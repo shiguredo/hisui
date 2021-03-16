@@ -56,8 +56,7 @@ Archive& Archive::operator=(const Archive& other) {
   return *this;
 }
 
-Metadata::Metadata(const std::string& file_path,
-                   const boost::json::array& json_archives)
+Metadata::Metadata(const std::string& file_path, const boost::json::value& jv)
     : m_path(file_path) {
   if (m_path.is_relative()) {
     m_path = std::filesystem::absolute(m_path);
@@ -65,6 +64,9 @@ Metadata::Metadata(const std::string& file_path,
   const auto current_path = std::filesystem::current_path();
   std::filesystem::current_path(m_path.parent_path());
   std::vector<std::tuple<std::string, std::string, double, double>> archives;
+
+  auto json_archives = prepare(jv);
+
   for (const auto& a : json_archives) {
     boost::json::object o;
     if (auto p = a.if_object()) {
@@ -72,40 +74,12 @@ Metadata::Metadata(const std::string& file_path,
     } else {
       throw std::runtime_error("a.if_object() failed");
     }
-    boost::json::string a_file_path;
-    if (auto p = o["file_path"].if_string()) {
-      a_file_path = *p;
-    } else {
-      throw std::runtime_error("file_path.if_object() failed");
-    }
-    boost::json::string a_connection_id;
-    if (auto p = o["connection_id"].if_string()) {
-      a_connection_id = *p;
-    } else {
-      throw std::runtime_error("connection_id.if_object() failed");
-    }
-    double a_start_time_offset;
-    if (o["start_time_offset"].is_number()) {
-      boost::json::error_code ec;
-      a_start_time_offset = o["start_time_offset"].to_number<double>(ec);
-      if (ec) {
-        throw std::runtime_error("start_time_offset.to_number() failed: " +
-                                 ec.message());
-      }
-    } else {
-      throw std::runtime_error("start_time_offset is not number");
-    }
-    double a_stop_time_offset;
-    if (o["stop_time_offset"].is_number()) {
-      boost::json::error_code ec;
-      a_stop_time_offset = o["stop_time_offset"].to_number<double>(ec);
-      if (ec) {
-        throw std::runtime_error("stop_time_offset.to_number() failed: " +
-                                 ec.message());
-      }
-    } else {
-      throw std::runtime_error("stop_time_offset is not number");
-    }
+    auto a_file_path = get_string_from_json_object(o, "file_path");
+    auto a_connection_id = get_string_from_json_object(o, "connection_id");
+    double a_start_time_offset =
+        get_double_from_json_object(o, "start_time_offset");
+    double a_stop_time_offset =
+        get_double_from_json_object(o, "stop_time_offset");
     spdlog::debug("{} {} {} {}", a_file_path, a_connection_id,
                   a_start_time_offset, a_stop_time_offset);
     archives.emplace_back(a_file_path, a_connection_id, a_start_time_offset,
@@ -181,26 +155,19 @@ double Metadata::getMaxStopTimeOffset() const {
   return m_max_stop_time_offset;
 }
 
-Metadata parse_metadata(const std::string& filename) {
-  std::ifstream i(filename);
-  if (!i.is_open()) {
-    throw std::runtime_error(
-        fmt::format("failed to open metadata json file: {}", filename));
-  }
-  std::string string_json((std::istreambuf_iterator<char>(i)),
-                          std::istreambuf_iterator<char>());
-  boost::json::error_code ec;
-  boost::json::value jv = boost::json::parse(string_json, ec);
-  if (ec) {
-    throw std::runtime_error(fmt::format(
-        "failed to parse metadata json file: message", ec.message()));
-  }
-
+boost::json::array Metadata::prepare(const boost::json::value& jv) {
   boost::json::object j;
   if (auto p = jv.if_object()) {
     j = *p;
   } else {
     throw std::runtime_error("jv.if_object() failed");
+  }
+
+  try {
+    m_recording_id = get_string_from_json_object(j, "recording_id");
+  } catch (const std::exception& e) {
+    spdlog::error("invalid format: cannot get recording_id: what={}", e.what());
+    throw e;
   }
 
   if (j["archives"] == nullptr) {
@@ -217,8 +184,25 @@ Metadata parse_metadata(const std::string& filename) {
   if (std::size(ja) == 0) {
     throw std::invalid_argument("metadata json file does not include archives");
   }
+  return ja;
+}
 
-  Metadata metadata(filename, ja);
+Metadata parse_metadata(const std::string& filename) {
+  std::ifstream i(filename);
+  if (!i.is_open()) {
+    throw std::runtime_error(
+        fmt::format("failed to open metadata json file: {}", filename));
+  }
+  std::string string_json((std::istreambuf_iterator<char>(i)),
+                          std::istreambuf_iterator<char>());
+  boost::json::error_code ec;
+  boost::json::value jv = boost::json::parse(string_json, ec);
+  if (ec) {
+    throw std::runtime_error(fmt::format(
+        "failed to parse metadata json file: message", ec.message()));
+  }
+
+  Metadata metadata(filename, jv);
 
   spdlog::debug("metadata min_start_time_offset={}",
                 metadata.getMinStartTimeOffset());
@@ -275,6 +259,32 @@ Metadata MetadataSet::getPreferred() const {
 
 bool MetadataSet::hasPreferred() const {
   return m_has_preferred;
+}
+
+boost::json::string Metadata::getRecordingID() const {
+  return m_recording_id;
+}
+
+boost::json::string get_string_from_json_object(boost::json::object o,
+                                                const std::string& key) {
+  if (auto p = o[key].if_string()) {
+    return *p;
+  }
+  throw std::runtime_error(fmt::format("o[{}].if_string() failed", key));
+}
+
+double get_double_from_json_object(boost::json::object o,
+                                   const std::string& key) {
+  if (o[key].is_number()) {
+    boost::json::error_code ec;
+    auto value = o[key].to_number<double>(ec);
+    if (ec) {
+      throw std::runtime_error(
+          fmt::format("o[{}].to_number() failed: {}", key, ec.message()));
+    }
+    return value;
+  }
+  throw std::runtime_error("start_time_offset is not number");
 }
 
 }  // namespace hisui
