@@ -195,6 +195,7 @@ target_sources(hisui
     src/muxer/opus_audio_producer.cpp
     src/muxer/simple_mp4_muxer.cpp
     src/muxer/faststart_mp4_muxer.cpp
+    src/muxer/muxer.cpp
     src/muxer/video_producer.cpp
     src/muxer/vpx_video_producer.cpp
     src/util/interval.cpp
