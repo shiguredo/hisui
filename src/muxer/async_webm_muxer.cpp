@@ -11,6 +11,7 @@
 #include "constants.hpp"
 #include "frame.hpp"
 #include "muxer/audio_producer.hpp"
+#include "muxer/no_video_producer.hpp"
 #include "muxer/opus_audio_producer.hpp"
 #include "muxer/video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
@@ -25,7 +26,11 @@ AsyncWebMMuxer::AsyncWebMMuxer(const hisui::Config& t_config,
 void AsyncWebMMuxer::setUp() {
   if (m_config.out_filename == "") {
     std::filesystem::path metadata_path(m_config.in_metadata_filename);
-    m_config.out_filename = metadata_path.replace_extension(".webm");
+    if (m_config.audio_only) {
+      m_config.out_filename = metadata_path.replace_extension(".weba");
+    } else {
+      m_config.out_filename = metadata_path.replace_extension(".webm");
+    }
   }
 
   m_file = std::fopen(m_config.out_filename.c_str(), "wb");
@@ -34,16 +39,21 @@ void AsyncWebMMuxer::setUp() {
   }
   m_context = new hisui::webm::output::Context(m_file);
 
-  if (m_config.out_video_bit_rate == 0) {
-    m_config.out_video_bit_rate =
-        static_cast<std::uint32_t>(std::size(m_metadata.getArchives())) *
-        hisui::Constants::VIDEO_VPX_BIT_RATE_PER_FILE;
+  if (m_config.audio_only) {
+    m_video_producer = new NoVideoProducer();
+  } else {
+    if (m_config.out_video_bit_rate == 0) {
+      m_config.out_video_bit_rate =
+          static_cast<std::uint32_t>(std::size(m_metadata.getArchives())) *
+          hisui::Constants::VIDEO_VPX_BIT_RATE_PER_FILE;
+    }
+
+    m_video_producer = new VPXVideoProducer(m_config, m_metadata);
+    m_context->setVideoTrack(m_video_producer->getWidth(),
+                             m_video_producer->getHeight(),
+                             m_video_producer->getFourcc());
   }
 
-  m_video_producer = new VPXVideoProducer(m_config, m_metadata);
-  m_context->setVideoTrack(m_video_producer->getWidth(),
-                           m_video_producer->getHeight(),
-                           m_video_producer->getFourcc());
   OpusAudioProducer* audio_producer =
       new OpusAudioProducer(m_config, m_metadata);
   const auto skip = audio_producer->getSkip();

@@ -66,7 +66,11 @@ void FaststartMP4Muxer::run() {
 
   mux();
 
-  m_faststart_writer->appendTrakAndUdtaBoxInfo({m_soun_track, m_vide_track});
+  if (m_vide_track) {
+    m_faststart_writer->appendTrakAndUdtaBoxInfo({m_soun_track, m_vide_track});
+  } else {
+    m_faststart_writer->appendTrakAndUdtaBoxInfo({m_soun_track});
+  }
   m_faststart_writer->writeMoovBox();
   m_faststart_writer->writeMdatHeader();
   m_faststart_writer->copyMdatData();

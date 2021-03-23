@@ -35,7 +35,11 @@ void SimpleMP4Muxer::run() {
 
   mux();
 
-  m_simple_writer->appendTrakAndUdtaBoxInfo({m_soun_track, m_vide_track});
+  if (m_vide_track) {
+    m_simple_writer->appendTrakAndUdtaBoxInfo({m_soun_track, m_vide_track});
+  } else {
+    m_simple_writer->appendTrakAndUdtaBoxInfo({m_soun_track});
+  }
   m_simple_writer->writeFreeBoxAndMdatHeader();
   m_simple_writer->writeMoovBox();
 }

@@ -12,6 +12,7 @@
 #include "constants.hpp"
 #include "metadata.hpp"
 #include "muxer/audio_producer.hpp"
+#include "muxer/no_video_producer.hpp"
 #include "muxer/opus_audio_producer.hpp"
 #include "muxer/video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
@@ -44,7 +45,11 @@ void MP4Muxer::initialize(const hisui::Config& config_orig,
 
   if (config.out_filename == "") {
     std::filesystem::path metadata_path(config.in_metadata_filename);
-    config.out_filename = metadata_path.replace_extension(".mp4");
+    if (config.audio_only) {
+      config.out_filename = metadata_path.replace_extension(".m4a");
+    } else {
+      config.out_filename = metadata_path.replace_extension(".mp4");
+    }
   }
 
   if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
@@ -81,23 +86,30 @@ void MP4Muxer::initialize(const hisui::Config& config_orig,
          .writer = m_writer});
   }
 
-  m_video_producer = new VPXVideoProducer(config, metadata, 16000);
-  m_vide_track = new shiguredo::mp4::track::VPXTrack(
-      {.timescale = 16000,
-       .duration = duration,
-       .track_id = m_writer->getAndUpdateNextTrackID(),
-       .width = m_video_producer->getWidth(),
-       .height = m_video_producer->getHeight(),
-       .writer = m_writer});
+  if (config.audio_only) {
+    m_video_producer = new NoVideoProducer();
+    m_timescale_ratio.assign(1, 1);
+  } else {
+    m_video_producer = new VPXVideoProducer(config, metadata, 16000);
+    m_vide_track = new shiguredo::mp4::track::VPXTrack(
+        {.timescale = 16000,
+         .duration = duration,
+         .track_id = m_writer->getAndUpdateNextTrackID(),
+         .width = m_video_producer->getWidth(),
+         .height = m_video_producer->getHeight(),
+         .writer = m_writer});
 
-  m_timescale_ratio.assign(m_soun_track->getTimescale(),
-                           m_vide_track->getTimescale());
+    m_timescale_ratio.assign(m_soun_track->getTimescale(),
+                             m_vide_track->getTimescale());
+  }
 }
 
 MP4Muxer::~MP4Muxer() {
   m_ofs.close();
 
-  delete m_vide_track;
+  if (m_vide_track) {
+    delete m_vide_track;
+  }
   delete m_soun_track;
   delete m_video_producer;
   delete m_audio_producer;
@@ -132,6 +144,9 @@ void MP4Muxer::writeTrackData() {
   }
   m_soun_track->terminateCurrentChunk();
   m_audio_buffer.clear();
+  if (!m_vide_track) {
+    return;
+  }
   for (const auto f : m_video_buffer) {
     m_vide_track->addMdatData(f.timestamp, f.data, f.data_size, f.is_key);
     delete[] f.data;

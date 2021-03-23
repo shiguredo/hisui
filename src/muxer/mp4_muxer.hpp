@@ -36,7 +36,7 @@ class MP4Muxer : public Muxer {
  protected:
   std::ofstream m_ofs;
   shiguredo::mp4::writer::Writer* m_writer;
-  shiguredo::mp4::track::VideTrack* m_vide_track;
+  shiguredo::mp4::track::VideTrack* m_vide_track = nullptr;
   shiguredo::mp4::track::SounTrack* m_soun_track;
   std::uint64_t m_chunk_interval;
 
