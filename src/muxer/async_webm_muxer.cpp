@@ -66,6 +66,10 @@ void AsyncWebMMuxer::setUp() {
                                hisui::Constants::NANO_SECOND /
                                hisui::Constants::PCM_SAMPLE_RATE,
                            private_data.data(), std::size(private_data));
+
+  m_show_progress_bar = m_config.show_progress_bar;
+  m_max_timestamp = static_cast<std::uint64_t>(
+      m_metadata.getMaxStopTimeOffset() * hisui::Constants::NANO_SECOND);
 }
 
 AsyncWebMMuxer::~AsyncWebMMuxer() {
