@@ -21,10 +21,13 @@ webm_test: get_input_files
 		echo webm_$${base}; \
 		vp9_file=output/$${base}.vp9.webm; \
 		vp8_file=output/$${base}.vp8.webm; \
+		audio_file=output/$${base}.weba; \
 		${HISUI} -f $${m} --out-file $${vp9_file} --show-progress-bar false --log-level error --out-video-codec VP9; \
 		${HISUI} -f $${m} --out-file $${vp8_file} --show-progress-bar false --log-level error --out-video-codec VP8; \
+		${HISUI} -f $${m} --out-file $${audio_file} --show-progress-bar false --log-level error --audio-only; \
 		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${vp9_file}) $${vp9_file} | head --bytes=$$(bash ./get_cluster_size.bash $${vp9_file}) > $${vp9_file}.cluster; \
 		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${vp8_file}) $${vp8_file} | head --bytes=$$(bash ./get_cluster_size.bash $${vp8_file}) > $${vp8_file}.cluster; \
+		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${audio_file}) $${audio_file} | head --bytes=$$(bash ./get_cluster_size.bash $${audio_file}) > $${audio_file}.cluster; \
 	done
 
 mp4_test: get_input_files
@@ -35,16 +38,20 @@ mp4_test: get_input_files
 		opus_file=output/$${base}.opus.mp4; \
 		simple_opus_file=output/$${base}.simple.opus.mp4; \
 		aac_file=output/$${base}.aac.mp4; \
+		opus_m4a_file=output/$${base}.opus.m4a; \
+		aac_m4a_file=output/$${base}.aac.m4a; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${opus_file} --show-progress-bar false --log-level error --out-container mp4; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${simple_opus_file} --show-progress-bar false --log-level error --out-container mp4 --mp4-muxer simple; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${aac_file} --show-progress-bar false --log-level error --out-container mp4 --out-audio-codec aac; \
+		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${opus_m4a_file} --show-progress-bar false --log-level error --out-container mp4 --audio-only; \
+		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${aac_m4a_file} --show-progress-bar false --log-level error --out-container mp4 --out-audio-codec aac --audio-only; \
 	done
 
 update_input_check:
 	sha224sum input/*.webm input/*.jpg > input/check
 
 update_output_check:
-	sha224sum output/*.cluster output/*.mp4 > output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)
+	sha224sum output/*.cluster output/*.mp4 output/*.m4a > output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)
 
 clean:
 	rm -f output/*.cluster output/*.mp4 output/*.webm

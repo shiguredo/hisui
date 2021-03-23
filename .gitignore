@@ -4,3 +4,7 @@
 /test/integration/input/Big_Buck_Bunny_360_10s_1MB.webm
 /test/integration/output/*.webm
 /test/integration/output/*.webm.cluster
+/test/integration/output/*.weba
+/test/integration/output/*.weba.cluster
+/test/integration/output/*.mp4
+/test/integration/output/*.m4a
