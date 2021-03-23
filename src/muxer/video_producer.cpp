@@ -39,7 +39,7 @@ VideoProducer::~VideoProducer() {
 }
 
 void VideoProducer::produce() {
-  if (m_is_finished) {
+  if (isFinished()) {
     return;
   }
 
