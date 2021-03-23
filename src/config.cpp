@@ -141,6 +141,7 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "OpenH264 dynamic library path");
 
   app->add_flag("--verbose", config->verbose, "Verbose mode");
+  app->add_flag("--audio-only", config->audio_only, "Audio only mode");
   app->add_option("--show-progress-bar", config->show_progress_bar,
                   "Toggle to show progress bar. default: true");
 

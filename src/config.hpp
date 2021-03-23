@@ -80,6 +80,7 @@ class Config {
   std::size_t max_columns = 3;
 
   bool verbose = false;
+  bool audio_only = false;
 
   // 以降は SPEC.rst にないオプション
   bool show_progress_bar = true;
