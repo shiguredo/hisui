@@ -1,10 +1,10 @@
 #include "muxer/video_producer.hpp"
 
+#include <bits/exception.h>
 #include <spdlog/spdlog.h>
 
 #include <cmath>
 #include <cstdint>
-#include <exception>
 #include <mutex>
 #include <optional>
 #include <vector>
