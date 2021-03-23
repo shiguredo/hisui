@@ -39,6 +39,10 @@ VideoProducer::~VideoProducer() {
 }
 
 void VideoProducer::produce() {
+  if (m_is_finished) {
+    return;
+  }
+
   try {
     std::vector<const video::YUVImage*> yuvs;
     std::vector<unsigned char> raw_image;
