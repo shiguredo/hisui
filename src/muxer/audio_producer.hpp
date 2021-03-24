@@ -17,7 +17,7 @@ class Sequencer;
 namespace hisui::muxer {
 
 struct AudioProducerParameters {
-  bool show_progress_bar = true;
+  const bool show_progress_bar = true;
 };
 
 class AudioProducer {

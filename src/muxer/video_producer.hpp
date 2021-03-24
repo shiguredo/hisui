@@ -21,8 +21,8 @@ class Composer;
 namespace hisui::muxer {
 
 struct VideoProducerParameters {
-  bool show_progress_bar = true;
-  bool is_finished = false;
+  const bool show_progress_bar = true;
+  const bool is_finished = false;
 };
 
 class VideoProducer {
