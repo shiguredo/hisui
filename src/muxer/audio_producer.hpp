@@ -16,8 +16,13 @@ class Sequencer;
 
 namespace hisui::muxer {
 
+struct AudioProducerParameters {
+  bool show_progress_bar = true;
+};
+
 class AudioProducer {
  public:
+  explicit AudioProducer(const AudioProducerParameters&);
   virtual ~AudioProducer();
   void produce();
   void bufferPop();
@@ -33,6 +38,7 @@ class AudioProducer {
 
   std::mutex m_mutex_buffer;
 
+  bool m_show_progress_bar;
   bool m_is_finished = false;
 };
 

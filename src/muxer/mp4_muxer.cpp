@@ -102,10 +102,6 @@ void MP4Muxer::initialize(const hisui::Config& config_orig,
     m_timescale_ratio.assign(m_soun_track->getTimescale(),
                              m_vide_track->getTimescale());
   }
-
-  m_show_progress_bar = config.show_progress_bar;
-  m_max_timestamp = static_cast<std::uint64_t>(metadata.getMaxStopTimeOffset() *
-                                               m_soun_track->getTimescale());
 }
 
 MP4Muxer::~MP4Muxer() {

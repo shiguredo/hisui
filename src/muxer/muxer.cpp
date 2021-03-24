@@ -11,7 +11,6 @@
 
 #include <boost/exception/exception.hpp>
 #include <boost/rational.hpp>
-#include <progresscpp/ProgressBar.hpp>
 
 #include "frame.hpp"
 #include "muxer/audio_producer.hpp"
@@ -30,13 +29,6 @@ void Muxer::mux() {
 
   bool video_finished = false;
 
-  // mux 内の sleep_for によって ProgressBar がカクカクするので,
-  // video がある場合は VideoProducer で ProgressBar を出す
-  progresscpp::ProgressBar progress_bar(m_max_timestamp, 60);
-  if (!m_video_producer->isFinished()) {
-    m_show_progress_bar = false;
-  }
-
   while (!m_audio_producer->isFinished()) {
     const auto audio_front = m_audio_producer->bufferFront();
     if (!audio_front.has_value()) {
@@ -45,11 +37,6 @@ void Muxer::mux() {
       continue;
     }
     const auto audio_timestamp = audio_front.value().timestamp;
-
-    if (m_show_progress_bar) {
-      progress_bar.setTicks(audio_timestamp);
-      progress_bar.display();
-    }
 
     if (video_finished) {
       appendAudio(audio_front.value());
@@ -85,10 +72,6 @@ void Muxer::mux() {
 
   if (video_finished) {
     muxFinalize();
-    if (m_show_progress_bar) {
-      progress_bar.setTicks(m_max_timestamp);
-      progress_bar.done();
-    }
     return;
   }
 

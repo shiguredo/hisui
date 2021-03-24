@@ -28,8 +28,6 @@ class Muxer {
   VideoProducer* m_video_producer;
   AudioProducer* m_audio_producer;
   boost::rational<std::uint64_t> m_timescale_ratio = 1;
-  std::uint64_t m_max_timestamp;
-  bool m_show_progress_bar;
 
  private:
   virtual void muxFinalize() = 0;
