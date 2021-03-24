@@ -26,6 +26,10 @@ class YUVImage;
 
 namespace hisui::muxer {
 
+VideoProducer::VideoProducer(const VideoProducerParameters& params)
+    : m_show_progress_bar(params.show_progress_bar),
+      m_is_finished(params.is_finished) {}
+
 VideoProducer::~VideoProducer() {
   if (m_encoder) {
     delete m_encoder;

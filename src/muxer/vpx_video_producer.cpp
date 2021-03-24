@@ -6,6 +6,7 @@
 
 #include "config.hpp"
 #include "metadata.hpp"
+#include "muxer/video_producer.hpp"
 #include "video/basic_sequencer.hpp"
 #include "video/buffer_vpx_encoder.hpp"
 #include "video/composer.hpp"
@@ -18,9 +19,8 @@ namespace hisui::muxer {
 
 VPXVideoProducer::VPXVideoProducer(const hisui::Config& t_config,
                                    const hisui::Metadata& t_metadata,
-                                   const std::uint64_t timescale) {
-  m_show_progress_bar = t_config.show_progress_bar;
-
+                                   const std::uint64_t timescale)
+    : VideoProducer({.show_progress_bar = t_config.show_progress_bar}) {
   m_sequencer = new hisui::video::BasicSequencer(t_metadata.getArchives());
 
   const auto scaling_width = t_config.scaling_width != 0

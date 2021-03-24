@@ -2,8 +2,6 @@
 
 namespace hisui::muxer {
 
-NoVideoProducer::NoVideoProducer() {
-  m_is_finished = true;
-}
+NoVideoProducer::NoVideoProducer() : VideoProducer({.is_finished = true}) {}
 
 }  // namespace hisui::muxer

@@ -20,8 +20,14 @@ class Composer;
 
 namespace hisui::muxer {
 
+struct VideoProducerParameters {
+  bool show_progress_bar = true;
+  bool is_finished = false;
+};
+
 class VideoProducer {
  public:
+  explicit VideoProducer(const VideoProducerParameters&);
   virtual ~VideoProducer();
   void produce();
   void bufferPop();
