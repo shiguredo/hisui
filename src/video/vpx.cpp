@@ -38,7 +38,8 @@ VPXEncoderConfig::VPXEncoderConfig(const std::uint32_t t_width,
       max_q(config.libvpx_max_q),
       threads(config.libvpx_threads),
       frame_parallel(config.libvp9_frame_parallel),
-      cpu_used(config.libvpx_cpu_used) {}
+      cpu_used(config.libvpx_cpu_used),
+      tile_columns(config.libvp9_tile_columns) {}
 
 void update_yuv_image_by_vpx_image(YUVImage* yuv_image,
                                    const vpx_image_t* vpx_image) {
@@ -177,6 +178,8 @@ void create_vpx_codec_ctx_t_for_encoding(::vpx_codec_ctx_t* codec,
   if (config.fourcc == hisui::config::OutVideoCodec::VP9) {
     ::vpx_codec_control(codec, VP9E_SET_FRAME_PARALLEL_DECODING,
                         config.frame_parallel);
+    ::vpx_codec_control(codec, VP9E_SET_TILE_COLUMNS,
+                        static_cast<int>(config.tile_columns));
   }
 }
 

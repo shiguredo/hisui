@@ -96,6 +96,7 @@ class Config {
   std::uint32_t libvpx_threads = 0;
   std::int32_t libvpx_cpu_used = 4;
   std::uint32_t libvp9_frame_parallel = 1;
+  std::uint32_t libvp9_tile_columns = 6;
 
   libyuv::FilterMode libyuv_filter_mode = libyuv::kFilterBox;
 

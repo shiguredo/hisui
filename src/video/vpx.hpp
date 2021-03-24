@@ -35,6 +35,7 @@ class VPXEncoderConfig {
   const std::uint32_t threads;
   const std::uint32_t frame_parallel;
   const std::int32_t cpu_used;
+  const std::uint32_t tile_columns;
 };
 
 void update_yuv_image_by_vpx_image(YUVImage*, const ::vpx_image_t*);
