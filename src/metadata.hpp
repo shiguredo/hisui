@@ -20,12 +20,13 @@ class Archive {
   std::string getConnectionID() const;
   double getStartTimeOffset() const;
   double getStopTimeOffset() const;
+  void adjustTimeOffsets(double);
 
  private:
   const std::filesystem::path m_path;
   const std::string m_connection_id;
-  const double m_start_time_offset;
-  const double m_stop_time_offset;
+  double m_start_time_offset;
+  double m_stop_time_offset;
 };
 
 class Metadata {
@@ -34,6 +35,7 @@ class Metadata {
   std::vector<Archive> getArchives() const;
   double getMinStartTimeOffset() const;
   double getMaxStopTimeOffset() const;
+  void adjustTimeOffsets(double);
   std::filesystem::path getPath() const;
 
  private:

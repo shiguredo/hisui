@@ -40,6 +40,11 @@ double Archive::getStopTimeOffset() const {
   return m_stop_time_offset;
 }
 
+void Archive::adjustTimeOffsets(double diff) {
+  m_start_time_offset += diff;
+  m_stop_time_offset += diff;
+}
+
 Metadata::Metadata(const std::string& file_path,
                    const boost::json::array& json_archives)
     : m_path(file_path) {
@@ -188,10 +193,17 @@ Metadata parse_metadata(const std::string& filename,
     spdlog::debug("  file_path='{} start_time_offset={} stop_time_offset={}",
                   archive.getPath().string(), archive.getStartTimeOffset(),
                   archive.getStopTimeOffset());
-    metadata.getMaxStopTimeOffset();
   }
 
   return metadata;
+}
+
+void Metadata::adjustTimeOffsets(double diff) {
+  m_min_start_time_offset += diff;
+  m_max_stop_time_offset += diff;
+  for (auto& archive : m_archives) {
+    archive.adjustTimeOffsets(diff);
+  }
 }
 
 }  // namespace hisui
