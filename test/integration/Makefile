@@ -14,6 +14,8 @@ get_input_files:
 test: webm_test mp4_test
 	[ -f "output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)" ] && sha224sum -c output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)
 
+#         case3, case4 の vp8 の場合に, 結果が不定となる場合があった
+#         case4 の場合を調査したところ, 同じ hisui のバイナリから生成した WebM のクラスター部で, 映像の最初の Intraframe の次の Interframe の 4バイト目が 0x0b だったり 0x0d だったりしている
 webm_test: get_input_files
 	rm -f output/*.webm*
 	for m in metadata/*.json; do \
@@ -23,11 +25,11 @@ webm_test: get_input_files
 		vp8_file=output/$${base}.vp8.webm; \
 		audio_file=output/$${base}.weba; \
 		${HISUI} -f $${m} --out-file $${vp9_file} --show-progress-bar false --log-level error --out-video-codec VP9; \
-		${HISUI} -f $${m} --out-file $${vp8_file} --show-progress-bar false --log-level error --out-video-codec VP8; \
 		${HISUI} -f $${m} --out-file $${audio_file} --show-progress-bar false --log-level error --audio-only; \
 		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${vp9_file}) $${vp9_file} | head --bytes=$$(bash ./get_cluster_size.bash $${vp9_file}) > $${vp9_file}.cluster; \
-		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${vp8_file}) $${vp8_file} | head --bytes=$$(bash ./get_cluster_size.bash $${vp8_file}) > $${vp8_file}.cluster; \
 		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${audio_file}) $${audio_file} | head --bytes=$$(bash ./get_cluster_size.bash $${audio_file}) > $${audio_file}.cluster; \
+		[ x"$$base" = x"case3" -o x"$$base" = x"case4" ] || ${HISUI} -f $${m} --out-file $${vp8_file} --show-progress-bar false --log-level error --out-video-codec VP8; \
+		[ x"$$base" = x"case3" -o x"$$base" = x"case4" ] || tail --bytes=+$$(bash ./get_cluster_start_position.bash $${vp8_file}) $${vp8_file} | head --bytes=$$(bash ./get_cluster_size.bash $${vp8_file}) > $${vp8_file}.cluster; \
 	done
 
 mp4_test: get_input_files
