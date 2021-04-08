@@ -137,14 +137,25 @@ Metadata::Metadata(const std::string& file_path,
     }
     Archive archive(path, get<1>(a), get<2>(a), get<3>(a));
     m_archives.push_back(archive);
-    if (get<2>(a) < m_min_start_time_offset) {
-      m_min_start_time_offset = get<2>(a);
+  }
+  setTimeOffsets();
+  std::filesystem::current_path(current_path);
+}
+
+Metadata::Metadata(const std::vector<Archive>& t_archives)
+    : m_archives(t_archives) {
+  setTimeOffsets();
+}
+
+void Metadata::setTimeOffsets() {
+  for (const auto& archive : m_archives) {
+    if (archive.getStartTimeOffset() < m_min_start_time_offset) {
+      m_min_start_time_offset = archive.getStartTimeOffset();
     }
-    if (get<3>(a) > m_max_stop_time_offset) {
-      m_max_stop_time_offset = get<3>(a);
+    if (archive.getStopTimeOffset() > m_max_stop_time_offset) {
+      m_max_stop_time_offset = archive.getStopTimeOffset();
     }
   }
-  std::filesystem::current_path(current_path);
 }
 
 std::vector<Archive> Metadata::getArchives() const {

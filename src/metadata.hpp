@@ -32,6 +32,7 @@ class Archive {
 class Metadata {
  public:
   Metadata(const std::string&, const boost::json::array&);
+  explicit Metadata(const std::vector<Archive>&);  // for testing
   std::vector<Archive> getArchives() const;
   double getMinStartTimeOffset() const;
   double getMaxStopTimeOffset() const;
@@ -39,8 +40,9 @@ class Metadata {
   std::filesystem::path getPath() const;
 
  private:
-  std::filesystem::path m_path;
+  void setTimeOffsets();
 
+  std::filesystem::path m_path;
   std::vector<Archive> m_archives;
   double m_min_start_time_offset = std::numeric_limits<double>::max();
   double m_max_stop_time_offset = std::numeric_limits<double>::min();
