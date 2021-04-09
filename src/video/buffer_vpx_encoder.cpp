@@ -103,4 +103,28 @@ std::uint32_t BufferVPXEncoder::getFourcc() const {
   return m_fourcc;
 }
 
+void BufferVPXEncoder::changeResolution(const std::uint32_t width,
+                                        const std::uint32_t height) {
+  if (m_width == width && m_height == height) {
+    return;
+  }
+  m_width = width;
+  m_height = height;
+  m_cfg.g_w = width;
+  m_cfg.g_h = height;
+  auto res = ::vpx_codec_enc_config_set(&m_codec, &m_cfg);
+  if (res != VPX_CODEC_OK) {
+    throw std::runtime_error(
+        fmt::format("vpx_codec_enc_config_set() failed: {}",
+                    ::vpx_codec_err_to_string(res)));
+  }
+
+  ::vpx_img_free(&m_raw_vpx_image);
+  if (!::vpx_img_alloc(&m_raw_vpx_image, VPX_IMG_FMT_I420, m_width, m_height,
+                       0)) {
+    throw std::runtime_error("vpx_img_alloc() failed");
+  }
+}
+
 }  // namespace hisui::video
+
