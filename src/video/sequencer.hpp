@@ -8,6 +8,12 @@
 #include <utility>
 #include <vector>
 
+namespace hisui {
+
+class Archive;
+
+}
+
 namespace hisui::util {
 
 class Interval;
@@ -45,5 +51,15 @@ class Sequencer {
   std::uint32_t m_max_height;
   std::size_t m_size;
 };
+
+struct MakeSequenceResult {
+  std::vector<
+      std::pair<std::string, std::shared_ptr<std::vector<SourceAndInterval>>>>
+      sequence{};
+  std::uint32_t max_width = 0;
+  std::uint32_t max_height = 0;
+};
+
+MakeSequenceResult make_sequence(const std::vector<hisui::Archive>&);
 
 }  // namespace hisui::video
