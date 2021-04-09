@@ -192,6 +192,8 @@ target_sources(hisui
     src/muxer/async_webm_muxer.cpp
     src/muxer/audio_producer.cpp
     src/muxer/mp4_muxer.cpp
+    src/muxer/multi_channel_async_webm_muxer.cpp
+    src/muxer/multi_channel_vpx_video_producer.cpp
     src/muxer/opus_audio_producer.cpp
     src/muxer/simple_mp4_muxer.cpp
     src/muxer/faststart_mp4_muxer.cpp
@@ -204,6 +206,7 @@ target_sources(hisui
     src/video/composer.cpp
     src/video/decoder.cpp
     src/video/grid_composer.cpp
+    src/video/multi_channel_sequencer.cpp
     src/video/openh264.cpp
     src/video/openh264_decoder.cpp
     src/video/openh264_handler.cpp

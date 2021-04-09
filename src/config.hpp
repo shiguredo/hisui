@@ -62,6 +62,7 @@ enum struct OutAudioCodec {
 class Config {
  public:
   std::string in_metadata_filename;
+  std::string in_multi_channel_metadata_filename = "";
   config::OutVideoCodec out_video_codec = config::OutVideoCodec::VP9;
   config::OutContainer out_container = config::OutContainer::WebM;
   std::uint32_t out_video_bit_rate = 0;

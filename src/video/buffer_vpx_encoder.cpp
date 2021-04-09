@@ -103,15 +103,18 @@ std::uint32_t BufferVPXEncoder::getFourcc() const {
   return m_fourcc;
 }
 
-void BufferVPXEncoder::changeResolution(const std::uint32_t width,
-                                        const std::uint32_t height) {
+void BufferVPXEncoder::setResolution(const std::uint32_t width,
+                                     const std::uint32_t height) {
   if (m_width == width && m_height == height) {
     return;
   }
+  flush();
+  spdlog::debug("width: {}, height: {}", width, height);
   m_width = width;
   m_height = height;
   m_cfg.g_w = width;
   m_cfg.g_h = height;
+  m_cfg.g_lag_in_frames = 0;
   auto res = ::vpx_codec_enc_config_set(&m_codec, &m_cfg);
   if (res != VPX_CODEC_OK) {
     throw std::runtime_error(

@@ -35,7 +35,7 @@ class BufferVPXEncoder : public Encoder {
   void outputImage(const std::vector<unsigned char>&);
   void flush();
   std::uint32_t getFourcc() const;
-  void changeResolution(const std::uint32_t, const std::uint32_t);
+  void setResolution(const std::uint32_t, const std::uint32_t);
 
  private:
   std::queue<hisui::Frame>* m_buffer;

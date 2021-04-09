@@ -60,6 +60,11 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->check(CLI::ExistingFile)
       ->required();
 
+  app->add_option("--in-multi-channel-metadata-file",
+                  config->in_multi_channel_metadata_filename,
+                  "Multi Channel Metadata filename")
+      ->check(CLI::ExistingFile);
+
   std::vector<std::pair<std::string, config::OutContainer>> out_container_assoc{
       {"WebM", config::OutContainer::WebM},
       {"MP4", config::OutContainer::MP4},

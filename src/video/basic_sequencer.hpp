@@ -20,7 +20,8 @@ class BasicSequencer : public Sequencer {
   explicit BasicSequencer(const std::vector<hisui::Archive>&);
   ~BasicSequencer();
 
-  void getYUVs(std::vector<const YUVImage*>*, const std::uint64_t);
+  SequencerGetYUVsResult getYUVs(std::vector<const YUVImage*>*,
+                                 const std::uint64_t);
 
  private:
   const YUVImage* m_black_yuv_image;

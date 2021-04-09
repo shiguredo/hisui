@@ -29,7 +29,7 @@ class VideoProducer {
  public:
   explicit VideoProducer(const VideoProducerParameters&);
   virtual ~VideoProducer();
-  void produce();
+  virtual void produce();
   void bufferPop();
   std::optional<hisui::Frame> bufferFront();
   bool isFinished();
