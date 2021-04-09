@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <stdexcept>
 #include <tuple>
@@ -170,8 +171,21 @@ double Metadata::getMaxStopTimeOffset() const {
   return m_max_stop_time_offset;
 }
 
-Metadata parse_metadata(const std::string& filename,
-                        const boost::json::value& jv) {
+Metadata parse_metadata(const std::string& filename) {
+  std::ifstream i(filename);
+  if (!i.is_open()) {
+    throw std::runtime_error(
+        fmt::format("failed to open metadata json file: {}", filename));
+  }
+  std::string string_json((std::istreambuf_iterator<char>(i)),
+                          std::istreambuf_iterator<char>());
+  boost::json::error_code ec;
+  boost::json::value jv = boost::json::parse(string_json, ec);
+  if (ec) {
+    throw std::runtime_error(fmt::format(
+        "failed to parse metadata json file: message", ec.message()));
+  }
+
   boost::json::object j;
   if (auto p = jv.if_object()) {
     j = *p;

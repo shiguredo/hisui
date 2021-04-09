@@ -44,23 +44,8 @@ int main(int argc, char** argv) {
   }
   spdlog::debug("log level={}", config.log_level);
 
-  std::ifstream i(config.in_metadata_filename);
-  if (!i.is_open()) {
-    spdlog::error("failed to open metadata json file: {}",
-                  config.in_metadata_filename);
-    return 1;
-  }
-  std::string string_json((std::istreambuf_iterator<char>(i)),
-                          std::istreambuf_iterator<char>());
-  boost::json::error_code ec;
-  boost::json::value jv = boost::json::parse(string_json, ec);
-  if (ec) {
-    spdlog::error("failed to parse metadata json file: message", ec.message());
-    return 1;
-  }
-
   const hisui::Metadata metadata =
-      hisui::parse_metadata(config.in_metadata_filename, jv);
+      hisui::parse_metadata(config.in_metadata_filename);
 
   if (!config.openh264.empty()) {
     try {

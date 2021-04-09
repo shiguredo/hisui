@@ -48,6 +48,6 @@ class Metadata {
   double m_max_stop_time_offset = std::numeric_limits<double>::min();
 };
 
-Metadata parse_metadata(const std::string&, const boost::json::value&);
+Metadata parse_metadata(const std::string&);
 
 }  // namespace hisui
