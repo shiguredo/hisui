@@ -31,7 +31,7 @@ BufferVPXEncoder::BufferVPXEncoder(std::queue<hisui::Frame>* t_buffer,
     throw std::runtime_error("vpx_img_alloc() failed");
   }
 
-  create_vpx_codec_ctx_t_for_encoding(&m_codec, config);
+  create_vpx_codec_ctx_t_for_encoding(&m_codec, &m_cfg, config);
 }
 
 void BufferVPXEncoder::outputImage(const std::vector<unsigned char>& yuv) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vpx/vpx_codec.h>
+#include <vpx/vpx_encoder.h>
 #include <vpx/vpx_image.h>
 
 #include <cstdint>
@@ -53,6 +54,7 @@ void update_vpx_image_by_yuv_data(::vpx_image_t*,
                                   const std::vector<std::uint8_t>&);
 
 void create_vpx_codec_ctx_t_for_encoding(::vpx_codec_ctx_t*,
+                                         ::vpx_codec_enc_cfg_t*,
                                          const VPXEncoderConfig&);
 
 void create_vpx_codec_ctx_t_for_decoding(::vpx_codec_ctx_t*,

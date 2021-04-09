@@ -138,14 +138,14 @@ void update_vpx_image_by_yuv_data(::vpx_image_t* img,
 }
 
 void create_vpx_codec_ctx_t_for_encoding(::vpx_codec_ctx_t* codec,
+                                         ::vpx_codec_enc_cfg_t* cfg,
                                          const VPXEncoderConfig& config) {
   const auto dx_algo = get_vpx_encode_codec_iface_by_fourcc(config.fourcc);
   if (!dx_algo) {
     throw std::runtime_error("get_vpx_encode_codec_iface_by_fourcc() failed");
   }
 
-  ::vpx_codec_enc_cfg_t cfg;
-  const auto ret = ::vpx_codec_enc_config_default(dx_algo, &cfg, 0);
+  const auto ret = ::vpx_codec_enc_config_default(dx_algo, cfg, 0);
   if (ret) {
     throw std::runtime_error(
         fmt::format("vpx_codec_enc_config_default() failed: error_code={}",
@@ -157,20 +157,20 @@ void create_vpx_codec_ctx_t_for_encoding(::vpx_codec_ctx_t* codec,
   spdlog::debug("target_bitrate={} cq_level={} min_q={}, max_q={}",
                 config.bitrate, config.cq_level, config.min_q, config.max_q);
 
-  cfg.g_w = config.width;
-  cfg.g_h = config.height;
-  cfg.g_timebase.num = static_cast<int>(config.fps.denominator());
-  cfg.g_timebase.den = static_cast<int>(config.fps.numerator());
-  cfg.rc_target_bitrate = config.bitrate;
-  cfg.rc_end_usage = VPX_CQ;
-  cfg.rc_min_quantizer = config.min_q;
-  cfg.rc_max_quantizer = config.max_q;
+  cfg->g_w = config.width;
+  cfg->g_h = config.height;
+  cfg->g_timebase.num = static_cast<int>(config.fps.denominator());
+  cfg->g_timebase.den = static_cast<int>(config.fps.numerator());
+  cfg->rc_target_bitrate = config.bitrate;
+  cfg->rc_end_usage = VPX_CQ;
+  cfg->rc_min_quantizer = config.min_q;
+  cfg->rc_max_quantizer = config.max_q;
 
   if (config.threads > 0) {
-    cfg.g_threads = config.threads;
+    cfg->g_threads = config.threads;
   }
 
-  if (::vpx_codec_enc_init(codec, dx_algo, &cfg, 0)) {
+  if (::vpx_codec_enc_init(codec, dx_algo, cfg, 0)) {
     throw std::runtime_error("vpx_codec_enc_init() failed");
   }
 

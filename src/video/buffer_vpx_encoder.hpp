@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vpx/vpx_codec.h>
+#include <vpx/vpx_encoder.h>
 #include <vpx/vpx_image.h>
 
 #include <cstdint>
@@ -43,6 +44,7 @@ class BufferVPXEncoder : public Encoder {
   std::uint32_t m_fourcc;
   int m_frame = 0;
   ::vpx_codec_ctx_t m_codec;
+  ::vpx_codec_enc_cfg_t m_cfg;
   ::vpx_image_t m_raw_vpx_image;
   std::uint64_t m_sum_of_bits = 0;
   const std::uint64_t m_timescale;
