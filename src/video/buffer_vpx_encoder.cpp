@@ -1,6 +1,7 @@
 #include "video/buffer_vpx_encoder.hpp"
 
 #include <bits/exception.h>
+#include <bits/stdint-uintn.h>
 #include <fmt/core.h>
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
@@ -26,6 +27,7 @@ BufferVPXEncoder::BufferVPXEncoder(std::queue<hisui::Frame>* t_buffer,
   m_height = config.height;
   m_fps = config.fps;
   m_fourcc = config.fourcc;
+  m_bitrate = config.bitrate;
   if (!::vpx_img_alloc(&m_raw_vpx_image, VPX_IMG_FMT_I420, m_width, m_height,
                        0)) {
     throw std::runtime_error("vpx_img_alloc() failed");
@@ -103,9 +105,10 @@ std::uint32_t BufferVPXEncoder::getFourcc() const {
   return m_fourcc;
 }
 
-void BufferVPXEncoder::setResolution(const std::uint32_t width,
-                                     const std::uint32_t height) {
-  if (m_width == width && m_height == height) {
+void BufferVPXEncoder::setResolutionAndBitrate(const std::uint32_t width,
+                                               const std::uint32_t height,
+                                               const std::uint32_t bitrate) {
+  if (m_width == width && m_height == height && m_bitrate == bitrate) {
     return;
   }
   flush();
@@ -114,6 +117,7 @@ void BufferVPXEncoder::setResolution(const std::uint32_t width,
   m_height = height;
   m_cfg.g_w = width;
   m_cfg.g_h = height;
+  m_cfg.rc_target_bitrate = bitrate;
   m_cfg.g_lag_in_frames = 0;
   auto res = ::vpx_codec_enc_config_set(&m_codec, &m_cfg);
   if (res != VPX_CODEC_OK) {

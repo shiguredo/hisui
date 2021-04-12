@@ -96,6 +96,7 @@ class Config {
 
   std::uint32_t multi_channel_width = 960;
   std::uint32_t multi_channel_height = 640;
+  std::uint32_t multi_channel_bit_rate = 1000;
 
   std::uint32_t libvpx_threads = 0;
   std::int32_t libvpx_cpu_used = 8;

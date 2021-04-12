@@ -71,6 +71,9 @@ void set_cli_options(CLI::App* app, Config* config) {
   app->add_option("--multi-channel-height", config->multi_channel_height,
                   "Height for multi-channel (640)");
 
+  app->add_option("--multi-channel-bit-rate", config->multi_channel_bit_rate,
+                  "Bit rate for multi-channel (1000)");
+
   app->add_option("--mix-multi-channel-audio", config->mix_multi_channel_audio,
                   "Mix multi-channel audio (false)");
 

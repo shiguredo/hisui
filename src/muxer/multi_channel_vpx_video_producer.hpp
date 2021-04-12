@@ -27,6 +27,9 @@ class MultiChannelVPXVideoProducer : public VideoProducer {
  private:
   hisui::video::Composer* m_normal_channel_composer = nullptr;
   hisui::video::Composer* m_preferred_channel_composer = nullptr;
+
+  const std::uint32_t m_normal_bit_rate;
+  const std::uint32_t m_preferred_bit_rate;
 };
 
 }  // namespace hisui::muxer

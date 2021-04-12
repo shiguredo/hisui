@@ -27,7 +27,9 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
     const hisui::Metadata& t_normal_metadata,
     const hisui::Metadata& t_preferred_metadata,
     const std::uint64_t timescale)
-    : VideoProducer({.show_progress_bar = t_config.show_progress_bar}) {
+    : VideoProducer({.show_progress_bar = t_config.show_progress_bar}),
+      m_normal_bit_rate(t_config.out_video_bit_rate),
+      m_preferred_bit_rate(t_config.multi_channel_bit_rate) {
   m_sequencer = new hisui::video::MultiChannelSequencer(
       t_normal_metadata.getArchives(), t_preferred_metadata.getArchives());
 
@@ -108,8 +110,9 @@ void MultiChannelVPXVideoProducer::produce() {
                              m_preferred_channel_composer->getHeight() * 3 >>
                          1);
         m_preferred_channel_composer->compose(&raw_image, {yuvs[0]});
-        m_encoder->setResolution(m_preferred_channel_composer->getWidth(),
-                                 m_preferred_channel_composer->getHeight());
+        m_encoder->setResolutionAndBitrate(
+            m_preferred_channel_composer->getWidth(),
+            m_preferred_channel_composer->getHeight(), m_preferred_bit_rate);
         {
           std::lock_guard<std::mutex> lock(m_mutex_buffer);
           m_encoder->outputImage(raw_image);
@@ -120,8 +123,9 @@ void MultiChannelVPXVideoProducer::produce() {
                              m_normal_channel_composer->getHeight() * 3 >>
                          1);
         m_normal_channel_composer->compose(&raw_image, yuvs);
-        m_encoder->setResolution(m_normal_channel_composer->getWidth(),
-                                 m_normal_channel_composer->getHeight());
+        m_encoder->setResolutionAndBitrate(
+            m_normal_channel_composer->getWidth(),
+            m_normal_channel_composer->getHeight(), m_normal_bit_rate);
         {
           std::lock_guard<std::mutex> lock(m_mutex_buffer);
           m_encoder->outputImage(raw_image);
