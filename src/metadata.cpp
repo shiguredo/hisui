@@ -46,6 +46,16 @@ void Archive::adjustTimeOffsets(double diff) {
   m_stop_time_offset += diff;
 }
 
+Archive& Archive::operator=(const Archive& other) {
+  if (this != &other) {
+    this->m_path = other.m_path;
+    this->m_connection_id = other.m_connection_id;
+    this->m_start_time_offset = other.m_start_time_offset;
+    this->m_stop_time_offset = other.m_stop_time_offset;
+  }
+  return *this;
+}
+
 Metadata::Metadata(const std::string& file_path,
                    const boost::json::array& json_archives)
     : m_path(file_path) {

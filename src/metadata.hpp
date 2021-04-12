@@ -22,15 +22,7 @@ class Archive {
   double getStopTimeOffset() const;
   void adjustTimeOffsets(double);
 
-  Archive& operator=(Archive other) {
-    if (this != &other) {
-      this->m_path = other.m_path;
-      this->m_connection_id = other.m_connection_id;
-      this->m_start_time_offset = other.m_start_time_offset;
-      this->m_stop_time_offset = other.m_stop_time_offset;
-    }
-    return *this;
-  }
+  Archive& operator=(const Archive& other);
 
  private:
   std::filesystem::path m_path;
