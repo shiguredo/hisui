@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "config.hpp"
 #include "metadata.hpp"
 #include "muxer/mp4_muxer.hpp"
@@ -14,7 +16,7 @@ namespace hisui::muxer {
 
 class SimpleMP4Muxer : public MP4Muxer {
  public:
-  SimpleMP4Muxer(const hisui::Config&, const hisui::Metadata&);
+  SimpleMP4Muxer(const hisui::Config&, const std::vector<hisui::Metadata>&);
   ~SimpleMP4Muxer();
 
   void setUp() override;
@@ -25,7 +27,7 @@ class SimpleMP4Muxer : public MP4Muxer {
   shiguredo::mp4::writer::SimpleWriter* m_simple_writer;
 
   hisui::Config m_config;
-  hisui::Metadata m_metadata;
+  std::vector<hisui::Metadata> m_metadata_list;
 };
 
 }  // namespace hisui::muxer

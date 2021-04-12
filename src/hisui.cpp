@@ -19,7 +19,6 @@
 #include "metadata.hpp"
 #include "muxer/async_webm_muxer.hpp"
 #include "muxer/faststart_mp4_muxer.hpp"
-#include "muxer/multi_channel_faststart_mp4_muxer.hpp"
 #include "muxer/muxer.hpp"
 #include "muxer/simple_mp4_muxer.hpp"
 #include "video/openh264_handler.hpp"
@@ -69,16 +68,9 @@ int main(int argc, char** argv) {
     muxer = new hisui::muxer::AsyncWebMMuxer(config, metadata_list);
   } else if (config.out_container == hisui::config::OutContainer::MP4) {
     if (config.mp4_muxer == hisui::config::MP4Muxer::Simple) {
-      muxer = new hisui::muxer::SimpleMP4Muxer(config, metadata);
+      muxer = new hisui::muxer::SimpleMP4Muxer(config, metadata_list);
     } else if (config.mp4_muxer == hisui::config::MP4Muxer::Faststart) {
-      if (config.in_multi_channel_metadata_filename == "") {
-        muxer = new hisui::muxer::FaststartMP4Muxer(config, metadata);
-      } else {
-        const hisui::Metadata alternative_metadata =
-            hisui::parse_metadata(config.in_multi_channel_metadata_filename);
-        muxer = new hisui::muxer::MultiChannelFaststartMP4Muxer(
-            config, metadata, alternative_metadata);
-      }
+      muxer = new hisui::muxer::FaststartMP4Muxer(config, metadata_list);
     } else {
       throw std::runtime_error("config.mp4_muxer is invalid");
     }

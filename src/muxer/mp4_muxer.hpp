@@ -50,7 +50,7 @@ class MP4Muxer : public Muxer {
 
   void writeTrackData();
   void initialize(const hisui::Config& t_config,
-                  const hisui::Metadata& t_metadata,
+                  const std::vector<hisui::Metadata>& t_metadata_list,
                   shiguredo::mp4::writer::Writer* writer,
                   const float duration);
 };
