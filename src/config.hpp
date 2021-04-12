@@ -94,6 +94,9 @@ class Config {
   std::uint32_t scaling_width = 320;
   std::uint32_t scaling_height = 240;
 
+  std::uint32_t multi_channel_width = 960;
+  std::uint32_t multi_channel_height = 640;
+
   std::uint32_t libvpx_threads = 0;
   std::int32_t libvpx_cpu_used = 8;
   std::uint32_t libvp9_frame_parallel = 1;

@@ -65,6 +65,12 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "Multi Channel Metadata filename")
       ->check(CLI::ExistingFile);
 
+  app->add_option("--multi-channel-width", config->multi_channel_width,
+                  "Width for multi-channel (960)");
+
+  app->add_option("--multi-channel-height", config->multi_channel_height,
+                  "Height for multi-channel (640)");
+
   app->add_option("--mix-multi-channel-audio", config->mix_multi_channel_audio,
                   "Mix multi-channel audio (false)");
 
