@@ -5,7 +5,7 @@
 namespace hisui {
 
 class Config;
-class Metadata;
+class MetadataSet;
 
 }  // namespace hisui
 
@@ -13,7 +13,7 @@ namespace hisui::muxer {
 
 class FDKAACAudioProducer : public AudioProducer {
  public:
-  FDKAACAudioProducer(const hisui::Config&, const hisui::Metadata& i);
+  FDKAACAudioProducer(const hisui::Config&, const hisui::MetadataSet&);
 };
 
 }  // namespace hisui::muxer

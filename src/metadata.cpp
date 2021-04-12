@@ -231,4 +231,40 @@ void Metadata::adjustTimeOffsets(double diff) {
   }
 }
 
+MetadataSet::MetadataSet(const Metadata& t_normal)
+    : m_normal(t_normal), m_preferred({}) {}
+
+void MetadataSet::setPrefered(const Metadata& t_preferred) {
+  m_has_preferred = true;
+  m_preferred = t_preferred;
+}
+
+std::vector<Archive> MetadataSet::getArchives() const {
+  if (m_has_preferred) {
+    std::vector<hisui::Archive> archives;
+    auto a0 = m_normal.getArchives();
+    archives.insert(std::end(archives), std::begin(a0), std::end(a0));
+    auto a1 = m_preferred.getArchives();
+    archives.insert(std::end(archives), std::begin(a1), std::end(a1));
+    return archives;
+  }
+  return m_normal.getArchives();
+}
+
+std::vector<Archive> MetadataSet::getNormalArchives() const {
+  return m_normal.getArchives();
+}
+
+Metadata MetadataSet::getNormal() const {
+  return m_normal;
+}
+
+Metadata MetadataSet::getPreferred() const {
+  return m_preferred;
+}
+
+bool MetadataSet::hasPreferred() const {
+  return m_has_preferred;
+}
+
 }  // namespace hisui

@@ -107,6 +107,7 @@ class Config {
   std::string openh264 = "";
 
   config::AudioMixer audio_mixer = config::AudioMixer::Simple;
+  bool mix_multi_channel_audio = false;
 
   config::MP4Muxer mp4_muxer = config::MP4Muxer::Faststart;
   config::OutAudioCodec out_audio_codec = config::OutAudioCodec::Opus;

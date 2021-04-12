@@ -52,25 +52,22 @@ int main(int argc, char** argv) {
     }
   }
 
-  const hisui::Metadata metadata =
-      hisui::parse_metadata(config.in_metadata_filename);
-
-  std::vector<hisui::Metadata> metadata_list{metadata};
+  hisui::MetadataSet metadata_set(
+      hisui::parse_metadata(config.in_metadata_filename));
 
   if (config.in_multi_channel_metadata_filename != "") {
-    const hisui::Metadata alternative_metadata =
-        hisui::parse_metadata(config.in_multi_channel_metadata_filename);
-    metadata_list.push_back(alternative_metadata);
+    metadata_set.setPrefered(
+        hisui::parse_metadata(config.in_multi_channel_metadata_filename));
   }
 
   hisui::muxer::Muxer* muxer = nullptr;
   if (config.out_container == hisui::config::OutContainer::WebM) {
-    muxer = new hisui::muxer::AsyncWebMMuxer(config, metadata_list);
+    muxer = new hisui::muxer::AsyncWebMMuxer(config, metadata_set);
   } else if (config.out_container == hisui::config::OutContainer::MP4) {
     if (config.mp4_muxer == hisui::config::MP4Muxer::Simple) {
-      muxer = new hisui::muxer::SimpleMP4Muxer(config, metadata_list);
+      muxer = new hisui::muxer::SimpleMP4Muxer(config, metadata_set);
     } else if (config.mp4_muxer == hisui::config::MP4Muxer::Faststart) {
-      muxer = new hisui::muxer::FaststartMP4Muxer(config, metadata_list);
+      muxer = new hisui::muxer::FaststartMP4Muxer(config, metadata_set);
     } else {
       throw std::runtime_error("config.mp4_muxer is invalid");
     }

@@ -8,8 +8,9 @@
 
 namespace hisui::muxer {
 
-FDKAACAudioProducer::FDKAACAudioProducer(const hisui::Config& t_config,
-                                         const hisui::Metadata& t_metadata)
+FDKAACAudioProducer::FDKAACAudioProducer(
+    const hisui::Config& t_config,
+    const hisui::MetadataSet& t_metadata_set)
     : AudioProducer({.show_progress_bar =
                          t_config.show_progress_bar && t_config.audio_only}) {
   switch (t_config.audio_mixer) {
@@ -21,8 +22,8 @@ FDKAACAudioProducer::FDKAACAudioProducer(const hisui::Config& t_config,
       break;
   }
 
-  m_sequencer = new hisui::audio::BasicSequencer(t_metadata.getArchives());
-  m_max_stop_time_offset = t_metadata.getMaxStopTimeOffset();
+  m_sequencer = new hisui::audio::BasicSequencer(t_metadata_set.getArchives());
+  m_max_stop_time_offset = t_metadata_set.getNormal().getMaxStopTimeOffset();
 
   m_encoder = new hisui::audio::BufferFDKAACEncoder(
       &m_buffer, {.bit_rate = t_config.out_aac_bit_rate});

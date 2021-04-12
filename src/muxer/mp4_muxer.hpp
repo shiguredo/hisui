@@ -10,7 +10,7 @@
 namespace hisui {
 
 class Config;
-class Metadata;
+class MetadataSet;
 
 }  // namespace hisui
 
@@ -49,10 +49,10 @@ class MP4Muxer : public Muxer {
   void appendVideo(hisui::Frame) override;
 
   void writeTrackData();
-  void initialize(const hisui::Config& t_config,
-                  const std::vector<hisui::Metadata>& t_metadata_list,
-                  shiguredo::mp4::writer::Writer* writer,
-                  const float duration);
+  void initialize(const hisui::Config&,
+                  const hisui::MetadataSet&,
+                  shiguredo::mp4::writer::Writer*,
+                  const float);
 };
 
 }  // namespace hisui::muxer

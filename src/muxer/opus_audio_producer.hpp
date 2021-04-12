@@ -10,7 +10,7 @@
 namespace hisui {
 
 class Config;
-class Metadata;
+class MetadataSet;
 
 }  // namespace hisui
 
@@ -20,7 +20,7 @@ class OpusAudioProducer : public AudioProducer {
  public:
   OpusAudioProducer(
       const hisui::Config&,
-      const hisui::Metadata& i,
+      const hisui::MetadataSet&,
       const std::uint64_t timescale = hisui::Constants::NANO_SECOND);
   ::opus_int32 getSkip() const;
 

@@ -31,15 +31,15 @@
 namespace hisui::muxer {
 
 void MP4Muxer::initialize(const hisui::Config& config_orig,
-                          const std::vector<hisui::Metadata>& metadata_list,
+                          const hisui::MetadataSet& metadata_set,
                           shiguredo::mp4::writer::Writer* writer,
                           const float duration) {
   m_writer = writer;
   hisui::Config config = config_orig;
   if (config.out_video_bit_rate == 0) {
-    config.out_video_bit_rate =
-        static_cast<std::uint32_t>(std::size(metadata_list[0].getArchives())) *
-        hisui::Constants::VIDEO_VPX_BIT_RATE_PER_FILE;
+    config.out_video_bit_rate = static_cast<std::uint32_t>(std::size(
+                                    metadata_set.getNormalArchives())) *
+                                hisui::Constants::VIDEO_VPX_BIT_RATE_PER_FILE;
   } else {
     config.out_video_bit_rate = config.out_video_bit_rate;
   }
@@ -63,7 +63,7 @@ void MP4Muxer::initialize(const hisui::Config& config_orig,
 
   if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
 #ifdef USE_FDK_AAC
-    m_audio_producer = new FDKAACAudioProducer(config, metadata_list[0]);
+    m_audio_producer = new FDKAACAudioProducer(config, metadata_set);
     m_soun_track = new shiguredo::mp4::track::AACTrack({
         .timescale = 48000,
         .duration = duration,
@@ -77,7 +77,7 @@ void MP4Muxer::initialize(const hisui::Config& config_orig,
 #endif
   } else {
     OpusAudioProducer* audio_producer =
-        new OpusAudioProducer(config, metadata_list[0], 48000);
+        new OpusAudioProducer(config, metadata_set, 48000);
     const auto skip = audio_producer->getSkip();
     m_audio_producer = audio_producer;
     m_soun_track = new shiguredo::mp4::track::OpusTrack(
@@ -91,11 +91,12 @@ void MP4Muxer::initialize(const hisui::Config& config_orig,
     m_video_producer = new NoVideoProducer();
     m_timescale_ratio.assign(1, 1);
   } else {
-    if (std::size(metadata_list) > 1) {
+    if (metadata_set.hasPreferred()) {
       m_video_producer = new MultiChannelVPXVideoProducer(
-          config, metadata_list[0], metadata_list[1], 16000);
+          config, metadata_set.getNormal(), metadata_set.getPreferred(), 16000);
     } else {
-      m_video_producer = new VPXVideoProducer(config, metadata_list[0], 16000);
+      m_video_producer =
+          new VPXVideoProducer(config, metadata_set.getNormal(), 16000);
     }
     m_vide_track = new shiguredo::mp4::track::VPXTrack(
         {.timescale = 16000,

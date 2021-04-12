@@ -22,9 +22,19 @@ class Archive {
   double getStopTimeOffset() const;
   void adjustTimeOffsets(double);
 
+  Archive& operator=(Archive other) {
+    if (this != &other) {
+      this->m_path = other.m_path;
+      this->m_connection_id = other.m_connection_id;
+      this->m_start_time_offset = other.m_start_time_offset;
+      this->m_stop_time_offset = other.m_stop_time_offset;
+    }
+    return *this;
+  }
+
  private:
-  const std::filesystem::path m_path;
-  const std::string m_connection_id;
+  std::filesystem::path m_path;
+  std::string m_connection_id;
   double m_start_time_offset;
   double m_stop_time_offset;
 };
@@ -32,7 +42,7 @@ class Archive {
 class Metadata {
  public:
   Metadata(const std::string&, const boost::json::array&);
-  explicit Metadata(const std::vector<Archive>&);  // for testing
+  explicit Metadata(const std::vector<Archive>&);
   std::vector<Archive> getArchives() const;
   double getMinStartTimeOffset() const;
   double getMaxStopTimeOffset() const;
@@ -49,5 +59,21 @@ class Metadata {
 };
 
 Metadata parse_metadata(const std::string&);
+
+class MetadataSet {
+ public:
+  explicit MetadataSet(const Metadata&);
+  void setPrefered(const Metadata&);
+  Metadata getNormal() const;
+  Metadata getPreferred() const;
+  bool hasPreferred() const;
+  std::vector<Archive> getArchives() const;
+  std::vector<Archive> getNormalArchives() const;
+
+ private:
+  Metadata m_normal;
+  Metadata m_preferred;
+  bool m_has_preferred = false;
+};
 
 }  // namespace hisui

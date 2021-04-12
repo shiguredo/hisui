@@ -20,10 +20,9 @@
 
 namespace hisui::muxer {
 
-AsyncWebMMuxer::AsyncWebMMuxer(
-    const hisui::Config& t_config,
-    const std::vector<hisui::Metadata>& t_metadata_list)
-    : m_config(t_config), m_metadata_list(t_metadata_list) {}
+AsyncWebMMuxer::AsyncWebMMuxer(const hisui::Config& t_config,
+                               const hisui::MetadataSet& t_metadata_set)
+    : m_config(t_config), m_metadata_set(t_metadata_set) {}
 
 void AsyncWebMMuxer::setUp() {
   if (m_config.out_filename == "") {
@@ -47,15 +46,16 @@ void AsyncWebMMuxer::setUp() {
     if (m_config.out_video_bit_rate == 0) {
       m_config.out_video_bit_rate =
           static_cast<std::uint32_t>(
-              std::size(m_metadata_list[0].getArchives())) *
+              std::size(m_metadata_set.getNormalArchives())) *
           hisui::Constants::VIDEO_VPX_BIT_RATE_PER_FILE;
     }
 
-    if (std::size(m_metadata_list) > 1) {
+    if (m_metadata_set.hasPreferred()) {
       m_video_producer = new MultiChannelVPXVideoProducer(
-          m_config, m_metadata_list[0], m_metadata_list[1]);
+          m_config, m_metadata_set.getNormal(), m_metadata_set.getPreferred());
     } else {
-      m_video_producer = new VPXVideoProducer(m_config, m_metadata_list[0]);
+      m_video_producer =
+          new VPXVideoProducer(m_config, m_metadata_set.getNormal());
     }
 
     m_context->setVideoTrack(m_video_producer->getWidth(),
@@ -64,7 +64,7 @@ void AsyncWebMMuxer::setUp() {
   }
 
   OpusAudioProducer* audio_producer =
-      new OpusAudioProducer(m_config, m_metadata_list[0]);
+      new OpusAudioProducer(m_config, m_metadata_set);
   const auto skip = audio_producer->getSkip();
   m_audio_producer = audio_producer;
 

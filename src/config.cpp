@@ -65,6 +65,9 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "Multi Channel Metadata filename")
       ->check(CLI::ExistingFile);
 
+  app->add_option("--mix-multi-channel-audio", config->mix_multi_channel_audio,
+                  "Mix multi-channel audio (false)");
+
   std::vector<std::pair<std::string, config::OutContainer>> out_container_assoc{
       {"WebM", config::OutContainer::WebM},
       {"MP4", config::OutContainer::MP4},
