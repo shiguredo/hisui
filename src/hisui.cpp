@@ -19,7 +19,6 @@
 #include "metadata.hpp"
 #include "muxer/async_webm_muxer.hpp"
 #include "muxer/faststart_mp4_muxer.hpp"
-#include "muxer/multi_channel_async_webm_muxer.hpp"
 #include "muxer/multi_channel_faststart_mp4_muxer.hpp"
 #include "muxer/muxer.hpp"
 #include "muxer/simple_mp4_muxer.hpp"
@@ -46,9 +45,6 @@ int main(int argc, char** argv) {
   }
   spdlog::debug("log level={}", config.log_level);
 
-  const hisui::Metadata metadata =
-      hisui::parse_metadata(config.in_metadata_filename);
-
   if (!config.openh264.empty()) {
     try {
       hisui::video::OpenH264Handler::open(config.openh264);
@@ -57,16 +53,20 @@ int main(int argc, char** argv) {
     }
   }
 
+  const hisui::Metadata metadata =
+      hisui::parse_metadata(config.in_metadata_filename);
+
+  std::vector<hisui::Metadata> metadata_list{metadata};
+
+  if (config.in_multi_channel_metadata_filename != "") {
+    const hisui::Metadata alternative_metadata =
+        hisui::parse_metadata(config.in_multi_channel_metadata_filename);
+    metadata_list.push_back(alternative_metadata);
+  }
+
   hisui::muxer::Muxer* muxer = nullptr;
   if (config.out_container == hisui::config::OutContainer::WebM) {
-    if (config.in_multi_channel_metadata_filename == "") {
-      muxer = new hisui::muxer::AsyncWebMMuxer(config, metadata);
-    } else {
-      const hisui::Metadata alternative_metadata =
-          hisui::parse_metadata(config.in_multi_channel_metadata_filename);
-      muxer = new hisui::muxer::MultiChannelAsyncWebMMuxer(
-          config, metadata, alternative_metadata);
-    }
+    muxer = new hisui::muxer::AsyncWebMMuxer(config, metadata_list);
   } else if (config.out_container == hisui::config::OutContainer::MP4) {
     if (config.mp4_muxer == hisui::config::MP4Muxer::Simple) {
       muxer = new hisui::muxer::SimpleMP4Muxer(config, metadata);

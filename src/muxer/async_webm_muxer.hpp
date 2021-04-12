@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdio>
+#include <vector>
 
 #include "config.hpp"
 #include "metadata.hpp"
@@ -22,7 +23,7 @@ namespace hisui::muxer {
 
 class AsyncWebMMuxer : public Muxer {
  public:
-  AsyncWebMMuxer(const hisui::Config&, const hisui::Metadata&);
+  AsyncWebMMuxer(const hisui::Config&, const std::vector<hisui::Metadata>&);
   ~AsyncWebMMuxer();
 
   void setUp() override;
@@ -38,7 +39,7 @@ class AsyncWebMMuxer : public Muxer {
   std::FILE* m_file;
 
   hisui::Config m_config;
-  hisui::Metadata m_metadata;
+  std::vector<hisui::Metadata> m_metadata_list;
 };
 
 }  // namespace hisui::muxer
