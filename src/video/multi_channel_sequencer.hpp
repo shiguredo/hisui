@@ -31,7 +31,7 @@ class MultiChannelSequencer : public Sequencer {
   const YUVImage* m_black_yuv_image;
   std::vector<
       std::pair<std::string, std::shared_ptr<std::vector<SourceAndInterval>>>>
-      m_alternative_sequence;
+      m_preferred_sequence;
 };
 
 }  // namespace hisui::video

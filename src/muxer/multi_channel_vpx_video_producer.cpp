@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -23,12 +24,12 @@ namespace hisui::muxer {
 
 MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
     const hisui::Config& t_config,
-    const hisui::Metadata& t_metadata,
-    const hisui::Metadata& t_multi_channel_metadata,
+    const hisui::Metadata& t_normal_metadata,
+    const hisui::Metadata& t_preferred_metadata,
     const std::uint64_t timescale)
     : VideoProducer({.show_progress_bar = t_config.show_progress_bar}) {
   m_sequencer = new hisui::video::MultiChannelSequencer(
-      t_metadata.getArchives(), t_multi_channel_metadata.getArchives());
+      t_normal_metadata.getArchives(), t_preferred_metadata.getArchives());
 
   const auto scaling_width = t_config.scaling_width != 0
                                  ? t_config.scaling_width
@@ -39,41 +40,44 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
 
   switch (t_config.video_composer) {
     case hisui::config::VideoComposer::Grid:
-      m_original_channel_composer = new hisui::video::GridComposer(
+      m_normal_channel_composer = new hisui::video::GridComposer(
           scaling_width, scaling_height, m_sequencer->getSize(),
           t_config.max_columns, t_config.video_scaler,
           t_config.libyuv_filter_mode);
-      m_alternative_channel_composer = new hisui::video::GridComposer(
+      m_preferred_channel_composer = new hisui::video::GridComposer(
           960, 640, 1, 1, t_config.video_scaler, t_config.libyuv_filter_mode);
       break;
     case hisui::config::VideoComposer::ParallelGrid:
-      m_original_channel_composer = new hisui::video::ParallelGridComposer(
+      m_normal_channel_composer = new hisui::video::ParallelGridComposer(
           scaling_width, scaling_height, m_sequencer->getSize(),
           t_config.max_columns, t_config.video_scaler,
           t_config.libyuv_filter_mode);
-      m_alternative_channel_composer = new hisui::video::GridComposer(
+      m_preferred_channel_composer = new hisui::video::GridComposer(
           960, 640, 1, 1, t_config.video_scaler, t_config.libyuv_filter_mode);
       break;
   }
 
-  m_composer = m_original_channel_composer;
+  m_composer = m_normal_channel_composer;
 
   hisui::video::VPXEncoderConfig vpx_config(
-      m_alternative_channel_composer->getWidth(),
-      m_alternative_channel_composer->getHeight(), t_config);
+      std::max(m_normal_channel_composer->getWidth(),
+               m_preferred_channel_composer->getWidth()),
+      std::max(m_normal_channel_composer->getHeight(),
+               m_preferred_channel_composer->getHeight()),
+      t_config);
 
   m_encoder =
       new hisui::video::BufferVPXEncoder(&m_buffer, vpx_config, timescale);
 
-  m_max_stop_time_offset = t_metadata.getMaxStopTimeOffset();
+  m_max_stop_time_offset = t_normal_metadata.getMaxStopTimeOffset();
   m_frame_rate = t_config.out_video_frame_rate;
 }
 
 MultiChannelVPXVideoProducer::~MultiChannelVPXVideoProducer() {
-  delete m_original_channel_composer;
-  m_original_channel_composer = nullptr;
-  delete m_alternative_channel_composer;
-  m_alternative_channel_composer = nullptr;
+  delete m_normal_channel_composer;
+  m_normal_channel_composer = nullptr;
+  delete m_preferred_channel_composer;
+  m_preferred_channel_composer = nullptr;
   m_composer = nullptr;
 }
 
@@ -97,25 +101,25 @@ void MultiChannelVPXVideoProducer::produce() {
                                      m_frame_rate.numerator();
          t < max_time; t += step) {
       auto result = m_sequencer->getYUVs(&yuvs, t);
-      if (result.is_alternative_stream) {
-        raw_image.resize(m_alternative_channel_composer->getWidth() *
-                             m_alternative_channel_composer->getHeight() * 3 >>
+      if (result.is_preferred_stream) {
+        raw_image.resize(m_preferred_channel_composer->getWidth() *
+                             m_preferred_channel_composer->getHeight() * 3 >>
                          1);
-        m_alternative_channel_composer->compose(&raw_image, {yuvs[0]});
-        m_encoder->setResolution(m_alternative_channel_composer->getWidth(),
-                                 m_alternative_channel_composer->getHeight());
+        m_preferred_channel_composer->compose(&raw_image, {yuvs[0]});
+        m_encoder->setResolution(m_preferred_channel_composer->getWidth(),
+                                 m_preferred_channel_composer->getHeight());
         {
           std::lock_guard<std::mutex> lock(m_mutex_buffer);
           m_encoder->outputImage(raw_image);
         }
 
       } else {
-        raw_image.resize(m_original_channel_composer->getWidth() *
-                             m_original_channel_composer->getHeight() * 3 >>
+        raw_image.resize(m_normal_channel_composer->getWidth() *
+                             m_normal_channel_composer->getHeight() * 3 >>
                          1);
-        m_original_channel_composer->compose(&raw_image, yuvs);
-        m_encoder->setResolution(m_original_channel_composer->getWidth(),
-                                 m_original_channel_composer->getHeight());
+        m_normal_channel_composer->compose(&raw_image, yuvs);
+        m_encoder->setResolution(m_normal_channel_composer->getWidth(),
+                                 m_normal_channel_composer->getHeight());
         {
           std::lock_guard<std::mutex> lock(m_mutex_buffer);
           m_encoder->outputImage(raw_image);

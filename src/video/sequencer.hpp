@@ -29,7 +29,7 @@ using SourceAndInterval =
     std::pair<std::unique_ptr<Source>, hisui::util::Interval>;
 
 struct SequencerGetYUVsResult {
-  const bool is_alternative_stream = false;
+  const bool is_preferred_stream = false;
 };
 
 class Sequencer {

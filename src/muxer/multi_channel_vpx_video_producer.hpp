@@ -25,8 +25,8 @@ class MultiChannelVPXVideoProducer : public VideoProducer {
   void produce() override;
 
  private:
-  hisui::video::Composer* m_original_channel_composer = nullptr;
-  hisui::video::Composer* m_alternative_channel_composer = nullptr;
+  hisui::video::Composer* m_normal_channel_composer = nullptr;
+  hisui::video::Composer* m_preferred_channel_composer = nullptr;
 };
 
 }  // namespace hisui::muxer
