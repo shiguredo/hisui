@@ -22,8 +22,8 @@ WebMSource::WebMSource(const std::string& t_file_path) {
   m_webm = new hisui::webm::input::VideoContext(t_file_path);
   if (!m_webm->init()) {
     spdlog::info(
-        "VideoContext initialization failed. no video track or unsupported "
-        "codec: file_path={}",
+        "VideoContext initialization failed. no video track, invalid video "
+        "track or unsupported codec: file_path={}",
         t_file_path);
 
     delete m_webm;

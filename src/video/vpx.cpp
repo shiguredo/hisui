@@ -166,9 +166,7 @@ void create_vpx_codec_ctx_t_for_encoding(::vpx_codec_ctx_t* codec,
   cfg->rc_min_quantizer = config.min_q;
   cfg->rc_max_quantizer = config.max_q;
 
-  if (config.threads > 0) {
-    cfg->g_threads = config.threads;
-  }
+  cfg->g_threads = config.threads;
 
   if (::vpx_codec_enc_init(codec, dx_algo, cfg, 0)) {
     throw std::runtime_error("vpx_codec_enc_init() failed");

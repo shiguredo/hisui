@@ -11,6 +11,24 @@
 
 ## develop
 
+## 2021.2.3
+
+- [FIX] PixelWidth/Height が 0 な VideoTrack を持つ WebM に対応するで混入したバグを修正する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/39
+
+## 2021.2.2
+
+- [FIX] PixelWidth/Height が 0 な VideoTrack を持つ WebM に対応する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/38
+
+## 2021.2.1
+
+- [FIX] --libvpx-therads が指定されていない場合の挙動を修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/34
+
 ## 2021.2
 
 - [UPDATE] `libvpx` を `v1.10.0` に

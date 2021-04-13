@@ -48,6 +48,11 @@ bool VideoContext::init() {
     return false;
   }
 
+  if (video_track->GetWidth() == 0 || video_track->GetHeight() == 0) {
+    spdlog::info("invalid video track");
+    return false;
+  }
+
   const auto codec_id = video_track->GetCodecId();
 
   if (!std::strncmp(codec_id, "V_VP8", 5)) {

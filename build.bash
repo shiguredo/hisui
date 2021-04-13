@@ -118,6 +118,7 @@ cd third_party || exit 1
 
 if [ -d libvpx ] ; then
     cd libvpx || exit 1
+    patch -p1 -R < ../libwebm.patch || echo "reverse patch failed"
     git checkout master
     git pull
 else
@@ -125,6 +126,7 @@ else
     cd libvpx || exit 1
 fi
 git checkout v"${LIBVPX_VERSION}"
+patch -p1 < ../libwebm.patch
 
 libvpx_configure_options=('--disable-examples' '--disable-tools' '--disable-docs' '--disable-unit-tests' )
 if [ "${BUILD_TYPE}" = "Native" ]; then

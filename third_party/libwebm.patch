@@ -1,0 +1,19 @@
+diff --git a/third_party/libwebm/mkvparser/mkvparser.cc b/third_party/libwebm/mkvparser/mkvparser.cc
+index ace65bd59..dc07113bd 100644
+--- a/third_party/libwebm/mkvparser/mkvparser.cc
++++ b/third_party/libwebm/mkvparser/mkvparser.cc
+@@ -5334,12 +5334,12 @@ long VideoTrack::Parse(Segment* pSegment, const Info& info,
+     if (id == libwebm::kMkvPixelWidth) {
+       width = UnserializeUInt(pReader, pos, size);
+ 
+-      if (width <= 0)
++      if (width < 0)
+         return E_FILE_FORMAT_INVALID;
+     } else if (id == libwebm::kMkvPixelHeight) {
+       height = UnserializeUInt(pReader, pos, size);
+ 
+-      if (height <= 0)
++      if (height < 0)
+         return E_FILE_FORMAT_INVALID;
+     } else if (id == libwebm::kMkvDisplayWidth) {
+       display_width = UnserializeUInt(pReader, pos, size);
