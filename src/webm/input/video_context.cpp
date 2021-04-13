@@ -30,7 +30,11 @@ bool VideoContext::init() {
   if (m_file == nullptr) {
     throw std::runtime_error("Unable to open: " + m_file_path);
   }
-  initReaderAndSegment(m_file);
+
+  if (!initReaderAndSegment(m_file)) {
+    spdlog::info("initReaderAndSegment failed");
+    return false;
+  }
 
   const mkvparser::Tracks* const tracks = m_segment->GetTracks();
   const mkvparser::VideoTrack* video_track = nullptr;

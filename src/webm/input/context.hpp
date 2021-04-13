@@ -38,7 +38,7 @@ class Context {
   std::FILE* m_file = nullptr;
 
   void reset();
-  void initReaderAndSegment(std::FILE*);
+  bool initReaderAndSegment(std::FILE*);
   bool moveNextBlock();
   void rewindCluster();
 

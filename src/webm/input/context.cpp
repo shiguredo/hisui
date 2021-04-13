@@ -3,6 +3,7 @@
 #include <fmt/core.h>
 #include <mkvparser/mkvparser.h>
 #include <mkvparser/mkvreader.h>
+#include <spdlog/spdlog.h>
 
 #include <stdexcept>
 
@@ -36,7 +37,7 @@ void Context::reset() {
   }
 }
 
-void Context::initReaderAndSegment(std::FILE* file) {
+bool Context::initReaderAndSegment(std::FILE* file) {
   m_reader = new mkvparser::MkvReader(file);
   m_reached_eos = false;
 
@@ -60,9 +61,11 @@ void Context::initReaderAndSegment(std::FILE* file) {
   const auto segument_load_ret = m_segment->Load();
   if (segument_load_ret < 0) {
     reset();
-    throw std::runtime_error(fmt::format(
-        "WebM m_segment->Load() failed: error_code={}", segument_load_ret));
+    spdlog::warn("WebM m_segment->Load() failed: error_code={}",
+                 segument_load_ret);
+    return false;
   }
+  return true;
 }
 
 bool Context::moveNextBlock() {

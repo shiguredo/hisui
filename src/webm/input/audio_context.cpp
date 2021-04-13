@@ -32,7 +32,10 @@ bool AudioContext::init() {
     throw std::runtime_error("Unable to open: " + m_file_path);
   }
 
-  initReaderAndSegment(m_file);
+  if (!initReaderAndSegment(m_file)) {
+    spdlog::info("initReaderAndSegment failed");
+    return false;
+  }
 
   const mkvparser::Tracks* const tracks = m_segment->GetTracks();
   const mkvparser::AudioTrack* audio_track = nullptr;
