@@ -23,7 +23,7 @@ FDKAACAudioProducer::FDKAACAudioProducer(
   }
 
   m_sequencer = new hisui::audio::BasicSequencer(t_metadata_set.getArchives());
-  m_max_stop_time_offset = t_metadata_set.getNormal().getMaxStopTimeOffset();
+  m_max_stop_time_offset = t_metadata_set.getMaxStopTimeOffset();
 
   m_encoder = new hisui::audio::BufferFDKAACEncoder(
       &m_buffer, {.bit_rate = t_config.out_aac_bit_rate});

@@ -73,7 +73,9 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
   m_encoder =
       new hisui::video::BufferVPXEncoder(&m_buffer, vpx_config, timescale);
 
-  m_max_stop_time_offset = t_normal_metadata.getMaxStopTimeOffset();
+  m_max_stop_time_offset =
+      std::max(t_normal_metadata.getMaxStopTimeOffset(),
+               t_preferred_metadata.getMaxStopTimeOffset());
   m_frame_rate = t_config.out_video_frame_rate;
 }
 

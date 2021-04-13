@@ -48,7 +48,7 @@ void FaststartMP4Muxer::setUp() {
                 directory_for_faststart_intermediate_file.string());
 
   const float duration =
-      static_cast<float>(m_metadata_set.getNormal().getMaxStopTimeOffset());
+      static_cast<float>(m_metadata_set.getMaxStopTimeOffset());
   m_faststart_writer = new shiguredo::mp4::writer::FaststartWriter(
       m_ofs, {.mvhd_timescale = 1000,
               .duration = duration,

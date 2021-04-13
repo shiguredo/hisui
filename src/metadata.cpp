@@ -155,6 +155,10 @@ double Metadata::getMaxStopTimeOffset() const {
   return m_max_stop_time_offset;
 }
 
+double Metadata::getCreatedAt() const {
+  return m_created_at;
+}
+
 boost::json::array Metadata::prepare(const boost::json::value& jv) {
   boost::json::object j;
   if (auto p = jv.if_object()) {
@@ -163,12 +167,8 @@ boost::json::array Metadata::prepare(const boost::json::value& jv) {
     throw std::runtime_error("jv.if_object() failed");
   }
 
-  try {
-    m_recording_id = get_string_from_json_object(j, "recording_id");
-  } catch (const std::exception& e) {
-    spdlog::error("invalid format: cannot get recording_id: what={}", e.what());
-    throw e;
-  }
+  m_recording_id = get_string_from_json_object(j, "recording_id");
+  m_created_at = get_double_from_json_object(j, "created_at");
 
   if (j["archives"] == nullptr) {
     throw std::invalid_argument("not metadata json file: {}");
@@ -231,6 +231,12 @@ MetadataSet::MetadataSet(const Metadata& t_normal)
 void MetadataSet::setPrefered(const Metadata& t_preferred) {
   m_has_preferred = true;
   m_preferred = t_preferred;
+  auto diff = m_normal.getCreatedAt() - m_preferred.getCreatedAt();
+  if (diff > 0) {
+    m_normal.adjustTimeOffsets(diff);
+  } else {
+    m_preferred.adjustTimeOffsets(diff);
+  }
 }
 
 std::vector<Archive> MetadataSet::getArchives() const {
@@ -259,6 +265,14 @@ Metadata MetadataSet::getPreferred() const {
 
 bool MetadataSet::hasPreferred() const {
   return m_has_preferred;
+}
+
+double MetadataSet::getMaxStopTimeOffset() const {
+  if (m_has_preferred) {
+    return std::max(m_normal.getMaxStopTimeOffset(),
+                    m_preferred.getMaxStopTimeOffset());
+  }
+  return m_normal.getMaxStopTimeOffset();
 }
 
 boost::json::string Metadata::getRecordingID() const {

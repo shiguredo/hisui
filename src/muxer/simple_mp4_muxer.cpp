@@ -21,7 +21,7 @@ SimpleMP4Muxer::SimpleMP4Muxer(const hisui::Config& t_config,
 
 void SimpleMP4Muxer::setUp() {
   const float duration =
-      static_cast<float>(m_metadata_set.getNormal().getMaxStopTimeOffset());
+      static_cast<float>(m_metadata_set.getMaxStopTimeOffset());
   m_simple_writer = new shiguredo::mp4::writer::SimpleWriter(
       m_ofs, {.mvhd_timescale = 1000, .duration = duration});
   initialize(m_config, m_metadata_set, m_simple_writer, duration);

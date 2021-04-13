@@ -38,6 +38,7 @@ class Metadata {
   std::vector<Archive> getArchives() const;
   double getMinStartTimeOffset() const;
   double getMaxStopTimeOffset() const;
+  double getCreatedAt() const;
   void adjustTimeOffsets(double);
   std::filesystem::path getPath() const;
   boost::json::string getRecordingID() const;
@@ -50,6 +51,7 @@ class Metadata {
   std::vector<Archive> m_archives;
   double m_min_start_time_offset = std::numeric_limits<double>::max();
   double m_max_stop_time_offset = std::numeric_limits<double>::min();
+  double m_created_at;
   boost::json::string m_recording_id;
 };
 
@@ -64,6 +66,7 @@ class MetadataSet {
   bool hasPreferred() const;
   std::vector<Archive> getArchives() const;
   std::vector<Archive> getNormalArchives() const;
+  double getMaxStopTimeOffset() const;
 
  private:
   Metadata m_normal;
