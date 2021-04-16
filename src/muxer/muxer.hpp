@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include <boost/cstdint.hpp>
 #include <boost/rational.hpp>
 
 namespace hisui {

@@ -1,9 +1,13 @@
 #include "muxer/multi_channel_vpx_video_producer.hpp"
 
+#include <bits/exception.h>
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 #include <boost/rational.hpp>
@@ -14,11 +18,18 @@
 #include "muxer/video_producer.hpp"
 #include "video/buffer_vpx_encoder.hpp"
 #include "video/composer.hpp"
+#include "video/encoder.hpp"
 #include "video/grid_composer.hpp"
 #include "video/multi_channel_sequencer.hpp"
 #include "video/parallel_grid_composer.hpp"
 #include "video/sequencer.hpp"
 #include "video/vpx.hpp"
+
+namespace hisui::video {
+
+class YUVImage;
+
+}
 
 namespace hisui::muxer {
 

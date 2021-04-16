@@ -8,7 +8,11 @@
 #include <boost/cstdint.hpp>
 #include <boost/rational.hpp>
 
-#include "frame.hpp"
+namespace hisui {
+
+struct Frame;
+
+}
 
 namespace hisui::video {
 

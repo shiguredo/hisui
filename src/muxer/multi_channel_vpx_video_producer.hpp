@@ -12,6 +12,12 @@ class MetadataSet;
 
 }  // namespace hisui
 
+namespace hisui::video {
+
+class Composer;
+
+}
+
 namespace hisui::muxer {
 
 class MultiChannelVPXVideoProducer : public VideoProducer {

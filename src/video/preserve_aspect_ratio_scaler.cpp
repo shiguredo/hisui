@@ -1,6 +1,7 @@
 #include "video/preserve_aspect_ratio_scaler.hpp"
 
 #include <bits/exception.h>
+#include <spdlog/fmt/bundled/format.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <stdexcept>
 
 #include <boost/cstdint.hpp>
+#include <boost/exception/exception.hpp>
 #include <boost/rational.hpp>
 
 #include "video/yuv.hpp"

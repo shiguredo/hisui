@@ -7,16 +7,11 @@
 
 #include "audio/sequencer.hpp"
 #include "audio/source.hpp"
+#include "util/interval.hpp"
 
 namespace hisui {
 
 class Archive;
-
-}
-
-namespace hisui::util {
-
-class Interval;
 
 }
 

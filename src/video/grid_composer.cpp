@@ -1,5 +1,7 @@
 #include "video/grid_composer.hpp"
 
+#include <libyuv/scale.h>
+
 #include <algorithm>
 
 #include "video/preserve_aspect_ratio_scaler.hpp"

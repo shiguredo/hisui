@@ -1,25 +1,19 @@
 #include "video/basic_sequencer.hpp"
 
 #include <bits/exception.h>
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
-#include <filesystem>
 #include <iterator>
 #include <memory>
-#include <set>
 #include <string>
 #include <utility>
 
-#include "constants.hpp"
-#include "metadata.hpp"
 #include "util/interval.hpp"
-#include "video/image_source.hpp"
 #include "video/sequencer.hpp"
 #include "video/source.hpp"
-#include "video/webm_source.hpp"
 #include "video/yuv.hpp"
 
 namespace hisui::video {

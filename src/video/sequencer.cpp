@@ -1,8 +1,14 @@
 #include "video/sequencer.hpp"
 
+#include <bits/exception.h>
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <iterator>
 #include <set>
 
 #include "constants.hpp"

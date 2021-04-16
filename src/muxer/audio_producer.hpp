@@ -5,7 +5,11 @@
 #include <optional>
 #include <queue>
 
-#include "frame.hpp"
+namespace hisui {
+
+struct Frame;
+
+}
 
 namespace hisui::audio {
 

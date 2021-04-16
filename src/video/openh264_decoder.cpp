@@ -1,9 +1,11 @@
 #include "video/openh264_decoder.hpp"
 
+#include <bits/exception.h>
 #include <codec/api/svc/codec_api.h>
 #include <codec/api/svc/codec_app_def.h>
 #include <codec/api/svc/codec_def.h>
 #include <fmt/core.h>
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
 #include <limits>

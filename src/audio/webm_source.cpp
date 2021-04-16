@@ -4,9 +4,8 @@
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
-#include <cstdio>
+#include <cstddef>
 #include <iterator>
-#include <stdexcept>
 
 #include "audio/decoder.hpp"
 #include "audio/opus_decoder.hpp"

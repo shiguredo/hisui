@@ -1,6 +1,7 @@
 #include "video/simple_scaler.hpp"
 
 #include <fmt/core.h>
+#include <libyuv/scale.h>
 
 #include <array>
 #include <stdexcept>

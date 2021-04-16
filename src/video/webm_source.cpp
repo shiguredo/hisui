@@ -5,7 +5,6 @@
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
-#include <cstdio>
 #include <stdexcept>
 
 #include "constants.hpp"

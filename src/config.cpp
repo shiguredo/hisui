@@ -1,7 +1,7 @@
 #include "config.hpp"
 
 #include <libyuv/scale.h>
-#include <spdlog/spdlog.h>
+#include <spdlog/common.h>
 
 #include <functional>
 #include <memory>
@@ -11,8 +11,10 @@
 #include <vector>
 
 #include <CLI/App.hpp>
-#include <CLI/Config.hpp>
-#include <CLI/Formatter.hpp>
+#include <CLI/FormatterFwd.hpp>
+#include <CLI/Option.hpp>
+#include <CLI/TypeTools.hpp>
+#include <CLI/Validators.hpp>
 #include <boost/rational.hpp>
 
 #ifdef NDEBUG
@@ -74,7 +76,8 @@ void set_cli_options(CLI::App* app, Config* config) {
   app->add_option("--screen-capture-bit-rate", config->screen_capture_bit_rate,
                   "Bit rate for screen-capture (1000)");
 
-  app->add_option("--mix-screen-capture-audio", config->mix_screen_capture_audio,
+  app->add_option("--mix-screen-capture-audio",
+                  config->mix_screen_capture_audio,
                   "Mix screen-capture audio (false)");
 
   std::vector<std::pair<std::string, config::OutContainer>> out_container_assoc{

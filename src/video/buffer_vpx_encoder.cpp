@@ -1,7 +1,6 @@
 #include "video/buffer_vpx_encoder.hpp"
 
 #include <bits/exception.h>
-#include <bits/stdint-uintn.h>
 #include <fmt/core.h>
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>

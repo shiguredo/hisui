@@ -2,8 +2,6 @@
 
 #include <opus_types.h>
 
-#include <vector>
-
 #include "audio/basic_sequencer.hpp"
 #include "audio/buffer_opus_encoder.hpp"
 #include "audio/mixer.hpp"

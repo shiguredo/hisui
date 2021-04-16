@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <boost/cstdint.hpp>
 #include <boost/rational.hpp>
 
 #include "config.hpp"

@@ -1,18 +1,21 @@
 #include "metadata.hpp"
 
 #include <bits/exception.h>
-#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/bundled/format.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <compare>
 #include <filesystem>
 #include <fstream>
-#include <map>
+#include <iterator>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
 
-#include <boost/json.hpp>
+#include <boost/json/impl/array.hpp>
+#include <boost/json/parse.hpp>
+#include <boost/json/system_error.hpp>
 
 namespace hisui {
 

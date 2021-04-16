@@ -6,7 +6,10 @@
 #include <spdlog/spdlog.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <stdexcept>
+
 #include "webm/input/context.hpp"
 
 namespace hisui::webm::input {

@@ -9,6 +9,7 @@
 #include <system_error>
 #include <thread>
 
+#include <boost/cstdint.hpp>
 #include <boost/exception/exception.hpp>
 #include <boost/rational.hpp>
 

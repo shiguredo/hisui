@@ -1,19 +1,14 @@
 #include <bits/exception.h>
+#include <spdlog/common.h>
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
-#include <fstream>
-#include <initializer_list>
-#include <iterator>
-#include <map>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include <CLI/App.hpp>
 #include <CLI/Config.hpp>
 #include <CLI/Formatter.hpp>
-#include <boost/json.hpp>
 
 #include "config.hpp"
 #include "metadata.hpp"

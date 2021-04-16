@@ -2,6 +2,7 @@
 
 #include <bits/exception.h>
 #include <fmt/core.h>
+#include <spdlog/fmt/bundled/format.h>
 #include <spdlog/spdlog.h>
 #include <vpx/vp8cx.h>
 #include <vpx/vp8dx.h>

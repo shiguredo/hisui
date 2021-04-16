@@ -6,7 +6,6 @@
 
 #include <cmath>
 #include <filesystem>
-#include <string>
 
 #include "audio/webm_source.hpp"
 #include "constants.hpp"

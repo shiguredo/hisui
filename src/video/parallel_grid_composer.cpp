@@ -1,6 +1,7 @@
 #include "video/parallel_grid_composer.hpp"
 
 #include <cxxabi.h>
+#include <libyuv/scale.h>
 
 #include <algorithm>
 #include <future>
