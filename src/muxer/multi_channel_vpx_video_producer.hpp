@@ -8,7 +8,7 @@
 namespace hisui {
 
 class Config;
-class Metadata;
+class MetadataSet;
 
 }  // namespace hisui
 
@@ -18,8 +18,7 @@ class MultiChannelVPXVideoProducer : public VideoProducer {
  public:
   MultiChannelVPXVideoProducer(
       const hisui::Config&,
-      const hisui::Metadata&,
-      const hisui::Metadata&,
+      const hisui::MetadataSet&,
       const std::uint64_t timescale = hisui::Constants::NANO_SECOND);
   ~MultiChannelVPXVideoProducer();
   void produce() override;

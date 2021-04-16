@@ -51,8 +51,8 @@ void AsyncWebMMuxer::setUp() {
     }
 
     if (m_metadata_set.hasPreferred()) {
-      m_video_producer = new MultiChannelVPXVideoProducer(
-          m_config, m_metadata_set.getNormal(), m_metadata_set.getPreferred());
+      m_video_producer =
+          new MultiChannelVPXVideoProducer(m_config, m_metadata_set);
     } else {
       m_video_producer =
           new VPXVideoProducer(m_config, m_metadata_set.getNormal());
