@@ -62,7 +62,7 @@ enum struct OutAudioCodec {
 class Config {
  public:
   std::string in_metadata_filename;
-  std::string in_multi_channel_metadata_filename = "";
+  std::string screen_capture_metadata_filename = "";
   config::OutVideoCodec out_video_codec = config::OutVideoCodec::VP9;
   config::OutContainer out_container = config::OutContainer::WebM;
   std::uint32_t out_video_bit_rate = 0;
@@ -94,9 +94,9 @@ class Config {
   std::uint32_t scaling_width = 320;
   std::uint32_t scaling_height = 240;
 
-  std::uint32_t multi_channel_width = 960;
-  std::uint32_t multi_channel_height = 640;
-  std::uint32_t multi_channel_bit_rate = 1000;
+  std::uint32_t screen_capture_width = 960;
+  std::uint32_t screen_capture_height = 640;
+  std::uint32_t screen_capture_bit_rate = 1000;
 
   std::uint32_t libvpx_threads = 0;
   std::int32_t libvpx_cpu_used = 8;
@@ -111,7 +111,7 @@ class Config {
   std::string openh264 = "";
 
   config::AudioMixer audio_mixer = config::AudioMixer::Simple;
-  bool mix_multi_channel_audio = false;
+  bool mix_screen_capture_audio = false;
 
   config::MP4Muxer mp4_muxer = config::MP4Muxer::Faststart;
   config::OutAudioCodec out_audio_codec = config::OutAudioCodec::Opus;

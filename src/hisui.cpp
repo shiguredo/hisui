@@ -55,9 +55,9 @@ int main(int argc, char** argv) {
   hisui::MetadataSet metadata_set(
       hisui::parse_metadata(config.in_metadata_filename));
 
-  if (config.in_multi_channel_metadata_filename != "") {
+  if (config.screen_capture_metadata_filename != "") {
     metadata_set.setPrefered(
-        hisui::parse_metadata(config.in_multi_channel_metadata_filename));
+        hisui::parse_metadata(config.screen_capture_metadata_filename));
   }
 
   hisui::muxer::Muxer* muxer = nullptr;

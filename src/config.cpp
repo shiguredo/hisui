@@ -60,22 +60,22 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->check(CLI::ExistingFile)
       ->required();
 
-  app->add_option("--in-multi-channel-metadata-file",
-                  config->in_multi_channel_metadata_filename,
+  app->add_option("--screen-capture-report",
+                  config->screen_capture_metadata_filename,
                   "Multi Channel Metadata filename")
       ->check(CLI::ExistingFile);
 
-  app->add_option("--multi-channel-width", config->multi_channel_width,
-                  "Width for multi-channel (960)");
+  app->add_option("--screen-capture-width", config->screen_capture_width,
+                  "Width for screen-capture (960)");
 
-  app->add_option("--multi-channel-height", config->multi_channel_height,
-                  "Height for multi-channel (640)");
+  app->add_option("--screen-capture-height", config->screen_capture_height,
+                  "Height for screen-capture (640)");
 
-  app->add_option("--multi-channel-bit-rate", config->multi_channel_bit_rate,
-                  "Bit rate for multi-channel (1000)");
+  app->add_option("--screen-capture-bit-rate", config->screen_capture_bit_rate,
+                  "Bit rate for screen-capture (1000)");
 
-  app->add_option("--mix-multi-channel-audio", config->mix_multi_channel_audio,
-                  "Mix multi-channel audio (false)");
+  app->add_option("--mix-screen-capture-audio", config->mix_screen_capture_audio,
+                  "Mix screen-capture audio (false)");
 
   std::vector<std::pair<std::string, config::OutContainer>> out_container_assoc{
       {"WebM", config::OutContainer::WebM},

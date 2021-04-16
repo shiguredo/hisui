@@ -28,7 +28,7 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
     const std::uint64_t timescale)
     : VideoProducer({.show_progress_bar = t_config.show_progress_bar}),
       m_normal_bit_rate(t_config.out_video_bit_rate),
-      m_preferred_bit_rate(t_config.multi_channel_bit_rate) {
+      m_preferred_bit_rate(t_config.screen_capture_bit_rate) {
   m_sequencer = new hisui::video::MultiChannelSequencer(
       t_metadata_set.getNormal().getArchives(),
       t_metadata_set.getPreferred().getArchives());
@@ -47,7 +47,7 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
           t_config.max_columns, t_config.video_scaler,
           t_config.libyuv_filter_mode);
       m_preferred_channel_composer = new hisui::video::GridComposer(
-          t_config.multi_channel_width, t_config.multi_channel_height, 1, 1,
+          t_config.screen_capture_width, t_config.screen_capture_height, 1, 1,
           t_config.video_scaler, t_config.libyuv_filter_mode);
       break;
     case hisui::config::VideoComposer::ParallelGrid:
@@ -56,7 +56,7 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
           t_config.max_columns, t_config.video_scaler,
           t_config.libyuv_filter_mode);
       m_preferred_channel_composer = new hisui::video::GridComposer(
-          t_config.multi_channel_width, t_config.multi_channel_height, 1, 1,
+          t_config.screen_capture_width, t_config.screen_capture_height, 1, 1,
           t_config.video_scaler, t_config.libyuv_filter_mode);
       break;
   }
