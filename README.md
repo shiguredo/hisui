@@ -84,6 +84,11 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
     - タイムスタンプを埋め込めるようにする
 - 配信情報の埋め込み対応
     - ConnectionID や Metadata 情報を指定して埋め込めるようにする
+- [whisper](https://github.com/openai/whisper) を利用した文字起こし機能
+    - 合成時に文字起こしも同時に行います
+    - 合成時に字幕を追加します
+- ハードウェアアクセラレーター対応
+    - NVIDIA などの GPU に対応します
 
 ## 対応予定
 
