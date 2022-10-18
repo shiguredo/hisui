@@ -74,8 +74,15 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
 
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
 
+- Lyra V2 対応
+- Lyra V2 MP4 対応
+- Lyra V2 WebM 対応
+- AV1 MP4 対応
+- AV1 WebM 対応
 - AV1 出力対応
+    - https://github.com/xiph/rav1e を利用します
 - AV1 入力対応
+    - https://code.videolan.org/videolan/dav1d を利用します
 - アイコン埋め込み対応
     - 音声のみの場合は指定したアイコンを埋め込めるようにする
 - タイトルの埋め込み対応
@@ -84,11 +91,14 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
     - タイムスタンプを埋め込めるようにする
 - 配信情報の埋め込み対応
     - ConnectionID や Metadata 情報を指定して埋め込めるようにする
-- [whisper](https://github.com/openai/whisper) を利用した文字起こし機能
+- [whisper](https://github.com/openai/whisper) を利用した文字起こしと字幕機能
     - 合成時に文字起こしも同時に行います
     - 合成時に字幕を追加します
+    - https://github.com/ggerganov/whisper.cpp を利用します
 - ハードウェアアクセラレーター対応
-    - NVIDIA などの GPU に対応します
+    - NVIDIA / AMD / Intel などへの対応
+- EME 対応
+    - https://www.w3.org/TR/encrypted-media/
 
 ## 対応予定
 
@@ -127,4 +137,3 @@ https://www.openh264.org/BINARY_LICENSE.txt
 ```
 "OpenH264 Video Codec provided by Cisco Systems, Inc."
 ```
-
