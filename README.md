@@ -74,6 +74,7 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
 
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
 
+- 分割録画対応
 - Lyra V2 対応
 - Lyra V2 MP4 対応
 - Lyra V2 WebM 対応
