@@ -34,7 +34,7 @@ jobs:
           pip3 install --user cpplint
         env:
             DEBIAN_FRONTEND: noninteractive
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Lint hisui
         run: PATH=$PATH:~/.local/bin:~/go/bin ./lint.bash
         timeout-minutes: 120

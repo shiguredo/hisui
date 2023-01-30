@@ -13,6 +13,8 @@
 
 - [UPDATE] deprecated になった actions/create-release と actions/upload-release の利用をやめて softprops/action-gh-release を利用する
     - @melpon
+- [UPDATE] GitHub Actions の各種バージョンを上げる
+    - @melpon
 
 ## 2022.1.0
 

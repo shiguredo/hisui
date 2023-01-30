@@ -34,7 +34,7 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
         env:
             DEBIAN_FRONTEND: noninteractive
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Get vars
         shell: bash
         id: vars
@@ -48,7 +48,7 @@ jobs:
           echo "libvpx_version=${LIBVPX_VERSION}" >> $GITHUB_OUTPUT
       - name: Cache libvpx ${{ steps.versions.outputs.libvpx_version }}
         id: cache-libvpx
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: third_party/libvpx
           key: ${{ matrix.os }}-third_party-libvpx-${{ hashFiles(format('{0}{1}', github.workspace, '/third_party/libvpx/libvpx.a')) }}
@@ -58,7 +58,7 @@ jobs:
         run: rm -rf third_party/libvpx
       - name: Cache release directory
         id: cache-release
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: release/_deps
           key: ${{ matrix.os }}-release-deps-${{ hashFiles(format('{0}{1}', github.workspace, '/release/Makefile')) }}
@@ -72,7 +72,7 @@ jobs:
           TZ=UTC echo "timestamp=$(TZ=UTC date +%Y-%m-%d-%H:%M:%S)" >> $GITHUB_OUTPUT
       - name: Cache ~/.ccache directory
         id: cache-ccache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/.ccache
           key: ${{ matrix.os }}-ccache-dir-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
@@ -93,25 +93,25 @@ jobs:
           echo "name=hisui-${HISUI_VERSION}_${{ matrix.os }}.tar.gz" >> $GITHUB_OUTPUT
         id: package_name
       - name: Upload hisui binary
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary
           path: release/hisui
           if-no-files-found: error
       - name: Upload hisui binary with hash
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary-${{ steps.vars.outputs.sha_short }}
           path: release/hisui
           if-no-files-found: error
       - name: Upload tarball
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.package_name.outputs.name }}
           path: release/${{ steps.package_name.outputs.name }}
           if-no-files-found: error
       - name: Upload environment
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}.env
           path: ${{ matrix.os }}.env
@@ -137,12 +137,12 @@ jobs:
       - build-linux
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Mkdir release
         shell: bash
         run: |
           mkdir release
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary
           path: release
@@ -192,12 +192,12 @@ jobs:
       - build-linux
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Mkdir release
         shell: bash
         run: |
           mkdir release
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary
           path: release
