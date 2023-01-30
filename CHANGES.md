@@ -11,6 +11,9 @@
 
 ## develop
 
+- [UPDATE] deprecated になった actions/create-release と actions/upload-release の利用をやめて softprops/action-gh-release を利用する
+    - @melpon
+
 ## 2022.1.0
 
 - [UPDATE] 依存ライブラリの更新
