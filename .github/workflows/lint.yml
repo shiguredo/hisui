@@ -1,4 +1,4 @@
-name: build-workflow
+name: lint
 
 on:
   pull_request:
