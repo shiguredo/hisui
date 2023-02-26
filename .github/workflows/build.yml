@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: third_party/libvpx
-          key: ${{ matrix.os }}-third_party-libvpx-${{ hashFiles(format('{0}/third_party/libvpx/{1}/libvpx.a', github.workspace, matrix.os)) }}
+          key: ${{ matrix.os }}-third_party-libvpx-${{ hashFiles(format('third_party/libvpx/{0}/libvpx.a', matrix.os)) }}
           restore-keys: ${{ matrix.os }}-third_party-libvpx-
       - name: Clear libvpx
         if: steps.cache-libvpx.outputs.cache-hit != 'true'
@@ -63,7 +63,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: release/${{ matrix.os }}/_deps
-          key: ${{ matrix.os }}-release-deps-${{ hashFiles(format('{0}/release/{1}/Makefile', github.workspace, matrix.os)) }}
+          key: ${{ matrix.os }}-release-deps-${{ hashFiles(format('release/{0}/Makefile', matrix.os)) }}
           restore-keys: ${{ matrix.os }}-release-deps-
       - name: Clear release directory
         if: steps.cache-release.outputs.cache-hit != 'true'
