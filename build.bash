@@ -155,7 +155,7 @@ esac
 mkdir -p "$PACKAGE"
 cd "$PACKAGE" || exit 1
 
-CXX="$CXX" CC="$CC" ../configure "${libvpx_configure_options[@]}"
+CXX="$CXX" CC="$CC" ../configure "${libvpx_configure_options[@]}" || (cat config.log && exit 1)
 make
 
 cd ../../..
