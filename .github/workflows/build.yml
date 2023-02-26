@@ -85,7 +85,8 @@ jobs:
         run: ./build.bash ${{ matrix.os }} --package --use-ccache ${{ contains(matrix.os, '_x86_64') && '--with-test' || '' }}
         timeout-minutes: 120
       - name: Test hisui
-        run: cmake --build release --target test -- ARGS='-V -L hisui'
+        if: contains(matrix.os, '_x86_64')
+        run: cmake --build release/${{ matrix.os }} --target test -- ARGS='-V -L hisui'
       - name: Output package name
         shell: bash
         run: |
