@@ -99,13 +99,13 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary
-          path: release/hisui
+          path: release/${{ matrix.os }}/hisui
           if-no-files-found: error
       - name: Upload hisui binary with hash
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary-${{ steps.vars.outputs.sha_short }}
-          path: release/hisui
+          path: release/${{ matrix.os }}/hisui
           if-no-files-found: error
       - name: Upload tarball
         uses: actions/upload-artifact@v3
@@ -148,11 +148,11 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary
-          path: release
+          path: release/${{ matrix.os }}
       - name: Chmod 755 hisui
         shell: bash
         run: |
-          chmod 755 release/hisui
+          chmod 755 release/${{ matrix.os }}/hisui
       - name: Get Versions
         shell: bash
         id: versions
@@ -207,7 +207,7 @@ jobs:
       - name: Chmod 755 hisui
         shell: bash
         run: |
-          chmod 755 release/hisui
+          chmod 755 release/${{ matrix.os }}/hisui
       - name: Get Versions
         shell: bash
         id: versions
