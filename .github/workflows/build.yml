@@ -111,7 +111,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.package_name.outputs.name }}
-          path: release/${{ steps.package_name.outputs.name }}
+          path: release/${{ matrix.os }}/${{ steps.package_name.outputs.name }}
           if-no-files-found: error
       - name: Upload environment
         uses: actions/upload-artifact@v3
@@ -144,7 +144,7 @@ jobs:
       - name: Mkdir release
         shell: bash
         run: |
-          mkdir release
+          mkdir release/${{ matrix.os }}
       - uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary
