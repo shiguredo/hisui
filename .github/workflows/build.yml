@@ -7,6 +7,7 @@ on:
       - main
       - master
       - develop
+      - feature/*
     tags:
       - 202*
     paths-ignore:
