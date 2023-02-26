@@ -2,7 +2,10 @@
 
 PROGRAM="$0"
 
-_PACKAGES=("ubuntu-20.04_x86_64")
+_PACKAGES=(
+    "ubuntu-20.04_x86_64"
+    "ubuntu-20.04_arm64"
+)
 
 function show_help() {
   echo "$PROGRAM [--clean] [--use-ccache] [--use-fdk-aac] [--with-test] [--build-type-native] [--package] <package>"
@@ -113,7 +116,6 @@ if [ $FLAG_CLEAN -eq 1 ]; then
 fi
 
 
-[ -d third_party ] || mkdir third_party
 cd third_party || exit 1
 
 if [ -d libvpx ] ; then
@@ -133,21 +135,41 @@ if [ "${BUILD_TYPE}" = "Native" ]; then
     libvpx_configure_options+=('--cpu=native')
 fi
 
-CXX="$CXX" CC="$CC" ./configure "${libvpx_configure_options[@]}"
+CMAKE_FLAGS+=("-DHISUI_PACKAGE=$PACKAGE")
+
+case "$PACKAGE" in
+  *_x86_64 )
+    CMAKE_FLAGS+=("-DCMAKE_TOOLCHAIN_FILE=../../cmake/clang-x86_64-toolchain.cmake")
+    ;;
+  *_arm64 )
+    CMAKE_FLAGS+=("-DCMAKE_TOOLCHAIN_FILE=../../cmake/clang-aarch64-toolchain.cmake")
+    libvpx_configure_options+=(
+        '--target=arm64-linux-gcc'
+        '--extra-cflags=-isystem/usr/aarch64-linux-gnu/include'
+        '--extra-cxxflags=-isystem/usr/aarch64-linux-gnu/include -isystem/usr/aarch64-linux-gnu/include/c++/10/aarch64-linux-gnu'
+    )
+    CC="$CC --target=aarch64-linux-gnu"
+    CXX="$CXX --target=aarch64-linux-gnu"
+esac
+
+mkdir -p "$PACKAGE"
+cd "$PACKAGE" || exit 1
+
+CXX="$CXX" CC="$CC" ../configure "${libvpx_configure_options[@]}"
 make
 
-cd ../..
+cd ../../..
 if [ "${BUILD_TYPE}" = "Native" ]; then
-    [ -d native ] || mkdir native
-    cd native || exit 1
+    mkdir -p "native/$PACKAGE"
+    cd "native/$PACKAGE" || exit 1
     CMAKE_FLAGS+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
 else
-    [ -d release ] || mkdir release
-    cd release || exit 1
+    mkdir -p "release/$PACKAGE"
+    cd "release/$PACKAGE" || exit 1
 fi
-cmake  .. "${CMAKE_FLAGS[@]}"
+cmake  ../.. "${CMAKE_FLAGS[@]}"
 cmake --build .
 
 if [ $FLAG_PACKAGE -eq 1 ]; then 
-    tar cvf hisui-"${HISUI_VERSION}"_ubuntu-20.04_x86_64.tar.gz hisui -C .. LICENSE NOTICE.md
+    tar cvf "hisui-${HISUI_VERSION}_$PACKAGE.tar.gz" hisui -C ../.. LICENSE NOTICE.md
 fi

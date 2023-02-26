@@ -127,7 +127,7 @@ target_link_libraries(layout_test
     fmt
     shiguredo-mp4
     spdlog 
-    ${CMAKE_SOURCE_DIR}/third_party/libvpx/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     )
 
 add_test(NAME layout COMMAND layout_test)

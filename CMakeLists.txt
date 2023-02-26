@@ -15,9 +15,6 @@ set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
 set_cache_string_from_env(SPDLOG_VERSION 1.9.2 "spdlog のバージョン")
 set_cache_string_from_env(STB_VERSION af1a5bc352164740c1cc1354942b1c6b72eacb8a "stb のバージョン")
 
-set(CMAKE_C_COMPILER clang)
-set(CMAKE_CXX_COMPILER clang++)
-
 add_compile_options(
     -Wall
     -Wextra
@@ -377,7 +374,7 @@ target_link_libraries(hisui
     fmt
     shiguredo-mp4
     spdlog
-    ${CMAKE_SOURCE_DIR}/third_party/libvpx/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     )
 
 if(WITH_TEST)

@@ -67,7 +67,7 @@ target_link_libraries(video_test
     PRIVATE
     fmt
     pthread
-    ${CMAKE_SOURCE_DIR}/third_party/libvpx/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     )
 
 add_test(NAME video COMMAND video_test)

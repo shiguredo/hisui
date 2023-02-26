@@ -23,6 +23,7 @@ jobs:
       matrix:
         os:
           - ubuntu-20.04_x86_64
+          - ubuntu-20.04_arm64
     name: Build hisui for ${{ matrix.os }}
     runs-on: ubuntu-20.04
     steps:
@@ -30,7 +31,7 @@ jobs:
         shell: bash
         run: |
           sudo apt update
-          sudo apt install -yq yasm ccache
+          sudo apt install -yq yasm ccache libstdc++-10-dev-arm64-cross
           sudo rm -rf /var/lib/apt/lists/*
         env:
             DEBIAN_FRONTEND: noninteractive
@@ -51,7 +52,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: third_party/libvpx
-          key: ${{ matrix.os }}-third_party-libvpx-${{ hashFiles(format('{0}{1}', github.workspace, '/third_party/libvpx/libvpx.a')) }}
+          key: ${{ matrix.os }}-third_party-libvpx-${{ hashFiles(format('{0}/third_party/libvpx/{1}/libvpx.a', github.workspace, matrix.os)) }}
           restore-keys: ${{ matrix.os }}-third_party-libvpx-
       - name: Clear libvpx
         if: steps.cache-libvpx.outputs.cache-hit != 'true'
@@ -60,8 +61,8 @@ jobs:
         id: cache-release
         uses: actions/cache@v3
         with:
-          path: release/_deps
-          key: ${{ matrix.os }}-release-deps-${{ hashFiles(format('{0}{1}', github.workspace, '/release/Makefile')) }}
+          path: release/${{ matrix.os }}/_deps
+          key: ${{ matrix.os }}-release-deps-${{ hashFiles(format('{0}/release/{1}/Makefile', github.workspace, matrix.os)) }}
           restore-keys: ${{ matrix.os }}-release-deps-
       - name: Clear release directory
         if: steps.cache-release.outputs.cache-hit != 'true'
@@ -80,7 +81,7 @@ jobs:
       - name: Ccache stat
         run: ccache -s
       - name: Build hisui
-        run: ./build.bash ${{ matrix.os }} --package --use-ccache --with-test
+        run: ./build.bash ${{ matrix.os }} --package --use-ccache ${{ contains(matrix.os, "_x86_64") && "--with-test" || "" }}
         timeout-minutes: 120
       - name: Test hisui
         run: cmake --build release --target test -- ARGS='-V -L hisui'
