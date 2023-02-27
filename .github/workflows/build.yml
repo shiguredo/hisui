@@ -181,7 +181,7 @@ jobs:
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
-          SLACK_TITLE: Failure push-to-dockerhub ${{ matrix.os }}
+          SLACK_TITLE: Failure push-to-dockerhub
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
   push-to-github-container-registory:
@@ -238,7 +238,7 @@ jobs:
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
-          SLACK_TITLE: Failure push-to-github-container-registory ${{ matrix.os }}
+          SLACK_TITLE: Failure push-to-github-container-registory
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
   create-release:
