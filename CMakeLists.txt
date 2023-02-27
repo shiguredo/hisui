@@ -377,7 +377,7 @@ target_link_libraries(hisui
     fmt
     shiguredo-mp4
     spdlog
-    ${CMAKE_SOURCE_DIR}/third_party/libvpx/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     )
 
 if(WITH_TEST)

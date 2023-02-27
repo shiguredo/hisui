@@ -70,7 +70,7 @@ target_link_libraries(version_test
     dl
     fmt
     shiguredo-mp4
-    ${CMAKE_SOURCE_DIR}/third_party/libvpx/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     )
 
 if(USE_FDK_AAC)
