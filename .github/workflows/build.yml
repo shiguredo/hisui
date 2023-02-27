@@ -173,9 +173,7 @@ jobs:
           context: .
           push: true
           tags: shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}
-          platforms:
-            - linux/amd64
-            - linux/arm64
+          platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile
       - name: Slack Notification
         if: failure()
@@ -232,9 +230,7 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}
-          platforms:
-            - linux/amd64
-            - linux/arm64
+          platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile
       - name: Slack Notification
         if: failure()
