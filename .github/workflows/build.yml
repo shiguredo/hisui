@@ -28,7 +28,7 @@ jobs:
           - ubuntu-22.04_x86_64
           - ubuntu-22.04_arm64
     name: Build hisui for ${{ matrix.os }}
-    runs-on: ${{ contains(matrix.os, 'ubuntu-20.04') && 'ubuntu-20.04' || 'ubuntu-22.04') }}
+    runs-on: ${{ contains(matrix.os, 'ubuntu-20.04') && 'ubuntu-20.04' || 'ubuntu-22.04' }}
     steps:
       - name: Install packages
         shell: bash
