@@ -5,6 +5,8 @@ PROGRAM="$0"
 _PACKAGES=(
     "ubuntu-20.04_x86_64"
     "ubuntu-20.04_arm64"
+    "ubuntu-22.04_x86_64"
+    "ubuntu-22.04_arm64"
 )
 
 function show_help() {

@@ -17,6 +17,8 @@
     - @melpon
 - [ADD] Ubuntu 20.04 ARM64 ビルドに対応
     - @melpon
+- [ADD] Ubuntu 22.04 に対応
+    - @melpon
 
 ## 2022.1.0
 
