@@ -139,8 +139,8 @@ jobs:
       - name: Mkdir release
         shell: bash
         run: |
-          mkdir release/ubuntu-20.04_x86_64
-          mkdir release/ubuntu-20.04_arm64
+          mkdir -p release/ubuntu-20.04_x86_64
+          mkdir -p release/ubuntu-20.04_arm64
       - uses: actions/download-artifact@v3
         with:
           name: ubuntu-20.04_x86_64-hisui-binary
@@ -195,8 +195,8 @@ jobs:
       - name: Mkdir release
         shell: bash
         run: |
-          mkdir release/ubuntu-20.04_x86_64
-          mkdir release/ubuntu-20.04_arm64
+          mkdir -p release/ubuntu-20.04_x86_64
+          mkdir -p release/ubuntu-20.04_arm64
       - uses: actions/download-artifact@v3
         with:
           name: ubuntu-20.04_x86_64-hisui-binary
