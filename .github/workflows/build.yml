@@ -25,8 +25,10 @@ jobs:
         os:
           - ubuntu-20.04_x86_64
           - ubuntu-20.04_arm64
+          - ubuntu-22.04_x86_64
+          - ubuntu-22.04_arm64
     name: Build hisui for ${{ matrix.os }}
-    runs-on: ubuntu-20.04
+    runs-on: ${{ contains(matrix.os, 'ubuntu-20.04') && 'ubuntu-20.04' || 'ubuntu-22.04' }}
     steps:
       - name: Install packages
         shell: bash
@@ -141,6 +143,8 @@ jobs:
         run: |
           mkdir -p release/ubuntu-20.04_x86_64
           mkdir -p release/ubuntu-20.04_arm64
+          mkdir -p release/ubuntu-22.04_x86_64
+          mkdir -p release/ubuntu-22.04_arm64
       - uses: actions/download-artifact@v3
         with:
           name: ubuntu-20.04_x86_64-hisui-binary
@@ -149,11 +153,21 @@ jobs:
         with:
           name: ubuntu-20.04_arm64-hisui-binary
           path: release/ubuntu-20.04_arm64
+      - uses: actions/download-artifact@v3
+        with:
+          name: ubuntu-22.04_x86_64-hisui-binary
+          path: release/ubuntu-22.04_x86_64
+      - uses: actions/download-artifact@v3
+        with:
+          name: ubuntu-22.04_arm64-hisui-binary
+          path: release/ubuntu-22.04_arm64
       - name: Chmod 755 hisui
         shell: bash
         run: |
           chmod 755 release/ubuntu-20.04_x86_64/hisui
           chmod 755 release/ubuntu-20.04_arm64/hisui
+          chmod 755 release/ubuntu-22.04_x86_64/hisui
+          chmod 755 release/ubuntu-22.04_arm64/hisui
       - name: Get Versions
         shell: bash
         id: versions
@@ -172,9 +186,21 @@ jobs:
         with:
           context: .
           push: true
-          tags: shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}
+          tags: shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}-ubuntu-20.04
           platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile
+          build-args: |
+            UBUNTU_VERSION=20.04
+      - name: Push to DockerHub
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          push: true
+          tags: shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}-ubuntu-22.04
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile
+          build-args: |
+            UBUNTU_VERSION=22.04
       - name: Slack Notification
         if: failure()
         uses: rtCamp/action-slack-notify@v2.1.0
@@ -182,63 +208,6 @@ jobs:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
           SLACK_TITLE: Failure push-to-dockerhub
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
-  push-to-github-container-registory:
-    name: Push to GitHub Container Registry
-    if: contains(github.ref, 'tags/202')
-    needs:
-      - build-linux
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v3
-      - name: Mkdir release
-        shell: bash
-        run: |
-          mkdir -p release/ubuntu-20.04_x86_64
-          mkdir -p release/ubuntu-20.04_arm64
-      - uses: actions/download-artifact@v3
-        with:
-          name: ubuntu-20.04_x86_64-hisui-binary
-          path: release/ubuntu-20.04_x86_64
-      - uses: actions/download-artifact@v3
-        with:
-          name: ubuntu-20.04_arm64-hisui-binary
-          path: release/ubuntu-20.04_arm64
-      - name: Chmod 755 hisui
-        shell: bash
-        run: |
-          chmod 755 release/ubuntu-20.04_x86_64/hisui
-          chmod 755 release/ubuntu-20.04_arm64/hisui
-      - name: Get Versions
-        shell: bash
-        id: versions
-        run: |
-          source VERSION
-          echo "hisui_version=${HISUI_VERSION}" >> $GITHUB_OUTPUT
-      - name: Login to ghcr.io
-        uses: docker/login-action@v1
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      - name: Push to ghcr.io
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          push: true
-          tags: ghcr.io/shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}
-          platforms: linux/amd64,linux/arm64
-          file: docker/Dockerfile
-      - name: Slack Notification
-        if: failure()
-        uses: rtCamp/action-slack-notify@v2.1.0
-        env:
-          SLACK_CHANNEL: hisui
-          SLACK_COLOR: danger
-          SLACK_TITLE: Failure push-to-github-container-registory
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
   create-release:
@@ -255,6 +224,12 @@ jobs:
       - uses: ./.github/actions/download
         with:
           platform: ubuntu-20.04_arm64
+      - uses: ./.github/actions/download
+        with:
+          platform: ubuntu-22.04_x86_64
+      - uses: ./.github/actions/download
+        with:
+          platform: ubuntu-22.04_arm64
       - name: Env to output
         run: |
           echo "package_paths<<EOF" >> $GITHUB_OUTPUT
