@@ -7,5 +7,9 @@ RUN apt update \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/cache/apt/archives/*
 
-COPY release/hisui /usr/local/bin
+ARG TARGETARCH
+COPY release/ubuntu-20.04_x86_64/hisui /tmp/hisui-amd64
+COPY release/ubuntu-20.04_arm64/hisui /tmp/hisui-arm64
+RUN cp /tmp/hisui-$TARGETARCH /usr/local/bin/hisui
+
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hisui"]
