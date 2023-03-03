@@ -45,8 +45,10 @@ OverlapIntervalsResult overlap_intervals(
 
   for (const auto& s : params.intervals) {
     /* for [start_time, end_time}: data(end_time).second < data(start_time).second */
-    data.emplace_back(s.end_time, 0);
-    data.emplace_back(s.start_time, 1);
+    if (s.start_time < s.end_time) {
+      data.emplace_back(s.end_time, 0);
+      data.emplace_back(s.start_time, 1);
+    }
   }
 
   sort(std::begin(data), std::end(data));
