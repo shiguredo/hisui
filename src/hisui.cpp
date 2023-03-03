@@ -28,29 +28,34 @@ int main(int argc, char** argv) {
   CLI::App app{"hisui"};
   hisui::Config config;
 
-  hisui::set_cli_options(&app, &config);
+  try {
+    hisui::set_cli_options(&app, &config);
 
-  CLI11_PARSE(app, argc, argv);
+    CLI11_PARSE(app, argc, argv);
 
-  config.validate();
+    config.validate();
 
-  if (config.verbose) {
-    spdlog::set_level(spdlog::level::debug);
-  } else {
-    spdlog::set_level(config.log_level);
-  }
-  spdlog::debug("log level={}", config.log_level);
-
-  if (!std::empty(config.openh264)) {
-    try {
-      hisui::video::OpenH264Handler::open(config.openh264);
-    } catch (const std::exception& e) {
-      spdlog::warn("failed to open openh264 library: {}", e.what());
+    if (config.verbose) {
+      spdlog::set_level(spdlog::level::debug);
+    } else {
+      spdlog::set_level(config.log_level);
     }
-  }
+    spdlog::debug("log level={}", config.log_level);
 
-  if (config.enabledReport()) {
-    hisui::report::Reporter::open();
+    if (!std::empty(config.openh264)) {
+      try {
+        hisui::video::OpenH264Handler::open(config.openh264);
+      } catch (const std::exception& e) {
+        spdlog::warn("failed to open openh264 library: {}", e.what());
+      }
+    }
+
+    if (config.enabledReport()) {
+      hisui::report::Reporter::open();
+    }
+  } catch (const std::exception& e) {
+    spdlog::error("adjusting configuration failed: {}", e.what());
+    return EXIT_FAILURE;
   }
 
   if (!std::empty(config.layout)) {
@@ -62,60 +67,69 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
 
-  hisui::MetadataSet metadata_set(
-      hisui::parse_metadata(config.in_metadata_filename));
-
-  if (!config.screen_capture_metadata_filename.empty()) {
-    metadata_set.setPrefered(
-        hisui::parse_metadata(config.screen_capture_metadata_filename));
-  } else if (!config.screen_capture_connection_id.empty()) {
-    metadata_set.split(config.screen_capture_connection_id);
-  }
-
   hisui::muxer::Muxer* muxer = nullptr;
-  if (config.out_container == hisui::config::OutContainer::WebM) {
-    muxer = new hisui::muxer::AsyncWebMMuxer(
-        config,
-        hisui::muxer::AsyncWebMMuxerParameters{
-            .audio_archive_items = metadata_set.getArchiveItems(),
-            .normal_archives = metadata_set.getNormal().getArchiveItems(),
-            .preferred_archives =
-                metadata_set.hasPreferred()
-                    ? metadata_set.getPreferred().getArchiveItems()
-                    : std::vector<hisui::ArchiveItem>{},
-            .duration = metadata_set.getMaxStopTimeOffset(),
-        });
-  } else if (config.out_container == hisui::config::OutContainer::MP4) {
-    if (config.mp4_muxer == hisui::config::MP4Muxer::Simple) {
-      muxer = new hisui::muxer::SimpleMP4Muxer(
-          config,
-          hisui::muxer::MP4MuxerParameters{
-              .audio_archive_items = metadata_set.getArchiveItems(),
-              .normal_archives = metadata_set.getNormal().getArchiveItems(),
-              .preferred_archives =
-                  metadata_set.hasPreferred()
-                      ? metadata_set.getPreferred().getArchiveItems()
-                      : std::vector<hisui::ArchiveItem>{},
-              .duration = metadata_set.getMaxStopTimeOffset(),
-          });
-    } else if (config.mp4_muxer == hisui::config::MP4Muxer::Faststart) {
-      muxer = new hisui::muxer::FaststartMP4Muxer(
-          config,
-          hisui::muxer::MP4MuxerParameters{
-              .audio_archive_items = metadata_set.getArchiveItems(),
-              .normal_archives = metadata_set.getNormal().getArchiveItems(),
-              .preferred_archives =
-                  metadata_set.hasPreferred()
-                      ? metadata_set.getPreferred().getArchiveItems()
-                      : std::vector<hisui::ArchiveItem>{},
-              .duration = metadata_set.getMaxStopTimeOffset(),
-          });
-    } else {
-      throw std::runtime_error("config.mp4_muxer is invalid");
+
+  boost::json::string normal_recording_id;
+  try {
+    hisui::MetadataSet metadata_set(
+        hisui::parse_metadata(config.in_metadata_filename));
+
+    if (!config.screen_capture_metadata_filename.empty()) {
+      metadata_set.setPrefered(
+          hisui::parse_metadata(config.screen_capture_metadata_filename));
+    } else if (!config.screen_capture_connection_id.empty()) {
+      metadata_set.split(config.screen_capture_connection_id);
     }
-  } else {
-    throw std::runtime_error("config.out_container is invalid");
+    normal_recording_id = metadata_set.getNormal().getRecordingID();
+
+    if (config.out_container == hisui::config::OutContainer::WebM) {
+      muxer = new hisui::muxer::AsyncWebMMuxer(
+          config,
+          hisui::muxer::AsyncWebMMuxerParameters{
+              .audio_archive_items = metadata_set.getArchiveItems(),
+              .normal_archives = metadata_set.getNormal().getArchiveItems(),
+              .preferred_archives =
+                  metadata_set.hasPreferred()
+                      ? metadata_set.getPreferred().getArchiveItems()
+                      : std::vector<hisui::ArchiveItem>{},
+              .duration = metadata_set.getMaxStopTimeOffset(),
+          });
+    } else if (config.out_container == hisui::config::OutContainer::MP4) {
+      if (config.mp4_muxer == hisui::config::MP4Muxer::Simple) {
+        muxer = new hisui::muxer::SimpleMP4Muxer(
+            config,
+            hisui::muxer::MP4MuxerParameters{
+                .audio_archive_items = metadata_set.getArchiveItems(),
+                .normal_archives = metadata_set.getNormal().getArchiveItems(),
+                .preferred_archives =
+                    metadata_set.hasPreferred()
+                        ? metadata_set.getPreferred().getArchiveItems()
+                        : std::vector<hisui::ArchiveItem>{},
+                .duration = metadata_set.getMaxStopTimeOffset(),
+            });
+      } else if (config.mp4_muxer == hisui::config::MP4Muxer::Faststart) {
+        muxer = new hisui::muxer::FaststartMP4Muxer(
+            config,
+            hisui::muxer::MP4MuxerParameters{
+                .audio_archive_items = metadata_set.getArchiveItems(),
+                .normal_archives = metadata_set.getNormal().getArchiveItems(),
+                .preferred_archives =
+                    metadata_set.hasPreferred()
+                        ? metadata_set.getPreferred().getArchiveItems()
+                        : std::vector<hisui::ArchiveItem>{},
+                .duration = metadata_set.getMaxStopTimeOffset(),
+            });
+      } else {
+        throw std::runtime_error("config.mp4_muxer is invalid");
+      }
+    } else {
+      throw std::runtime_error("config.out_container is invalid");
+    }
+  } catch (const std::exception& e) {
+    spdlog::error("setting up muxer failed: {}", e.what());
+    return EXIT_FAILURE;
   }
+
   try {
     muxer->setUp();
     muxer->run();
@@ -123,28 +137,39 @@ int main(int argc, char** argv) {
     spdlog::error("muxing failed: {}", e.what());
     muxer->cleanUp();
     if (config.enabledFailureReport()) {
-      std::ofstream os(std::filesystem::path(config.failure_report) /
-                       fmt::format("{}_{}_failure.json",
-                                   hisui::datetime::get_current_utc_string(),
-                                   metadata_set.getNormal().getRecordingID()));
-      os << hisui::report::Reporter::getInstance().makeFailureReport(e.what());
-      hisui::report::Reporter::close();
+      try {
+        std::ofstream os(std::filesystem::path(config.failure_report) /
+                         fmt::format("{}_{}_failure.json",
+                                     hisui::datetime::get_current_utc_string(),
+                                     normal_recording_id));
+        os << hisui::report::Reporter::getInstance().makeFailureReport(
+            e.what());
+        hisui::report::Reporter::close();
+      } catch (const std::exception& e) {
+        spdlog::error("reporting(failure) failed: {}", e.what());
+        return EXIT_FAILURE;
+      }
     }
     return EXIT_FAILURE;
   }
   delete muxer;
 
-  if (config.enabledSuccessReport()) {
-    std::ofstream os(std::filesystem::path(config.success_report) /
-                     fmt::format("{}_{}_success.json",
-                                 hisui::datetime::get_current_utc_string(),
-                                 metadata_set.getNormal().getRecordingID()));
-    os << hisui::report::Reporter::getInstance().makeSuccessReport();
-    hisui::report::Reporter::close();
-  }
-
   if (!config.openh264.empty()) {
     hisui::video::OpenH264Handler::close();
+  }
+
+  if (config.enabledSuccessReport()) {
+    try {
+      std::ofstream os(std::filesystem::path(config.success_report) /
+                       fmt::format("{}_{}_success.json",
+                                   hisui::datetime::get_current_utc_string(),
+                                   normal_recording_id));
+      os << hisui::report::Reporter::getInstance().makeSuccessReport();
+      hisui::report::Reporter::close();
+    } catch (const std::exception& e) {
+      spdlog::error("reporting(success) failed: {}", e.what());
+      return EXIT_FAILURE;
+    }
   }
 
   return EXIT_SUCCESS;
