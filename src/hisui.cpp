@@ -135,7 +135,11 @@ int main(int argc, char** argv) {
     muxer->run();
   } catch (const std::exception& e) {
     spdlog::error("muxing failed: {}", e.what());
-    muxer->cleanUp();
+    try {
+      muxer->cleanUp();
+    } catch (const std::exception& e) {
+      spdlog::error("cleaning up muxer failed: {}", e.what());
+    }
     if (config.enabledFailureReport()) {
       try {
         std::ofstream os(std::filesystem::path(config.failure_report) /
