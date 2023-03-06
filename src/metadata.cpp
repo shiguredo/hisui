@@ -175,7 +175,7 @@ Metadata parse_metadata(const std::string& filename) {
   boost::json::value jv = boost::json::parse(string_json, ec);
   if (ec) {
     throw std::runtime_error(fmt::format(
-        "failed to parse metadata json file: message", ec.message()));
+        "failed to parse metadata json file: message: {}", ec.message()));
   }
 
   Metadata metadata(filename, jv);
