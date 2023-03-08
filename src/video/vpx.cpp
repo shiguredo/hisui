@@ -181,6 +181,7 @@ void create_vpx_codec_ctx_t_for_encoding(::vpx_codec_ctx_t* codec,
     ::vpx_codec_control(codec, VP9E_SET_TILE_COLUMNS,
                         static_cast<int>(config.tile_columns));
     ::vpx_codec_control(codec, VP9E_SET_ROW_MT, config.row_mt);
+    ::vpx_codec_control(codec, VP9E_SET_COLOR_SPACE, VPX_CS_BT_601);
   }
 }
 
