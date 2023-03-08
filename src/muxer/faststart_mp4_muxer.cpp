@@ -78,7 +78,7 @@ void FaststartMP4Muxer::run() {
 
   if (m_vide_track) {
     m_faststart_writer->appendTrakAndUdtaBoxInfo(
-        {m_soun_track.get(), m_vide_track.get()});
+        {m_vide_track.get(), m_soun_track.get()});
   } else {
     m_faststart_writer->appendTrakAndUdtaBoxInfo({m_soun_track.get()});
   }
