@@ -68,9 +68,9 @@ void MP4Muxer::initialize(
   }
 
   if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
-    m_chunk_interval = 960;  // 960ms
-  } else {
     m_chunk_interval = 40;  // 40 ms
+  } else {
+    m_chunk_interval = 1000;  // 1000 ms
   }
 
   m_ofs = std::ofstream(config.out_filename, std::ios_base::binary);
