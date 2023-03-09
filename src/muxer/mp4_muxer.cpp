@@ -68,7 +68,7 @@ void MP4Muxer::initialize(
   }
 
   if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
-    m_chunk_interval = 40;  // 40 ms
+    m_chunk_interval = 120;  // 120 ms
   } else {
     m_chunk_interval = 1000;  // 1000 ms
   }
@@ -85,6 +85,7 @@ void MP4Muxer::initialize(
             .timescale = 48000,
             .duration = static_cast<float>(m_duration),
             .track_id = m_writer->getAndUpdateNextTrackID(),
+            .buffer_size_db = 0,
             .max_bitrate = config.out_aac_bit_rate,
             .avg_bitrate = config.out_aac_bit_rate,
             .writer = m_writer.get(),
