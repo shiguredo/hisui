@@ -181,7 +181,8 @@ void MP4Muxer::appendAudio(hisui::Frame frame) {
 void MP4Muxer::appendVideo(hisui::Frame frame) {
   if ((frame.timestamp * m_writer->getMvhdTimescale() /
        m_vide_track->getTimescale()) >=
-      m_chunk_start + m_video_chunk_interval) {
+          m_chunk_start + m_video_chunk_interval ||
+      std::size(m_video_buffer) >= 1) {
     m_chunk_start += m_video_chunk_interval;
     writeTrackData();
   }
