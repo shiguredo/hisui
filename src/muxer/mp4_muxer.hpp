@@ -55,7 +55,8 @@ class MP4Muxer : public Muxer {
   std::shared_ptr<shiguredo::mp4::writer::Writer> m_writer;
   std::shared_ptr<shiguredo::mp4::track::VideTrack> m_vide_track;
   std::shared_ptr<shiguredo::mp4::track::SounTrack> m_soun_track;
-  std::uint64_t m_chunk_interval;
+  std::uint64_t m_audio_chunk_interval;
+  std::uint64_t m_video_chunk_interval;
 
   std::uint64_t m_chunk_start = 0;
   std::vector<hisui::Frame> m_audio_buffer;

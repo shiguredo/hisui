@@ -68,9 +68,11 @@ void MP4Muxer::initialize(
   }
 
   if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
-    m_chunk_interval = 120;  // 120 ms
+    m_video_chunk_interval = 30;
+    m_audio_chunk_interval = 100;
   } else {
-    m_chunk_interval = 1000;  // 1000 ms
+    m_audio_chunk_interval = 1000;
+    m_video_chunk_interval = 1000;
   }
 
   m_ofs = std::ofstream(config.out_filename, std::ios_base::binary);
@@ -164,8 +166,9 @@ MP4Muxer::~MP4Muxer() {
 
 void MP4Muxer::appendAudio(hisui::Frame frame) {
   if ((frame.timestamp * m_writer->getMvhdTimescale() /
-       m_soun_track->getTimescale()) >= m_chunk_start + m_chunk_interval) {
-    m_chunk_start += m_chunk_interval;
+       m_soun_track->getTimescale()) >=
+      m_chunk_start + m_audio_chunk_interval) {
+    m_chunk_start += m_audio_chunk_interval;
     writeTrackData();
   }
 
@@ -175,8 +178,9 @@ void MP4Muxer::appendAudio(hisui::Frame frame) {
 
 void MP4Muxer::appendVideo(hisui::Frame frame) {
   if ((frame.timestamp * m_writer->getMvhdTimescale() /
-       m_vide_track->getTimescale()) >= m_chunk_start + m_chunk_interval) {
-    m_chunk_start += m_chunk_interval;
+       m_vide_track->getTimescale()) >=
+      m_chunk_start + m_video_chunk_interval) {
+    m_chunk_start += m_video_chunk_interval;
     writeTrackData();
   }
 
