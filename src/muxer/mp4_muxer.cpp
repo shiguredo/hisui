@@ -76,6 +76,35 @@ void MP4Muxer::initialize(
   }
 
   m_ofs = std::ofstream(config.out_filename, std::ios_base::binary);
+  if (config.audio_only) {
+    m_video_producer = std::make_shared<NoVideoProducer>();
+    m_timescale_ratio.assign(1, 1);
+  } else {
+    if (!m_video_producer) {
+      if (!std::empty(m_preferred_archives)) {
+        m_video_producer = std::make_shared<MultiChannelVPXVideoProducer>(
+            config, MultiChannelVPXVideoProducerParameters{
+                        .normal_archives = m_normal_archives,
+                        .preferred_archives = m_preferred_archives,
+                        .duration = m_duration,
+                        .timescale = 16000,
+                    });
+      } else {
+        m_video_producer = std::make_shared<VPXVideoProducer>(
+            config, VPXVideoProducerParameters{.archives = m_normal_archives,
+                                               .duration = m_duration,
+                                               .timescale = 16000});
+      }
+    }
+    m_vide_track = std::make_shared<shiguredo::mp4::track::VPXTrack>(
+        shiguredo::mp4::track::VPXTrackParameters{
+            .timescale = 16000,
+            .duration = static_cast<float>(m_duration),
+            .track_id = m_writer->getAndUpdateNextTrackID(),
+            .width = m_video_producer->getWidth(),
+            .height = m_video_producer->getHeight(),
+            .writer = m_writer.get()});
+  }
 
   if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
 #ifdef USE_FDK_AAC
@@ -108,35 +137,7 @@ void MP4Muxer::initialize(
             .writer = m_writer.get()});
   }
 
-  if (config.audio_only) {
-    m_video_producer = std::make_shared<NoVideoProducer>();
-    m_timescale_ratio.assign(1, 1);
-  } else {
-    if (!m_video_producer) {
-      if (!std::empty(m_preferred_archives)) {
-        m_video_producer = std::make_shared<MultiChannelVPXVideoProducer>(
-            config, MultiChannelVPXVideoProducerParameters{
-                        .normal_archives = m_normal_archives,
-                        .preferred_archives = m_preferred_archives,
-                        .duration = m_duration,
-                        .timescale = 16000,
-                    });
-      } else {
-        m_video_producer = std::make_shared<VPXVideoProducer>(
-            config, VPXVideoProducerParameters{.archives = m_normal_archives,
-                                               .duration = m_duration,
-                                               .timescale = 16000});
-      }
-    }
-    m_vide_track = std::make_shared<shiguredo::mp4::track::VPXTrack>(
-        shiguredo::mp4::track::VPXTrackParameters{
-            .timescale = 16000,
-            .duration = static_cast<float>(m_duration),
-            .track_id = m_writer->getAndUpdateNextTrackID(),
-            .width = m_video_producer->getWidth(),
-            .height = m_video_producer->getHeight(),
-            .writer = m_writer.get()});
-
+  if (!config.audio_only) {
     m_timescale_ratio.assign(m_soun_track->getTimescale(),
                              m_vide_track->getTimescale());
   }
