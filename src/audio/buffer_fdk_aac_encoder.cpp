@@ -1,5 +1,7 @@
 #include "audio/buffer_fdk_aac_encoder.hpp"
 
+#include <fmt/core.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -98,12 +100,17 @@ void BufferFDKAACEncoder::encodeAndWrite() {
   }
 
   const std::size_t data_size = static_cast<std::size_t>(out_args.numOutBytes);
+  if (data_size <= 7) {
+    throw std::runtime_error(
+        fmt::format("out_args.numOutBytes is too small: {}", data_size));
+  }
+  auto headless_data_size = data_size - 7;
 
-  std::uint8_t* data = new std::uint8_t[data_size];
-  std::copy_n(m_aac_buffer, data_size, data);
+  std::uint8_t* data = new std::uint8_t[headless_data_size];
+  std::copy_n(m_aac_buffer + 7, headless_data_size, data);
   m_buffer->push(hisui::Frame{.timestamp = m_timestamp,
                               .data = data,
-                              .data_size = data_size,
+                              .data_size = headless_data_size,
                               .is_key = true});
 
   m_pcm_buffer.clear();
