@@ -168,7 +168,8 @@ MP4Muxer::~MP4Muxer() {
 void MP4Muxer::appendAudio(hisui::Frame frame) {
   if ((frame.timestamp * m_writer->getMvhdTimescale() /
        m_soun_track->getTimescale()) >=
-      m_chunk_start + m_audio_chunk_interval) {
+          m_chunk_start + m_audio_chunk_interval ||
+      std::size(m_audio_buffer) >= 2) {
     m_chunk_start += m_audio_chunk_interval;
     writeTrackData();
   }
