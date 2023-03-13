@@ -9,7 +9,7 @@ include(cmake/env.cmake)
 
 set_cache_string_from_env(BOOST_VERSION 1.78.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.1.2 "CLI11 のバージョン")
-set_cache_string_from_env(CPP_MP4_VERSION 761da1a301f40e6a477d91864277e26361644169 "cpp-mp4 のバージョン")
+set_cache_string_from_env(CPP_MP4_VERSION 16c0c14a3aabf4899e91f01dee79ab6eee8ac3a9 "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 8.0.1 "fmt のバージョン")
 set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
 set_cache_string_from_env(SPDLOG_VERSION 1.9.2 "spdlog のバージョン")
