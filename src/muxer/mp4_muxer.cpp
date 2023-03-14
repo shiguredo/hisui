@@ -101,6 +101,8 @@ void MP4Muxer::initialize(
             .track_id = m_writer->getAndUpdateNextTrackID(),
             .width = m_video_producer->getWidth(),
             .height = m_video_producer->getHeight(),
+            .max_bitrate = config.out_video_bit_rate * 1000,
+            .avg_bitrate = config.out_video_bit_rate * 1000,
             .writer = m_writer.get()});
   }
 
