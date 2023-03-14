@@ -137,3 +137,8 @@ gamemoderun ./hisui -f ~/report-XXX.json --libvpx-threads 4 --libvp9-tile-column
 - [mrintrepide/VP9 Encode Guide.md](https://gist.github.com/mrintrepide/3033c35ee9557e66cff7806f48dbd339)
 - [VP9 Encoding Guide - wiki](http://wiki.webmproject.org/ffmpeg/vp9-encoding-guide)
 - [FeralInteractive/gamemode: Optimise Linux system performance on demand](https://github.com/FeralInteractive/gamemode)
+
+### AAC を使った合成をしたい
+
+hisui を自前でビルドすることで利用が可能です。
+ビルドについては [BUILD_LINUX](BUILD_LINUX.md) をご参照ください。

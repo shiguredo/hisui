@@ -7,6 +7,7 @@
 ## docker 経由で利用する
 
 Hisui は docker image を用意しています。これを使うことで x86_64 環境であれば気軽に Hisui を利用可能です。
+ただし、 AAC を利用したい場合は自前ビルドを実行する必要があります。ビルドについては [BUILD_LINUX](BUILD_LINUX.md) をご参照ください。
 
 - https://hub.docker.com/r/shiguredo/hisui
 - https://github.com/orgs/shiguredo/packages/container/package/hisui
