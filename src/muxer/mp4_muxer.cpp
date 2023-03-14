@@ -114,6 +114,7 @@ void MP4Muxer::initialize(
             .timescale = 48000,
             .duration = static_cast<float>(m_duration),
             .track_id = m_writer->getAndUpdateNextTrackID(),
+            .buffer_size_db = 0,
             .max_bitrate = config.out_aac_bit_rate,
             .avg_bitrate = config.out_aac_bit_rate,
             .writer = m_writer.get(),
