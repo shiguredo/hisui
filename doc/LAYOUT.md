@@ -19,6 +19,32 @@ hisui --layout layout.json
 [Composing Video Recordings using Twilio Programmable Video - Twilio](https://www.twilio.com/docs/video/api/compositions-resource) に準ずる。
 `audio_sources`, `audio_sources_excluded`, Region(後述) 内の `video_sources`, `video_sources_excluded` には、Sora の archive-*.json のパス/パターンを指定する。
 
+## レイアウト例
+
+```
+{
+  "audio_sources": [
+    "./archive-*.json"
+  ],
+  "audio_sources_excluded": [
+    "./archive-7VZRQBE3ZS5ES9BV5VGVF4TSTW.json"
+  ],
+  "video_layout": {
+    "grid": {
+      "video_sources": [
+        "./archive-*.json"
+      ]
+    }
+  },
+  "trim": true,
+  "format": "webm",
+  "resolution": "640x360",
+  "bitrate": 1000
+}
+```
+
+## レイアウト用設定パラメータ
+
 ### audio_sources
 
 音声のソースとして用いる archive-*.json のパスの配列を指定する。相対パスの場合は、レイアウト設定を指定する JSON ファイルのあるパスからの相対パスを探す。
