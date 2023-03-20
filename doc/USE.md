@@ -13,6 +13,7 @@ Hisui は docker image を用意しています。これを使うことで x86_6
 - https://hub.docker.com/r/shiguredo/hisui
 - https://github.com/orgs/shiguredo/packages/container/package/hisui
 
+実行コマンド例
 ```
 docker run -v /home/shiguredo/sora-2020.3/archive:/hisui ghcr.io/shiguredo/hisui:2022.1.0 -f /hisui/CSX77QY9F57V5BT72S62C28VS4/report-CSX77QY9F57V5BT72S62C28VS4.json
 ```
@@ -58,3 +59,11 @@ Options:
 ```
 ./hisui -f report-CSX77QY9F57V5BT72S62C28VS4.json
 ```
+
+## 好きなレイアウトで合成したい
+
+Hisui にはレイアウトという機能があり、そちらを利用することでより自由な合成が可能です。
+
+もし、より複雑な合成を試されたい場合はぜひレイアウト機能を試してみてください。
+
+詳細は [レイアウト機能](LAYOUT.md) のドキュメントをご参照ください。
