@@ -45,7 +45,11 @@ hisui --layout layout.json
 レイアウトに設定しているパラメータの説明
 
 このレイアウトはマス目状に映像を配置して合成します。
-それぞれの項目について以下に説明します。
+合成結果はスクリーンショットのようになります。
+
+[![Image from Gyazo](https://i.gyazo.com/b9f94a258cacf6968a407c3d611345f3.png)](https://gyazo.com/b9f94a258cacf6968a407c3d611345f3)
+
+それぞれのパラメータについて以下に説明します。
 
 - `audio_sources` : 格納されているファイル全てを相対パスで指定します
 - `audio_sources_excluded` : ファイルの中から音声を入れないファイルを指定します
