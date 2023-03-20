@@ -1,23 +1,22 @@
 # レイアウト機能
 
+hisui では JSON 形式のレイアウトファイルを使用することでより細かな合成の設定が可能です。
+レイアウトファイルでは合成する音声/映像の制御や、合成時の映像の場所など自由に設定することができます。
+ここではレイアウトで使用できるパラメータやレイアウト例について記載します。
+
 ## 用語
 
 - X の倍数に丸める: 値が X の倍数になるよう数値を小さくなる方向に変更します(変更しなくてよい場合はしません)。
 
 ## 利用方法
 
---layout オプションでレイアウト設定を指定します。 レイアウト設定は JSON ファイルを指定して利用します。
+`--layout` オプションでレイアウト設定を指定します。 レイアウト設定は JSON ファイルを指定して利用します。
 
-例:
+実行コマンド例:
 
 ```
 hisui --layout layout.json
 ```
-
-## レイアウト設定
-
-[Composing Video Recordings using Twilio Programmable Video - Twilio](https://www.twilio.com/docs/video/api/compositions-resource) に準じます。
-`audio_sources`, `audio_sources_excluded`, Region(後述) 内の `video_sources`, `video_sources_excluded` には、Sora の archive-*.json のパス/パターンを指定します。
 
 ## レイアウト例
 
@@ -43,7 +42,7 @@ hisui --layout layout.json
 }
 ```
 
-レイアウトの説明
+レイアウトに設定しているパラメータの説明
 
 このレイアウトはマス目状に映像を配置して合成します。
 それぞれの項目について以下に説明します。
@@ -58,6 +57,11 @@ hisui --layout layout.json
 - `resolution` : 出力する映像のサイズを指定します
 - `bitrate` : 出力する映像のビットレート指定します
 
+## レイアウト設定
+
+hisui レイアウトは [Composing Video Recordings using Twilio Programmable Video - Twilio](https://www.twilio.com/docs/video/api/compositions-resource) に準じます。
+hisui のレイアウトでは `audio_sources`, `audio_sources_excluded`, Region(後述) 内の `video_sources`, `video_sources_excluded` には、Sora の archive-*.json のパス/パターンを指定します。
+
 ## レイアウト用設定パラメータ
 
 レイアウトで使用可能な設定パラメータについて以下に記載します。
@@ -68,11 +72,15 @@ hisui --layout layout.json
 
 `*` をワイルドカードとして利用することができます。
 
+`*` を使用する場合は Sora の録画データと同じディレクトリにレイアウトファイルがあること、Sora の録画データ以外のファイルが無いようにする必要があります。
+
 ### audio_sources_excluded
 
 audio_sources のうち除外するソースのパターンの配列を指定します。
 
 `*` をワイルドカードとして利用することができます。
+
+`*` を使用する場合は Sora の録画データと同じディレクトリにレイアウトファイルがあること、Sora の録画データ以外のファイルが無いようにする必要があります。
 
 ### bitrate
 
@@ -149,7 +157,6 @@ Region のサイズ(`width` ないし `height`[後述]) が、動画のサイズ
 
 これらを考慮して 1 つの Cell のサイズがなるべく大きくなるように Cell のサイズを決定します。
 
-
 #### Cell の状態
 
 Cell には次の状態が存在します:
@@ -192,11 +199,15 @@ Cell へのソースの配置の仕方を指定します。
 
 `*` をワイルドカードとして利用できます。
 
+`*` を使用する場合は Sora の録画データと同じディレクトリにレイアウトファイルがあること、Sora の録画データ以外のファイルが無いようにする必要があります。
+
 ### video_sources_excluded
 
-video_sources のうち除外するソースのパターンの配列を指定する。
+video_sources のうち除外するソースのパターンの配列を指定します。
 
-`*` をワイルドカードとして利用できる。
+`*` をワイルドカードとして利用できます。
+
+`*` を使用する場合は Sora の録画データと同じディレクトリにレイアウトファイルがあること、Sora の録画データ以外のファイルが無いようにする必要があります。
 
 ### width
 
