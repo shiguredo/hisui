@@ -64,6 +64,18 @@ channel に接続している映像のうち特定の connection だけ大きく
 - Safari / Chrom / Edge / Firefox といったブラウザでの再生
 - Windows の 映画とテレビ、 Windows11 で追加された メディアプレイヤーでの再生
 
+### Hisui を実行したらエラーになってしまいました
+
+対象のファイルがないなど、様々な原因が考えられます。以下によくあるエラーを記載します。
+
+| エラーメッセージ | エラー内容 | 解決例 |
+| --- | --- | --- |
+| `--in-metadata-file: 1 required TEXT:FILE missing` | 合成対象のメタデータが見つかりません | `report-hoge.json` の指定と場所を確認してみてください |
+| `--layout: 1 required TEXT:FILE missing` | レイアウトファイル指定ミス | レイアウトファイルの指定している場所を確認してみてください |
+| `[error] setting up muxer failed:` | ファイル指定ミス | 指定したファイルの場所を確認してみてください。分割録画だけの録画データを対象にしていないか確認してみてください |
+| `[error] muxing failed: Unable to open:` | 指定した場所が見つからない | `--out-file` などのオプションで指定した場所を確認してみてください |
+| `[error] parsing layout metadata failed: pattern` | レイアウトファイル内のエラー | メッセージに出力されている内容を確認してレイアウトの設定を見直してみてください |
+
 ### コーデック
 ### 音声コーデックに AAC を指定できますか
 
