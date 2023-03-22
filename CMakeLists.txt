@@ -7,7 +7,7 @@ cmake_policy(SET CMP0091 NEW)
 
 include(cmake/env.cmake)
 
-set_cache_string_from_env(BOOST_VERSION 1.78.0 "Boost のバージョン")
+set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.1.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 2023.1.0 "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 8.0.1 "fmt のバージョン")
@@ -74,6 +74,13 @@ CPMAddPackage(
 CPMAddPackage(
     NAME boost_core
     GITHUB_REPOSITORY boostorg/core
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_describe
+    GITHUB_REPOSITORY boostorg/describe
     GIT_TAG boost-${BOOST_VERSION}
     DOWNLOAD_ONLY YES
     )
@@ -199,6 +206,13 @@ CPMAddPackage(
     NAME opus
     GITHUB_REPOSITORY xiph/opus
     VERSION ${OPUS_VERSION}
+    )
+
+CPMAddPackage(
+    NAME boost_variant2
+    GITHUB_REPOSITORY boostorg/variant2
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
     )
 
 CPMAddPackage(
@@ -340,6 +354,7 @@ target_include_directories(hisui
     ${boost_config_SOURCE_DIR}/include
     ${boost_container_SOURCE_DIR}/include
     ${boost_core_SOURCE_DIR}/include
+    ${boost_describe_SOURCE_DIR}/include
     ${boost_exception_SOURCE_DIR}/include
     ${boost_integer_SOURCE_DIR}/include
     ${boost_intrusive_SOURCE_DIR}/include
@@ -348,6 +363,7 @@ target_include_directories(hisui
     ${boost_move_SOURCE_DIR}/include
     ${boost_mp11_SOURCE_DIR}/include
     ${boost_rational_SOURCE_DIR}/include
+    ${boost_variant2_SOURCE_DIR}/include
     ${boost_smart_ptr_SOURCE_DIR}/include
     ${boost_static_assert_SOURCE_DIR}/include
     ${boost_system_SOURCE_DIR}/include
