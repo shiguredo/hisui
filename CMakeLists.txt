@@ -8,7 +8,7 @@ cmake_policy(SET CMP0091 NEW)
 include(cmake/env.cmake)
 
 set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
-set_cache_string_from_env(CLI11_VERSION 2.1.2 "CLI11 のバージョン")
+set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 2023.1.0 "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 8.0.1 "fmt のバージョン")
 set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
