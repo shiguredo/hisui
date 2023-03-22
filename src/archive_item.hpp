@@ -18,8 +18,6 @@ class ArchiveItem {
   double getStopTimeOffset() const;
   void adjustTimeOffsets(double);
 
-  ArchiveItem& operator=(const ArchiveItem& other);
-
  private:
   std::filesystem::path m_path;
   std::string m_connection_id;

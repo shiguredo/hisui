@@ -30,9 +30,13 @@ void Context::init() {
 }
 
 Context::~Context() {
-  m_segment->Finalize();
-  delete m_segment;
-  delete m_writer;
+  if (m_segment) {
+    m_segment->Finalize();
+    delete m_segment;
+  }
+  if (m_writer) {
+    delete m_writer;
+  }
   if (m_file) {
     std::fclose(m_file);
   }

@@ -53,9 +53,13 @@ class Metadata {
   std::vector<std::shared_ptr<Region>> m_regions;
   libyuv::FilterMode m_filter_mode;
 
-  void parseVideoLayout(boost::json::object j);
-  std::shared_ptr<Region> parseRegion(const std::string& name,
-                                      boost::json::object jo);
+  void parseVideoLayout(
+      boost::json::object j,
+      const std::vector<std::string>& fixed_excluded_patterns);
+  std::shared_ptr<Region> parseRegion(
+      const std::string& name,
+      boost::json::object jo,
+      const std::vector<std::string>& fixed_excluded_patterns);
 };
 
 Metadata parse_metadata(const hisui::Config&);

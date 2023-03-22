@@ -88,7 +88,8 @@ void FaststartMP4Muxer::run() {
 }
 
 void FaststartMP4Muxer::cleanUp() {
-  if (std::filesystem::exists(m_faststart_writer->getIntermediateFilePath())) {
+  if (m_faststart_writer &&
+      std::filesystem::exists(m_faststart_writer->getIntermediateFilePath())) {
     m_faststart_writer->deleteIntermediateFile();
   }
 }

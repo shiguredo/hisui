@@ -28,7 +28,9 @@
 
 namespace hisui::layout {
 
-void Metadata::parseVideoLayout(boost::json::object j) {
+void Metadata::parseVideoLayout(
+    boost::json::object j,
+    const std::vector<std::string>& fixed_excluded_patterns) {
   auto key = "video_layout";
   if (!j.contains(key) || j[key].is_null()) {
     return;
@@ -38,7 +40,8 @@ void Metadata::parseVideoLayout(boost::json::object j) {
     std::string name(region.key());
     if (region.value().is_object()) {
       try {
-        m_regions.push_back(parseRegion(name, region.value().as_object()));
+        m_regions.push_back(parseRegion(name, region.value().as_object(),
+                                        fixed_excluded_patterns));
       } catch (const std::exception& e) {
         spdlog::error("parsing region '{}' failed: {}", name, e.what());
         std::exit(EXIT_FAILURE);
@@ -155,8 +158,21 @@ Metadata::Metadata(const std::string& file_path,
     }
   }
 
+  std::vector<std::string> fixed_excluded_patterns = {
+      m_path.filename(), "report-*.json", "*.webm"};
+
+  for (const auto& pattern : fixed_excluded_patterns) {
+    auto result = std::remove_if(std::begin(audio_source_filenames),
+                                 std::end(audio_source_filenames),
+                                 [&pattern](const auto& text) {
+                                   return hisui::util::wildcard_match(
+                                       {.text = text, .pattern = pattern});
+                                 });
+    audio_source_filenames.erase(result, std::end(audio_source_filenames));
+  }
+
   m_audio_source_filenames = audio_source_filenames;
-  parseVideoLayout(j);
+  parseVideoLayout(j, fixed_excluded_patterns);
 }
 
 Metadata parse_metadata(const hisui::Config& config) {
@@ -314,8 +330,10 @@ void Metadata::prepare() {
       [](const auto& a, const auto& b) { return a->getZPos() < b->getZPos(); });
 }
 
-std::shared_ptr<Region> Metadata::parseRegion(const std::string& name,
-                                              boost::json::object jo) {
+std::shared_ptr<Region> Metadata::parseRegion(
+    const std::string& name,
+    boost::json::object jo,
+    const std::vector<std::string>& fixed_excluded_patterns) {
   auto cells_excluded_array =
       hisui::util::get_array_from_json_object_with_default(
           jo, "cells_excluded", boost::json::array());
@@ -374,6 +392,16 @@ std::shared_ptr<Region> Metadata::parseRegion(const std::string& name,
       throw std::invalid_argument(fmt::format("{} contains a non-string value",
                                               "video_sources_excluded"));
     }
+  }
+
+  for (const auto& pattern : fixed_excluded_patterns) {
+    auto result = std::remove_if(std::begin(video_source_filenames),
+                                 std::end(video_source_filenames),
+                                 [&pattern](const auto& text) {
+                                   return hisui::util::wildcard_match(
+                                       {.text = text, .pattern = pattern});
+                                 });
+    video_source_filenames.erase(result, std::end(video_source_filenames));
   }
 
   auto reuse_string = hisui::util::get_string_from_json_object_with_default(

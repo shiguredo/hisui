@@ -1,4 +1,4 @@
-name: build-workflow
+name: build
 
 on:
   pull_request:
@@ -7,6 +7,7 @@ on:
       - main
       - master
       - develop
+      - feature/*
     tags:
       - 202*
     paths-ignore:
@@ -23,14 +24,17 @@ jobs:
       matrix:
         os:
           - ubuntu-20.04_x86_64
+          - ubuntu-20.04_arm64
+          - ubuntu-22.04_x86_64
+          - ubuntu-22.04_arm64
     name: Build hisui for ${{ matrix.os }}
-    runs-on: ubuntu-20.04
+    runs-on: ${{ contains(matrix.os, 'ubuntu-20.04') && 'ubuntu-20.04' || 'ubuntu-22.04' }}
     steps:
       - name: Install packages
         shell: bash
         run: |
           sudo apt update
-          sudo apt install -yq yasm ccache
+          sudo apt install -yq yasm ccache libstdc++-10-dev-arm64-cross libc6-dev-arm64-cross binutils-aarch64-linux-gnu
           sudo rm -rf /var/lib/apt/lists/*
         env:
             DEBIAN_FRONTEND: noninteractive
@@ -51,7 +55,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: third_party/libvpx
-          key: ${{ matrix.os }}-third_party-libvpx-${{ hashFiles(format('{0}{1}', github.workspace, '/third_party/libvpx/libvpx.a')) }}
+          key: ${{ matrix.os }}-third_party-libvpx-${{ hashFiles(format('third_party/libvpx/{0}/libvpx.a', matrix.os)) }}
           restore-keys: ${{ matrix.os }}-third_party-libvpx-
       - name: Clear libvpx
         if: steps.cache-libvpx.outputs.cache-hit != 'true'
@@ -60,8 +64,8 @@ jobs:
         id: cache-release
         uses: actions/cache@v3
         with:
-          path: release/_deps
-          key: ${{ matrix.os }}-release-deps-${{ hashFiles(format('{0}{1}', github.workspace, '/release/Makefile')) }}
+          path: release/${{ matrix.os }}/_deps
+          key: ${{ matrix.os }}-release-deps-${{ hashFiles(format('release/{0}/Makefile', matrix.os)) }}
           restore-keys: ${{ matrix.os }}-release-deps-
       - name: Clear release directory
         if: steps.cache-release.outputs.cache-hit != 'true'
@@ -80,10 +84,11 @@ jobs:
       - name: Ccache stat
         run: ccache -s
       - name: Build hisui
-        run: ./build.bash ${{ matrix.os }} --package --use-ccache --with-test
+        run: ./build.bash ${{ matrix.os }} --package --use-ccache ${{ contains(matrix.os, '_x86_64') && '--with-test' || '' }}
         timeout-minutes: 120
       - name: Test hisui
-        run: cmake --build release --target test -- ARGS='-V -L hisui'
+        if: contains(matrix.os, '_x86_64')
+        run: cmake --build release/${{ matrix.os }} --target test -- ARGS='-V -L hisui'
       - name: Output package name
         shell: bash
         run: |
@@ -96,19 +101,19 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary
-          path: release/hisui
+          path: release/${{ matrix.os }}/hisui
           if-no-files-found: error
       - name: Upload hisui binary with hash
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}-hisui-binary-${{ steps.vars.outputs.sha_short }}
-          path: release/hisui
+          path: release/${{ matrix.os }}/hisui
           if-no-files-found: error
       - name: Upload tarball
         uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.package_name.outputs.name }}
-          path: release/${{ steps.package_name.outputs.name }}
+          path: release/${{ matrix.os }}/${{ steps.package_name.outputs.name }}
           if-no-files-found: error
       - name: Upload environment
         uses: actions/upload-artifact@v3
@@ -128,11 +133,6 @@ jobs:
   push-to-dockerhub:
     name: Push to DockerHub
     if: contains(github.ref, 'tags/202')
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-20.04_x86_64
     needs:
       - build-linux
     runs-on: ubuntu-20.04
@@ -141,15 +141,33 @@ jobs:
       - name: Mkdir release
         shell: bash
         run: |
-          mkdir release
+          mkdir -p release/ubuntu-20.04_x86_64
+          mkdir -p release/ubuntu-20.04_arm64
+          mkdir -p release/ubuntu-22.04_x86_64
+          mkdir -p release/ubuntu-22.04_arm64
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ matrix.os }}-hisui-binary
-          path: release
+          name: ubuntu-20.04_x86_64-hisui-binary
+          path: release/ubuntu-20.04_x86_64
+      - uses: actions/download-artifact@v3
+        with:
+          name: ubuntu-20.04_arm64-hisui-binary
+          path: release/ubuntu-20.04_arm64
+      - uses: actions/download-artifact@v3
+        with:
+          name: ubuntu-22.04_x86_64-hisui-binary
+          path: release/ubuntu-22.04_x86_64
+      - uses: actions/download-artifact@v3
+        with:
+          name: ubuntu-22.04_arm64-hisui-binary
+          path: release/ubuntu-22.04_arm64
       - name: Chmod 755 hisui
         shell: bash
         run: |
-          chmod 755 release/hisui
+          chmod 755 release/ubuntu-20.04_x86_64/hisui
+          chmod 755 release/ubuntu-20.04_arm64/hisui
+          chmod 755 release/ubuntu-22.04_x86_64/hisui
+          chmod 755 release/ubuntu-22.04_arm64/hisui
       - name: Get Versions
         shell: bash
         id: versions
@@ -168,72 +186,28 @@ jobs:
         with:
           context: .
           push: true
-          tags: shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}
-          platforms: linux/amd64
+          tags: shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}-ubuntu-20.04
+          platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile
-      - name: Slack Notification
-        if: failure()
-        uses: rtCamp/action-slack-notify@v2.1.0
-        env:
-          SLACK_CHANNEL: hisui
-          SLACK_COLOR: danger
-          SLACK_TITLE: Failure push-to-dockerhub ${{ matrix.os }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
-  push-to-github-container-registory:
-    name: Push to GitHub Container Registry
-    if: contains(github.ref, 'tags/202')
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-20.04_x86_64
-    needs:
-      - build-linux
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v3
-      - name: Mkdir release
-        shell: bash
-        run: |
-          mkdir release
-      - uses: actions/download-artifact@v3
-        with:
-          name: ${{ matrix.os }}-hisui-binary
-          path: release
-      - name: Chmod 755 hisui
-        shell: bash
-        run: |
-          chmod 755 release/hisui
-      - name: Get Versions
-        shell: bash
-        id: versions
-        run: |
-          source VERSION
-          echo "hisui_version=${HISUI_VERSION}" >> $GITHUB_OUTPUT
-      - name: Login to ghcr.io
-        uses: docker/login-action@v1
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      - name: Push to ghcr.io
+          build-args: |
+            UBUNTU_VERSION=20.04
+      - name: Push to DockerHub
         uses: docker/build-push-action@v2
         with:
           context: .
           push: true
-          tags: ghcr.io/shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}
-          platforms: linux/amd64
+          tags: shiguredo/hisui:${{ steps.versions.outputs.hisui_version }}-ubuntu-22.04
+          platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile
+          build-args: |
+            UBUNTU_VERSION=22.04
       - name: Slack Notification
         if: failure()
         uses: rtCamp/action-slack-notify@v2.1.0
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
-          SLACK_TITLE: Failure push-to-github-container-registory ${{ matrix.os }}
+          SLACK_TITLE: Failure push-to-dockerhub
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
   create-release:
@@ -242,16 +216,20 @@ jobs:
     needs:
       - build-linux
     runs-on: ubuntu-20.04
-    strategy:
-      fail-fast: true
-      matrix:
-        os:
-          - ubuntu-20.04_x86_64
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/download
         with:
           platform: ubuntu-20.04_x86_64
+      - uses: ./.github/actions/download
+        with:
+          platform: ubuntu-20.04_arm64
+      - uses: ./.github/actions/download
+        with:
+          platform: ubuntu-22.04_x86_64
+      - uses: ./.github/actions/download
+        with:
+          platform: ubuntu-22.04_arm64
       - name: Env to output
         run: |
           echo "package_paths<<EOF" >> $GITHUB_OUTPUT
