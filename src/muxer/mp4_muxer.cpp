@@ -74,37 +74,6 @@ void MP4Muxer::initialize(
   }
 
   m_ofs = std::ofstream(config.out_filename, std::ios_base::binary);
-
-  if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
-#ifdef USE_FDK_AAC
-    m_audio_producer = std::make_shared<FDKAACAudioProducer>(
-        config, FDKAACAudioProducerParameters{.archives = m_audio_archives,
-                                              .duration = m_duration});
-    m_soun_track = std::make_shared<shiguredo::mp4::track::AACTrack>(
-        shiguredo::mp4::track::AACTrackParameters{
-            .timescale = 48000,
-            .duration = static_cast<float>(m_duration),
-            .track_id = m_writer->getAndUpdateNextTrackID(),
-            .max_bitrate = config.out_aac_bit_rate,
-            .avg_bitrate = config.out_aac_bit_rate,
-            .writer = m_writer.get(),
-        });
-#else
-    throw std::logic_error("AAC: inconsistent setting");
-#endif
-  } else {
-    auto audio_producer = std::make_shared<OpusAudioProducer>(
-        config, m_audio_archives, m_duration, 48000);
-    const auto skip = audio_producer->getSkip();
-    m_audio_producer = audio_producer;
-    m_soun_track = std::make_shared<shiguredo::mp4::track::OpusTrack>(
-        shiguredo::mp4::track::OpusTrackParameters{
-            .pre_skip = static_cast<std::uint64_t>(skip),
-            .duration = static_cast<float>(m_duration),
-            .track_id = m_writer->getAndUpdateNextTrackID(),
-            .writer = m_writer.get()});
-  }
-
   if (config.audio_only) {
     m_video_producer = std::make_shared<NoVideoProducer>();
     m_timescale_ratio.assign(1, 1);
@@ -132,8 +101,43 @@ void MP4Muxer::initialize(
             .track_id = m_writer->getAndUpdateNextTrackID(),
             .width = m_video_producer->getWidth(),
             .height = m_video_producer->getHeight(),
+            .max_bitrate = config.out_video_bit_rate * 1000,
+            .avg_bitrate = config.out_video_bit_rate * 1000,
             .writer = m_writer.get()});
+  }
 
+  if (config.out_audio_codec == config::OutAudioCodec::FDK_AAC) {
+#ifdef USE_FDK_AAC
+    m_audio_producer = std::make_shared<FDKAACAudioProducer>(
+        config, FDKAACAudioProducerParameters{.archives = m_audio_archives,
+                                              .duration = m_duration});
+    m_soun_track = std::make_shared<shiguredo::mp4::track::AACTrack>(
+        shiguredo::mp4::track::AACTrackParameters{
+            .timescale = 48000,
+            .duration = static_cast<float>(m_duration),
+            .track_id = m_writer->getAndUpdateNextTrackID(),
+            .buffer_size_db = 0,
+            .max_bitrate = config.out_aac_bit_rate,
+            .avg_bitrate = config.out_aac_bit_rate,
+            .writer = m_writer.get(),
+        });
+#else
+    throw std::logic_error("AAC: inconsistent setting");
+#endif
+  } else {
+    auto audio_producer = std::make_shared<OpusAudioProducer>(
+        config, m_audio_archives, m_duration, 48000);
+    const auto skip = audio_producer->getSkip();
+    m_audio_producer = audio_producer;
+    m_soun_track = std::make_shared<shiguredo::mp4::track::OpusTrack>(
+        shiguredo::mp4::track::OpusTrackParameters{
+            .pre_skip = static_cast<std::uint64_t>(skip),
+            .duration = static_cast<float>(m_duration),
+            .track_id = m_writer->getAndUpdateNextTrackID(),
+            .writer = m_writer.get()});
+  }
+
+  if (!config.audio_only) {
     m_timescale_ratio.assign(m_soun_track->getTimescale(),
                              m_vide_track->getTimescale());
   }
