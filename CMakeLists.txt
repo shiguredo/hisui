@@ -13,7 +13,7 @@ set_cache_string_from_env(CPP_MP4_VERSION 2023.1.0 "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 9.1.0 "fmt のバージョン")
 set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
 set_cache_string_from_env(SPDLOG_VERSION 1.11.0 "spdlog のバージョン")
-set_cache_string_from_env(STB_VERSION af1a5bc352164740c1cc1354942b1c6b72eacb8a "stb のバージョン")
+set_cache_string_from_env(STB_VERSION 5736b15f7ea0ffb08dd38af21067c314d6a3aae9 "stb のバージョン")
 
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
