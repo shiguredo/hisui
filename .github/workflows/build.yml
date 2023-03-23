@@ -43,13 +43,13 @@ jobs:
         shell: bash
         id: vars
         run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
       - name: Get versions
         shell: bash
         id: versions
         run: |
           source VERSION
-          echo "libvpx_version=${LIBVPX_VERSION}" >> $GITHUB_OUTPUT
+          echo "libvpx_version=${LIBVPX_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Cache libvpx ${{ steps.versions.outputs.libvpx_version }}
         id: cache-libvpx
         uses: actions/cache@v3
@@ -73,7 +73,7 @@ jobs:
       - name: Prepare ccache timestamp
         id: ccache_cache_timestamp
         run: |
-          TZ=UTC echo "timestamp=$(TZ=UTC date +%Y-%m-%d-%H:%M:%S)" >> $GITHUB_OUTPUT
+          TZ=UTC echo "timestamp=$(TZ=UTC date +%Y-%m-%d-%H:%M:%S)" >> "$GITHUB_OUTPUT"
       - name: Cache ~/.ccache directory
         id: cache-ccache
         uses: actions/cache@v3
@@ -95,7 +95,7 @@ jobs:
           source VERSION
           echo "PACKAGE_NAME=hisui-${HISUI_VERSION}_${{ matrix.os }}.tar.gz" >> ${{ matrix.os }}.env
           echo "CONTENT_TYPE=application/gzip" >> ${{ matrix.os }}.env
-          echo "name=hisui-${HISUI_VERSION}_${{ matrix.os }}.tar.gz" >> $GITHUB_OUTPUT
+          echo "name=hisui-${HISUI_VERSION}_${{ matrix.os }}.tar.gz" >> "$GITHUB_OUTPUT"
         id: package_name
       - name: Upload hisui binary
         uses: actions/upload-artifact@v3
@@ -173,7 +173,7 @@ jobs:
         id: versions
         run: |
           source VERSION
-          echo "hisui_version=${HISUI_VERSION}" >> $GITHUB_OUTPUT
+          echo "hisui_version=${HISUI_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Login to DockerHub
         uses: docker/login-action@v1
         with:
@@ -232,9 +232,11 @@ jobs:
           platform: ubuntu-22.04_arm64
       - name: Env to output
         run: |
-          echo "package_paths<<EOF" >> $GITHUB_OUTPUT
-          cat package_paths.env >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "package_paths<<EOF"
+            cat package_paths.env
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
         id: env
       - name: Release
         uses: softprops/action-gh-release@v1
