@@ -35,6 +35,9 @@
 - [FIX] Core dump する場合の修正
     - @haruyama
     - https://github.com/shiguredo/hisui/pull/101
+- [FIX] オーバーラップする間隔の検査時に start < end な間隔のみを利用する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/100
 - [UPDATE] deprecated になった actions/create-release と actions/upload-release の利用をやめて softprops/action-gh-release を利用する
     - @melpon
 - [UPDATE] GitHub Actions の各種バージョンを上げる
