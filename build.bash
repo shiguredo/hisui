@@ -173,5 +173,9 @@ cmake  ../.. "${CMAKE_FLAGS[@]}"
 cmake --build .
 
 if [ $FLAG_PACKAGE -eq 1 ]; then 
-    tar cvf "hisui-${HISUI_VERSION}_$PACKAGE.tar.gz" hisui -C ../.. LICENSE NOTICE.md
+    rm -rf "hisui-${HISUI_VERSION}"
+    mkdir "hisui-${HISUI_VERSION}"
+    cp hisui ../../LICENSE ../../NOTICE.md "hisui-${HISUI_VERSION}"
+    tar cvf "hisui-${HISUI_VERSION}_$PACKAGE.tar.gz" "hisui-${HISUI_VERSION}"
+    rm -rf "hisui-${HISUI_VERSION}"
 fi
