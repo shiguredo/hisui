@@ -29,6 +29,12 @@
 - [FIX] Safari, Windows Media Player での再生の問題を修正
     - @haruyama
     - https://github.com/shiguredo/hisui/pull/104
+- [CHANGE] layout: レイアウト指定ファイル, report-*.json, *.webm は sources から常に除外する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/103
+- [FIX] Core dump する場合の修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/101
 - [UPDATE] deprecated になった actions/create-release と actions/upload-release の利用をやめて softprops/action-gh-release を利用する
     - @melpon
 - [UPDATE] GitHub Actions の各種バージョンを上げる
