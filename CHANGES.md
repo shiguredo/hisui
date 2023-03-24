@@ -13,6 +13,9 @@
 
 ## 2023.1.0
 
+- [FIX] --out-audio-codec の説明が間違っているのを修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/110
 - [CHANGE] tarball に "hisui-${HISUI_VERSION}" ディレクトリを含める
     - @haruyama
     - https://github.com/shiguredo/hisui/pull/108
