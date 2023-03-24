@@ -41,7 +41,7 @@ jobs:
         timeout-minutes: 120
       - name: Slack Notification
         if: failure()
-        uses: rtCamp/action-slack-notify@v2.1.0
+        uses: rtCamp/action-slack-notify@v2.2.0
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
