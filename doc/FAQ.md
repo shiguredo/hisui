@@ -78,6 +78,14 @@ https://forums.virtualbox.org/viewtopic.php?f=6&t=101917
 | `[error] parsing layout metadata failed: pattern` | レイアウトファイル内のエラー | メッセージに出力されている内容を確認してレイアウトの設定を見直してみてください |
 | `[error] parsing audio_source(./hoge/archive-hoge.json) failed: filename() and file_path() do not exsit` | JSON 指定のファイルが見つからない | レイアウトで指定しているファイルの webm が存在しているか確認してみてください |
 
+### Hisui で合成をキャンセルしたときに mdatXXXX というファイルが生成されました
+
+mdatXXXX は Hisui が合成をするときに作成する中間ファイルです。
+
+`--mp4-muxer` が `Faststart` に設定されているときに生成されます。Hisui はデフォルトで `Faststart` になっているため、`--mp4-muxer Simple` とオプションを設定しない限り生成されます。
+
+`--dir-for-faststart` オプションで mdatXXXX を生成する場所を指定することが可能です。デフォルトでは合成ファイルを出力する場所に作成されるようになっています。
+
 ### コーデック
 ### 音声コーデックに AAC を指定できますか
 
