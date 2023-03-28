@@ -95,7 +95,7 @@ void set_cli_options(CLI::App* app, Config* config) {
 
   app->add_option("--mix-screen-capture-audio",
                   config->mix_screen_capture_audio,
-                  "Mix screen-capture audio. default: false)")
+                  "Mix screen-capture audio. default: false")
       ->group(EXPERIMENTAL_OPTIONS);
 
   std::vector<std::pair<std::string, config::OutContainer>> out_container_assoc{
@@ -131,7 +131,7 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->transform(CLI::CheckedTransformer(out_audio_codec, CLI::ignore_case));
 
   app->add_option("--out-video-frame-rate", config->out_video_frame_rate,
-                  "Video frame rate (INTEGER/RATIONAL). default: 25)");
+                  "Video frame rate (INTEGER/RATIONAL). default: 25");
 
   app->add_option("--out-webm-file", config->out_filename, "Output filename")
       ->group(OPTIONS_FOR_BACKWARD_COMPATIBILITY);
