@@ -33,29 +33,29 @@ https://forums.virtualbox.org/viewtopic.php?f=6&t=101917
 
 - `--screen-capture-report` を利用するケース
 
-複数の Channel を使用した場合はこのオプションを使用すると便利です。
+    複数の Channel を使用した場合はこのオプションを使用すると便利です。
 
-例えば会議メンバーが参加している channel とは別に画面共有だけの channel を用意して配信し録画した場合の合成に役立ちます。
+    例えば会議メンバーが参加している channel とは別に画面共有だけの channel を用意して配信し録画した場合の合成に役立ちます。
 
-`--screen-capture-report` を使用することで画面共有中の間だけ、画面共有の画面が全面になる合成を作ることができます。
+    `--screen-capture-report` を使用することで画面共有中の間だけ、画面共有の画面が全面になる合成を作ることができます。
 
-実行コマンド例
+    実行コマンド例
 
-大きく表示したい映像の report ファイルを指定します。
+    大きく表示したい映像の report ファイルを指定します。
 
-`./hisui -f .../report-2A0EVXFRVS7BSCEV4EQJ3MW4VC.json --screen-capture-report .../report-GACVGHQB953FX8GFG98AY3XGXR.json  --out-file test.mp4`
+    `./hisui -f .../report-2A0EVXFRVS7BSCEV4EQJ3MW4VC.json --screen-capture-report .../report-GACVGHQB953FX8GFG98AY3XGXR.json  --out-file test.mp4`
 
 - `--screen-capture-connection-id` を利用するケース
 
-channel に接続している映像のうち特定の connection だけ大きくしたい場合などには `--screen-capture-connection-id` が便利です。
+    channel に接続している映像のうち特定の connection だけ大きくしたい場合などには `--screen-capture-connection-id` が便利です。
 
-同一 channel で画面共有をした場合、途中から説明をされた方を大きく表示したい場合の合成に役立ちます。
+    同一 channel で画面共有をした場合、途中から説明をされた方を大きく表示したい場合の合成に役立ちます。
 
-実行コマンド例
+    実行コマンド例
 
-大きく表示したい映像の connection id を指定します。
+    大きく表示したい映像の connection id を指定します。
 
-`./hisui -f .../report-4Z3KF8X4GH1G75SWSVA2YAZ65R.json --screen-capture-connection-id JVNGWZB23124NCH76ZRV67HXV8 --out-file test.mp4`
+    `./hisui -f .../report-4Z3KF8X4GH1G75SWSVA2YAZ65R.json --screen-capture-connection-id JVNGWZB23124NCH76ZRV67HXV8 --out-file test.mp4`
 
 ### Hisui で作成した VP9/AAC の MP4 を再生することは可能ですか
 
