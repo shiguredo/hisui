@@ -11,6 +11,16 @@
 
 ## develop
 
+## 2023.1.1
+
+- [UPDATE] バージョンを 2023.1.1 に上げる
+    - @torikizi
+    - 依存ライブラリの `cpp-mp4` を `2023.1.1` にするアップデートも含む
+    - https://github.com/shiguredo/hisui/pull/118
+- [FIX] config の typo を修正
+    - @torikizi
+    - https://github.com/shiguredo/hisui/pull/117
+
 ## 2023.1.0
 
 - [FIX] --out-audio-codec の説明が間違っているのを修正
