@@ -48,7 +48,7 @@ std::string get_fdkaac_aacenc_version() {
 #endif
 
 std::string get_hisui_version() {
-  return "2022.1.0";
+  return "2023.1.1";
 }
 
 std::string get_cppmp4_version() {
