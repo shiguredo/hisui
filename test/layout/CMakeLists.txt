@@ -89,6 +89,7 @@ target_include_directories(layout_test
     ${boost_container_SOURCE_DIR}/include
     ${boost_container_hash_SOURCE_DIR}/include
     ${boost_core_SOURCE_DIR}/include
+    ${boost_describe_SOURCE_DIR}/include
     ${boost_detail_SOURCE_DIR}/include
     ${boost_exception_SOURCE_DIR}/include
     ${boost_function_SOURCE_DIR}/include
@@ -112,6 +113,7 @@ target_include_directories(layout_test
     ${boost_type_index_SOURCE_DIR}/include
     ${boost_type_traits_SOURCE_DIR}/include
     ${boost_utility_SOURCE_DIR}/include
+    ${boost_variant2_SOURCE_DIR}/include
     ${cpp-mp4_SOURCE_DIR}/include
     ${fmt_SOURCE_DIR}/include
     ${spdlog_SOURCE_DIR}/include

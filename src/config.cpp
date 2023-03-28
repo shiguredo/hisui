@@ -124,7 +124,7 @@ void set_cli_options(CLI::App* app, Config* config) {
   };
   app->add_option("--out-audio-codec", config->out_audio_codec,
                   "Audio codec (Opus/AAC). default: Opus (hisui supports "
-                  "AAC only in WebM)")
+                  "AAC only in MP4)")
 #ifndef USE_FDK_AAC
       ->group("")
 #endif

@@ -32,8 +32,8 @@ void fdk_aac_init(::HANDLE_AACENCODER* handle,
       ::AACENC_OK) {
     throw std::runtime_error("Unable to set the bitrate");
   }
-  if (::aacEncoder_SetParam(*handle, ::AACENC_TRANSMUX, ::TT_MP4_ADTS) !=
-      ::AACENC_OK) {
+  if (::aacEncoder_SetParam(*handle, ::AACENC_TRANSMUX,
+                            params.transport_type) != ::AACENC_OK) {
     throw std::runtime_error("Unable to set the ADTS transmux");
   }
   if (::aacEncoder_SetParam(*handle, ::AACENC_AFTERBURNER,

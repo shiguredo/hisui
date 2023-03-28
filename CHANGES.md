@@ -11,6 +11,36 @@
 
 ## develop
 
+## 2023.1.0
+
+- [FIX] --out-audio-codec の説明が間違っているのを修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/110
+- [CHANGE] tarball に "hisui-${HISUI_VERSION}" ディレクトリを含める
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/108
+- [UPDATE] 依存ライブラリの更新
+    - @haruyama
+    - `boost` を `1.81.0` に
+    - `CLI11` を `2.3.2` に
+    - `fmt` を `9.1.0` に
+    - `spdlog` を `1.11.0` に
+    - `libvpx` を `v1.13.0` に
+    - `cpp-mp4` を `2023.1.0` に
+    - `stb` を `5736b15f7ea0ffb08dd38af21067c314d6a3aae9` に
+    - https://github.com/shiguredo/hisui/pull/106
+- [FIX] Safari, Windows Media Player での再生の問題を修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/104
+- [CHANGE] layout: レイアウト指定ファイル, report-*.json, *.webm は sources から常に除外する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/103
+- [FIX] Core dump する場合の修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/101
+- [FIX] オーバーラップする間隔の検査時に start < end な間隔のみを利用する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/100
 - [UPDATE] deprecated になった actions/create-release と actions/upload-release の利用をやめて softprops/action-gh-release を利用する
     - @melpon
 - [UPDATE] GitHub Actions の各種バージョンを上げる
