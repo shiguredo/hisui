@@ -5,7 +5,7 @@
 BOOST_AUTO_TEST_SUITE(version)
 
 BOOST_AUTO_TEST_CASE(get_hisui_version) {
-  BOOST_REQUIRE_EQUAL("2022.1.0", hisui::version::get_hisui_version());
+  BOOST_REQUIRE_EQUAL("2023.1.1", hisui::version::get_hisui_version());
 }
 
 BOOST_AUTO_TEST_SUITE_END()
