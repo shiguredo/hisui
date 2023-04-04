@@ -118,8 +118,8 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
 Apache License 2.0
 
 ```
-Copyright 2020-2022, HARUYAMA Seigo (Original Author)
-Copyright 2020-2022, Shiguredo Inc.
+Copyright 2020-2023, HARUYAMA Seigo (Original Author)
+Copyright 2020-2023, Shiguredo Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
