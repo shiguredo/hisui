@@ -32,7 +32,8 @@ std::size_t Sequencer::getSize() const {
   return m_size;
 }
 
-MakeSequenceResult make_sequence(const std::vector<hisui::Archive>& archives) {
+MakeSequenceResult make_sequence(
+    const std::vector<hisui::ArchiveItem>& archives) {
   MakeSequenceResult result;
   auto& sequence = result.sequence;
   auto& max_width = result.max_width;
@@ -87,4 +88,3 @@ MakeSequenceResult make_sequence(const std::vector<hisui::Archive>& archives) {
 }
 
 }  // namespace hisui::video
-

@@ -39,3 +39,16 @@ gamemoderun ./hisui -f ~/report-XXX.json --libvpx-threads 4 --libvp9-tile-column
 - [mrintrepide/VP9 Encode Guide.md](https://gist.github.com/mrintrepide/3033c35ee9557e66cff7806f48dbd339)
 - [VP9 Encoding Guide - wiki](http://wiki.webmproject.org/ffmpeg/vp9-encoding-guide)
 - [FeralInteractive/gamemode: Optimise Linux system performance on demand](https://github.com/FeralInteractive/gamemode)
+
+## Windows の VirtualBox 上で hisui を実行したらエラーが発生した
+
+Windows の VirtualBox 上で hisui を実行した際にエラーが発生した事象が確認されています。
+Hyper-V を無効にすることで事象が解消されることを確認しています。
+
+### 参考
+https://forums.virtualbox.org/viewtopic.php?f=6&t=101917
+
+## 分割録画した映像を合成したい
+
+hisui は現在分割録画ファイルからの合成に対応していません。
+Sora の録画ファイルは単一録画ファイルを生成するようにしてご利用ください。

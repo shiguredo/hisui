@@ -94,7 +94,7 @@ BOOST_AUTO_TEST_CASE(merge_yuv_planes_from_top_left_2x2c) {
 }
 
 BOOST_AUTO_TEST_CASE(create_black_yuv_image_1) {
-  hisui::video::YUVImage* yuv = hisui::video::create_black_yuv_image(4, 2);
+  auto yuv = hisui::video::create_black_yuv_image(4, 2);
 
   BOOST_REQUIRE(yuv->checkWidthAndHeight(4, 2));
   BOOST_REQUIRE_EQUAL(4, yuv->getWidth(0));
@@ -114,11 +114,10 @@ BOOST_AUTO_TEST_CASE(create_black_yuv_image_1) {
                                   yuv->yuv[1] + 2);
   BOOST_REQUIRE_EQUAL_COLLECTIONS(expected_v, expected_v + 2, yuv->yuv[2],
                                   yuv->yuv[2] + 2);
-  delete yuv;
 }
 
 BOOST_AUTO_TEST_CASE(create_black_yuv_image_2) {
-  hisui::video::YUVImage* yuv = hisui::video::create_black_yuv_image(3, 2);
+  auto yuv = hisui::video::create_black_yuv_image(3, 2);
 
   BOOST_REQUIRE(yuv->checkWidthAndHeight(3, 2));
   BOOST_REQUIRE_EQUAL(3, yuv->getWidth(0));
@@ -140,11 +139,10 @@ BOOST_AUTO_TEST_CASE(create_black_yuv_image_2) {
                                   yuv->yuv[1] + 2);
   BOOST_REQUIRE_EQUAL_COLLECTIONS(expected_v, expected_v + 2, yuv->yuv[2],
                                   yuv->yuv[2] + 2);
-  delete yuv;
 }
 
 BOOST_AUTO_TEST_CASE(YUVIMage_setWidthAndHeight_1) {
-  hisui::video::YUVImage* yuv = hisui::video::create_black_yuv_image(3, 2);
+  auto yuv = hisui::video::create_black_yuv_image(3, 2);
 
   BOOST_REQUIRE(yuv->checkWidthAndHeight(3, 2));
   BOOST_REQUIRE_EQUAL(3, yuv->getWidth(0));
@@ -163,8 +161,6 @@ BOOST_AUTO_TEST_CASE(YUVIMage_setWidthAndHeight_1) {
   BOOST_REQUIRE_EQUAL(4, yuv->getHeight(0));
   BOOST_REQUIRE_EQUAL(2, yuv->getHeight(1));
   BOOST_REQUIRE_EQUAL(2, yuv->getHeight(2));
-
-  delete yuv;
 }
 
 BOOST_AUTO_TEST_SUITE_END()

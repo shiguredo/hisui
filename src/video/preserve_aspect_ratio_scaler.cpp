@@ -22,14 +22,11 @@ PreserveAspectRatioScaler::PreserveAspectRatioScaler(
     const std::uint32_t t_height,
     const libyuv::FilterMode t_filter_mode)
     : Scaler(t_width, t_height), m_filter_mode(t_filter_mode) {
-  m_intermediate = new YUVImage(m_width, m_height);
+  m_intermediate = std::make_shared<YUVImage>(m_width, m_height);
 }
 
-PreserveAspectRatioScaler::~PreserveAspectRatioScaler() {
-  delete m_intermediate;
-}
-
-const YUVImage* PreserveAspectRatioScaler::scale(const YUVImage* src) {
+const std::shared_ptr<YUVImage> PreserveAspectRatioScaler::scale(
+    const std::shared_ptr<YUVImage> src) {
   const auto src_width = src->getWidth(0);
   const auto src_height = src->getHeight(0);
 
@@ -50,8 +47,8 @@ const YUVImage* PreserveAspectRatioScaler::scale(const YUVImage* src) {
   return marginInHeightScale(src, src_height, width_ratio);
 }  // namespace hisui::video
 
-const YUVImage* PreserveAspectRatioScaler::marginInHeightScale(
-    const YUVImage* src,
+const std::shared_ptr<YUVImage> PreserveAspectRatioScaler::marginInHeightScale(
+    const std::shared_ptr<YUVImage> src,
     const std::uint32_t src_height,
     const boost::rational<std::uint32_t>& width_ratio) {
   const std::uint32_t intermediate_height =
@@ -100,8 +97,8 @@ const YUVImage* PreserveAspectRatioScaler::marginInHeightScale(
   return m_scaled;
 }
 
-const YUVImage* PreserveAspectRatioScaler::marginInWidthScale(
-    const YUVImage* src,
+const std::shared_ptr<YUVImage> PreserveAspectRatioScaler::marginInWidthScale(
+    const std::shared_ptr<YUVImage> src,
     const std::uint32_t src_width,
     const boost::rational<std::uint32_t>& height_ratio) {
   const std::uint32_t intermediate_width =
@@ -158,7 +155,8 @@ const YUVImage* PreserveAspectRatioScaler::marginInWidthScale(
   return m_scaled;
 }
 
-const YUVImage* PreserveAspectRatioScaler::simpleScale(const YUVImage* src) {
+const std::shared_ptr<YUVImage> PreserveAspectRatioScaler::simpleScale(
+    const std::shared_ptr<YUVImage> src) {
   const int ret = libyuv::I420Scale(
       src->yuv[0], static_cast<int>(src->getWidth(0)), src->yuv[1],
       static_cast<int>(src->getWidth(1)), src->yuv[2],

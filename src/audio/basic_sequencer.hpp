@@ -11,7 +11,7 @@
 
 namespace hisui {
 
-class Archive;
+class ArchiveItem;
 
 }
 
@@ -19,7 +19,7 @@ namespace hisui::audio {
 
 class BasicSequencer : public Sequencer {
  public:
-  explicit BasicSequencer(const std::vector<hisui::Archive>&);
+  explicit BasicSequencer(const std::vector<hisui::ArchiveItem>&);
 
   void getSamples(std::vector<std::pair<std::int16_t, std::int16_t>>*,
                   const std::uint64_t);

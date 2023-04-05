@@ -24,7 +24,7 @@ ImageSource::ImageSource(const std::string& file_path) {
   spdlog::trace("ImageSource file_path={}, width={}, height={}", file_path,
                 m_width, m_height);
 
-  m_yuv_image = new YUVImage(m_width, m_height);
+  m_yuv_image = std::make_shared<YUVImage>(m_width, m_height);
 
   const int width2 = (m_width + 1) >> 1;
   const auto ret = libyuv::ABGRToI420(
@@ -39,11 +39,7 @@ ImageSource::ImageSource(const std::string& file_path) {
   }
 }
 
-ImageSource::~ImageSource() {
-  delete m_yuv_image;
-}
-
-const YUVImage* ImageSource::getYUV(const std::uint64_t) {
+const std::shared_ptr<YUVImage> ImageSource::getYUV(const std::uint64_t) {
   return m_yuv_image;
 }
 

@@ -22,47 +22,10 @@
 #include <boost/json/system_error.hpp>
 #include <boost/json/value.hpp>
 
+#include "archive_item.hpp"
+#include "util/json.hpp"
+
 namespace hisui {
-
-Archive::Archive(const std::filesystem::path& t_path,
-                 const std::string& m_connection_id,
-                 const double t_start_time_offset,
-                 const double t_stop_time_offset)
-    : m_path(t_path),
-      m_connection_id(m_connection_id),
-      m_start_time_offset(t_start_time_offset),
-      m_stop_time_offset(t_stop_time_offset) {}
-
-std::filesystem::path Archive::getPath() const {
-  return m_path;
-}
-
-std::string Archive::getConnectionID() const {
-  return m_connection_id;
-}
-
-double Archive::getStartTimeOffset() const {
-  return m_start_time_offset;
-}
-
-double Archive::getStopTimeOffset() const {
-  return m_stop_time_offset;
-}
-
-void Archive::adjustTimeOffsets(double diff) {
-  m_start_time_offset += diff;
-  m_stop_time_offset += diff;
-}
-
-Archive& Archive::operator=(const Archive& other) {
-  if (this != &other) {
-    this->m_path = other.m_path;
-    this->m_connection_id = other.m_connection_id;
-    this->m_start_time_offset = other.m_start_time_offset;
-    this->m_stop_time_offset = other.m_stop_time_offset;
-  }
-  return *this;
-}
 
 Metadata::Metadata(const std::string& file_path, const boost::json::value& jv)
     : m_path(file_path) {
@@ -82,12 +45,13 @@ Metadata::Metadata(const std::string& file_path, const boost::json::value& jv)
     } else {
       throw std::runtime_error("a.if_object() failed");
     }
-    auto a_file_path = get_string_from_json_object(o, "file_path");
-    auto a_connection_id = get_string_from_json_object(o, "connection_id");
+    auto a_file_path = hisui::util::get_string_from_json_object(o, "file_path");
+    auto a_connection_id =
+        hisui::util::get_string_from_json_object(o, "connection_id");
     double a_start_time_offset =
-        get_double_from_json_object(o, "start_time_offset");
+        hisui::util::get_double_from_json_object(o, "start_time_offset");
     double a_stop_time_offset =
-        get_double_from_json_object(o, "stop_time_offset");
+        hisui::util::get_double_from_json_object(o, "stop_time_offset");
     spdlog::debug("{} {} {} {}", a_file_path, a_connection_id,
                   a_start_time_offset, a_stop_time_offset);
     archives.emplace_back(a_file_path, a_connection_id, a_start_time_offset,
@@ -128,14 +92,14 @@ Metadata::Metadata(const std::string& file_path, const boost::json::value& jv)
             fmt::format("file is not found: {}", get<0>(a)));
       }
     }
-    Archive archive(path, get<1>(a), get<2>(a), get<3>(a));
+    ArchiveItem archive(path, get<1>(a), get<2>(a), get<3>(a));
     m_archives.push_back(archive);
   }
   setTimeOffsets();
   std::filesystem::current_path(current_path);
 }
 
-Metadata::Metadata(const std::vector<Archive>& t_archives)
+Metadata::Metadata(const std::vector<ArchiveItem>& t_archives)
     : m_archives(t_archives) {
   setTimeOffsets();
 }
@@ -151,7 +115,7 @@ void Metadata::setTimeOffsets() {
   }
 }
 
-std::vector<Archive> Metadata::getArchives() const {
+std::vector<ArchiveItem> Metadata::getArchiveItems() const {
   return m_archives;
 }
 
@@ -175,8 +139,8 @@ boost::json::array Metadata::prepare(const boost::json::value& jv) {
     throw std::runtime_error("jv.if_object() failed");
   }
 
-  m_recording_id = get_string_from_json_object(j, "recording_id");
-  m_created_at = get_double_from_json_object(j, "created_at");
+  m_recording_id = hisui::util::get_string_from_json_object(j, "recording_id");
+  m_created_at = hisui::util::get_double_from_json_object(j, "created_at");
 
   if (j["archives"] == nullptr) {
     throw std::invalid_argument("not metadata json file: {}");
@@ -199,28 +163,6 @@ boost::json::string Metadata::getRecordingID() const {
   return m_recording_id;
 }
 
-boost::json::string get_string_from_json_object(boost::json::object o,
-                                                const std::string& key) {
-  if (auto p = o[key].if_string()) {
-    return *p;
-  }
-  throw std::runtime_error(fmt::format("o[{}].if_string() failed", key));
-}
-
-double get_double_from_json_object(boost::json::object o,
-                                   const std::string& key) {
-  if (o[key].is_number()) {
-    boost::json::error_code ec;
-    auto value = o[key].to_number<double>(ec);
-    if (ec) {
-      throw std::runtime_error(
-          fmt::format("o[{}].to_number() failed: {}", key, ec.message()));
-    }
-    return value;
-  }
-  throw std::runtime_error(fmt::format("o[{}] is not number", key));
-}
-
 Metadata parse_metadata(const std::string& filename) {
   std::ifstream i(filename);
   if (!i.is_open()) {
@@ -233,7 +175,7 @@ Metadata parse_metadata(const std::string& filename) {
   boost::json::value jv = boost::json::parse(string_json, ec);
   if (ec) {
     throw std::runtime_error(fmt::format(
-        "failed to parse metadata json file: message", ec.message()));
+        "failed to parse metadata json file: message: {}", ec.message()));
   }
 
   Metadata metadata(filename, jv);
@@ -242,7 +184,7 @@ Metadata parse_metadata(const std::string& filename) {
                 metadata.getMinStartTimeOffset());
   spdlog::debug("metadata max_start_time_offset={}",
                 metadata.getMaxStopTimeOffset());
-  for (const auto& archive : metadata.getArchives()) {
+  for (const auto& archive : metadata.getArchiveItems()) {
     spdlog::debug("  file_path='{} start_time_offset={} stop_time_offset={}",
                   archive.getPath().string(), archive.getStartTimeOffset(),
                   archive.getStopTimeOffset());
@@ -273,20 +215,20 @@ void MetadataSet::setPrefered(const Metadata& t_preferred) {
   }
 }
 
-std::vector<Archive> MetadataSet::getArchives() const {
+std::vector<ArchiveItem> MetadataSet::getArchiveItems() const {
   if (m_has_preferred) {
-    std::vector<hisui::Archive> archives;
-    auto a0 = m_normal.getArchives();
+    std::vector<hisui::ArchiveItem> archives;
+    auto a0 = m_normal.getArchiveItems();
     archives.insert(std::end(archives), std::begin(a0), std::end(a0));
-    auto a1 = m_preferred.getArchives();
+    auto a1 = m_preferred.getArchiveItems();
     archives.insert(std::end(archives), std::begin(a1), std::end(a1));
     return archives;
   }
-  return m_normal.getArchives();
+  return m_normal.getArchiveItems();
 }
 
-std::vector<Archive> MetadataSet::getNormalArchives() const {
-  return m_normal.getArchives();
+std::vector<ArchiveItem> MetadataSet::getNormalArchives() const {
+  return m_normal.getArchiveItems();
 }
 
 Metadata MetadataSet::getNormal() const {
@@ -329,10 +271,10 @@ void Metadata::copyWithoutArchives(const Metadata& orig) {
   m_recording_id = orig.m_recording_id;
 }
 
-std::vector<Archive> Metadata::deleteArchivesByConnectionID(
+std::vector<ArchiveItem> Metadata::deleteArchivesByConnectionID(
     const std::string& connection_id) {
-  std::vector<Archive> undeleted{};
-  std::vector<Archive> deleted{};
+  std::vector<ArchiveItem> undeleted{};
+  std::vector<ArchiveItem> deleted{};
 
   for (const auto& archive : m_archives) {
     if (archive.getConnectionID() == connection_id) {
@@ -346,7 +288,7 @@ std::vector<Archive> Metadata::deleteArchivesByConnectionID(
   return deleted;
 }
 
-void Metadata::setArchives(const std::vector<Archive>& t_archives) {
+void Metadata::setArchives(const std::vector<ArchiveItem>& t_archives) {
   m_archives = t_archives;
 }
 

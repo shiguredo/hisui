@@ -4,6 +4,7 @@
 #include <vpx/vpx_image.h>
 
 #include <cstdint>
+#include <memory>
 
 #include "video/decoder.hpp"
 
@@ -19,11 +20,11 @@ class YUVImage;
 
 class VPXDecoder : public Decoder {
  public:
-  explicit VPXDecoder(hisui::webm::input::VideoContext*);
+  explicit VPXDecoder(std::shared_ptr<hisui::webm::input::VideoContext>);
 
   ~VPXDecoder();
 
-  const YUVImage* getImage(const std::uint64_t);
+  const std::shared_ptr<YUVImage> getImage(const std::uint64_t);
 
  private:
   ::vpx_codec_ctx_t m_codec;
@@ -31,7 +32,7 @@ class VPXDecoder : public Decoder {
   std::uint64_t m_next_timestamp = 0;
   ::vpx_image_t* m_current_vpx_image = nullptr;
   ::vpx_image_t* m_next_vpx_image = nullptr;
-  YUVImage* m_current_yuv_image = nullptr;
+  std::shared_ptr<YUVImage> m_current_yuv_image = nullptr;
   bool m_report_enabled = false;
 
   void updateVPXImage(const std::uint64_t);

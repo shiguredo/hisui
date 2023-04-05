@@ -8,7 +8,7 @@
 BOOST_AUTO_TEST_SUITE(vpx)
 
 BOOST_AUTO_TEST_CASE(update_yuv_image_by_vpx_image_1) {
-  hisui::video::YUVImage* yuv_image = new hisui::video::YUVImage(4, 2);
+  auto yuv_image = std::make_shared<hisui::video::YUVImage>(4, 2);
   auto vpx_image = ::vpx_img_alloc(nullptr, VPX_IMG_FMT_I420, 4, 2, 0);
   unsigned char buf0[] = {0, 0, 0, 0, 1, 1, 1, 1};
   unsigned char buf1[] = {2, 2};
@@ -30,7 +30,7 @@ BOOST_AUTO_TEST_CASE(update_yuv_image_by_vpx_image_1) {
 }
 
 BOOST_AUTO_TEST_CASE(update_yuv_image_by_vpx_image_2) {
-  hisui::video::YUVImage* yuv_image = new hisui::video::YUVImage(6, 2);
+  auto yuv_image = std::make_shared<hisui::video::YUVImage>(6, 2);
   auto vpx_image = ::vpx_img_alloc(nullptr, VPX_IMG_FMT_I420, 4, 2, 0);
   unsigned char buf0[] = {0, 0, 0, 0, 1, 1, 1, 1};
   unsigned char buf1[] = {2, 2};
@@ -52,7 +52,7 @@ BOOST_AUTO_TEST_CASE(update_yuv_image_by_vpx_image_2) {
 }
 
 BOOST_AUTO_TEST_CASE(update_yuv_image_by_vpx_image_3) {
-  hisui::video::YUVImage* yuv_image = new hisui::video::YUVImage(6, 2);
+  auto yuv_image = std::make_shared<hisui::video::YUVImage>(6, 2);
   auto vpx_image = ::vpx_img_alloc(nullptr, VPX_IMG_FMT_I420, 4, 2, 8);
   unsigned char buf0[] = {0, 0, 0, 0, 100, 100, 100, 100,
                           1, 1, 1, 1, 100, 100, 100, 100};

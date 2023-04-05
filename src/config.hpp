@@ -91,6 +91,8 @@ class Config {
   std::string success_report = "";
   std::string failure_report = "";
 
+  std::string layout = "";
+
   // 以降は SPEC.rst にないオプション
   bool show_progress_bar = true;
 

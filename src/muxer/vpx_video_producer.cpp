@@ -1,6 +1,7 @@
 #include "muxer/vpx_video_producer.hpp"
 
 #include <cstdint>
+#include <memory>
 
 #include <boost/rational.hpp>
 
@@ -18,10 +19,9 @@
 namespace hisui::muxer {
 
 VPXVideoProducer::VPXVideoProducer(const hisui::Config& t_config,
-                                   const hisui::Metadata& t_metadata,
-                                   const std::uint64_t timescale)
+                                   const VPXVideoProducerParameters& params)
     : VideoProducer({.show_progress_bar = t_config.show_progress_bar}) {
-  m_sequencer = new hisui::video::BasicSequencer(t_metadata.getArchives());
+  m_sequencer = std::make_shared<hisui::video::BasicSequencer>(params.archives);
 
   const auto scaling_width = t_config.scaling_width != 0
                                  ? t_config.scaling_width
@@ -32,13 +32,13 @@ VPXVideoProducer::VPXVideoProducer(const hisui::Config& t_config,
 
   switch (t_config.video_composer) {
     case hisui::config::VideoComposer::Grid:
-      m_composer = new hisui::video::GridComposer(
+      m_composer = std::make_shared<hisui::video::GridComposer>(
           scaling_width, scaling_height, m_sequencer->getSize(),
           t_config.max_columns, t_config.video_scaler,
           t_config.libyuv_filter_mode);
       break;
     case hisui::config::VideoComposer::ParallelGrid:
-      m_composer = new hisui::video::ParallelGridComposer(
+      m_composer = std::make_shared<hisui::video::ParallelGridComposer>(
           scaling_width, scaling_height, m_sequencer->getSize(),
           t_config.max_columns, t_config.video_scaler,
           t_config.libyuv_filter_mode);
@@ -48,10 +48,10 @@ VPXVideoProducer::VPXVideoProducer(const hisui::Config& t_config,
   hisui::video::VPXEncoderConfig vpx_config(m_composer->getWidth(),
                                             m_composer->getHeight(), t_config);
 
-  m_encoder =
-      new hisui::video::BufferVPXEncoder(&m_buffer, vpx_config, timescale);
+  m_encoder = std::make_shared<hisui::video::BufferVPXEncoder>(
+      &m_buffer, vpx_config, params.timescale);
 
-  m_max_stop_time_offset = t_metadata.getMaxStopTimeOffset();
+  m_duration = params.duration;
   m_frame_rate = t_config.out_video_frame_rate;
 }
 

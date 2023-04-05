@@ -43,7 +43,7 @@ VPXEncoderConfig::VPXEncoderConfig(const std::uint32_t t_width,
       tile_columns(config.libvp9_tile_columns),
       row_mt(config.libvp9_row_mt) {}
 
-void update_yuv_image_by_vpx_image(YUVImage* yuv_image,
+void update_yuv_image_by_vpx_image(std::shared_ptr<YUVImage> yuv_image,
                                    const vpx_image_t* vpx_image) {
   const std::array<int, 3> PLANES_YUV = {VPX_PLANE_Y, VPX_PLANE_U, VPX_PLANE_V};
 

@@ -3,14 +3,16 @@
 #include <opus_types.h>
 
 #include <cstdint>
+#include <vector>
 
+#include "archive_item.hpp"
 #include "constants.hpp"
 #include "muxer/audio_producer.hpp"
 
 namespace hisui {
 
 class Config;
-class MetadataSet;
+class AudioMetadata;
 
 }  // namespace hisui
 
@@ -20,7 +22,8 @@ class OpusAudioProducer : public AudioProducer {
  public:
   OpusAudioProducer(
       const hisui::Config&,
-      const hisui::MetadataSet&,
+      const std::vector<hisui::ArchiveItem>,
+      const double t_duration,
       const std::uint64_t timescale = hisui::Constants::NANO_SECOND);
   ::opus_int32 getSkip() const;
 

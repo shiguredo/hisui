@@ -32,10 +32,13 @@ void tag_invoke(const boost::json::value_from_tag&,
                 const VideoDecoderInfo& vdi);
 
 struct ResolutionWithTimestamp {
-  const std::uint64_t timestamp;
-  const std::uint32_t width;
-  const std::uint32_t height;
+  std::uint64_t timestamp;
+  std::uint32_t width;
+  std::uint32_t height;
 };
+
+bool operator==(ResolutionWithTimestamp const& left,
+                ResolutionWithTimestamp const& right);
 
 void tag_invoke(const boost::json::value_from_tag&,
                 boost::json::value& jv,  // NOLINT

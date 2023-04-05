@@ -11,6 +11,74 @@
 
 ## develop
 
+## 2023.1.1
+
+- [UPDATE] バージョンを 2023.1.1 に上げる
+    - @torikizi
+    - 依存ライブラリの `cpp-mp4` を `2023.1.1` にするアップデートも含む
+    - https://github.com/shiguredo/hisui/pull/118
+- [FIX] config の typo を修正
+    - @torikizi
+    - https://github.com/shiguredo/hisui/pull/117
+
+## 2023.1.0
+
+- [FIX] --out-audio-codec の説明が間違っているのを修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/110
+- [CHANGE] tarball に "hisui-${HISUI_VERSION}" ディレクトリを含める
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/108
+- [UPDATE] 依存ライブラリの更新
+    - @haruyama
+    - `boost` を `1.81.0` に
+    - `CLI11` を `2.3.2` に
+    - `fmt` を `9.1.0` に
+    - `spdlog` を `1.11.0` に
+    - `libvpx` を `v1.13.0` に
+    - `cpp-mp4` を `2023.1.0` に
+    - `stb` を `5736b15f7ea0ffb08dd38af21067c314d6a3aae9` に
+    - https://github.com/shiguredo/hisui/pull/106
+- [FIX] Safari, Windows Media Player での再生の問題を修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/104
+- [CHANGE] layout: レイアウト指定ファイル, report-*.json, *.webm は sources から常に除外する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/103
+- [FIX] Core dump する場合の修正
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/101
+- [FIX] オーバーラップする間隔の検査時に start < end な間隔のみを利用する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/100
+- [UPDATE] deprecated になった actions/create-release と actions/upload-release の利用をやめて softprops/action-gh-release を利用する
+    - @melpon
+- [UPDATE] GitHub Actions の各種バージョンを上げる
+    - @melpon
+- [ADD] Ubuntu 20.04 ARM64 ビルドに対応
+    - @melpon
+- [ADD] Ubuntu 22.04 に対応
+    - @melpon
+
+## 2022.1.0
+
+- [UPDATE] 依存ライブラリの更新
+    - @haruyama
+    - `boost` を `1.78.0` に
+    - `CLI11` を `2.1.2` に
+    - `fmt` を `8.0.1` に
+    - `spdlog` を `1.9.2` に
+    - `rapidcsv` を `8.53` に
+    - `libvpx` を `v.1.11.0` に
+    - `cpp-mp4` を `2022.1.0` に
+    - `stb` を `af1a5bc352164740c1cc1354942b1c6b72eacb8a` に
+- [CHANGE] Boost::JSON を header-only で利用する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/91
+- [CHANGE] レイアウト機能
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/48
+
 ## 2021.3
 
 - [ADD] [実験的機能] 画面共有合成機能を追加する

@@ -1,0 +1,43 @@
+{
+  "audio_sources": [
+  ],
+  "audio_sources_excluded": [],
+  "bitrate": 1000,
+  "format": "webm",
+  "resolution": "640x480",
+  "trim": false,
+  "video_layout": {
+    "base": {
+      "cells_excluded": [],
+      "height": 0,
+      "max_columns": 0,
+      "max_rows": 0,
+      "reuse": "show_oldest",
+      "video_sources": [
+        "0-2.json"
+      ],
+      "video_sources_excluded": [],
+      "width": 0,
+      "x_pos": 0,
+      "y_pos": 0,
+      "z_pos": 0
+    },
+    "overlay": {
+      "cells_excluded": [1, 3],
+      "height": 164,
+      "max_columns": 1,
+      "max_rows": 1,
+      "reuse": "show_newest",
+      "video_sources": [
+        "0-2.json",
+        "3-5.json"
+      ],
+      "video_sources_excluded": [],
+      "width": 244,
+      "x_pos": 100,
+      "y_pos": 200,
+      "z_pos": 1
+    }
+  }
+}
+

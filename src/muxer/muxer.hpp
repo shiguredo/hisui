@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include <boost/cstdint.hpp>
 #include <boost/rational.hpp>
@@ -18,7 +19,7 @@ class VideoProducer;
 
 class Muxer {
  public:
-  virtual ~Muxer() {}
+  virtual ~Muxer() = default;
   virtual void setUp() = 0;
   virtual void run() = 0;
   virtual void cleanUp() = 0;
@@ -26,8 +27,8 @@ class Muxer {
  protected:
   void mux();
 
-  VideoProducer* m_video_producer;
-  AudioProducer* m_audio_producer;
+  std::shared_ptr<VideoProducer> m_video_producer;
+  std::shared_ptr<AudioProducer> m_audio_producer;
   boost::rational<std::uint64_t> m_timescale_ratio = 1;
 
  private:

@@ -7,13 +7,13 @@ cmake_policy(SET CMP0091 NEW)
 
 include(cmake/env.cmake)
 
-set_cache_string_from_env(BOOST_VERSION 1.76.0 "Boost のバージョン")
-set_cache_string_from_env(CLI11_VERSION 1.9.1 "CLI11 のバージョン")
-set_cache_string_from_env(CPP_MP4_VERSION 2021.3 "cpp-mp4 のバージョン")
-set_cache_string_from_env(FMT_VERSION 7.1.3 "fmt のバージョン")
+set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
+set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
+set_cache_string_from_env(CPP_MP4_VERSION 2023.1.1 "cpp-mp4 のバージョン")
+set_cache_string_from_env(FMT_VERSION 9.1.0 "fmt のバージョン")
 set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
-set_cache_string_from_env(SPDLOG_VERSION 1.8.2 "spdlog のバージョン")
-set_cache_string_from_env(STB_VERSION b42009b3b9d4ca35bc703f5310eedc74f584be58 "stb のバージョン")
+set_cache_string_from_env(SPDLOG_VERSION 1.11.0 "spdlog のバージョン")
+set_cache_string_from_env(STB_VERSION 5736b15f7ea0ffb08dd38af21067c314d6a3aae9 "stb のバージョン")
 
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
@@ -44,6 +44,13 @@ set(CMAKE_C_FLAGS_PROFILE "-pg -O3 -DNDEBUG -march=native -mtune=native")
 include(cmake/tools.cmake)
 
 CPMAddPackage(
+    NAME boost_align
+    GITHUB_REPOSITORY boostorg/align
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
     NAME boost_assert
     GITHUB_REPOSITORY boostorg/assert
     GIT_TAG boost-${BOOST_VERSION}
@@ -58,8 +65,29 @@ CPMAddPackage(
     )
 
 CPMAddPackage(
+    NAME boost_container
+    GITHUB_REPOSITORY boostorg/container
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
     NAME boost_core
     GITHUB_REPOSITORY boostorg/core
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_describe
+    GITHUB_REPOSITORY boostorg/describe
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_exception
+    GITHUB_REPOSITORY boostorg/exception
     GIT_TAG boost-${BOOST_VERSION}
     DOWNLOAD_ONLY YES
     )
@@ -72,10 +100,38 @@ CPMAddPackage(
     )
 
 CPMAddPackage(
+    NAME boost_intrusive
+    GITHUB_REPOSITORY boostorg/intrusive
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_io
+    GITHUB_REPOSITORY boostorg/io
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
     NAME boost_json
     GITHUB_REPOSITORY boostorg/json
     GIT_TAG boost-${BOOST_VERSION}
-    OPTIONS "BOOST_JSON_STANDALONE On"
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_move
+    GITHUB_REPOSITORY boostorg/move
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_mp11
+    GITHUB_REPOSITORY boostorg/mp11
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
     )
 
 CPMAddPackage(
@@ -86,8 +142,22 @@ CPMAddPackage(
     )
 
 CPMAddPackage(
+    NAME boost_smart_ptr
+    GITHUB_REPOSITORY boostorg/smart_ptr
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
     NAME boost_static_assert
     GITHUB_REPOSITORY boostorg/static_assert
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_system
+    GITHUB_REPOSITORY boostorg/system
     GIT_TAG boost-${BOOST_VERSION}
     DOWNLOAD_ONLY YES
     )
@@ -139,6 +209,13 @@ CPMAddPackage(
     )
 
 CPMAddPackage(
+    NAME boost_variant2
+    GITHUB_REPOSITORY boostorg/variant2
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
     NAME spdlog
     GITHUB_REPOSITORY gabime/spdlog
     VERSION ${SPDLOG_VERSION}
@@ -180,34 +257,53 @@ endif()
 
 target_sources(hisui
     PRIVATE
+    src/archive_item.cpp
+    src/audio/basic_sequencer.cpp
+    src/audio/buffer_opus_encoder.cpp
+    src/audio/mixer.cpp
+    src/audio/opus.cpp
+    src/audio/opus_decoder.cpp
+    src/audio/webm_source.cpp
     src/config.cpp
     src/datetime.cpp
     src/hisui.cpp
+    src/layout/archive.cpp
+    src/layout/cell.cpp
+    src/layout/cell_util.cpp
+    src/layout/compose.cpp
+    src/layout/composer.cpp
+    src/layout/grid.cpp
+    src/layout/interval.cpp
+    src/layout/metadata.cpp
+    src/layout/overlap.cpp
+    src/layout/region.cpp
+    src/layout/source.cpp
+    src/layout/video_source.cpp
+    src/layout/vpx_video_producer.cpp
     src/metadata.cpp
-    src/audio/buffer_opus_encoder.cpp
-    src/audio/mixer.cpp
-    src/audio/opus_decoder.cpp
-    src/audio/opus.cpp
-    src/audio/basic_sequencer.cpp
-    src/audio/webm_source.cpp
     src/muxer/async_webm_muxer.cpp
     src/muxer/audio_producer.cpp
+    src/muxer/faststart_mp4_muxer.cpp
     src/muxer/mp4_muxer.cpp
     src/muxer/multi_channel_vpx_video_producer.cpp
-    src/muxer/opus_audio_producer.cpp
-    src/muxer/simple_mp4_muxer.cpp
-    src/muxer/faststart_mp4_muxer.cpp
     src/muxer/muxer.cpp
     src/muxer/no_video_producer.cpp
+    src/muxer/opus_audio_producer.cpp
+    src/muxer/simple_mp4_muxer.cpp
     src/muxer/video_producer.cpp
     src/muxer/vpx_video_producer.cpp
     src/report/reporter.cpp
+    src/util/file.cpp
     src/util/interval.cpp
+    src/util/json.cpp
+    src/util/wildcard.cpp
     src/version/version.cpp
+    src/video/basic_sequencer.cpp
     src/video/buffer_vpx_encoder.cpp
     src/video/composer.cpp
     src/video/decoder.cpp
     src/video/grid_composer.cpp
+    src/video/image_source.cpp
     src/video/multi_channel_sequencer.cpp
     src/video/openh264.cpp
     src/video/openh264_decoder.cpp
@@ -215,16 +311,14 @@ target_sources(hisui
     src/video/parallel_grid_composer.cpp
     src/video/preserve_aspect_ratio_scaler.cpp
     src/video/scaler.cpp
-    src/video/basic_sequencer.cpp
     src/video/sequencer.cpp
     src/video/simple_scaler.cpp
-    src/video/image_source.cpp
-    src/video/webm_source.cpp
     src/video/vpx.cpp
     src/video/vpx_decoder.cpp
+    src/video/webm_source.cpp
     src/video/yuv.cpp
-    src/webm/input/context.cpp
     src/webm/input/audio_context.cpp
+    src/webm/input/context.cpp
     src/webm/input/video_context.cpp
     src/webm/output/context.cpp
     third_party/libvpx/third_party/libyuv/source/cpu_id.cc
@@ -255,13 +349,24 @@ target_sources(hisui
 target_include_directories(hisui
     PRIVATE
     src
+    ${boost_align_SOURCE_DIR}/include
     ${boost_assert_SOURCE_DIR}/include
     ${boost_config_SOURCE_DIR}/include
+    ${boost_container_SOURCE_DIR}/include
     ${boost_core_SOURCE_DIR}/include
+    ${boost_describe_SOURCE_DIR}/include
+    ${boost_exception_SOURCE_DIR}/include
     ${boost_integer_SOURCE_DIR}/include
+    ${boost_intrusive_SOURCE_DIR}/include
+    ${boost_io_SOURCE_DIR}/include
     ${boost_json_SOURCE_DIR}/include
+    ${boost_move_SOURCE_DIR}/include
+    ${boost_mp11_SOURCE_DIR}/include
     ${boost_rational_SOURCE_DIR}/include
+    ${boost_variant2_SOURCE_DIR}/include
+    ${boost_smart_ptr_SOURCE_DIR}/include
     ${boost_static_assert_SOURCE_DIR}/include
+    ${boost_system_SOURCE_DIR}/include
     ${boost_throw_exception_SOURCE_DIR}/include
     ${boost_type_traits_SOURCE_DIR}/include
     ${boost_utility_SOURCE_DIR}/include
@@ -282,14 +387,13 @@ set_target_properties(hisui PROPERTIES CXX_STANDARD 20 C_STANDARD 11)
 
 target_link_libraries(hisui
     PRIVATE
-    Boost::json
     dl
     opus
     pthread
     fmt
     shiguredo-mp4
     spdlog
-    ${CMAKE_SOURCE_DIR}/third_party/libvpx/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     )
 
 if(WITH_TEST)

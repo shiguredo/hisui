@@ -35,6 +35,7 @@ target_include_directories(version_test
     ${boost_config_SOURCE_DIR}/include
     ${boost_container_hash_SOURCE_DIR}/include
     ${boost_core_SOURCE_DIR}/include
+    ${boost_describe_SOURCE_DIR}/include
     ${boost_detail_SOURCE_DIR}/include
     ${boost_exception_SOURCE_DIR}/include
     ${boost_function_SOURCE_DIR}/include
@@ -42,6 +43,7 @@ target_include_directories(version_test
     ${boost_io_SOURCE_DIR}/include
     ${boost_iterator_SOURCE_DIR}/include
     ${boost_move_SOURCE_DIR}/include
+    ${boost_mp11_SOURCE_DIR}/include
     ${boost_mpl_SOURCE_DIR}/include
     ${boost_numeric_conversion_SOURCE_DIR}/include
     ${boost_preprocessor_SOURCE_DIR}/include
@@ -54,6 +56,7 @@ target_include_directories(version_test
     ${boost_type_index_SOURCE_DIR}/include
     ${boost_type_traits_SOURCE_DIR}/include
     ${boost_utility_SOURCE_DIR}/include
+    ${boost_variant2_SOURCE_DIR}/include
     ${cpp-mp4_SOURCE_DIR}/include
     ${fmt_SOURCE_DIR}/include
     ${spdlog_SOURCE_DIR}/include
@@ -70,7 +73,7 @@ target_link_libraries(version_test
     dl
     fmt
     shiguredo-mp4
-    ${CMAKE_SOURCE_DIR}/third_party/libvpx/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     )
 
 if(USE_FDK_AAC)

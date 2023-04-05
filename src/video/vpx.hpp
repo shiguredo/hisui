@@ -5,6 +5,7 @@
 #include <vpx/vpx_image.h>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <boost/cstdint.hpp>
@@ -40,7 +41,8 @@ class VPXEncoderConfig {
   const std::uint32_t row_mt;
 };
 
-void update_yuv_image_by_vpx_image(YUVImage*, const ::vpx_image_t*);
+void update_yuv_image_by_vpx_image(std::shared_ptr<YUVImage>,
+                                   const ::vpx_image_t*);
 
 vpx_codec_iface_t* get_vpx_decode_codec_iface_by_fourcc(const std::uint32_t);
 vpx_codec_iface_t* get_vpx_encode_codec_iface_by_fourcc(const std::uint32_t);

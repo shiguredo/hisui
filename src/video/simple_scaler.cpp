@@ -15,7 +15,8 @@ SimpleScaler::SimpleScaler(const std::uint32_t t_width,
                            const libyuv::FilterMode t_filter_mode)
     : Scaler(t_width, t_height), m_filter_mode(t_filter_mode) {}
 
-const YUVImage* SimpleScaler::scale(const YUVImage* src) {
+const std::shared_ptr<YUVImage> SimpleScaler::scale(
+    const std::shared_ptr<YUVImage> src) {
   if (src->getWidth(0) == m_width && src->getHeight(0) == m_height) {
     return src;
   }

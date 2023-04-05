@@ -63,8 +63,9 @@ GridComposer::~GridComposer() {
   }
 }
 
-void GridComposer::compose(std::vector<unsigned char>* composed,
-                           const std::vector<const YUVImage*>& images) {
+void GridComposer::compose(
+    std::vector<unsigned char>* composed,
+    const std::vector<std::shared_ptr<YUVImage>>& images) {
   for (std::size_t i = 0; i < m_size; ++i) {
     m_scaled_images[i] = m_scalers[i]->scale(images[i]);
   }

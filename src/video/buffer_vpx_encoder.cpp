@@ -133,4 +133,3 @@ void BufferVPXEncoder::setResolutionAndBitrate(const std::uint32_t width,
 }
 
 }  // namespace hisui::video
-

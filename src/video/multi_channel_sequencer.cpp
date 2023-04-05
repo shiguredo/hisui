@@ -19,8 +19,8 @@
 namespace hisui::video {
 
 MultiChannelSequencer::MultiChannelSequencer(
-    const std::vector<hisui::Archive>& normal_archives,
-    const std::vector<hisui::Archive>& preferred_archives) {
+    const std::vector<hisui::ArchiveItem>& normal_archives,
+    const std::vector<hisui::ArchiveItem>& preferred_archives) {
   auto normal_result = make_sequence(normal_archives);
 
   m_sequence = normal_result.sequence;
@@ -39,12 +39,8 @@ MultiChannelSequencer::MultiChannelSequencer(
   m_preferred_sequence = preferred_result.sequence;
 }  // namespace hisui::video
 
-MultiChannelSequencer::~MultiChannelSequencer() {
-  delete m_black_yuv_image;
-}
-
 SequencerGetYUVsResult MultiChannelSequencer::getYUVs(
-    std::vector<const YUVImage*>* yuvs,
+    std::vector<std::shared_ptr<YUVImage>>* yuvs,
     const std::uint64_t timestamp) {
   for (const auto& p : m_preferred_sequence) {
     const auto it = std::find_if(

@@ -6,29 +6,34 @@
 
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <utility>
 #include <vector>
 
 #include <progresscpp/ProgressBar.hpp>
 
+#include "audio/basic_sequencer.hpp"
 #include "audio/encoder.hpp"
-#include "audio/sequencer.hpp"
+#include "audio/mixer.hpp"
+#include "config.hpp"
 #include "constants.hpp"
 #include "frame.hpp"
 
 namespace hisui::muxer {
 
 AudioProducer::AudioProducer(const AudioProducerParameters& params)
-    : m_show_progress_bar(params.show_progress_bar) {}
-
-AudioProducer::~AudioProducer() {
-  if (m_sequencer) {
-    delete m_sequencer;
+    : m_duration(params.duration),
+      m_show_progress_bar(params.show_progress_bar) {
+  switch (params.mixer) {
+    case hisui::config::AudioMixer::Simple:
+      m_mix_sample = hisui::audio::mix_sample_simple;
+      break;
+    case hisui::config::AudioMixer::Vttoth:
+      m_mix_sample = hisui::audio::mix_sample_vttoth;
+      break;
   }
-  if (m_encoder) {
-    delete m_encoder;
-  }
+  m_sequencer = std::make_unique<hisui::audio::BasicSequencer>(params.archives);
 }
 
 void AudioProducer::produce() {
@@ -36,7 +41,7 @@ void AudioProducer::produce() {
     std::vector<std::pair<std::int16_t, std::int16_t>> samples;
 
     const std::uint64_t max_time = static_cast<std::uint64_t>(
-        std::ceil(m_max_stop_time_offset * hisui::Constants::PCM_SAMPLE_RATE));
+        std::ceil(m_duration * hisui::Constants::PCM_SAMPLE_RATE));
 
     progresscpp::ProgressBar progress_bar(max_time, 60);
 

@@ -18,14 +18,13 @@
 namespace hisui::video {
 
 WebMSource::WebMSource(const std::string& t_file_path) {
-  m_webm = new hisui::webm::input::VideoContext(t_file_path);
+  m_webm = std::make_shared<hisui::webm::input::VideoContext>(t_file_path);
   if (!m_webm->init()) {
     spdlog::info(
         "VideoContext initialization failed. no video track, invalid video "
         "track or unsupported codec: file_path={}",
         t_file_path);
 
-    delete m_webm;
     m_webm = nullptr;
     m_width = 320;
     m_height = 240;
@@ -45,35 +44,23 @@ WebMSource::WebMSource(const std::string& t_file_path) {
   switch (m_webm->getFourcc()) {
     case hisui::Constants::VP8_FOURCC: /* fall through */
     case hisui::Constants::VP9_FOURCC:
-      m_decoder = new VPXDecoder(m_webm);
+      m_decoder = std::make_shared<VPXDecoder>(m_webm);
       break;
     case hisui::Constants::H264_FOURCC:
       if (OpenH264Handler::hasInstance()) {
-        m_decoder = new OpenH264Decoder(m_webm);
+        m_decoder = std::make_shared<OpenH264Decoder>(m_webm);
         break;
       }
       throw std::runtime_error("openh264 library is not loaded");
     default:
       const auto fourcc = m_webm->getFourcc();
-      delete m_webm;
       m_webm = nullptr;
       throw std::runtime_error(fmt::format("unknown fourcc: {}", fourcc));
   }
 }
 
-WebMSource::~WebMSource() {
-  if (m_webm) {
-    delete m_webm;
-  }
-  if (m_decoder) {
-    delete m_decoder;
-  }
-  if (m_black_yuv_image) {
-    delete m_black_yuv_image;
-  }
-}
-
-const YUVImage* WebMSource::getYUV(const std::uint64_t timestamp) {
+const std::shared_ptr<YUVImage> WebMSource::getYUV(
+    const std::uint64_t timestamp) {
   if (!m_decoder) {
     return m_black_yuv_image;
   }

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -35,14 +36,12 @@ namespace hisui::muxer {
 
 MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
     const hisui::Config& t_config,
-    const hisui::MetadataSet& t_metadata_set,
-    const std::uint64_t timescale)
+    const MultiChannelVPXVideoProducerParameters& params)
     : VideoProducer({.show_progress_bar = t_config.show_progress_bar}),
       m_normal_bit_rate(t_config.out_video_bit_rate),
       m_preferred_bit_rate(t_config.screen_capture_bit_rate) {
-  m_sequencer = new hisui::video::MultiChannelSequencer(
-      t_metadata_set.getNormal().getArchives(),
-      t_metadata_set.getPreferred().getArchives());
+  m_sequencer = std::make_shared<hisui::video::MultiChannelSequencer>(
+      params.normal_archives, params.preferred_archives);
 
   const auto scaling_width = t_config.scaling_width != 0
                                  ? t_config.scaling_width
@@ -53,22 +52,25 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
 
   switch (t_config.video_composer) {
     case hisui::config::VideoComposer::Grid:
-      m_normal_channel_composer = new hisui::video::GridComposer(
+      m_normal_channel_composer = std::make_shared<hisui::video::GridComposer>(
           scaling_width, scaling_height, m_sequencer->getSize(),
           t_config.max_columns, t_config.video_scaler,
           t_config.libyuv_filter_mode);
-      m_preferred_channel_composer = new hisui::video::GridComposer(
-          t_config.screen_capture_width, t_config.screen_capture_height, 1, 1,
-          t_config.video_scaler, t_config.libyuv_filter_mode);
+      m_preferred_channel_composer =
+          std::make_shared<hisui::video::GridComposer>(
+              t_config.screen_capture_width, t_config.screen_capture_height, 1,
+              1, t_config.video_scaler, t_config.libyuv_filter_mode);
       break;
     case hisui::config::VideoComposer::ParallelGrid:
-      m_normal_channel_composer = new hisui::video::ParallelGridComposer(
-          scaling_width, scaling_height, m_sequencer->getSize(),
-          t_config.max_columns, t_config.video_scaler,
-          t_config.libyuv_filter_mode);
-      m_preferred_channel_composer = new hisui::video::GridComposer(
-          t_config.screen_capture_width, t_config.screen_capture_height, 1, 1,
-          t_config.video_scaler, t_config.libyuv_filter_mode);
+      m_normal_channel_composer =
+          std::make_shared<hisui::video::ParallelGridComposer>(
+              scaling_width, scaling_height, m_sequencer->getSize(),
+              t_config.max_columns, t_config.video_scaler,
+              t_config.libyuv_filter_mode);
+      m_preferred_channel_composer =
+          std::make_shared<hisui::video::GridComposer>(
+              t_config.screen_capture_width, t_config.screen_capture_height, 1,
+              1, t_config.video_scaler, t_config.libyuv_filter_mode);
       break;
   }
 
@@ -81,19 +83,11 @@ MultiChannelVPXVideoProducer::MultiChannelVPXVideoProducer(
                m_preferred_channel_composer->getHeight()),
       t_config);
 
-  m_encoder =
-      new hisui::video::BufferVPXEncoder(&m_buffer, vpx_config, timescale);
+  m_encoder = std::make_shared<hisui::video::BufferVPXEncoder>(
+      &m_buffer, vpx_config, params.timescale);
 
-  m_max_stop_time_offset = t_metadata_set.getMaxStopTimeOffset();
+  m_duration = params.duration;
   m_frame_rate = t_config.out_video_frame_rate;
-}
-
-MultiChannelVPXVideoProducer::~MultiChannelVPXVideoProducer() {
-  delete m_normal_channel_composer;
-  m_normal_channel_composer = nullptr;
-  delete m_preferred_channel_composer;
-  m_preferred_channel_composer = nullptr;
-  m_composer = nullptr;
 }
 
 void MultiChannelVPXVideoProducer::produce() {
@@ -102,12 +96,12 @@ void MultiChannelVPXVideoProducer::produce() {
   }
 
   try {
-    std::vector<const video::YUVImage*> yuvs;
+    std::vector<std::shared_ptr<video::YUVImage>> yuvs;
     std::vector<unsigned char> raw_image;
     yuvs.resize(m_sequencer->getSize());
 
     const std::uint64_t max_time = static_cast<std::uint64_t>(
-        std::ceil(m_max_stop_time_offset * hisui::Constants::NANO_SECOND));
+        std::ceil(m_duration * hisui::Constants::NANO_SECOND));
 
     progresscpp::ProgressBar progress_bar(max_time, 60);
 
@@ -161,7 +155,7 @@ void MultiChannelVPXVideoProducer::produce() {
   } catch (const std::exception& e) {
     spdlog::error("VideoProducer::produce() failed: what={}", e.what());
     m_is_finished = true;
-    throw e;
+    throw;
   }
 }
 

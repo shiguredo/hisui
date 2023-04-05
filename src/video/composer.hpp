@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace hisui::video {
@@ -11,7 +12,7 @@ class Composer {
  public:
   virtual ~Composer() = default;
   virtual void compose(std::vector<unsigned char>*,
-                       const std::vector<const YUVImage*>&) = 0;
+                       const std::vector<std::shared_ptr<YUVImage>>&) = 0;
 
   std::uint32_t getWidth() const;
   std::uint32_t getHeight() const;

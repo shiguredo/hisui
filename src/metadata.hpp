@@ -10,36 +10,16 @@
 #include <boost/json/string.hpp>
 #include <boost/json/value.hpp>
 
+#include "archive_item.hpp"
+
 namespace hisui {
-
-class Archive {
- public:
-  Archive(const std::filesystem::path&,
-          const std::string&,
-          const double,
-          const double);
-
-  std::filesystem::path getPath() const;
-  std::string getConnectionID() const;
-  double getStartTimeOffset() const;
-  double getStopTimeOffset() const;
-  void adjustTimeOffsets(double);
-
-  Archive& operator=(const Archive& other);
-
- private:
-  std::filesystem::path m_path;
-  std::string m_connection_id;
-  double m_start_time_offset;
-  double m_stop_time_offset;
-};
 
 class Metadata {
  public:
   Metadata(const std::string&, const boost::json::value&);
-  explicit Metadata(const std::vector<Archive>&);
+  explicit Metadata(const std::vector<ArchiveItem>&);
 
-  std::vector<Archive> getArchives() const;
+  std::vector<ArchiveItem> getArchiveItems() const;
   double getMinStartTimeOffset() const;
   double getMaxStopTimeOffset() const;
   double getCreatedAt() const;
@@ -48,15 +28,15 @@ class Metadata {
 
   void adjustTimeOffsets(double);
   void copyWithoutArchives(const Metadata&);
-  void setArchives(const std::vector<Archive>&);
-  std::vector<Archive> deleteArchivesByConnectionID(const std::string&);
+  void setArchives(const std::vector<ArchiveItem>&);
+  std::vector<ArchiveItem> deleteArchivesByConnectionID(const std::string&);
 
  private:
   boost::json::array prepare(const boost::json::value& jv);
   void setTimeOffsets();
 
   std::filesystem::path m_path;
-  std::vector<Archive> m_archives;
+  std::vector<ArchiveItem> m_archives;
   double m_min_start_time_offset = std::numeric_limits<double>::max();
   double m_max_stop_time_offset = std::numeric_limits<double>::min();
   boost::json::string m_recording_id;
@@ -73,8 +53,8 @@ class MetadataSet {
   Metadata getNormal() const;
   Metadata getPreferred() const;
   bool hasPreferred() const;
-  std::vector<Archive> getArchives() const;
-  std::vector<Archive> getNormalArchives() const;
+  std::vector<ArchiveItem> getNormalArchives() const;
+  std::vector<ArchiveItem> getArchiveItems() const;
   double getMaxStopTimeOffset() const;
 
  private:
@@ -82,10 +62,5 @@ class MetadataSet {
   Metadata m_preferred;
   bool m_has_preferred = false;
 };
-
-boost::json::string get_string_from_json_object(boost::json::object o,
-                                                const std::string& key);
-double get_double_from_json_object(boost::json::object o,
-                                   const std::string& key);
 
 }  // namespace hisui

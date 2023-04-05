@@ -20,11 +20,11 @@
 
 namespace hisui::video {
 
-VPXDecoder::VPXDecoder(hisui::webm::input::VideoContext* t_webm)
+VPXDecoder::VPXDecoder(std::shared_ptr<hisui::webm::input::VideoContext> t_webm)
     : Decoder(t_webm) {
   create_vpx_codec_ctx_t_for_decoding(&m_codec, m_webm->getFourcc());
 
-  m_current_yuv_image = new YUVImage(m_width, m_height);
+  m_current_yuv_image = std::make_shared<YUVImage>(m_width, m_height);
 
   m_next_vpx_image = create_black_vpx_image(m_width, m_height);
 
@@ -52,13 +52,11 @@ VPXDecoder::~VPXDecoder() {
   if (m_current_vpx_image) {
     ::vpx_img_free(m_current_vpx_image);
   }
-  if (m_current_yuv_image) {
-    delete m_current_yuv_image;
-  }
   ::vpx_codec_destroy(&m_codec);
 }
 
-const YUVImage* VPXDecoder::getImage(const std::uint64_t timestamp) {
+const std::shared_ptr<YUVImage> VPXDecoder::getImage(
+    const std::uint64_t timestamp) {
   // 非対応 WebM or 時間超過
   if (!m_webm || m_is_time_over) {
     return m_black_yuv_image;

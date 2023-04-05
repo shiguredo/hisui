@@ -1,4 +1,4 @@
-name: build-workflow
+name: lint
 
 on:
   pull_request:
@@ -7,6 +7,7 @@ on:
       - main
       - master
       - develop
+      - feature/*
     paths-ignore:
     - 'doc/**'
     - '**.md'
@@ -34,13 +35,13 @@ jobs:
           pip3 install --user cpplint
         env:
             DEBIAN_FRONTEND: noninteractive
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Lint hisui
         run: PATH=$PATH:~/.local/bin:~/go/bin ./lint.bash
         timeout-minutes: 120
       - name: Slack Notification
         if: failure()
-        uses: rtCamp/action-slack-notify@v2.1.0
+        uses: rtCamp/action-slack-notify@v2.2.0
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger

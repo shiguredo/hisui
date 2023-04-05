@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <queue>
 #include <string>
 #include <utility>
@@ -20,12 +21,11 @@ class Decoder;
 class WebMSource : public Source {
  public:
   explicit WebMSource(const std::string&);
-  ~WebMSource();
   std::pair<std::int16_t, std::int16_t> getSample(const std::uint64_t);
 
  private:
-  hisui::webm::input::AudioContext* m_webm = nullptr;
-  hisui::audio::Decoder* m_decoder = nullptr;
+  std::shared_ptr<hisui::webm::input::AudioContext> m_webm = nullptr;
+  std::shared_ptr<hisui::audio::Decoder> m_decoder = nullptr;
   int m_channels;
   std::uint64_t m_sampling_rate;
   std::queue<std::int16_t> m_data;

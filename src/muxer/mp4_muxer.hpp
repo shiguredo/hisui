@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <fstream>
+#include <memory>
 #include <vector>
 
+#include "archive_item.hpp"
 #include "frame.hpp"
 #include "muxer/muxer.hpp"
 
@@ -29,15 +31,30 @@ class Writer;
 
 namespace hisui::muxer {
 
+struct MP4MuxerParameters {
+  const std::vector<hisui::ArchiveItem>& audio_archive_items;
+  const std::vector<hisui::ArchiveItem>& normal_archives;
+  const std::vector<hisui::ArchiveItem>& preferred_archives;
+  const double duration;
+};
+
+struct MP4MuxerParametersForLayout {
+  const std::vector<hisui::ArchiveItem>& audio_archive_items;
+  const std::shared_ptr<VideoProducer>& video_producer;
+  const double duration;
+};
+
 class MP4Muxer : public Muxer {
  public:
-  ~MP4Muxer();
+  explicit MP4Muxer(const MP4MuxerParameters&);
+  explicit MP4Muxer(const MP4MuxerParametersForLayout&);
+  virtual ~MP4Muxer();
 
  protected:
   std::ofstream m_ofs;
-  shiguredo::mp4::writer::Writer* m_writer;
-  shiguredo::mp4::track::VideTrack* m_vide_track = nullptr;
-  shiguredo::mp4::track::SounTrack* m_soun_track;
+  std::shared_ptr<shiguredo::mp4::writer::Writer> m_writer;
+  std::shared_ptr<shiguredo::mp4::track::VideTrack> m_vide_track;
+  std::shared_ptr<shiguredo::mp4::track::SounTrack> m_soun_track;
   std::uint64_t m_chunk_interval;
 
   std::uint64_t m_chunk_start = 0;
@@ -50,9 +67,13 @@ class MP4Muxer : public Muxer {
 
   void writeTrackData();
   void initialize(const hisui::Config&,
-                  const hisui::MetadataSet&,
-                  shiguredo::mp4::writer::Writer*,
-                  const float);
+                  std::shared_ptr<shiguredo::mp4::writer::Writer>);
+  double m_duration;
+
+ private:
+  std::vector<hisui::ArchiveItem> m_audio_archives;
+  std::vector<hisui::ArchiveItem> m_normal_archives;
+  std::vector<hisui::ArchiveItem> m_preferred_archives;
 };
 
 }  // namespace hisui::muxer

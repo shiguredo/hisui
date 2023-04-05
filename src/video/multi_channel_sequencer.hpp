@@ -10,7 +10,7 @@
 
 namespace hisui {
 
-class Archive;
+class ArchiveItem;
 
 }
 
@@ -20,15 +20,14 @@ class YUVImage;
 
 class MultiChannelSequencer : public Sequencer {
  public:
-  explicit MultiChannelSequencer(const std::vector<hisui::Archive>&,
-                                 const std::vector<hisui::Archive>&);
-  ~MultiChannelSequencer();
+  explicit MultiChannelSequencer(const std::vector<hisui::ArchiveItem>&,
+                                 const std::vector<hisui::ArchiveItem>&);
 
-  SequencerGetYUVsResult getYUVs(std::vector<const YUVImage*>*,
+  SequencerGetYUVsResult getYUVs(std::vector<std::shared_ptr<YUVImage>>*,
                                  const std::uint64_t);
 
  private:
-  const YUVImage* m_black_yuv_image;
+  std::shared_ptr<YUVImage> m_black_yuv_image;
   std::vector<
       std::pair<std::string, std::shared_ptr<std::vector<SourceAndInterval>>>>
       m_preferred_sequence;

@@ -15,7 +15,8 @@
 
 namespace hisui::audio {
 
-BasicSequencer::BasicSequencer(const std::vector<hisui::Archive>& archives) {
+BasicSequencer::BasicSequencer(
+    const std::vector<hisui::ArchiveItem>& archives) {
   for (const auto& archive : archives) {
     const auto& path = archive.getPath();
     if (!(path.extension() == ".webm")) {

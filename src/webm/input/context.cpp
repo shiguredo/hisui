@@ -120,6 +120,7 @@ void Context::rewindCluster() {
 }
 
 Context::Context(const std::string& t_file_path) : m_file_path(t_file_path) {}
+
 Context::~Context() {
   reset();
 }

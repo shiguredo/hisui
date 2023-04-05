@@ -2,7 +2,13 @@
 
 Ubuntu 20.04 と 22.04 、x86_64 と arm64 でビルドを確認しています。
 
-## 事前インストール
+## 事前準備
+
+hisui をクローンします。
+
+```
+git clone https://github.com/shiguredo/hisui.git
+```
 
 必要なライブラリをインストールします。
 

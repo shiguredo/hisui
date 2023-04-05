@@ -11,7 +11,7 @@ get_input_files:
 	[ -f input/Big_Buck_Bunny_360_10s_1MB.webm ] || curl -o input/Big_Buck_Bunny_360_10s_1MB.webm https://test-videos.co.uk/vids/bigbuckbunny/webm/vp9/360/Big_Buck_Bunny_360_10s_1MB.webm # CC BY 3.0 https://creativecommons.org/licenses/by/3.0/ (c) copyright 2008, Blender Foundation / www.bigbuckbunny.org
 	sha224sum -c input/check
 
-test: webm_test mp4_test
+test: webm_test mp4_test layout_webm_test layout_mp4_test
 	[ -f "output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)" ] && sha224sum -c output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)
 
 #         case3, case4 の vp8 の場合に, 結果が不定となる場合があった
@@ -49,11 +49,30 @@ mp4_test: get_input_files
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${aac_m4a_file} --show-progress-bar false --log-level error --out-container mp4 --out-audio-codec aac --audio-only; \
 	done
 
+layout_webm_test: get_input_files
+	rm -f output/layout/case*.webm*
+	for m in layout/webm/case*.json; do \
+		base=$$(basename $${m} .json); \
+		echo layout_webm_$${base}; \
+		output=output/layout/$${base}.webm; \
+		${HISUI} --layout $${m} --out-file $${output} --show-progress-bar false --log-level error --out-video-codec VP9; \
+		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${output}) $${output} | head --bytes=$$(bash ./get_cluster_size.bash $${output}) > $${output}.cluster; \
+	done
+
+layout_mp4_test: get_input_files
+	rm -f output/layout/case*.mp4
+	for m in layout/mp4/case*.json; do \
+		base=$$(basename $${m} .json); \
+		echo layout_mp4_$${base}; \
+		output=output/layout/$${base}.mp4; \
+		faketime -f '2021-12-23 00:00:00' ${HISUI} --layout $${m} --out-file $${output} --show-progress-bar false --log-level error --out-video-codec VP9; \
+	done
+
 update_input_check:
 	sha224sum input/*.webm input/*.jpg > input/check
 
 update_output_check:
-	sha224sum output/*.cluster output/*.mp4 output/*.m4a > output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)
+	sha224sum output/*.cluster output/*.mp4 output/*.m4a output/layout/*.cluster output/layout/*.mp4 > output/check_libfdk-aac-dev-$(LIBFKD_AAC_DEV_VERSION)
 
 clean:
-	rm -f output/*.cluster output/*.mp4 output/*.webm
+	rm -f output/*.cluster output/*.mp4 output/*.webm output/layout/*.cluster output/layout/*.webm

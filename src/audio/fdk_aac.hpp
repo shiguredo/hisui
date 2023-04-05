@@ -16,6 +16,7 @@ struct FDKAACInitParameters {
   const std::uint32_t afterburner = 1;
   const std::uint32_t bit_rate = Constants::FDK_AAC_DEFAULT_BIT_RATE;
   const CHANNEL_MODE mode = ::MODE_2;
+  const std::uint32_t transport_type = ::TT_MP4_RAW;
 };
 
 void fdk_aac_init(::HANDLE_AACENCODER*,

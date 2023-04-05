@@ -19,10 +19,10 @@ class YUVImage;
 
 class OpenH264Decoder : public Decoder {
  public:
-  explicit OpenH264Decoder(hisui::webm::input::VideoContext*);
+  explicit OpenH264Decoder(std::shared_ptr<hisui::webm::input::VideoContext>);
   ~OpenH264Decoder();
 
-  const YUVImage* getImage(const std::uint64_t);
+  const std::shared_ptr<YUVImage> getImage(const std::uint64_t);
 
  private:
   ::ISVCDecoder* m_decoder = nullptr;

@@ -61,8 +61,7 @@ void set_cli_options(CLI::App* app, Config* config) {
   app->formatter(std::make_shared<MyFormatter>());
   app->add_option("-f,--in-metadata-file", config->in_metadata_filename,
                   "Metadata filename (REQUIRED)")
-      ->check(CLI::ExistingFile)
-      ->required();
+      ->check(CLI::ExistingFile);
 
   auto option_screen_capture_report =
       app->add_option("--screen-capture-report",
@@ -96,7 +95,7 @@ void set_cli_options(CLI::App* app, Config* config) {
 
   app->add_option("--mix-screen-capture-audio",
                   config->mix_screen_capture_audio,
-                  "Mix screen-capture audio. default: false)")
+                  "Mix screen-capture audio. default: false")
       ->group(EXPERIMENTAL_OPTIONS);
 
   std::vector<std::pair<std::string, config::OutContainer>> out_container_assoc{
@@ -125,14 +124,14 @@ void set_cli_options(CLI::App* app, Config* config) {
   };
   app->add_option("--out-audio-codec", config->out_audio_codec,
                   "Audio codec (Opus/AAC). default: Opus (hisui supports "
-                  "AAC only in WebM)")
+                  "AAC only in MP4)")
 #ifndef USE_FDK_AAC
       ->group("")
 #endif
       ->transform(CLI::CheckedTransformer(out_audio_codec, CLI::ignore_case));
 
   app->add_option("--out-video-frame-rate", config->out_video_frame_rate,
-                  "Video frame rate (INTEGER/RATIONAL). default: 25)");
+                  "Video frame rate (INTEGER/RATIONAL). default: 25");
 
   app->add_option("--out-webm-file", config->out_filename, "Output filename")
       ->group(OPTIONS_FOR_BACKWARD_COMPATIBILITY);
@@ -195,6 +194,9 @@ void set_cli_options(CLI::App* app, Config* config) {
 
   app->add_option("--show-progress-bar", config->show_progress_bar,
                   "Toggle to show progress bar. default: true");
+
+  app->add_option("--layout", config->layout, "Layout Metadata File")
+      ->check(CLI::ExistingFile);
 
   app->add_option("--out-video-bit-rate", config->out_video_bit_rate,
                   "Video bit rate (kbps, POSITIVE INTEGER). default: 200 x "

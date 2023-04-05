@@ -28,7 +28,7 @@ class ParallelGridComposer : public Composer {
   ~ParallelGridComposer();
 
   void compose(std::vector<unsigned char>*,
-               const std::vector<const YUVImage*>&);
+               const std::vector<std::shared_ptr<YUVImage>>&);
 
  private:
   std::uint32_t m_single_width;
@@ -41,7 +41,7 @@ class ParallelGridComposer : public Composer {
   std::array<std::uint32_t, 3> m_single_plane_widths;
   std::array<std::uint32_t, 3> m_single_plane_heights;
   std::array<unsigned char, 3> m_plane_default_values;
-  std::vector<const YUVImage*> m_scaled_images;
+  std::vector<std::shared_ptr<YUVImage>> m_scaled_images;
   std::array<std::vector<const unsigned char*>, 3> m_srcs;
 
   // Scaler::scale() は内部buffer を返すことがあるので, Source 分用意する

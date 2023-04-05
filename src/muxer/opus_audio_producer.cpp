@@ -1,6 +1,7 @@
 #include "muxer/opus_audio_producer.hpp"
 
 #include <opus_types.h>
+#include <memory>
 
 #include "audio/basic_sequencer.hpp"
 #include "audio/buffer_opus_encoder.hpp"
@@ -11,28 +12,20 @@
 
 namespace hisui::muxer {
 
-OpusAudioProducer::OpusAudioProducer(const hisui::Config& t_config,
-                                     const hisui::MetadataSet& t_metadata_set,
-                                     const std::uint64_t timescale)
-    : AudioProducer({.show_progress_bar =
+OpusAudioProducer::OpusAudioProducer(
+    const hisui::Config& t_config,
+    const std::vector<hisui::ArchiveItem> t_archives,
+    const double t_duration,
+    const std::uint64_t timescale)
+    : AudioProducer({.archives = t_archives,
+                     .mixer = t_config.audio_mixer,
+                     .duration = t_duration,
+                     .show_progress_bar =
                          t_config.show_progress_bar && t_config.audio_only}) {
-  switch (t_config.audio_mixer) {
-    case hisui::config::AudioMixer::Simple:
-      m_mix_sample = hisui::audio::mix_sample_simple;
-      break;
-    case hisui::config::AudioMixer::Vttoth:
-      m_mix_sample = hisui::audio::mix_sample_vttoth;
-      break;
-  }
-
-  m_sequencer = new hisui::audio::BasicSequencer(t_metadata_set.getArchives());
-
-  m_max_stop_time_offset = t_metadata_set.getMaxStopTimeOffset();
-
-  hisui::audio::BufferOpusEncoder* encoder =
-      new hisui::audio::BufferOpusEncoder(
-          &m_buffer,
-          {.bit_rate = t_config.out_opus_bit_rate, .timescale = timescale});
+  auto encoder = std::make_shared<hisui::audio::BufferOpusEncoder>(
+      &m_buffer,
+      hisui::audio::BufferOpusEncoderParameters{
+          .bit_rate = t_config.out_opus_bit_rate, .timescale = timescale});
   m_skip = encoder->getSkip();
   m_encoder = encoder;
 }

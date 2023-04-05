@@ -1,13 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "video/sequencer.hpp"
 
 namespace hisui {
 
-class Archive;
+class ArchiveItem;
 
 }
 
@@ -17,14 +18,13 @@ class YUVImage;
 
 class BasicSequencer : public Sequencer {
  public:
-  explicit BasicSequencer(const std::vector<hisui::Archive>&);
-  ~BasicSequencer();
+  explicit BasicSequencer(const std::vector<hisui::ArchiveItem>&);
 
-  SequencerGetYUVsResult getYUVs(std::vector<const YUVImage*>*,
+  SequencerGetYUVsResult getYUVs(std::vector<std::shared_ptr<YUVImage>>*,
                                  const std::uint64_t);
 
  private:
-  const YUVImage* m_black_yuv_image;
+  std::shared_ptr<YUVImage> m_black_yuv_image;
 };
 
 }  // namespace hisui::video

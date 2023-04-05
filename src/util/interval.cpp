@@ -12,4 +12,17 @@ std::uint64_t Interval::getSubstructLower(const std::uint64_t t) const {
   return t - m_lower;
 }
 
+void Interval::set(const std::uint64_t l, const std::uint64_t u) {
+  m_lower = l;
+  m_upper = u;
+}
+
+std::uint64_t Interval::getLower() const {
+  return m_lower;
+}
+
+std::uint64_t Interval::getUpper() const {
+  return m_upper;
+}
+
 }  // namespace hisui::util

@@ -3,6 +3,7 @@
 #include <libyuv/scale.h>
 
 #include <cstdint>
+#include <memory>
 
 #include "video/scaler.hpp"
 
@@ -15,7 +16,7 @@ class SimpleScaler : public Scaler {
   SimpleScaler(const std::uint32_t,
                const std::uint32_t,
                const libyuv::FilterMode);
-  const YUVImage* scale(const YUVImage* src);
+  const std::shared_ptr<YUVImage> scale(const std::shared_ptr<YUVImage> src);
 
   const libyuv::FilterMode m_filter_mode;
 };

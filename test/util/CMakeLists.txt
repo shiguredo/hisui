@@ -20,7 +20,9 @@ add_compile_options(
 add_executable(util_test
     main.cpp
     interval_test.cpp
+    wildcard_test.cpp
     ../../src/util/interval.cpp
+    ../../src/util/wildcard.cpp
     )
 
 set_target_properties(util_test PROPERTIES CXX_STANDARD 20 C_STANDARD 11)
@@ -34,6 +36,7 @@ target_include_directories(util_test
     ${boost_config_SOURCE_DIR}/include
     ${boost_container_hash_SOURCE_DIR}/include
     ${boost_core_SOURCE_DIR}/include
+    ${boost_describe_SOURCE_DIR}/include
     ${boost_detail_SOURCE_DIR}/include
     ${boost_exception_SOURCE_DIR}/include
     ${boost_function_SOURCE_DIR}/include
@@ -41,6 +44,7 @@ target_include_directories(util_test
     ${boost_io_SOURCE_DIR}/include
     ${boost_iterator_SOURCE_DIR}/include
     ${boost_move_SOURCE_DIR}/include
+    ${boost_mp11_SOURCE_DIR}/include
     ${boost_mpl_SOURCE_DIR}/include
     ${boost_numeric_conversion_SOURCE_DIR}/include
     ${boost_preprocessor_SOURCE_DIR}/include
@@ -52,6 +56,7 @@ target_include_directories(util_test
     ${boost_type_traits_SOURCE_DIR}/include
     ${boost_type_index_SOURCE_DIR}/include
     ${boost_utility_SOURCE_DIR}/include
+    ${boost_variant2_SOURCE_DIR}/include
     )
 
 add_test(NAME util COMMAND util_test)

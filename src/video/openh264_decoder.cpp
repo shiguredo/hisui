@@ -20,7 +20,8 @@
 
 namespace hisui::video {
 
-OpenH264Decoder::OpenH264Decoder(hisui::webm::input::VideoContext* t_webm)
+OpenH264Decoder::OpenH264Decoder(
+    std::shared_ptr<hisui::webm::input::VideoContext> t_webm)
     : Decoder(t_webm) {
   const auto create_decoder_ret =
       OpenH264Handler::getInstance().createDecoder(&m_decoder);
@@ -72,7 +73,8 @@ OpenH264Decoder::~OpenH264Decoder() {
   }
 }
 
-const YUVImage* OpenH264Decoder::getImage(const std::uint64_t timestamp) {
+const std::shared_ptr<YUVImage> OpenH264Decoder::getImage(
+    const std::uint64_t timestamp) {
   // 非対応 WebM or 時間超過
   if (!m_webm || m_is_time_over) {
     return m_black_yuv_image;
@@ -83,7 +85,7 @@ const YUVImage* OpenH264Decoder::getImage(const std::uint64_t timestamp) {
     return m_black_yuv_image;
   }
   updateImage(timestamp);
-  return m_current_yuv_image.get();
+  return m_current_yuv_image;
 }
 
 void OpenH264Decoder::updateImage(const std::uint64_t timestamp) {

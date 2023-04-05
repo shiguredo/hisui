@@ -18,7 +18,8 @@
 
 namespace hisui::video {
 
-BasicSequencer::BasicSequencer(const std::vector<hisui::Archive>& archives) {
+BasicSequencer::BasicSequencer(
+    const std::vector<hisui::ArchiveItem>& archives) {
   auto result = make_sequence(archives);
 
   m_sequence = result.sequence;
@@ -34,12 +35,8 @@ BasicSequencer::BasicSequencer(const std::vector<hisui::Archive>& archives) {
   m_black_yuv_image = create_black_yuv_image(m_max_width, m_max_height);
 }  // namespace hisui::video
 
-BasicSequencer::~BasicSequencer() {
-  delete m_black_yuv_image;
-}
-
 SequencerGetYUVsResult BasicSequencer::getYUVs(
-    std::vector<const YUVImage*>* yuvs,
+    std::vector<std::shared_ptr<YUVImage>>* yuvs,
     const std::uint64_t timestamp) {
   std::size_t i = 0;
   for (const auto& p : m_sequence) {
