@@ -28,7 +28,7 @@ jobs:
       - name: Install packages
         shell: bash
         run: |
-          go get -u github.com/client9/misspell/cmd/misspell
+          go install github.com/client9/misspell/cmd/misspell@latest
           sudo apt update
           sudo apt install -yq shellcheck
           sudo rm -rf /var/lib/apt/lists/*
