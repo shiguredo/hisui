@@ -10,7 +10,7 @@ _PACKAGES=(
 )
 
 function show_help() {
-  echo "$PROGRAM [--clean] [--use-ccache] [--use-fdk-aac] [--with-test] [--build-type-native] [--package] <package>"
+  echo "$PROGRAM [--clean] [--use-ccache] [--use-fdk-aac] [--with-test] [--build-type-native] [--build-type-debug] [--package] <package>"
   echo "<package>:"
   for package in "${_PACKAGES[@]}"; do
     echo "  - $package"
@@ -49,6 +49,9 @@ while [ $# -ne 0 ]; do
         ;;
     "--build-type-native" )
         BUILD_TYPE="Native"
+        ;;
+    "--build-type-debug" )
+        BUILD_TYPE="Debug"
         ;;
     --* )
         show_help
@@ -114,6 +117,7 @@ source ./VERSION
 if [ $FLAG_CLEAN -eq 1 ]; then
     rm -rf release
     rm -rf native
+    rm -rf debug
     exit 0
 fi
 
@@ -164,6 +168,10 @@ cd ../../..
 if [ "${BUILD_TYPE}" = "Native" ]; then
     mkdir -p "native/$PACKAGE"
     cd "native/$PACKAGE" || exit 1
+    CMAKE_FLAGS+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
+elif [ "${BUILD_TYPE}" = "Debug" ]; then
+    mkdir -p "debug/$PACKAGE"
+    cd "debug/$PACKAGE" || exit 1
     CMAKE_FLAGS+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
 else
     mkdir -p "release/$PACKAGE"
