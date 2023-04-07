@@ -4,13 +4,14 @@
 
 公開されている docker イメージやバイナリは FDK-AAC には対応していません。FDK-AAC を利用する場合は自前でのビルドを行ってください。
 
+自前でのビルドについては [BUILD_LINUX](BUILD_LINUX.md) をご参照ください。
+
 ## docker 経由で利用する
 
 Hisui は docker image を用意しています。これを使うことで気軽に Hisui を利用可能です。
 
 - https://hub.docker.com/r/shiguredo/hisui
 
-実行コマンド例
 ```
 docker run -v /home/shiguredo/sora-2022.2.3/archive:/hisui -it shiguredo/hisui:2023.1.1-ubuntu-22.04 -f /hisui/CSX77QY9F57V5BT72S62C28VS4/report-CSX77QY9F57V5BT72S62C28VS4.json
 ```
@@ -60,6 +61,8 @@ Experimental Options:
   --failure-report            Directory for failure report
 ```
 
+
+
 ## 自前ビルドで利用したい場合
 
 -f で合成したい recording.report が生成するファイルを指定して下さい。
@@ -67,3 +70,11 @@ Experimental Options:
 ```
 ./hisui -f report-CSX77QY9F57V5BT72S62C28VS4.json
 ```
+
+## 好きなレイアウトで合成したい
+
+Hisui にはレイアウトという機能があり、そちらを利用することでより自由な合成が可能です。
+
+もし、より複雑な合成を試されたい場合はぜひレイアウト機能を試してみてください。
+
+詳細は [レイアウト機能](LAYOUT.md) のドキュメントをご参照ください。
