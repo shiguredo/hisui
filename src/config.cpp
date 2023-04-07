@@ -63,6 +63,7 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "Metadata filename (REQUIRED)")
       ->check(CLI::ExistingFile);
 
+  app->add_flag("--version", config->version, "Print version and exit");
   auto option_screen_capture_report =
       app->add_option("--screen-capture-report",
                       config->screen_capture_metadata_filename,

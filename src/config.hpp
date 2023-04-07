@@ -86,6 +86,7 @@ class Config {
 
   std::size_t max_columns = 3;
 
+  bool version = false;
   bool verbose = false;
   bool audio_only = false;
   std::string success_report = "";

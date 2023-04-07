@@ -22,6 +22,7 @@
 #include "muxer/muxer.hpp"
 #include "muxer/simple_mp4_muxer.hpp"
 #include "report/reporter.hpp"
+#include "version/version.hpp"
 #include "video/openh264_handler.hpp"
 
 int main(int argc, char** argv) {
@@ -34,6 +35,12 @@ int main(int argc, char** argv) {
     CLI11_PARSE(app, argc, argv);
 
     config.validate();
+
+    if (config.version) {
+      std::cout << "Recording Composition Tool Hisui "
+                << hisui::version::get_hisui_version() << std::endl;
+      return EXIT_SUCCESS;
+    }
 
     if (config.verbose) {
       spdlog::set_level(spdlog::level::debug);
