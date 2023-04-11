@@ -111,7 +111,7 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
 
 ## 廃止予定
 
-- Safari が Opus 再生に対応したら AAC 対応を削除予定です
+- Mobile Safari が Opus 再生に対応したら AAC 対応を削除予定です
 
 ## ライセンス
 
