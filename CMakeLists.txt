@@ -299,6 +299,7 @@ target_sources(hisui
     src/util/wildcard.cpp
     src/version/version.cpp
     src/video/basic_sequencer.cpp
+    src/video/buffer_openh264_encoder.cpp
     src/video/buffer_vpx_encoder.cpp
     src/video/composer.cpp
     src/video/decoder.cpp
