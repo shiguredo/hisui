@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "config.hpp"
 #include "video/yuv.hpp"
 
 namespace hisui::video {
@@ -42,5 +43,13 @@ void update_yuv_image_by_openh264_buffer_info(
                 yuv_image->yuv[2] + i * width1);
   }
 }
+
+OpenH264EncoderConfig::OpenH264EncoderConfig(const std::uint32_t t_width,
+                                             const std::uint32_t t_height,
+                                             const hisui::Config& config)
+    : width(t_width),
+      height(t_height),
+      fps(config.out_video_frame_rate),
+      bitrate(config.out_video_bit_rate) {}
 
 }  // namespace hisui::video
