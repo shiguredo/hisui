@@ -288,6 +288,7 @@ target_sources(hisui
     src/muxer/multi_channel_vpx_video_producer.cpp
     src/muxer/muxer.cpp
     src/muxer/no_video_producer.cpp
+    src/muxer/openh264_video_producer.cpp
     src/muxer/opus_audio_producer.cpp
     src/muxer/simple_mp4_muxer.cpp
     src/muxer/video_producer.cpp
