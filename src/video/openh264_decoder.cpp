@@ -26,9 +26,8 @@ OpenH264Decoder::OpenH264Decoder(
   const auto create_decoder_ret =
       OpenH264Handler::getInstance().createDecoder(&m_decoder);
   if (create_decoder_ret != 0 || m_decoder == nullptr) {
-    throw std::runtime_error(
-        fmt::format("m_h264_handler->createDecoder() failed: error_code={}",
-                    create_decoder_ret));
+    throw std::runtime_error(fmt::format(
+        "OpenH264 createDecoder() failed: error_code={}", create_decoder_ret));
   }
   ::SDecodingParam param;
   param.pFileNameRestructed = nullptr;
