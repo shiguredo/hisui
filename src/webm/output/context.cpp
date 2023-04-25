@@ -83,6 +83,9 @@ void Context::setVideoTrack(const std::uint32_t width,
     case hisui::Constants::VP9_FOURCC:
       codec_id = "V_VP9";
       break;
+    case hisui::Constants::H264_FOURCC:
+      codec_id = "V_MPEG4/ISO/AVC";
+      break;
     default:
       throw std::runtime_error(fmt::format("unknown fourcc: {:x}", fourcc));
   }
