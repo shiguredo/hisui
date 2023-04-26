@@ -275,6 +275,7 @@ target_sources(hisui
     src/layout/grid.cpp
     src/layout/interval.cpp
     src/layout/metadata.cpp
+    src/layout/openh264_video_producer.cpp
     src/layout/overlap.cpp
     src/layout/region.cpp
     src/layout/source.cpp
