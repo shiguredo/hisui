@@ -30,6 +30,10 @@ BufferOpenH264Encoder::BufferOpenH264Encoder(
   m_height = config.height;
   m_fps = config.fps;
   m_bitrate = config.bitrate;
+
+  if (!OpenH264Handler::hasInstance()) {
+    throw std::runtime_error("OpenH264 library is not loaded");
+  }
   const auto create_encoder_ret =
       OpenH264Handler::getInstance().createEncoder(&m_encoder);
   if (create_encoder_ret != 0 || m_encoder == nullptr) {
