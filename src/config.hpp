@@ -116,6 +116,10 @@ class Config {
   std::uint32_t libvp9_tile_columns = 0;
   std::uint32_t libvp9_row_mt = 0;
 
+  std::uint16_t openh264_threads = 1;
+  std::int32_t openh264_min_qp = 0;
+  std::int32_t openh264_max_qp = 51;
+
   libyuv::FilterMode libyuv_filter_mode = libyuv::kFilterBox;
 
   config::VideoComposer video_composer = config::VideoComposer::Grid;

@@ -48,6 +48,9 @@ BufferOpenH264Encoder::BufferOpenH264Encoder(
   param.iPicWidth = static_cast<int>(m_width);
   param.iPicHeight = static_cast<int>(m_height);
   param.iTargetBitrate = 1000 * static_cast<int>(m_bitrate);
+  param.iMultipleThreadIdc = config.threads;
+  param.iMinQp = config.min_qp;
+  param.iMaxQp = config.max_qp;
   if (const auto ret = m_encoder->InitializeExt(&param)) {
     throw std::runtime_error(fmt::format(
         "OpenH264 Encoder Initialize() failed: error_code={}", ret));

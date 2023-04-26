@@ -262,6 +262,21 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->check(CLI::Range(0, 1))
       ->group(OPTIONS_FOR_TUNING);
 
+  app->add_option("--openh264-threads", config->openh264_threads,
+                  "OpenH264 number of threads (NON NEGATIVE INTEGER)"
+                  "default: 1 (multiple threads imp. disabled)")
+      ->check(CLI::NonNegativeNumber)
+      ->group(OPTIONS_FOR_TUNING);
+
+  app->add_option("--openh264-min-qp", config->openh264_min_qp,
+                  "OpenH264 minmum QP encoder supports. default: 0")
+      ->check(CLI::Range(0, 51))
+      ->group(OPTIONS_FOR_TUNING);
+  app->add_option("--openh264-max-qp", config->openh264_max_qp,
+                  "OpenH264 maximum QP encoder supports. default: 51")
+      ->check(CLI::Range(0, 51))
+      ->group(OPTIONS_FOR_TUNING);
+
   std::vector<std::pair<std::string, spdlog::level::level_enum>>
       log_level_assoc{
           {"trace", spdlog::level::trace},

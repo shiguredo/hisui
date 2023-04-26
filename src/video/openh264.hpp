@@ -27,6 +27,9 @@ class OpenH264EncoderConfig {
   const std::uint32_t height;
   const boost::rational<std::uint64_t> fps;
   const std::uint32_t bitrate;
+  const std::uint16_t threads;
+  const std::int32_t min_qp;
+  const std::int32_t max_qp;
 };
 
 }  // namespace hisui::video
