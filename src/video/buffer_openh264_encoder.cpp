@@ -1,6 +1,7 @@
 #include "video/buffer_openh264_encoder.hpp"
 
 #include <codec/api/svc/codec_api.h>
+#include <codec/api/svc/codec_app_def.h>
 #include <codec/api/svc/codec_def.h>
 
 #include <bits/exception.h>
@@ -47,6 +48,11 @@ BufferOpenH264Encoder::BufferOpenH264Encoder(
         fmt::format("OpenH264 GetDefaultParams() failed: error_code={}", ret));
   }
   param.iUsageType = CAMERA_VIDEO_REAL_TIME;  // TODO(haruyama): config にする?
+  param.iRCMode = RC_QUALITY_MODE;
+  for (auto i = 0; i < MAX_SPATIAL_LAYER_NUM; ++i) {
+    param.sSpatialLayers[i].uiLevelIdc = LEVEL_3_1;
+    param.sSpatialLayers[i].uiProfileIdc = PRO_BASELINE;
+  }
   param.fMaxFrameRate = static_cast<float>(m_fps.numerator()) /
                         static_cast<float>(m_fps.denominator());
   param.iPicWidth = static_cast<int>(m_width);
