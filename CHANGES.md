@@ -11,6 +11,19 @@
 
 ## develop
 
+- [CHANGE] OpenH264 での エンコードに対応する (WebM のみ)
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/123
+- [CHANGE] --version flag を追加する (version を出力し正常終了する)
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/122
+- [CHANGE] ビルドに debug 指定を追加しました
+    - @torikizi
+    - https://github.com/shiguredo/hisui/pull/120
+- [FIX] misspell のインストールに 'go install' を利用する
+    - @haruyama
+    - https://github.com/shiguredo/hisui/pull/121
+
 ## 2023.1.1
 
 - [UPDATE] バージョンを 2023.1.1 に上げる
