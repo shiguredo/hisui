@@ -30,6 +30,7 @@ enum struct AudioMixer {
 enum OutVideoCodec {
   VP8 = hisui::Constants::VP8_FOURCC,
   VP9 = hisui::Constants::VP9_FOURCC,
+  H264 = hisui::Constants::H264_FOURCC,
 };
 
 enum struct VideoComposer {
@@ -114,6 +115,10 @@ class Config {
   std::uint32_t libvp9_frame_parallel = 1;
   std::uint32_t libvp9_tile_columns = 0;
   std::uint32_t libvp9_row_mt = 0;
+
+  std::uint16_t openh264_threads = 1;
+  std::int32_t openh264_min_qp = 0;
+  std::int32_t openh264_max_qp = 51;
 
   libyuv::FilterMode libyuv_filter_mode = libyuv::kFilterBox;
 

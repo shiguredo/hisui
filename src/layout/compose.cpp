@@ -8,6 +8,7 @@
 #include "constants.hpp"
 #include "datetime.hpp"
 #include "layout/metadata.hpp"
+#include "layout/openh264_video_producer.hpp"
 #include "layout/vpx_video_producer.hpp"
 #include "muxer/async_webm_muxer.hpp"
 #include "muxer/faststart_mp4_muxer.hpp"
@@ -29,16 +30,29 @@ int compose(const hisui::Config& t_config) {
     if (config.audio_only) {
       video_producer = std::make_shared<muxer::NoVideoProducer>();
     } else {
-      video_producer = std::make_shared<VPXVideoProducer>(
-          config, VPXVideoProducerParameters{
-                      .regions = metadata.getRegions(),
-                      .resolution = metadata.getResolution(),
-                      .duration = metadata.getMaxEndTime(),
-                      .timescale = config.out_container ==
-                                           hisui::config::OutContainer::WebM
-                                       ? hisui::Constants::NANO_SECOND
-                                       : 16000,  // TODO(haruyama): 整理する
-                  });
+      if (config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+        video_producer = std::make_shared<OpenH264VideoProducer>(
+            config, OpenH264VideoProducerParameters{
+                        .regions = metadata.getRegions(),
+                        .resolution = metadata.getResolution(),
+                        .duration = metadata.getMaxEndTime(),
+                        .timescale = config.out_container ==
+                                             hisui::config::OutContainer::WebM
+                                         ? hisui::Constants::NANO_SECOND
+                                         : 16000,  // TODO(haruyama): 整理する
+                    });
+      } else {
+        video_producer = std::make_shared<VPXVideoProducer>(
+            config, VPXVideoProducerParameters{
+                        .regions = metadata.getRegions(),
+                        .resolution = metadata.getResolution(),
+                        .duration = metadata.getMaxEndTime(),
+                        .timescale = config.out_container ==
+                                             hisui::config::OutContainer::WebM
+                                         ? hisui::Constants::NANO_SECOND
+                                         : 16000,  // TODO(haruyama): 整理する
+                    });
+      }
     }
   } catch (const std::exception& e) {
     spdlog::error("setting up video_producer failed: {}", e.what());

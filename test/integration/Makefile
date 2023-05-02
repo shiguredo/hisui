@@ -1,6 +1,6 @@
 .PHONY: all get_input_files test webm_test update_input_check update_output_check clean
 
-HISUI=../../release/hisui --openh264 /usr/local/lib/libopenh264-2.1.1-linux64.6.so
+HISUI=../../release/hisui --openh264 /usr/local/lib/libopenh264-2.3.1-linux64.7.so
 LIBFKD_AAC_DEV_VERSION=$(shell dpkg -s libfdk-aac-dev | grep Version | cut -d ' ' -f 2)
 
 all: test
@@ -23,6 +23,7 @@ webm_test: get_input_files
 		echo webm_$${base}; \
 		vp9_file=output/$${base}.vp9.webm; \
 		vp8_file=output/$${base}.vp8.webm; \
+		h264_file=output/$${base}.h264.webm; \
 		audio_file=output/$${base}.weba; \
 		${HISUI} -f $${m} --out-file $${vp9_file} --show-progress-bar false --log-level error --out-video-codec VP9; \
 		${HISUI} -f $${m} --out-file $${audio_file} --show-progress-bar false --log-level error --audio-only; \
@@ -30,6 +31,8 @@ webm_test: get_input_files
 		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${audio_file}) $${audio_file} | head --bytes=$$(bash ./get_cluster_size.bash $${audio_file}) > $${audio_file}.cluster; \
 		[ x"$$base" = x"case3" -o x"$$base" = x"case4" ] || ${HISUI} -f $${m} --out-file $${vp8_file} --show-progress-bar false --log-level error --out-video-codec VP8; \
 		[ x"$$base" = x"case3" -o x"$$base" = x"case4" ] || tail --bytes=+$$(bash ./get_cluster_start_position.bash $${vp8_file}) $${vp8_file} | head --bytes=$$(bash ./get_cluster_size.bash $${vp8_file}) > $${vp8_file}.cluster; \
+		${HISUI} -f $${m} --out-file $${h264_file} --show-progress-bar false --log-level error --out-video-codec H264; \
+		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${h264_file}) $${h264_file} | head --bytes=$$(bash ./get_cluster_size.bash $${h264_file}) > $${h264_file}.cluster; \
 	done
 
 mp4_test: get_input_files
@@ -54,9 +57,12 @@ layout_webm_test: get_input_files
 	for m in layout/webm/case*.json; do \
 		base=$$(basename $${m} .json); \
 		echo layout_webm_$${base}; \
-		output=output/layout/$${base}.webm; \
-		${HISUI} --layout $${m} --out-file $${output} --show-progress-bar false --log-level error --out-video-codec VP9; \
-		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${output}) $${output} | head --bytes=$$(bash ./get_cluster_size.bash $${output}) > $${output}.cluster; \
+		vp9_file=output/layout/$${base}.webm; \
+		${HISUI} --layout $${m} --out-file $${vp9_file} --show-progress-bar false --log-level error --out-video-codec VP9; \
+		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${vp9_file}) $${vp9_file} | head --bytes=$$(bash ./get_cluster_size.bash $${vp9_file}) > $${vp9_file}.cluster; \
+		h264_file=output/layout/$${base}.h264.webm; \
+		${HISUI} --layout $${m} --out-file $${h264_file} --show-progress-bar false --log-level error --out-video-codec H264; \
+		tail --bytes=+$$(bash ./get_cluster_start_position.bash $${h264_file}) $${h264_file} | head --bytes=$$(bash ./get_cluster_size.bash $${h264_file}) > $${h264_file}.cluster; \
 	done
 
 layout_mp4_test: get_input_files

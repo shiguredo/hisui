@@ -275,6 +275,7 @@ target_sources(hisui
     src/layout/grid.cpp
     src/layout/interval.cpp
     src/layout/metadata.cpp
+    src/layout/openh264_video_producer.cpp
     src/layout/overlap.cpp
     src/layout/region.cpp
     src/layout/source.cpp
@@ -288,6 +289,7 @@ target_sources(hisui
     src/muxer/multi_channel_vpx_video_producer.cpp
     src/muxer/muxer.cpp
     src/muxer/no_video_producer.cpp
+    src/muxer/openh264_video_producer.cpp
     src/muxer/opus_audio_producer.cpp
     src/muxer/simple_mp4_muxer.cpp
     src/muxer/video_producer.cpp
@@ -299,6 +301,7 @@ target_sources(hisui
     src/util/wildcard.cpp
     src/version/version.cpp
     src/video/basic_sequencer.cpp
+    src/video/buffer_openh264_encoder.cpp
     src/video/buffer_vpx_encoder.cpp
     src/video/composer.cpp
     src/video/decoder.cpp

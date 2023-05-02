@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <iterator>
 #include <memory>
@@ -9,11 +10,13 @@
 #include <string>
 
 #include "audio/opus.hpp"
+#include "config.hpp"
 #include "constants.hpp"
 #include "frame.hpp"
 #include "muxer/audio_producer.hpp"
 #include "muxer/multi_channel_vpx_video_producer.hpp"
 #include "muxer/no_video_producer.hpp"
+#include "muxer/openh264_video_producer.hpp"
 #include "muxer/opus_audio_producer.hpp"
 #include "muxer/video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
@@ -70,9 +73,17 @@ void AsyncWebMMuxer::setUp() {
                           .duration = m_duration,
                       });
       } else {
-        m_video_producer = std::make_shared<VPXVideoProducer>(
-            m_config, VPXVideoProducerParameters{.archives = m_normal_archives,
-                                                 .duration = m_duration});
+        if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+          m_video_producer = std::make_shared<OpenH264VideoProducer>(
+              m_config,
+              OpenH264VideoProducerParameters{.archives = m_normal_archives,
+                                              .duration = m_duration});
+        } else {
+          m_video_producer = std::make_shared<VPXVideoProducer>(
+              m_config,
+              VPXVideoProducerParameters{.archives = m_normal_archives,
+                                         .duration = m_duration});
+        }
       }
     }
   }
@@ -99,15 +110,28 @@ void AsyncWebMMuxer::setUp() {
   if (hisui::report::Reporter::hasInstance()) {
     hisui::report::Reporter::getInstance().registerOutput({
         .container = "WebM",
-        .video_codec =
-            m_config.audio_only ? "none"
-            : m_video_producer->getFourcc() == hisui::Constants::VP9_FOURCC
-                ? "vp9"
-                : "vp8",
+        .video_codec = getVideoCodecName(),
         .audio_codec = "opus",
         .duration = m_duration,
     });
   }
+}
+
+std::string AsyncWebMMuxer::getVideoCodecName() {
+  if (m_config.audio_only) {
+    return "none";
+  }
+  auto fourcc = m_video_producer->getFourcc();
+  if (fourcc == hisui::Constants::VP9_FOURCC) {
+    return "vp9";
+  }
+  if (fourcc == hisui::Constants::VP8_FOURCC) {
+    return "vp8";
+  }
+  if (fourcc == hisui::Constants::H264_FOURCC) {
+    return "h264";
+  }
+  throw std::runtime_error(fmt::format("unknown fourcc: {}", fourcc));
 }
 
 void AsyncWebMMuxer::appendAudio(hisui::Frame frame) {

@@ -111,9 +111,10 @@ void set_cli_options(CLI::App* app, Config* config) {
   std::vector<std::pair<std::string, std::uint32_t>> out_video_codec_assoc{
       {"VP8", config::OutVideoCodec::VP8},
       {"VP9", config::OutVideoCodec::VP9},
+      {"H264", config::OutVideoCodec::H264},
   };
   app->add_option("--out-video-codec", config->out_video_codec,
-                  "Video codec (VP8/VP9). default: VP9")
+                  "Video codec (VP8/VP9/H264). default: VP9")
       ->transform(CLI::CheckedTransformer(out_video_codec_assoc));
 
   std::vector<std::pair<std::string, config::OutAudioCodec>> out_audio_codec{
@@ -259,6 +260,21 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "libvp9 row based non-deterministic multi-threading. "
                   "default: 0 (0, 1)")
       ->check(CLI::Range(0, 1))
+      ->group(OPTIONS_FOR_TUNING);
+
+  app->add_option("--openh264-threads", config->openh264_threads,
+                  "OpenH264 number of threads (NON NEGATIVE INTEGER)"
+                  "default: 1 (multiple threads imp. disabled)")
+      ->check(CLI::NonNegativeNumber)
+      ->group(OPTIONS_FOR_TUNING);
+
+  app->add_option("--openh264-min-qp", config->openh264_min_qp,
+                  "OpenH264 minmum QP encoder supports. default: 0")
+      ->check(CLI::Range(0, 51))
+      ->group(OPTIONS_FOR_TUNING);
+  app->add_option("--openh264-max-qp", config->openh264_max_qp,
+                  "OpenH264 maximum QP encoder supports. default: 51")
+      ->check(CLI::Range(0, 51))
       ->group(OPTIONS_FOR_TUNING);
 
   std::vector<std::pair<std::string, spdlog::level::level_enum>>
