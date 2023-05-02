@@ -11,18 +11,25 @@
 
 ## develop
 
-- [CHANGE] OpenH264 での エンコードに対応する (WebM のみ)
+- [CHANGE] OpenH264 での エンコードに対応する
+    - 現時点では WebM のみ対応
+    - `--out-video-codec` オプションに H.264 の指定を追加する
+    - H.264 のチューニングオプションを追加する (ヘルプオプションには Debug でのみ表示される)
+        - `--openh264-threads` : エンコード時のスレッド数を指定するオプション [ default 1]
+        - `--openh264-min-qp`  : 最小量子化パラメータを指定するオプション [0 - 51]
+        - `--openh264-max-qp`  : 最大量子化パラメータを指定するオプション [0 - 51]
+          ※ 量子化パラメータは、エンコーダーが画像データを圧縮する際に、どれだけの情報を削除するかを制御するパラメータ
+    - 現時点で発見されている課題
+        - 合成した H.264 のファイルを再生時、シークバーを動かすと再生が止まる
     - @haruyama
-    - https://github.com/shiguredo/hisui/pull/123
-- [CHANGE] --version flag を追加する (version を出力し正常終了する)
+- [CHANGE] Hisui のオプションに `--version` を追加し、バージョン出力を追加する
+    - `Recording Composition Tool Hisui [バージョン]` で出力する
     - @haruyama
-    - https://github.com/shiguredo/hisui/pull/122
-- [CHANGE] ビルドに debug 指定を追加しました
+- [CHANGE] ビルドオプションに `--build-type-debug` を追加し、デバッグビルドを追加する
+    - デバッグビルドを利用することで通常見えないオプションをヘルプオプションで見ることができるようになる
     - @torikizi
-    - https://github.com/shiguredo/hisui/pull/120
-- [FIX] misspell のインストールに 'go install' を利用する
+- [FIX] `misspell` パッケージのインストールを `go get -u` から `go install` を利用するよう変更する
     - @haruyama
-    - https://github.com/shiguredo/hisui/pull/121
 
 ## 2023.1.1
 
