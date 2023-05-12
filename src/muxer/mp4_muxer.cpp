@@ -189,7 +189,7 @@ void MP4Muxer::appendVideo(hisui::Frame frame) {
 
 void MP4Muxer::writeTrackData() {
   for (const auto f : m_audio_buffer) {
-    m_soun_track->addMdatData(f.timestamp, f.data, f.data_size, f.is_key);
+    m_soun_track->addData(f.timestamp, f.data, f.data_size, f.is_key);
     delete[] f.data;
   }
   m_soun_track->terminateCurrentChunk();
@@ -198,7 +198,7 @@ void MP4Muxer::writeTrackData() {
     return;
   }
   for (const auto f : m_video_buffer) {
-    m_vide_track->addMdatData(f.timestamp, f.data, f.data_size, f.is_key);
+    m_vide_track->addData(f.timestamp, f.data, f.data_size, f.is_key);
     delete[] f.data;
   }
   m_vide_track->terminateCurrentChunk();
