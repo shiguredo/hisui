@@ -1,6 +1,6 @@
 #include "video/openh264.hpp"
 
-#include <codec/api/svc/codec_def.h>
+#include <codec/api/wels/codec_def.h>
 
 #include <algorithm>
 #include <array>

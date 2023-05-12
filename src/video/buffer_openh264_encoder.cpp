@@ -1,8 +1,8 @@
 #include "video/buffer_openh264_encoder.hpp"
 
-#include <codec/api/svc/codec_api.h>
-#include <codec/api/svc/codec_app_def.h>
-#include <codec/api/svc/codec_def.h>
+#include <codec/api/wels/codec_api.h>
+#include <codec/api/wels/codec_app_def.h>
+#include <codec/api/wels/codec_def.h>
 
 #include <bits/exception.h>
 #include <fmt/core.h>

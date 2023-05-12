@@ -1,6 +1,6 @@
 #include "version/version.hpp"
 
-#include <codec/api/svc/codec_app_def.h>
+#include <codec/api/wels/codec_app_def.h>
 #include <fmt/core.h>
 #include <mkvparser/mkvparser.h>
 #include <vpx/vpx_codec.h>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <codec/api/svc/codec_app_def.h>
+#include <codec/api/wels/codec_app_def.h>
 
 #include <queue>
 #include <vector>
