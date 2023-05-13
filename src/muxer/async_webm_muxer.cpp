@@ -110,28 +110,11 @@ void AsyncWebMMuxer::setUp() {
   if (hisui::report::Reporter::hasInstance()) {
     hisui::report::Reporter::getInstance().registerOutput({
         .container = "WebM",
-        .video_codec = getVideoCodecName(),
+        .video_codec = getVideoCodecName(m_config),
         .audio_codec = "opus",
         .duration = m_duration,
     });
   }
-}
-
-std::string AsyncWebMMuxer::getVideoCodecName() {
-  if (m_config.audio_only) {
-    return "none";
-  }
-  auto fourcc = m_video_producer->getFourcc();
-  if (fourcc == hisui::Constants::VP9_FOURCC) {
-    return "vp9";
-  }
-  if (fourcc == hisui::Constants::VP8_FOURCC) {
-    return "vp8";
-  }
-  if (fourcc == hisui::Constants::H264_FOURCC) {
-    return "h264";
-  }
-  throw std::runtime_error(fmt::format("unknown fourcc: {}", fourcc));
 }
 
 void AsyncWebMMuxer::appendAudio(hisui::Frame frame) {

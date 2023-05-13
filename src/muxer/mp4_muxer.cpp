@@ -169,11 +169,7 @@ void MP4Muxer::initialize(
         .mux_type = config.mp4_muxer == config::MP4Muxer::Faststart
                         ? "faststart"
                         : "simple",
-        .video_codec =
-            config.audio_only ? "none"
-            : m_video_producer->getFourcc() == hisui::Constants::VP9_FOURCC
-                ? "vp9"
-                : "vp8",
+        .video_codec = getVideoCodecName(config),
         .audio_codec = config.out_audio_codec == config::OutAudioCodec::FDK_AAC
                            ? "aac"
                            : "opus",
