@@ -61,7 +61,7 @@ target_include_directories(version_test
     ${fmt_SOURCE_DIR}/include
     ${spdlog_SOURCE_DIR}/include
     ../../src
-    ../../src/third_party/openh264/codec/api/svc
+    ../../src/third_party/openh264/codec/api/wels
     ../../third_party/openh264
     ../../third_party/libvpx
     ../../third_party/libvpx/third_party/libwebm

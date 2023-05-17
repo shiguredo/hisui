@@ -2,15 +2,17 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <boost/cstdint.hpp>
 #include <boost/rational.hpp>
 
 namespace hisui {
 
+class Config;
 struct Frame;
 
-}
+}  // namespace hisui
 
 namespace hisui::muxer {
 
@@ -26,6 +28,7 @@ class Muxer {
 
  protected:
   void mux();
+  std::string getVideoCodecName(const hisui::Config& config);
 
   std::shared_ptr<VideoProducer> m_video_producer;
   std::shared_ptr<AudioProducer> m_audio_producer;

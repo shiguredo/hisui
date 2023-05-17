@@ -44,7 +44,6 @@ class AsyncWebMMuxer : public Muxer {
   void muxFinalize() override;
   void appendAudio(hisui::Frame) override;
   void appendVideo(hisui::Frame) override;
-  std::string getVideoCodecName();
 
   std::unique_ptr<hisui::webm::output::Context> m_context;
 
