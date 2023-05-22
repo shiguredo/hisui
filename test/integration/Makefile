@@ -45,11 +45,13 @@ mp4_test: get_input_files
 		aac_file=output/$${base}.aac.mp4; \
 		opus_m4a_file=output/$${base}.opus.m4a; \
 		aac_m4a_file=output/$${base}.aac.m4a; \
+		aac_h264_mp4_file=output/$${base}.aac.h264.mp4; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${opus_file} --show-progress-bar false --log-level error --out-container mp4; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${simple_opus_file} --show-progress-bar false --log-level error --out-container mp4 --mp4-muxer simple; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${aac_file} --show-progress-bar false --log-level error --out-container mp4 --out-audio-codec aac; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${opus_m4a_file} --show-progress-bar false --log-level error --out-container mp4 --audio-only; \
 		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${aac_m4a_file} --show-progress-bar false --log-level error --out-container mp4 --out-audio-codec aac --audio-only; \
+		faketime -f '2021-01-06 00:00:00' ${HISUI} -f $${m} --out-file $${aac_h264_mp4_file} --show-progress-bar false --log-level error --out-container mp4 --out-audio-codec aac --out-video-codec H264; \
 	done
 
 layout_webm_test: get_input_files
