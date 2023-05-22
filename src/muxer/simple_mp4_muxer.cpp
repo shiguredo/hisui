@@ -25,10 +25,23 @@ SimpleMP4Muxer::SimpleMP4Muxer(const hisui::Config& t_config,
     : MP4Muxer(params), m_config(t_config) {}
 
 void SimpleMP4Muxer::setUp() {
-  m_simple_writer = std::make_shared<shiguredo::mp4::writer::SimpleWriter>(
-      m_ofs,
-      shiguredo::mp4::writer::SimpleWriterParameters{
-          .mvhd_timescale = 1000, .duration = static_cast<float>(m_duration)});
+  if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+    m_simple_writer = std::make_shared<shiguredo::mp4::writer::SimpleWriter>(
+        m_ofs, shiguredo::mp4::writer::SimpleWriterParameters{
+                   .mvhd_timescale = 1000,
+                   .duration = static_cast<float>(m_duration),
+                   .ftyp_params = shiguredo::mp4::box::FtypParameters{
+                       .major_brand = {'i', 's', 'o', 'm'},
+                       .minor_version = 0,
+                       .compatible_brands = {
+                           {'m', 'p', '4', '1'},
+                       }}});
+  } else {
+    m_simple_writer = std::make_shared<shiguredo::mp4::writer::SimpleWriter>(
+        m_ofs, shiguredo::mp4::writer::SimpleWriterParameters{
+                   .mvhd_timescale = 1000,
+                   .duration = static_cast<float>(m_duration)});
+  }
   initialize(m_config, m_simple_writer);
 }
 
