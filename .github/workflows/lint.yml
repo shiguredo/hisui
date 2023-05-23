@@ -7,13 +7,12 @@ on:
       - main
       - master
       - develop
-      - feature/*
     paths-ignore:
-    - 'doc/**'
-    - '**.md'
-    - 'THANKS'
-    - 'LICENSE'
-    - 'NOTICE'
+      - 'doc/**'
+      - '**.md'
+      - 'THANKS'
+      - 'LICENSE'
+      - 'NOTICE'
 
 jobs:
   lint:
