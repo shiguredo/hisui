@@ -50,8 +50,8 @@ BufferOpenH264Encoder::BufferOpenH264Encoder(
   param.iUsageType = CAMERA_VIDEO_REAL_TIME;  // TODO(haruyama): config にする?
   param.iRCMode = RC_QUALITY_MODE;
   for (auto i = 0; i < MAX_SPATIAL_LAYER_NUM; ++i) {
-    param.sSpatialLayers[i].uiLevelIdc = LEVEL_3_1;
-    param.sSpatialLayers[i].uiProfileIdc = PRO_BASELINE;
+    param.sSpatialLayers[i].uiLevelIdc = config.level;
+    param.sSpatialLayers[i].uiProfileIdc = config.profile;
   }
   param.fMaxFrameRate = static_cast<float>(m_fps.numerator()) /
                         static_cast<float>(m_fps.denominator());

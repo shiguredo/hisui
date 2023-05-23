@@ -53,6 +53,8 @@ OpenH264EncoderConfig::OpenH264EncoderConfig(const std::uint32_t t_width,
       bitrate(config.out_video_bit_rate),
       threads(config.openh264_threads),
       min_qp(config.openh264_min_qp),
-      max_qp(config.openh264_max_qp) {}
+      max_qp(config.openh264_max_qp),
+      profile(config.openh264_profile),
+      level(config.openh264_level) {}
 
 }  // namespace hisui::video

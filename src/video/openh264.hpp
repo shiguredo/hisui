@@ -1,5 +1,6 @@
 #pragma once
 
+#include <codec/api/wels/codec_app_def.h>
 #include <codec/api/wels/codec_def.h>
 
 #include <cstdint>
@@ -30,6 +31,8 @@ class OpenH264EncoderConfig {
   const std::uint16_t threads;
   const std::int32_t min_qp;
   const std::int32_t max_qp;
+  const ::EProfileIdc profile = ::PRO_BASELINE;
+  const ::ELevelIdc level = ::LEVEL_3_1;
 };
 
 }  // namespace hisui::video
