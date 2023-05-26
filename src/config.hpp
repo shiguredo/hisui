@@ -1,5 +1,6 @@
 #pragma once
 
+#include <codec/api/wels/codec_app_def.h>
 #include <libyuv/scale.h>
 #include <spdlog/common.h>
 
@@ -119,6 +120,8 @@ class Config {
   std::uint16_t openh264_threads = 1;
   std::int32_t openh264_min_qp = 0;
   std::int32_t openh264_max_qp = 51;
+  ::EProfileIdc openh264_profile = ::PRO_BASELINE;
+  ::ELevelIdc openh264_level = ::LEVEL_3_1;
 
   libyuv::FilterMode libyuv_filter_mode = libyuv::kFilterBox;
 

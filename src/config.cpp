@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <codec/api/wels/codec_app_def.h>
 #include <libyuv/scale.h>
 #include <spdlog/common.h>
 
@@ -275,6 +276,29 @@ void set_cli_options(CLI::App* app, Config* config) {
   app->add_option("--openh264-max-qp", config->openh264_max_qp,
                   "OpenH264 maximum QP encoder supports. default: 51")
       ->check(CLI::Range(0, 51))
+      ->group(OPTIONS_FOR_TUNING);
+
+  std::vector<std::pair<std::string, ::EProfileIdc>> openh264_profile_assoc{
+      {"baseline", ::PRO_BASELINE},
+      {"main", ::PRO_MAIN},
+      {"high", ::PRO_HIGH},
+  };
+  app->add_option("--openh264-profile", config->openh264_profile,
+                  "OpenH264 Profile (baseline/main/high). default: baseline")
+      ->transform(
+          CLI::CheckedTransformer(openh264_profile_assoc, CLI::ignore_case))
+      ->group(OPTIONS_FOR_TUNING);
+
+  std::vector<std::pair<std::string, ::ELevelIdc>> openh264_level_assoc{
+      {"3.0", ::LEVEL_3_0}, {"3.1", ::LEVEL_3_1}, {"3.2", ::LEVEL_3_2},
+      {"4.0", ::LEVEL_4_0}, {"4.1", ::LEVEL_4_1}, {"4.2", ::LEVEL_4_2},
+      {"5.0", ::LEVEL_5_0}, {"5.1", ::LEVEL_5_1}, {"5.2", ::LEVEL_5_2},
+  };
+  app->add_option(
+         "--openh264-level", config->openh264_level,
+         "OpenH264 Level (3.0/3.1/3.2/4.0/4.1/4.2/5.0/5.1/5.2). default: 3.1")
+      ->transform(
+          CLI::CheckedTransformer(openh264_level_assoc, CLI::ignore_case))
       ->group(OPTIONS_FOR_TUNING);
 
   std::vector<std::pair<std::string, spdlog::level::level_enum>>
