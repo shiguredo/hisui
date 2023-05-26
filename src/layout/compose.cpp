@@ -24,6 +24,8 @@ int compose(const hisui::Config& t_config) {
   auto metadata = hisui::layout::parse_metadata(config);
   metadata.copyToConfig(&config);
 
+  config.validate();
+
   std::shared_ptr<hisui::muxer::Muxer> muxer;
   std::shared_ptr<muxer::VideoProducer> video_producer;
   try {

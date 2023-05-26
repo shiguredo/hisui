@@ -34,8 +34,6 @@ int main(int argc, char** argv) {
 
     CLI11_PARSE(app, argc, argv);
 
-    config.validate();
-
     if (config.version) {
       std::cout << "Recording Composition Tool Hisui "
                 << hisui::version::get_hisui_version() << std::endl;
@@ -68,6 +66,8 @@ int main(int argc, char** argv) {
   if (!std::empty(config.layout)) {
     return hisui::layout::compose(config);
   }
+
+  config.validate();
 
   if (std::empty(config.in_metadata_filename)) {
     spdlog::error("-f,--in-metadata-file is required");
