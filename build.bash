@@ -124,6 +124,7 @@ fi
 
 cd third_party || exit 1
 
+# libvpx
 if [ -d libvpx ] ; then
     cd libvpx || exit 1
     patch -p1 -R < ../libwebm.patch || echo "reverse patch failed"
@@ -163,8 +164,33 @@ cd "$PACKAGE" || exit 1
 
 CXX="$CXX" CC="$CC" ../configure "${libvpx_configure_options[@]}" || (cat config.log && exit 1)
 make
-
 cd ../../..
+
+# SVT-AV1
+cd third_party || exit 1
+if [ -d SVT-AV1 ] ; then
+    cd SVT-AV1 || exit 1
+    git checkout master
+    git pull
+else
+    git clone https://gitlab.com/AOMediaCodec/SVT-AV1.git
+    cd SVT-AV1 || exit 1
+fi
+git checkout v"${SVT_AV1_VERSION}"
+
+stv_av1_configure_options=('--static' '--no-apps')
+if [ "${BUILD_TYPE}" = "Native" ]; then
+    stv_av1_configure_options+=('--native' 'release')
+elif [ "${BUILD_TYPE}" = "Release" ]; then
+    stv_av1_configure_options+=('release')
+elif [ "${BUILD_TYPE}" = "Debug" ]; then
+    stv_av1_configure_options+=('debug')
+fi
+cd Build/linux || exit 1
+./build.sh "${stv_av1_configure_options[@]}" || exit 1
+
+cd ../../../..
+
 if [ "${BUILD_TYPE}" = "Native" ]; then
     mkdir -p "native/$PACKAGE"
     cd "native/$PACKAGE" || exit 1
