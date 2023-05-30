@@ -7,6 +7,13 @@ cmake_policy(SET CMP0091 NEW)
 
 include(cmake/env.cmake)
 
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+    set(SVT_AV1_BUILD_TYPE "Debug")
+else()
+    set(SVT_AV1_BUILD_TYPE "Release")
+endif()
+
+
 set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 7158ce0c19c1a7e9c8fcc34339e381766235abb5 "cpp-mp4 のバージョン")
@@ -397,6 +404,7 @@ target_link_libraries(hisui
     shiguredo-mp4
     spdlog
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     )
 
 if(WITH_TEST)
