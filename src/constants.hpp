@@ -10,6 +10,7 @@ class Constants {
   static const std::uint32_t PCM_SAMPLE_RATE = 48000;
   static const std::uint32_t VP8_FOURCC = 0x30385056;
   static const std::uint32_t VP9_FOURCC = 0x30395056;
+  static const std::uint32_t AV1_FOURCC = 0x31305641;
   static const std::uint32_t H264_FOURCC = 0x34363248;
   static const std::uint32_t I420_FOURCC = 0x30323449;
   static const std::uint32_t VIDEO_H264_OUTPUT_BITRATE = 512000;
