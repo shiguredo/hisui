@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "constants.hpp"
+#include "video/av1_decoder.hpp"
 #include "video/decoder.hpp"
 #include "video/openh264_decoder.hpp"
 #include "video/openh264_handler.hpp"
@@ -45,6 +46,9 @@ WebMSource::WebMSource(const std::string& t_file_path) {
     case hisui::Constants::VP8_FOURCC: /* fall through */
     case hisui::Constants::VP9_FOURCC:
       m_decoder = std::make_shared<VPXDecoder>(m_webm);
+      break;
+    case hisui::Constants::AV1_FOURCC:
+      m_decoder = std::make_shared<AV1Decoder>(m_webm);
       break;
     case hisui::Constants::H264_FOURCC:
       if (OpenH264Handler::hasInstance()) {

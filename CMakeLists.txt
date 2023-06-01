@@ -307,6 +307,7 @@ target_sources(hisui
     src/util/json.cpp
     src/util/wildcard.cpp
     src/version/version.cpp
+    src/video/av1_decoder.cpp
     src/video/basic_sequencer.cpp
     src/video/buffer_openh264_encoder.cpp
     src/video/buffer_vpx_encoder.cpp
@@ -391,6 +392,7 @@ target_include_directories(hisui
     third_party/libvpx/third_party/libyuv/include
     third_party/libvpx/third_party/libwebm
     third_party/libvpx
+    third_party/SVT-AV1/Source/API
     )
 
 set_target_properties(hisui PROPERTIES CXX_STANDARD 20 C_STANDARD 11)

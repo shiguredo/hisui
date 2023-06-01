@@ -121,6 +121,7 @@ target_include_directories(layout_test
     ../../third_party/libvpx/third_party/libwebm
     ../../third_party/libvpx
     ../../third_party/openh264
+    ../../third_party/SVT-AV1/Source/API
     )
 
 target_link_libraries(layout_test
