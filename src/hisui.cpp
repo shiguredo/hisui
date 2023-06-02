@@ -29,6 +29,8 @@ int main(int argc, char** argv) {
   CLI::App app{"hisui"};
   hisui::Config config;
 
+  ::setenv("SVT_LOG", "-2", 1);
+
   try {
     hisui::set_cli_options(&app, &config);
 
