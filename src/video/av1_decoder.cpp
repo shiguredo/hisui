@@ -64,9 +64,7 @@ int set_picture_buffer(::EbSvtIOFormat* pic_buffer,
 }
 
 void update_yuv_image_by_av1_buffer(std::shared_ptr<YUVImage> yuv_image,
-                                    const ::EbBufferHeaderType* recon_buffer) {
-  ::EbSvtIOFormat* buffer =
-      reinterpret_cast<::EbSvtIOFormat*>(recon_buffer->p_buffer);
+                                    const ::EbSvtIOFormat* buffer) {
   const auto bytes_per_sample = (buffer->bit_depth == ::EB_EIGHT_BIT) ? 1 : 2;
   if (bytes_per_sample == 2) {
     throw std::runtime_error("bytes_per_sample == 2 is not suppoted");
@@ -140,6 +138,18 @@ AV1Decoder::AV1Decoder(std::shared_ptr<hisui::webm::input::VideoContext> t_webm)
   m_frame_info = new ::EbAV1FrameInfo();
 
   m_current_yuv_image = std::make_shared<YUVImage>(m_width, m_height);
+
+  if (hisui::report::Reporter::hasInstance()) {
+    m_report_enabled = true;
+
+    hisui::report::Reporter::getInstance().registerVideoDecoder(
+        m_webm->getFilePath(),
+        {.codec = "av1", .duration = m_webm->getDuration()});
+
+    hisui::report::Reporter::getInstance().registerResolutionChange(
+        m_webm->getFilePath(),
+        {.timestamp = 0, .width = m_width, .height = m_height});
+  }
 
   updateAV1ImageByTimestamp(0);
 }
@@ -230,7 +240,20 @@ void AV1Decoder::updateAV1ImageByTimestamp(const std::uint64_t timestamp) {
       }
       if (svt_av1_dec_get_picture(m_handle, m_recon_buffer, m_stream_info,
                                   m_frame_info) != ::EB_DecNoOutputPicture) {
-        update_yuv_image_by_av1_buffer(m_current_yuv_image, m_recon_buffer);
+        ::EbSvtIOFormat* buffer =
+            reinterpret_cast<::EbSvtIOFormat*>(m_recon_buffer->p_buffer);
+
+        if (m_report_enabled) {
+          if (m_current_yuv_image->getWidth(0) != buffer->width ||
+              m_current_yuv_image->getHeight(0) != buffer->height) {
+            hisui::report::Reporter::getInstance().registerResolutionChange(
+                m_webm->getFilePath(), {.timestamp = m_next_timestamp,
+                                        .width = buffer->width,
+                                        .height = buffer->height});
+          }
+        }
+
+        update_yuv_image_by_av1_buffer(m_current_yuv_image, buffer);
       }
       m_next_timestamp = static_cast<std::uint64_t>(m_webm->getTimestamp());
     } else {
