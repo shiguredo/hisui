@@ -186,7 +186,16 @@ elif [ "${BUILD_TYPE}" = "Release" ]; then
 elif [ "${BUILD_TYPE}" = "Debug" ]; then
     stv_av1_configure_options+=('debug')
 fi
+
+case "$PACKAGE" in
+  *_x86_64 )
+    stv_av1_configure_options+=('-t' '../../../../cmake/clang-x86_64-toolchain.cmake')
+    ;;
+  *_arm64 )
+    stv_av1_configure_options+=('-s' 'aarch64-linux-gnu' '-t' '../../../../cmake/clang-aarch64-toolchain.cmake')
+esac
 cd Build/linux || exit 1
+
 ./build.sh "${stv_av1_configure_options[@]}" || exit 1
 
 cd ../../../..
