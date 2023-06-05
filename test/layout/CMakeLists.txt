@@ -3,6 +3,16 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
 
+if(DEFINED CMAKE_BUILD_TYPE)
+    if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+        set(SVT_AV1_BUILD_TYPE "Debug")
+    else()
+        set(SVT_AV1_BUILD_TYPE "Release")
+    endif()
+else()
+    set(SVT_AV1_BUILD_TYPE "Release")
+endif()
+
 add_compile_options(
     -Wall
     -Wextra
@@ -39,6 +49,7 @@ add_executable(layout_test
     ../../src/util/interval.cpp
     ../../src/util/json.cpp
     ../../src/version/version.cpp
+    ../../src/video/av1_decoder.cpp
     ../../src/video/decoder.cpp
     ../../src/video/openh264.cpp
     ../../src/video/openh264_decoder.cpp
@@ -131,6 +142,7 @@ target_link_libraries(layout_test
     shiguredo-mp4
     spdlog 
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     )
 
 add_test(NAME layout COMMAND layout_test)
