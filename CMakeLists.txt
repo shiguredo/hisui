@@ -7,12 +7,15 @@ cmake_policy(SET CMP0091 NEW)
 
 include(cmake/env.cmake)
 
-if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-    set(SVT_AV1_BUILD_TYPE "Debug")
+if(DEFINED CMAKE_BUILD_TYPE)
+    if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+        set(SVT_AV1_BUILD_TYPE "Debug")
+    else()
+        set(SVT_AV1_BUILD_TYPE "Release")
+    endif()
 else()
     set(SVT_AV1_BUILD_TYPE "Release")
 endif()
-
 
 set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
