@@ -312,6 +312,7 @@ target_sources(hisui
     src/version/version.cpp
     src/video/av1_decoder.cpp
     src/video/basic_sequencer.cpp
+    src/video/buffer_av1_encoder.cpp
     src/video/buffer_openh264_encoder.cpp
     src/video/buffer_vpx_encoder.cpp
     src/video/composer.cpp
@@ -410,6 +411,7 @@ target_link_libraries(hisui
     spdlog
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+    ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
     )
 
 if(WITH_TEST)
