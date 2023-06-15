@@ -113,6 +113,7 @@ void set_cli_options(CLI::App* app, Config* config) {
       {"VP8", config::OutVideoCodec::VP8},
       {"VP9", config::OutVideoCodec::VP9},
       {"H264", config::OutVideoCodec::H264},
+      {"AV1", config::OutVideoCodec::AV1},
   };
   app->add_option("--out-video-codec", config->out_video_codec,
                   "Video codec (VP8/VP9/H264). default: VP9")

@@ -32,6 +32,7 @@ enum OutVideoCodec {
   VP8 = hisui::Constants::VP8_FOURCC,
   VP9 = hisui::Constants::VP9_FOURCC,
   H264 = hisui::Constants::H264_FOURCC,
+  AV1 = hisui::Constants::AV1_FOURCC,
 };
 
 enum struct VideoComposer {
