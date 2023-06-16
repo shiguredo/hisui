@@ -14,6 +14,7 @@
 #include "constants.hpp"
 #include "frame.hpp"
 #include "muxer/audio_producer.hpp"
+#include "muxer/av1_video_producer.hpp"
 #include "muxer/multi_channel_vpx_video_producer.hpp"
 #include "muxer/no_video_producer.hpp"
 #include "muxer/openh264_video_producer.hpp"
@@ -78,6 +79,12 @@ void AsyncWebMMuxer::setUp() {
               m_config,
               OpenH264VideoProducerParameters{.archives = m_normal_archives,
                                               .duration = m_duration});
+        } else if (m_config.out_video_codec ==
+                   hisui::config::OutVideoCodec::AV1) {
+          m_video_producer = std::make_shared<AV1VideoProducer>(
+              m_config,
+              AV1VideoProducerParameters{.archives = m_normal_archives,
+                                         .duration = m_duration});
         } else {
           m_video_producer = std::make_shared<VPXVideoProducer>(
               m_config,
@@ -89,9 +96,18 @@ void AsyncWebMMuxer::setUp() {
   }
 
   if (!m_config.audio_only) {
-    m_context->setVideoTrack(m_video_producer->getWidth(),
-                             m_video_producer->getHeight(),
-                             m_video_producer->getFourcc(), nullptr, 0);
+    // TODO(haruyama): 前後含めてリファクタリング
+    if (m_config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
+      const std::array<std::uint8_t, 4> private_data{0x81, 0x00, 0x06, 0x00};
+      m_context->setVideoTrack(m_video_producer->getWidth(),
+                               m_video_producer->getHeight(),
+                               m_video_producer->getFourcc(),
+                               private_data.data(), std::size(private_data));
+    } else {
+      m_context->setVideoTrack(m_video_producer->getWidth(),
+                               m_video_producer->getHeight(),
+                               m_video_producer->getFourcc(), nullptr, 0);
+    }
   }
 
   auto audio_producer = std::make_shared<OpusAudioProducer>(
