@@ -46,7 +46,7 @@ int set_picture_buffer(::EbSvtIOFormat* pic_buffer,
                        ::EbSvtAv1DecConfiguration* config,
                        std::uint32_t width,
                        std::uint32_t height) {
-  auto luma_size = sizeof(std::uint8_t) * width * height;
+  auto luma_size = width * height;
   pic_buffer->luma = new std::uint8_t[luma_size];
   pic_buffer->cb = new std::uint8_t[luma_size >> 2];
   pic_buffer->cr = new std::uint8_t[luma_size >> 2];
