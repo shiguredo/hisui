@@ -80,18 +80,7 @@ void AsyncWebMMuxer::setUp() {
   }
 
   if (!m_config.audio_only) {
-    // TODO(haruyama): 前後含めてリファクタリング
-    if (m_config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
-      const std::array<std::uint8_t, 4> private_data{0x81, 0x00, 0x06, 0x00};
-      m_context->setVideoTrack(m_video_producer->getWidth(),
-                               m_video_producer->getHeight(),
-                               m_video_producer->getFourcc(),
-                               private_data.data(), std::size(private_data));
-    } else {
-      m_context->setVideoTrack(m_video_producer->getWidth(),
-                               m_video_producer->getHeight(),
-                               m_video_producer->getFourcc(), nullptr, 0);
-    }
+    setVideoTrack();
   }
 
   auto audio_producer = std::make_shared<OpusAudioProducer>(
