@@ -69,7 +69,7 @@ void update_yuv_image_by_av1_buffer(std::shared_ptr<YUVImage> yuv_image,
   if (bytes_per_sample == 2) {
     throw std::runtime_error("bytes_per_sample == 2 is not suppoted");
   }
-  if (buffer->color_fmt != EB_YUV420) {
+  if (buffer->color_fmt != ::EB_YUV420) {
     throw std::runtime_error(
         fmt::format("only EB_YUV420 format is suppoted: {}",
                     static_cast<std::int32_t>(buffer->color_fmt)));
@@ -104,26 +104,27 @@ AV1Decoder::AV1Decoder(std::shared_ptr<hisui::webm::input::VideoContext> t_webm)
     : Decoder(t_webm) {
   ::EbSvtAv1DecConfiguration config;
   void* app_data = nullptr;
-  if (auto err = svt_av1_dec_init_handle(&m_handle, app_data, &config);
+  if (auto err = ::svt_av1_dec_init_handle(&m_handle, app_data, &config);
       err != ::EB_ErrorNone) {
-    throw std::runtime_error(fmt::format("svt_av1_dec_init_handle() failed: {}",
-                                         static_cast<std::uint32_t>(err)));
+    throw std::runtime_error(
+        fmt::format("::svt_av1_dec_init_handle() failed: {}",
+                    static_cast<std::uint32_t>(err)));
   }
   set_config(&config, m_width, m_height);
 
-  if (auto err = svt_av1_dec_set_parameter(m_handle, &config);
+  if (auto err = ::svt_av1_dec_set_parameter(m_handle, &config);
       err != ::EB_ErrorNone) {
     throw std::runtime_error(
-        fmt::format("svt_av1_dec_set_parameter() failed: {}",
+        fmt::format("::svt_av1_dec_set_parameter() failed: {}",
                     static_cast<std::uint32_t>(err)));
   }
-  if (auto err = svt_av1_dec_init(m_handle); err != ::EB_ErrorNone) {
-    if (auto err_deinit = svt_av1_dec_deinit_handle(m_handle);
+  if (auto err = ::svt_av1_dec_init(m_handle); err != ::EB_ErrorNone) {
+    if (auto err_deinit = ::svt_av1_dec_deinit_handle(m_handle);
         err_deinit != ::EB_ErrorNone) {
-      spdlog::error("svt_av1_dec_deinit_handle() failed: {}",
+      spdlog::error("::svt_av1_dec_deinit_handle() failed: {}",
                     static_cast<std::uint32_t>(err_deinit));
     }
-    throw std::runtime_error(fmt::format("svt_av1_dec_init() failed: {}",
+    throw std::runtime_error(fmt::format("::svt_av1_dec_init() failed: {}",
                                          static_cast<std::uint32_t>(err)));
   }
 
@@ -158,8 +159,8 @@ AV1Decoder::~AV1Decoder() {
   // 作法的には実施すべきだが, segmentation fault してしまうので実施しない
   // https://gitlab.com/AOMediaCodec/SVT-AV1/-/issues/2005#note_1181213012
   // if (m_handle) {
-  //   if (auto err = svt_av1_dec_deinit(m_handle); err != ::EB_ErrorNone) {
-  //     spdlog::error("svt_av1_dec_deinit() failed: {}",
+  //   if (auto err = ::svt_av1_dec_deinit(m_handle); err != ::EB_ErrorNone) {
+  //     spdlog::error("::svt_av1_dec_deinit() failed: {}",
   //                   static_cast<std::uint32_t>(err));
   //   }
   // }
@@ -191,8 +192,9 @@ AV1Decoder::~AV1Decoder() {
   }
 
   if (m_handle) {
-    if (auto err = svt_av1_dec_deinit_handle(m_handle); err != ::EB_ErrorNone) {
-      spdlog::error("svt_av1_dec_deinit_handle() failed: {}",
+    if (auto err = ::svt_av1_dec_deinit_handle(m_handle);
+        err != ::EB_ErrorNone) {
+      spdlog::error("::svt_av1_dec_deinit_handle() failed: {}",
                     static_cast<std::uint32_t>(err));
     }
   }
@@ -232,14 +234,14 @@ void AV1Decoder::updateAV1ImageByTimestamp(const std::uint64_t timestamp) {
     m_current_timestamp = m_next_timestamp;
     if (m_webm->readFrame()) {
       spdlog::trace("webm->getBufferSize(): {}", m_webm->getBufferSize());
-      if (auto err = svt_av1_dec_frame(m_handle, m_webm->getBuffer(),
-                                       m_webm->getBufferSize(), 0);
+      if (auto err = ::svt_av1_dec_frame(m_handle, m_webm->getBuffer(),
+                                         m_webm->getBufferSize(), 0);
           err != ::EB_ErrorNone) {
-        throw std::runtime_error(fmt::format("svt_av1_dec_frame() failed: {}",
+        throw std::runtime_error(fmt::format("::svt_av1_dec_frame() failed: {}",
                                              static_cast<std::uint32_t>(err)));
       }
-      if (svt_av1_dec_get_picture(m_handle, m_recon_buffer, m_stream_info,
-                                  m_frame_info) != ::EB_DecNoOutputPicture) {
+      if (::svt_av1_dec_get_picture(m_handle, m_recon_buffer, m_stream_info,
+                                    m_frame_info) != ::EB_DecNoOutputPicture) {
         ::EbSvtIOFormat* buffer =
             reinterpret_cast<::EbSvtIOFormat*>(m_recon_buffer->p_buffer);
 
