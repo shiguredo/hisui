@@ -1,5 +1,6 @@
 #include "video/buffer_av1_encoder.hpp"
 
+#include <EbSvtAv1.h>
 #include <EbSvtAv1Enc.h>
 
 #include <bits/exception.h>
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <vector>
 
 #include <boost/rational.hpp>
 

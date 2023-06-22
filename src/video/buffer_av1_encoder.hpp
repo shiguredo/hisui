@@ -65,7 +65,7 @@ class BufferAV1Encoder : public Encoder {
   ::EbComponentType* m_handle;
   ::EbBufferHeaderType* m_input_buffer;
   ::EbSvtAv1EncConfiguration m_av1_enc_config;
-  std::vector<std::uint8_t> m_extra_data;
+  std::vector<std::uint8_t> m_extra_data = {};
 
   void outputFrame(const std::int64_t, const std::uint8_t);
 };
