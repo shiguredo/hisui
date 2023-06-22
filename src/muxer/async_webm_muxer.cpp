@@ -154,4 +154,34 @@ void AsyncWebMMuxer::cleanUp() {}
 
 void AsyncWebMMuxer::muxFinalize() {}
 
+std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
+  if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+    return std::make_shared<OpenH264VideoProducer>(
+        m_config, OpenH264VideoProducerParameters{.archives = m_normal_archives,
+                                                  .duration = m_duration});
+  } else if (m_config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
+    return std::make_shared<AV1VideoProducer>(
+        m_config, AV1VideoProducerParameters{.archives = m_normal_archives,
+                                             .duration = m_duration});
+  } else {
+    return std::make_shared<VPXVideoProducer>(
+        m_config, VPXVideoProducerParameters{.archives = m_normal_archives,
+                                             .duration = m_duration});
+  }
+}
+
+void AsyncWebMMuxer::setVideoTrack() {
+  if (m_config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
+    const std::array<std::uint8_t, 4> private_data{0x81, 0x00, 0x06, 0x00};
+    m_context->setVideoTrack(m_video_producer->getWidth(),
+                             m_video_producer->getHeight(),
+                             m_video_producer->getFourcc(), private_data.data(),
+                             std::size(private_data));
+  } else {
+    m_context->setVideoTrack(m_video_producer->getWidth(),
+                             m_video_producer->getHeight(),
+                             m_video_producer->getFourcc(), nullptr, 0);
+  }
+}
+
 }  // namespace hisui::muxer
