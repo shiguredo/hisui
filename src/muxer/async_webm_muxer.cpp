@@ -74,23 +74,7 @@ void AsyncWebMMuxer::setUp() {
                           .duration = m_duration,
                       });
       } else {
-        if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
-          m_video_producer = std::make_shared<OpenH264VideoProducer>(
-              m_config,
-              OpenH264VideoProducerParameters{.archives = m_normal_archives,
-                                              .duration = m_duration});
-        } else if (m_config.out_video_codec ==
-                   hisui::config::OutVideoCodec::AV1) {
-          m_video_producer = std::make_shared<AV1VideoProducer>(
-              m_config,
-              AV1VideoProducerParameters{.archives = m_normal_archives,
-                                         .duration = m_duration});
-        } else {
-          m_video_producer = std::make_shared<VPXVideoProducer>(
-              m_config,
-              VPXVideoProducerParameters{.archives = m_normal_archives,
-                                         .duration = m_duration});
-        }
+        m_video_producer = makeVideoProducer();
       }
     }
   }
