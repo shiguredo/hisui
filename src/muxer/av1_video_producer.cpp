@@ -54,4 +54,8 @@ AV1VideoProducer::AV1VideoProducer(const hisui::Config& t_config,
   m_frame_rate = t_config.out_video_frame_rate;
 }
 
+const std::vector<std::uint8_t>& AV1VideoProducer::getExtraData() const {
+  return m_encoder->getExtraData();
+}
+
 }  // namespace hisui::muxer
