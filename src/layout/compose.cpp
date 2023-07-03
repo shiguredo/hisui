@@ -7,6 +7,7 @@
 #include "config.hpp"
 #include "constants.hpp"
 #include "datetime.hpp"
+#include "layout/av1_video_producer.hpp"
 #include "layout/metadata.hpp"
 #include "layout/openh264_video_producer.hpp"
 #include "layout/vpx_video_producer.hpp"
@@ -35,6 +36,17 @@ int compose(const hisui::Config& t_config) {
       if (config.out_video_codec == hisui::config::OutVideoCodec::H264) {
         video_producer = std::make_shared<OpenH264VideoProducer>(
             config, OpenH264VideoProducerParameters{
+                        .regions = metadata.getRegions(),
+                        .resolution = metadata.getResolution(),
+                        .duration = metadata.getMaxEndTime(),
+                        .timescale = config.out_container ==
+                                             hisui::config::OutContainer::WebM
+                                         ? hisui::Constants::NANO_SECOND
+                                         : 16000,  // TODO(haruyama): 整理する
+                    });
+      } else if (config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
+        video_producer = std::make_shared<AV1VideoProducer>(
+            config, AV1VideoProducerParameters{
                         .regions = metadata.getRegions(),
                         .resolution = metadata.getResolution(),
                         .duration = metadata.getMaxEndTime(),
