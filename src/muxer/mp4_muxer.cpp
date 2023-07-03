@@ -14,6 +14,7 @@
 #include "constants.hpp"
 #include "metadata.hpp"
 #include "muxer/audio_producer.hpp"
+#include "muxer/av1_video_producer.hpp"
 #include "muxer/multi_channel_vpx_video_producer.hpp"
 #include "muxer/no_video_producer.hpp"
 #include "muxer/openh264_video_producer.hpp"
@@ -21,6 +22,7 @@
 #include "muxer/video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
 #include "report/reporter.hpp"
+#include "shiguredo/mp4/track/av1.hpp"
 #include "shiguredo/mp4/track/h264.hpp"
 #include "shiguredo/mp4/track/opus.hpp"
 #include "shiguredo/mp4/track/soun.hpp"
@@ -96,6 +98,12 @@ void MP4Muxer::initialize(
               OpenH264VideoProducerParameters{.archives = m_normal_archives,
                                               .duration = m_duration,
                                               .timescale = 16000});
+        } else if (config.out_video_codec ==
+                   hisui::config::OutVideoCodec::AV1) {
+          m_video_producer = std::make_shared<AV1VideoProducer>(
+              config, AV1VideoProducerParameters{.archives = m_normal_archives,
+                                                 .duration = m_duration,
+                                                 .timescale = 16000});
         } else {
           m_video_producer = std::make_shared<VPXVideoProducer>(
               config, VPXVideoProducerParameters{.archives = m_normal_archives,
@@ -112,6 +120,16 @@ void MP4Muxer::initialize(
               .track_id = m_writer->getAndUpdateNextTrackID(),
               .width = m_video_producer->getWidth(),
               .height = m_video_producer->getHeight(),
+              .writer = m_writer.get()});
+    } else if (config.out_video_codec == config::OutVideoCodec::AV1) {
+      m_vide_track = std::make_shared<shiguredo::mp4::track::AV1Track>(
+          shiguredo::mp4::track::AV1TrackParameters{
+              .timescale = 16000,
+              .duration = static_cast<float>(m_duration),
+              .track_id = m_writer->getAndUpdateNextTrackID(),
+              .width = m_video_producer->getWidth(),
+              .height = m_video_producer->getHeight(),
+              .config_OBUs = m_video_producer->getExtraData(),
               .writer = m_writer.get()});
     } else {
       m_vide_track = std::make_shared<shiguredo::mp4::track::VPXTrack>(
