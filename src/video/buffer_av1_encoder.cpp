@@ -55,6 +55,10 @@ BufferAV1Encoder::BufferAV1Encoder(std::queue<hisui::Frame>* t_buffer,
       static_cast<std::uint32_t>(m_fps.numerator());
   m_av1_enc_config.frame_rate_denominator =
       static_cast<std::uint32_t>(m_fps.denominator());
+  // core dump する場合を予防する
+  m_av1_enc_config.frame_scale_evts.start_frame_nums = nullptr;
+  m_av1_enc_config.frame_scale_evts.resize_kf_denoms = nullptr;
+  m_av1_enc_config.frame_scale_evts.resize_denoms = nullptr;
 
   if (auto err = ::svt_av1_enc_set_parameter(m_handle, &m_av1_enc_config);
       err != ::EB_ErrorNone) {
