@@ -278,6 +278,7 @@ target_sources(hisui
     src/datetime.cpp
     src/hisui.cpp
     src/layout/archive.cpp
+    src/layout/av1_video_producer.cpp
     src/layout/cell.cpp
     src/layout/cell_util.cpp
     src/layout/compose.cpp
