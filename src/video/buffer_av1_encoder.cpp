@@ -266,4 +266,8 @@ void BufferAV1Encoder::setResolutionAndBitrate(const std::uint32_t width,
   buffer->cr = new std::uint8_t[luma_size >> 2];
 }
 
+const std::vector<std::uint8_t>& BufferAV1Encoder::getExtraData() const {
+  return m_extra_data;
+}
+
 }  // namespace hisui::video

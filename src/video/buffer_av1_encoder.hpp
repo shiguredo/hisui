@@ -51,6 +51,7 @@ class BufferAV1Encoder : public Encoder {
   void setResolutionAndBitrate(const std::uint32_t,
                                const std::uint32_t,
                                const std::uint32_t);
+  const std::vector<std::uint8_t>& getExtraData() const;
 
  private:
   std::queue<hisui::Frame>* m_buffer;
