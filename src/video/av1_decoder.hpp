@@ -25,7 +25,7 @@ class AV1Decoder : public Decoder {
 
   ~AV1Decoder();
 
-  const std::shared_ptr<YUVImage> getImage(const std::uint64_t);
+  const std::shared_ptr<YUVImage> getImage(const std::uint64_t) override;
 
  private:
   std::uint64_t m_current_timestamp = 0;

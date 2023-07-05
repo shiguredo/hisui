@@ -25,8 +25,8 @@ class BufferFDKAACEncoder : public Encoder {
   BufferFDKAACEncoder(std::queue<hisui::Frame>*,
                       const BufferFDKAACEncoderParameters&);
   ~BufferFDKAACEncoder();
-  void addSample(const std::int16_t, const std::int16_t);
-  void flush();
+  void addSample(const std::int16_t, const std::int16_t) override;
+  void flush() override;
 
  private:
   std::queue<hisui::Frame>* m_buffer;

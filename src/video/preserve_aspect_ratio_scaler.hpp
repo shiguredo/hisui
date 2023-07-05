@@ -23,7 +23,8 @@ class PreserveAspectRatioScaler : public Scaler {
   PreserveAspectRatioScaler(const std::uint32_t,
                             const std::uint32_t,
                             const libyuv::FilterMode);
-  const std::shared_ptr<YUVImage> scale(const std::shared_ptr<YUVImage>);
+  const std::shared_ptr<YUVImage> scale(
+      const std::shared_ptr<YUVImage>) override;
 
  private:
   const libyuv::FilterMode m_filter_mode;

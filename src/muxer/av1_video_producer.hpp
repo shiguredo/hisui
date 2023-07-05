@@ -25,7 +25,7 @@ struct AV1VideoProducerParameters {
 class AV1VideoProducer : public VideoProducer {
  public:
   AV1VideoProducer(const hisui::Config&, const AV1VideoProducerParameters&);
-  const std::vector<std::uint8_t>& getExtraData() const;
+  const std::vector<std::uint8_t>& getExtraData() const override;
 };
 
 }  // namespace hisui::muxer

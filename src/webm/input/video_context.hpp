@@ -14,7 +14,7 @@ class VideoContext : public Context {
 
   void reset();
 
-  bool init();
+  bool init() override;
 
   std::uint32_t getFourcc() const;
   std::uint32_t getWidth() const;

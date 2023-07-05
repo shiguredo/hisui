@@ -28,9 +28,9 @@ struct VPXVideoProducerParameters {
 class VPXVideoProducer : public hisui::muxer::VideoProducer {
  public:
   VPXVideoProducer(const hisui::Config&, const VPXVideoProducerParameters&);
-  virtual void produce();
-  virtual std::uint32_t getWidth() const;
-  virtual std::uint32_t getHeight() const;
+  void produce() override;
+  std::uint32_t getWidth() const override;
+  std::uint32_t getHeight() const override;
 
  private:
   Resolution m_resolution;

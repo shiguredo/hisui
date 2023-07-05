@@ -13,6 +13,7 @@ class YUVImage;
 }  // namespace hisui::video
 
 namespace hisui::layout {
+
 class VideoSource : public Source {
  public:
   explicit VideoSource(const SourceParameters&);

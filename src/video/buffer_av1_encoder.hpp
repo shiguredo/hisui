@@ -45,13 +45,13 @@ class BufferAV1Encoder : public Encoder {
       const std::uint64_t timescale = hisui::Constants::NANO_SECOND);
   ~BufferAV1Encoder();
 
-  void outputImage(const std::vector<unsigned char>&);
-  void flush();
-  std::uint32_t getFourcc() const;
+  void outputImage(const std::vector<unsigned char>&) override;
+  void flush() override;
+  std::uint32_t getFourcc() const override;
   void setResolutionAndBitrate(const std::uint32_t,
                                const std::uint32_t,
-                               const std::uint32_t);
-  const std::vector<std::uint8_t>& getExtraData() const;
+                               const std::uint32_t) override;
+  const std::vector<std::uint8_t>& getExtraData() const override;
 
  private:
   std::queue<hisui::Frame>* m_buffer;

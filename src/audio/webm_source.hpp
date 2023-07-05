@@ -21,7 +21,7 @@ class Decoder;
 class WebMSource : public Source {
  public:
   explicit WebMSource(const std::string&);
-  std::pair<std::int16_t, std::int16_t> getSample(const std::uint64_t);
+  std::pair<std::int16_t, std::int16_t> getSample(const std::uint64_t) override;
 
  private:
   std::shared_ptr<hisui::webm::input::AudioContext> m_webm = nullptr;

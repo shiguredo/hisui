@@ -16,7 +16,8 @@ class SimpleScaler : public Scaler {
   SimpleScaler(const std::uint32_t,
                const std::uint32_t,
                const libyuv::FilterMode);
-  const std::shared_ptr<YUVImage> scale(const std::shared_ptr<YUVImage> src);
+  const std::shared_ptr<YUVImage> scale(
+      const std::shared_ptr<YUVImage> src) override;
 
   const libyuv::FilterMode m_filter_mode;
 };
