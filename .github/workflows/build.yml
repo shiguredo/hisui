@@ -49,6 +49,7 @@ jobs:
         run: |
           source VERSION
           echo "libvpx_version=${LIBVPX_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "svt_av1_version=${SVT_AV1_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Cache libvpx ${{ steps.versions.outputs.libvpx_version }}
         id: cache-libvpx
         uses: actions/cache@v3
@@ -59,6 +60,16 @@ jobs:
       - name: Clear libvpx
         if: steps.cache-libvpx.outputs.cache-hit != 'true'
         run: rm -rf third_party/libvpx
+      - name: Cache SVT-AV1 ${{ steps.versions.outputs.svt_av1_version }}
+        id: cache-svt-av1
+        uses: actions/cache@v3
+        with:
+          path: third_party/SVT-AV1
+          key: ${{ matrix.os }}-third_party-svt-av1-${{ hashFiles('third_party/SVT-AV1/Bin/Release/libSvtAv1Dec.a', 'third_party/SVT-AV1/Bin/Release/libSvtAv1Enc.a') }}
+          restore-keys: ${{ matrix.os }}-third_party-svt-av1-
+      - name: Clear SVT-AV1
+        if: steps.cache-svt-av1.outputs.cache-hit != 'true'
+        run: rm -rf third_party/SVT-AV1
       - name: Cache release directory
         id: cache-release
         uses: actions/cache@v3
