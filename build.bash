@@ -131,7 +131,7 @@ if [ -d libvpx ] ; then
     git checkout main
     git pull
 else
-    git clone https://chromium.googlesource.com/webm/libvpx
+    git clone --filter=tree:0 https://chromium.googlesource.com/webm/libvpx
     cd libvpx || exit 1
 fi
 git checkout v"${LIBVPX_VERSION}"
@@ -173,7 +173,7 @@ if [ -d SVT-AV1 ] ; then
     git checkout master
     git pull
 else
-    git clone https://gitlab.com/AOMediaCodec/SVT-AV1.git
+    git clone --filter=tree:0 https://gitlab.com/AOMediaCodec/SVT-AV1.git
     cd SVT-AV1 || exit 1
 fi
 git checkout v"${SVT_AV1_VERSION}"
