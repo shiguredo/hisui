@@ -200,6 +200,30 @@ cd Build/linux || exit 1
 
 cd ../../../..
 
+# Lyra
+cd third_party || exit 1
+
+if [ -d lyra ] ; then
+    cd lyra || exit 1
+    git checkout master
+    git pull
+else
+    git clone --filter=tree:0 https://github.com/google/lyra.git
+    cd lyra || exit 1
+fi
+git checkout v"${LYRA_VERSION}"
+
+lyra_bazel_options=('-c')
+if [ "${BUILD_TYPE}" = "Debug" ]; then
+    lyra_bazel_options+=('dgb')
+elif [ "${BUILD_TYPE}" = "Release" ]; then
+    lyra_bazel_options+=('opt')
+fi
+
+bazelisk build "${lyra_bazel_options[@]}" //lyra:lyra_decoder || exit 1
+
+cd ../..
+
 if [ "${BUILD_TYPE}" = "Native" ]; then
     mkdir -p "native/$PACKAGE"
     cd "native/$PACKAGE" || exit 1

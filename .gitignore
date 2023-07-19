@@ -1,5 +1,6 @@
 /third_party/libvpx
 /third_party/SVT-AV1
+/third_party/lyra
 /test/integration/input/caminandes3.webm
 /test/integration/input/lilac_blossom_bloom_spring.jpg
 /test/integration/input/Big_Buck_Bunny_360_10s_1MB.webm
