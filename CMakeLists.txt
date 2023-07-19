@@ -17,6 +17,7 @@ else()
     set(SVT_AV1_BUILD_TYPE "Release")
 endif()
 
+set_cache_string_from_env(ABSEIL_VERSION 20230125.3 "Abseil のバージョン")
 set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 5eac4e592033c5f384347fd15556de20047752af "cpp-mp4 のバージョン")
@@ -52,6 +53,12 @@ set(CMAKE_CXX_FLAGS_PROFILE "-pg -O3 -DNDEBUG -march=native -mtune=native")
 set(CMAKE_C_FLAGS_PROFILE "-pg -O3 -DNDEBUG -march=native -mtune=native")
 
 include(cmake/tools.cmake)
+
+CPMAddPackage(
+    NAME abseil_cpp
+    GITHUB_REPOSITORY abseil/abseil-cpp
+    GIT_TAG ${ABSEIL_VERSION}
+    )
 
 CPMAddPackage(
     NAME boost_align
@@ -366,6 +373,7 @@ target_sources(hisui
 target_include_directories(hisui
     PRIVATE
     src
+    ${abseil_cpp_SOURCE_DIR}/include
     ${boost_align_SOURCE_DIR}/include
     ${boost_assert_SOURCE_DIR}/include
     ${boost_config_SOURCE_DIR}/include
@@ -406,6 +414,7 @@ set_target_properties(hisui PROPERTIES CXX_STANDARD 20 C_STANDARD 11)
 
 target_link_libraries(hisui
     PRIVATE
+    absl::strings
     dl
     opus
     pthread
