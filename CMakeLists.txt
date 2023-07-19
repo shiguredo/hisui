@@ -22,6 +22,7 @@ set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 5eac4e592033c5f384347fd15556de20047752af "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 9.1.0 "fmt のバージョン")
+set_cache_string_from_env(GULRAK_FILESYSTEM_VERSION 1.5.14 "gulrak/filesystem のバージョン")
 set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
 set_cache_string_from_env(SPDLOG_VERSION 1.11.0 "spdlog のバージョン")
 set_cache_string_from_env(STB_VERSION 5736b15f7ea0ffb08dd38af21067c314d6a3aae9 "stb のバージョン")
@@ -220,6 +221,13 @@ CPMAddPackage(
     )
 
 CPMAddPackage(
+    NAME gulrak_filesystem
+    GITHUB_REPOSITORY gulrak/filesystem
+    GIT_TAG v${GULRAK_FILESYSTEM_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
     NAME opus
     GITHUB_REPOSITORY xiph/opus
     VERSION ${OPUS_VERSION}
@@ -398,6 +406,7 @@ target_include_directories(hisui
     ${cli11_SOURCE_DIR}/include
     ${cpp-mp4_SOURCE_DIR}/include
     ${fmt_SOURCE_DIR}/include
+    ${gulrak_filesystem_SOURCE_DIR}/include
     ${opus_SOURCE_DIR}/include
     ${spdlog_SOURCE_DIR}/include
     ${stb_SOURCE_DIR}
