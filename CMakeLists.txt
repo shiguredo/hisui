@@ -399,6 +399,7 @@ target_include_directories(hisui
     third_party/libvpx/third_party/libwebm
     third_party/libvpx
     third_party/SVT-AV1/Source/API
+    third_party/lyra
     )
 
 set_target_properties(hisui PROPERTIES CXX_STANDARD 20 C_STANDARD 11)
@@ -414,6 +415,7 @@ target_link_libraries(hisui
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+    ${CMAKE_SOURCE_DIR}/third_party/lyra/bazel-bin/lyra/liblyra_decoder.a
     )
 
 if(WITH_TEST)
