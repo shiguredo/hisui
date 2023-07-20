@@ -302,6 +302,9 @@ void set_cli_options(CLI::App* app, Config* config) {
           CLI::CheckedTransformer(openh264_level_assoc, CLI::ignore_case))
       ->group(OPTIONS_FOR_TUNING);
 
+  app->add_option("--lyra-model-path", config->lyra_model_path,
+                  "Path to directory containing Lyra TFLite files");
+
   std::vector<std::pair<std::string, spdlog::level::level_enum>>
       log_level_assoc{
           {"trace", spdlog::level::trace},
