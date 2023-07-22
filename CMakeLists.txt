@@ -286,6 +286,7 @@ target_sources(hisui
     src/audio/basic_sequencer.cpp
     src/audio/buffer_opus_encoder.cpp
     src/audio/lyra_decoder.cpp
+    src/audio/lyra_handler.cpp
     src/audio/mixer.cpp
     src/audio/opus.cpp
     src/audio/opus_decoder.cpp

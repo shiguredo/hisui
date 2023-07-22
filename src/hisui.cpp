@@ -13,6 +13,7 @@
 #include <CLI/Config.hpp>
 #include <CLI/Formatter.hpp>
 
+#include "audio/lyra_handler.hpp"
 #include "config.hpp"
 #include "datetime.hpp"
 #include "layout/compose.hpp"
@@ -47,13 +48,21 @@ int main(int argc, char** argv) {
     } else {
       spdlog::set_level(config.log_level);
     }
-    spdlog::debug("log level={}", config.log_level);
+    spdlog::debug("log level={}", static_cast<uint32_t>(config.log_level));
 
     if (!std::empty(config.openh264)) {
       try {
         hisui::video::OpenH264Handler::open(config.openh264);
       } catch (const std::exception& e) {
         spdlog::warn("failed to open openh264 library: {}", e.what());
+      }
+    }
+
+    if (!std::empty(config.lyra_model_path)) {
+      try {
+        hisui::audio::LyraHandler::setModelPath(config.lyra_model_path);
+      } catch (const std::exception& e) {
+        spdlog::warn("failed to set lyra model path: {}", e.what());
       }
     }
 
