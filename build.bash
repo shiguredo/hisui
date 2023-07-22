@@ -205,7 +205,7 @@ cd third_party || exit 1
 
 if [ -d lyra ] ; then
     cd lyra || exit 1
-    git checkout master
+    git checkout main 
     git pull
 else
     git clone --filter=tree:0 https://github.com/google/lyra.git
