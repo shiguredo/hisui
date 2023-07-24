@@ -215,7 +215,7 @@ git checkout v"${LYRA_VERSION}"
 
 lyra_bazel_options=('-c')
 if [ "${BUILD_TYPE}" = "Debug" ]; then
-    lyra_bazel_options+=('dgb')
+    lyra_bazel_options+=('dbg')
 elif [ "${BUILD_TYPE}" = "Release" ]; then
     lyra_bazel_options+=('opt')
 fi
