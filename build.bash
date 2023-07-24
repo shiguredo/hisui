@@ -201,7 +201,7 @@ cd Build/linux || exit 1
 cd ../../../..
 
 # Lyra
-cd third_party || exit 1
+cd third_party/lyra || exit 1
 
 if [ -d lyra ] ; then
     cd lyra || exit 1
@@ -213,6 +213,8 @@ else
 fi
 git checkout v"${LYRA_VERSION}"
 
+cd ..
+
 lyra_bazel_options=('-c')
 if [ "${BUILD_TYPE}" = "Debug" ]; then
     lyra_bazel_options+=('dbg')
@@ -220,7 +222,7 @@ elif [ "${BUILD_TYPE}" = "Release" ]; then
     lyra_bazel_options+=('opt')
 fi
 
-bazelisk build "${lyra_bazel_options[@]}" //lyra:lyra_decoder || exit 1
+USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
 
 cd ../..
 
