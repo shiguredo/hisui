@@ -180,10 +180,13 @@ git checkout v"${SVT_AV1_VERSION}"
 
 stv_av1_configure_options=('--static' '--no-apps')
 if [ "${BUILD_TYPE}" = "Native" ]; then
+    SVT_AV1_BUILD_TYPE="Release"
     stv_av1_configure_options+=('--native' 'release')
 elif [ "${BUILD_TYPE}" = "Release" ]; then
+    SVT_AV1_BUILD_TYPE="Release"
     stv_av1_configure_options+=('release')
 elif [ "${BUILD_TYPE}" = "Debug" ]; then
+    SVT_AV1_BUILD_TYPE="Debug"
     stv_av1_configure_options+=('debug')
 fi
 
@@ -199,6 +202,26 @@ cd Build/linux || exit 1
 ./build.sh "${stv_av1_configure_options[@]}" || exit 1
 
 cd ../../../..
+
+objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+objcopy --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+
+objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+objcopy --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
 
 # Lyra
 cd third_party/lyra || exit 1
@@ -223,8 +246,10 @@ elif [ "${BUILD_TYPE}" = "Release" ]; then
 fi
 
 USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
-chmod 755 bazel-bin/liblyra.a
-objcopy -W cpuinfo_is_initialized bazel-bin/liblyra.a
+# chmod 755 bazel-bin/liblyra.a
+# objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized bazel-bin/liblyra.a
+# objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize bazel-bin/liblyra.a
+# objcopy --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize bazel-bin/liblyra.a
 
 cd ../..
 
