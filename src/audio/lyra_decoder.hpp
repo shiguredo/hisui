@@ -1,5 +1,7 @@
 #pragma once
 
+#include <lyra.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -19,7 +21,9 @@ class LyraDecoder : public Decoder {
       const std::size_t) override;
 
  private:
+  lyra_decoder* m_decoder;
   int m_channels;
+  std::int16_t* m_lyra_buffer = nullptr;
 };
 
 }  // namespace hisui::audio
