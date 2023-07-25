@@ -223,6 +223,8 @@ elif [ "${BUILD_TYPE}" = "Release" ]; then
 fi
 
 USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
+chmod 755 bazel-bin/liblyra.a
+objcopy -W cpuinfo_is_initialized bazel-bin/liblyra.a
 
 cd ../..
 
