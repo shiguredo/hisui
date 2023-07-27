@@ -251,7 +251,7 @@ case "$PACKAGE" in
 esac
 
 clang_version=$(clang -v |& /usr/bin/grep version | rev | cut -d ' ' -f 1 | rev)
-llvm_version=$(echo $clang_version | cut -d '.' -f 1)
+llvm_version=$(echo "$clang_version" | cut -d '.' -f 1)
 
 BAZEL_LLVM_DIR=/usr/lib/llvm-${llvm_version} CLANG_VERSION=${clang_version} USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
 # chmod 755 bazel-bin/liblyra.a
