@@ -193,9 +193,11 @@ fi
 case "$PACKAGE" in
   *_x86_64 )
     stv_av1_configure_options+=('-t' '../../../../cmake/clang-x86_64-toolchain.cmake')
+    objcopy=/usr/bin/objcopy
     ;;
   *_arm64 )
     stv_av1_configure_options+=('-s' 'aarch64-linux-gnu' '-t' '../../../../cmake/clang-aarch64-toolchain.cmake')
+    objcopy=/usr/aarch64-linux-gnu/bin/objcopy
 esac
 cd Build/linux || exit 1
 
@@ -203,25 +205,25 @@ cd Build/linux || exit 1
 
 cd ../../../..
 
-objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
-objcopy --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
 
-objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-objcopy --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
 
 # Lyra
 cd third_party/lyra || exit 1
