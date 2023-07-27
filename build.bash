@@ -247,10 +247,13 @@ fi
 
 case "$PACKAGE" in
   *_arm64 )
-      lyra_bazel_options+=('--config=jeston')
+      lyra_bazel_options+=('--config=jetson')
 esac
 
-BAZEL_LLVM_DIR=/usr/lib/llvm-15 CLANG_VERSION=15.0.7 USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
+clang_version=$(clang -v |& /usr/bin/grep version | rev | cut -d ' ' -f 1 | rev)
+llvm_version=$(echo $clang_version | cut -d '.' -f 1)
+
+BAZEL_LLVM_DIR=/usr/lib/llvm-${llvm_version} CLANG_VERSION=${clang_version} USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
 # chmod 755 bazel-bin/liblyra.a
 # objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized bazel-bin/liblyra.a
 # objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize bazel-bin/liblyra.a
