@@ -21,7 +21,8 @@ LyraDecoder::LyraDecoder(const int t_channles, const std::string& model_path)
     throw std::runtime_error("could not create lyra decoder");
   }
 
-  m_lyra_buffer = new std::int16_t[10000];  // TODO(haruyama)
+  m_lyra_buffer = new std::int16_t[hisui::Constants::PCM_SAMPLE_RATE /
+                                   hisui::Constants::LYRA_FRAME_RATE];
 }
 
 LyraDecoder::~LyraDecoder() {
@@ -42,8 +43,8 @@ std::pair<const std::int16_t*, const std::size_t> LyraDecoder::decode(
     throw std::runtime_error("lyra_decoder_set_encoded_packet() failed");
   }
   auto v = lyra_decoder_decode_samples(
-      m_decoder, hisui::Constants::PCM_SAMPLE_RATE /
-                     50);  // 50 は chromemedia::codec::kFrameRate 由来
+      m_decoder,
+      hisui::Constants::PCM_SAMPLE_RATE / hisui::Constants::LYRA_FRAME_RATE);
   if (v == nullptr) {
     throw std::runtime_error("lyra_decoder_decode_samples() failed");
   }

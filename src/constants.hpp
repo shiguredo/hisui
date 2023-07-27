@@ -8,6 +8,8 @@ namespace hisui {
 class Constants {
  public:
   static const std::uint32_t PCM_SAMPLE_RATE = 48000;
+  static const std::uint32_t LYRA_FRAME_RATE =
+      50;  // from chromemedia::codec::kFrameRate
   static const std::uint32_t VP8_FOURCC = 0x30385056;
   static const std::uint32_t VP9_FOURCC = 0x30395056;
   static const std::uint32_t AV1_FOURCC = 0x31305641;
