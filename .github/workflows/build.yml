@@ -93,6 +93,8 @@ jobs:
           restore-keys: ${{ matrix.os }}-ccache-dir-
       - name: Ccache stat
         run: ccache -s
+      - name: Install numpy
+        run: pip install numpy
       - name: Build hisui
         run: ./build.bash ${{ matrix.os }} --package --use-ccache ${{ contains(matrix.os, '_x86_64') && '--with-test' || '' }}
         timeout-minutes: 120
