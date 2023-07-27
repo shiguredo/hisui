@@ -250,7 +250,7 @@ case "$PACKAGE" in
       lyra_bazel_options+=('--config=jeston')
 esac
 
-BAZEL_WEBRTC_LIBRARY_DIR= BAZEL_WEBRTC_INCLUDE_DIR= BAZEL_LLVM_DIR=/usr/lib/llvm-15  CLANG_VERSION=15.0.7 USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
+BAZEL_LLVM_DIR=/usr/lib/llvm-15 CLANG_VERSION=15.0.7 USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
 # chmod 755 bazel-bin/liblyra.a
 # objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized bazel-bin/liblyra.a
 # objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize bazel-bin/liblyra.a

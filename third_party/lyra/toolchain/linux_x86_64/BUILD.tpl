@@ -24,7 +24,6 @@ cc_toolchain_config(
         "/usr/include/x86_64-linux-gnu",
         "/usr/include",
         "%{llvm_dir}/libcxx/include",
-        "%{webrtc_include_dir}/buildtools/third_party/libc++abi/trunk/include",
     ],
     tool_paths = {
         "ar": "%{llvm_dir}/bin/llvm-ar",
@@ -82,9 +81,7 @@ cc_toolchain_config(
     ],
     # conly_flags = [],
     cxx_flags = [
-        "-isystem", "%{llvm_dir}/libcxx/include",
-        "-isystem", "%{webrtc_include_dir}/buildtools/third_party/libc++abi/trunk/include",
-        "-I", "%{llvm_dir}/libcxx/include",
+        "-isystem%{llvm_dir}/libcxx/include",
         "-std=c++17",
         "-nostdinc++",
         "-D_LIBCPP_ABI_NAMESPACE=Cr",
@@ -95,11 +92,9 @@ cc_toolchain_config(
         "-Wl,-no-as-needed",
         "-Wl,-z,relro,-z,now",
         "-B", "%{llvm_dir}/bin/",
-        "-L", "%{webrtc_library_dir}",
     ],
     # archive_flags = [],
     link_libs = [
-        "-lwebrtc",
         "-lpthread",
         "-lm",
     ],
@@ -147,7 +142,6 @@ cc_toolchain_config(
         "/usr/include",
         "/usr/aarch64-linux-gnu/include",
         "%{llvm_dir}/libcxx/include",
-        "%{webrtc_include_dir}/buildtools/third_party/libc++abi/trunk/include",
     ],
     tool_paths = {
         "ar": "%{llvm_dir}/bin/llvm-ar",
@@ -221,12 +215,10 @@ cc_toolchain_config(
         "-Wl,-no-as-needed",
         "-Wl,-z,relro,-z,now",
         "-B", "%{llvm_dir}/bin/",
-        "-L", "%{webrtc_library_dir}",
         "--target=aarch64-linux-gnu",
     ],
     # archive_flags = [],
     link_libs = [
-        "-lwebrtc",
         "-lpthread",
         "-lm",
     ],
