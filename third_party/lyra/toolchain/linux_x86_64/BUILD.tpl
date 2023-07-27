@@ -203,8 +203,8 @@ cc_toolchain_config(
     cxx_flags = [
         "-isystem%{llvm_dir}/libcxx/include",
         "-I/usr/aarch64-linux-gnu/include",
-        "-I/usr/aarch64-linux-gnu/include/c++/12",
-        "-I/usr/aarch64-linux-gnu/include/c++/12/aarch64-linux-gnu",
+        "-I/usr/aarch64-linux-gnu/include/c++/10",
+        "-I/usr/aarch64-linux-gnu/include/c++/10/aarch64-linux-gnu",
         "-std=c++17",
         "-nostdinc++",
         "-D_LIBCPP_ABI_NAMESPACE=Cr",
