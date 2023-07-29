@@ -12,7 +12,6 @@ cc_library(
         "@lyra//lyra:lyra_decoder",
     ],
     hdrs = ["lyra.h"],
-    copts = ["-Ilyra"],
 )
 
 cc_static_library(

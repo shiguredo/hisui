@@ -248,14 +248,19 @@ elif [ "${BUILD_TYPE}" = "Release" ]; then
 fi
 
 case "$PACKAGE" in
+  *_x86_64 )
+      lyra_bazel_sysroot=''
+      ;;
   *_arm64 )
       lyra_bazel_options+=('--config=jetson')
+      lyra_bazel_sysroot='/usr/aarch64-linux-gnu'
 esac
 
-clang_version=$(clang -v |& /usr/bin/grep version | rev | cut -d ' ' -f 1 | rev)
+clang_raw_version=$(clang -v |& /usr/bin/grep version | rev | cut -d ' ' -f 1 | rev)
+clang_varsion=$(echo "$clang_raw_version" | cut -d '-' -f 1)
 llvm_version=$(echo "$clang_version" | cut -d '.' -f 1)
 
-BAZEL_LLVM_DIR=/usr/lib/llvm-${llvm_version} CLANG_VERSION=${clang_version} USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
+BAZEL_SYSROOT=${lyra_bazel_sysroot} BAZEL_LLVM_DIR=/usr/lib/llvm-${llvm_version} CLANG_VERSION=${clang_version} USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
 # chmod 755 bazel-bin/liblyra.a
 # objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized bazel-bin/liblyra.a
 # objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize bazel-bin/liblyra.a
