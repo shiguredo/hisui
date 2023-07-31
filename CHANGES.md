@@ -11,7 +11,9 @@
 
 ## develop
 
-- [CHANGE] SVT-AV1 での デコードに対応する
+- [CHANGE] Lyra の デコードに対応する
+    - @haruyama
+- [CHANGE] SVT-AV1 での AV1 デコード/エンコードに対応する
     - @haruyama
 - [CHANGE] OpenH264 での エンコードに対応する
     - `--out-video-codec` オプションに H.264 の指定を追加する
