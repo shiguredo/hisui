@@ -93,6 +93,11 @@ jobs:
           restore-keys: ${{ matrix.os }}-ccache-dir-
       - name: Ccache stat
         run: ccache -s
+      - name: Cache ~/.cache/bazel directory
+        uses: actions/cache@v3
+        with:
+          path: "~/.cache/bazel"
+          key: ${{ matrix.os }}-cache-bazel-dir
       - name: Install numpy
         run: pip install numpy
       - name: Build hisui
