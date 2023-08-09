@@ -341,7 +341,10 @@ target_sources(hisui
     src/video/scaler.cpp
     src/video/sequencer.cpp
     src/video/simple_scaler.cpp
+    src/video/vaapi_utils.cpp
+    src/video/vaapi_utils_drm.cpp
     src/video/vpl_decoder.cpp
+    src/video/vpl_session_impl.cpp
     src/video/vpx.cpp
     src/video/vpx_decoder.cpp
     src/video/webm_source.cpp
@@ -423,12 +426,15 @@ set_target_properties(hisui PROPERTIES CXX_STANDARD 20 C_STANDARD 11)
 target_link_libraries(hisui
     PRIVATE
     dl
+    drm
     opus
     pthread
     fmt
     shiguredo-mp4
     spdlog
     VPL
+    va
+    va-drm
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a

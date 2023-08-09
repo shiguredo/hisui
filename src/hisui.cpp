@@ -15,6 +15,7 @@
 
 #include "audio/lyra_handler.hpp"
 #include "config.hpp"
+#include "constants.hpp"
 #include "datetime.hpp"
 #include "layout/compose.hpp"
 #include "metadata.hpp"
@@ -25,12 +26,29 @@
 #include "report/reporter.hpp"
 #include "version/version.hpp"
 #include "video/openh264_handler.hpp"
+#include "video/vpl_decoder.hpp"
+#include "video/vpl_session.hpp"
 
 int main(int argc, char** argv) {
   CLI::App app{"hisui"};
   hisui::Config config;
 
   ::setenv("SVT_LOG", "-2", 1);
+
+  auto vpl_session = hisui::video::VplSession::Create();
+  spdlog::info("H264 decode: {}",
+               hisui::video::VplDecoder::IsSupported(
+                   vpl_session, hisui::Constants::H264_FOURCC));
+  spdlog::info("VP8  decode: {}",
+               hisui::video::VplDecoder::IsSupported(
+                   vpl_session, hisui::Constants::VP8_FOURCC));
+  spdlog::info("VP9  decode: {}",
+               hisui::video::VplDecoder::IsSupported(
+                   vpl_session, hisui::Constants::VP9_FOURCC));
+  spdlog::info("AV1  decode: {}",
+               hisui::video::VplDecoder::IsSupported(
+                   vpl_session, hisui::Constants::AV1_FOURCC));
+  return EXIT_SUCCESS;
 
   try {
     hisui::set_cli_options(&app, &config);
