@@ -341,6 +341,7 @@ target_sources(hisui
     src/video/scaler.cpp
     src/video/sequencer.cpp
     src/video/simple_scaler.cpp
+    src/video/vpl_decoder.cpp
     src/video/vpx.cpp
     src/video/vpx_decoder.cpp
     src/video/webm_source.cpp
@@ -407,6 +408,7 @@ target_include_directories(hisui
     ${opus_SOURCE_DIR}/include
     ${spdlog_SOURCE_DIR}/include
     ${stb_SOURCE_DIR}
+    ${VPL_SOURCE_DIR}/api
     third_party/openh264
     third_party/progress-cpp/include
     third_party/libvpx/third_party/libyuv/include
