@@ -21,6 +21,7 @@ set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 5eac4e592033c5f384347fd15556de20047752af "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 9.1.0 "fmt のバージョン")
+set_cache_string_from_env(ONEVPL_VERSION 2023.3.1 "oneVPL のバージョン")
 set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
 set_cache_string_from_env(SPDLOG_VERSION 1.11.0 "spdlog のバージョン")
 set_cache_string_from_env(STB_VERSION 5736b15f7ea0ffb08dd38af21067c314d6a3aae9 "stb のバージョン")
@@ -217,6 +218,13 @@ CPMAddPackage(
     NAME opus
     GITHUB_REPOSITORY xiph/opus
     VERSION ${OPUS_VERSION}
+    )
+
+CPMAddPackage(
+    NAME vpl
+    GITHUB_REPOSITORY oneapi-src/oneVPL
+    VERSION ${ONEVPL_VERSION}
+    OPTIONS "BUILD_SHARED_LIBS Off" "BUILD_TOOLS Off" "BUILD_EXAMPLES Off" "BUILD_PREVIEW Off" "BUILD_TOOLS_ONEVPL_EXPERIMENTAL Off"
     )
 
 CPMAddPackage(
@@ -418,6 +426,7 @@ target_link_libraries(hisui
     fmt
     shiguredo-mp4
     spdlog
+    VPL
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
