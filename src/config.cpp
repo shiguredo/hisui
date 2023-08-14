@@ -116,7 +116,7 @@ void set_cli_options(CLI::App* app, Config* config) {
       {"AV1", config::OutVideoCodec::AV1},
   };
   app->add_option("--out-video-codec", config->out_video_codec,
-                  "Video codec (VP8/VP9/H264). default: VP9")
+                  "Video codec (VP8/VP9/H264/AV1). default: VP9")
       ->transform(CLI::CheckedTransformer(out_video_codec_assoc));
 
   std::vector<std::pair<std::string, config::OutAudioCodec>> out_audio_codec{
