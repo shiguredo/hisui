@@ -30,7 +30,7 @@ mfxU32 ToMfxCodec(const std::uint32_t fourcc) {
 }
 
 std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
-    const std::shared_ptr<VplSession> session,
+    VplSession& session,
     const std::uint32_t fourcc,
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes) {
   for (auto size : sizes) {
@@ -44,12 +44,12 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
 }
 
 std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
-    std::shared_ptr<VplSession> session,
+    VplSession& session,
     mfxU32 codec,
     std::uint32_t width,
     std::uint32_t height) {
   std::unique_ptr<MFXVideoDECODE> decoder(
-      new MFXVideoDECODE(GetVplSession(session)));
+      new MFXVideoDECODE(session.getSession()));
 
   mfxStatus sts = MFX_ERR_NONE;
 
@@ -116,12 +116,7 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
   return decoder;
 }
 
-bool VplDecoder::IsSupported(const std::shared_ptr<VplSession> session,
-                             const std::uint32_t fourcc) {
-  if (!session) {
-    return false;
-  }
-
+bool VplDecoder::IsSupported(VplSession& session, const std::uint32_t fourcc) {
   auto decoder = CreateDecoder(session, fourcc, {{4096, 4096}, {2048, 2048}});
 
   return decoder != nullptr;

@@ -35,20 +35,26 @@ int main(int argc, char** argv) {
 
   ::setenv("SVT_LOG", "-2", 1);
 
-  auto vpl_session = hisui::video::VplSession::Create();
-  spdlog::info("H264 decode: {}",
-               hisui::video::VplDecoder::IsSupported(
-                   vpl_session, hisui::Constants::H264_FOURCC));
-  spdlog::info("VP8  decode: {}",
-               hisui::video::VplDecoder::IsSupported(
-                   vpl_session, hisui::Constants::VP8_FOURCC));
-  spdlog::info("VP9  decode: {}",
-               hisui::video::VplDecoder::IsSupported(
-                   vpl_session, hisui::Constants::VP9_FOURCC));
-  spdlog::info("AV1  decode: {}",
-               hisui::video::VplDecoder::IsSupported(
-                   vpl_session, hisui::Constants::AV1_FOURCC));
-  return EXIT_SUCCESS;
+  try {
+    hisui::video::VplSession::open();
+  } catch (const std::exception& e) {
+    spdlog::warn("failed to open VPL session: {}", e.what());
+  }
+  if (hisui::video::VplSession::hasInstance()) {
+    spdlog::info("H264 decode: {}", hisui::video::VplDecoder::IsSupported(
+                                        hisui::video::VplSession::getInstance(),
+                                        hisui::Constants::H264_FOURCC));
+    spdlog::info("VP8  decode: {}", hisui::video::VplDecoder::IsSupported(
+                                        hisui::video::VplSession::getInstance(),
+                                        hisui::Constants::VP8_FOURCC));
+    spdlog::info("VP9  decode: {}", hisui::video::VplDecoder::IsSupported(
+                                        hisui::video::VplSession::getInstance(),
+                                        hisui::Constants::VP9_FOURCC));
+    spdlog::info("AV1  decode: {}", hisui::video::VplDecoder::IsSupported(
+                                        hisui::video::VplSession::getInstance(),
+                                        hisui::Constants::AV1_FOURCC));
+    return EXIT_SUCCESS;
+  }
 
   try {
     hisui::set_cli_options(&app, &config);
@@ -201,6 +207,10 @@ int main(int argc, char** argv) {
 
   if (hisui::audio::LyraHandler::hasInstance()) {
     hisui::audio::LyraHandler::close();
+  }
+
+  if (hisui::video::VplSession::hasInstance()) {
+    hisui::video::VplSession::close();
   }
 
   if (config.enabledSuccessReport()) {

@@ -30,8 +30,7 @@ class VplDecoder /* : public Decoder */ {
   //
   // const std::shared_ptr<YUVImage> getImage(const std::uint64_t) override;
 
-  static bool IsSupported(const std::shared_ptr<VplSession> session,
-                          const std::uint32_t fourcc);
+  static bool IsSupported(VplSession& session, const std::uint32_t fourcc);
 
  private:
   std::shared_ptr<VplSession> m_session;
@@ -42,12 +41,12 @@ class VplDecoder /* : public Decoder */ {
   bool m_report_enabled = false;
 
   static std::unique_ptr<MFXVideoDECODE> CreateDecoder(
-      const std::shared_ptr<VplSession> session,
+      VplSession& session,
       const mfxU32 codec,
       const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes);
 
   static std::unique_ptr<MFXVideoDECODE> CreateDecoderInternal(
-      const std::shared_ptr<VplSession> session,
+      VplSession& session,
       const mfxU32 codec,
       const std::uint32_t width,
       const std::uint32_t height);
