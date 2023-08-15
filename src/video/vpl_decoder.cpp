@@ -29,9 +29,9 @@ mfxU32 ToMfxCodec(const std::uint32_t fourcc) {
 }
 
 std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
-    std::shared_ptr<VplSession> session,
-    std::uint32_t fourcc,
-    std::vector<std::pair<int, int>> sizes) {
+    const std::shared_ptr<VplSession> session,
+    const std::uint32_t fourcc,
+    const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes) {
   for (auto size : sizes) {
     auto decoder = CreateDecoderInternal(session, ToMfxCodec(fourcc),
                                          size.first, size.second);
@@ -45,8 +45,8 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
 std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
     std::shared_ptr<VplSession> session,
     mfxU32 codec,
-    int width,
-    int height) {
+    std::uint32_t width,
+    std::uint32_t height) {
   std::unique_ptr<MFXVideoDECODE> decoder(
       new MFXVideoDECODE(GetVplSession(session)));
 
@@ -61,10 +61,12 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
   param.mfx.FrameInfo.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
   param.mfx.FrameInfo.CropX = 0;
   param.mfx.FrameInfo.CropY = 0;
-  param.mfx.FrameInfo.CropW = width;
-  param.mfx.FrameInfo.CropH = height;
-  param.mfx.FrameInfo.Width = (width + 15) / 16 * 16;
-  param.mfx.FrameInfo.Height = (height + 15) / 16 * 16;
+  param.mfx.FrameInfo.CropW = static_cast<std::uint16_t>(width);
+  param.mfx.FrameInfo.CropH = static_cast<std::uint16_t>(height);
+  param.mfx.FrameInfo.Width =
+      (static_cast<std::uint16_t>(width) + 15) / 16 * 16;
+  param.mfx.FrameInfo.Height =
+      (static_cast<std::uint16_t>(height) + 15) / 16 * 16;
 
   param.mfx.GopRefDist = 1;
   param.AsyncDepth = 1;
@@ -112,8 +114,8 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
   return decoder;
 }
 
-bool VplDecoder::IsSupported(std::shared_ptr<VplSession> session,
-                             std::uint32_t fourcc) {
+bool VplDecoder::IsSupported(const std::shared_ptr<VplSession> session,
+                             const std::uint32_t fourcc) {
   if (!session) {
     return false;
   }
