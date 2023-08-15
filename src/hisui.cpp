@@ -176,8 +176,12 @@ int main(int argc, char** argv) {
   }
   delete muxer;
 
-  if (!config.openh264.empty()) {
+  if (hisui::video::OpenH264Handler::hasInstance()) {
     hisui::video::OpenH264Handler::close();
+  }
+
+  if (hisui::audio::LyraHandler::hasInstance()) {
+    hisui::audio::LyraHandler::close();
   }
 
   if (config.enabledSuccessReport()) {
