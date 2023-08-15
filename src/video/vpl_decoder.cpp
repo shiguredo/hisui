@@ -1,6 +1,7 @@
 #include "video/vpl_decoder.hpp"
 
 #include <fmt/core.h>
+#include <spdlog/spdlog.h>
 #include <vpl/mfxdefs.h>
 #include <vpl/mfxstructures.h>
 #include <vpl/mfxvp8.h>
@@ -90,8 +91,8 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
                             : codec == MFX_CODEC_AV1 ? "MFX_CODEC_AV1"
                             : codec == MFX_CODEC_AVC ? "MFX_CODEC_AVC"
                                                      : "MFX_CODEC_UNKNOWN";
-    std::cerr << "Unsupported decoder codec: codec=" << codec_str
-              << " sts=" << sts << std::endl;
+    spdlog::warn("Unsupported decoder codec: codec={}, sts={}", codec_str,
+                 static_cast<std::int32_t>(sts));
     return nullptr;
   }
 
@@ -106,7 +107,8 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
     // Initialize the oneVPL encoder
     sts = decoder->Init(&param);
     if (sts != MFX_ERR_NONE) {
-      std::cerr << "decoder->Init() failed: " << sts << std::endl;
+      spdlog::warn("decoder->Init() failed: std={}",
+                   static_cast<std::int32_t>(sts));
       return nullptr;
     }
   }

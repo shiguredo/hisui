@@ -1,6 +1,7 @@
 #include "video/vpl_session.hpp"
 
 #include <fmt/core.h>
+#include <spdlog/spdlog.h>
 #include <vpl/mfxdispatcher.h>
 #include <vpl/mfxvideo.h>
 
@@ -31,7 +32,7 @@ std::shared_ptr<VplSession> VplSession::Create() {
 
   session->loader = MFXLoad();
   if (session->loader == nullptr) {
-    std::cerr << "Failed to MFXLoad" << std::endl;
+    spdlog::warn("MFXLoad() failed");
     return nullptr;
   }
 
@@ -40,12 +41,13 @@ std::shared_ptr<VplSession> VplSession::Create() {
 
   sts = MFXCreateSession(session->loader, 0, &session->session);
   if (sts != MFX_ERR_NONE) {
-    std::cerr << "MFXCreateSession failed" << std::endl;
+    spdlog::warn("MFXCreateSession() failed");
     return nullptr;
   }
 
   session->libva = CreateDRMLibVA();
   if (!session->libva) {
+    spdlog::warn("CreateDRMLibVA() failed");
     return nullptr;
   }
 
