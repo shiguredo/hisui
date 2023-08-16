@@ -344,7 +344,7 @@ target_sources(hisui
     src/video/vaapi_utils.cpp
     src/video/vaapi_utils_drm.cpp
     src/video/vpl_decoder.cpp
-    src/video/vpl_session_impl.cpp
+    src/video/vpl_session.cpp
     src/video/vpx.cpp
     src/video/vpx_decoder.cpp
     src/video/webm_source.cpp
