@@ -10,24 +10,10 @@
 #include <iostream>
 #include <stdexcept>
 
+#include "video/vpl.hpp"
 #include "video/vpl_session.hpp"
 
 namespace hisui::video {
-
-mfxU32 ToMfxCodec(const std::uint32_t fourcc) {
-  switch (fourcc) {
-    case hisui::Constants::VP8_FOURCC:
-      return MFX_CODEC_VP8;
-    case hisui::Constants::VP9_FOURCC:
-      return MFX_CODEC_VP9;
-    case hisui::Constants::H264_FOURCC:
-      return MFX_CODEC_AVC;
-    case hisui::Constants::AV1_FOURCC:
-      return MFX_CODEC_AV1;
-    default:
-      throw std::runtime_error(fmt::format("unknown fourcc: {:x}", fourcc));
-  }
-}
 
 std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
     const std::uint32_t fourcc,

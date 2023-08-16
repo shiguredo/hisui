@@ -343,6 +343,7 @@ target_sources(hisui
     src/video/simple_scaler.cpp
     src/video/vaapi_utils.cpp
     src/video/vaapi_utils_drm.cpp
+    src/video/vpl.cpp
     src/video/vpl_decoder.cpp
     src/video/vpl_session.cpp
     src/video/vpx.cpp

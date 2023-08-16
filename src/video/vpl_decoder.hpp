@@ -19,8 +19,6 @@ class VideoContext;
 
 namespace hisui::video {
 
-mfxU32 ToMfxCodec(const std::uint32_t fourcc);
-
 class YUVImage;
 
 class VplDecoder /* : public Decoder */ {
