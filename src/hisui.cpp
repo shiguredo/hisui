@@ -27,6 +27,7 @@
 #include "version/version.hpp"
 #include "video/openh264_handler.hpp"
 #include "video/vpl_decoder.hpp"
+#include "video/vpl_encoder.hpp"
 #include "video/vpl_session.hpp"
 
 int main(int argc, char** argv) {
@@ -48,6 +49,15 @@ int main(int argc, char** argv) {
     spdlog::info("VP9  decode: {}", hisui::video::VplDecoder::IsSupported(
                                         hisui::Constants::VP9_FOURCC));
     spdlog::info("AV1  decode: {}", hisui::video::VplDecoder::IsSupported(
+                                        hisui::Constants::AV1_FOURCC));
+
+    spdlog::info("H264 encode: {}", hisui::video::VplEncoder::IsSupported(
+                                        hisui::Constants::H264_FOURCC));
+    spdlog::info("VP8  encode: {}", hisui::video::VplEncoder::IsSupported(
+                                        hisui::Constants::VP8_FOURCC));
+    spdlog::info("VP9  encode: {}", hisui::video::VplEncoder::IsSupported(
+                                        hisui::Constants::VP9_FOURCC));
+    spdlog::info("AV1  encode: {}", hisui::video::VplEncoder::IsSupported(
                                         hisui::Constants::AV1_FOURCC));
     return EXIT_SUCCESS;
   }
