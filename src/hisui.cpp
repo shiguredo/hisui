@@ -42,16 +42,12 @@ int main(int argc, char** argv) {
   }
   if (hisui::video::VplSession::hasInstance()) {
     spdlog::info("H264 decode: {}", hisui::video::VplDecoder::IsSupported(
-                                        hisui::video::VplSession::getInstance(),
                                         hisui::Constants::H264_FOURCC));
     spdlog::info("VP8  decode: {}", hisui::video::VplDecoder::IsSupported(
-                                        hisui::video::VplSession::getInstance(),
                                         hisui::Constants::VP8_FOURCC));
     spdlog::info("VP9  decode: {}", hisui::video::VplDecoder::IsSupported(
-                                        hisui::video::VplSession::getInstance(),
                                         hisui::Constants::VP9_FOURCC));
     spdlog::info("AV1  decode: {}", hisui::video::VplDecoder::IsSupported(
-                                        hisui::video::VplSession::getInstance(),
                                         hisui::Constants::AV1_FOURCC));
     return EXIT_SUCCESS;
   }

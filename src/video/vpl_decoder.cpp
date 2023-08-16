@@ -30,12 +30,15 @@ mfxU32 ToMfxCodec(const std::uint32_t fourcc) {
 }
 
 std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
-    VplSession& session,
     const std::uint32_t fourcc,
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes) {
+  if (!hisui::video::VplSession::hasInstance()) {
+    throw std::runtime_error("VPL session is not opened");
+  }
   for (auto size : sizes) {
-    auto decoder = CreateDecoderInternal(session, ToMfxCodec(fourcc),
-                                         size.first, size.second);
+    auto decoder =
+        CreateDecoderInternal(hisui::video::VplSession::getInstance(),
+                              ToMfxCodec(fourcc), size.first, size.second);
     if (decoder != nullptr) {
       return decoder;
     }
@@ -116,8 +119,8 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
   return decoder;
 }
 
-bool VplDecoder::IsSupported(VplSession& session, const std::uint32_t fourcc) {
-  auto decoder = CreateDecoder(session, fourcc, {{4096, 4096}, {2048, 2048}});
+bool VplDecoder::IsSupported(const std::uint32_t fourcc) {
+  auto decoder = CreateDecoder(fourcc, {{4096, 4096}, {2048, 2048}});
 
   return decoder != nullptr;
 }
