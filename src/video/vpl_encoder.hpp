@@ -15,12 +15,12 @@
 
 namespace hisui::video {
 
-class VplEncoder /* : public Encoder */ {
+class VPLEncoder /* : public Encoder */ {
  public:
-  static bool IsSupported(const std::uint32_t fourcc);
+  static bool isSupported(const std::uint32_t fourcc);
 
  private:
-  static std::unique_ptr<MFXVideoENCODE> CreateEncoder(
+  static std::unique_ptr<MFXVideoENCODE> createEncoder(
       const ::mfxU32 codec,
       const std::uint32_t width,
       const std::uint32_t height,
@@ -28,11 +28,5 @@ class VplEncoder /* : public Encoder */ {
       const std::uint32_t target_bit_rate,
       const std::uint32_t max_bit_rate,
       const bool init);
-
-  static std::unique_ptr<MFXVideoDECODE> CreateEncoderInternal(
-      VplSession& session,
-      const mfxU32 codec,
-      const std::uint32_t width,
-      const std::uint32_t height);
 };
 }  // namespace hisui::video

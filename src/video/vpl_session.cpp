@@ -11,34 +11,34 @@
 
 namespace hisui::video {
 
-VplSession::VplSession() {}
+VPLSession::VPLSession() {}
 
-VplSession::~VplSession() {
-  MFXClose(m_session);
-  MFXUnload(m_loader);
+VPLSession::~VPLSession() {
+  ::MFXClose(m_session);
+  ::MFXUnload(m_loader);
 }
 
-bool VplSession::hasInstance() {
+bool VPLSession::hasInstance() {
   return m_instance != nullptr;
 }
 
-VplSession& VplSession::getInstance() {
+VPLSession& VPLSession::getInstance() {
   return *m_instance;
 }
 
-void VplSession::close() {
+void VPLSession::close() {
   delete m_instance;
   m_instance = nullptr;
 }
 
-void VplSession::open() {
-  auto session = new VplSession();
+void VPLSession::open() {
+  auto session = new VPLSession();
   ::mfxStatus sts = MFX_ERR_NONE;
 
-  session->m_loader = MFXLoad();
+  session->m_loader = ::MFXLoad();
   if (session->m_loader == nullptr) {
     delete session;
-    spdlog::warn("MFXLoad() failed");
+    spdlog::warn("::MFXLoad() failed");
     return;
   }
 
@@ -60,7 +60,7 @@ void VplSession::open() {
   }
 
   sts = ::MFXVideoCORE_SetHandle(
-      session->m_session, static_cast<mfxHandleType>(MFX_HANDLE_VA_DISPLAY),
+      session->m_session, static_cast<::mfxHandleType>(MFX_HANDLE_VA_DISPLAY),
       session->m_libva->GetVADisplay());
   if (sts != MFX_ERR_NONE) {
     delete session;
@@ -70,7 +70,7 @@ void VplSession::open() {
 
   // Query selected implementation and version
   ::mfxIMPL impl;
-  sts = MFXQueryIMPL(session->m_session, &impl);
+  sts = ::MFXQueryIMPL(session->m_session, &impl);
   if (sts != MFX_ERR_NONE) {
     delete session;
     throw std::runtime_error(fmt::format("MFXQueryIMPL() failed: {}",
@@ -78,7 +78,7 @@ void VplSession::open() {
   }
 
   ::mfxVersion ver;
-  sts = MFXQueryVersion(session->m_session, &ver);
+  sts = ::MFXQueryVersion(session->m_session, &ver);
   if (sts != MFX_ERR_NONE) {
     delete session;
     throw std::runtime_error(fmt::format("MFXQueryVersion() failed: {}",
@@ -88,7 +88,7 @@ void VplSession::open() {
   m_instance = session;
 }
 
-::mfxSession VplSession::getSession() {
+::mfxSession VPLSession::getSession() {
   return m_session;
 }
 

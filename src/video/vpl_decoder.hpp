@@ -21,14 +21,14 @@ namespace hisui::video {
 
 class YUVImage;
 
-class VplDecoder : public Decoder {
+class VPLDecoder : public Decoder {
  public:
-  explicit VplDecoder(std::shared_ptr<hisui::webm::input::VideoContext>);
-  ~VplDecoder();
+  explicit VPLDecoder(std::shared_ptr<hisui::webm::input::VideoContext>);
+  ~VPLDecoder();
 
   const std::shared_ptr<YUVImage> getImage(const std::uint64_t) override;
 
-  static bool IsSupported(const std::uint32_t fourcc);
+  static bool isSupported(const std::uint32_t fourcc);
 
  private:
   std::unique_ptr<MFXVideoDECODE> m_decoder;
@@ -44,13 +44,13 @@ class VplDecoder : public Decoder {
   std::vector<uint8_t> m_bitstream_buffer;
   ::mfxBitstream m_bitstream;
 
-  static std::unique_ptr<MFXVideoDECODE> CreateDecoder(
-      const mfxU32 codec,
+  static std::unique_ptr<MFXVideoDECODE> createDecoder(
+      const ::mfxU32 codec,
       const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes);
 
-  static std::unique_ptr<MFXVideoDECODE> CreateDecoderInternal(
-      VplSession& session,
-      const mfxU32 codec,
+  static std::unique_ptr<MFXVideoDECODE> createDecoderInternal(
+      VPLSession& session,
+      const ::mfxU32 codec,
       const std::uint32_t width,
       const std::uint32_t height);
 

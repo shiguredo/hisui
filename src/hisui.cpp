@@ -37,27 +37,27 @@ int main(int argc, char** argv) {
   ::setenv("SVT_LOG", "-2", 1);
 
   try {
-    hisui::video::VplSession::open();
+    hisui::video::VPLSession::open();
   } catch (const std::exception& e) {
     spdlog::warn("failed to open VPL session: {}", e.what());
   }
-  if (hisui::video::VplSession::hasInstance()) {
-    spdlog::info("H264 decode: {}", hisui::video::VplDecoder::IsSupported(
+  if (hisui::video::VPLSession::hasInstance()) {
+    spdlog::info("H264 decode: {}", hisui::video::VPLDecoder::isSupported(
                                         hisui::Constants::H264_FOURCC));
-    spdlog::info("VP8  decode: {}", hisui::video::VplDecoder::IsSupported(
+    spdlog::info("VP8  decode: {}", hisui::video::VPLDecoder::isSupported(
                                         hisui::Constants::VP8_FOURCC));
-    spdlog::info("VP9  decode: {}", hisui::video::VplDecoder::IsSupported(
+    spdlog::info("VP9  decode: {}", hisui::video::VPLDecoder::isSupported(
                                         hisui::Constants::VP9_FOURCC));
-    spdlog::info("AV1  decode: {}", hisui::video::VplDecoder::IsSupported(
+    spdlog::info("AV1  decode: {}", hisui::video::VPLDecoder::isSupported(
                                         hisui::Constants::AV1_FOURCC));
 
-    spdlog::info("H264 encode: {}", hisui::video::VplEncoder::IsSupported(
+    spdlog::info("H264 encode: {}", hisui::video::VPLEncoder::isSupported(
                                         hisui::Constants::H264_FOURCC));
-    spdlog::info("VP8  encode: {}", hisui::video::VplEncoder::IsSupported(
+    spdlog::info("VP8  encode: {}", hisui::video::VPLEncoder::isSupported(
                                         hisui::Constants::VP8_FOURCC));
-    spdlog::info("VP9  encode: {}", hisui::video::VplEncoder::IsSupported(
+    spdlog::info("VP9  encode: {}", hisui::video::VPLEncoder::isSupported(
                                         hisui::Constants::VP9_FOURCC));
-    spdlog::info("AV1  encode: {}", hisui::video::VplEncoder::IsSupported(
+    spdlog::info("AV1  encode: {}", hisui::video::VPLEncoder::isSupported(
                                         hisui::Constants::AV1_FOURCC));
   }
 
@@ -214,8 +214,8 @@ int main(int argc, char** argv) {
     hisui::audio::LyraHandler::close();
   }
 
-  if (hisui::video::VplSession::hasInstance()) {
-    hisui::video::VplSession::close();
+  if (hisui::video::VPLSession::hasInstance()) {
+    hisui::video::VPLSession::close();
   }
 
   if (config.enabledSuccessReport()) {

@@ -11,7 +11,7 @@
 
 namespace hisui::video {
 
-mfxU32 ToMfxCodec(const std::uint32_t fourcc) {
+::mfxU32 ToMfxCodec(const std::uint32_t fourcc) {
   switch (fourcc) {
     case hisui::Constants::VP8_FOURCC:
       return MFX_CODEC_VP8;

@@ -15,23 +15,23 @@
 
 namespace hisui::video {
 
-class VplSession {
+class VPLSession {
  public:
-  VplSession(const VplSession&) = delete;
-  VplSession& operator=(const VplSession&) = delete;
-  VplSession(VplSession&&) = delete;
-  VplSession& operator=(VplSession&&) = delete;
-  static VplSession& getInstance();
+  VPLSession(const VPLSession&) = delete;
+  VPLSession& operator=(const VPLSession&) = delete;
+  VPLSession(VPLSession&&) = delete;
+  VPLSession& operator=(VPLSession&&) = delete;
+  static VPLSession& getInstance();
   static bool hasInstance();
   static void open();
   static void close();
   ::mfxSession getSession();
 
  private:
-  inline static VplSession* m_instance = nullptr;
+  inline static VPLSession* m_instance = nullptr;
 
-  VplSession();
-  ~VplSession();
+  VPLSession();
+  ~VPLSession();
 
   ::mfxLoader m_loader = nullptr;
   ::mfxSession m_session = nullptr;

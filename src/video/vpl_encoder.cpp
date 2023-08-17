@@ -9,7 +9,7 @@
 
 namespace hisui::video {
 
-std::unique_ptr<MFXVideoENCODE> VplEncoder::CreateEncoder(
+std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
     const ::mfxU32 codec,
     const std::uint32_t width,
     const std::uint32_t height,
@@ -17,7 +17,7 @@ std::unique_ptr<MFXVideoENCODE> VplEncoder::CreateEncoder(
     const std::uint32_t target_bit_rate,
     const std::uint32_t max_bit_rate,
     const bool init) {
-  if (!hisui::video::VplSession::hasInstance()) {
+  if (!hisui::video::VPLSession::hasInstance()) {
     throw std::runtime_error("VPL session is not opened");
   }
   mfxStatus sts = MFX_ERR_NONE;
@@ -110,7 +110,7 @@ std::unique_ptr<MFXVideoENCODE> VplEncoder::CreateEncoder(
   }
 
   std::unique_ptr<MFXVideoENCODE> encoder(
-      new MFXVideoENCODE(hisui::video::VplSession::getInstance().getSession()));
+      new MFXVideoENCODE(hisui::video::VPLSession::getInstance().getSession()));
 
   // MFX_ERR_NONE	The function completed successfully.
   // MFX_ERR_UNSUPPORTED	The function failed to identify a specific implementation for the required features.
@@ -210,9 +210,9 @@ std::unique_ptr<MFXVideoENCODE> VplEncoder::CreateEncoder(
   return encoder;
 }
 
-bool VplEncoder::IsSupported(const std::uint32_t fourcc) {
+bool VPLEncoder::isSupported(const std::uint32_t fourcc) {
   auto encoder =
-      CreateEncoder(ToMfxCodec(fourcc), 1920, 1080, 30, 10, 20, false);
+      createEncoder(ToMfxCodec(fourcc), 1920, 1080, 30, 10, 20, false);
   return encoder != nullptr;
 }
 

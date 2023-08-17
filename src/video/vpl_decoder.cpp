@@ -19,8 +19,8 @@
 
 namespace hisui::video {
 
-bool VplDecoder::initVpl() {
-  m_decoder = CreateDecoder(m_fourcc, {{4096, 4096}, {2048, 2048}});
+bool VPLDecoder::initVpl() {
+  m_decoder = createDecoder(m_fourcc, {{4096, 4096}, {2048, 2048}});
   if (!m_decoder) {
     throw std::runtime_error(
         fmt::format("createDecoder() failed: fourcc={}", m_fourcc));
@@ -79,13 +79,13 @@ bool VplDecoder::initVpl() {
   return true;
 }
 
-void VplDecoder::releaseVpl() {
+void VPLDecoder::releaseVpl() {
   if (m_decoder != nullptr) {
     m_decoder->Close();
   }
 }
 
-VplDecoder::VplDecoder(std::shared_ptr<hisui::webm::input::VideoContext> t_webm)
+VPLDecoder::VPLDecoder(std::shared_ptr<hisui::webm::input::VideoContext> t_webm)
     : Decoder(t_webm), m_fourcc(t_webm->getFourcc()) {
   initVpl();
 
@@ -107,11 +107,11 @@ VplDecoder::VplDecoder(std::shared_ptr<hisui::webm::input::VideoContext> t_webm)
   }
 }
 
-VplDecoder::~VplDecoder() {
+VPLDecoder::~VPLDecoder() {
   releaseVpl();
 }
 
-const std::shared_ptr<YUVImage> VplDecoder::getImage(
+const std::shared_ptr<YUVImage> VPLDecoder::getImage(
     const std::uint64_t timestamp) {
   if (!m_webm || m_is_time_over) {
     return m_black_yuv_image;
@@ -125,7 +125,7 @@ const std::shared_ptr<YUVImage> VplDecoder::getImage(
   return m_current_yuv_image;
 }
 
-void VplDecoder::updateImage(const std::uint64_t timestamp) {
+void VPLDecoder::updateImage(const std::uint64_t timestamp) {
   // 次のブロックに逹っしていない
   if (timestamp < m_next_timestamp) {
     return;
@@ -134,7 +134,7 @@ void VplDecoder::updateImage(const std::uint64_t timestamp) {
   updateImageByTimestamp(timestamp);
 }
 
-void VplDecoder::updateImageByTimestamp(const std::uint64_t timestamp) {
+void VPLDecoder::updateImageByTimestamp(const std::uint64_t timestamp) {
   if (m_finished_webm) {
     return;
   }
@@ -163,7 +163,7 @@ void VplDecoder::updateImageByTimestamp(const std::uint64_t timestamp) {
   } while (timestamp >= m_next_timestamp);
 }
 
-void VplDecoder::decode() {
+void VPLDecoder::decode() {
   auto buffer_size = m_webm->getBufferSize();
 
   if (m_bitstream.MaxLength < m_bitstream.DataLength + buffer_size) {
@@ -250,7 +250,7 @@ void VplDecoder::decode() {
   }
 
   sts = MFXVideoCORE_SyncOperation(
-      hisui::video::VplSession::getInstance().getSession(), syncp, 600000);
+      hisui::video::VPLSession::getInstance().getSession(), syncp, 600000);
   if (sts != MFX_ERR_NONE) {
     throw std::runtime_error(
         fmt::format("MFXVideoCORE_SyncOperation() failed: sts={}",
@@ -269,15 +269,15 @@ void VplDecoder::decode() {
   return;
 }
 
-std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
+std::unique_ptr<MFXVideoDECODE> VPLDecoder::createDecoder(
     const std::uint32_t fourcc,
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes) {
-  if (!hisui::video::VplSession::hasInstance()) {
+  if (!hisui::video::VPLSession::hasInstance()) {
     throw std::runtime_error("VPL session is not opened");
   }
   for (auto size : sizes) {
     auto decoder =
-        CreateDecoderInternal(hisui::video::VplSession::getInstance(),
+        createDecoderInternal(hisui::video::VPLSession::getInstance(),
                               ToMfxCodec(fourcc), size.first, size.second);
     if (decoder != nullptr) {
       return decoder;
@@ -286,8 +286,8 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoder(
   return nullptr;
 }
 
-std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
-    VplSession& session,
+std::unique_ptr<MFXVideoDECODE> VPLDecoder::createDecoderInternal(
+    VPLSession& session,
     mfxU32 codec,
     std::uint32_t width,
     std::uint32_t height) {
@@ -359,8 +359,8 @@ std::unique_ptr<MFXVideoDECODE> VplDecoder::CreateDecoderInternal(
   return decoder;
 }
 
-bool VplDecoder::IsSupported(const std::uint32_t fourcc) {
-  auto decoder = CreateDecoder(fourcc, {{4096, 4096}, {2048, 2048}});
+bool VPLDecoder::isSupported(const std::uint32_t fourcc) {
+  auto decoder = createDecoder(fourcc, {{4096, 4096}, {2048, 2048}});
 
   return decoder != nullptr;
 }

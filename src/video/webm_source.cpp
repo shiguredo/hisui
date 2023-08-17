@@ -47,15 +47,25 @@ WebMSource::WebMSource(const std::string& t_file_path) {
   switch (m_webm->getFourcc()) {
     case hisui::Constants::VP8_FOURCC: /* fall through */
     case hisui::Constants::VP9_FOURCC:
+      if (VPLSession::hasInstance() &&
+          VPLDecoder::isSupported(m_webm->getFourcc())) {
+        m_decoder = std::make_shared<VPLDecoder>(m_webm);
+        break;
+      }
       m_decoder = std::make_shared<VPXDecoder>(m_webm);
       break;
     case hisui::Constants::AV1_FOURCC:
+      if (VPLSession::hasInstance() &&
+          VPLDecoder::isSupported(hisui::Constants::AV1_FOURCC)) {
+        m_decoder = std::make_shared<VPLDecoder>(m_webm);
+        break;
+      }
       m_decoder = std::make_shared<AV1Decoder>(m_webm);
       break;
     case hisui::Constants::H264_FOURCC:
-      if (VplSession::hasInstance() &&
-          VplDecoder::IsSupported(hisui::Constants::H264_FOURCC)) {
-        m_decoder = std::make_shared<VplDecoder>(m_webm);
+      if (VPLSession::hasInstance() &&
+          VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
+        m_decoder = std::make_shared<VPLDecoder>(m_webm);
         break;
       }
       if (OpenH264Handler::hasInstance()) {
