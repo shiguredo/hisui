@@ -21,22 +21,28 @@ namespace hisui::video {
 
 class YUVImage;
 
-class VplDecoder /* : public Decoder */ {
+class VplDecoder : public Decoder {
  public:
-  // explicit VplDecoder(std::shared_ptr<hisui::webm::input::VideoContext>);
-  // ~VplDecoder();
-  //
-  // const std::shared_ptr<YUVImage> getImage(const std::uint64_t) override;
+  explicit VplDecoder(std::shared_ptr<hisui::webm::input::VideoContext>);
+  ~VplDecoder();
+
+  const std::shared_ptr<YUVImage> getImage(const std::uint64_t) override;
 
   static bool IsSupported(const std::uint32_t fourcc);
 
  private:
-  std::shared_ptr<VplSession> m_session;
   std::unique_ptr<MFXVideoDECODE> m_decoder;
+  std::uint32_t m_fourcc;
   std::uint64_t m_current_timestamp = 0;
   std::uint64_t m_next_timestamp = 0;
   std::shared_ptr<YUVImage> m_current_yuv_image = nullptr;
+  std::shared_ptr<YUVImage> m_next_yuv_image = nullptr;
   bool m_report_enabled = false;
+  std::vector<::mfxFrameSurface1> m_surfaces;
+  ::mfxFrameAllocRequest m_alloc_request;
+  std::vector<uint8_t> m_surface_buffer;
+  std::vector<uint8_t> m_bitstream_buffer;
+  ::mfxBitstream m_bitstream;
 
   static std::unique_ptr<MFXVideoDECODE> CreateDecoder(
       const mfxU32 codec,
@@ -47,6 +53,12 @@ class VplDecoder /* : public Decoder */ {
       const mfxU32 codec,
       const std::uint32_t width,
       const std::uint32_t height);
+
+  bool initVpl();
+  void releaseVpl();
+  void updateImage(const std::uint64_t);
+  void updateImageByTimestamp(const std::uint64_t);
+  void decode();
 };
 
 }  // namespace hisui::video

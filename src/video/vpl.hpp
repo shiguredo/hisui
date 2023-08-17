@@ -11,12 +11,6 @@
 #include "video/decoder.hpp"
 #include "video/vpl_session.hpp"
 
-namespace hisui::webm::input {
-
-class VideoContext;
-
-}
-
 namespace hisui::video {
 
 mfxU32 ToMfxCodec(const std::uint32_t fourcc);

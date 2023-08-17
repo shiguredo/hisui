@@ -59,7 +59,6 @@ int main(int argc, char** argv) {
                                         hisui::Constants::VP9_FOURCC));
     spdlog::info("AV1  encode: {}", hisui::video::VplEncoder::IsSupported(
                                         hisui::Constants::AV1_FOURCC));
-    return EXIT_SUCCESS;
   }
 
   try {

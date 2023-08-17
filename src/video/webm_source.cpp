@@ -12,6 +12,8 @@
 #include "video/decoder.hpp"
 #include "video/openh264_decoder.hpp"
 #include "video/openh264_handler.hpp"
+#include "video/vpl_decoder.hpp"
+#include "video/vpl_session.hpp"
 #include "video/vpx_decoder.hpp"
 #include "video/yuv.hpp"
 #include "webm/input/video_context.hpp"
@@ -51,6 +53,11 @@ WebMSource::WebMSource(const std::string& t_file_path) {
       m_decoder = std::make_shared<AV1Decoder>(m_webm);
       break;
     case hisui::Constants::H264_FOURCC:
+      if (VplSession::hasInstance() &&
+          VplDecoder::IsSupported(hisui::Constants::H264_FOURCC)) {
+        m_decoder = std::make_shared<VplDecoder>(m_webm);
+        break;
+      }
       if (OpenH264Handler::hasInstance()) {
         m_decoder = std::make_shared<OpenH264Decoder>(m_webm);
         break;
