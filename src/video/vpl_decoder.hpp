@@ -44,11 +44,11 @@ class VPLDecoder : public Decoder {
   std::vector<uint8_t> m_bitstream_buffer;
   ::mfxBitstream m_bitstream;
 
-  static std::unique_ptr<MFXVideoDECODE> createDecoder(
+  static std::unique_ptr<::MFXVideoDECODE> createDecoder(
       const ::mfxU32 codec,
       const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes);
 
-  static std::unique_ptr<MFXVideoDECODE> createDecoderInternal(
+  static std::unique_ptr<::MFXVideoDECODE> createDecoderInternal(
       VPLSession& session,
       const ::mfxU32 codec,
       const std::uint32_t width,

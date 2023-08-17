@@ -26,9 +26,9 @@ bool VPLDecoder::initVpl() {
         fmt::format("createDecoder() failed: fourcc={}", m_fourcc));
   }
 
-  mfxStatus sts = MFX_ERR_NONE;
+  ::mfxStatus sts = MFX_ERR_NONE;
 
-  mfxVideoParam param;
+  ::mfxVideoParam param;
   memset(&param, 0, sizeof(param));
   sts = m_decoder->GetVideoParam(&param);
   if (sts != MFX_ERR_NONE) {
@@ -65,7 +65,7 @@ bool VPLDecoder::initVpl() {
     m_surfaces.clear();
     m_surfaces.reserve(m_alloc_request.NumFrameSuggested);
     for (int i = 0; i < m_alloc_request.NumFrameSuggested; i++) {
-      mfxFrameSurface1 surface;
+      ::mfxFrameSurface1 surface;
       memset(&surface, 0, sizeof(surface));
       surface.Info = param.mfx.FrameInfo;
       surface.Data.Y = m_surface_buffer.data() + i * size;
@@ -196,7 +196,7 @@ void VPLDecoder::decode() {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
-    // 受信した映像のサイズが変わってたら width_, height_ を更新する
+    // 受信した映像のサイズが変わってたら width, height を更新する
     if (sts == MFX_WRN_VIDEO_PARAM_CHANGED) {
       mfxVideoParam param;
       memset(&param, 0, sizeof(param));
@@ -234,7 +234,7 @@ void VPLDecoder::decode() {
   // VP9 は受信フレームのサイズが変わっても MFX_WRN_VIDEO_PARAM_CHANGED を返さないようなので、
   // ここで毎フレーム情報を取得してサイズを更新する。
   if (m_fourcc != Constants::H264_FOURCC) {
-    mfxVideoParam param;
+    ::mfxVideoParam param;
     memset(&param, 0, sizeof(param));
     sts = m_decoder->GetVideoParam(&param);
     if (sts != MFX_ERR_NONE) {
@@ -249,7 +249,7 @@ void VPLDecoder::decode() {
     }
   }
 
-  sts = MFXVideoCORE_SyncOperation(
+  sts = ::MFXVideoCORE_SyncOperation(
       hisui::video::VPLSession::getInstance().getSession(), syncp, 600000);
   if (sts != MFX_ERR_NONE) {
     throw std::runtime_error(
@@ -269,7 +269,7 @@ void VPLDecoder::decode() {
   return;
 }
 
-std::unique_ptr<MFXVideoDECODE> VPLDecoder::createDecoder(
+std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoder(
     const std::uint32_t fourcc,
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes) {
   if (!hisui::video::VPLSession::hasInstance()) {
@@ -279,24 +279,24 @@ std::unique_ptr<MFXVideoDECODE> VPLDecoder::createDecoder(
     auto decoder =
         createDecoderInternal(hisui::video::VPLSession::getInstance(),
                               ToMfxCodec(fourcc), size.first, size.second);
-    if (decoder != nullptr) {
+    if (decoder) {
       return decoder;
     }
   }
   return nullptr;
 }
 
-std::unique_ptr<MFXVideoDECODE> VPLDecoder::createDecoderInternal(
+std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoderInternal(
     VPLSession& session,
-    mfxU32 codec,
+    ::mfxU32 codec,
     std::uint32_t width,
     std::uint32_t height) {
   std::unique_ptr<MFXVideoDECODE> decoder(
       new MFXVideoDECODE(session.getSession()));
 
-  mfxStatus sts = MFX_ERR_NONE;
+  ::mfxStatus sts = MFX_ERR_NONE;
 
-  mfxVideoParam param;
+  ::mfxVideoParam param;
   memset(&param, 0, sizeof(param));
 
   param.mfx.CodecId = codec;
@@ -350,7 +350,12 @@ std::unique_ptr<MFXVideoDECODE> VPLDecoder::createDecoderInternal(
     // Initialize the oneVPL encoder
     sts = decoder->Init(&param);
     if (sts != MFX_ERR_NONE) {
-      spdlog::warn("decoder->Init() failed: std={}",
+      const char* codec_str = codec == MFX_CODEC_VP8   ? "MFX_CODEC_VP8"
+                              : codec == MFX_CODEC_VP9 ? "MFX_CODEC_VP9"
+                              : codec == MFX_CODEC_AV1 ? "MFX_CODEC_AV1"
+                              : codec == MFX_CODEC_AVC ? "MFX_CODEC_AVC"
+                                                       : "MFX_CODEC_UNKNOWN";
+      spdlog::warn("decoder->Init() failed: codec={}, std={}", codec_str,
                    static_cast<std::int32_t>(sts));
       return nullptr;
     }
