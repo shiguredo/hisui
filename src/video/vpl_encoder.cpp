@@ -1,5 +1,6 @@
 #include "video/vpl_encoder.hpp"
 
+#include <libyuv/convert_from.h>
 #include <spdlog/spdlog.h>
 #include <vpl/mfxvp8.h>
 
@@ -7,7 +8,19 @@
 
 #include <video/vpl.hpp>
 
+#include "config.hpp"
+#include "frame.hpp"
+
 namespace hisui::video {
+
+VPLEncoderConfig::VPLEncoderConfig(const std::uint32_t t_width,
+                                   const std::uint32_t t_height,
+                                   const hisui::Config& config)
+    : width(t_width),
+      height(t_height),
+      fps(config.out_video_frame_rate),
+      target_bit_rate(config.out_video_bit_rate * 1000),
+      max_bit_rate(config.out_video_bit_rate * 1000) {}
 
 std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
     const ::mfxU32 codec,
@@ -20,9 +33,9 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
   if (!hisui::video::VPLSession::hasInstance()) {
     throw std::runtime_error("VPL session is not opened");
   }
-  mfxStatus sts = MFX_ERR_NONE;
+  ::mfxStatus sts = MFX_ERR_NONE;
 
-  mfxVideoParam param;
+  ::mfxVideoParam param;
   memset(&param, 0, sizeof(param));
 
   param.mfx.CodecId = codec;
@@ -214,6 +227,183 @@ bool VPLEncoder::isSupported(const std::uint32_t fourcc) {
   auto encoder =
       createEncoder(ToMfxCodec(fourcc), 1920, 1080, 30, 10, 20, false);
   return encoder != nullptr;
+}
+
+VPLEncoder::VPLEncoder(const std::uint32_t t_fourcc,
+                       std::queue<hisui::Frame>* t_buffer,
+                       const VPLEncoderConfig& t_config,
+                       const std::uint64_t t_timescale)
+    : m_fourcc(t_fourcc), m_buffer(t_buffer), m_timescale(t_timescale) {
+  m_width = t_config.width;
+  m_height = t_config.height;
+  m_fps = t_config.fps;
+  m_bitrate = t_config.target_bit_rate;
+  m_encoder = createEncoder(
+      ToMfxCodec(m_fourcc), t_config.width, t_config.height, t_config.fps,
+      t_config.target_bit_rate, t_config.max_bit_rate, true);
+  if (!m_encoder) {
+    throw std::runtime_error("createEncoder() failed:");
+  }
+  initVPL();
+}
+
+VPLEncoder::~VPLEncoder() {
+  if (m_frame > 0) {
+    spdlog::debug("VPLEncoder: number of frames: {}", m_frame);
+    spdlog::debug("VPLEncoder: final average bitrate (kbps): {}",
+                  m_sum_of_bits * m_fps.numerator() / m_fps.denominator() /
+                      static_cast<std::uint64_t>(m_frame) / 1024);
+  }
+  releaseVPL();
+}
+
+void VPLEncoder::initVPL() {
+  ::mfxStatus sts = MFX_ERR_NONE;
+
+  ::mfxVideoParam param;
+  memset(&param, 0, sizeof(param));
+
+  // Retrieve video parameters selected by encoder.
+  // - BufferSizeInKB parameter is required to set bit stream buffer size
+  sts = m_encoder->GetVideoParam(&param);
+  if (sts != MFX_ERR_NONE) {
+    throw std::runtime_error(fmt::format("GetVideoParam() failed: sts={}",
+                                         static_cast<std::int32_t>(sts)));
+  }
+  spdlog::info("BufferSizeInKB={}", param.mfx.BufferSizeInKB);
+
+  // Query number of required surfaces for encoder
+  memset(&m_alloc_request, 0, sizeof(m_alloc_request));
+  sts = m_encoder->QueryIOSurf(&param, &m_alloc_request);
+  if (sts != MFX_ERR_NONE) {
+    throw std::runtime_error(fmt::format("QueryIOSurf() failed: sts={}",
+                                         static_cast<std::int32_t>(sts)));
+  }
+  spdlog::info("Encoder NumFrameSuggested={}",
+               m_alloc_request.NumFrameSuggested);
+
+  m_frame_info = param.mfx.FrameInfo;
+
+  // 出力ビットストリームの初期化
+  m_bitstream_buffer.resize(param.mfx.BufferSizeInKB * 1000);
+
+  memset(&m_bitstream, 0, sizeof(m_bitstream));
+  m_bitstream.MaxLength = static_cast<std::uint32_t>(m_bitstream_buffer.size());
+  m_bitstream.Data = m_bitstream_buffer.data();
+
+  // 必要な枚数分の入力サーフェスを作る
+  {
+    int width = (m_alloc_request.Info.Width + 31) / 32 * 32;
+    int height = (m_alloc_request.Info.Height + 31) / 32 * 32;
+    // 1枚あたりのバイト数
+    // NV12 なので 1 ピクセルあたり 12 ビット
+    int size = width * height * 12 / 8;
+    m_surface_buffer.resize(
+        static_cast<std::size_t>(m_alloc_request.NumFrameSuggested * size));
+
+    m_surfaces.clear();
+    m_surfaces.reserve(m_alloc_request.NumFrameSuggested);
+    for (int i = 0; i < m_alloc_request.NumFrameSuggested; i++) {
+      ::mfxFrameSurface1 surface;
+      memset(&surface, 0, sizeof(surface));
+      surface.Info = m_frame_info;
+      surface.Data.Y = m_surface_buffer.data() + i * size;
+      surface.Data.U = m_surface_buffer.data() + i * size + width * height;
+      surface.Data.V = m_surface_buffer.data() + i * size + width * height + 1;
+      surface.Data.Pitch = static_cast<std::uint16_t>(width);
+      m_surfaces.push_back(surface);
+    }
+  }
+}
+
+void VPLEncoder::releaseVPL() {
+  if (m_encoder) {
+    m_encoder->Close();
+  }
+}
+
+void VPLEncoder::outputImage(const std::vector<unsigned char>& yuv) {
+  encodeFrame(yuv);
+  ++m_frame;
+}
+
+void VPLEncoder::encodeFrame(const std::vector<unsigned char>& yuv) {
+  // 使ってない入力サーフェスを取り出す
+  auto surface =
+      std::find_if(m_surfaces.begin(), m_surfaces.end(),
+                   [](const ::mfxFrameSurface1& s) { return !s.Data.Locked; });
+  if (surface == m_surfaces.end()) {
+    throw std::runtime_error("unlocked surface is not found");
+  }
+
+  auto yuv_data = yuv.data();
+
+  // I420 から NV12 に変換
+  libyuv::I420ToNV12(
+      yuv_data, static_cast<int>(m_width), yuv_data + m_width * m_height,
+      m_width >> 1, yuv_data + m_width * m_height + ((m_width * m_height) >> 2),
+      m_width >> 1, surface->Data.Y, surface->Data.Pitch, surface->Data.U,
+      surface->Data.Pitch, static_cast<int>(m_width),
+      static_cast<int>(m_height));
+
+  ::mfxStatus sts;
+
+  ::mfxEncodeCtrl ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.FrameType = MFX_FRAMETYPE_UNKNOWN;
+
+  // NV12 をハードウェアエンコード
+  ::mfxSyncPoint syncp;
+  sts = m_encoder->EncodeFrameAsync(&ctrl, &*surface, &m_bitstream, &syncp);
+  // alloc_request_.NumFrameSuggested が 1 の場合は MFX_ERR_MORE_DATA は発生しない
+  if (sts == MFX_ERR_MORE_DATA) {
+    // もっと入力が必要なので出直す
+    return;
+  }
+  if (sts != MFX_ERR_NONE) {
+    throw std::runtime_error(fmt::format("EncodeFrameAsync() failed: sts={}",
+                                         static_cast<std::int32_t>(sts)));
+  }
+
+  sts = ::MFXVideoCORE_SyncOperation(
+      hisui::video::VPLSession::getInstance().getSession(), syncp, 600000);
+  if (sts != MFX_ERR_NONE) {
+    throw std::runtime_error(
+        fmt::format("MFXVideoCORE_SyncOperation() failed: sts={}",
+                    static_cast<std::int32_t>(sts)));
+  }
+
+  {
+    std::uint8_t* p = m_bitstream.Data + m_bitstream.DataOffset;
+    std::uint32_t data_size = m_bitstream.DataLength;
+    m_bitstream.DataLength = 0;
+
+    std::uint8_t* data = new std::uint8_t[data_size];
+    std::copy_n(p, data_size, data);
+    m_sum_of_bits += data_size * 8;
+    const std::uint64_t pts_ns = static_cast<std::uint64_t>(m_frame) *
+                                 m_timescale * m_fps.denominator() /
+                                 m_fps.numerator();
+    m_buffer->push(
+        hisui::Frame{.timestamp = pts_ns,
+                     .data = data,
+                     .data_size = data_size,
+                     .is_key = m_bitstream.FrameType == MFX_FRAMETYPE_IDR ||
+                               m_bitstream.FrameType == MFX_FRAMETYPE_I});
+  }
+}
+
+void VPLEncoder::flush() {}
+
+std::uint32_t VPLEncoder::getFourcc() const {
+  return m_fourcc;
+}
+
+void VPLEncoder::setResolutionAndBitrate(const std::uint32_t,
+                                         const std::uint32_t,
+                                         const std::uint32_t) {
+  throw std::runtime_error(
+      "VPLEncoder::setResolutionAndBitrate is not implemented");
 }
 
 }  // namespace hisui::video

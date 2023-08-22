@@ -373,6 +373,9 @@ target_sources(hisui
     third_party/libvpx/third_party/libyuv/source/scale_neon64.cc
     third_party/libvpx/third_party/libyuv/source/scale_win.cc
     third_party/libvpx/third_party/libyuv/source/convert.cc
+    third_party/libvpx/third_party/libyuv/source/convert_argb.cc
+    third_party/libvpx/third_party/libyuv/source/convert_from.cc
+    third_party/libvpx/third_party/libyuv/source/video_common.cc
     third_party/libvpx/third_party/libwebm/mkvparser/mkvparser.cc
     third_party/libvpx/third_party/libwebm/mkvparser/mkvreader.cc
     third_party/libvpx/third_party/libwebm/mkvmuxer/mkvmuxer.cc
