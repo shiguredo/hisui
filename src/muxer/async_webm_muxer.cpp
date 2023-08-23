@@ -1,5 +1,7 @@
 #include "muxer/async_webm_muxer.hpp"
 
+#include <spdlog/spdlog.h>
+
 #include <array>
 #include <cstdint>
 #include <exception>
@@ -20,8 +22,11 @@
 #include "muxer/openh264_video_producer.hpp"
 #include "muxer/opus_audio_producer.hpp"
 #include "muxer/video_producer.hpp"
+#include "muxer/vpl_video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
 #include "report/reporter.hpp"
+#include "video/vpl_encoder.hpp"
+#include "video/vpl_session.hpp"
 #include "webm/output/context.hpp"
 
 namespace hisui::muxer {
@@ -129,6 +134,15 @@ void AsyncWebMMuxer::muxFinalize() {}
 
 std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
   if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+    if (hisui::video::VPLSession::hasInstance() &&
+        hisui::video::VPLEncoder::isSupported(hisui::Constants::H264_FOURCC)) {
+      spdlog::debug("use VPLEncoder");
+      return std::make_shared<VPLVideoProducer>(
+          m_config,
+          VPLVideoProducerParameters{.archives = m_normal_archives,
+                                     .duration = m_duration},
+          hisui::config::OutVideoCodec::H264);
+    }
     return std::make_shared<OpenH264VideoProducer>(
         m_config, OpenH264VideoProducerParameters{.archives = m_normal_archives,
                                                   .duration = m_duration});

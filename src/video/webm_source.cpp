@@ -47,11 +47,11 @@ WebMSource::WebMSource(const std::string& t_file_path) {
   switch (m_webm->getFourcc()) {
     case hisui::Constants::VP8_FOURCC: /* fall through */
     case hisui::Constants::VP9_FOURCC:
-      if (VPLSession::hasInstance() &&
-          VPLDecoder::isSupported(m_webm->getFourcc())) {
-        m_decoder = std::make_shared<VPLDecoder>(m_webm);
-        break;
-      }
+      // if (VPLSession::hasInstance() &&
+      //     VPLDecoder::isSupported(m_webm->getFourcc())) {
+      //   m_decoder = std::make_shared<VPLDecoder>(m_webm);
+      //   break;
+      // }
       m_decoder = std::make_shared<VPXDecoder>(m_webm);
       break;
     case hisui::Constants::AV1_FOURCC:
