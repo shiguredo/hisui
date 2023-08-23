@@ -317,6 +317,7 @@ target_sources(hisui
     src/muxer/simple_mp4_muxer.cpp
     src/muxer/video_producer.cpp
     src/muxer/vpx_video_producer.cpp
+    src/muxer/vpl_video_producer.cpp
     src/report/reporter.cpp
     src/util/file.cpp
     src/util/interval.cpp
