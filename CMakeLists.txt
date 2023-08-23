@@ -303,6 +303,7 @@ target_sources(hisui
     src/layout/source.cpp
     src/layout/video_source.cpp
     src/layout/vpx_video_producer.cpp
+    src/layout/vpl_video_producer.cpp
     src/metadata.cpp
     src/muxer/async_webm_muxer.cpp
     src/muxer/audio_producer.cpp
