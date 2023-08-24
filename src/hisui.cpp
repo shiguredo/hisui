@@ -25,6 +25,7 @@
 #include "muxer/simple_mp4_muxer.hpp"
 #include "report/reporter.hpp"
 #include "version/version.hpp"
+#include "video/decoder_factory.hpp"
 #include "video/openh264_handler.hpp"
 #include "video/vpl_decoder.hpp"
 #include "video/vpl_encoder.hpp"
@@ -39,7 +40,7 @@ int main(int argc, char** argv) {
   try {
     hisui::video::VPLSession::open();
   } catch (const std::exception& e) {
-    spdlog::warn("failed to open VPL session: {}", e.what());
+    spdlog::debug("failed to open VPL session: {}", e.what());
   }
   if (hisui::video::VPLSession::hasInstance()) {
     spdlog::info("H264 decode: {}", hisui::video::VPLDecoder::isSupported(
@@ -114,6 +115,8 @@ int main(int argc, char** argv) {
     spdlog::error("-f,--in-metadata-file is required");
     return EXIT_FAILURE;
   }
+
+  hisui::video::DecoderFactory::setup(config);
 
   hisui::muxer::Muxer* muxer = nullptr;
 

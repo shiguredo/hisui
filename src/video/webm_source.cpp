@@ -10,6 +10,7 @@
 #include "constants.hpp"
 #include "video/av1_decoder.hpp"
 #include "video/decoder.hpp"
+#include "video/decoder_factory.hpp"
 #include "video/openh264_decoder.hpp"
 #include "video/openh264_handler.hpp"
 #include "video/vpl_decoder.hpp"
@@ -44,40 +45,7 @@ WebMSource::WebMSource(const std::string& t_file_path) {
   m_duration = static_cast<std::uint64_t>(m_webm->getDuration());
   m_black_yuv_image = create_black_yuv_image(m_width, m_height);
 
-  switch (m_webm->getFourcc()) {
-    case hisui::Constants::VP8_FOURCC: /* fall through */
-    case hisui::Constants::VP9_FOURCC:
-      // if (VPLSession::hasInstance() &&
-      //     VPLDecoder::isSupported(m_webm->getFourcc())) {
-      //   m_decoder = std::make_shared<VPLDecoder>(m_webm);
-      //   break;
-      // }
-      m_decoder = std::make_shared<VPXDecoder>(m_webm);
-      break;
-    case hisui::Constants::AV1_FOURCC:
-      if (VPLSession::hasInstance() &&
-          VPLDecoder::isSupported(hisui::Constants::AV1_FOURCC)) {
-        m_decoder = std::make_shared<VPLDecoder>(m_webm);
-        break;
-      }
-      m_decoder = std::make_shared<AV1Decoder>(m_webm);
-      break;
-    case hisui::Constants::H264_FOURCC:
-      if (VPLSession::hasInstance() &&
-          VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
-        m_decoder = std::make_shared<VPLDecoder>(m_webm);
-        break;
-      }
-      if (OpenH264Handler::hasInstance()) {
-        m_decoder = std::make_shared<OpenH264Decoder>(m_webm);
-        break;
-      }
-      throw std::runtime_error("openh264 library is not loaded");
-    default:
-      const auto fourcc = m_webm->getFourcc();
-      m_webm = nullptr;
-      throw std::runtime_error(fmt::format("unknown fourcc: {}", fourcc));
-  }
+  m_decoder = hisui::video::DecoderFactory::create(m_webm);
 }
 
 const std::shared_ptr<YUVImage> WebMSource::getYUV(

@@ -48,7 +48,7 @@ void VPLSession::open() {
   sts = ::MFXCreateSession(session->m_loader, 0, &session->m_session);
   if (sts != MFX_ERR_NONE) {
     delete session;
-    spdlog::warn("MFXCreateSession() failed");
+    spdlog::debug("MFXCreateSession() failed");
     return;
   }
 

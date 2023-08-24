@@ -332,6 +332,7 @@ target_sources(hisui
     src/video/buffer_vpx_encoder.cpp
     src/video/composer.cpp
     src/video/decoder.cpp
+    src/video/decoder_factory.cpp
     src/video/grid_composer.cpp
     src/video/image_source.cpp
     src/video/multi_channel_sequencer.cpp
