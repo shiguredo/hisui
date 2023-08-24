@@ -334,8 +334,8 @@ std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoderInternal(
                             : codec == MFX_CODEC_AV1 ? "MFX_CODEC_AV1"
                             : codec == MFX_CODEC_AVC ? "MFX_CODEC_AVC"
                                                      : "MFX_CODEC_UNKNOWN";
-    spdlog::warn("Unsupported decoder codec: codec={}, sts={}", codec_str,
-                 static_cast<std::int32_t>(sts));
+    spdlog::debug("Unsupported decoder codec: codec={}, sts={}", codec_str,
+                  static_cast<std::int32_t>(sts));
     return nullptr;
   }
 

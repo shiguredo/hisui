@@ -152,8 +152,8 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
                               : codec == MFX_CODEC_AV1 ? "MFX_CODEC_AV1"
                               : codec == MFX_CODEC_AVC ? "MFX_CODEC_AVC"
                                                        : "MFX_CODEC_UNKNOWN";
-      spdlog::warn("Unsupported encoder codec: codec={}, sts={}", codec_str,
-                   static_cast<std::int32_t>(sts));
+      spdlog::debug("Unsupported encoder codec: codec={}, sts={}", codec_str,
+                    static_cast<std::int32_t>(sts));
       return nullptr;
     }
   }
