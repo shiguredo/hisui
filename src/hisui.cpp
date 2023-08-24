@@ -25,6 +25,7 @@
 #include "muxer/simple_mp4_muxer.hpp"
 #include "report/reporter.hpp"
 #include "version/version.hpp"
+#include "video/codec_engine.hpp"
 #include "video/decoder_factory.hpp"
 #include "video/openh264_handler.hpp"
 #include "video/vpl_decoder.hpp"
@@ -41,25 +42,6 @@ int main(int argc, char** argv) {
     hisui::video::VPLSession::open();
   } catch (const std::exception& e) {
     spdlog::debug("failed to open VPL session: {}", e.what());
-  }
-  if (hisui::video::VPLSession::hasInstance()) {
-    spdlog::info("H264 decode: {}", hisui::video::VPLDecoder::isSupported(
-                                        hisui::Constants::H264_FOURCC));
-    spdlog::info("VP8  decode: {}", hisui::video::VPLDecoder::isSupported(
-                                        hisui::Constants::VP8_FOURCC));
-    spdlog::info("VP9  decode: {}", hisui::video::VPLDecoder::isSupported(
-                                        hisui::Constants::VP9_FOURCC));
-    spdlog::info("AV1  decode: {}", hisui::video::VPLDecoder::isSupported(
-                                        hisui::Constants::AV1_FOURCC));
-
-    spdlog::info("H264 encode: {}", hisui::video::VPLEncoder::isSupported(
-                                        hisui::Constants::H264_FOURCC));
-    spdlog::info("VP8  encode: {}", hisui::video::VPLEncoder::isSupported(
-                                        hisui::Constants::VP8_FOURCC));
-    spdlog::info("VP9  encode: {}", hisui::video::VPLEncoder::isSupported(
-                                        hisui::Constants::VP9_FOURCC));
-    spdlog::info("AV1  encode: {}", hisui::video::VPLEncoder::isSupported(
-                                        hisui::Constants::AV1_FOURCC));
   }
 
   try {
@@ -110,6 +92,11 @@ int main(int argc, char** argv) {
   }
 
   config.validate();
+
+  if (config.video_codec_engines) {
+    hisui::video::showCodecEngines();
+    return EXIT_SUCCESS;
+  }
 
   if (std::empty(config.in_metadata_filename)) {
     spdlog::error("-f,--in-metadata-file is required");

@@ -98,6 +98,7 @@ class Config {
   std::string layout = "";
 
   // 以降は SPEC.rst にないオプション
+  bool video_codec_engines = false;
   bool show_progress_bar = true;
 
 #ifdef NDEBUG

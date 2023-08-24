@@ -196,6 +196,9 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->check(CLI::ExistingDirectory)
       ->group(EXPERIMENTAL_OPTIONS);
 
+  app->add_flag("--video-codec-engines", config->video_codec_engines,
+                "Show video codec engines and exit.");
+
   app->add_option("--show-progress-bar", config->show_progress_bar,
                   "Toggle to show progress bar. default: true");
 

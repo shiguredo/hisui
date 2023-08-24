@@ -330,6 +330,7 @@ target_sources(hisui
     src/video/buffer_av1_encoder.cpp
     src/video/buffer_openh264_encoder.cpp
     src/video/buffer_vpx_encoder.cpp
+    src/video/codec_engine.cpp
     src/video/composer.cpp
     src/video/decoder.cpp
     src/video/decoder_factory.cpp
