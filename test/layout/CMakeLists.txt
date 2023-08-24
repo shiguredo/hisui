@@ -51,11 +51,17 @@ add_executable(layout_test
     ../../src/version/version.cpp
     ../../src/video/av1_decoder.cpp
     ../../src/video/decoder.cpp
+    ../../src/video/decoder_factory.cpp
     ../../src/video/openh264.cpp
     ../../src/video/openh264_decoder.cpp
     ../../src/video/openh264_handler.cpp
     ../../src/video/preserve_aspect_ratio_scaler.cpp
     ../../src/video/scaler.cpp
+    ../../src/video/vaapi_utils.cpp
+    ../../src/video/vaapi_utils_drm.cpp
+    ../../src/video/vpl.cpp
+    ../../src/video/vpl_decoder.cpp
+    ../../src/video/vpl_session.cpp
     ../../src/video/vpx.cpp
     ../../src/video/vpx_decoder.cpp
     ../../src/video/webm_source.cpp
@@ -127,6 +133,7 @@ target_include_directories(layout_test
     ${boost_variant2_SOURCE_DIR}/include
     ${cpp-mp4_SOURCE_DIR}/include
     ${fmt_SOURCE_DIR}/include
+    ${VPL_SOURCE_DIR}/api
     ${spdlog_SOURCE_DIR}/include
     ../../third_party/libvpx/third_party/libyuv/include
     ../../third_party/libvpx/third_party/libwebm
@@ -138,9 +145,13 @@ target_include_directories(layout_test
 target_link_libraries(layout_test
     PRIVATE
     dl
+    drm
     fmt
     shiguredo-mp4
     spdlog 
+    va
+    va-drm
+    VPL
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     )
