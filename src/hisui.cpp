@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
   hisui::Config config;
 
   ::setenv("SVT_LOG", "-2", 1);
+  ::setenv("LIBVA_MESSAGING_LEVEL", "0", 1);
 
   try {
     hisui::video::VPLSession::open();
