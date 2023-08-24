@@ -100,7 +100,8 @@ std::pair<std::int16_t, std::int16_t> WebMSource::getSample(
 void WebMSource::readFrame() {
   if (m_webm->readFrame()) {
     m_current_position = static_cast<std::uint64_t>(m_webm->getTimestamp()) *
-                         m_sampling_rate / hisui::Constants::NANO_SECOND;
+                         hisui::Constants::PCM_SAMPLE_RATE /
+                         hisui::Constants::NANO_SECOND;
     const auto decoded =
         m_decoder->decode(m_webm->getBuffer(), m_webm->getBufferSize());
     if (decoded.second > 0) {
