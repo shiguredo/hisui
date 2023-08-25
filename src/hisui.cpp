@@ -63,6 +63,7 @@ int main(int argc, char** argv) {
         hisui::audio::LyraHandler::setModelPath(config.lyra_model_path);
       } catch (const std::exception& e) {
         spdlog::warn("failed to set lyra model path: {}", e.what());
+        return EXIT_FAILURE;
       }
     }
 
