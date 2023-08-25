@@ -27,21 +27,11 @@ void showCodecEngines() {
   std::cout << "  Encoder:" << std::endl;
   {
     bool is_default = true;
-    if (VPLSession::hasInstance() &&
-        VPLEncoder::isSupported(hisui::Constants::VP8_FOURCC)) {
-      printEngine("Intel oneVPL", "intel", is_default);
-      is_default = false;
-    }
     printEngine("libvpx", "software", is_default);
   }
   std::cout << "  Decoder:" << std::endl;
   {
     bool is_default = true;
-    if (VPLSession::hasInstance() &&
-        VPLDecoder::isSupported(hisui::Constants::VP8_FOURCC)) {
-      printEngine("Intel oneVPL", "intel", is_default);
-      is_default = false;
-    }
     printEngine("libvpx", "software", is_default);
   }
 
@@ -49,21 +39,11 @@ void showCodecEngines() {
   std::cout << "  Encoder:" << std::endl;
   {
     bool is_default = true;
-    if (VPLSession::hasInstance() &&
-        VPLEncoder::isSupported(hisui::Constants::VP9_FOURCC)) {
-      printEngine("Intel oneVPL", "intel", is_default);
-      is_default = false;
-    }
     printEngine("libvpx", "software", is_default);
   }
   std::cout << "  Decoder:" << std::endl;
   {
     bool is_default = true;
-    if (VPLSession::hasInstance() &&
-        VPLDecoder::isSupported(hisui::Constants::VP9_FOURCC)) {
-      printEngine("Intel oneVPL", "intel", is_default);
-      is_default = false;
-    }
     printEngine("libvpx", "software", is_default);
   }
 
@@ -71,21 +51,11 @@ void showCodecEngines() {
   std::cout << "  Encoder:" << std::endl;
   {
     bool is_default = true;
-    if (VPLSession::hasInstance() &&
-        VPLEncoder::isSupported(hisui::Constants::AV1_FOURCC)) {
-      printEngine("Intel oneVPL", "intel", is_default);
-      is_default = false;
-    }
     printEngine("SVT-AV1", "software", is_default);
   }
   std::cout << "  Decoder:" << std::endl;
   {
     bool is_default = true;
-    if (VPLSession::hasInstance() &&
-        VPLDecoder::isSupported(hisui::Constants::AV1_FOURCC)) {
-      printEngine("Intel oneVPL", "intel", is_default);
-      is_default = false;
-    }
     printEngine("SVT-AV1", "software", is_default);
   }
 

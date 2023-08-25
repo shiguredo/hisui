@@ -29,17 +29,8 @@ std::shared_ptr<hisui::video::Decoder> DecoderFactory::create(
   switch (fourcc) {
     case hisui::Constants::VP8_FOURCC: /* fall through */
     case hisui::Constants::VP9_FOURCC:
-      // if (VPLSession::hasInstance() &&
-      //     VPLDecoder::isSupported(m_webm->getFourcc())) {
-      //   m_decoder = std::make_shared<VPLDecoder>(m_webm);
-      //   break;
-      // }
       return std::make_shared<VPXDecoder>(webm);
     case hisui::Constants::AV1_FOURCC:
-      if (VPLSession::hasInstance() &&
-          VPLDecoder::isSupported(hisui::Constants::AV1_FOURCC)) {
-        return std::make_shared<VPLDecoder>(webm);
-      }
       return std::make_shared<AV1Decoder>(webm);
     case hisui::Constants::H264_FOURCC:
       if (m_instance->m_config.h264_decoder == config::H264Decoder::OneVPL) {
