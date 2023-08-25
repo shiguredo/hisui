@@ -42,15 +42,30 @@ std::shared_ptr<hisui::video::Decoder> DecoderFactory::create(
       }
       return std::make_shared<AV1Decoder>(webm);
     case hisui::Constants::H264_FOURCC:
+      if (m_instance->m_config.h264_decoder == config::H264Decoder::OneVPL) {
+        if (VPLSession::hasInstance() &&
+            VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
+          return std::make_shared<VPLDecoder>(webm);
+        }
+        throw std::runtime_error("onevPL H.264 decoder is not supported");
+      } else if (m_instance->m_config.h264_decoder ==
+                 config::H264Decoder::OpenH264) {
+        if (OpenH264Handler::hasInstance()) {
+          return std::make_shared<OpenH264Decoder>(webm);
+        }
+        throw std::runtime_error("OpenH264 H.264 decoder is not supported");
+      }
+
+      // Unspecified
+
       if (VPLSession::hasInstance() &&
           VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
         return std::make_shared<VPLDecoder>(webm);
       }
       if (OpenH264Handler::hasInstance()) {
         return std::make_shared<OpenH264Decoder>(webm);
-        break;
       }
-      throw std::runtime_error("H.264 is not supported");
+      throw std::runtime_error("H.264 decoder is unavailable");
     default:
       throw std::runtime_error(fmt::format("unknown fourcc: {}", fourcc));
   }

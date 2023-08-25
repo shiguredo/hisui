@@ -60,6 +60,12 @@ enum struct OutAudioCodec {
   FDK_AAC,
 };
 
+enum struct H264Decoder {
+  Unspecified,
+  OneVPL,
+  OpenH264,
+};
+
 }  // namespace config
 
 class Config {
@@ -100,6 +106,8 @@ class Config {
   // 以降は SPEC.rst にないオプション
   bool video_codec_engines = false;
   bool show_progress_bar = true;
+
+  config::H264Decoder h264_decoder = config::H264Decoder::Unspecified;
 
 #ifdef NDEBUG
   spdlog::level::level_enum log_level = spdlog::level::info;
