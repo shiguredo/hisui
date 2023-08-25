@@ -39,7 +39,7 @@ void LyraHandler::close() {
 }
 
 std::string LyraHandler::getModelPath() const {
-  if (std::empty(m_model_path)) {
+  if (!hasInstance()) {
     throw std::runtime_error("lyra model path is not set");
   }
   return m_model_path;

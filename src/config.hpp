@@ -124,7 +124,7 @@ class Config {
   ::EProfileIdc openh264_profile = ::PRO_BASELINE;
   ::ELevelIdc openh264_level = ::LEVEL_3_1;
 
-  std::string lyra_model_path;
+  std::string lyra_model_path = "";
 
   libyuv::FilterMode libyuv_filter_mode = libyuv::kFilterBox;
 
