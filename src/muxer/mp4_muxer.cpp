@@ -1,5 +1,7 @@
 #include "muxer/mp4_muxer.hpp"
 
+#include <spdlog/spdlog.h>
+
 #include <cstdint>
 #include <filesystem>
 #include <iterator>
@@ -20,6 +22,7 @@
 #include "muxer/openh264_video_producer.hpp"
 #include "muxer/opus_audio_producer.hpp"
 #include "muxer/video_producer.hpp"
+#include "muxer/vpl_video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
 #include "report/reporter.hpp"
 #include "shiguredo/mp4/track/av1.hpp"
@@ -29,6 +32,9 @@
 #include "shiguredo/mp4/track/vide.hpp"
 #include "shiguredo/mp4/track/vpx.hpp"
 #include "shiguredo/mp4/writer/writer.hpp"
+#include "video/openh264_handler.hpp"
+#include "video/vpl_encoder.hpp"
+#include "video/vpl_session.hpp"
 
 #ifdef USE_FDK_AAC
 #include "muxer/fdk_aac_audio_producer.hpp"
@@ -93,11 +99,52 @@ void MP4Muxer::initialize(
                     });
       } else {
         if (config.out_video_codec == config::OutVideoCodec::H264) {
-          m_video_producer = std::make_shared<OpenH264VideoProducer>(
-              config,
-              OpenH264VideoProducerParameters{.archives = m_normal_archives,
-                                              .duration = m_duration,
-                                              .timescale = 16000});
+          auto fourcc = hisui::Constants::H264_FOURCC;
+          if (config.h264_encoder == hisui::config::H264Encoder::OpenH264) {
+            if (!hisui::video::OpenH264Handler::hasInstance()) {
+              throw std::runtime_error("OpenH264 is not loaded");
+            } else {
+              m_video_producer = std::make_shared<OpenH264VideoProducer>(
+                  config,
+                  OpenH264VideoProducerParameters{.archives = m_normal_archives,
+                                                  .duration = m_duration,
+                                                  .timescale = 16000});
+            }
+          } else if (config.h264_encoder ==
+                     hisui::config::H264Encoder::OneVPL) {
+            if (!(hisui::video::VPLSession::hasInstance() &&
+                  hisui::video::VPLEncoder::isSupported(fourcc))) {
+              throw std::runtime_error("oneVPL H.264 encoder is not supported");
+            }
+            m_video_producer = std::make_shared<VPLVideoProducer>(
+                config,
+                VPLVideoProducerParameters{.archives = m_normal_archives,
+                                           .duration = m_duration,
+                                           .timescale = 16000},
+                fourcc);
+          }
+
+          // Unspecified
+
+          if (!m_video_producer) {
+            if (hisui::video::VPLSession::hasInstance() &&
+                hisui::video::VPLEncoder::isSupported(fourcc)) {
+              spdlog::debug("use VPLEncoder");
+              m_video_producer = std::make_shared<VPLVideoProducer>(
+                  config,
+                  VPLVideoProducerParameters{.archives = m_normal_archives,
+                                             .duration = m_duration,
+                                             .timescale = 16000},
+                  fourcc);
+            } else if (hisui::video::OpenH264Handler::hasInstance()) {
+              m_video_producer = std::make_shared<OpenH264VideoProducer>(
+                  config,
+                  OpenH264VideoProducerParameters{.archives = m_normal_archives,
+                                                  .duration = m_duration,
+                                                  .timescale = 16000});
+            }
+            throw std::runtime_error("H.264 encoder is unavailable");
+          }
         } else if (config.out_video_codec ==
                    hisui::config::OutVideoCodec::AV1) {
           m_video_producer = std::make_shared<AV1VideoProducer>(

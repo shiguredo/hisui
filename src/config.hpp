@@ -66,6 +66,12 @@ enum struct H264Decoder {
   OpenH264,
 };
 
+enum struct H264Encoder {
+  Unspecified,
+  OneVPL,
+  OpenH264,
+};
+
 }  // namespace config
 
 class Config {
@@ -108,6 +114,7 @@ class Config {
   bool show_progress_bar = true;
 
   config::H264Decoder h264_decoder = config::H264Decoder::Unspecified;
+  config::H264Encoder h264_encoder = config::H264Encoder::Unspecified;
 
 #ifdef NDEBUG
   spdlog::level::level_enum log_level = spdlog::level::info;

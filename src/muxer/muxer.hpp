@@ -30,7 +30,7 @@ class Muxer {
   void mux();
   std::string getVideoCodecName(const hisui::Config& config);
 
-  std::shared_ptr<VideoProducer> m_video_producer;
+  std::shared_ptr<VideoProducer> m_video_producer = nullptr;
   std::shared_ptr<AudioProducer> m_audio_producer;
   boost::rational<std::uint64_t> m_timescale_ratio = 1;
 

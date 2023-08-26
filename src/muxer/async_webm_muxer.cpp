@@ -25,6 +25,7 @@
 #include "muxer/vpl_video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
 #include "report/reporter.hpp"
+#include "video/openh264_handler.hpp"
 #include "video/vpl_encoder.hpp"
 #include "video/vpl_session.hpp"
 #include "webm/output/context.hpp"
@@ -134,6 +135,28 @@ void AsyncWebMMuxer::muxFinalize() {}
 
 std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
   if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+    auto fourcc = hisui::Constants::H264_FOURCC;
+    if (m_config.h264_encoder == hisui::config::H264Encoder::OpenH264) {
+      if (!hisui::video::OpenH264Handler::hasInstance()) {
+        throw std::runtime_error("OpenH264 is not loaded");
+      }
+      return std::make_shared<OpenH264VideoProducer>(
+          m_config, OpenH264VideoProducerParameters{
+                        .archives = m_normal_archives, .duration = m_duration});
+
+    } else if (m_config.h264_encoder == hisui::config::H264Encoder::OneVPL) {
+      if (!(hisui::video::VPLSession::hasInstance() &&
+            hisui::video::VPLEncoder::isSupported(fourcc))) {
+        throw std::runtime_error("oneVPL H.264 encoder is not supported");
+      }
+      return std::make_shared<VPLVideoProducer>(
+          m_config,
+          VPLVideoProducerParameters{.archives = m_normal_archives,
+                                     .duration = m_duration},
+          fourcc);
+    }
+
+    // Unspecified
     if (hisui::video::VPLSession::hasInstance() &&
         hisui::video::VPLEncoder::isSupported(hisui::Constants::H264_FOURCC)) {
       spdlog::debug("use VPLEncoder");
@@ -142,10 +165,12 @@ std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
           VPLVideoProducerParameters{.archives = m_normal_archives,
                                      .duration = m_duration},
           hisui::config::OutVideoCodec::H264);
+    } else if (hisui::video::OpenH264Handler::hasInstance()) {
+      return std::make_shared<OpenH264VideoProducer>(
+          m_config, OpenH264VideoProducerParameters{
+                        .archives = m_normal_archives, .duration = m_duration});
     }
-    return std::make_shared<OpenH264VideoProducer>(
-        m_config, OpenH264VideoProducerParameters{.archives = m_normal_archives,
-                                                  .duration = m_duration});
+    throw std::runtime_error("H.264 encoder is unavailable");
   } else if (m_config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
     return std::make_shared<AV1VideoProducer>(
         m_config, AV1VideoProducerParameters{.archives = m_normal_archives,

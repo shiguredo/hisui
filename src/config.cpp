@@ -209,6 +209,16 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->transform(
           CLI::CheckedTransformer(h264_decoder_assoc, CLI::ignore_case));
 
+  std::vector<std::pair<std::string, config::H264Encoder>> h264_encoder_assoc{
+      {"OneVPL", config::H264Encoder::OneVPL},
+      {"OpenH264", config::H264Encoder::OpenH264},
+  };
+
+  app->add_option("--h264-encoder", config->h264_encoder,
+                  "H264 encoder (OneVPL/OpenH264). default: OneVPL")
+      ->transform(
+          CLI::CheckedTransformer(h264_encoder_assoc, CLI::ignore_case));
+
   app->add_option("--show-progress-bar", config->show_progress_bar,
                   "Toggle to show progress bar. default: true");
 

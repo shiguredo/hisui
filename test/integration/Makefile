@@ -1,6 +1,6 @@
 .PHONY: all get_input_files test webm_test update_input_check update_output_check clean
 
-HISUI=../../release/hisui --openh264 /usr/local/lib/libopenh264-2.3.1-linux64.7.so --h264-decoder OpenH264
+HISUI=../../release/hisui --openh264 /usr/local/lib/libopenh264-2.3.1-linux64.7.so --h264-decoder OpenH264 --h264-encoder OpenH264
 LIBFKD_AAC_DEV_VERSION=$(shell dpkg -s libfdk-aac-dev | grep Version | cut -d ' ' -f 2)
 
 all: test
