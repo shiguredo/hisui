@@ -122,7 +122,7 @@ jobs:
           if-no-files-found: error
       - name: Slack Notification
         if: failure()
-        uses: rtCamp/action-slack-notify@v2.2.0
+        uses: rtCamp/action-slack-notify@v2.2.1
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
@@ -202,7 +202,7 @@ jobs:
             UBUNTU_VERSION=22.04
       - name: Slack Notification
         if: failure()
-        uses: rtCamp/action-slack-notify@v2.2.0
+        uses: rtCamp/action-slack-notify@v2.2.1
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
@@ -244,7 +244,7 @@ jobs:
             ${{ steps.env.outputs.package_paths }}
       - name: Slack Notification
         if: failure()
-        uses: rtCamp/action-slack-notify@v2.2.0
+        uses: rtCamp/action-slack-notify@v2.2.1
         env:
           SLACK_CHANNEL: hisui
           SLACK_COLOR: danger
