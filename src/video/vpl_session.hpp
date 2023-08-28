@@ -1,12 +1,11 @@
 #pragma once
 
 #include <vpl/mfxdefs.h>
+#include <vpl/mfxdispatcher.h>
+#include <vpl/mfxvideo.h>
 
 #include <cstdint>
 #include <memory>
-
-#include <vpl/mfxdispatcher.h>
-#include <vpl/mfxvideo.h>
 
 #include "constants.hpp"
 #include "video/decoder.hpp"

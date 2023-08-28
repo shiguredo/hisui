@@ -3,6 +3,7 @@
 #include <fmt/core.h>
 
 #include <iostream>
+#include <string>
 
 #include "constants.hpp"
 #include "video/openh264_handler.hpp"

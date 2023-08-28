@@ -40,25 +40,25 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
 
   param.mfx.CodecId = codec;
   if (codec == MFX_CODEC_VP8) {
-    //param.mfx.CodecProfile = MFX_PROFILE_VP8_0;
+    // param.mfx.CodecProfile = MFX_PROFILE_VP8_0;
   } else if (codec == MFX_CODEC_VP9) {
-    //param.mfx.CodecProfile = MFX_PROFILE_VP9_0;
+    // param.mfx.CodecProfile = MFX_PROFILE_VP9_0;
   } else if (codec == MFX_CODEC_AVC) {
-    //param.mfx.CodecProfile = MFX_PROFILE_AVC_HIGH;
-    //param.mfx.CodecLevel = MFX_LEVEL_AVC_51;
-    //param.mfx.CodecProfile = MFX_PROFILE_AVC_MAIN;
-    //param.mfx.CodecLevel = MFX_LEVEL_AVC_1;
+    // param.mfx.CodecProfile = MFX_PROFILE_AVC_HIGH;
+    // param.mfx.CodecLevel = MFX_LEVEL_AVC_51;
+    // param.mfx.CodecProfile = MFX_PROFILE_AVC_MAIN;
+    // param.mfx.CodecLevel = MFX_LEVEL_AVC_1;
   } else if (codec == MFX_CODEC_AV1) {
-    //param.mfx.CodecProfile = MFX_PROFILE_AV1_MAIN;
+    // param.mfx.CodecProfile = MFX_PROFILE_AV1_MAIN;
   }
   param.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
-  //param.mfx.BRCParamMultiplier = 1;
-  //param.mfx.InitialDelayInKB = target_kbps;
+  // param.mfx.BRCParamMultiplier = 1;
+  // param.mfx.InitialDelayInKB = target_kbps;
   param.mfx.TargetKbps = static_cast<std::uint16_t>(target_bit_rate);
   param.mfx.MaxKbps = static_cast<std::uint16_t>(max_bit_rate);
   param.mfx.RateControlMethod = MFX_RATECONTROL_VBR;
-  //param.mfx.NumSlice = 1;
-  //param.mfx.NumRefFrame = 1;
+  // param.mfx.NumSlice = 1;
+  // param.mfx.NumRefFrame = 1;
   param.mfx.FrameInfo.FrameRateExtN =
       static_cast<std::uint32_t>(frame_rate.numerator());
   param.mfx.FrameInfo.FrameRateExtD =
@@ -77,11 +77,11 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
   param.mfx.FrameInfo.Height =
       (static_cast<std::uint16_t>(height) + 15) / 16 * 16;
 
-  //param.mfx.GopOptFlag = MFX_GOP_STRICT | MFX_GOP_CLOSED;
-  //param.mfx.IdrInterval = codec_settings->H264().keyFrameInterval;
-  //param.mfx.IdrInterval = 0;
+  // param.mfx.GopOptFlag = MFX_GOP_STRICT | MFX_GOP_CLOSED;
+  // param.mfx.IdrInterval = codec_settings->H264().keyFrameInterval;
+  // param.mfx.IdrInterval = 0;
   param.mfx.GopRefDist = 1;
-  //param.mfx.EncodedOrder = 0;
+  // param.mfx.EncodedOrder = 0;
   param.AsyncDepth = 1;
   param.IOPattern =
       MFX_IOPATTERN_IN_SYSTEM_MEMORY | MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
@@ -96,21 +96,21 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
     ext_coding_option.Header.BufferSz = sizeof(ext_coding_option);
     ext_coding_option.AUDelimiter = MFX_CODINGOPTION_OFF;
     ext_coding_option.MaxDecFrameBuffering = 1;
-    //ext_coding_option.NalHrdConformance = MFX_CODINGOPTION_OFF;
-    //ext_coding_option.VuiVclHrdParameters = MFX_CODINGOPTION_ON;
-    //ext_coding_option.SingleSeiNalUnit = MFX_CODINGOPTION_ON;
-    //ext_coding_option.RefPicMarkRep = MFX_CODINGOPTION_OFF;
-    //ext_coding_option.PicTimingSEI = MFX_CODINGOPTION_OFF;
-    //ext_coding_option.RecoveryPointSEI = MFX_CODINGOPTION_OFF;
-    //ext_coding_option.FramePicture = MFX_CODINGOPTION_OFF;
-    //ext_coding_option.FieldOutput = MFX_CODINGOPTION_ON;
+    // ext_coding_option.NalHrdConformance = MFX_CODINGOPTION_OFF;
+    // ext_coding_option.VuiVclHrdParameters = MFX_CODINGOPTION_ON;
+    // ext_coding_option.SingleSeiNalUnit = MFX_CODINGOPTION_ON;
+    // ext_coding_option.RefPicMarkRep = MFX_CODINGOPTION_OFF;
+    // ext_coding_option.PicTimingSEI = MFX_CODINGOPTION_OFF;
+    // ext_coding_option.RecoveryPointSEI = MFX_CODINGOPTION_OFF;
+    // ext_coding_option.FramePicture = MFX_CODINGOPTION_OFF;
+    // ext_coding_option.FieldOutput = MFX_CODINGOPTION_ON;
 
     memset(&ext_coding_option2, 0, sizeof(ext_coding_option2));
     ext_coding_option2.Header.BufferId = MFX_EXTBUFF_CODING_OPTION2;
     ext_coding_option2.Header.BufferSz = sizeof(ext_coding_option2);
     ext_coding_option2.RepeatPPS = MFX_CODINGOPTION_ON;
-    //ext_coding_option2.MaxSliceSize = 1;
-    //ext_coding_option2.AdaptiveI = MFX_CODINGOPTION_ON;
+    // ext_coding_option2.MaxSliceSize = 1;
+    // ext_coding_option2.AdaptiveI = MFX_CODINGOPTION_ON;
 
     ext_buffers[0] = reinterpret_cast<mfxExtBuffer*>(&ext_coding_option);
     ext_buffers[1] = reinterpret_cast<mfxExtBuffer*>(&ext_coding_option2);
@@ -122,14 +122,10 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
     param.NumExtParam = static_cast<std::uint16_t>(ext_buffers_size);
   }
 
-  std::unique_ptr<MFXVideoENCODE> encoder(
+  std::unique_ptr<::MFXVideoENCODE> encoder(
       new MFXVideoENCODE(hisui::video::VPLSession::getInstance().getSession()));
 
-  // MFX_ERR_NONE	The function completed successfully.
-  // MFX_ERR_UNSUPPORTED	The function failed to identify a specific implementation for the required features.
-  // MFX_WRN_PARTIAL_ACCELERATION	The underlying hardware does not fully support the specified video parameters; The encoding may be partially accelerated. Only SDK HW implementations may return this status code.
-  // MFX_WRN_INCOMPATIBLE_VIDEO_PARAM	The function detected some video parameters were incompatible with others; incompatibility resolved.
-  mfxVideoParam bk_param;
+  ::mfxVideoParam bk_param;
   memcpy(&bk_param, &param, sizeof(bk_param));
   sts = encoder->Query(&param, &param);
   if (sts < 0) {
@@ -142,7 +138,7 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
       param.mfx.QPI = 25;
       param.mfx.QPP = 33;
       param.mfx.QPB = 40;
-      //param.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
+      // param.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
     }
     memcpy(&bk_param, &param, sizeof(bk_param));
     sts = encoder->Query(&param, &param);
@@ -158,7 +154,7 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
     }
   }
 
-  //#define F(NAME)                                              \
+  // #define F(NAME)                                              \
   //  if (bk_param.NAME != param.NAME)                           \
   //  std::cout << "param " << #NAME << " old=" << bk_param.NAME \
   //            << " new=" << param.NAME << std::endl
@@ -200,9 +196,9 @@ std::unique_ptr<MFXVideoENCODE> VPLEncoder::createEncoder(
   //  F(mfx.EnableReallocRequest);
   //  F(AsyncDepth);
   //  F(IOPattern);
-  //#undef F
+  // #undef F
 
-  //if (sts != MFX_ERR_NONE) {
+  // if (sts != MFX_ERR_NONE) {
   //  const char* codec_str = codec == MFX_CODEC_VP8   ? "MFX_CODEC_VP8"
   //                          : codec == MFX_CODEC_VP9 ? "MFX_CODEC_VP9"
   //                          : codec == MFX_CODEC_AV1 ? "MFX_CODEC_AV1"

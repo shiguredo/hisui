@@ -26,8 +26,7 @@ class DecoderFactory {
   static void setup(const hisui::Config&);
 
  private:
-  DecoderFactory();
-  DecoderFactory(const hisui::Config&);
+  explicit DecoderFactory(const hisui::Config&);
 
   inline static std::unique_ptr<DecoderFactory> m_instance = nullptr;
   hisui::Config m_config;

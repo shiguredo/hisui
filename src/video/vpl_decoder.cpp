@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 #include "report/reporter.hpp"
@@ -316,16 +317,16 @@ std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoderInternal(
   param.AsyncDepth = 1;
   param.IOPattern = MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
 
-  //qmfxExtCodingOption ext_coding_option;
-  //qmemset(&ext_coding_option, 0, sizeof(ext_coding_option));
-  //qext_coding_option.Header.BufferId = MFX_EXTBUFF_CODING_OPTION;
-  //qext_coding_option.Header.BufferSz = sizeof(ext_coding_option);
-  //qext_coding_option.MaxDecFrameBuffering = 1;
+  // qmfxExtCodingOption ext_coding_option;
+  // qmemset(&ext_coding_option, 0, sizeof(ext_coding_option));
+  // qext_coding_option.Header.BufferId = MFX_EXTBUFF_CODING_OPTION;
+  // qext_coding_option.Header.BufferSz = sizeof(ext_coding_option);
+  // qext_coding_option.MaxDecFrameBuffering = 1;
 
-  //qmfxExtBuffer* ext_buffers[1];
-  //qext_buffers[0] = (mfxExtBuffer*)&ext_coding_option;
-  //qparam.ExtParam = ext_buffers;
-  //qparam.NumExtParam = sizeof(ext_buffers) / sizeof(ext_buffers[0]);
+  // qmfxExtBuffer* ext_buffers[1];
+  // qext_buffers[0] = (mfxExtBuffer*)&ext_coding_option;
+  // qparam.ExtParam = ext_buffers;
+  // qparam.NumExtParam = sizeof(ext_buffers) / sizeof(ext_buffers[0]);
 
   sts = decoder->Query(&param, &param);
   if (sts < 0) {
@@ -339,10 +340,10 @@ std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoderInternal(
     return nullptr;
   }
 
-  //if (sts != MFX_ERR_NONE) {
+  // if (sts != MFX_ERR_NONE) {
   //  RTC_LOG(LS_WARNING) << "Supported specified codec but has warning: sts="
   //                      << sts;
-  //}
+  // }
 
   // Query した上で Init しても MFX_ERR_UNSUPPORTED になることがあるので
   // 本来 Init が不要な時も常に呼ぶようにして確認する
