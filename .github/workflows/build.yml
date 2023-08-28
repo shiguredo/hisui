@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           sudo apt update
-          sudo apt install -yq yasm ccache libstdc++-10-dev-arm64-cross libc6-dev-arm64-cross binutils-aarch64-linux-gnu
+          sudo apt install -yq yasm ccache libstdc++-10-dev-arm64-cross libc6-dev-arm64-cross binutils-aarch64-linux-gnu libva-dev libdrm-dev
           sudo rm -rf /var/lib/apt/lists/*
         env:
             DEBIAN_FRONTEND: noninteractive
