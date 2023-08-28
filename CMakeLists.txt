@@ -19,7 +19,7 @@ endif()
 
 set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
-set_cache_string_from_env(CPP_MP4_VERSION 5eac4e592033c5f384347fd15556de20047752af "cpp-mp4 のバージョン")
+set_cache_string_from_env(CPP_MP4_VERSION 307dc2867aa697317634c9cf3eea182c6cdba54e "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 9.1.0 "fmt のバージョン")
 set_cache_string_from_env(ONEVPL_VERSION 2023.3.1 "oneVPL のバージョン")
 set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
