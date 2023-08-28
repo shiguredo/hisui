@@ -24,7 +24,7 @@ class VPLSession {
   static bool hasInstance();
   static void open();
   static void close();
-  ::mfxSession getSession();
+  ::mfxSession getSession() const;
 
  private:
   inline static VPLSession* m_instance = nullptr;

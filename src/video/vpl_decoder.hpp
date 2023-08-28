@@ -50,7 +50,7 @@ class VPLDecoder : public Decoder {
       const std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes);
 
   static std::unique_ptr<::MFXVideoDECODE> createDecoderInternal(
-      VPLSession& session,  // NOLINT
+      const VPLSession& session,
       const ::mfxU32 codec,
       const std::uint32_t width,
       const std::uint32_t height);

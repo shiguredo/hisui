@@ -88,7 +88,7 @@ void VPLSession::open() {
   m_instance = session;
 }
 
-::mfxSession VPLSession::getSession() {
+::mfxSession VPLSession::getSession() const {
   return m_session;
 }
 

@@ -288,7 +288,7 @@ std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoder(
 }
 
 std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoderInternal(
-    VPLSession& session,
+    const VPLSession& session,
     ::mfxU32 codec,
     std::uint32_t width,
     std::uint32_t height) {
