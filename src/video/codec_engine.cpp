@@ -7,9 +7,12 @@
 
 #include "constants.hpp"
 #include "video/openh264_handler.hpp"
+
+#ifdef USE_ONEVPL
 #include "video/vpl_decoder.hpp"
 #include "video/vpl_encoder.hpp"
 #include "video/vpl_session.hpp"
+#endif
 
 namespace hisui::video {
 
@@ -64,11 +67,13 @@ void showCodecEngines() {
   std::cout << "  Encoder:" << std::endl;
   {
     bool is_default = true;
+#ifdef USE_ONEVPL
     if (VPLSession::hasInstance() &&
         VPLEncoder::isSupported(hisui::Constants::H264_FOURCC)) {
       printEngine("Intel oneVPL", "intel", is_default);
       is_default = false;
     }
+#endif
     if (OpenH264Handler::hasInstance()) {
       printEngine("OpenH264", "software", is_default);
     }
@@ -76,11 +81,13 @@ void showCodecEngines() {
   std::cout << "  Decoder:" << std::endl;
   {
     bool is_default = true;
+#ifdef USE_ONEVPL
     if (VPLSession::hasInstance() &&
         VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
       printEngine("Intel oneVPL", "intel", is_default);
       is_default = false;
     }
+#endif
     if (OpenH264Handler::hasInstance()) {
       printEngine("OpenH264", "software", is_default);
     }

@@ -221,13 +221,6 @@ CPMAddPackage(
     )
 
 CPMAddPackage(
-    NAME vpl
-    GITHUB_REPOSITORY oneapi-src/oneVPL
-    VERSION ${ONEVPL_VERSION}
-    OPTIONS "BUILD_SHARED_LIBS Off" "BUILD_TOOLS Off" "BUILD_EXAMPLES Off" "BUILD_PREVIEW Off" "BUILD_TOOLS_ONEVPL_EXPERIMENTAL Off"
-    )
-
-CPMAddPackage(
     NAME boost_variant2
     GITHUB_REPOSITORY boostorg/variant2
     GIT_TAG boost-${BOOST_VERSION}
@@ -274,6 +267,47 @@ if(USE_FDK_AAC)
         )
 endif()
 
+option(USE_ONEVPL "Use oneVPL" OFF)
+
+if(USE_ONEVPL)
+    target_compile_definitions(hisui
+        PRIVATE
+        USE_ONEVPL
+        )
+
+    CPMAddPackage(
+        NAME vpl
+        GITHUB_REPOSITORY oneapi-src/oneVPL
+        VERSION ${ONEVPL_VERSION}
+        OPTIONS "BUILD_SHARED_LIBS Off" "BUILD_TOOLS Off" "BUILD_EXAMPLES Off" "BUILD_PREVIEW Off" "BUILD_TOOLS_ONEVPL_EXPERIMENTAL Off"
+        )
+
+    target_sources(hisui
+        PRIVATE
+        src/layout/vpl_video_producer.cpp
+        src/muxer/vpl_video_producer.cpp
+        src/video/vaapi_utils.cpp
+        src/video/vaapi_utils_drm.cpp
+        src/video/vpl.cpp
+        src/video/vpl_decoder.cpp
+        src/video/vpl_encoder.cpp
+        src/video/vpl_session.cpp
+        )
+
+    target_include_directories(hisui
+        PRIVATE
+        ${VPL_SOURCE_DIR}/api
+        )
+
+    target_link_libraries(hisui
+        PRIVATE
+        drm
+        va
+        va-drm
+        VPL
+        )
+endif()
+
 target_sources(hisui
     PRIVATE
     src/archive_item.cpp
@@ -303,7 +337,6 @@ target_sources(hisui
     src/layout/source.cpp
     src/layout/video_source.cpp
     src/layout/vpx_video_producer.cpp
-    src/layout/vpl_video_producer.cpp
     src/metadata.cpp
     src/muxer/async_webm_muxer.cpp
     src/muxer/audio_producer.cpp
@@ -318,7 +351,6 @@ target_sources(hisui
     src/muxer/simple_mp4_muxer.cpp
     src/muxer/video_producer.cpp
     src/muxer/vpx_video_producer.cpp
-    src/muxer/vpl_video_producer.cpp
     src/report/reporter.cpp
     src/util/file.cpp
     src/util/interval.cpp
@@ -345,12 +377,6 @@ target_sources(hisui
     src/video/scaler.cpp
     src/video/sequencer.cpp
     src/video/simple_scaler.cpp
-    src/video/vaapi_utils.cpp
-    src/video/vaapi_utils_drm.cpp
-    src/video/vpl.cpp
-    src/video/vpl_decoder.cpp
-    src/video/vpl_encoder.cpp
-    src/video/vpl_session.cpp
     src/video/vpx.cpp
     src/video/vpx_decoder.cpp
     src/video/webm_source.cpp
@@ -420,7 +446,6 @@ target_include_directories(hisui
     ${opus_SOURCE_DIR}/include
     ${spdlog_SOURCE_DIR}/include
     ${stb_SOURCE_DIR}
-    ${VPL_SOURCE_DIR}/api
     third_party/openh264
     third_party/progress-cpp/include
     third_party/libvpx/third_party/libyuv/include
@@ -435,15 +460,11 @@ set_target_properties(hisui PROPERTIES CXX_STANDARD 20 C_STANDARD 11)
 target_link_libraries(hisui
     PRIVATE
     dl
-    drm
     opus
     pthread
     fmt
     shiguredo-mp4
     spdlog
-    va
-    va-drm
-    VPL
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a

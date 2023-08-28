@@ -28,9 +28,12 @@
 #include "video/codec_engine.hpp"
 #include "video/decoder_factory.hpp"
 #include "video/openh264_handler.hpp"
+
+#ifdef USE_ONEVPL
 #include "video/vpl_decoder.hpp"
 #include "video/vpl_encoder.hpp"
 #include "video/vpl_session.hpp"
+#endif
 
 int main(int argc, char** argv) {
   CLI::App app{"hisui"};
@@ -39,11 +42,13 @@ int main(int argc, char** argv) {
   ::setenv("SVT_LOG", "-2", 1);
   ::setenv("LIBVA_MESSAGING_LEVEL", "0", 1);
 
+#ifdef USE_ONEVPL
   try {
     hisui::video::VPLSession::open();
   } catch (const std::exception& e) {
     spdlog::debug("failed to open VPL session: {}", e.what());
   }
+#endif
 
   try {
     hisui::set_cli_options(&app, &config);
@@ -205,9 +210,11 @@ int main(int argc, char** argv) {
     hisui::audio::LyraHandler::close();
   }
 
+#ifdef USE_ONEVPL
   if (hisui::video::VPLSession::hasInstance()) {
     hisui::video::VPLSession::close();
   }
+#endif
 
   if (config.enabledSuccessReport()) {
     try {

@@ -13,8 +13,6 @@
 #include "video/decoder_factory.hpp"
 #include "video/openh264_decoder.hpp"
 #include "video/openh264_handler.hpp"
-#include "video/vpl_decoder.hpp"
-#include "video/vpl_session.hpp"
 #include "video/vpx_decoder.hpp"
 #include "video/yuv.hpp"
 #include "webm/input/video_context.hpp"

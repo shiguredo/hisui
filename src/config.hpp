@@ -62,13 +62,17 @@ enum struct OutAudioCodec {
 
 enum struct H264Decoder {
   Unspecified,
+#ifdef USE_ONEVPL
   OneVPL,
+#endif
   OpenH264,
 };
 
 enum struct H264Encoder {
   Unspecified,
+#ifdef USE_ONEVPL
   OneVPL,
+#endif
   OpenH264,
 };
 

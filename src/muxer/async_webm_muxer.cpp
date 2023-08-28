@@ -22,13 +22,16 @@
 #include "muxer/openh264_video_producer.hpp"
 #include "muxer/opus_audio_producer.hpp"
 #include "muxer/video_producer.hpp"
-#include "muxer/vpl_video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
 #include "report/reporter.hpp"
 #include "video/openh264_handler.hpp"
+#include "webm/output/context.hpp"
+
+#ifdef USE_ONEVPL
+#include "muxer/vpl_video_producer.hpp"
 #include "video/vpl_encoder.hpp"
 #include "video/vpl_session.hpp"
-#include "webm/output/context.hpp"
+#endif
 
 namespace hisui::muxer {
 
@@ -135,7 +138,6 @@ void AsyncWebMMuxer::muxFinalize() {}
 
 std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
   if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
-    auto fourcc = hisui::Constants::H264_FOURCC;
     if (m_config.h264_encoder == hisui::config::H264Encoder::OpenH264) {
       if (!hisui::video::OpenH264Handler::hasInstance()) {
         throw std::runtime_error("OpenH264 library is not loaded");
@@ -143,20 +145,24 @@ std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
       return std::make_shared<OpenH264VideoProducer>(
           m_config, OpenH264VideoProducerParameters{
                         .archives = m_normal_archives, .duration = m_duration});
-
-    } else if (m_config.h264_encoder == hisui::config::H264Encoder::OneVPL) {
+    }
+#ifdef USE_ONEVPL
+    if (m_config.h264_encoder == hisui::config::H264Encoder::OneVPL) {
       if (!(hisui::video::VPLSession::hasInstance() &&
-            hisui::video::VPLEncoder::isSupported(fourcc))) {
+            hisui::video::VPLEncoder::isSupported(
+                hisui::Constants::H264_FOURCC))) {
         throw std::runtime_error("oneVPL H.264 encoder is not supported");
       }
       return std::make_shared<VPLVideoProducer>(
           m_config,
           VPLVideoProducerParameters{.archives = m_normal_archives,
                                      .duration = m_duration},
-          fourcc);
+          hisui::Constants::H264_FOURCC);
     }
+#endif
 
     // Unspecified
+#ifdef USE_ONEVPL
     if (hisui::video::VPLSession::hasInstance() &&
         hisui::video::VPLEncoder::isSupported(hisui::Constants::H264_FOURCC)) {
       spdlog::debug("use VPLVideoProducer");
@@ -165,7 +171,9 @@ std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
           VPLVideoProducerParameters{.archives = m_normal_archives,
                                      .duration = m_duration},
           hisui::config::OutVideoCodec::H264);
-    } else if (hisui::video::OpenH264Handler::hasInstance()) {
+    } else  // NOLINT
+#endif
+        if (hisui::video::OpenH264Handler::hasInstance()) {
       spdlog::debug("use OpenH264VideoProducer");
       return std::make_shared<OpenH264VideoProducer>(
           m_config, OpenH264VideoProducerParameters{

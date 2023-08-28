@@ -147,6 +147,7 @@ CMAKE_FLAGS+=("-DHISUI_PACKAGE=$PACKAGE")
 case "$PACKAGE" in
   *_x86_64 )
     CMAKE_FLAGS+=("-DCMAKE_TOOLCHAIN_FILE=../../cmake/clang-x86_64-toolchain.cmake")
+    CMAKE_FLAGS+=('-DUSE_ONEVPL=YES')
     ;;
   *_arm64 )
     CMAKE_FLAGS+=("-DCMAKE_TOOLCHAIN_FILE=../../cmake/clang-aarch64-toolchain.cmake")

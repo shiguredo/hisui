@@ -8,10 +8,13 @@
 #include "video/av1_decoder.hpp"
 #include "video/openh264_decoder.hpp"
 #include "video/openh264_handler.hpp"
-#include "video/vpl_decoder.hpp"
-#include "video/vpl_session.hpp"
 #include "video/vpx_decoder.hpp"
 #include "webm/input/video_context.hpp"
+
+#ifdef USE_ONEVPL
+#include "video/vpl_decoder.hpp"
+#include "video/vpl_session.hpp"
+#endif
 
 namespace hisui::video {
 
@@ -33,14 +36,16 @@ std::shared_ptr<hisui::video::Decoder> DecoderFactory::create(
     case hisui::Constants::AV1_FOURCC:
       return std::make_shared<AV1Decoder>(webm);
     case hisui::Constants::H264_FOURCC:
+#ifdef USE_ONEVPL
       if (m_instance->m_config.h264_decoder == config::H264Decoder::OneVPL) {
         if (VPLSession::hasInstance() &&
             VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
           return std::make_shared<VPLDecoder>(webm);
         }
         throw std::runtime_error("onevPL H.264 decoder is not supported");
-      } else if (m_instance->m_config.h264_decoder ==
-                 config::H264Decoder::OpenH264) {
+      }
+#endif
+      if (m_instance->m_config.h264_decoder == config::H264Decoder::OpenH264) {
         if (OpenH264Handler::hasInstance()) {
           return std::make_shared<OpenH264Decoder>(webm);
         }
@@ -48,11 +53,12 @@ std::shared_ptr<hisui::video::Decoder> DecoderFactory::create(
       }
 
       // Unspecified
-
+#ifdef USE_ONEVPL
       if (VPLSession::hasInstance() &&
           VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
         return std::make_shared<VPLDecoder>(webm);
       }
+#endif
       if (OpenH264Handler::hasInstance()) {
         return std::make_shared<OpenH264Decoder>(webm);
       }

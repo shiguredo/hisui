@@ -59,9 +59,6 @@ add_executable(layout_test
     ../../src/video/scaler.cpp
     ../../src/video/vaapi_utils.cpp
     ../../src/video/vaapi_utils_drm.cpp
-    ../../src/video/vpl.cpp
-    ../../src/video/vpl_decoder.cpp
-    ../../src/video/vpl_session.cpp
     ../../src/video/vpx.cpp
     ../../src/video/vpx_decoder.cpp
     ../../src/video/webm_source.cpp
@@ -133,7 +130,6 @@ target_include_directories(layout_test
     ${boost_variant2_SOURCE_DIR}/include
     ${cpp-mp4_SOURCE_DIR}/include
     ${fmt_SOURCE_DIR}/include
-    ${VPL_SOURCE_DIR}/api
     ${spdlog_SOURCE_DIR}/include
     ../../third_party/libvpx/third_party/libyuv/include
     ../../third_party/libvpx/third_party/libwebm
@@ -145,16 +141,40 @@ target_include_directories(layout_test
 target_link_libraries(layout_test
     PRIVATE
     dl
-    drm
     fmt
     shiguredo-mp4
     spdlog 
-    va
-    va-drm
-    VPL
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     )
+
+if(USE_ONEVPL)
+    target_compile_definitions(layout_test
+        PRIVATE
+        USE_ONEVPL
+        )
+
+    target_sources(layout_test
+        PRIVATE
+        ../../src/video/vpl.cpp
+        ../../src/video/vpl_decoder.cpp
+        ../../src/video/vpl_session.cpp
+        )
+
+    target_include_directories(layout_test
+        PRIVATE
+        ${VPL_SOURCE_DIR}/api
+        )
+
+    target_link_libraries(layout_test
+        PRIVATE
+        drm
+        va
+        va-drm
+        VPL
+        )
+endif()
+
 
 add_test(NAME layout COMMAND layout_test)
 set_tests_properties(layout PROPERTIES LABELS hisui)
