@@ -102,14 +102,13 @@ void MP4Muxer::initialize(
           auto fourcc = hisui::Constants::H264_FOURCC;
           if (config.h264_encoder == hisui::config::H264Encoder::OpenH264) {
             if (!hisui::video::OpenH264Handler::hasInstance()) {
-              throw std::runtime_error("OpenH264 is not loaded");
-            } else {
-              m_video_producer = std::make_shared<OpenH264VideoProducer>(
-                  config,
-                  OpenH264VideoProducerParameters{.archives = m_normal_archives,
-                                                  .duration = m_duration,
-                                                  .timescale = 16000});
+              throw std::runtime_error("OpenH264 library is not loaded");
             }
+            m_video_producer = std::make_shared<OpenH264VideoProducer>(
+                config,
+                OpenH264VideoProducerParameters{.archives = m_normal_archives,
+                                                .duration = m_duration,
+                                                .timescale = 16000});
           } else if (config.h264_encoder ==
                      hisui::config::H264Encoder::OneVPL) {
             if (!(hisui::video::VPLSession::hasInstance() &&
@@ -129,7 +128,7 @@ void MP4Muxer::initialize(
           if (!m_video_producer) {
             if (hisui::video::VPLSession::hasInstance() &&
                 hisui::video::VPLEncoder::isSupported(fourcc)) {
-              spdlog::debug("use VPLEncoder");
+              spdlog::debug("use VPLVideoProducer");
               m_video_producer = std::make_shared<VPLVideoProducer>(
                   config,
                   VPLVideoProducerParameters{.archives = m_normal_archives,
@@ -137,6 +136,7 @@ void MP4Muxer::initialize(
                                              .timescale = 16000},
                   fourcc);
             } else if (hisui::video::OpenH264Handler::hasInstance()) {
+              spdlog::debug("use OpenH264VideoProducer");
               m_video_producer = std::make_shared<OpenH264VideoProducer>(
                   config,
                   OpenH264VideoProducerParameters{.archives = m_normal_archives,

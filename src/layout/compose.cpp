@@ -41,7 +41,7 @@ int compose(const hisui::Config& t_config) {
         auto fourcc = hisui::Constants::H264_FOURCC;
         if (config.h264_encoder == hisui::config::H264Encoder::OpenH264) {
           if (!hisui::video::OpenH264Handler::hasInstance()) {
-            throw std::runtime_error("OpenH264 is not loaded");
+            throw std::runtime_error("OpenH264 library is not loaded");
           }
           video_producer = std::make_shared<OpenH264VideoProducer>(
               config, OpenH264VideoProducerParameters{
@@ -76,6 +76,7 @@ int compose(const hisui::Config& t_config) {
         if (!video_producer) {
           if (hisui::video::VPLSession::hasInstance() &&
               hisui::video::VPLEncoder::isSupported(fourcc)) {
+            spdlog::debug("use VPLVideoProducer");
             video_producer = std::make_shared<VPLVideoProducer>(
                 config,
                 VPLVideoProducerParameters{
@@ -89,6 +90,7 @@ int compose(const hisui::Config& t_config) {
                 },
                 fourcc);
           } else if (hisui::video::OpenH264Handler::hasInstance()) {
+            spdlog::debug("use OpenH264VideoProducer");
             video_producer = std::make_shared<OpenH264VideoProducer>(
                 config,
                 OpenH264VideoProducerParameters{
