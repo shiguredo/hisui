@@ -79,15 +79,7 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
 
 - 分割録画対応
-- Lyra V2 対応
 - Lyra V2 MP4 対応
-- Lyra V2 WebM 対応
-- AV1 MP4 対応
-- AV1 WebM 対応
-- AV1 出力対応
-    - https://github.com/xiph/rav1e を利用します
-- AV1 入力対応
-    - https://code.videolan.org/videolan/dav1d を利用します
 - アイコン埋め込み対応
     - 音声のみの場合は指定したアイコンを埋め込めるようにする
 - タイトルの埋め込み対応
@@ -101,19 +93,13 @@ Hisui についての FAQ は [FAQ.md](doc/FAQ.md) をお読みください。
     - 合成時に字幕を追加します
     - https://github.com/ggerganov/whisper.cpp を利用します
 - ハードウェアアクセラレーター対応
-    - NVIDIA / AMD / Intel などへの対応
+    - NVIDIA / AMD への対応
 - EME 対応
     - https://www.w3.org/TR/encrypted-media/
-
-## 対応予定
-
-- Sora が AV1 録画に対応したら AV1 デコード機能へ対応予定です
-- Safari が AV1 再生に対応したら AV1 エンコード機能へ対応予定です
 
 ## 廃止予定
 
 - Mobile Safari が Opus 再生に対応したら AAC 対応を削除予定です
-
 
 ## ヘルプ
 
