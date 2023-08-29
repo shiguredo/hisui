@@ -42,7 +42,7 @@ std::shared_ptr<hisui::video::Decoder> DecoderFactory::create(
             VPLDecoder::isSupported(hisui::Constants::H264_FOURCC)) {
           return std::make_shared<VPLDecoder>(webm);
         }
-        throw std::runtime_error("onevPL H.264 decoder is not supported");
+        throw std::runtime_error("oneVPL H.264 decoder is not supported");
       }
 #endif
       if (m_instance->m_config.h264_decoder == config::H264Decoder::OpenH264) {
