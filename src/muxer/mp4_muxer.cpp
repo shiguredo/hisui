@@ -153,8 +153,9 @@ void MP4Muxer::initialize(
                   OpenH264VideoProducerParameters{.archives = m_normal_archives,
                                                   .duration = m_duration,
                                                   .timescale = 16000});
+            } else {
+              throw std::runtime_error("H.264 encoder is unavailable");
             }
-            throw std::runtime_error("H.264 encoder is unavailable");
           }
         } else if (config.out_video_codec ==
                    hisui::config::OutVideoCodec::AV1) {

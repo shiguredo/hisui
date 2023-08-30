@@ -113,8 +113,9 @@ int compose(const hisui::Config& t_config) {
                                      ? hisui::Constants::NANO_SECOND
                                      : 16000,  // TODO(haruyama): 整理する
                 });
+          } else {
+            throw std::runtime_error("H.264 dncoder is unavailable");
           }
-          throw std::runtime_error("H.264 dncoder is unavailable");
         }
       } else if (config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
         video_producer = std::make_shared<AV1VideoProducer>(
