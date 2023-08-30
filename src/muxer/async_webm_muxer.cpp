@@ -153,11 +153,12 @@ std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
                 hisui::Constants::H264_FOURCC))) {
         throw std::runtime_error("oneVPL H.264 encoder is not supported");
       }
+      auto fourcc = hisui::Constants::H264_FOURCC;
       return std::make_shared<VPLVideoProducer>(
           m_config,
           VPLVideoProducerParameters{.archives = m_normal_archives,
                                      .duration = m_duration},
-          hisui::Constants::H264_FOURCC);
+          fourcc);
     }
 #endif
 
