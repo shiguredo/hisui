@@ -68,6 +68,14 @@ int main(int argc, char** argv) {
     }
     spdlog::debug("log level={}", static_cast<uint32_t>(config.log_level));
 
+    if (std::empty(config.lyra_model_path)) {
+      if (const auto hisui_lyra_model_coeffs_path =
+              std::getenv("HISUI_LYRA_MODEL_COEFFS_PATH")) {
+        config.lyra_model_path = hisui_lyra_model_coeffs_path;
+      }
+      spdlog::debug("config.lyra_model_path={}", config.lyra_model_path);
+    }
+
     if (!std::empty(config.openh264)) {
       try {
         hisui::video::OpenH264Handler::open(config.openh264);
