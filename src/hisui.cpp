@@ -94,6 +94,7 @@ int main(int argc, char** argv) {
   }
 
   if (!std::empty(config.layout)) {
+    hisui::video::DecoderFactory::setup(config);
     return hisui::layout::compose(config);
   }
 
