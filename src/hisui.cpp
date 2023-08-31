@@ -95,7 +95,23 @@ int main(int argc, char** argv) {
 
   if (!std::empty(config.layout)) {
     hisui::video::DecoderFactory::setup(config);
-    return hisui::layout::compose(config);
+    auto ret = hisui::layout::compose(config);
+
+    if (hisui::video::OpenH264Handler::hasInstance()) {
+      hisui::video::OpenH264Handler::close();
+    }
+
+    if (hisui::audio::LyraHandler::hasInstance()) {
+      hisui::audio::LyraHandler::close();
+    }
+
+#ifdef USE_ONEVPL
+    if (hisui::video::VPLSession::hasInstance()) {
+      hisui::video::VPLSession::close();
+    }
+#endif
+
+    return ret;
   }
 
   config.validate();

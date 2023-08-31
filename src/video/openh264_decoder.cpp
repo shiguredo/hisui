@@ -70,6 +70,7 @@ OpenH264Decoder::~OpenH264Decoder() {
     m_decoder->Uninitialize();
     OpenH264Handler::getInstance().destroyDecoder(m_decoder);
   }
+  m_decoder = nullptr;
 }
 
 const std::shared_ptr<YUVImage> OpenH264Decoder::getImage(
