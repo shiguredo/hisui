@@ -222,13 +222,16 @@ void VPLDecoder::decode() {
   }
 
   if (!syncp) {
-    spdlog::info("Failed to DecodeFrameAsync: syncp is null, sts={}",
-                 static_cast<std::int32_t>(sts));
+    spdlog::info(
+        "Failed to DecodeFrameAsync: syncp is null, file_path={} sts={}",
+        m_webm->getFilePath(), static_cast<std::int32_t>(sts));
     return;
   }
+
   if (sts != MFX_ERR_NONE) {
-    throw std::runtime_error(fmt::format("DecodeFrameAsync() failed: sts={}",
-                                         static_cast<std::int32_t>(sts)));
+    throw std::runtime_error(
+        fmt::format("DecodeFrameAsync() failed: file_path={}, sts={}",
+                    m_webm->getFilePath(), static_cast<std::int32_t>(sts)));
   }
 
   // H264 は sts == MFX_WRN_VIDEO_PARAM_CHANGED でハンドリングできるのでここではチェックしない
@@ -356,8 +359,9 @@ std::unique_ptr<::MFXVideoDECODE> VPLDecoder::createDecoderInternal(
                               : codec == MFX_CODEC_AV1 ? "MFX_CODEC_AV1"
                               : codec == MFX_CODEC_AVC ? "MFX_CODEC_AVC"
                                                        : "MFX_CODEC_UNKNOWN";
-      spdlog::warn("decoder->Init() failed: codec={}, std={}", codec_str,
-                   static_cast<std::int32_t>(sts));
+      spdlog::warn(
+          "decoder->Init() failed: codec={}, std={}, width={}, height={}",
+          codec_str, static_cast<std::int32_t>(sts), width, height);
       return nullptr;
     }
   }
