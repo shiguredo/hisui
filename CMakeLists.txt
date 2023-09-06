@@ -289,7 +289,6 @@ if(USE_ONEVPL)
         src/video/vaapi_utils.cpp
         src/video/vaapi_utils_drm.cpp
         src/video/vpl.cpp
-        src/video/vpl_decoder.cpp
         src/video/vpl_encoder.cpp
         src/video/vpl_session.cpp
         )

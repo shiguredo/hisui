@@ -60,14 +60,6 @@ enum struct OutAudioCodec {
   FDK_AAC,
 };
 
-enum struct H264Decoder {
-  Unspecified,
-#ifdef USE_ONEVPL
-  OneVPL,
-#endif
-  OpenH264,
-};
-
 enum struct H264Encoder {
   Unspecified,
 #ifdef USE_ONEVPL
@@ -117,7 +109,6 @@ class Config {
   bool video_codec_engines = false;
   bool show_progress_bar = true;
 
-  config::H264Decoder h264_decoder = config::H264Decoder::Unspecified;
   config::H264Encoder h264_encoder = config::H264Encoder::Unspecified;
 
 #ifdef NDEBUG

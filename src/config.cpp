@@ -199,18 +199,6 @@ void set_cli_options(CLI::App* app, Config* config) {
   app->add_flag("--video-codec-engines", config->video_codec_engines,
                 "Show video codec engines and exit.");
 
-  std::vector<std::pair<std::string, config::H264Decoder>> h264_decoder_assoc{
-#ifdef USE_ONEVPL
-      {"OneVPL", config::H264Decoder::OneVPL},
-#endif
-      {"OpenH264", config::H264Decoder::OpenH264},
-  };
-
-  app->add_option("--h264-decoder", config->h264_decoder,
-                  "H264 decoder (OneVPL/OpenH264). default: OneVPL")
-      ->transform(
-          CLI::CheckedTransformer(h264_decoder_assoc, CLI::ignore_case));
-
   std::vector<std::pair<std::string, config::H264Encoder>> h264_encoder_assoc{
 #ifdef USE_ONEVPL
       {"OneVPL", config::H264Encoder::OneVPL},

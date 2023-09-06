@@ -157,7 +157,6 @@ if(USE_ONEVPL)
     target_sources(layout_test
         PRIVATE
         ../../src/video/vpl.cpp
-        ../../src/video/vpl_decoder.cpp
         ../../src/video/vpl_session.cpp
         )
 
