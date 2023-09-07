@@ -66,6 +66,7 @@ target_include_directories(version_test
     ../../third_party/libvpx
     ../../third_party/libvpx/third_party/libwebm
     ../../third_party/libvpx/third_party/libyuv/include
+    ../../third_party/SVT-AV1/Source/API
     )
 
 target_link_libraries(version_test
