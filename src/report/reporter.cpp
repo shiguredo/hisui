@@ -94,6 +94,8 @@ void Reporter::collectVersions() {
       {"libwebm", version::get_libwebm_version()},
       {"openh264", version::get_openh264_version()},
       {"SVT-AV1", version::get_svt_av1_version()},
+      {"oneVPL", version::get_onevpl_version()},
+      {"Lyra", version::get_lyra_version()},
 #ifdef USE_FDK_AAC
       {"fdk-aac AACENC", version::get_fdkaac_aacenc_version()},
 #endif
