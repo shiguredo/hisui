@@ -35,6 +35,22 @@
 #include "video/vpl_session.hpp"
 #endif
 
+static void closeHandlersAndSession() {
+  if (hisui::video::OpenH264Handler::hasInstance()) {
+    hisui::video::OpenH264Handler::close();
+  }
+
+  if (hisui::audio::LyraHandler::hasInstance()) {
+    hisui::audio::LyraHandler::close();
+  }
+
+#ifdef USE_ONEVPL
+  if (hisui::video::VPLSession::hasInstance()) {
+    hisui::video::VPLSession::close();
+  }
+#endif
+}
+
 int main(int argc, char** argv) {
   CLI::App app{"hisui"};
   hisui::Config config;
@@ -105,19 +121,7 @@ int main(int argc, char** argv) {
     hisui::video::DecoderFactory::setup(config);
     auto ret = hisui::layout::compose(config);
 
-    if (hisui::video::OpenH264Handler::hasInstance()) {
-      hisui::video::OpenH264Handler::close();
-    }
-
-    if (hisui::audio::LyraHandler::hasInstance()) {
-      hisui::audio::LyraHandler::close();
-    }
-
-#ifdef USE_ONEVPL
-    if (hisui::video::VPLSession::hasInstance()) {
-      hisui::video::VPLSession::close();
-    }
-#endif
+    closeHandlersAndSession();
 
     return ret;
   }
@@ -227,19 +231,7 @@ int main(int argc, char** argv) {
   }
   delete muxer;
 
-  if (hisui::video::OpenH264Handler::hasInstance()) {
-    hisui::video::OpenH264Handler::close();
-  }
-
-  if (hisui::audio::LyraHandler::hasInstance()) {
-    hisui::audio::LyraHandler::close();
-  }
-
-#ifdef USE_ONEVPL
-  if (hisui::video::VPLSession::hasInstance()) {
-    hisui::video::VPLSession::close();
-  }
-#endif
+  closeHandlersAndSession();
 
   if (config.enabledSuccessReport()) {
     try {
@@ -257,3 +249,4 @@ int main(int argc, char** argv) {
 
   return EXIT_SUCCESS;
 }
+
