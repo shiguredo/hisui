@@ -17,7 +17,7 @@ else()
     set(SVT_AV1_BUILD_TYPE "Release")
 endif()
 
-set_cache_string_from_env(BOOST_VERSION 1.81.0 "Boost のバージョン")
+set_cache_string_from_env(BOOST_VERSION 1.83.0 "Boost のバージョン")
 set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 2023.2.1 "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 9.1.0 "fmt のバージョン")
@@ -79,6 +79,13 @@ CPMAddPackage(
 CPMAddPackage(
     NAME boost_container
     GITHUB_REPOSITORY boostorg/container
+    GIT_TAG boost-${BOOST_VERSION}
+    DOWNLOAD_ONLY YES
+    )
+
+CPMAddPackage(
+    NAME boost_container_hash
+    GITHUB_REPOSITORY boostorg/container_hash
     GIT_TAG boost-${BOOST_VERSION}
     DOWNLOAD_ONLY YES
     )
@@ -420,6 +427,7 @@ target_include_directories(hisui
     ${boost_assert_SOURCE_DIR}/include
     ${boost_config_SOURCE_DIR}/include
     ${boost_container_SOURCE_DIR}/include
+    ${boost_container_hash_SOURCE_DIR}/include
     ${boost_core_SOURCE_DIR}/include
     ${boost_describe_SOURCE_DIR}/include
     ${boost_exception_SOURCE_DIR}/include
@@ -483,13 +491,6 @@ if(WITH_TEST)
     CPMAddPackage(
         NAME boost_bind
         GITHUB_REPOSITORY boostorg/bind
-        GIT_TAG boost-${BOOST_VERSION}
-        DOWNLOAD_ONLY YES
-        )
-
-    CPMAddPackage(
-        NAME boost_container_hash
-        GITHUB_REPOSITORY boostorg/container_hash
         GIT_TAG boost-${BOOST_VERSION}
         DOWNLOAD_ONLY YES
         )
