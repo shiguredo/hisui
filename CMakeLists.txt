@@ -22,7 +22,7 @@ set_cache_string_from_env(CLI11_VERSION 2.3.2 "CLI11 のバージョン")
 set_cache_string_from_env(CPP_MP4_VERSION 2023.2.1 "cpp-mp4 のバージョン")
 set_cache_string_from_env(FMT_VERSION 9.1.0 "fmt のバージョン")
 set_cache_string_from_env(ONEVPL_VERSION 2023.3.1 "oneVPL のバージョン")
-set_cache_string_from_env(OPUS_VERSION 1.3.1 "Opus のバージョン")
+set_cache_string_from_env(OPUS_VERSION 1.4 "Opus のバージョン")
 set_cache_string_from_env(SPDLOG_VERSION 1.11.0 "spdlog のバージョン")
 set_cache_string_from_env(STB_VERSION 5736b15f7ea0ffb08dd38af21067c314d6a3aae9 "stb のバージョン")
 
