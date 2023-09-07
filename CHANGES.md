@@ -11,6 +11,12 @@
 
 ## develop
 
+- [UPDATE] 依存ライブラリの更新をする
+    - `boost` を `1.83.0` にあげる
+    - `cpp-mp4` を `2023.2.1` にあげる
+    - `opus` を `1.4` にあげる
+- [CHANGE] one VPL での H.264 エンコードに対応する
+    - @haruyama
 - [CHANGE] Lyra の デコードに対応する
     - @haruyama
 - [CHANGE] SVT-AV1 での AV1 デコード/エンコードに対応する
