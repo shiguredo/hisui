@@ -1,5 +1,6 @@
 #pragma once
 
+#include <codec/api/wels/codec_app_def.h>
 #include <libyuv/scale.h>
 #include <spdlog/common.h>
 
@@ -30,6 +31,8 @@ enum struct AudioMixer {
 enum OutVideoCodec {
   VP8 = hisui::Constants::VP8_FOURCC,
   VP9 = hisui::Constants::VP9_FOURCC,
+  H264 = hisui::Constants::H264_FOURCC,
+  AV1 = hisui::Constants::AV1_FOURCC,
 };
 
 enum struct VideoComposer {
@@ -55,6 +58,14 @@ enum struct MP4Muxer {
 enum struct OutAudioCodec {
   Opus,
   FDK_AAC,
+};
+
+enum struct H264Encoder {
+  Unspecified,
+#ifdef USE_ONEVPL
+  OneVPL,
+#endif
+  OpenH264,
 };
 
 }  // namespace config
@@ -86,6 +97,7 @@ class Config {
 
   std::size_t max_columns = 3;
 
+  bool version = false;
   bool verbose = false;
   bool audio_only = false;
   std::string success_report = "";
@@ -94,7 +106,10 @@ class Config {
   std::string layout = "";
 
   // 以降は SPEC.rst にないオプション
+  bool video_codec_engines = false;
   bool show_progress_bar = true;
+
+  config::H264Encoder h264_encoder = config::H264Encoder::Unspecified;
 
 #ifdef NDEBUG
   spdlog::level::level_enum log_level = spdlog::level::info;
@@ -113,6 +128,14 @@ class Config {
   std::uint32_t libvp9_frame_parallel = 1;
   std::uint32_t libvp9_tile_columns = 0;
   std::uint32_t libvp9_row_mt = 0;
+
+  std::uint16_t openh264_threads = 1;
+  std::int32_t openh264_min_qp = 0;
+  std::int32_t openh264_max_qp = 51;
+  ::EProfileIdc openh264_profile = ::PRO_BASELINE;
+  ::ELevelIdc openh264_level = ::LEVEL_3_1;
+
+  std::string lyra_model_path = "";
 
   libyuv::FilterMode libyuv_filter_mode = libyuv::kFilterBox;
 

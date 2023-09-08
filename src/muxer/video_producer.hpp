@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <vector>
 
 #include <boost/cstdint.hpp>
 #include <boost/rational.hpp>
@@ -34,6 +35,8 @@ class VideoProducer {
   virtual std::uint32_t getWidth() const;
   virtual std::uint32_t getHeight() const;
   std::uint32_t getFourcc() const;
+
+  virtual const std::vector<std::uint8_t>& getExtraData() const;
 
  protected:
   std::shared_ptr<hisui::video::Sequencer> m_sequencer;

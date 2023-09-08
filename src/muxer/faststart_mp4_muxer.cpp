@@ -58,15 +58,33 @@ void FaststartMP4Muxer::setUp() {
   spdlog::debug("directory_for_faststart_intermediate_file: {}",
                 directory_for_faststart_intermediate_file.string());
 
-  m_faststart_writer =
-      std::make_shared<shiguredo::mp4::writer::FaststartWriter>(
-          m_ofs,
-          shiguredo::mp4::writer::FaststartWriterParameters{
-              .mvhd_timescale = 1000,
-              .duration = static_cast<float>(m_duration),
-              .mdat_path_templete =
-                  directory_for_faststart_intermediate_file.string() +
-                  std::filesystem::path::preferred_separator + "mdatXXXXXX"});
+  if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+    m_faststart_writer =
+        std::make_shared<shiguredo::mp4::writer::FaststartWriter>(
+            m_ofs,
+            shiguredo::mp4::writer::FaststartWriterParameters{
+                .mvhd_timescale = 1000,
+                .duration = static_cast<float>(m_duration),
+                .mdat_path_templete =
+                    directory_for_faststart_intermediate_file.string() +
+                    std::filesystem::path::preferred_separator + "mdatXXXXXX",
+                .ftyp_params = shiguredo::mp4::box::FtypParameters{
+                    .major_brand = {'i', 's', 'o', 'm'},
+                    .minor_version = 0,
+                    .compatible_brands = {
+                        {'m', 'p', '4', '1'},
+                    }}});
+  } else {
+    m_faststart_writer =
+        std::make_shared<shiguredo::mp4::writer::FaststartWriter>(
+            m_ofs,
+            shiguredo::mp4::writer::FaststartWriterParameters{
+                .mvhd_timescale = 1000,
+                .duration = static_cast<float>(m_duration),
+                .mdat_path_templete =
+                    directory_for_faststart_intermediate_file.string() +
+                    std::filesystem::path::preferred_separator + "mdatXXXXXX"});
+  }
 
   initialize(m_config, m_faststart_writer);
 }

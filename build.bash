@@ -10,7 +10,7 @@ _PACKAGES=(
 )
 
 function show_help() {
-  echo "$PROGRAM [--clean] [--use-ccache] [--use-fdk-aac] [--with-test] [--build-type-native] [--package] <package>"
+  echo "$PROGRAM [--clean] [--use-ccache] [--use-fdk-aac] [--with-test] [--build-type-native] [--build-type-debug] [--package] <package>"
   echo "<package>:"
   for package in "${_PACKAGES[@]}"; do
     echo "  - $package"
@@ -49,6 +49,9 @@ while [ $# -ne 0 ]; do
         ;;
     "--build-type-native" )
         BUILD_TYPE="Native"
+        ;;
+    "--build-type-debug" )
+        BUILD_TYPE="Debug"
         ;;
     --* )
         show_help
@@ -114,19 +117,21 @@ source ./VERSION
 if [ $FLAG_CLEAN -eq 1 ]; then
     rm -rf release
     rm -rf native
+    rm -rf debug
     exit 0
 fi
 
 
 cd third_party || exit 1
 
+# libvpx
 if [ -d libvpx ] ; then
     cd libvpx || exit 1
     patch -p1 -R < ../libwebm.patch || echo "reverse patch failed"
     git checkout main
     git pull
 else
-    git clone https://chromium.googlesource.com/webm/libvpx
+    git clone --filter=tree:0 https://chromium.googlesource.com/webm/libvpx
     cd libvpx || exit 1
 fi
 git checkout v"${LIBVPX_VERSION}"
@@ -142,6 +147,7 @@ CMAKE_FLAGS+=("-DHISUI_PACKAGE=$PACKAGE")
 case "$PACKAGE" in
   *_x86_64 )
     CMAKE_FLAGS+=("-DCMAKE_TOOLCHAIN_FILE=../../cmake/clang-x86_64-toolchain.cmake")
+    CMAKE_FLAGS+=('-DUSE_ONEVPL=YES')
     ;;
   *_arm64 )
     CMAKE_FLAGS+=("-DCMAKE_TOOLCHAIN_FILE=../../cmake/clang-aarch64-toolchain.cmake")
@@ -159,11 +165,117 @@ cd "$PACKAGE" || exit 1
 
 CXX="$CXX" CC="$CC" ../configure "${libvpx_configure_options[@]}" || (cat config.log && exit 1)
 make
-
 cd ../../..
+
+# SVT-AV1
+cd third_party || exit 1
+if [ -d SVT-AV1 ] ; then
+    cd SVT-AV1 || exit 1
+    git checkout master
+    git pull
+else
+    git clone --filter=tree:0 https://gitlab.com/AOMediaCodec/SVT-AV1.git
+    cd SVT-AV1 || exit 1
+fi
+git checkout v"${SVT_AV1_VERSION}"
+
+stv_av1_configure_options=('--static' '--no-apps')
+if [ "${BUILD_TYPE}" = "Native" ]; then
+    SVT_AV1_BUILD_TYPE="Release"
+    stv_av1_configure_options+=('--native' 'release')
+elif [ "${BUILD_TYPE}" = "Release" ]; then
+    SVT_AV1_BUILD_TYPE="Release"
+    stv_av1_configure_options+=('release')
+elif [ "${BUILD_TYPE}" = "Debug" ]; then
+    SVT_AV1_BUILD_TYPE="Debug"
+    stv_av1_configure_options+=('debug')
+fi
+
+case "$PACKAGE" in
+  *_x86_64 )
+    stv_av1_configure_options+=('-t' '../../../../cmake/clang-x86_64-toolchain.cmake')
+    objcopy=/usr/bin/objcopy
+    ;;
+  *_arm64 )
+    stv_av1_configure_options+=('-s' 'aarch64-linux-gnu' '-t' '../../../../cmake/clang-aarch64-toolchain.cmake')
+    objcopy=/usr/aarch64-linux-gnu/bin/objcopy
+esac
+cd Build/linux || exit 1
+
+./build.sh "${stv_av1_configure_options[@]}" || exit 1
+
+cd ../../../..
+
+${objcopy} --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+${objcopy} --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Dec.a
+
+${objcopy} --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_get_core=local_cpuinfo_get_core third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_isa=local_cpuinfo_isa third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_linux_init=local_cpuinfo_x86_linux_init third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_vendor third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+${objcopy} --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
+
+# Lyra
+cd third_party/lyra || exit 1
+
+if [ -d lyra ] ; then
+    cd lyra || exit 1
+    git checkout main 
+    git pull
+else
+    git clone --filter=tree:0 https://github.com/google/lyra.git
+    cd lyra || exit 1
+fi
+git checkout v"${LYRA_VERSION}"
+
+cd ..
+
+lyra_bazel_options=('-c')
+if [ "${BUILD_TYPE}" = "Debug" ]; then
+    lyra_bazel_options+=('dbg')
+elif [ "${BUILD_TYPE}" = "Release" ]; then
+    lyra_bazel_options+=('opt')
+fi
+
+case "$PACKAGE" in
+  *_x86_64 )
+      lyra_bazel_sysroot=''
+      ;;
+  *_arm64 )
+      lyra_bazel_options+=('--config=jetson')
+      lyra_bazel_sysroot='/usr/aarch64-linux-gnu'
+esac
+
+clang_raw_version=$(clang -v |& /usr/bin/grep version | rev | cut -d ' ' -f 1 | rev)
+clang_version=$(echo "$clang_raw_version" | cut -d '-' -f 1)
+llvm_version=$(echo "$clang_version" | cut -d '.' -f 1)
+
+BAZEL_SYSROOT=${lyra_bazel_sysroot} BAZEL_LLVM_DIR=/usr/lib/llvm-${llvm_version} CLANG_VERSION=${clang_version} USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
+# chmod 755 bazel-bin/liblyra.a
+# objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized bazel-bin/liblyra.a
+# objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize bazel-bin/liblyra.a
+# objcopy --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize bazel-bin/liblyra.a
+
+cd ../..
+
 if [ "${BUILD_TYPE}" = "Native" ]; then
     mkdir -p "native/$PACKAGE"
     cd "native/$PACKAGE" || exit 1
+    CMAKE_FLAGS+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
+elif [ "${BUILD_TYPE}" = "Debug" ]; then
+    mkdir -p "debug/$PACKAGE"
+    cd "debug/$PACKAGE" || exit 1
     CMAKE_FLAGS+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
 else
     mkdir -p "release/$PACKAGE"

@@ -63,7 +63,9 @@ void Context::setAudioTrack(const std::uint64_t codec_delay,
 
 void Context::setVideoTrack(const std::uint32_t width,
                             const std::uint32_t height,
-                            const std::uint32_t fourcc) {
+                            const std::uint32_t fourcc,
+                            const std::uint8_t* private_data,
+                            const std::size_t private_data_size) {
   const std::uint64_t video_track_id = m_segment->AddVideoTrack(
       static_cast<int>(width), static_cast<int>(height),
       static_cast<int>(m_video_track_number));
@@ -83,10 +85,20 @@ void Context::setVideoTrack(const std::uint32_t width,
     case hisui::Constants::VP9_FOURCC:
       codec_id = "V_VP9";
       break;
+    case hisui::Constants::H264_FOURCC:
+      codec_id = "V_MPEG4/ISO/AVC";
+      break;
+    case hisui::Constants::AV1_FOURCC:
+      codec_id = "V_AV1";
+      break;
     default:
       throw std::runtime_error(fmt::format("unknown fourcc: {:x}", fourcc));
   }
   video_track->set_codec_id(codec_id);
+
+  if (private_data_size > 0) {
+    video_track->SetCodecPrivate(private_data, private_data_size);
+  }
 }
 
 void Context::addVideoFrame(const std::uint8_t* content,

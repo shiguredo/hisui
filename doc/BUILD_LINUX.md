@@ -1,6 +1,6 @@
 # Hisui をビルドする
 
-Ubuntu 20.04 x86_64 でのみビルドを確認しています。
+Ubuntu 20.04 と 22.04 、x86_64 と arm64 でビルドを確認しています。
 
 ## 事前準備
 
@@ -16,11 +16,30 @@ git clone https://github.com/shiguredo/hisui.git
 sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm
 ```
 
-## ビルド
+## Ubuntu 20.04 x86_64 ビルド
 
 ```
 ./build.bash ubuntu-20.04_x86_64
 ```
+
+## Ubuntu 20.04 arm64 ビルド
+
+```
+./build.bash ubuntu-20.04_arm64
+```
+
+## Ubuntu 22.04 x86_64 ビルド
+
+```
+./build.bash ubuntu-22.04_x86_64
+```
+
+## Ubuntu 22.04 arm64 ビルド
+
+```
+./build.bash ubuntu-22.04_arm64
+```
+
 
 ### --use-fdk-aac を有効にしたバイナリをビルドする
 
@@ -33,7 +52,7 @@ sudo apt install libfdk-aac-dev
 ```
 
 ```
-./build.bash --use-fdk-aac ubuntu-20.04_x86_64
+./build.bash --use-fdk-aac ubuntu-22.04_x86_64
 ```
 
 ## バイナリ

@@ -28,7 +28,7 @@ class GridComposer : public Composer {
   ~GridComposer();
 
   void compose(std::vector<unsigned char>*,
-               const std::vector<std::shared_ptr<YUVImage>>&);
+               const std::vector<std::shared_ptr<YUVImage>>&) override;
 
  private:
   std::uint32_t m_single_width;

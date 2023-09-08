@@ -1,12 +1,13 @@
 #include "video/openh264.hpp"
 
-#include <codec/api/svc/codec_def.h>
+#include <codec/api/wels/codec_def.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 
+#include "config.hpp"
 #include "video/yuv.hpp"
 
 namespace hisui::video {
@@ -42,5 +43,18 @@ void update_yuv_image_by_openh264_buffer_info(
                 yuv_image->yuv[2] + i * width1);
   }
 }
+
+OpenH264EncoderConfig::OpenH264EncoderConfig(const std::uint32_t t_width,
+                                             const std::uint32_t t_height,
+                                             const hisui::Config& config)
+    : width(t_width),
+      height(t_height),
+      fps(config.out_video_frame_rate),
+      bitrate(config.out_video_bit_rate),
+      threads(config.openh264_threads),
+      min_qp(config.openh264_min_qp),
+      max_qp(config.openh264_max_qp),
+      profile(config.openh264_profile),
+      level(config.openh264_level) {}
 
 }  // namespace hisui::video

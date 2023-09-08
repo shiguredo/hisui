@@ -24,7 +24,7 @@ class MultiChannelSequencer : public Sequencer {
                                  const std::vector<hisui::ArchiveItem>&);
 
   SequencerGetYUVsResult getYUVs(std::vector<std::shared_ptr<YUVImage>>*,
-                                 const std::uint64_t);
+                                 const std::uint64_t) override;
 
  private:
   std::shared_ptr<YUVImage> m_black_yuv_image;

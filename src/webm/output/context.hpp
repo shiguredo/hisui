@@ -25,7 +25,9 @@ class Context {
                      const std::size_t private_data_size);
   void setVideoTrack(const std::uint32_t width,
                      const std::uint32_t height,
-                     const std::uint32_t fourcc);
+                     const std::uint32_t fourcc,
+                     const std::uint8_t* private_data,
+                     const std::size_t private_data_size);
 
   void addVideoFrame(const std::uint8_t* content,
                      const std::uint64_t length,

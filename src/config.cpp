@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <codec/api/wels/codec_app_def.h>
 #include <libyuv/scale.h>
 #include <spdlog/common.h>
 
@@ -63,6 +64,7 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "Metadata filename (REQUIRED)")
       ->check(CLI::ExistingFile);
 
+  app->add_flag("--version", config->version, "Print version and exit");
   auto option_screen_capture_report =
       app->add_option("--screen-capture-report",
                       config->screen_capture_metadata_filename,
@@ -110,9 +112,11 @@ void set_cli_options(CLI::App* app, Config* config) {
   std::vector<std::pair<std::string, std::uint32_t>> out_video_codec_assoc{
       {"VP8", config::OutVideoCodec::VP8},
       {"VP9", config::OutVideoCodec::VP9},
+      {"H264", config::OutVideoCodec::H264},
+      {"AV1", config::OutVideoCodec::AV1},
   };
   app->add_option("--out-video-codec", config->out_video_codec,
-                  "Video codec (VP8/VP9). default: VP9")
+                  "Video codec (VP8/VP9/H264/AV1). default: VP9")
       ->transform(CLI::CheckedTransformer(out_video_codec_assoc));
 
   std::vector<std::pair<std::string, config::OutAudioCodec>> out_audio_codec{
@@ -192,6 +196,21 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->check(CLI::ExistingDirectory)
       ->group(EXPERIMENTAL_OPTIONS);
 
+  app->add_flag("--video-codec-engines", config->video_codec_engines,
+                "Show video codec engines and exit.");
+
+  std::vector<std::pair<std::string, config::H264Encoder>> h264_encoder_assoc{
+#ifdef USE_ONEVPL
+      {"OneVPL", config::H264Encoder::OneVPL},
+#endif
+      {"OpenH264", config::H264Encoder::OpenH264},
+  };
+
+  app->add_option("--h264-encoder", config->h264_encoder,
+                  "H264 encoder (OneVPL/OpenH264). default: OneVPL")
+      ->transform(
+          CLI::CheckedTransformer(h264_encoder_assoc, CLI::ignore_case));
+
   app->add_option("--show-progress-bar", config->show_progress_bar,
                   "Toggle to show progress bar. default: true");
 
@@ -259,6 +278,47 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "default: 0 (0, 1)")
       ->check(CLI::Range(0, 1))
       ->group(OPTIONS_FOR_TUNING);
+
+  app->add_option("--openh264-threads", config->openh264_threads,
+                  "OpenH264 number of threads (NON NEGATIVE INTEGER)"
+                  "default: 1 (multiple threads imp. disabled)")
+      ->check(CLI::NonNegativeNumber)
+      ->group(OPTIONS_FOR_TUNING);
+
+  app->add_option("--openh264-min-qp", config->openh264_min_qp,
+                  "OpenH264 minmum QP encoder supports. default: 0")
+      ->check(CLI::Range(0, 51))
+      ->group(OPTIONS_FOR_TUNING);
+  app->add_option("--openh264-max-qp", config->openh264_max_qp,
+                  "OpenH264 maximum QP encoder supports. default: 51")
+      ->check(CLI::Range(0, 51))
+      ->group(OPTIONS_FOR_TUNING);
+
+  std::vector<std::pair<std::string, ::EProfileIdc>> openh264_profile_assoc{
+      {"baseline", ::PRO_BASELINE},
+      {"main", ::PRO_MAIN},
+      {"high", ::PRO_HIGH},
+  };
+  app->add_option("--openh264-profile", config->openh264_profile,
+                  "OpenH264 Profile (baseline/main/high). default: baseline")
+      ->transform(
+          CLI::CheckedTransformer(openh264_profile_assoc, CLI::ignore_case))
+      ->group(OPTIONS_FOR_TUNING);
+
+  std::vector<std::pair<std::string, ::ELevelIdc>> openh264_level_assoc{
+      {"3.0", ::LEVEL_3_0}, {"3.1", ::LEVEL_3_1}, {"3.2", ::LEVEL_3_2},
+      {"4.0", ::LEVEL_4_0}, {"4.1", ::LEVEL_4_1}, {"4.2", ::LEVEL_4_2},
+      {"5.0", ::LEVEL_5_0}, {"5.1", ::LEVEL_5_1}, {"5.2", ::LEVEL_5_2},
+  };
+  app->add_option(
+         "--openh264-level", config->openh264_level,
+         "OpenH264 Level (3.0/3.1/3.2/4.0/4.1/4.2/5.0/5.1/5.2). default: 3.1")
+      ->transform(
+          CLI::CheckedTransformer(openh264_level_assoc, CLI::ignore_case))
+      ->group(OPTIONS_FOR_TUNING);
+
+  app->add_option("--lyra-model-path", config->lyra_model_path,
+                  "Path to directory containing Lyra TFLite files");
 
   std::vector<std::pair<std::string, spdlog::level::level_enum>>
       log_level_assoc{

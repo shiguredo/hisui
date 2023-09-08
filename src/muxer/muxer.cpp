@@ -94,4 +94,24 @@ void Muxer::mux() {
   muxFinalize();
 }
 
+std::string Muxer::getVideoCodecName(const hisui::Config& config) {
+  if (config.audio_only) {
+    return "none";
+  }
+  auto fourcc = m_video_producer->getFourcc();
+  if (fourcc == hisui::Constants::VP9_FOURCC) {
+    return "vp9";
+  }
+  if (fourcc == hisui::Constants::VP8_FOURCC) {
+    return "vp8";
+  }
+  if (fourcc == hisui::Constants::AV1_FOURCC) {
+    return "av1";
+  }
+  if (fourcc == hisui::Constants::H264_FOURCC) {
+    return "h264";
+  }
+  throw std::runtime_error(fmt::format("unknown fourcc: {}", fourcc));
+}
+
 }  // namespace hisui::muxer

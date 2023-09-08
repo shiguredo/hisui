@@ -24,7 +24,7 @@ class VPXDecoder : public Decoder {
 
   ~VPXDecoder();
 
-  const std::shared_ptr<YUVImage> getImage(const std::uint64_t);
+  const std::shared_ptr<YUVImage> getImage(const std::uint64_t) override;
 
  private:
   ::vpx_codec_ctx_t m_codec;

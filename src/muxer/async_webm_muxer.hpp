@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "config.hpp"
@@ -53,6 +54,8 @@ class AsyncWebMMuxer : public Muxer {
   std::vector<hisui::ArchiveItem> m_preferred_archives;
   double m_duration;
   std::size_t m_normal_archive_size;
+  std::shared_ptr<VideoProducer> makeVideoProducer();
+  void setVideoTrack();
 };
 
 }  // namespace hisui::muxer

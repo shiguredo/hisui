@@ -13,7 +13,9 @@
 #include <CLI/Config.hpp>
 #include <CLI/Formatter.hpp>
 
+#include "audio/lyra_handler.hpp"
 #include "config.hpp"
+#include "constants.hpp"
 #include "datetime.hpp"
 #include "layout/compose.hpp"
 #include "metadata.hpp"
@@ -22,31 +24,88 @@
 #include "muxer/muxer.hpp"
 #include "muxer/simple_mp4_muxer.hpp"
 #include "report/reporter.hpp"
+#include "version/version.hpp"
+#include "video/codec_engine.hpp"
+#include "video/decoder_factory.hpp"
 #include "video/openh264_handler.hpp"
+
+#ifdef USE_ONEVPL
+#include "video/vpl_decoder.hpp"
+#include "video/vpl_encoder.hpp"
+#include "video/vpl_session.hpp"
+#endif
+
+static void closeHandlersAndSession() {
+  if (hisui::video::OpenH264Handler::hasInstance()) {
+    hisui::video::OpenH264Handler::close();
+  }
+
+  if (hisui::audio::LyraHandler::hasInstance()) {
+    hisui::audio::LyraHandler::close();
+  }
+
+#ifdef USE_ONEVPL
+  if (hisui::video::VPLSession::hasInstance()) {
+    hisui::video::VPLSession::close();
+  }
+#endif
+}
 
 int main(int argc, char** argv) {
   CLI::App app{"hisui"};
   hisui::Config config;
+
+  ::setenv("SVT_LOG", "-2", 1);
+  ::setenv("LIBVA_MESSAGING_LEVEL", "0", 1);
+
+#ifdef USE_ONEVPL
+  try {
+    hisui::video::VPLSession::open();
+  } catch (const std::exception& e) {
+    spdlog::debug("failed to open VPL session: {}", e.what());
+  }
+#endif
 
   try {
     hisui::set_cli_options(&app, &config);
 
     CLI11_PARSE(app, argc, argv);
 
-    config.validate();
+    if (config.version) {
+      std::cout << "Recording Composition Tool Hisui "
+                << hisui::version::get_hisui_version() << std::endl;
+      return EXIT_SUCCESS;
+    }
 
     if (config.verbose) {
       spdlog::set_level(spdlog::level::debug);
     } else {
       spdlog::set_level(config.log_level);
     }
-    spdlog::debug("log level={}", config.log_level);
+    spdlog::debug("log level={}", static_cast<uint32_t>(config.log_level));
+
+    if (std::empty(config.lyra_model_path)) {
+      if (const auto hisui_lyra_model_coeffs_path =
+              std::getenv("HISUI_LYRA_MODEL_COEFFS_PATH")) {
+        config.lyra_model_path = hisui_lyra_model_coeffs_path;
+      }
+      spdlog::debug("config.lyra_model_path={}", config.lyra_model_path);
+    }
 
     if (!std::empty(config.openh264)) {
       try {
         hisui::video::OpenH264Handler::open(config.openh264);
       } catch (const std::exception& e) {
         spdlog::warn("failed to open openh264 library: {}", e.what());
+      }
+    }
+
+    if (!std::empty(config.lyra_model_path)) {
+      try {
+        hisui::audio::LyraHandler::setModelPath(config.lyra_model_path);
+      } catch (const std::exception& e) {
+        spdlog::warn("failed to set lyra model path: {}", e.what());
+        return EXIT_FAILURE;
       }
     }
 
@@ -59,13 +118,27 @@ int main(int argc, char** argv) {
   }
 
   if (!std::empty(config.layout)) {
-    return hisui::layout::compose(config);
+    hisui::video::DecoderFactory::setup(config);
+    auto ret = hisui::layout::compose(config);
+
+    closeHandlersAndSession();
+
+    return ret;
+  }
+
+  config.validate();
+
+  if (config.video_codec_engines) {
+    hisui::video::showCodecEngines();
+    return EXIT_SUCCESS;
   }
 
   if (std::empty(config.in_metadata_filename)) {
     spdlog::error("-f,--in-metadata-file is required");
     return EXIT_FAILURE;
   }
+
+  hisui::video::DecoderFactory::setup(config);
 
   hisui::muxer::Muxer* muxer = nullptr;
 
@@ -158,9 +231,7 @@ int main(int argc, char** argv) {
   }
   delete muxer;
 
-  if (!config.openh264.empty()) {
-    hisui::video::OpenH264Handler::close();
-  }
+  closeHandlersAndSession();
 
   if (config.enabledSuccessReport()) {
     try {
@@ -178,3 +249,4 @@ int main(int argc, char** argv) {
 
   return EXIT_SUCCESS;
 }
+
