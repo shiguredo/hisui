@@ -28,8 +28,8 @@ class BufferOpusEncoder : public Encoder {
   explicit BufferOpusEncoder(std::queue<hisui::Frame>*,
                              const BufferOpusEncoderParameters&);
   ~BufferOpusEncoder();
-  void addSample(const std::int16_t, const std::int16_t);
-  void flush();
+  void addSample(const std::int16_t, const std::int16_t) override;
+  void flush() override;
 
   ::opus_int32 getSkip() const;
 

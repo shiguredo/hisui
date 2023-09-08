@@ -70,6 +70,7 @@ OpenH264Decoder::~OpenH264Decoder() {
     m_decoder->Uninitialize();
     OpenH264Handler::getInstance().destroyDecoder(m_decoder);
   }
+  m_decoder = nullptr;
 }
 
 const std::shared_ptr<YUVImage> OpenH264Decoder::getImage(
@@ -120,9 +121,11 @@ void OpenH264Decoder::updateImageByTimestamp(const std::uint64_t timestamp) {
           m_tmp_yuv, &buffer_info);
       if (ret != 0) {
         spdlog::error(
-            "OpenH264Decoder DecodeFrameNoDelay failed: error_code={}", ret);
-        throw std::runtime_error(fmt::format(
-            "m_decoder->DecodeFrameNoDelay() failed: error_code={}", ret));
+            "OpenH264Decoder DecodeFrameNoDelay failed: error_code={}",
+            static_cast<std::uint32_t>(ret));
+        throw std::runtime_error(
+            fmt::format("m_decoder->DecodeFrameNoDelay() failed: error_code={}",
+                        static_cast<std::uint32_t>(ret)));
       }
       m_next_timestamp = static_cast<std::uint64_t>(m_webm->getTimestamp());
       if (buffer_info.iBufferStatus == 1) {

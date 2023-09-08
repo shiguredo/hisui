@@ -22,7 +22,7 @@ class BasicSequencer : public Sequencer {
   explicit BasicSequencer(const std::vector<hisui::ArchiveItem>&);
 
   void getSamples(std::vector<std::pair<std::int16_t, std::int16_t>>*,
-                  const std::uint64_t);
+                  const std::uint64_t) override;
 
  private:
   std::vector<

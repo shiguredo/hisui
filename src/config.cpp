@@ -113,9 +113,10 @@ void set_cli_options(CLI::App* app, Config* config) {
       {"VP8", config::OutVideoCodec::VP8},
       {"VP9", config::OutVideoCodec::VP9},
       {"H264", config::OutVideoCodec::H264},
+      {"AV1", config::OutVideoCodec::AV1},
   };
   app->add_option("--out-video-codec", config->out_video_codec,
-                  "Video codec (VP8/VP9/H264). default: VP9")
+                  "Video codec (VP8/VP9/H264/AV1). default: VP9")
       ->transform(CLI::CheckedTransformer(out_video_codec_assoc));
 
   std::vector<std::pair<std::string, config::OutAudioCodec>> out_audio_codec{
@@ -194,6 +195,21 @@ void set_cli_options(CLI::App* app, Config* config) {
                   "Directory for failure report")
       ->check(CLI::ExistingDirectory)
       ->group(EXPERIMENTAL_OPTIONS);
+
+  app->add_flag("--video-codec-engines", config->video_codec_engines,
+                "Show video codec engines and exit.");
+
+  std::vector<std::pair<std::string, config::H264Encoder>> h264_encoder_assoc{
+#ifdef USE_ONEVPL
+      {"OneVPL", config::H264Encoder::OneVPL},
+#endif
+      {"OpenH264", config::H264Encoder::OpenH264},
+  };
+
+  app->add_option("--h264-encoder", config->h264_encoder,
+                  "H264 encoder (OneVPL/OpenH264). default: OneVPL")
+      ->transform(
+          CLI::CheckedTransformer(h264_encoder_assoc, CLI::ignore_case));
 
   app->add_option("--show-progress-bar", config->show_progress_bar,
                   "Toggle to show progress bar. default: true");
@@ -300,6 +316,9 @@ void set_cli_options(CLI::App* app, Config* config) {
       ->transform(
           CLI::CheckedTransformer(openh264_level_assoc, CLI::ignore_case))
       ->group(OPTIONS_FOR_TUNING);
+
+  app->add_option("--lyra-model-path", config->lyra_model_path,
+                  "Path to directory containing Lyra TFLite files");
 
   std::vector<std::pair<std::string, spdlog::level::level_enum>>
       log_level_assoc{
