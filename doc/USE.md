@@ -13,7 +13,7 @@ Hisui は docker image を用意しています。これを使うことで気軽
 - https://hub.docker.com/r/shiguredo/hisui
 
 ```
-docker run -v /home/shiguredo/sora-2022.2.3/archive:/hisui -it shiguredo/hisui:2023.2.0-ubuntu-22.04 -f /hisui/CSX77QY9F57V5BT72S62C28VS4/report-CSX77QY9F57V5BT72S62C28VS4.json
+docker run -v /home/shiguredo/sora-2022.2.3/archive:/hisui -it shiguredo/hisui:2023.2.1-ubuntu-22.04 -f /hisui/CSX77QY9F57V5BT72S62C28VS4/report-CSX77QY9F57V5BT72S62C28VS4.json
 ```
 
 - -v で Sora の録画データがある archive フォルダを指定して下さい
@@ -23,7 +23,7 @@ docker run -v /home/shiguredo/sora-2022.2.3/archive:/hisui -it shiguredo/hisui:2
 ## docker 経由で help を見る
 
 ```
-$ docker run -it shiguredo/hisui:2023.2.0-ubuntu-22.04 --help
+$ docker run -it shiguredo/hisui:2023.2.1-ubuntu-22.04 --help
 hisui
 Usage: /usr/local/bin/hisui [OPTIONS]
 

@@ -11,6 +11,11 @@
 
 ## develop
 
+## 2023.2.1
+
+- [FIX] docker image 生成を修正する
+    - @haruymaa
+
 ## 2023.2.0
 
 - [UPDATE] 依存ライブラリの更新をする
