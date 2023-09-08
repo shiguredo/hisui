@@ -67,6 +67,9 @@ bool AudioContext::init() {
     } else {
       m_channels = static_cast<int>(audio_track->GetChannels());
     }
+  } else if (!std::strncmp(audio_track->GetCodecId(), "A_LYRA", 6)) {
+    m_codec = AudioCodec::Lyra;
+    m_channels = static_cast<int>(audio_track->GetChannels());
   } else {
     spdlog::info("unsuppoted codec: codec_id={}", audio_track->GetCodecId());
     return false;

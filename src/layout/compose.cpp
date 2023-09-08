@@ -7,6 +7,7 @@
 #include "config.hpp"
 #include "constants.hpp"
 #include "datetime.hpp"
+#include "layout/av1_video_producer.hpp"
 #include "layout/metadata.hpp"
 #include "layout/openh264_video_producer.hpp"
 #include "layout/vpx_video_producer.hpp"
@@ -16,6 +17,13 @@
 #include "muxer/no_video_producer.hpp"
 #include "muxer/simple_mp4_muxer.hpp"
 #include "report/reporter.hpp"
+#include "video/openh264_handler.hpp"
+
+#ifdef USE_ONEVPL
+#include "layout/vpl_video_producer.hpp"
+#include "video/vpl_encoder.hpp"
+#include "video/vpl_session.hpp"
+#endif
 
 namespace hisui::layout {
 
@@ -33,8 +41,85 @@ int compose(const hisui::Config& t_config) {
       video_producer = std::make_shared<muxer::NoVideoProducer>();
     } else {
       if (config.out_video_codec == hisui::config::OutVideoCodec::H264) {
-        video_producer = std::make_shared<OpenH264VideoProducer>(
-            config, OpenH264VideoProducerParameters{
+        if (config.h264_encoder == hisui::config::H264Encoder::OpenH264) {
+          if (!hisui::video::OpenH264Handler::hasInstance()) {
+            throw std::runtime_error("OpenH264 library is not loaded");
+          }
+          video_producer = std::make_shared<OpenH264VideoProducer>(
+              config, OpenH264VideoProducerParameters{
+                          .regions = metadata.getRegions(),
+                          .resolution = metadata.getResolution(),
+                          .duration = metadata.getMaxEndTime(),
+                          .timescale = config.out_container ==
+                                               hisui::config::OutContainer::WebM
+                                           ? hisui::Constants::NANO_SECOND
+                                           : 16000,  // TODO(haruyama): 整理する
+                      });
+        }
+#ifdef USE_ONEVPL
+        if (config.h264_encoder == hisui::config::H264Encoder::OneVPL) {
+          auto fourcc = hisui::Constants::H264_FOURCC;
+          if (!(hisui::video::VPLSession::hasInstance() &&
+                hisui::video::VPLEncoder::isSupported(fourcc))) {
+            throw std::runtime_error("oneVPL H.264 encoder is not supported");
+          }
+          video_producer = std::make_shared<VPLVideoProducer>(
+              config,
+              VPLVideoProducerParameters{
+                  .regions = metadata.getRegions(),
+                  .resolution = metadata.getResolution(),
+                  .duration = metadata.getMaxEndTime(),
+                  .timescale =
+                      config.out_container == hisui::config::OutContainer::WebM
+                          ? hisui::Constants::NANO_SECOND
+                          : 16000,  // TODO(haruyama): 整理する
+              },
+              fourcc);
+        }
+#endif
+
+        // Unspecified
+        if (!video_producer) {
+#ifdef USE_ONEVPL
+          if (hisui::video::VPLSession::hasInstance() &&
+              hisui::video::VPLEncoder::isSupported(
+                  hisui::Constants::H264_FOURCC)) {
+            auto fourcc = hisui::Constants::H264_FOURCC;
+            spdlog::debug("use VPLVideoProducer");
+            video_producer = std::make_shared<VPLVideoProducer>(
+                config,
+                VPLVideoProducerParameters{
+                    .regions = metadata.getRegions(),
+                    .resolution = metadata.getResolution(),
+                    .duration = metadata.getMaxEndTime(),
+                    .timescale = config.out_container ==
+                                         hisui::config::OutContainer::WebM
+                                     ? hisui::Constants::NANO_SECOND
+                                     : 16000,  // TODO(haruyama): 整理する
+                },
+                fourcc);
+          } else  // NOLINT
+#endif
+              if (hisui::video::OpenH264Handler::hasInstance()) {
+            spdlog::debug("use OpenH264VideoProducer");
+            video_producer = std::make_shared<OpenH264VideoProducer>(
+                config,
+                OpenH264VideoProducerParameters{
+                    .regions = metadata.getRegions(),
+                    .resolution = metadata.getResolution(),
+                    .duration = metadata.getMaxEndTime(),
+                    .timescale = config.out_container ==
+                                         hisui::config::OutContainer::WebM
+                                     ? hisui::Constants::NANO_SECOND
+                                     : 16000,  // TODO(haruyama): 整理する
+                });
+          } else {
+            throw std::runtime_error("H.264 dncoder is unavailable");
+          }
+        }
+      } else if (config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
+        video_producer = std::make_shared<AV1VideoProducer>(
+            config, AV1VideoProducerParameters{
                         .regions = metadata.getRegions(),
                         .resolution = metadata.getResolution(),
                         .duration = metadata.getMaxEndTime(),

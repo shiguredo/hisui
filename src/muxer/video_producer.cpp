@@ -112,4 +112,8 @@ std::uint32_t VideoProducer::getFourcc() const {
   return m_encoder->getFourcc();
 }
 
+const std::vector<std::uint8_t>& VideoProducer::getExtraData() const {
+  throw std::logic_error("VideoProducer::getExtraData() should not be called");
+}
+
 }  // namespace hisui::muxer

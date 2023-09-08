@@ -22,7 +22,7 @@ class OpenH264Decoder : public Decoder {
   explicit OpenH264Decoder(std::shared_ptr<hisui::webm::input::VideoContext>);
   ~OpenH264Decoder();
 
-  const std::shared_ptr<YUVImage> getImage(const std::uint64_t);
+  const std::shared_ptr<YUVImage> getImage(const std::uint64_t) override;
 
  private:
   ::ISVCDecoder* m_decoder = nullptr;

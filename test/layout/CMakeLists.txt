@@ -3,6 +3,16 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
 
+if(DEFINED CMAKE_BUILD_TYPE)
+    if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+        set(SVT_AV1_BUILD_TYPE "Debug")
+    else()
+        set(SVT_AV1_BUILD_TYPE "Release")
+    endif()
+else()
+    set(SVT_AV1_BUILD_TYPE "Release")
+endif()
+
 add_compile_options(
     -Wall
     -Wextra
@@ -39,12 +49,16 @@ add_executable(layout_test
     ../../src/util/interval.cpp
     ../../src/util/json.cpp
     ../../src/version/version.cpp
+    ../../src/video/av1_decoder.cpp
     ../../src/video/decoder.cpp
+    ../../src/video/decoder_factory.cpp
     ../../src/video/openh264.cpp
     ../../src/video/openh264_decoder.cpp
     ../../src/video/openh264_handler.cpp
     ../../src/video/preserve_aspect_ratio_scaler.cpp
     ../../src/video/scaler.cpp
+    ../../src/video/vaapi_utils.cpp
+    ../../src/video/vaapi_utils_drm.cpp
     ../../src/video/vpx.cpp
     ../../src/video/vpx_decoder.cpp
     ../../src/video/webm_source.cpp
@@ -121,6 +135,7 @@ target_include_directories(layout_test
     ../../third_party/libvpx/third_party/libwebm
     ../../third_party/libvpx
     ../../third_party/openh264
+    ../../third_party/SVT-AV1/Source/API
     )
 
 target_link_libraries(layout_test
@@ -130,7 +145,35 @@ target_link_libraries(layout_test
     shiguredo-mp4
     spdlog 
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
+    ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     )
+
+if(USE_ONEVPL)
+    target_compile_definitions(layout_test
+        PRIVATE
+        USE_ONEVPL
+        )
+
+    target_sources(layout_test
+        PRIVATE
+        ../../src/video/vpl.cpp
+        ../../src/video/vpl_session.cpp
+        )
+
+    target_include_directories(layout_test
+        PRIVATE
+        ${VPL_SOURCE_DIR}/api
+        )
+
+    target_link_libraries(layout_test
+        PRIVATE
+        drm
+        va
+        va-drm
+        VPL
+        )
+endif()
+
 
 add_test(NAME layout COMMAND layout_test)
 set_tests_properties(layout PROPERTIES LABELS hisui)

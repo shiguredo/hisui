@@ -29,9 +29,9 @@ class OpenH264VideoProducer : public hisui::muxer::VideoProducer {
  public:
   OpenH264VideoProducer(const hisui::Config&,
                         const OpenH264VideoProducerParameters&);
-  virtual void produce();
-  virtual std::uint32_t getWidth() const;
-  virtual std::uint32_t getHeight() const;
+  void produce() override;
+  std::uint32_t getWidth() const override;
+  std::uint32_t getHeight() const override;
 
  private:
   Resolution m_resolution;

@@ -105,6 +105,9 @@ std::string Muxer::getVideoCodecName(const hisui::Config& config) {
   if (fourcc == hisui::Constants::VP8_FOURCC) {
     return "vp8";
   }
+  if (fourcc == hisui::Constants::AV1_FOURCC) {
+    return "av1";
+  }
   if (fourcc == hisui::Constants::H264_FOURCC) {
     return "h264";
   }

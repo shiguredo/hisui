@@ -1,5 +1,6 @@
 #include "version/version.hpp"
 
+#include <EbSvtAv1.h>
 #include <codec/api/wels/codec_app_def.h>
 #include <fmt/core.h>
 #include <mkvparser/mkvparser.h>
@@ -34,6 +35,23 @@ std::string get_openh264_version() {
   auto version = hisui::video::OpenH264Handler::getInstance().getCodecVersion();
   return fmt::format("{}.{}.{}", version.uMajor, version.uMinor,
                      version.uRevision);
+}
+
+std::string get_svt_av1_version() {
+  return fmt::format("{}.{}.{}", SVT_AV1_VERSION_MAJOR, SVT_AV1_VERSION_MINOR,
+                     SVT_AV1_VERSION_PATCHLEVEL);
+}
+
+std::string get_onevpl_version() {
+  // コードからは得られない
+  // VERSION と合わせること
+  return "2023.3.1";
+}
+
+std::string get_lyra_version() {
+  // コードから得るには third_party/lyra を変更する必要あり
+  // VERSION と合わせること
+  return "1.3.2";
 }
 
 #ifdef USE_FDK_AAC

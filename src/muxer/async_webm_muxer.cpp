@@ -1,5 +1,7 @@
 #include "muxer/async_webm_muxer.hpp"
 
+#include <spdlog/spdlog.h>
+
 #include <array>
 #include <cstdint>
 #include <exception>
@@ -14,6 +16,7 @@
 #include "constants.hpp"
 #include "frame.hpp"
 #include "muxer/audio_producer.hpp"
+#include "muxer/av1_video_producer.hpp"
 #include "muxer/multi_channel_vpx_video_producer.hpp"
 #include "muxer/no_video_producer.hpp"
 #include "muxer/openh264_video_producer.hpp"
@@ -21,7 +24,14 @@
 #include "muxer/video_producer.hpp"
 #include "muxer/vpx_video_producer.hpp"
 #include "report/reporter.hpp"
+#include "video/openh264_handler.hpp"
 #include "webm/output/context.hpp"
+
+#ifdef USE_ONEVPL
+#include "muxer/vpl_video_producer.hpp"
+#include "video/vpl_encoder.hpp"
+#include "video/vpl_session.hpp"
+#endif
 
 namespace hisui::muxer {
 
@@ -73,25 +83,13 @@ void AsyncWebMMuxer::setUp() {
                           .duration = m_duration,
                       });
       } else {
-        if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
-          m_video_producer = std::make_shared<OpenH264VideoProducer>(
-              m_config,
-              OpenH264VideoProducerParameters{.archives = m_normal_archives,
-                                              .duration = m_duration});
-        } else {
-          m_video_producer = std::make_shared<VPXVideoProducer>(
-              m_config,
-              VPXVideoProducerParameters{.archives = m_normal_archives,
-                                         .duration = m_duration});
-        }
+        m_video_producer = makeVideoProducer();
       }
     }
   }
 
   if (!m_config.audio_only) {
-    m_context->setVideoTrack(m_video_producer->getWidth(),
-                             m_video_producer->getHeight(),
-                             m_video_producer->getFourcc());
+    setVideoTrack();
   }
 
   auto audio_producer = std::make_shared<OpusAudioProducer>(
@@ -137,5 +135,75 @@ void AsyncWebMMuxer::run() {
 void AsyncWebMMuxer::cleanUp() {}
 
 void AsyncWebMMuxer::muxFinalize() {}
+
+std::shared_ptr<VideoProducer> AsyncWebMMuxer::makeVideoProducer() {
+  if (m_config.out_video_codec == hisui::config::OutVideoCodec::H264) {
+    if (m_config.h264_encoder == hisui::config::H264Encoder::OpenH264) {
+      if (!hisui::video::OpenH264Handler::hasInstance()) {
+        throw std::runtime_error("OpenH264 library is not loaded");
+      }
+      return std::make_shared<OpenH264VideoProducer>(
+          m_config, OpenH264VideoProducerParameters{
+                        .archives = m_normal_archives, .duration = m_duration});
+    }
+#ifdef USE_ONEVPL
+    if (m_config.h264_encoder == hisui::config::H264Encoder::OneVPL) {
+      if (!(hisui::video::VPLSession::hasInstance() &&
+            hisui::video::VPLEncoder::isSupported(
+                hisui::Constants::H264_FOURCC))) {
+        throw std::runtime_error("oneVPL H.264 encoder is not supported");
+      }
+      auto fourcc = hisui::Constants::H264_FOURCC;
+      return std::make_shared<VPLVideoProducer>(
+          m_config,
+          VPLVideoProducerParameters{.archives = m_normal_archives,
+                                     .duration = m_duration},
+          fourcc);
+    }
+#endif
+
+    // Unspecified
+#ifdef USE_ONEVPL
+    if (hisui::video::VPLSession::hasInstance() &&
+        hisui::video::VPLEncoder::isSupported(hisui::Constants::H264_FOURCC)) {
+      spdlog::debug("use VPLVideoProducer");
+      return std::make_shared<VPLVideoProducer>(
+          m_config,
+          VPLVideoProducerParameters{.archives = m_normal_archives,
+                                     .duration = m_duration},
+          hisui::config::OutVideoCodec::H264);
+    } else  // NOLINT
+#endif
+        if (hisui::video::OpenH264Handler::hasInstance()) {
+      spdlog::debug("use OpenH264VideoProducer");
+      return std::make_shared<OpenH264VideoProducer>(
+          m_config, OpenH264VideoProducerParameters{
+                        .archives = m_normal_archives, .duration = m_duration});
+    }
+    throw std::runtime_error("H.264 encoder is unavailable");
+  } else if (m_config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
+    return std::make_shared<AV1VideoProducer>(
+        m_config, AV1VideoProducerParameters{.archives = m_normal_archives,
+                                             .duration = m_duration});
+  } else {
+    return std::make_shared<VPXVideoProducer>(
+        m_config, VPXVideoProducerParameters{.archives = m_normal_archives,
+                                             .duration = m_duration});
+  }
+}
+
+void AsyncWebMMuxer::setVideoTrack() {
+  if (m_config.out_video_codec == hisui::config::OutVideoCodec::AV1) {
+    const std::array<std::uint8_t, 4> private_data{0x81, 0x00, 0x06, 0x00};
+    m_context->setVideoTrack(m_video_producer->getWidth(),
+                             m_video_producer->getHeight(),
+                             m_video_producer->getFourcc(), private_data.data(),
+                             std::size(private_data));
+  } else {
+    m_context->setVideoTrack(m_video_producer->getWidth(),
+                             m_video_producer->getHeight(),
+                             m_video_producer->getFourcc(), nullptr, 0);
+  }
+}
 
 }  // namespace hisui::muxer

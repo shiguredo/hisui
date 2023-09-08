@@ -10,6 +10,7 @@ namespace hisui::webm::input {
 enum struct AudioCodec {
   None,
   Opus,
+  Lyra,
 };
 
 class AudioContext : public Context {
@@ -18,7 +19,7 @@ class AudioContext : public Context {
   ~AudioContext();
 
   void reset();
-  bool init();
+  bool init() override;
   int getChannels() const;
   std::uint64_t getBitDepth() const;
   double getSamplingRate() const;

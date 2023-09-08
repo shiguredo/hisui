@@ -20,9 +20,9 @@ class YUVImage;
 class WebMSource : public Source {
  public:
   explicit WebMSource(const std::string&);
-  const std::shared_ptr<YUVImage> getYUV(const std::uint64_t);
-  std::uint32_t getWidth() const;
-  std::uint32_t getHeight() const;
+  const std::shared_ptr<YUVImage> getYUV(const std::uint64_t) override;
+  std::uint32_t getWidth() const override;
+  std::uint32_t getHeight() const override;
 
  private:
   std::shared_ptr<hisui::webm::input::VideoContext> m_webm;

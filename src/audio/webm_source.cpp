@@ -8,6 +8,8 @@
 #include <iterator>
 
 #include "audio/decoder.hpp"
+#include "audio/lyra_decoder.hpp"
+#include "audio/lyra_handler.hpp"
 #include "audio/opus_decoder.hpp"
 #include "constants.hpp"
 #include "report/reporter.hpp"
@@ -38,6 +40,18 @@ WebMSource::WebMSource(const std::string& t_file_path) {
       if (hisui::report::Reporter::hasInstance()) {
         hisui::report::Reporter::getInstance().registerAudioDecoder(
             m_webm->getFilePath(), {.codec = "opus",
+                                    .channels = m_webm->getChannels(),
+                                    .duration = m_webm->getDuration()});
+      }
+      break;
+    case hisui::webm::input::AudioCodec::Lyra:
+      m_channels = m_webm->getChannels(),
+      m_sampling_rate = static_cast<std::uint64_t>(m_webm->getSamplingRate());
+      m_decoder = std::make_shared<LyraDecoder>(
+          m_channels, LyraHandler::getInstance().getModelPath());
+      if (hisui::report::Reporter::hasInstance()) {
+        hisui::report::Reporter::getInstance().registerAudioDecoder(
+            m_webm->getFilePath(), {.codec = "lyra",
                                     .channels = m_webm->getChannels(),
                                     .duration = m_webm->getDuration()});
       }
@@ -86,7 +100,8 @@ std::pair<std::int16_t, std::int16_t> WebMSource::getSample(
 void WebMSource::readFrame() {
   if (m_webm->readFrame()) {
     m_current_position = static_cast<std::uint64_t>(m_webm->getTimestamp()) *
-                         m_sampling_rate / hisui::Constants::NANO_SECOND;
+                         hisui::Constants::PCM_SAMPLE_RATE /
+                         hisui::Constants::NANO_SECOND;
     const auto decoded =
         m_decoder->decode(m_webm->getBuffer(), m_webm->getBufferSize());
     if (decoded.second > 0) {

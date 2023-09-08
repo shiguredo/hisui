@@ -61,6 +61,8 @@ bool VideoContext::init() {
     m_fourcc = hisui::Constants::VP8_FOURCC;
   } else if (!std::strncmp(codec_id, "V_VP9", 5)) {
     m_fourcc = hisui::Constants::VP9_FOURCC;
+  } else if (!std::strncmp(codec_id, "V_AV1", 5)) {
+    m_fourcc = hisui::Constants::AV1_FOURCC;
   } else if (!std::strncmp(codec_id, "V_MPEG4/ISO/AVC", 15)) {
     m_fourcc = hisui::Constants::H264_FOURCC;
   } else {
