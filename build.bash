@@ -287,7 +287,9 @@ cmake --build .
 if [ $FLAG_PACKAGE -eq 1 ]; then 
     rm -rf "hisui-${HISUI_VERSION}"
     mkdir "hisui-${HISUI_VERSION}"
+    mkdir "hisui-${HISUI_VERSION}/lyra"
     cp hisui ../../LICENSE ../../NOTICE.md "hisui-${HISUI_VERSION}"
+    cp -r ../../third_party/lyra/lyra/lyra/model_coeffs "hisui-${HISUI_VERSION}/lyra"
     tar cvf "hisui-${HISUI_VERSION}_$PACKAGE.tar.gz" "hisui-${HISUI_VERSION}"
     rm -rf "hisui-${HISUI_VERSION}"
 fi
