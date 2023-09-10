@@ -37,7 +37,7 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
         env:
             DEBIAN_FRONTEND: noninteractive
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Get vars
         shell: bash
         id: vars
@@ -160,7 +160,7 @@ jobs:
       - build-linux
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Mkdir release
         shell: bash
         run: |
@@ -256,7 +256,7 @@ jobs:
       - build-linux
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/download
         with:
           platform: ubuntu-20.04_x86_64
