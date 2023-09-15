@@ -17,7 +17,7 @@ docker run -v /home/shiguredo/sora-2022.2.3/archive:/hisui -it shiguredo/hisui:2
 ```
 
 - -v で Sora の録画データがある archive フォルダを指定して下さい
-    - docker 側のフォルダはどこでも良いですがここでは /hisui を利用しています
+  - docker 側のフォルダはどこでも良いですがここでは /hisui を利用しています
 - -f で合成したい recording.report が生成するファイルを指定して下さい
 
 ## docker 経由で help を見る
@@ -30,9 +30,10 @@ Usage: /usr/local/bin/hisui [OPTIONS]
 Options:
   -h,--help                   Print this help message and exit
   -f,--in-metadata-file       Metadata filename (REQUIRED)
+  --version                   Print version and exit
   --out-container             Output container type (WebM/MP4). default: WebM
-  --out-video-codec           Video codec (VP8/VP9). default: VP9
-  --out-video-frame-rate      Video frame rate (INTEGER/RATIONAL). default: 25)
+  --out-video-codec           Video codec (VP8/VP9/H264/AV1). default: VP9
+  --out-video-frame-rate      Video frame rate (INTEGER/RATIONAL). default: 25
   --out-file                  Output filename
   --max-columns               Max columns (POSITIVE INTEGER). default: 3
   --libvpx-cq-level           libvpx Constrained Quality level (NON NEGATIVE INTEGER). default: 30
@@ -45,8 +46,11 @@ Options:
   --openh264                  OpenH264 dynamic library path
   --verbose                   Verbose mode
   --audio-only                Audio only mode
+  --video-codec-engines       Show video codec engines and exit.
+  --h264-encoder              H264 encoder (OneVPL/OpenH264). default: OneVPL
   --show-progress-bar         Toggle to show progress bar. default: true
   --layout                    Layout Metadata File
+  --lyra-model-path           Path to directory containing Lyra TFLite files
 
 
 Experimental Options:
@@ -56,12 +60,10 @@ Experimental Options:
   --screen-capture-width      Width for screen-capture (NON NEGATIVE multiple of 4). default: 960
   --screen-capture-height     Height for screen-capture (NON NEGATIVE multiple of 4). default: 640
   --screen-capture-bit-rate   Bit rate for screen-capture (kbps). default: 1000
-  --mix-screen-capture-audio  Mix screen-capture audio. default: false)
+  --mix-screen-capture-audio  Mix screen-capture audio. default: false
   --success-report            Directory for success report
   --failure-report            Directory for failure report
 ```
-
-
 
 ## 自前ビルドで利用したい場合
 
