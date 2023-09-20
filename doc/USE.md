@@ -20,6 +20,8 @@ docker run -v /home/shiguredo/sora-2022.2.3/archive:/hisui -it shiguredo/hisui:2
   - docker 側のフォルダはどこでも良いですがここでは /hisui を利用しています
 - -f で合成したい recording.report が生成するファイルを指定して下さい
 
+Lyra のファイルを変換したい場合はオプションを指定せずそのままのコマンドで利用可能です。
+
 ## docker 経由で help を見る
 
 ```
