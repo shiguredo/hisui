@@ -13,8 +13,13 @@ git clone https://github.com/shiguredo/hisui.git
 必要なライブラリをインストールします。
 
 ```
-sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm
+sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm libva-dev libdrm-dev
 ```
+
+上記以外に Bazel をインストールする必要があります。
+Lyra のビルドには Bazel バージョン 5.3.2 を使用するため、Bazelisk を使用してインストールすることをおすすめします。
+
+https://bazel.build/install?hl=ja
 
 ## Ubuntu 20.04 x86_64 ビルド
 
@@ -39,7 +44,6 @@ sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm
 ```
 ./build.bash ubuntu-22.04_arm64
 ```
-
 
 ### --use-fdk-aac を有効にしたバイナリをビルドする
 
