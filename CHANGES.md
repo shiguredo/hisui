@@ -11,6 +11,9 @@
 
 ## develop
 
+- [UPDATE] libvpx 1.13.1 に上げる
+  - @voluntas
+
 ## 2023.2.1
 
 - [FIX] docker image 生成を修正する
