@@ -2,6 +2,12 @@ name: build
 
 on:
   pull_request:
+    paths-ignore:
+      - 'doc/**'
+      - '**.md'
+      - 'THANKS'
+      - 'LICENSE'
+      - 'NOTICE'
   push:
     branches:
       - main
