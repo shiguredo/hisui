@@ -67,7 +67,9 @@ Experimental Options:
   --failure-report            Directory for failure report
 ```
 
-## 自前ビルドで利用したい場合
+## 自前ビルドおよび、リリースされたビルド済みのバイナリを使用して利用する
+
+ビルド済みのバイナリを使用する場合は [Releases](https://github.com/shiguredo/hisui/releases) より環境に応じた最新のバイナリをダウンロードしてください。
 
 -f で合成したい recording.report が生成するファイルを指定して下さい。
 
