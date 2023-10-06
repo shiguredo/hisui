@@ -13,7 +13,7 @@ Hisui は docker image を用意しています。これを使うことで気軽
 - https://hub.docker.com/r/shiguredo/hisui
 
 ```
-docker run -v /home/shiguredo/sora-2022.2.3/archive:/hisui -it shiguredo/hisui:2023.2.1-ubuntu-22.04 -f /hisui/CSX77QY9F57V5BT72S62C28VS4/report-CSX77QY9F57V5BT72S62C28VS4.json
+docker run -v /home/shiguredo/sora/archive:/hisui -it shiguredo/hisui:2023.2.1-ubuntu-22.04 -f /hisui/CSX77QY9F57V5BT72S62C28VS4/report-CSX77QY9F57V5BT72S62C28VS4.json
 ```
 
 - -v で Sora の録画データがある archive フォルダを指定して下さい
@@ -67,7 +67,9 @@ Experimental Options:
   --failure-report            Directory for failure report
 ```
 
-## 自前ビルドで利用したい場合
+## 自前ビルドおよび、リリースされたビルド済みのバイナリを使用して利用する
+
+ビルド済みのバイナリを使用する場合は [Releases](https://github.com/shiguredo/hisui/releases) より環境に応じた最新のバイナリをダウンロードしてください。
 
 -f で合成したい recording.report が生成するファイルを指定して下さい。
 
