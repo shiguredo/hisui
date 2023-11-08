@@ -13,10 +13,7 @@ git clone https://github.com/shiguredo/hisui.git
 必要なライブラリをインストールします。
 
 ```
-sudo apt install build-essential
-sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm libva-dev libdrm-dev
-sudo apt install python3-pip
-pip install numpy
+sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm libva-dev libdrm-dev python3-numpy g++
 ```
 
 上記以外に Bazel をインストールする必要があります。
