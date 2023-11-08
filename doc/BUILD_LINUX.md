@@ -13,7 +13,7 @@ git clone https://github.com/shiguredo/hisui.git
 必要なライブラリをインストールします。
 
 ```
-sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm libva-dev libdrm-dev
+sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm libva-dev libdrm-dev python3-numpy g++
 ```
 
 上記以外に Bazel をインストールする必要があります。
@@ -61,4 +61,4 @@ sudo apt install libfdk-aac-dev
 
 ## バイナリ
 
-release ディレクトリに hisui バイナリが生成されます。
+`release / ビルドを実行したアーキテクチャ名` の下に hisui バイナリが生成されます。
