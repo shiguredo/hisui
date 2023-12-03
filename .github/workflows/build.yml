@@ -227,7 +227,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       - name: Push to DockerHub
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
@@ -237,7 +237,7 @@ jobs:
           build-args: |
             UBUNTU_VERSION=20.04
       - name: Push to DockerHub
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
