@@ -22,7 +22,7 @@ jobs:
         os:
           - ubuntu-20.04_x86_64
     name: Lint hisui for ${{ matrix.os }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Install packages
         shell: bash
