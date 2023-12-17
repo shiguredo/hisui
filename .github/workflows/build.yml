@@ -174,19 +174,19 @@ jobs:
           mkdir -p release/ubuntu-20.04_arm64
           mkdir -p release/ubuntu-22.04_x86_64
           mkdir -p release/ubuntu-22.04_arm64
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-20.04_x86_64-hisui-binary
           path: release/ubuntu-20.04_x86_64
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-20.04_arm64-hisui-binary
           path: release/ubuntu-20.04_arm64
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-22.04_x86_64-hisui-binary
           path: release/ubuntu-22.04_x86_64
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-22.04_arm64-hisui-binary
           path: release/ubuntu-22.04_arm64
@@ -197,19 +197,19 @@ jobs:
           chmod 755 release/ubuntu-20.04_arm64/hisui
           chmod 755 release/ubuntu-22.04_x86_64/hisui
           chmod 755 release/ubuntu-22.04_arm64/hisui
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-20.04_x86_64-lyra-model-coeffs
           path: release/ubuntu-20.04_x86_64/lyra/model_coeffs
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-20.04_arm64-lyra-model-coeffs
           path: release/ubuntu-20.04_arm64/lyra/model_coeffs
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-22.04_x86_64-lyra-model-coeffs
           path: release/ubuntu-22.04_x86_64/lyra/model_coeffs
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: ubuntu-22.04_arm64-lyra-model-coeffs
           path: release/ubuntu-22.04_arm64/lyra/model_coeffs
