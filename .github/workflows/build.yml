@@ -121,31 +121,31 @@ jobs:
           echo "name=hisui-${HISUI_VERSION}_${{ matrix.os }}.tar.gz" >> "$GITHUB_OUTPUT"
         id: package_name
       - name: Upload hisui binary
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-hisui-binary
           path: release/${{ matrix.os }}/hisui
           if-no-files-found: error
       - name: Upload hisui binary with hash
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-hisui-binary-${{ steps.vars.outputs.sha_short }}
           path: release/${{ matrix.os }}/hisui
           if-no-files-found: error
       - name: Upload Lyra model_coeffs with hash
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-lyra-model-coeffs
           path: third_party/lyra/lyra/lyra/model_coeffs
           if-no-files-found: error
       - name: Upload tarball
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package_name.outputs.name }}
           path: release/${{ matrix.os }}/${{ steps.package_name.outputs.name }}
           if-no-files-found: error
       - name: Upload environment
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}.env
           path: ${{ matrix.os }}.env
