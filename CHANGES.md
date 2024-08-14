@@ -8,6 +8,10 @@
   - 下位互換がある追加
 - FIX
   - バグ修正
+- TEST
+  - テスト関連
+- DOC
+  - ドキュメント関連
 
 ## develop
 
@@ -74,7 +78,7 @@
   - Safari, Windows Media Player, 映画＆テレビ での再生を修正する
   - @haruyama
 - [CHANGE] レイアウトに `*` のみを指定した場合、全てのレイアウトを指定したものとして扱うよう修正する
-  - layout: レイアウト指定ファイル, report-_.json, _.webm は sources から常に除外する
+  - layout: レイアウト指定ファイル, report-_.json,_.webm は sources から常に除外する
   - @haruyama
 - [FIX] 例外と null 参照を修正する
   - 一部のケースで core dump していたのを修正する
@@ -128,7 +132,7 @@
   - レポートは指定したディレクトリに出力する
   - 実験的機能として合成成功/失敗時にレポートを出力するオプションを追加する
     - `--success-report` : 合成成功時にレポートを出力するオプション (`{utc_datetime}_ {recoding_id}_success.json`)
-    - `--failure-report ` : 合成失敗時にレポートを出力するオプション (`{utc_datetime}_ {recoding_id}_failure.json`)
+    - `--failure-report` : 合成失敗時にレポートを出力するオプション (`{utc_datetime}_ {recoding_id}_failure.json`)
   - 合成失敗レポートはコマンドライン引数の処理での失敗時には出力しない
   - レポートの対象は以下のようにする
     - 入力 (各ファイルごとに)
