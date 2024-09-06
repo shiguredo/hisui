@@ -11,6 +11,24 @@
 
 ## develop
 
+- [CHANGE] Lyra を Hisui から外し、 Lyra に関連するオプションやファイル、関数を削除する
+  - Lyra 関連のファイルを削除
+    - third_party/lyra を削除
+    - src/audio/lyra を削除
+  - Lyra 関連のビルド設定を削除
+    - build.yml から Lyra 関連の設定を削除
+    - build.bash から Lyra 関連の設定を削除
+    - Doockerfile から Lyra 関連の設定を削除
+  - `lyra_model_path` オプションを削除
+  - `LyraHandler` クラスを削除
+  - NOTICE から Lyra 関連の記述を削除
+  - Lyra のバージョン定義を削除
+  - ドキュメントから Lyra 関連の記述を削除
+  - @torikizi
+- [CHANGE] ビルド時に Bazel のインストールを行わないようにする
+  - Lyra のために Bazel を利用していたので、関連して削除
+  - @torikizi
+
 ## 2023.2.1
 
 - [FIX] docker image 生成を修正する
