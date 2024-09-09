@@ -11,6 +11,10 @@
 
 ## develop
 
+## 2024.1.0
+
+**リリース日**: 2024-09-09
+
 - [CHANGE] Lyra を Hisui から外し、 Lyra に関連するオプションやファイル、関数を削除する
   - Lyra 関連のファイルを削除
     - third_party/lyra を削除
