@@ -48,12 +48,6 @@ std::string get_onevpl_version() {
   return "2023.3.1";
 }
 
-std::string get_lyra_version() {
-  // コードから得るには third_party/lyra を変更する必要あり
-  // VERSION と合わせること
-  return "1.3.2";
-}
-
 #ifdef USE_FDK_AAC
 std::string get_fdkaac_aacenc_version() {
   ::LIB_INFO info[FDK_MODULE_LAST];

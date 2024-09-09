@@ -319,8 +319,6 @@ target_sources(hisui
     src/archive_item.cpp
     src/audio/basic_sequencer.cpp
     src/audio/buffer_opus_encoder.cpp
-    src/audio/lyra_decoder.cpp
-    src/audio/lyra_handler.cpp
     src/audio/mixer.cpp
     src/audio/opus.cpp
     src/audio/opus_decoder.cpp
@@ -459,7 +457,6 @@ target_include_directories(hisui
     third_party/libvpx/third_party/libwebm
     third_party/libvpx
     third_party/SVT-AV1/Source/API
-    third_party/lyra
     )
 
 set_target_properties(hisui PROPERTIES CXX_STANDARD 20 C_STANDARD 11)
@@ -475,7 +472,6 @@ target_link_libraries(hisui
     ${CMAKE_SOURCE_DIR}/third_party/libvpx/${HISUI_PACKAGE}/libvpx.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Dec.a
     ${CMAKE_SOURCE_DIR}/third_party/SVT-AV1/Bin/${SVT_AV1_BUILD_TYPE}/libSvtAv1Enc.a
-    ${CMAKE_SOURCE_DIR}/third_party/lyra/bazel-bin/liblyra.a
     )
 
 if(WITH_TEST)

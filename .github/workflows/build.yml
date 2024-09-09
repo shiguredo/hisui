@@ -2,6 +2,12 @@ name: build
 
 on:
   pull_request:
+    paths-ignore:
+      - 'doc/**'
+      - '**.md'
+      - 'THANKS'
+      - 'LICENSE'
+      - 'NOTICE'
   push:
     branches:
       - main
@@ -37,7 +43,7 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
         env:
             DEBIAN_FRONTEND: noninteractive
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Get vars
         shell: bash
         id: vars
@@ -93,13 +99,6 @@ jobs:
           restore-keys: ${{ matrix.os }}-ccache-dir-
       - name: Ccache stat
         run: ccache -s
-      - name: Cache ~/.cache/bazel directory
-        uses: actions/cache@v3
-        with:
-          path: "~/.cache/bazel"
-          key: ${{ matrix.os }}-cache-bazel-dir
-      - name: Install numpy
-        run: pip install numpy
       - name: Build hisui
         run: ./build.bash ${{ matrix.os }} --package --use-ccache ${{ contains(matrix.os, '_x86_64') && '--with-test' || '' }}
         timeout-minutes: 120
@@ -125,12 +124,6 @@ jobs:
         with:
           name: ${{ matrix.os }}-hisui-binary-${{ steps.vars.outputs.sha_short }}
           path: release/${{ matrix.os }}/hisui
-          if-no-files-found: error
-      - name: Upload Lyra model_coeffs with hash
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ matrix.os }}-lyra-model-coeffs
-          path: third_party/lyra/lyra/lyra/model_coeffs
           if-no-files-found: error
       - name: Upload tarball
         uses: actions/upload-artifact@v3
@@ -160,7 +153,7 @@ jobs:
       - build-linux
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Mkdir release
         shell: bash
         run: |
@@ -191,22 +184,6 @@ jobs:
           chmod 755 release/ubuntu-20.04_arm64/hisui
           chmod 755 release/ubuntu-22.04_x86_64/hisui
           chmod 755 release/ubuntu-22.04_arm64/hisui
-      - uses: actions/download-artifact@v3
-        with:
-          name: ubuntu-20.04_x86_64-lyra-model-coeffs
-          path: release/ubuntu-20.04_x86_64/lyra/model_coeffs
-      - uses: actions/download-artifact@v3
-        with:
-          name: ubuntu-20.04_arm64-lyra-model-coeffs
-          path: release/ubuntu-20.04_arm64/lyra/model_coeffs
-      - uses: actions/download-artifact@v3
-        with:
-          name: ubuntu-22.04_x86_64-lyra-model-coeffs
-          path: release/ubuntu-22.04_x86_64/lyra/model_coeffs
-      - uses: actions/download-artifact@v3
-        with:
-          name: ubuntu-22.04_arm64-lyra-model-coeffs
-          path: release/ubuntu-22.04_arm64/lyra/model_coeffs
       - name: Get Versions
         shell: bash
         id: versions
@@ -256,7 +233,7 @@ jobs:
       - build-linux
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/download
         with:
           platform: ubuntu-20.04_x86_64
