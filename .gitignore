@@ -1,6 +1,4 @@
 /third_party/libvpx
-/third_party/lyra/bazel-*
-/third_party/lyra/lyra
 /third_party/SVT-AV1
 /test/integration/input/caminandes3.webm
 /test/integration/input/lilac_blossom_bloom_spring.jpg

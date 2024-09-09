@@ -10,23 +10,16 @@ hisui をクローンします。
 git clone https://github.com/shiguredo/hisui.git
 ```
 
-必要なライブラリをインストールします。
-
-まず、Bazel をインストールする必要があります。
-Lyra のビルドには Bazel バージョン 5.3.2 を使用するため、Bazelisk をインストールしてください。
-
-https://bazel.build/install?hl=ja
-
 ### x86_64 ビルド時
 
 ```
-sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm libva-dev libdrm-dev python3-numpy g++
+sudo apt install cmake clang libc6-dev libstdc++-10-dev yasm libva-dev libdrm-dev g++
 ```
 
 ### Ubuntu 20.04 arm64 ビルド時
 
 ```
-sudo apt install cmake clang-12 binutils-aarch64-linux-gnu libc6-dev-arm64-cross libstdc++-10-dev-arm64-cross yasm python3-numpy g++ libva-dev libdrm-dev
+sudo apt install cmake clang-12 binutils-aarch64-linux-gnu libc6-dev-arm64-cross libstdc++-10-dev-arm64-cross yasm g++ libva-dev libdrm-dev
 
 sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 1
 sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-12 1
@@ -35,7 +28,7 @@ sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-12 
 ### Ubuntu 22.04 arm64 ビルド時
 
 ```
-sudo apt install cmake clang binutils-aarch64-linux-gnu libc6-dev-arm64-cross libstdc++-10-dev-arm64-cross yasm python3-numpy g++ libva-dev libdrm-dev
+sudo apt install cmake clang binutils-aarch64-linux-gnu libc6-dev-arm64-cross libstdc++-10-dev-arm64-cross yasm g++ libva-dev libdrm-dev
 ```
 
 ## ビルド

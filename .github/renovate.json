@@ -9,6 +9,5 @@
     "group:recommended",
     "group:allNonMajor",
     "schedule:weekly"
-  ],
-  "excludeCommitPaths": ["third_party/lyra/**"]
+  ]
 }

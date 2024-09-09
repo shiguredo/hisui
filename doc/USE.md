@@ -20,8 +20,6 @@ docker run -v /home/shiguredo/sora/archive:/hisui -it shiguredo/hisui:2023.2.1-u
   - docker 側のフォルダはどこでも良いですがここでは /hisui を利用しています
 - -f で合成したい recording.report が生成するファイルを指定して下さい
 
-Lyra のファイルを変換したい場合はオプションを指定せずそのままのコマンドで利用可能です。
-
 ## docker 経由で help を見る
 
 ```
@@ -52,7 +50,6 @@ Options:
   --h264-encoder              H264 encoder (OneVPL/OpenH264). default: OneVPL
   --show-progress-bar         Toggle to show progress bar. default: true
   --layout                    Layout Metadata File
-  --lyra-model-path           Path to directory containing Lyra TFLite files
 
 
 Experimental Options:

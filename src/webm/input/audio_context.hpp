@@ -10,7 +10,6 @@ namespace hisui::webm::input {
 enum struct AudioCodec {
   None,
   Opus,
-  Lyra,
 };
 
 class AudioContext : public Context {

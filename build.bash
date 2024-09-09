@@ -226,49 +226,6 @@ ${objcopy} --redefine-sym cpuinfo_x86_decode_vendor=local_cpuinfo_x86_decode_ven
 ${objcopy} --redefine-sym cpuinfo_x86_init_processor=local_cpuinfo_x86_init_processor third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
 ${objcopy} --redefine-sym cpuinfo_x86_detect_isa=local_cpuinfo_x86_detect_isa third_party/SVT-AV1/Bin/"${SVT_AV1_BUILD_TYPE}"/libSvtAv1Enc.a
 
-# Lyra
-cd third_party/lyra || exit 1
-
-if [ -d lyra ] ; then
-    cd lyra || exit 1
-    git checkout main 
-    git pull
-else
-    git clone --filter=tree:0 https://github.com/google/lyra.git
-    cd lyra || exit 1
-fi
-git checkout v"${LYRA_VERSION}"
-
-cd ..
-
-lyra_bazel_options=('-c')
-if [ "${BUILD_TYPE}" = "Debug" ]; then
-    lyra_bazel_options+=('dbg')
-elif [ "${BUILD_TYPE}" = "Release" ]; then
-    lyra_bazel_options+=('opt')
-fi
-
-case "$PACKAGE" in
-  *_x86_64 )
-      lyra_bazel_sysroot=''
-      ;;
-  *_arm64 )
-      lyra_bazel_options+=('--config=jetson')
-      lyra_bazel_sysroot='/usr/aarch64-linux-gnu'
-esac
-
-clang_raw_version=$(clang -v |& /usr/bin/grep version | rev | cut -d ' ' -f 1 | rev)
-clang_version=$(echo "$clang_raw_version" | cut -d '-' -f 1)
-llvm_version=$(echo "$clang_version" | cut -d '.' -f 1)
-
-BAZEL_SYSROOT=${lyra_bazel_sysroot} BAZEL_LLVM_DIR=/usr/lib/llvm-${llvm_version} CLANG_VERSION=${clang_version} USE_BAZEL_VERSION=5.4.1 bazelisk build "${lyra_bazel_options[@]}" :lyra || exit 1
-# chmod 755 bazel-bin/liblyra.a
-# objcopy --redefine-sym cpuinfo_is_initialized=local_cpuinfo_is_initialized bazel-bin/liblyra.a
-# objcopy --redefine-sym cpuinfo_initialize=local_cpuinfo_initialize bazel-bin/liblyra.a
-# objcopy --redefine-sym cpuinfo_deinitialize=local_cpuinfo_deinitialize bazel-bin/liblyra.a
-
-cd ../..
-
 if [ "${BUILD_TYPE}" = "Native" ]; then
     mkdir -p "native/$PACKAGE"
     cd "native/$PACKAGE" || exit 1
@@ -287,9 +244,7 @@ cmake --build .
 if [ $FLAG_PACKAGE -eq 1 ]; then 
     rm -rf "hisui-${HISUI_VERSION}"
     mkdir "hisui-${HISUI_VERSION}"
-    mkdir "hisui-${HISUI_VERSION}/lyra"
     cp hisui ../../LICENSE ../../NOTICE.md "hisui-${HISUI_VERSION}"
-    cp -r ../../third_party/lyra/lyra/lyra/model_coeffs "hisui-${HISUI_VERSION}/lyra"
     tar czvf "hisui-${HISUI_VERSION}_$PACKAGE.tar.gz" "hisui-${HISUI_VERSION}"
     rm -rf "hisui-${HISUI_VERSION}"
 fi
