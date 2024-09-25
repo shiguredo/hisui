@@ -3,6 +3,10 @@
 [![GitHub tag (latest SemVer)](https://img.shields.io/github/tag/shiguredo/hisui.svg)](https://github.com/shiguredo/hisui)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+**このライブラリはメンテナンスモードで、バグフィックスのみ対応します**
+
+現在 Rust 版の Hisui を開発中です。
+
 ## About Shiguredo's open source software
 
 We will not respond to PRs or issues that have not been discussed on Discord. Also, Discord is only available in Japanese.
@@ -155,7 +159,7 @@ Apache License 2.0
 
 ```
 Copyright 2020-2023, HARUYAMA Seigo (Original Author)
-Copyright 2020-2023, Shiguredo Inc.
+Copyright 2020-2024, Shiguredo Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
