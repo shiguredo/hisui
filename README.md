@@ -8,7 +8,7 @@
 # 新しい Hisui を開発中です
 
 - 2025 年の春に公開を予定しています
-- 2025 年の夏に正式版リリースを予定しています
+- 2025 年の夏にリリースを予定しています
 - ライセンスは [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0.html) として公開を予定しています
 
 # Recording Composition Tool Hisui
