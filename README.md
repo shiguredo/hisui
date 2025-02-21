@@ -1,16 +1,3 @@
-# レガシー版 Hisui
-
-新しい Hisui はレガシー版の Hisui と **互換性があります** 。
-新しい Hisui のリリースまではレガシー版の Hisui をお使いください。
-
-<https://github.com/shiguredo/hisui-legacy>
-
-# 新しい Hisui を開発中です
-
-- 2025 年の春に公開を予定しています
-- 2025 年の夏にリリースを予定しています
-- ライセンスは [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0.html) として公開を予定しています
-
 # Recording Composition Tool Hisui
 
 [![GitHub tag (latest SemVer)](https://img.shields.io/github/tag/shiguredo/hisui.svg)](https://github.com/shiguredo/hisui)
@@ -30,7 +17,7 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 
 Recording Composition Tool Hisui は WebRTC SFU Sora 向けの録画合成ツールです。
 
-Sora が出力した録画ファイル (MP4 または WebM)を合成し MP4 で出力するツールです。
+Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で出力するツールです。
 
 ## 特徴
 
@@ -41,20 +28,21 @@ Sora が出力した録画ファイル (MP4 または WebM)を合成し MP4 で�
 ### 新しい Hisui とレガシー版 Hisui の違い
 
 - Rust で実装されています
-- macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
 - macOS の Audio Toolbox を利用した AAC の音声エンコードに対応しています
-- MP4 メタデータに対応しています
-- 分割録画に対応しています
-- 入力形式が MP4 にも対応しています
+- macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
+- MP4 と WebM の入力形式に対応しています
+- 分割録画機能が出力するファイル形式に対応しています
 - 出力形式が MP4 形式のみです
   - WebM での出力形式は非対応です
-- AV1 のデコーダに rav1e を利用しています
+- AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
 - Intel VPL に非対応です
   - 将来的に対応予定です
 
+詳細は [hisui_legacy\.md](docs/hisui_legacy.md) をご覧ください。
+
 ## ファイル形式
 
-- Sora が生成した WebM ファイルに対応しています
+- Sora が生成した MP4 または WebM ファイルに対応しています
 - 出力ファイル形式は MP4 に対応しています
 
 ## デコーダー/エンコーダー
@@ -79,8 +67,8 @@ Sora が出力した録画ファイル (MP4 または WebM)を合成し MP4 で�
 - Ubuntu 24.04 arm64
 - Ubuntu 22.04 x86_64
 - Ubuntu 22.04 arm64
-- macOS 15.0 arm64
-- macOS 14.0 arm64
+- macOS 15 arm64
+- macOS 14 arm64
 
 ### macOS の対応バージョン
 
@@ -93,6 +81,10 @@ Sora が出力した録画ファイル (MP4 または WebM)を合成し MP4 で�
 ## 対応 Sora
 
 - WebRTC SFU Sora 2024.1 以降
+
+## ドキュメント
+
+Hisui の利用方法は [usage.md](docs/usage.md) をご確認ください。
 
 ## サポートについて
 
@@ -138,3 +130,10 @@ limitations under the License.
 ```text
 "OpenH264 Video Codec provided by Cisco Systems, Inc."
 ```
+
+## レガシー版 Hisui
+
+新しい Hisui はレガシー版の Hisui とほぼ互換性があります。
+レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
+
+<https://github.com/shiguredo/hisui-legacy>
