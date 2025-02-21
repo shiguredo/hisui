@@ -94,6 +94,22 @@ Sora が出力した録画ファイル (MP4 または WebM)を合成し MP4 で�
 
 - WebRTC SFU Sora 2024.1 以降
 
+## サポートについて
+
+### Discord
+
+- **サポートしません**
+- アドバイスします
+- フィードバック歓迎します
+
+最新の状況などは Discord で共有しています。質問や相談も Discord でのみ受け付けています。
+
+<https://discord.gg/shiguredo>
+
+### バグ報告
+
+Discord へお願いします。
+
 ## ライセンス
 
 Apache License 2.0
