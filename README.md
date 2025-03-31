@@ -86,6 +86,10 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 
 Hisui の利用方法は [usage.md](docs/usage.md) をご確認ください。
 
+## ビルド
+
+Hisui のビルド方法は [build.md](docs/build.md) をご確認ください。
+
 ## サポートについて
 
 ### Discord
@@ -100,7 +104,7 @@ Hisui の利用方法は [usage.md](docs/usage.md) をご確認ください。
 
 ### バグ報告
 
-Discord へお願いします。
+Discord の `#sora-tool-faq` チャンネルへお願いします。
 
 ## ライセンス
 
