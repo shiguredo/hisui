@@ -55,7 +55,6 @@ impl std::error::Error for Error {}
 /// Opus デコーダー
 #[derive(Debug)]
 pub struct Decoder {
-    #[cfg(not(feature = "docs-rs"))]
     inner: *mut sys::OpusDecoder,
     channels: u8,
     decode_buf: Vec<i16>,
@@ -123,7 +122,6 @@ impl Drop for Decoder {
 /// Opus エンコーダー
 #[derive(Debug)]
 pub struct Encoder {
-    #[cfg(not(feature = "docs-rs"))]
     inner: *mut sys::OpusEncoder,
     channels: u8,
     encode_buf: Vec<u8>,

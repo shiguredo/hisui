@@ -7,11 +7,6 @@ use std::{
 const LIB_NAME: &str = "opus";
 
 fn main() {
-    if cfg!(feature = "docs-rs") {
-        // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップする
-        return;
-    }
-
     // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed=build.rs");
@@ -25,6 +20,19 @@ fn main() {
     let output_bindings_path = out_dir.join("bindings.rs");
     let _ = std::fs::remove_dir_all(&out_build_dir);
     std::fs::create_dir(&out_build_dir).expect("failed to create build directory");
+
+    if std::env::var("DOCS_RS").is_ok() {
+        // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップして、
+        // 代わりに、ドキュメント生成時に最低限必要な構造体だけをダミーで出力している。
+        //
+        // See also: https://docs.rs/about/builds
+        std::fs::write(
+            output_bindings_path,
+            "pub struct OpusEncoder; pub struct OpusDecoder;",
+        )
+        .expect("write file error");
+        return;
+    }
 
     // 依存ライブラリのリポジトリを取得する
     git_clone_external_lib(&out_build_dir);
