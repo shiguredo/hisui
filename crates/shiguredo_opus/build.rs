@@ -7,6 +7,11 @@ use std::{
 const LIB_NAME: &str = "opus";
 
 fn main() {
+    if cfg!(feature = "docs-rs") {
+        // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップする
+        return;
+    }
+
     // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed=build.rs");

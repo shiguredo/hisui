@@ -10,6 +10,15 @@ repository = "https://github.com/shiguredo/hisui"
 readme = "README.md"
 build = "build.rs"
 
+[features]
+# Docs.rs 向けのビルド時に build.rs 内でネットワークアクセスが発生すると失敗してしまうので、
+# それに対処するためのフラグ。
+# 指定されている場合には build.rs での処理がスキップされる。
+docs-rs = []
+
+[package.metadata.docs.rs]
+features = ["docs-rs"]
+
 [dependencies]
 
 [build-dependencies]

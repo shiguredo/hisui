@@ -4,4 +4,6 @@
 #![allow(dead_code)]
 #![allow(clippy::all)]
 
+// Docs.rs 向けのビルドではバインディングファイルは生成されないので include もしない
+#[cfg(not(feature = "docs-rs"))]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
