@@ -1,0 +1,27 @@
+{
+  "audio_sources": [
+    "./archive-*.json"
+  ],
+  "video_layout": {
+    "main": {
+      "z_pos": 1,
+      "video_sources": [
+        "./archive-PDRAR1R3G108781B492Z4STJRC.json"
+      ]
+    },
+    "pip": {
+      "z_pos": 2,
+      "x_pos": 1000,
+      "y_pos": 30,
+      "width": 240,
+      "height": 180,
+      "video_sources": [
+        "./archive-WKGZ7ZKYP12BX7VNDFC2A4583C.json"
+      ]
+    }
+  },
+  "trim": true,
+  "format": "mp4",
+  "resolution": "1280x720",
+  "bitrate": 3000
+}

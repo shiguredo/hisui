@@ -1,0 +1,42 @@
+name: CI-macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "develop"
+      - "feature/**"
+
+jobs:
+  test:
+    runs-on:
+      group: Self
+      labels: [self-hosted, macOS, ARM64, Apple-M2-Pro]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 🍺 Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+      - run: cargo check --workspace
+      - run: cargo clippy --workspace
+      - run: cargo test --workspace --exclude shiguredo_openh264
+
+      - name: Slack Notification
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: hisui
+          SLACK_COLOR: danger
+          SLACK_ICON_EMOJI: ":japanese_ogre:"
+          SLACK_TITLE: "FAILED"
+          SLACK_MESSAGE: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{github.event.head_commit.message }}>
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

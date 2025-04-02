@@ -1,0 +1,22 @@
+[package]
+name = "shiguredo_libvpx"
+version = "2025.1.0-canary.0"
+edition = "2024"
+authors = ["Shiguredo Inc."]
+license = "Apache-2.0"
+description = "libvpx VP8 / VP9 decoders and encoders for Hisui"
+homepage = "https://github.com/shiguredo/hisui"
+repository = "https://github.com/shiguredo/hisui"
+readme = "README.md"
+build = "build.rs"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.71.1"
+toml = "0.8.20"
+
+# 以降は外部ライブラリビルド用のメタデータ
+# (この内容は build.rs の中からのみ参照される)
+[package.metadata.external-dependencies]
+libvpx = { git = "https://github.com/webmproject/libvpx.git", version = "v1.15.0" }

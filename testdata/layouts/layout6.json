@@ -1,0 +1,9 @@
+{
+  "audio_sources": [
+    "./archive-*.json"
+  ],
+  "resolution": "1920x1080",
+  "trim": true,
+  "format": "mp4",
+  "bitrate": 500
+}

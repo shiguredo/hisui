@@ -1,0 +1,24 @@
+{
+  "audio_sources": [],
+  "trim": false,
+  "resolution": "16x34",
+  "video_layout": {
+    "blue_and_green": {
+      "z_pos": 0,
+      "max_columns": 1,
+      "video_sources": [
+        "blue-noise.json",
+        "green-noise.json"
+      ]
+    },
+    "center_red": {
+      "z_pos": 1,
+      "y_pos": 8,
+      "width": 16,
+      "height": 20,
+      "video_sources": [
+        "red-noise.json"
+      ]
+    }
+  }
+}

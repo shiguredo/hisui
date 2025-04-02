@@ -1,0 +1,43 @@
+{
+  "audio_sources": [
+    "./archive-*.json"
+  ],
+  "audio_sources_excluded": [
+    "./archive-VJS82KB0JS02K33Z4GJC5CTFJG.json"
+  ],
+  "video_layout": {
+    "interviewed": {
+      "z_pos": 2,
+      "x_pos": 400,
+      "y_pos": 180,
+      "width": 480,
+      "height": 360,
+      "video_sources": [
+        "./archive-XRXEMCZWFN751DXWBX7Q22JTWM.json"
+      ]
+    },
+    "interviewers": {
+      "z_pos": 1,
+      "x_pos": 10,
+      "y_pos": 0,
+      "width": 1260,
+      "height": 720,
+      "max_rows": 3,
+      "max_columns": 3,
+      "cells_excluded": [
+        4
+      ],
+      "reuse": "show_newest",
+      "video_sources": [
+        "archive-*.json"
+      ],
+      "video_sources_excluded": [
+        "archive-XRXEMCZWFN751DXWBX7Q22JTWM.json"
+      ]
+    }
+  },
+  "trim": true,
+  "format": "mp4",
+  "resolution": "1280x720",
+  "bitrate": 3000
+}
