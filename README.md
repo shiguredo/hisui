@@ -55,11 +55,11 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 - [OpenH264](https://github.com/cisco/openh264) を利用した H.264 のデコード/エンコードに対応しています
 - [Apple Video Toolbox](https://developer.apple.com/documentation/videotoolbox) を利用したハードウェアアクセラレーターによる H.264 / H.265 のデコード/エンコードに対応しています
 
-### libfdk-aac-dev
+### FDK-AAC
 
-> [!IMPORTANT]  
-> Ubuntu を利用する場合、 libfdk-aac-dev を利用した AAC のエンコードに対応しています。
-> ただし、自前でビルドする必要があります。
+> [!IMPORTANT]
+> Ubuntu を利用する場合、 FDK-AAC を利用した AAC のエンコードに対応しています。
+> ただし、 `--features fdk-aac` を指定して Hisui を自前でビルドする必要があります。
 
 ## 動作環境
 
