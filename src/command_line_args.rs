@@ -186,7 +186,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
         let show_progress_bar = noargs::opt("show-progress-bar")
             .ty("true|false")
             .default("true")
-            .doc("`true` が指定された場合には合成の進捗を表示します")
+            .doc("true が指定された場合には合成の進捗を表示します")
             .take(&mut args)
             .parse()?;
         let verbose = noargs::flag("verbose")
