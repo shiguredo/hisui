@@ -122,12 +122,12 @@ jobs:
 
       - run: cargo build --features fdk-aac
       - run: ldd target/debug/hisui
-      - name: `--features fdk-aac` 指定時には FDK-AAC が動的リンクされていることを確認する
+      - name: '--features fdk-aac' 指定時には FDK-AAC が動的リンクされることを確認する
         run: ldd target/debug/hisui | grep fdk-aac
 
       - run: cargo build
       - run: ldd target/debug/hisui
-      - name: `--features fdk-aac` 未指定時には FDK-AAC がリンクされていないことを確認する
+      - name: '--features fdk-aac' 未指定時には FDK-AAC がリンクされないことを確認する
         run: ! ldd target/debug/hisui | grep -q fdk-aac
 
   test-openh264:
