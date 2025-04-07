@@ -5,22 +5,29 @@ use std::{
 };
 
 use orfail::OrFail;
-use serde::{Deserialize, Serialize};
 
 /// Sora の report-*.json から必要な情報のみを取り出した構造体
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RecordingMetadata {
-    #[serde(default)]
+    // TDOO: #[serde(default)]
     pub split_only: bool,
 
     pub archives: Vec<ArchiveEntry>,
 }
 
+impl<'text> nojson::FromRawJsonValue<'text> for RecordingMetadata {
+    fn from_raw_json_value(
+        _value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        todo!()
+    }
+}
+
 impl RecordingMetadata {
     pub fn from_file<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
-        let file = std::fs::File::open(&path)
+        let text = std::fs::read_to_string(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-        serde_json::from_reader(file).or_fail()
+        text.parse().map(|nojson::Json(v)| v).or_fail()
     }
 
     pub fn archive_metadata_paths(&self) -> orfail::Result<Vec<PathBuf>> {
@@ -48,19 +55,19 @@ impl RecordingMetadata {
 }
 
 /// Sora の report-*.json の archives 配列の要素に対応する構造体（必要な情報のみ）
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ArchiveEntry {
     pub connection_id: String,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     pub split_last_index: Option<String>,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     pub metadata_filename: Option<PathBuf>,
 }
 
 /// Sora の archive-*.json から必要な情報のみを取り出した構造体
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ArchiveMetadata {
     pub connection_id: String,
     pub format: ContainerFormat,
@@ -70,11 +77,19 @@ pub struct ArchiveMetadata {
     pub stop_time_offset: u64,
 }
 
+impl<'text> nojson::FromRawJsonValue<'text> for ArchiveMetadata {
+    fn from_raw_json_value(
+        _value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        todo!()
+    }
+}
+
 impl ArchiveMetadata {
     pub fn from_file<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
-        let file = std::fs::File::open(&path)
+        let text = std::fs::read_to_string(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-        Ok(serde_json::from_reader(file).or_fail()?)
+        text.parse().map(|nojson::Json(v)| v).or_fail()
     }
 
     pub fn source_id(&self) -> SourceId {
@@ -93,8 +108,8 @@ impl ArchiveMetadata {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-#[serde(into = "String")]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+// TODO: #[serde(into = "String")]
 pub struct SourceId(Arc<String>);
 
 impl SourceId {
@@ -119,8 +134,8 @@ pub struct SourceInfo {
     pub stop_timestamp: Duration,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+// TODO: #[serde(rename_all = "snake_case")]
 pub enum ContainerFormat {
     #[default]
     Webm,

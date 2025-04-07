@@ -152,8 +152,14 @@ impl Runner {
         AudioEncoder::update_codec_engines(&mut codec_engines);
         VideoEncoder::update_codec_engines(&mut codec_engines, options);
 
-        serde_json::to_writer_pretty(std::io::stdout(), &codec_engines).or_fail()?;
-        println!();
+        println!(
+            "{}",
+            nojson::json(|f| {
+                f.set_indent_size(2);
+                f.set_spacing(true);
+                f.value(&codec_engines)
+            })
+        );
 
         Ok(())
     }
@@ -312,22 +318,20 @@ impl Runner {
                 .push(WriterStats::Mp4(mp4_writer.stats().clone()));
         });
         stats.with_lock(|stats| {
-            log::debug!(
-                "stats: {}",
-                serde_json::to_string(stats).unwrap_or_default()
-            );
+            // TODO: nojson-0.1.1 では `&*` を外す（&mut を受け取れるようにする）
+            log::debug!("stats: {}", nojson::Json(&*stats));
 
             if let Some(path) = &self.args.out_stats_file {
                 // 統計が出力できなくても全体を失敗扱いにはしない
 
-                let json = match serde_json::to_string_pretty(stats) {
-                    Err(e) => {
-                        log::warn!("failed to serialize stats: {e}");
-                        return;
-                    }
-                    Ok(json) => json,
-                };
+                let json = nojson::json(|f| {
+                    f.set_indent_size(2);
+                    f.set_spacing(true);
 
+                    // TODO: nojson-0.1.1 では `&*` を外す（&mut を受け取れるようにする）
+                    f.value(&*stats)
+                })
+                .to_string();
                 if let Err(e) = std::fs::write(path, json) {
                     log::warn!(
                         "failed to write stats JSON: path={}, reason={e}",

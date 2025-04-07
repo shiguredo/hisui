@@ -5,7 +5,6 @@ use std::{
 };
 
 use orfail::OrFail;
-use serde::Deserialize;
 
 use crate::{
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
@@ -44,7 +43,7 @@ impl Layout {
         fps: FrameRate,
     ) -> orfail::Result<Self> {
         let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
-        let raw: RawLayout = serde_json::from_str(json).or_fail()?;
+        let raw: RawLayout = json.parse().map(|nojson::Json(v)| v).or_fail()?;
         raw.into_layout(base_path, fps).or_fail()
     }
 
@@ -79,23 +78,45 @@ impl Layout {
             .into_iter()
             .map(|path| path.file_name().or_fail().map(PathBuf::from))
             .collect::<orfail::Result<Vec<_>>>()?;
-        let video_layout = if audio_only {
-            serde_json::json!({})
-        } else {
-            serde_json::json!({
-                "grid": {
-                    "video_sources": source_paths,
-                    "max_columns": max_columns,
+        let video_layout = nojson::json(|f| {
+            f.object(|f| {
+                if audio_only {
+                    return Ok(());
                 }
+                f.member(
+                    "grid",
+                    nojson::json(|f| {
+                        f.object(|f| {
+                            // TODO: nojson-v0.1.1 では削除する
+                            let source_paths = source_paths
+                                .iter()
+                                .map(|p| p.display().to_string())
+                                .collect::<Vec<_>>();
+                            f.member("video_sources", source_paths)?;
+                            f.member("max_columns", max_columns)
+                        })
+                    }),
+                )
             })
-        };
-        let layout_json = serde_json::json!({
-            "trim": false,
-            "audio_sources": source_paths,
-            "video_layout": video_layout,
-            "resolution": format!("{width}x{height}"),
         });
-        let raw: RawLayout = serde_json::from_value(layout_json).or_fail()?;
+
+        let layout_json = nojson::json(|f| {
+            f.object(|f| {
+                // TODO: nojson-v0.1.1 では削除する
+                let source_paths = source_paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>();
+                f.member("audio_sources", source_paths)?;
+                f.member("video_layout", &video_layout)?;
+                f.member("resolution", format!("{width}x{height}"))
+            })
+        });
+        let raw: RawLayout = layout_json
+            .to_string()
+            .parse()
+            .map(|nojson::Json(v)| v)
+            .or_fail()?;
         raw.into_layout(base_path, fps).or_fail()
     }
 
@@ -142,23 +163,31 @@ impl Layout {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RawLayout {
     audio_sources: Vec<PathBuf>,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     audio_sources_excluded: Vec<PathBuf>,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     video_layout: BTreeMap<String, RawRegion>,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     trim: bool,
 
     resolution: Resolution,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     bitrate: usize,
+}
+
+impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
+    fn from_raw_json_value(
+        _value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        todo!()
+    }
 }
 
 impl RawLayout {
@@ -312,38 +341,38 @@ impl Region {
 }
 
 /// 映像リージョン
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RawRegion {
-    #[serde(default)]
+    // TODO: #[serde(default)]
     cells_excluded: Vec<usize>,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     height: usize,
 
-    #[serde(default)]
+    // TDOO: #[serde(default)]
     max_columns: usize,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     max_rows: usize,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     reuse: ReuseKind,
 
     video_sources: Vec<PathBuf>,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     video_sources_excluded: Vec<PathBuf>,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     width: usize,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     x_pos: usize,
 
-    #[serde(default)]
+    // TDOO: #[serde(default)]
     y_pos: usize,
 
-    #[serde(default)]
+    // TODO: #[serde(default)]
     z_pos: isize,
 }
 
@@ -518,8 +547,8 @@ enum Cell {
 }
 
 /// 各セルの再利用方法
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+// TODO: #[serde(rename_all = "snake_case")]
 pub enum ReuseKind {
     /// 再利用しない
     None,
@@ -533,8 +562,8 @@ pub enum ReuseKind {
 }
 
 /// 映像の解像度
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "String")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// TODO: #[serde(try_from = "String")]
 pub struct Resolution {
     width: EvenUsize,
     height: EvenUsize,

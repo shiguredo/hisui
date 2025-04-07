@@ -4,11 +4,9 @@ use std::{
     str::FromStr,
 };
 
-use serde::{Deserialize, Serialize};
-
 /// コーデック名
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+// TODO: #[serde(rename_all = "UPPERCASE")]
 pub enum CodecName {
     // Audio
     Aac,
@@ -74,8 +72,8 @@ impl FromStr for CodecName {
 }
 
 /// エンジン名
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+// TODO: #[serde(rename_all = "snake_case")]
 pub enum EngineName {
     AudioToobox,
     Dav1d,
@@ -177,7 +175,7 @@ impl std::ops::Mul<usize> for EvenUsize {
     }
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default)]
 pub struct CodecEngines(BTreeMap<CodecName, Engines>);
 
 impl CodecEngines {
@@ -190,7 +188,13 @@ impl CodecEngines {
     }
 }
 
-#[derive(Debug, Default, Serialize)]
+impl nojson::DisplayJson for CodecEngines {
+    fn fmt(&self, _f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct Engines {
     pub encoders: BTreeSet<EngineName>,
     pub decoders: BTreeSet<EngineName>,

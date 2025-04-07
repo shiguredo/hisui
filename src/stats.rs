@@ -39,7 +39,7 @@ impl SharedStats {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct Stats {
     /// 全体の合成に要した実時間
     pub elapsed_seconds: Seconds,
@@ -60,8 +60,14 @@ pub struct Stats {
     pub writers: Vec<WriterStats>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(into = "f32")]
+impl nojson::DisplayJson for Stats {
+    fn fmt(&self, _f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+// TODO: #[serde(into = "f32")]
 pub struct Seconds(Duration);
 
 impl Seconds {
@@ -110,15 +116,15 @@ impl From<Seconds> for f32 {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone)]
+// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MixerStats {
     Audio(AudioMixerStats),
     Video(VideoMixerStats),
 }
 
 /// `AudioMixer` 用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct AudioMixerStats {
     /// ミキサーの入力 `AudioData` の数
     pub total_input_audio_data_count: u64,
@@ -146,7 +152,7 @@ pub struct AudioMixerStats {
 }
 
 /// `VideoMixer` 用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct VideoMixerStats {
     /// 合成後の映像の解像度
     pub output_video_resolution: VideoResolution,
@@ -171,15 +177,15 @@ pub struct VideoMixerStats {
 }
 
 /// エンコーダー関連の統計情報
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone)]
+// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EncoderStats {
     Audio(AudioEncoderStats),
     Video(VideoEncoderStats),
 }
 
 /// 音声エンコーダー用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct AudioEncoderStats {
     /// エンコーダーの種類
     pub engine: Option<EngineName>,
@@ -198,7 +204,7 @@ pub struct AudioEncoderStats {
 }
 
 /// 映像エンコーダー用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct VideoEncoderStats {
     /// エンコーダーの種類
     pub engine: Option<EngineName>,
@@ -220,15 +226,15 @@ pub struct VideoEncoderStats {
 }
 
 /// デコーダー関連の統計情報
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone)]
+// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DecoderStats {
     Audio(AudioDecoderStats),
     Video(VideoDecoderStats),
 }
 
 /// 音声デコーダー用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct AudioDecoderStats {
     /// 入力ソースの ID
     pub source_id: Option<SourceId>,
@@ -250,7 +256,7 @@ pub struct AudioDecoderStats {
 }
 
 /// 映像デコーダー用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct VideoDecoderStats {
     /// 入力ソースの ID
     pub source_id: Option<SourceId>,
@@ -278,8 +284,8 @@ pub struct VideoDecoderStats {
 }
 
 /// 入力関連の統計情報
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone)]
+// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReaderStats {
     WebmAudio(WebmAudioReaderStats),
     WebmVideo(WebmVideoReaderStats),
@@ -288,7 +294,7 @@ pub enum ReaderStats {
 }
 
 /// `Mp4AudioReader` 用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct Mp4AudioReaderStats {
     /// 入力ファイルのパス
     pub input_file: PathBuf,
@@ -310,7 +316,7 @@ pub struct Mp4AudioReaderStats {
 }
 
 /// `Mp4VideoReader` 用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct Mp4VideoReaderStats {
     /// 入力ファイルのパス
     pub input_file: PathBuf,
@@ -335,7 +341,7 @@ pub struct Mp4VideoReaderStats {
 }
 
 /// `WebmAudioReader` 用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct WebmAudioReaderStats {
     /// 入力ファイルのパス
     pub input_file: PathBuf,
@@ -360,7 +366,7 @@ pub struct WebmAudioReaderStats {
 }
 
 /// `WebmVideoReader` 用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct WebmVideoReaderStats {
     /// 入力ファイルのパス
     pub input_file: PathBuf,
@@ -385,14 +391,14 @@ pub struct WebmVideoReaderStats {
 }
 
 /// 出力用のの統計情報
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone)]
+// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WriterStats {
     Mp4(Mp4WriterStats),
 }
 
 /// `Mp4Writer` 用の統計情報
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct Mp4WriterStats {
     /// 音声コーデック
     pub audio_codec: Option<CodecName>,
@@ -428,8 +434,8 @@ pub struct Mp4WriterStats {
     pub total_processing_seconds: Seconds,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
-#[serde(into = "String")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+// TODO: #[serde(into = "String")]
 pub struct VideoResolution {
     pub width: usize,
     pub height: usize,
