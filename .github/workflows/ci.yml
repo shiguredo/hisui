@@ -36,7 +36,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo check --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
 
   clippy:
     runs-on: ubuntu-24.04
@@ -63,7 +63,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo clippy --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
 
   test:
     runs-on: ubuntu-24.04
@@ -90,7 +90,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo test --workspace --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
@@ -165,7 +165,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake valgrind
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake valgrind libfdk-aac-dev
       - name: Cache cargo
         uses: actions/cache@v4
         with:
