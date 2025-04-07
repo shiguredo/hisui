@@ -49,6 +49,8 @@ $ sudo apt-get install -y libfdk-aac-dev
 $ cargo install hisui@2025.1.0-canary.0 --features fdk-aac
 ```
 
+なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。
+
 ## ビルド結果の確認方法
 
 `hisui -h` を実行してみてください。
