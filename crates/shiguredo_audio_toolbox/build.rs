@@ -16,7 +16,12 @@ fn main() {
         // See also: https://docs.rs/about/builds
         std::fs::write(
             output_bindings_path,
-            "", //"pub struct OpusEncoder; pub struct OpusDecoder;",
+            concat!(
+                "pub type Float64 = f64;",
+                "pub struct AudioConverterRef;",
+                "pub struct AudioBufferList;",
+                "pub struct AudioStreamPacketDescription;",
+            ),
         )
         .expect("write file error");
         return;
