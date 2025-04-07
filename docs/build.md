@@ -15,7 +15,7 @@ $ sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf a
 macOS の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
 ```
-$ sudo brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+$ brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
 ```
 
 ## Hisui 本体のビルド方法
