@@ -117,7 +117,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo test --package shigudo_fdk_aac
+      - run: cargo test --package shiguredo_fdk_aac
       - run: cargo test --features fdk-aac
       - run: cargo build --features fdk-aac
       - run: ldd target/debug/hisui
