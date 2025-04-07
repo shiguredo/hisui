@@ -212,7 +212,7 @@ jobs:
     steps:
       # docs.rs 向けでは外部ライブラリのビルドは走らないので依存パッケージなどのインストールは不要
       - uses: actions/checkout@v4
-      - run: cargo doc --workspace --features fdk-aac --exclude hisui
+      - run: cargo doc --workspace --exclude hisui
 
   slack_notify_failed:
     needs: [check, clippy, test, test-fdk-aac, test-openh264, valgrind, docs_rs]
