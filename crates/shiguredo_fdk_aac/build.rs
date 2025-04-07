@@ -15,6 +15,19 @@ fn main() {
     let _ = std::fs::remove_dir_all(&out_build_dir);
     std::fs::create_dir(&out_build_dir).expect("failed to create build directory");
 
+    if std::env::var("DOCS_RS").is_ok() {
+        // Docs.rs 向けのビルドではシステムの FDK-AAC が参照できないので build.rs の処理はスキップして、
+        // 代わりに、ドキュメント生成時に最低限必要な定義だけをダミーで出力している。
+        //
+        // See also: https://docs.rs/about/builds
+        std::fs::write(
+            output_bindings_path,
+            concat!("pub struct AACENC_ERROR;", "pub struct HANDLE_AACENCODER;",),
+        )
+        .expect("write file error");
+        return;
+    }
+
     // バインディングを生成する
     bindgen::Builder::default()
         .header("/usr/include/fdk-aac/aacenc_lib.h")
