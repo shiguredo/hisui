@@ -4,10 +4,7 @@
 //! [SVT-AV1]: https://gitlab.com/AOMediaCodec/SVT-AV1
 #![warn(missing_docs)]
 
-use std::{
-    mem::MaybeUninit,
-    sync::{LazyLock, Mutex},
-};
+use std::{mem::MaybeUninit, sync::Mutex};
 
 mod sys;
 
@@ -16,7 +13,7 @@ const ENV_VALUE_SVT_LOG_LEVEL: &'static str = "1"; // 1 は error (必要に応�
 
 // SVT-AV1 のエンコーダー初期化処理を複数スレッドで同時に実行すると
 // 大量のエラーログが出力されることがあるのでロックを使用している
-static GLOBAL_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static GLOBAL_LOCK: Mutex<()> = Mutex::new(());
 
 /// エラー
 #[derive(Debug)]
