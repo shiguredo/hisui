@@ -204,6 +204,16 @@ jobs:
       - run: cargo install cargo-valgrind || echo 'already installed'
       - run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
 
+  docs_rs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DOCS_RS: 1
+    steps:
+      # docs.rs 向けでは外部ライブラリのビルドは走らないので依存パッケージなどのインストールは不要
+      - uses: actions/checkout@v4
+      - run: cargo doc --workspace --features fdk-aac
+
   slack_notify_failed:
     needs: [check, clippy, test, test-fdk-aac, test-openh264, valgrind]
     timeout-minutes: 20
