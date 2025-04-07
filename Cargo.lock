@@ -558,7 +558,6 @@ name = "shiguredo_fdk_aac"
 version = "2025.1.0-canary.0"
 dependencies = [
  "bindgen",
- "toml",
 ]
 
 [[package]]

@@ -60,7 +60,7 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 
 > [!IMPORTANT]
 > Ubuntu を利用する場合、 FDK-AAC を利用した AAC のエンコードに対応しています。
-> ただし、 `--features fdk-aac` を指定して Hisui を自前でビルドする必要があります。
+> ただし、 `libfdk-aac-dev` パッケージをシステムにインストールした上で、 `--features fdk-aac` を指定して Hisui を自前でビルドする必要があります。
 
 ## 動作環境
 
