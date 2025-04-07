@@ -119,6 +119,7 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
       - run: cargo test --features fdk-aac
       - run: cargo build
+      - run: ldd target/debug/hisui
       - name: FDK-AAC が動的リンクされていることを確認する
         run: ldd target/debug/hisui | grep fdk-aac
 
