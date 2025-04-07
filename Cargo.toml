@@ -13,7 +13,6 @@ readme = "README.md"
 fdk-aac = ["shiguredo_fdk_aac"]
 
 [dependencies]
-env_logger = { version = "0.11.6", default-features = false, features = ["auto-color", "color", "humantime"] }
 indicatif = "0.17.9"
 libc = "0.2.171"
 log = "0.4.25"
