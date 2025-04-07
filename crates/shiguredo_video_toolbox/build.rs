@@ -9,6 +9,32 @@ fn main() {
     let out_include_dir = out_dir.join("include/");
     let output_bindings_path = out_dir.join("bindings.rs");
 
+    if std::env::var("DOCS_RS").is_ok() {
+        // Docs.rs 向けのビルドでは Video Toolbox は参照できないので build.rs の処理はスキップして、
+        // 代わりに、ドキュメント生成時に最低限必要な定義だけをダミーで出力している。
+        //
+        // See also: https://docs.rs/about/builds
+        std::fs::write(
+            output_bindings_path,
+            concat!(
+                "pub struct CFDictionaryRef;",
+                "pub struct CFStringRef;",
+                "pub struct __CVBuffer;",
+                "pub struct CMTime;",
+                "pub struct CVImageBufferRef;",
+                "pub struct VTDecodeInfoFlags;",
+                "pub struct VTDecompressionSessionRef;",
+                "pub struct CMVideoFormatDescriptionRef;",
+                "pub struct CMSampleBufferRef;",
+                "pub struct VTEncodeInfoFlags;",
+                "pub struct VTCompressionSessionRef;",
+                "pub struct VTCompressionSessionCreate;",
+            ),
+        )
+        .expect("write file error");
+        return;
+    }
+
     let _ = std::fs::remove_dir_all(&out_include_dir);
     std::fs::create_dir(&out_include_dir).expect("failed to create include directory");
 
