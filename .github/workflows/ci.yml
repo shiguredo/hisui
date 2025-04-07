@@ -118,6 +118,9 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
       - run: cargo test --features fdk-aac
+      - run: cargo build
+      - name: FDK-AAC が動的リンクされていることを確認する
+        run: ldd target/debug/hisui | grep fdk-aac
 
   test-openh264:
     runs-on: ubuntu-24.04
