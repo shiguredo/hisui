@@ -38,7 +38,7 @@ impl Args {
 
         // Hisui がサポートしている引数を処理する
         noargs::HELP_FLAG
-            .doc("このヘルプメッセージを表示します")
+            .doc("このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)")
             .take_help(&mut args);
         let version = noargs::VERSION_FLAG
             .doc("バージョン番号を表示します")
