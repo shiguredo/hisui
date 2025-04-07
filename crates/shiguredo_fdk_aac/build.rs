@@ -23,5 +23,5 @@ fn main() {
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    println!("cargo::rustc-link-lib={LIB_NAME}");
+    println!("cargo::rustc-link-lib=dylib={LIB_NAME}");
 }
