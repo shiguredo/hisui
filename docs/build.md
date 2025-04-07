@@ -2,10 +2,20 @@
 
 ## ビルドに必要な依存パッケージのインストール
 
+### Ubuntu の場合
+
 Ubuntu の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
 ```
 $ sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+```
+
+### macOS の場合
+
+macOS の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
+
+```
+$ sudo brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
 ```
 
 ## Hisui 本体のビルド方法
@@ -25,9 +35,17 @@ $ cd hisui/
 $ cargo install --path .
 ```
 
-FDK-AAC を使った AAC エンコードを行う場合には `--features fdk-aac` の指定が必要になります。
+上のいずれかの方法でビルドした hisui のバイナリは
+`$HOME/.cargo/bin/hisui` のようなディレクトリに配置されます。
+アンインストールする場合には `$ cargo uninstall hisui` を実行してください。
+
+### FDK-AAC を使った AAC エンコードを有効にする場合
+
+Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
+`--features fdk-aac` を指定して Hisui をビルドする必要があります。
 
 ```console
+$ sudo apt-get install -y libfdk-aac-dev
 $ cargo install hisui@2025.1.0-canary.0 --features fdk-aac
 ```
 
