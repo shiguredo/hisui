@@ -189,8 +189,14 @@ impl CodecEngines {
 }
 
 impl nojson::DisplayJson for CodecEngines {
-    fn fmt(&self, _f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.members(
+                self.0
+                    .iter()
+                    .map(|(name, engines)| (name.as_str(), engines)),
+            )
+        })
     }
 }
 
@@ -198,4 +204,19 @@ impl nojson::DisplayJson for CodecEngines {
 pub struct Engines {
     pub encoders: BTreeSet<EngineName>,
     pub decoders: BTreeSet<EngineName>,
+}
+
+impl nojson::DisplayJson for Engines {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member(
+                "encoders",
+                nojson::json(|f| f.array(|f| f.elements(self.encoders.iter().map(|x| x.as_str())))),
+            )?;
+            f.member(
+                "decoders",
+                nojson::json(|f| f.array(|f| f.elements(self.decoders.iter().map(|x| x.as_str())))),
+            )
+        })
+    }
 }

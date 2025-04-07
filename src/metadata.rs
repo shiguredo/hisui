@@ -9,17 +9,19 @@ use orfail::OrFail;
 /// Sora の report-*.json から必要な情報のみを取り出した構造体
 #[derive(Debug, Clone)]
 pub struct RecordingMetadata {
-    // TDOO: #[serde(default)]
     pub split_only: bool,
-
     pub archives: Vec<ArchiveEntry>,
 }
 
 impl<'text> nojson::FromRawJsonValue<'text> for RecordingMetadata {
     fn from_raw_json_value(
-        _value: nojson::RawJsonValue<'text, '_>,
+        value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        todo!()
+        let ([split_only, archives], []) = value.to_fixed_object(["split_only", "archives"], [])?;
+        Ok(Self {
+            split_only: split_only.try_to()?,
+            archives: archives.try_to()?,
+        })
     }
 }
 
@@ -58,12 +60,25 @@ impl RecordingMetadata {
 #[derive(Debug, Clone)]
 pub struct ArchiveEntry {
     pub connection_id: String,
-
-    // TODO: #[serde(default)]
     pub split_last_index: Option<String>,
-
-    // TODO: #[serde(default)]
     pub metadata_filename: Option<PathBuf>,
+}
+
+impl<'text> nojson::FromRawJsonValue<'text> for ArchiveEntry {
+    fn from_raw_json_value(
+        value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let ([connection_id], [split_last_index, metadata_filename]) =
+            value.to_fixed_object(["connection_id"], ["split_last_index", "metadata_filename"])?;
+        Ok(Self {
+            connection_id: connection_id.try_to()?,
+            split_last_index: split_last_index.map(|v| v.try_to()).transpose()?,
+            // TODO: nojson-0.1.1 で簡略化
+            metadata_filename: metadata_filename
+                .map(|v| Ok(PathBuf::from(v.try_to::<String>()?)))
+                .transpose()?,
+        })
+    }
 }
 
 /// Sora の archive-*.json から必要な情報のみを取り出した構造体
@@ -79,9 +94,28 @@ pub struct ArchiveMetadata {
 
 impl<'text> nojson::FromRawJsonValue<'text> for ArchiveMetadata {
     fn from_raw_json_value(
-        _value: nojson::RawJsonValue<'text, '_>,
+        value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        todo!()
+        let ([connection_id, format, audio, video, start_time_offset, stop_time_offset], []) =
+            value.to_fixed_object(
+                [
+                    "connection_id",
+                    "format",
+                    "audio",
+                    "video",
+                    "start_time_offset",
+                    "stop_time_offset",
+                ],
+                [],
+            )?;
+        Ok(Self {
+            connection_id: connection_id.try_to()?,
+            format: format.try_to()?,
+            audio: audio.try_to()?,
+            video: video.try_to()?,
+            start_time_offset: start_time_offset.try_to()?,
+            stop_time_offset: stop_time_offset.try_to()?,
+        })
     }
 }
 
@@ -135,9 +169,23 @@ pub struct SourceInfo {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-// TODO: #[serde(rename_all = "snake_case")]
 pub enum ContainerFormat {
     #[default]
     Webm,
     Mp4,
+}
+
+impl<'text> nojson::FromRawJsonValue<'text> for ContainerFormat {
+    fn from_raw_json_value(
+        value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        match value.to_unquoted_string_str()?.as_ref() {
+            "webm" => Ok(Self::Webm),
+            "mp4" => Ok(Self::Mp4),
+            v => Err(nojson::JsonParseError::invalid_value(
+                value,
+                format!("unknown container format: {v}"),
+            )),
+        }
+    }
 }
