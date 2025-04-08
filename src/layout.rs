@@ -156,27 +156,36 @@ impl Layout {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RawLayout {
     audio_sources: Vec<PathBuf>,
-
-    // TODO: #[serde(default)]
     audio_sources_excluded: Vec<PathBuf>,
-
-    // TODO: #[serde(default)]
     video_layout: BTreeMap<String, RawRegion>,
-
-    // TODO: #[serde(default)]
     trim: bool,
-
     resolution: Resolution,
-
-    // TODO: #[serde(default)]
     bitrate: usize,
 }
 
 impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
     fn from_raw_json_value(
-        _value: nojson::RawJsonValue<'text, '_>,
+        value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        todo!()
+        let ([audio_sources, resolution], [audio_sources_excluded, video_layout, trim, bitrate]) =
+            value.to_fixed_object(
+                ["audio_sources", "resolution"],
+                ["audio_sources_excluded", "video_layout", "trim", "bitrate"],
+            )?;
+        Ok(Self {
+            audio_sources: audio_sources.try_to()?,
+            audio_sources_excluded: audio_sources_excluded
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            video_layout: video_layout
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            trim: trim.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            resolution: resolution.try_to()?,
+            bitrate: bitrate.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+        })
     }
 }
 
@@ -333,37 +342,67 @@ impl Region {
 /// 映像リージョン
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RawRegion {
-    // TODO: #[serde(default)]
     cells_excluded: Vec<usize>,
-
-    // TODO: #[serde(default)]
     height: usize,
-
-    // TDOO: #[serde(default)]
     max_columns: usize,
-
-    // TODO: #[serde(default)]
     max_rows: usize,
-
-    // TODO: #[serde(default)]
     reuse: ReuseKind,
-
     video_sources: Vec<PathBuf>,
-
-    // TODO: #[serde(default)]
     video_sources_excluded: Vec<PathBuf>,
-
-    // TODO: #[serde(default)]
     width: usize,
-
-    // TODO: #[serde(default)]
     x_pos: usize,
-
-    // TDOO: #[serde(default)]
     y_pos: usize,
-
-    // TODO: #[serde(default)]
     z_pos: isize,
+}
+
+impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
+    fn from_raw_json_value(
+        value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let (
+            [video_sources],
+            [cells_excluded, height, max_columns, max_rows, reuse, video_sources_excluded, width, x_pos, y_pos, z_pos],
+        ) = value.to_fixed_object(
+            ["video_sources"],
+            [
+                "cells_excluded",
+                "height",
+                "max_columns",
+                "max_rows",
+                "reuse",
+                "video_sources_excluded",
+                "width",
+                "x_pos",
+                "y_pos",
+                "z_pos",
+            ],
+        )?;
+        Ok(Self {
+            video_sources: video_sources.try_to()?,
+            cells_excluded: cells_excluded
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            height: height.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            max_columns: max_columns
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            max_rows: max_rows
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            reuse: reuse.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            video_sources_excluded: video_sources_excluded
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            width: width.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            x_pos: x_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            y_pos: y_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            z_pos: z_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+        })
+    }
 }
 
 impl RawRegion {
@@ -538,7 +577,6 @@ enum Cell {
 
 /// 各セルの再利用方法
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-// TODO: #[serde(rename_all = "snake_case")]
 pub enum ReuseKind {
     /// 再利用しない
     None,
@@ -551,9 +589,24 @@ pub enum ReuseKind {
     ShowNewest,
 }
 
+impl<'text> nojson::FromRawJsonValue<'text> for ReuseKind {
+    fn from_raw_json_value(
+        value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        match value.to_unquoted_string_str()?.as_ref() {
+            "none" => Ok(Self::None),
+            "show_oldest" => Ok(Self::ShowOldest),
+            "show_newest" => Ok(Self::ShowNewest),
+            v => Err(nojson::JsonParseError::invalid_value(
+                value,
+                format!("unknown reuse kind: {v}"),
+            )),
+        }
+    }
+}
+
 /// 映像の解像度
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// TODO: #[serde(try_from = "String")]
 pub struct Resolution {
     width: EvenUsize,
     height: EvenUsize,
@@ -600,25 +653,26 @@ impl Resolution {
     }
 }
 
-impl TryFrom<String> for Resolution {
-    type Error = String;
+impl<'text> nojson::FromRawJsonValue<'text> for Resolution {
+    fn from_raw_json_value(
+        value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let error = || format!("invalid resolution: {value}");
-        if !value.contains('x') {
-            return Err(error());
-        }
+        let Some((Ok(width), Ok(height))) = s.split_once('x').map(|(w, h)| (w.parse(), h.parse()))
+        else {
+            return Err(nojson::JsonParseError::invalid_value(
+                value,
+                format!("invalid resolution: {s}"),
+            ));
+        };
 
-        let mut tokens = value.splitn(2, 'x');
-        let width = tokens
-            .next()
-            .and_then(|s| s.parse::<usize>().ok())
-            .ok_or_else(error)?;
-        let height = tokens
-            .next()
-            .and_then(|s| s.parse::<usize>().ok())
-            .ok_or_else(error)?;
-        Self::new(width, height).map_err(|e| e.message)
+        Self::new(width, height).map_err(|e| {
+            nojson::JsonParseError::invalid_value(
+                value,
+                format!("invalid resolution: {}", e.message),
+            )
+        })
     }
 }
 
