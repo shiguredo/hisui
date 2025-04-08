@@ -143,8 +143,13 @@ impl ArchiveMetadata {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-// TODO: #[serde(into = "String")]
 pub struct SourceId(Arc<String>);
+
+impl nojson::DisplayJson for SourceId {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(&*self.0)
+    }
+}
 
 impl SourceId {
     pub fn new(id: &str) -> Self {

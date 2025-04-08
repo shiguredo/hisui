@@ -6,7 +6,6 @@ use std::{
 
 /// コーデック名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-// TODO: #[serde(rename_all = "UPPERCASE")]
 pub enum CodecName {
     // Audio
     Aac,
@@ -18,6 +17,12 @@ pub enum CodecName {
     Vp8,
     Vp9,
     Av1,
+}
+
+impl nojson::DisplayJson for CodecName {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.as_str())
+    }
 }
 
 impl CodecName {
@@ -73,7 +78,6 @@ impl FromStr for CodecName {
 
 /// エンジン名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-// TODO: #[serde(rename_all = "snake_case")]
 pub enum EngineName {
     AudioToobox,
     Dav1d,
@@ -83,6 +87,12 @@ pub enum EngineName {
     Opus,
     SvtAv1,
     VideoToolbox,
+}
+
+impl nojson::DisplayJson for EngineName {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.as_str())
+    }
 }
 
 impl EngineName {

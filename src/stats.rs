@@ -61,14 +61,27 @@ pub struct Stats {
 }
 
 impl nojson::DisplayJson for Stats {
-    fn fmt(&self, _f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("elapsed_seconds", self.elapsed_seconds)?;
+            f.member("readers", &self.readers)?;
+            f.member("decoders", &self.decoders)?;
+            f.member("mixers", &self.mixers)?;
+            f.member("encoders", &self.encoders)?;
+            f.member("writers", &self.writers)?;
+            Ok(())
+        })
     }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-// TODO: #[serde(into = "f32")]
 pub struct Seconds(Duration);
+
+impl nojson::DisplayJson for Seconds {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.0.as_secs_f32())
+    }
+}
 
 impl Seconds {
     pub fn new(elapsed: Duration) -> Self {
@@ -117,10 +130,18 @@ impl From<Seconds> for f32 {
 }
 
 #[derive(Debug, Clone)]
-// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MixerStats {
     Audio(AudioMixerStats),
     Video(VideoMixerStats),
+}
+
+impl nojson::DisplayJson for MixerStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            MixerStats::Audio(stats) => stats.fmt(f),
+            MixerStats::Video(stats) => stats.fmt(f),
+        }
+    }
 }
 
 /// `AudioMixer` 用の統計情報
@@ -151,6 +172,38 @@ pub struct AudioMixerStats {
     pub error: bool,
 }
 
+impl nojson::DisplayJson for AudioMixerStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "audio")?;
+            f.member(
+                "total_input_audio_data_count",
+                &self.total_input_audio_data_count,
+            )?;
+            f.member(
+                "total_output_audio_data_count",
+                &self.total_output_audio_data_count,
+            )?;
+            f.member(
+                "total_output_audio_data_seconds",
+                &self.total_output_audio_data_seconds,
+            )?;
+            f.member("total_output_sample_count", &self.total_output_sample_count)?;
+            f.member(
+                "total_output_filled_sample_count",
+                &self.total_output_filled_sample_count,
+            )?;
+            f.member(
+                "total_trimmed_sample_count",
+                &self.total_trimmed_sample_count,
+            )?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
+}
+
 /// `VideoMixer` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct VideoMixerStats {
@@ -176,12 +229,48 @@ pub struct VideoMixerStats {
     pub error: bool,
 }
 
+impl nojson::DisplayJson for VideoMixerStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "video")?;
+            f.member("output_video_resolution", &self.output_video_resolution)?;
+            f.member(
+                "total_input_video_frame_count",
+                &self.total_input_video_frame_count,
+            )?;
+            f.member(
+                "total_output_video_frame_count",
+                &self.total_output_video_frame_count,
+            )?;
+            f.member(
+                "total_output_video_frame_seconds",
+                &self.total_output_video_frame_seconds,
+            )?;
+            f.member(
+                "total_trimmed_video_frame_count",
+                &self.total_trimmed_video_frame_count,
+            )?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
+}
+
 /// エンコーダー関連の統計情報
 #[derive(Debug, Clone)]
-// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EncoderStats {
     Audio(AudioEncoderStats),
     Video(VideoEncoderStats),
+}
+
+impl nojson::DisplayJson for EncoderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            EncoderStats::Audio(stats) => stats.fmt(f),
+            EncoderStats::Video(stats) => stats.fmt(f),
+        }
+    }
 }
 
 /// 音声エンコーダー用の統計情報
@@ -201,6 +290,20 @@ pub struct AudioEncoderStats {
 
     /// エラーで中断したかどうか
     pub error: bool,
+}
+
+impl nojson::DisplayJson for AudioEncoderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "audio")?;
+            f.member("engine", &self.engine)?;
+            f.member("codec", &self.codec)?;
+            f.member("total_audio_data_count", &self.total_audio_data_count)?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
 }
 
 /// 映像エンコーダー用の統計情報
@@ -225,12 +328,41 @@ pub struct VideoEncoderStats {
     pub error: bool,
 }
 
+impl nojson::DisplayJson for VideoEncoderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "video")?;
+            f.member("engine", &self.engine)?;
+            f.member("codec", &self.codec)?;
+            f.member(
+                "total_input_video_frame_count",
+                &self.total_input_video_frame_count,
+            )?;
+            f.member(
+                "total_output_video_frame_count",
+                &self.total_output_video_frame_count,
+            )?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
+}
+
 /// デコーダー関連の統計情報
 #[derive(Debug, Clone)]
-// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DecoderStats {
     Audio(AudioDecoderStats),
     Video(VideoDecoderStats),
+}
+
+impl nojson::DisplayJson for DecoderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            DecoderStats::Audio(stats) => stats.fmt(f),
+            DecoderStats::Video(stats) => stats.fmt(f),
+        }
+    }
 }
 
 /// 音声デコーダー用の統計情報
@@ -253,6 +385,21 @@ pub struct AudioDecoderStats {
 
     /// エラーで中断したかどうか
     pub error: bool,
+}
+
+impl nojson::DisplayJson for AudioDecoderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "audio")?;
+            f.member("source_id", &self.source_id)?;
+            f.member("engine", &self.engine)?;
+            f.member("codec", &self.codec)?;
+            f.member("total_audio_data_count", &self.total_audio_data_count)?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
 }
 
 /// 映像デコーダー用の統計情報
@@ -283,14 +430,47 @@ pub struct VideoDecoderStats {
     pub error: bool,
 }
 
+impl nojson::DisplayJson for VideoDecoderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "video")?;
+            f.member("source_id", &self.source_id)?;
+            f.member("engine", &self.engine)?;
+            f.member("codec", &self.codec)?;
+            f.member(
+                "total_input_video_frame_count",
+                &self.total_input_video_frame_count,
+            )?;
+            f.member(
+                "total_output_video_frame_count",
+                &self.total_output_video_frame_count,
+            )?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("resolutions", &self.resolutions)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
+}
+
 /// 入力関連の統計情報
 #[derive(Debug, Clone)]
-// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReaderStats {
     WebmAudio(WebmAudioReaderStats),
     WebmVideo(WebmVideoReaderStats),
     Mp4Audio(Mp4AudioReaderStats),
     Mp4Video(Mp4VideoReaderStats),
+}
+
+impl nojson::DisplayJson for ReaderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            ReaderStats::WebmAudio(stats) => stats.fmt(f),
+            ReaderStats::WebmVideo(stats) => stats.fmt(f),
+            ReaderStats::Mp4Audio(stats) => stats.fmt(f),
+            ReaderStats::Mp4Video(stats) => stats.fmt(f),
+        }
+    }
 }
 
 /// `Mp4AudioReader` 用の統計情報
@@ -313,6 +493,21 @@ pub struct Mp4AudioReaderStats {
 
     /// エラーで中断したかどうか
     pub error: bool,
+}
+
+impl nojson::DisplayJson for Mp4AudioReaderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "mp4_audio")?;
+            f.member("input_file", &self.input_file)?;
+            f.member("codec", &self.codec)?;
+            f.member("total_sample_count", &self.total_sample_count)?;
+            f.member("total_track_seconds", &self.total_track_seconds)?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
 }
 
 /// `Mp4VideoReader` 用の統計情報
@@ -340,6 +535,29 @@ pub struct Mp4VideoReaderStats {
     pub error: bool,
 }
 
+impl nojson::DisplayJson for Mp4VideoReaderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "mp4_video")?;
+            f.member("input_file", &self.input_file)?;
+            f.member("codec", &self.codec)?;
+            f.member(
+                "resolutions",
+                nojson::json(|f| {
+                    f.array(|f| {
+                        f.elements(self.resolutions.iter().map(|(w, h)| format!("{w}x{h}")))
+                    })
+                }),
+            )?;
+            f.member("total_sample_count", &self.total_sample_count)?;
+            f.member("total_track_seconds", &self.total_track_seconds)?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
+}
+
 /// `WebmAudioReader` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct WebmAudioReaderStats {
@@ -363,6 +581,22 @@ pub struct WebmAudioReaderStats {
 
     /// エラーで中断したかどうか
     pub error: bool,
+}
+
+impl nojson::DisplayJson for WebmAudioReaderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "webm_audio")?;
+            f.member("input_file", &self.input_file)?;
+            f.member("codec", &self.codec)?;
+            f.member("total_cluster_count", &self.total_cluster_count)?;
+            f.member("total_simple_block_count", &self.total_simple_block_count)?;
+            f.member("total_track_seconds", &self.total_track_seconds)?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
 }
 
 /// `WebmVideoReader` 用の統計情報
@@ -390,11 +624,34 @@ pub struct WebmVideoReaderStats {
     pub error: bool,
 }
 
+impl nojson::DisplayJson for WebmVideoReaderStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "webm_video")?;
+            f.member("input_file", &self.input_file)?;
+            f.member("codec", &self.codec)?;
+            f.member("total_cluster_count", &self.total_cluster_count)?;
+            f.member("total_simple_block_count", &self.total_simple_block_count)?;
+            f.member("total_track_seconds", &self.total_track_seconds)?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("error", &self.error)?;
+            Ok(())
+        })
+    }
+}
+
 /// 出力用のの統計情報
 #[derive(Debug, Clone)]
-// TODO: #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WriterStats {
     Mp4(Mp4WriterStats),
+}
+
+impl nojson::DisplayJson for WriterStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            WriterStats::Mp4(stats) => stats.fmt(f),
+        }
+    }
 }
 
 /// `Mp4Writer` 用の統計情報
@@ -434,8 +691,27 @@ pub struct Mp4WriterStats {
     pub total_processing_seconds: Seconds,
 }
 
+impl nojson::DisplayJson for Mp4WriterStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("kind", "mp4")?;
+            f.member("audio_codec", &self.audio_codec)?;
+            f.member("video_codec", &self.video_codec)?;
+            f.member("reserved_moov_box_size", &self.reserved_moov_box_size)?;
+            f.member("actual_moov_box_size", &self.actual_moov_box_size)?;
+            f.member("total_audio_chunk_count", &self.total_audio_chunk_count)?;
+            f.member("total_video_chunk_count", &self.total_video_chunk_count)?;
+            f.member("total_audio_sample_count", &self.total_audio_sample_count)?;
+            f.member("total_video_sample_count", &self.total_video_sample_count)?;
+            f.member("total_audio_track_seconds", &self.total_audio_track_seconds)?;
+            f.member("total_video_track_seconds", &self.total_video_track_seconds)?;
+            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            Ok(())
+        })
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-// TODO: #[serde(into = "String")]
 pub struct VideoResolution {
     pub width: usize,
     pub height: usize,
@@ -450,8 +726,8 @@ impl VideoResolution {
     }
 }
 
-impl From<VideoResolution> for String {
-    fn from(value: VideoResolution) -> Self {
-        format!("{}x{}", value.width, value.height)
+impl nojson::DisplayJson for VideoResolution {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(format!("{}x{}", self.width, self.height))
     }
 }
