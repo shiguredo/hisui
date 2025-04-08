@@ -24,7 +24,7 @@ Hisui は Rust のビルドツールである [Cargo](https://doc.rust-lang.org/
 
 ```console
 // crates.io からビルドする場合（まだ canary リリースしかないのでバージョン指定が必須）
-$ cargo install hisui@2025.1.0-canary.0
+$ cargo install hisui@2025.1.0-canary.1
 
 // リポジトリ指定でビルドする場合
 $ cargo install --git https://github.com/shiguredo/hisui.git
@@ -46,7 +46,7 @@ Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk
 
 ```console
 $ sudo apt-get install -y libfdk-aac-dev
-$ cargo install hisui@2025.1.0-canary.0 --features fdk-aac
+$ cargo install hisui@2025.1.0-canary.1 --features fdk-aac
 ```
 
 なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。
