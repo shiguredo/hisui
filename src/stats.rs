@@ -79,7 +79,7 @@ pub struct Seconds(Duration);
 
 impl nojson::DisplayJson for Seconds {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(self.0.as_secs_f32())
+        write!(f.inner_mut(), "{}", self.0.as_secs_f32())
     }
 }
 
