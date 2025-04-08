@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    error::Error,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -43,7 +44,15 @@ impl Layout {
         fps: FrameRate,
     ) -> orfail::Result<Self> {
         let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
-        let raw: RawLayout = json.parse().map(|nojson::Json(v)| v).or_fail()?;
+
+        let json = nojson::RawJson::parse(json)
+            .map_err(|e| malformed_json_error(layout_file_path, &json, e))
+            .or_fail()?;
+        let raw: RawLayout = json
+            .value()
+            .try_to()
+            .map_err(|e| invalid_json_error(layout_file_path, &json, e))
+            .or_fail()?;
         raw.into_layout(base_path, fps).or_fail()
     }
 
@@ -1012,6 +1021,76 @@ impl AggregatedSourceInfo {
             self.start_timestamp <= other.stop_timestamp
         }
     }
+}
+
+fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> orfail::Failure {
+    let (line_num, column_num) = e.get_line_and_column_numbers(text).expect("infallible");
+    let line = e.get_line(text).expect("infallible");
+    let prev_line = if line_num.get() == 1 {
+        None
+    } else {
+        text.lines().nth(line_num.get() - 2)
+    };
+    orfail::Failure::new(format!(
+        r#"{e}
+
+INPUT: {}{}
+{:4} |{line}
+     |{:>column$} error
+
+BACKTRACE:"#,
+        path.display(),
+        if let Some(prev) = prev_line {
+            format!("\n     |{prev}")
+        } else {
+            "".to_owned()
+        },
+        line_num,
+        "^",
+        column = column_num.get()
+    ))
+}
+
+fn invalid_json_error(
+    path: &Path,
+    json: &nojson::RawJson,
+    e: nojson::JsonParseError,
+) -> orfail::Failure {
+    let text = json.text();
+    let (line_num, column_num) = e.get_line_and_column_numbers(text).expect("infallible");
+    let line = e.get_line(text).expect("infallible");
+    let prev_line = if line_num.get() == 1 {
+        None
+    } else {
+        text.lines().nth(line_num.get() - 2)
+    };
+    let value = json
+        .get_value_by_position(e.position())
+        .expect("infallible");
+    orfail::Failure::new(format!(
+        r#"{e}
+
+INPUT: {}{}
+{:4} |{line}
+     |{:>column$}{} {}
+
+BACKTRACE:"#,
+        path.display(),
+        if let Some(prev) = prev_line {
+            format!("\n     |{prev}")
+        } else {
+            "".to_owned()
+        },
+        line_num,
+        "^",
+        std::iter::repeat_n('^', value.as_raw_str().len() - 1).collect::<String>(),
+        if let Some(reason) = e.source() {
+            format!("{reason}")
+        } else {
+            "error".to_owned()
+        },
+        column = column_num.get()
+    ))
 }
 
 // 非公開構造体のテストは layout_test.rs ではなくこっちでやる
