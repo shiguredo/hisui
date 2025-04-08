@@ -1034,7 +1034,7 @@ mod tests {
         for json in jsons {
             // Layout をロードしようとすると関連する archive.json も用意する必要があって
             // 手間なのでここでは RawLayout を使っている
-            let _: RawLayout = serde_json::from_str(json).or_fail()?;
+            json.parse::<nojson::Json<RawLayout>>().or_fail()?;
         }
         Ok(())
     }

@@ -14,15 +14,15 @@ use orfail::OrFail;
 fn valid_resolutions() -> orfail::Result<()> {
     let valid_jsons = [r#""16x16""#, r#""3840x3840""#];
     for json in valid_jsons {
-        let _: Resolution = serde_json::from_str(json).or_fail()?;
+        json.parse::<nojson::Json<Resolution>>().or_fail()?;
     }
 
     // 値は 2 の倍数に丸められる
     for i in 0..2 {
         let json = format!(r#""{}x{}""#, 32 + i, 32 + i);
-        let v: Resolution = serde_json::from_str(&json).or_fail()?;
-        assert_eq!(v.width().get(), 32);
-        assert_eq!(v.height().get(), 32);
+        let v = json.parse::<nojson::Json<Resolution>>().or_fail()?;
+        assert_eq!(v.0.width().get(), 32);
+        assert_eq!(v.0.height().get(), 32);
     }
 
     Ok(())
@@ -495,7 +495,7 @@ fn invalid_resolutions() -> orfail::Result<()> {
         r#""100x100.0""#,
     ];
     for json in invalid_jsons {
-        assert!(serde_json::from_str::<Resolution>(json).is_err());
+        assert!(json.parse::<nojson::Json<Resolution>>().is_err());
     }
     Ok(())
 }

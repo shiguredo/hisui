@@ -17,9 +17,12 @@ impl<'text> nojson::FromRawJsonValue<'text> for RecordingMetadata {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        let ([split_only, archives], []) = value.to_fixed_object(["split_only", "archives"], [])?;
+        let ([archives], [split_only]) = value.to_fixed_object(["archives"], ["split_only"])?;
         Ok(Self {
-            split_only: split_only.try_to()?,
+            split_only: split_only
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
             archives: archives.try_to()?,
         })
     }
