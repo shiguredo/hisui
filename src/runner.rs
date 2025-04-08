@@ -318,8 +318,7 @@ impl Runner {
                 .push(WriterStats::Mp4(mp4_writer.stats().clone()));
         });
         stats.with_lock(|stats| {
-            // TODO: nojson-0.1.1 では `&*` を外す（&mut を受け取れるようにする）
-            log::debug!("stats: {}", nojson::Json(&*stats));
+            log::debug!("stats: {}", nojson::Json(&stats));
 
             if let Some(path) = &self.args.out_stats_file {
                 // 統計が出力できなくても全体を失敗扱いにはしない
@@ -327,9 +326,7 @@ impl Runner {
                 let json = nojson::json(|f| {
                     f.set_indent_size(2);
                     f.set_spacing(true);
-
-                    // TODO: nojson-0.1.1 では `&*` を外す（&mut を受け取れるようにする）
-                    f.value(&*stats)
+                    f.value(&stats)
                 })
                 .to_string();
                 if let Err(e) = std::fs::write(path, json) {

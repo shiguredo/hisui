@@ -73,10 +73,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for ArchiveEntry {
         Ok(Self {
             connection_id: connection_id.try_to()?,
             split_last_index: split_last_index.map(|v| v.try_to()).transpose()?,
-            // TODO: nojson-0.1.1 で簡略化
-            metadata_filename: metadata_filename
-                .map(|v| Ok(PathBuf::from(v.try_to::<String>()?)))
-                .transpose()?,
+            metadata_filename: metadata_filename.map(|v| v.try_to()).transpose()?,
         })
     }
 }

@@ -87,12 +87,7 @@ impl Layout {
                     "grid",
                     nojson::json(|f| {
                         f.object(|f| {
-                            // TODO: nojson-v0.1.1 では削除する
-                            let source_paths = source_paths
-                                .iter()
-                                .map(|p| p.display().to_string())
-                                .collect::<Vec<_>>();
-                            f.member("video_sources", source_paths)?;
+                            f.member("video_sources", &source_paths)?;
                             f.member("max_columns", max_columns)
                         })
                     }),
@@ -102,12 +97,7 @@ impl Layout {
 
         let layout_json = nojson::json(|f| {
             f.object(|f| {
-                // TODO: nojson-v0.1.1 では削除する
-                let source_paths = source_paths
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>();
-                f.member("audio_sources", source_paths)?;
+                f.member("audio_sources", &source_paths)?;
                 f.member("video_layout", &video_layout)?;
                 f.member("resolution", format!("{width}x{height}"))
             })
