@@ -3,6 +3,10 @@ use std::path::PathBuf;
 // 依存ライブラリの名前
 const LIB_NAME: &str = "fdk-aac";
 
+// 環境変数で fdk-aac のインクルードパスを指定する場合のキー
+// デフォルト: /usr/include/fdk-aac/
+const ENV_FDK_AAC_INCLUDE_DIR: &str = "FDK_AAC_INCLUDE_DIR";
+
 fn main() {
     // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
     println!("cargo::rerun-if-changed=Cargo.toml");
@@ -29,8 +33,14 @@ fn main() {
     }
 
     // バインディングを生成する
+    let include_dir = PathBuf::from(
+        std::env::var(ENV_FDK_AAC_INCLUDE_DIR)
+            .ok()
+            .unwrap_or_else(|| "/usr/include/fdk-aac/".to_owned()),
+    );
+
     bindgen::Builder::default()
-        .header("/usr/include/fdk-aac/aacenc_lib.h")
+        .header(include_dir.join("aacenc_lib.h").display().to_string())
         .generate()
         .expect("failed to generate bindings")
         .write_to_file(output_bindings_path)
