@@ -45,13 +45,13 @@ jobs:
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
       - run: rustup update stable
       - run: cargo build --release
-
+      - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ needs.github-release-draft.outputs.version }} \
-            target/release/hisui#hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64
+            hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64
 
   macos-binary:
     name: 'Upload Binary for MacOS'
@@ -67,13 +67,13 @@ jobs:
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
       - run: cargo build --release
-
+      - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ needs.github-release-draft.outputs.version }} \
-            target/release/hisui#hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
+            hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
 
   slack_notify_failed:
     needs: [github-release-draft, ubuntu-binary, macos-binary]
