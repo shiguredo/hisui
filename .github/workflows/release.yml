@@ -53,28 +53,24 @@ jobs:
     name: 'Upload Binary for MacOS'
     runs-on: macos-latest
     needs: github-release-draft
-    strategy:
-      matrix:
-        target: ["aarch64-apple-darwin"]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
       - run: rustup update stable
-      - run: rustup target add ${{ matrix.target }}
       - name: Install packages to build external dependencies
         run: |
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
-      - run: cargo build --release --target=${{ matrix.target }}
+      - run: cargo build --release
 
       - uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.github-release-draft.outputs.upload-url }}
-          asset_path: target/${{ matrix.target }}/release/hisui
-          asset_name: hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.target }}
+          asset_path: target/release/hisui
+          asset_name: hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
           asset_content_type: application/octet-stream
 
   slack_notify_failed:
