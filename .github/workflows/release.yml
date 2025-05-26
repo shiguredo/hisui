@@ -53,6 +53,27 @@ jobs:
           gh release upload ${{ needs.github-release-draft.outputs.version }} \
             hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64
 
+  ubuntu-arm64-binary:
+    name: 'Upload Binary for Ubuntu'
+    runs-on: ubuntu-24.04-arm
+    needs: github-release-draft
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+      - run: rustup update stable
+      - run: cargo build --release
+      - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64
+      - name: Upload Release Asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ needs.github-release-draft.outputs.version }} \
+            hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64
+
   macos-binary:
     name: 'Upload Binary for MacOS'
     runs-on: macos-latest
@@ -76,7 +97,7 @@ jobs:
             hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
 
   slack_notify_failed:
-    needs: [github-release-draft, ubuntu-binary, macos-binary]
+    needs: [github-release-draft, ubuntu-binary, ubuntu-arm64-binary, macos-binary]
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     if: failure()
