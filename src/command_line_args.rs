@@ -69,12 +69,12 @@ impl Args {
 NOTE: `--layout` 引数が指定されている場合にはこの引数は無視されます"#,
             )
             .take(&mut args)
-            .parse_if_present()?;
+            .present_and_then(|a| a.value().parse())?;
         let layout = noargs::opt("layout")
             .ty("PATH")
             .doc("Hisui のレイアウトファイルを指定して合成を実行します")
             .take(&mut args)
-            .parse_if_present()?;
+            .present_and_then(|a| a.value().parse())?;
         let out_file = noargs::opt("out-file")
             .ty("PATH")
             .doc(concat!(
@@ -85,13 +85,13 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "（ただし、音声のみの場合には `output.mp4a` という名前になります)",
             ))
             .take(&mut args)
-            .parse_if_present()?;
+            .present_and_then(|a| a.value().parse())?;
         let out_video_codec = noargs::opt("out-video-codec")
             .ty("VP8|VP9|H264|H265|AV1")
             .default("VP9")
             .doc("映像のエンコードコーデック")
             .take(&mut args)
-            .parse_with(|s| CodecName::parse_video(s.raw_value_or_empty()))?;
+            .then(|a| CodecName::parse_video(a.value()))?;
         let out_audio_codec = noargs::opt("out-audio-codec")
             .ty("Opus|AAC")
             .default("Opus")
@@ -103,13 +103,13 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "  - FDK-AAC を有効にして自前ビルドした Hisui (`--feature fdk-aac`)\n",
             ))
             .take(&mut args)
-            .parse_with(|s| CodecName::parse_audio(s.raw_value_or_empty()))?;
+            .then(|a| CodecName::parse_audio(a.value()))?;
         let out_video_frame_rate = noargs::opt("out-video-frame-rate")
             .ty("INTEGER|RATIONAL")
             .default("25")
             .doc("合成後の映像のフレームーレート")
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let max_columns = noargs::opt("max-columns")
             .ty("POSITIVE_INTEGER")
             .default("3")
@@ -120,7 +120,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "NOTE: `--layout` 引数指定時には、この引数は無視されます"
             ))
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let audio_only = noargs::flag("audio-only")
             .doc(concat!(
                 "音声のみを合成対象にします\n",
@@ -139,7 +139,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "NOTE: H.264 を扱える他のエンジンが存在する場合でも OpenH264 が優先されます\n"
             ))
             .take(&mut args)
-            .parse_if_present()?;
+            .present_and_then(|a| a.value().parse())?;
         let libvpx_cq_level = noargs::opt("libvpx-cq-level")
             .ty("NON_NEGATIVE_INTEGER")
             .default("30")
@@ -150,7 +150,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "関数呼び出しの引数として渡されます\n",
             ))
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let libvpx_min_q = noargs::opt("libvpx-min-q")
             .ty("NON_NEGATIVE_INTEGER")
             .default("10")
@@ -160,7 +160,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "`vpx_codec_enc_cfg` 構造体の `rc_min_quantizer` に設定されます\n",
             ))
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let libvpx_max_q = noargs::opt("libvpx-max-q")
             .ty("NON_NEGATIVE_INTEGER")
             .default("50")
@@ -170,25 +170,25 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "`vpx_codec_enc_cfg` 構造体の `rc_max_quantizer` に設定されます\n",
             ))
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let out_opus_bit_rate = noargs::opt("out-opus-bit-rate")
             .ty("BPS")
             .default("65536")
             .doc("Opus でエンコードする際のビットレート")
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let out_aac_bit_rate = noargs::opt("out-aac-bit-rate")
             .ty("BPS")
             .default("64000")
             .doc("AAC でエンコードする際のビットレート")
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let show_progress_bar = noargs::opt("show-progress-bar")
             .ty("true|false")
             .default("true")
             .doc("true が指定された場合には合成の進捗を表示します")
             .take(&mut args)
-            .parse()?;
+            .then(|a| a.value().parse())?;
         let verbose = noargs::flag("verbose")
             .doc("警告未満のログメッセージも出力します")
             .take(&mut args)
@@ -203,12 +203,12 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "NOTE: macOS ではこの引数は無視されます",
             ))
             .take(&mut args)
-            .parse_if_present()?;
+            .present_and_then(|a| a.value().parse())?;
         let out_stats_file = noargs::opt("out-stats-file")
             .ty("PATH")
             .doc("合成実行中に集めた統計情報 JSON の出力先ファイル")
             .take(&mut args)
-            .parse_if_present()?;
+            .present_and_then(|a| a.value().parse())?;
 
         // 以降は legacy 版のみが対応している引数群
         // （当面は残しておいて、どこかの段階で引数自体を削除する）
