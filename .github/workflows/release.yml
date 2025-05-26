@@ -11,20 +11,26 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}
-      upload-url: ${{ steps.create-release.outputs.upload_url }}
+      release-id: ${{ steps.create-release.outputs.release-id }}
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
       - name: Get the version
         id: get_version
         run: echo "VERSION=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
 
-      - id: create-release
-        uses: actions/create-release@v1
+      - name: Create Release Draft
+        id: create-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.get_version.outputs.VERSION }}
-          release_name: ${{ steps.get_version.outputs.VERSION }}
-          draft: true
+        run: |
+          release_output=$(gh release create ${{ steps.get_version.outputs.VERSION }} \
+            --title "${{ steps.get_version.outputs.VERSION }}" \
+            --notes "Release ${{ steps.get_version.outputs.VERSION }}" \
+            --draft)
+          release_id=$(echo "$release_output" | grep -o 'releases/[0-9]*' | cut -d'/' -f2)
+          echo "release-id=$release_id" >> $GITHUB_OUTPUT
 
   ubuntu-binary:
     name: 'Upload Binary for Ubuntu'
@@ -40,14 +46,12 @@ jobs:
       - run: rustup update stable
       - run: cargo build --release
 
-      - uses: actions/upload-release-asset@v1
+      - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.github-release-draft.outputs.upload-url }}
-          asset_path: target/release/hisui
-          asset_name: hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64
-          asset_content_type: application/octet-stream
+        run: |
+          gh release upload ${{ needs.github-release-draft.outputs.version }} \
+            target/release/hisui#hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64
 
   macos-binary:
     name: 'Upload Binary for MacOS'
@@ -64,14 +68,12 @@ jobs:
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
       - run: cargo build --release
 
-      - uses: actions/upload-release-asset@v1
+      - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.github-release-draft.outputs.upload-url }}
-          asset_path: target/release/hisui
-          asset_name: hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
-          asset_content_type: application/octet-stream
+        run: |
+          gh release upload ${{ needs.github-release-draft.outputs.version }} \
+            target/release/hisui#hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
 
   slack_notify_failed:
     needs: [github-release-draft, ubuntu-binary, macos-binary]
