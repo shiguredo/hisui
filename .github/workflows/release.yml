@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  github-release-draft:
+    name: 'Create GitHub Release Draft'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
+      upload-url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - name: Get the version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+
+      - id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          release_name: v${{ steps.get_version.outputs.VERSION }}
+          draft: true
+
+  # ubuntu-binary:
+  #   name: 'Upload Binary for Linux'
+  #   runs-on: ubuntu-latest
+  #   needs: github-release-draft
+  #   steps:
+  #     - name: Checkout sources
+  #       uses: actions/checkout@v4
+  #     - name: Install packages to build external dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+  #     - run: rustup update stable
+  #     - run: cargo build --release
+
+  #     - uses: actions/upload-release-asset@v1
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       with:
+  #         upload_url: ${{ needs.github-release-draft.outputs.upload-url }}
+  #         asset_path: target/release/hisui
+  #         asset_name: hisui-${{ needs.github-release-draft.outputs.version }}.x86_64-unknown-linux-musl
+  #         asset_content_type: application/octet-stream
+
+  macos-binary:
+    name: 'Upload Binary for MacOS'
+    runs-on: macos-latest
+    needs: github-release-draft
+    strategy:
+      matrix:
+        target: ["aarch64-apple-darwin"]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - run: rustup update stable
+      - run: rustup target add ${{ matrix.target }}
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+      - run: cargo build --release --target=${{ matrix.target }}
+
+      - uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.github-release-draft.outputs.upload-url }}
+          asset_path: target/${{ matrix.target }}/release/hisui
+          asset_name: hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.target }}
+          asset_content_type: application/octet-stream
+
+  slack_notify_failed:
+    # needs: [github-release-draft, ubuntu-binary, macos-latest]
+    needs: [github-release-draft, macos-latest]
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    if: failure()
+    steps:
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: hisui
+          SLACK_COLOR: danger
+          SLACK_ICON_EMOJI: ":japanese_ogre:"
+          SLACK_TITLE: "FAILED"
+          SLACK_MESSAGE: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{github.event.head_commit.message }}>
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
