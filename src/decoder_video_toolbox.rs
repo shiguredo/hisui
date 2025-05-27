@@ -67,25 +67,29 @@ impl VideoToolboxDecoder {
         }
 
         if frame.format == VideoFormat::H265 {
-            let (vps, sps, pps) = get_h265_vps_sps_pps(frame).or_fail()?;
-            if vps == self.vps && sps == self.sps && pps == self.pps {
-                // 情報は変わっていない
-                return Ok(());
-            }
+            // [NOTE] VPS / SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
+            if let Ok((vps, sps, pps)) = get_h265_vps_sps_pps(frame) {
+                if vps == self.vps && sps == self.sps && pps == self.pps {
+                    // 情報は変わっていない
+                    return Ok(());
+                }
 
-            // 変わっているので再初期化
-            self.decoded.is_none().or_fail()?;
-            *self = Self::new_h265(frame).or_fail()?;
+                // 変わっているので再初期化
+                self.decoded.is_none().or_fail()?;
+                *self = Self::new_h265(frame).or_fail()?;
+            }
         } else {
-            let (sps, pps) = get_h264_sps_pps(frame).or_fail()?;
-            if sps == self.sps && pps == self.pps {
-                // 情報は変わっていない
-                return Ok(());
-            }
+            // [NOTE] VPS / SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
+            if let Ok((sps, pps)) = get_h264_sps_pps(frame) {
+                if sps == self.sps && pps == self.pps {
+                    // 情報は変わっていない
+                    return Ok(());
+                }
 
-            // 変わっているので再初期化
-            self.decoded.is_none().or_fail()?;
-            *self = Self::new_h264(frame).or_fail()?;
+                // 変わっているので再初期化
+                self.decoded.is_none().or_fail()?;
+                *self = Self::new_h264(frame).or_fail()?;
+            }
         }
 
         Ok(())
