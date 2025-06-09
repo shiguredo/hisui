@@ -309,6 +309,15 @@ pub enum SubCommand {
 
 impl SubCommand {
     fn new(args: &mut noargs::RawArgs) -> noargs::Result<Option<Self>> {
+        if args
+            .remaining_args()
+            .find(|a| matches!(a.1, "inspect"))
+            .is_none()
+        {
+            // サブコマンドなし
+            return Ok(None);
+        }
+
         if noargs::cmd("inspect")
             .doc("録画ファイルの情報を取得する")
             .take(args)
@@ -322,8 +331,7 @@ impl SubCommand {
                     .then(|a| a.value().parse())?,
             }))
         } else {
-            // サブコマンドなし
-            Ok(None)
+            unreachable!()
         }
     }
 }
