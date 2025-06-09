@@ -30,6 +30,7 @@ pub mod reader_webm;
 pub mod runner;
 pub mod source;
 pub mod stats;
+pub mod subcommand_inspect;
 pub mod types;
 pub mod video;
 pub mod video_h264;
