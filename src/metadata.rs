@@ -180,6 +180,15 @@ pub enum ContainerFormat {
     Mp4,
 }
 
+impl nojson::DisplayJson for ContainerFormat {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            ContainerFormat::Webm => f.string("webm"),
+            ContainerFormat::Mp4 => f.string("mp4"),
+        }
+    }
+}
+
 impl<'text> nojson::FromRawJsonValue<'text> for ContainerFormat {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,

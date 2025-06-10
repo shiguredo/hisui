@@ -1,10 +1,11 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{
     metadata::{ContainerFormat, SourceId},
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    types::CodecName,
 };
 
 use orfail::OrFail;
@@ -49,15 +50,61 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
         }
     };
 
+    let mut audio_codec = None;
     for sample in audio_reader {
         let sample = sample.or_fail()?;
-        dbg!(sample.timestamp);
+        if audio_codec.is_none() {
+            audio_codec = sample.format.codec_name();
+        }
     }
 
+    let mut video_codec = None;
     for sample in video_reader {
         let sample = sample.or_fail()?;
-        dbg!(sample.timestamp);
+        if video_codec.is_none() {
+            video_codec = sample.format.codec_name();
+        }
     }
 
+    // 入力ファイルから取得した情報を出力する
+    let info = FileInfo {
+        path: input_file_path.as_ref().to_path_buf(),
+        format,
+        audio_codec,
+        video_codec,
+    };
+    println!(
+        "{}",
+        nojson::json(|f| {
+            f.set_indent_size(2);
+            f.set_spacing(true);
+            f.value(&info)
+        })
+    );
+
     Ok(())
+}
+
+#[derive(Debug)]
+struct FileInfo {
+    path: PathBuf,
+    format: ContainerFormat,
+    audio_codec: Option<CodecName>,
+    video_codec: Option<CodecName>,
+}
+
+impl nojson::DisplayJson for FileInfo {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("path", &self.path)?;
+            f.member("format", &self.format)?;
+            if let Some(c) = self.audio_codec {
+                f.member("audio_codec", c)?;
+            }
+            if let Some(c) = self.video_codec {
+                f.member("video_codec", c)?;
+            }
+            Ok(())
+        })
+    }
 }
