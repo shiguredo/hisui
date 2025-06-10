@@ -15,6 +15,11 @@ fn main() -> noargs::Result<()> {
     };
     Logger::init(log_level)?;
 
+    if let Some(text) = args.get_help_or_version() {
+        print!("{text}");
+        return Ok(());
+    }
+
     match args.sub_command {
         Some(SubCommand::Inspect { input_file }) => hisui::subcommand_inspect::run(input_file)?,
         None => Runner::new(args).run()?,
