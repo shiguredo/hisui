@@ -9,6 +9,8 @@ use crate::{
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     types::CodecName,
+    video::{VideoFormat, VideoFrame},
+    video_h264::H264AnnexBNalUnits,
 };
 
 use orfail::OrFail;
@@ -79,6 +81,7 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
             duration: sample.duration,
             data_size: sample.data.len(),
             keyframe: sample.keyframe,
+            codec_specific_info: VideoCodecSpecificInfo::new(&sample),
         });
     }
 
@@ -142,6 +145,10 @@ impl nojson::DisplayJson for FileInfo {
                         .as_micros(),
                 )?;
                 f.member("video_sample_count", self.video_samples.len())?;
+                f.member(
+                    "video_keyframe_sample_count",
+                    self.video_samples.iter().filter(|s| s.keyframe).count(),
+                )?;
                 f.member("video_samples", &self.video_samples)?;
             }
             Ok(())
@@ -176,6 +183,7 @@ struct VideoSampleInfo {
     duration: Duration,
     data_size: usize,
     keyframe: bool,
+    codec_specific_info: Option<VideoCodecSpecificInfo>,
 }
 
 impl nojson::DisplayJson for VideoSampleInfo {
@@ -186,9 +194,82 @@ impl nojson::DisplayJson for VideoSampleInfo {
             f.member("duration_us", self.duration.as_micros())?;
             f.member("data_size", self.data_size)?;
             f.member("keyframe", self.keyframe)?;
+            match &self.codec_specific_info {
+                None => {}
+                Some(VideoCodecSpecificInfo::H264 { nalus }) => {
+                    f.member("nalus", nalus)?;
+                }
+            }
             Ok(())
         })?;
         f.set_indent_size(2);
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct H264NalUnitInfo {
+    ty: u8,
+    nri: u8,
+}
+
+impl nojson::DisplayJson for H264NalUnitInfo {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("type", self.ty)?;
+            f.member("nri", self.nri)
+        })
+    }
+}
+
+#[derive(Debug)]
+enum VideoCodecSpecificInfo {
+    H264 { nalus: Vec<H264NalUnitInfo> },
+}
+
+impl VideoCodecSpecificInfo {
+    fn new(sample: &VideoFrame) -> Option<Self> {
+        match sample.format {
+            VideoFormat::H264AnnexB => {
+                let mut nalus = Vec::new();
+                for nalu in H264AnnexBNalUnits::new(&sample.data) {
+                    match nalu {
+                        Ok(nalu) => {
+                            let header_byte = nalu.data.first()?;
+                            let nri = (header_byte >> 5) & 0b11;
+                            nalus.push(H264NalUnitInfo { ty: nalu.ty, nri });
+                        }
+                        Err(_) => return None, // パースエラー
+                    }
+                }
+
+                Some(VideoCodecSpecificInfo::H264 { nalus })
+            }
+            VideoFormat::H264 => {
+                let mut nalus = Vec::new();
+                let mut data = &sample.data[..];
+
+                // NOTE: sora の場合は区切りバイトサイズは 4 に固定
+                while data.len() > 4 {
+                    let length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                    data = &data[4..];
+
+                    if data.len() < length || length == 0 {
+                        return None; // パースエラー
+                    }
+
+                    let header_byte = data[0];
+                    let nalu_type = header_byte & 0b0001_1111;
+                    let nri = (header_byte >> 5) & 0b11;
+
+                    nalus.push(H264NalUnitInfo { ty: nalu_type, nri });
+
+                    data = &data[length..];
+                }
+
+                Some(VideoCodecSpecificInfo::H264 { nalus })
+            }
+            _ => None,
+        }
     }
 }
