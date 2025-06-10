@@ -68,11 +68,17 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
     }
 
     let mut video_codec = None;
+    let mut video_samples = Vec::new();
     for sample in video_reader {
         let sample = sample.or_fail()?;
         if video_codec.is_none() {
             video_codec = sample.format.codec_name();
         }
+        video_samples.push(VideoSampleInfo {
+            timestamp: sample.timestamp,
+            duration: sample.duration,
+            data_size: sample.data.len(),
+        });
     }
 
     // 入力ファイルから取得した情報を出力する
@@ -82,6 +88,7 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
         audio_codec,
         audio_samples,
         video_codec,
+        video_samples,
     };
     println!(
         "{}",
@@ -102,6 +109,7 @@ struct FileInfo {
     audio_codec: Option<CodecName>,
     audio_samples: Vec<AudioSampleInfo>,
     video_codec: Option<CodecName>,
+    video_samples: Vec<VideoSampleInfo>,
 }
 
 impl nojson::DisplayJson for FileInfo {
@@ -124,6 +132,16 @@ impl nojson::DisplayJson for FileInfo {
             }
             if let Some(c) = self.video_codec {
                 f.member("video_codec", c)?;
+                f.member(
+                    "video_duration_us",
+                    self.video_samples
+                        .iter()
+                        .map(|s| s.duration)
+                        .sum::<Duration>()
+                        .as_micros(),
+                )?;
+                f.member("video_sample_count", self.video_samples.len())?;
+                f.member("video_samples", &self.video_samples)?;
             }
             Ok(())
         })
@@ -138,6 +156,27 @@ struct AudioSampleInfo {
 }
 
 impl nojson::DisplayJson for AudioSampleInfo {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.set_indent_size(0);
+        f.object(|f| {
+            f.member("timestamp_us", self.timestamp.as_micros())?;
+            f.member("duration_us", self.duration.as_micros())?;
+            f.member("data_size", self.data_size)?;
+            Ok(())
+        })?;
+        f.set_indent_size(2);
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct VideoSampleInfo {
+    timestamp: Duration,
+    duration: Duration,
+    data_size: usize,
+}
+
+impl nojson::DisplayJson for VideoSampleInfo {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.set_indent_size(0);
         f.object(|f| {
