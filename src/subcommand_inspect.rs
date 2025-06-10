@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use crate::{
     metadata::{ContainerFormat, SourceId},
@@ -51,11 +54,17 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
     };
 
     let mut audio_codec = None;
+    let mut audio_samples = Vec::new();
     for sample in audio_reader {
         let sample = sample.or_fail()?;
         if audio_codec.is_none() {
             audio_codec = sample.format.codec_name();
         }
+        audio_samples.push(AudioSampleInfo {
+            timestamp: sample.timestamp,
+            duration: sample.duration,
+            data_size: sample.data.len(),
+        });
     }
 
     let mut video_codec = None;
@@ -72,6 +81,7 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
         format,
         audio_codec,
         video_codec,
+        audio_samples,
     };
     println!(
         "{}",
@@ -91,6 +101,8 @@ struct FileInfo {
     format: ContainerFormat,
     audio_codec: Option<CodecName>,
     video_codec: Option<CodecName>,
+    // TODO: sample_count, duration
+    audio_samples: Vec<AudioSampleInfo>,
 }
 
 impl nojson::DisplayJson for FileInfo {
@@ -104,7 +116,31 @@ impl nojson::DisplayJson for FileInfo {
             if let Some(c) = self.video_codec {
                 f.member("video_codec", c)?;
             }
+            if !self.audio_samples.is_empty() {
+                f.member("audio_samples", &self.audio_samples)?;
+            }
             Ok(())
         })
+    }
+}
+
+#[derive(Debug)]
+struct AudioSampleInfo {
+    timestamp: Duration,
+    duration: Duration,
+    data_size: usize,
+}
+
+impl nojson::DisplayJson for AudioSampleInfo {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.set_indent_size(0);
+        f.object(|f| {
+            f.member("timestamp_us", self.timestamp.as_micros())?;
+            f.member("duration_us", self.duration.as_micros())?;
+            f.member("data_size", self.data_size)?;
+            Ok(())
+        })?;
+        f.set_indent_size(2);
+        Ok(())
     }
 }
