@@ -32,11 +32,6 @@ impl Runner {
     }
 
     pub fn run(&mut self) -> orfail::Result<()> {
-        if let Some(text) = self.args.get_help_or_version() {
-            print!("{text}");
-            return Ok(());
-        }
-
         if self.args.codec_engines {
             // 利用可能なエンジンやコーデックを表示して終了する
             self.show_codec_engines().or_fail()?;

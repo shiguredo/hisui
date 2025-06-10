@@ -25,6 +25,7 @@ pub struct Args {
     pub show_progress_bar: bool,
     pub layout: Option<PathBuf>,
     pub cpu_cores: Option<usize>,
+    pub sub_command: Option<SubCommand>,
 }
 
 impl Args {
@@ -256,7 +257,14 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             eprintln!("[WARN] `--h264-encoder` is obsolete\n");
         }
 
-        if version.is_none() && in_metadata_file.is_none() && layout.is_none() && !codec_engines {
+        let sub_command = SubCommand::new(&mut args)?;
+
+        if version.is_none()
+            && in_metadata_file.is_none()
+            && layout.is_none()
+            && !codec_engines
+            && sub_command.is_none()
+        {
             // 最低限必要な引数が指定されていない場合にはヘルプを表示する
             args.metadata_mut().help_mode = true;
         }
@@ -282,11 +290,48 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             verbose,
             cpu_cores,
             out_stats_file,
+            sub_command,
             help: args.finish()?,
         })
     }
 
     pub fn get_help_or_version(&self) -> Option<&String> {
         self.help.as_ref().or(self.version.as_ref())
+    }
+}
+
+// TODO(sile): -h の時のサブコマンドのヘルプの見せ方は改善する
+//             (e.g., サブコマンドを指定しているかどうかで引数処理を大元で分岐させる）
+#[derive(Debug, Clone)]
+pub enum SubCommand {
+    Inspect { input_file: PathBuf },
+}
+
+impl SubCommand {
+    fn new(args: &mut noargs::RawArgs) -> noargs::Result<Option<Self>> {
+        if args
+            .remaining_args()
+            .find(|a| matches!(a.1, "inspect"))
+            .is_none()
+        {
+            // サブコマンドなし
+            return Ok(None);
+        }
+
+        if noargs::cmd("inspect")
+            .doc("録画ファイルの情報を取得する")
+            .take(args)
+            .is_present()
+        {
+            Ok(Some(Self::Inspect {
+                input_file: noargs::arg("INPUT_FILE")
+                    .example("/path/to/archive.mp4")
+                    .doc("情報取得対象の録画ファイル(.mp4|.webm)")
+                    .take(args)
+                    .then(|a| a.value().parse())?,
+            }))
+        } else {
+            unreachable!()
+        }
     }
 }
