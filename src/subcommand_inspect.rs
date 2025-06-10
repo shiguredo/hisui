@@ -80,8 +80,6 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
         path: input_file_path.as_ref().to_path_buf(),
         format,
         audio_codec,
-        audio_duration: audio_samples.iter().map(|s| s.duration).sum(),
-        audio_sample_count: audio_samples.len(),
         audio_samples,
         video_codec,
     };
@@ -102,8 +100,6 @@ struct FileInfo {
     path: PathBuf,
     format: ContainerFormat,
     audio_codec: Option<CodecName>,
-    audio_duration: Duration,
-    audio_sample_count: usize,
     audio_samples: Vec<AudioSampleInfo>,
     video_codec: Option<CodecName>,
 }
@@ -115,8 +111,15 @@ impl nojson::DisplayJson for FileInfo {
             f.member("format", &self.format)?;
             if let Some(c) = self.audio_codec {
                 f.member("audio_codec", c)?;
-                f.member("audio_duration_us", self.audio_duration.as_micros())?;
-                f.member("audio_sample_count", self.audio_sample_count)?;
+                f.member(
+                    "audio_duration_us",
+                    self.audio_samples
+                        .iter()
+                        .map(|s| s.duration)
+                        .sum::<Duration>()
+                        .as_micros(),
+                )?;
+                f.member("audio_sample_count", self.audio_samples.len())?;
                 f.member("audio_samples", &self.audio_samples)?;
             }
             if let Some(c) = self.video_codec {
