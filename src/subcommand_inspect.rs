@@ -78,6 +78,7 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
             timestamp: sample.timestamp,
             duration: sample.duration,
             data_size: sample.data.len(),
+            keyframe: sample.keyframe,
         });
     }
 
@@ -174,6 +175,7 @@ struct VideoSampleInfo {
     timestamp: Duration,
     duration: Duration,
     data_size: usize,
+    keyframe: bool,
 }
 
 impl nojson::DisplayJson for VideoSampleInfo {
@@ -183,6 +185,7 @@ impl nojson::DisplayJson for VideoSampleInfo {
             f.member("timestamp_us", self.timestamp.as_micros())?;
             f.member("duration_us", self.duration.as_micros())?;
             f.member("data_size", self.data_size)?;
+            f.member("keyframe", self.keyframe)?;
             Ok(())
         })?;
         f.set_indent_size(2);
