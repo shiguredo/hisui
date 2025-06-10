@@ -28,7 +28,7 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
 
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
-    let (video_reader, audio_reader) = match format {
+    let (audio_reader, video_reader) = match format {
         ContainerFormat::Webm => {
             let audio = AudioReader::Webm(
                 WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
@@ -48,6 +48,16 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
             (audio, video)
         }
     };
+
+    for sample in audio_reader {
+        let sample = sample.or_fail()?;
+        dbg!(sample.timestamp);
+    }
+
+    for sample in video_reader {
+        let sample = sample.or_fail()?;
+        dbg!(sample.timestamp);
+    }
 
     Ok(())
 }
