@@ -6,6 +6,8 @@ on:
     branches:
       - "develop"
       - "feature/**"
+    paths-ignore:
+      - "**.md"
 
 env:
   RUST_BACKTRACE: 1
