@@ -4,18 +4,25 @@ use std::{
 };
 
 use crate::{
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     metadata::{ContainerFormat, SourceId},
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    stats::VideoDecoderStats,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
 };
 
 use orfail::OrFail;
+use shiguredo_openh264::Openh264Library;
 
-pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
+pub fn run<P: AsRef<Path>>(
+    input_file_path: P,
+    decode: bool,
+    openh264: Option<PathBuf>,
+) -> orfail::Result<()> {
     let format = match input_file_path
         .as_ref()
         .extension()
@@ -57,32 +64,77 @@ pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
 
     let mut audio_codec = None;
     let mut audio_samples = Vec::new();
+    let mut audio_decoder = None;
     for sample in audio_reader {
         let sample = sample.or_fail()?;
         if audio_codec.is_none() {
             audio_codec = sample.format.codec_name();
+            if decode {
+                audio_decoder = Some(AudioDecoder::new_opus().or_fail()?);
+            }
         }
-        audio_samples.push(AudioSampleInfo {
+
+        let mut info = AudioSampleInfo {
             timestamp: sample.timestamp,
             duration: sample.duration,
             data_size: sample.data.len(),
-        });
+            decoded_data_size: None,
+        };
+
+        if let Some(decoder) = &mut audio_decoder {
+            let decoded = decoder.decode(&sample).or_fail()?;
+            info.decoded_data_size = Some(decoded.data.len());
+        }
+
+        audio_samples.push(info);
     }
 
     let mut video_codec = None;
     let mut video_samples = Vec::new();
+    let mut video_decoder = None;
+    let mut video_decoder_stats = VideoDecoderStats::default();
+    let mut decoded_count = 0;
     for sample in video_reader {
         let sample = sample.or_fail()?;
         if video_codec.is_none() {
             video_codec = sample.format.codec_name();
+            if decode {
+                let options = VideoDecoderOptions {
+                    openh264_lib: openh264
+                        .clone()
+                        .map(Openh264Library::load)
+                        .transpose()
+                        .or_fail()?,
+                };
+                video_decoder = Some(VideoDecoder::new(options));
+            }
         }
+
         video_samples.push(VideoSampleInfo {
             timestamp: sample.timestamp,
             duration: sample.duration,
             data_size: sample.data.len(),
             keyframe: sample.keyframe,
             codec_specific_info: VideoCodecSpecificInfo::new(&sample),
+            decoded_data_size: None,
+            width: None,
+            height: None,
         });
+
+        if let Some(decoder) = &mut video_decoder {
+            decoder.decode(sample, &mut video_decoder_stats).or_fail()?;
+            while let Some(decoded) = decoder.next_decoded_frame() {
+                video_samples[decoded_count].update(&decoded);
+                decoded_count += 1;
+            }
+        }
+    }
+    if let Some(decoder) = &mut video_decoder {
+        decoder.finish().or_fail()?;
+        while let Some(decoded) = decoder.next_decoded_frame() {
+            video_samples[decoded_count].update(&decoded);
+            decoded_count += 1;
+        }
     }
 
     // 入力ファイルから取得した情報を出力する
@@ -161,6 +213,7 @@ struct AudioSampleInfo {
     timestamp: Duration,
     duration: Duration,
     data_size: usize,
+    decoded_data_size: Option<usize>,
 }
 
 impl nojson::DisplayJson for AudioSampleInfo {
@@ -170,6 +223,9 @@ impl nojson::DisplayJson for AudioSampleInfo {
             f.member("timestamp_us", self.timestamp.as_micros())?;
             f.member("duration_us", self.duration.as_micros())?;
             f.member("data_size", self.data_size)?;
+            if let Some(v) = self.decoded_data_size {
+                f.member("decoded_data_size", v)?;
+            }
             Ok(())
         })?;
         f.set_indent_size(2);
@@ -184,6 +240,17 @@ struct VideoSampleInfo {
     data_size: usize,
     keyframe: bool,
     codec_specific_info: Option<VideoCodecSpecificInfo>,
+    decoded_data_size: Option<usize>,
+    width: Option<usize>,
+    height: Option<usize>,
+}
+
+impl VideoSampleInfo {
+    fn update(&mut self, decoded: &VideoFrame) {
+        self.decoded_data_size = Some(decoded.data.len());
+        self.width = Some(decoded.width.get());
+        self.height = Some(decoded.height.get());
+    }
 }
 
 impl nojson::DisplayJson for VideoSampleInfo {
@@ -199,6 +266,15 @@ impl nojson::DisplayJson for VideoSampleInfo {
                 Some(VideoCodecSpecificInfo::H264 { nalus }) => {
                     f.member("nalus", nalus)?;
                 }
+            }
+            if let Some(v) = self.decoded_data_size {
+                f.member("decoded_data_size", v)?;
+            }
+            if let Some(v) = self.width {
+                f.member("width", v)?;
+            }
+            if let Some(v) = self.height {
+                f.member("height", v)?;
             }
             Ok(())
         })?;
