@@ -15,7 +15,7 @@ use crate::{
 
 use orfail::OrFail;
 
-pub fn run<P: AsRef<Path>>(input_file_path: P) -> orfail::Result<()> {
+pub fn run<P: AsRef<Path>>(input_file_path: P, _decode: bool) -> orfail::Result<()> {
     let format = match input_file_path
         .as_ref()
         .extension()

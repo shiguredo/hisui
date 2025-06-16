@@ -304,7 +304,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
 //             (e.g., サブコマンドを指定しているかどうかで引数処理を大元で分岐させる）
 #[derive(Debug, Clone)]
 pub enum SubCommand {
-    Inspect { input_file: PathBuf },
+    Inspect { input_file: PathBuf, decode: bool },
 }
 
 impl SubCommand {
@@ -324,6 +324,10 @@ impl SubCommand {
             .is_present()
         {
             Ok(Some(Self::Inspect {
+                decode: noargs::flag("decode")
+                    .doc("指定された場合にはデコードまで行う")
+                    .take(args)
+                    .is_present(),
                 input_file: noargs::arg("INPUT_FILE")
                     .example("/path/to/archive.mp4")
                     .doc("情報取得対象の録画ファイル(.mp4|.webm)")
