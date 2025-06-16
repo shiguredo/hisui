@@ -21,9 +21,11 @@ fn main() -> noargs::Result<()> {
     }
 
     match args.sub_command {
-        Some(SubCommand::Inspect { input_file, decode }) => {
-            hisui::subcommand_inspect::run(input_file, decode)?
-        }
+        Some(SubCommand::Inspect {
+            input_file,
+            decode,
+            openh264,
+        }) => hisui::subcommand_inspect::run(input_file, decode, openh264)?,
         None => Runner::new(args).run()?,
     }
     Ok(())

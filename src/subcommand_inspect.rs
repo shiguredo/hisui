@@ -16,7 +16,11 @@ use crate::{
 
 use orfail::OrFail;
 
-pub fn run<P: AsRef<Path>>(input_file_path: P, decode: bool) -> orfail::Result<()> {
+pub fn run<P: AsRef<Path>>(
+    input_file_path: P,
+    decode: bool,
+    _openh264: Option<PathBuf>,
+) -> orfail::Result<()> {
     let format = match input_file_path
         .as_ref()
         .extension()

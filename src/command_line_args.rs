@@ -304,7 +304,11 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
 //             (e.g., サブコマンドを指定しているかどうかで引数処理を大元で分岐させる）
 #[derive(Debug, Clone)]
 pub enum SubCommand {
-    Inspect { input_file: PathBuf, decode: bool },
+    Inspect {
+        input_file: PathBuf,
+        decode: bool,
+        openh264: Option<PathBuf>,
+    },
 }
 
 impl SubCommand {
@@ -328,6 +332,11 @@ impl SubCommand {
                     .doc("指定された場合にはデコードまで行う")
                     .take(args)
                     .is_present(),
+                openh264: noargs::opt("openh264")
+                    .ty("PATH")
+                    .doc("OpenH264 の共有ライブラリのパス")
+                    .take(args)
+                    .present_and_then(|a| a.value().parse())?,
                 input_file: noargs::arg("INPUT_FILE")
                     .example("/path/to/archive.mp4")
                     .doc("情報取得対象の録画ファイル(.mp4|.webm)")
