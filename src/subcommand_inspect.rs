@@ -93,6 +93,7 @@ pub fn run<P: AsRef<Path>>(
     let mut video_samples = Vec::new();
     let mut video_decoder = None;
     let mut video_decoder_stats = VideoDecoderStats::default();
+    let mut decoded_count = 0;
     for sample in video_reader {
         let sample = sample.or_fail()?;
         if video_codec.is_none() {
@@ -109,21 +110,31 @@ pub fn run<P: AsRef<Path>>(
             }
         }
 
-        if let Some(decoder) = &mut video_decoder {
-            // TODO: 結果を VideoSampleInfo に反映する
-            // TODO: remove clone
-            decoder
-                .decode(sample.clone(), &mut video_decoder_stats)
-                .or_fail()?;
-        }
-
         video_samples.push(VideoSampleInfo {
             timestamp: sample.timestamp,
             duration: sample.duration,
             data_size: sample.data.len(),
             keyframe: sample.keyframe,
             codec_specific_info: VideoCodecSpecificInfo::new(&sample),
+            decoded_data_size: None,
+            width: None,
+            height: None,
         });
+
+        if let Some(decoder) = &mut video_decoder {
+            decoder.decode(sample, &mut video_decoder_stats).or_fail()?;
+            while let Some(decoded) = decoder.next_decoded_frame() {
+                video_samples[decoded_count].update(&decoded);
+                decoded_count += 1;
+            }
+        }
+    }
+    if let Some(decoder) = &mut video_decoder {
+        decoder.finish().or_fail()?;
+        while let Some(decoded) = decoder.next_decoded_frame() {
+            video_samples[decoded_count].update(&decoded);
+            decoded_count += 1;
+        }
     }
 
     // 入力ファイルから取得した情報を出力する
@@ -229,6 +240,17 @@ struct VideoSampleInfo {
     data_size: usize,
     keyframe: bool,
     codec_specific_info: Option<VideoCodecSpecificInfo>,
+    decoded_data_size: Option<usize>,
+    width: Option<usize>,
+    height: Option<usize>,
+}
+
+impl VideoSampleInfo {
+    fn update(&mut self, decoded: &VideoFrame) {
+        self.decoded_data_size = Some(decoded.data.len());
+        self.width = Some(decoded.width.get());
+        self.height = Some(decoded.height.get());
+    }
 }
 
 impl nojson::DisplayJson for VideoSampleInfo {
@@ -244,6 +266,15 @@ impl nojson::DisplayJson for VideoSampleInfo {
                 Some(VideoCodecSpecificInfo::H264 { nalus }) => {
                     f.member("nalus", nalus)?;
                 }
+            }
+            if let Some(v) = self.decoded_data_size {
+                f.member("decoded_data_size", v)?;
+            }
+            if let Some(v) = self.width {
+                f.member("width", v)?;
+            }
+            if let Some(v) = self.height {
+                f.member("height", v)?;
             }
             Ok(())
         })?;
