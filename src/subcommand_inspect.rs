@@ -74,16 +74,19 @@ pub fn run<P: AsRef<Path>>(
             }
         }
 
-        if let Some(decoder) = &mut audio_decoder {
-            // TODO: 結果を AudioSampleInfo に反映する
-            decoder.decode(&sample).or_fail()?;
-        }
-
-        audio_samples.push(AudioSampleInfo {
+        let mut info = AudioSampleInfo {
             timestamp: sample.timestamp,
             duration: sample.duration,
             data_size: sample.data.len(),
-        });
+            decoded_data_size: None,
+        };
+
+        if let Some(decoder) = &mut audio_decoder {
+            let decoded = decoder.decode(&sample).or_fail()?;
+            info.decoded_data_size = Some(decoded.data.len());
+        }
+
+        audio_samples.push(info);
     }
 
     let mut video_codec = None;
@@ -199,6 +202,7 @@ struct AudioSampleInfo {
     timestamp: Duration,
     duration: Duration,
     data_size: usize,
+    decoded_data_size: Option<usize>,
 }
 
 impl nojson::DisplayJson for AudioSampleInfo {
@@ -208,6 +212,9 @@ impl nojson::DisplayJson for AudioSampleInfo {
             f.member("timestamp_us", self.timestamp.as_micros())?;
             f.member("duration_us", self.duration.as_micros())?;
             f.member("data_size", self.data_size)?;
+            if let Some(v) = self.decoded_data_size {
+                f.member("decoded_data_size", v)?;
+            }
             Ok(())
         })?;
         f.set_indent_size(2);
