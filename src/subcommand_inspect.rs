@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::{
+    decoder::AudioDecoder,
     metadata::{ContainerFormat, SourceId},
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
@@ -15,7 +16,7 @@ use crate::{
 
 use orfail::OrFail;
 
-pub fn run<P: AsRef<Path>>(input_file_path: P, _decode: bool) -> orfail::Result<()> {
+pub fn run<P: AsRef<Path>>(input_file_path: P, decode: bool) -> orfail::Result<()> {
     let format = match input_file_path
         .as_ref()
         .extension()
@@ -57,11 +58,21 @@ pub fn run<P: AsRef<Path>>(input_file_path: P, _decode: bool) -> orfail::Result<
 
     let mut audio_codec = None;
     let mut audio_samples = Vec::new();
+    let mut audio_decoder = None;
     for sample in audio_reader {
         let sample = sample.or_fail()?;
         if audio_codec.is_none() {
             audio_codec = sample.format.codec_name();
+            if decode {
+                audio_decoder = Some(AudioDecoder::new_opus().or_fail()?);
+            }
         }
+
+        if let Some(decoder) = &mut audio_decoder {
+            // TODO: 結果を AudioSampleInfo に反映する
+            decoder.decode(&sample).or_fail()?;
+        }
+
         audio_samples.push(AudioSampleInfo {
             timestamp: sample.timestamp,
             duration: sample.duration,
