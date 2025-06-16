@@ -4,22 +4,24 @@ use std::{
 };
 
 use crate::{
-    decoder::AudioDecoder,
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     metadata::{ContainerFormat, SourceId},
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    stats::VideoDecoderStats,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
 };
 
 use orfail::OrFail;
+use shiguredo_openh264::Openh264Library;
 
 pub fn run<P: AsRef<Path>>(
     input_file_path: P,
     decode: bool,
-    _openh264: Option<PathBuf>,
+    openh264: Option<PathBuf>,
 ) -> orfail::Result<()> {
     let format = match input_file_path
         .as_ref()
@@ -86,11 +88,32 @@ pub fn run<P: AsRef<Path>>(
 
     let mut video_codec = None;
     let mut video_samples = Vec::new();
+    let mut video_decoder = None;
+    let mut video_decoder_stats = VideoDecoderStats::default();
     for sample in video_reader {
         let sample = sample.or_fail()?;
         if video_codec.is_none() {
             video_codec = sample.format.codec_name();
+            if decode {
+                let options = VideoDecoderOptions {
+                    openh264_lib: openh264
+                        .clone()
+                        .map(Openh264Library::load)
+                        .transpose()
+                        .or_fail()?,
+                };
+                video_decoder = Some(VideoDecoder::new(options));
+            }
         }
+
+        if let Some(decoder) = &mut video_decoder {
+            // TODO: 結果を VideoSampleInfo に反映する
+            // TODO: remove clone
+            decoder
+                .decode(sample.clone(), &mut video_decoder_stats)
+                .or_fail()?;
+        }
+
         video_samples.push(VideoSampleInfo {
             timestamp: sample.timestamp,
             duration: sample.duration,
