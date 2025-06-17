@@ -14,7 +14,7 @@ build = "build.rs"
 libloading = "0.8.6"
 
 [build-dependencies]
-bindgen = "0.71.1"
+bindgen = "0.72.0"
 toml = "0.8.20"
 
 # 以降は外部ライブラリビルド用のメタデータ

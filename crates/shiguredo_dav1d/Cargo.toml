@@ -12,7 +12,7 @@ readme = "README.md"
 [dependencies]
 
 [build-dependencies]
-bindgen = "0.71.1"
+bindgen = "0.72.0"
 toml = "0.8.20"
 
 # 以降は外部ライブラリビルド用のメタデータ

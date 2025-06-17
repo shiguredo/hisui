@@ -14,4 +14,4 @@ build = "build.rs"
 log = "0.4.26"
 
 [build-dependencies]
-bindgen = "0.71.1"
+bindgen = "0.72.0"
