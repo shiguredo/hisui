@@ -6,7 +6,6 @@ use std::{
 use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     metadata::{ContainerFormat, SourceId},
-    reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     stats::VideoDecoderStats,
@@ -41,26 +40,27 @@ pub fn run<P: AsRef<Path>>(
 
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
-    let (audio_reader, video_reader) = match format {
-        ContainerFormat::Webm => {
-            let audio = AudioReader::Webm(
-                WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-            );
-            let video = VideoReader::Webm(
-                WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-            );
-            (audio, video)
-        }
-        ContainerFormat::Mp4 => {
-            let audio = AudioReader::Mp4(
-                Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-            );
-            let video = VideoReader::Mp4(
-                Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-            );
-            (audio, video)
-        }
-    };
+    let (audio_reader, video_reader): (Box<dyn Iterator<Item = _>>, Box<dyn Iterator<Item = _>>) =
+        match format {
+            ContainerFormat::Webm => {
+                let audio = Box::new(
+                    WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                );
+                let video = Box::new(
+                    WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                );
+                (audio, video)
+            }
+            ContainerFormat::Mp4 => {
+                let audio = Box::new(
+                    Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                );
+                let video = Box::new(
+                    Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                );
+                (audio, video)
+            }
+        };
 
     let mut audio_codec = None;
     let mut audio_samples = Vec::new();
