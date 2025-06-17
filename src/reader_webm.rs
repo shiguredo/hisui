@@ -293,7 +293,12 @@ impl VideoTrackHeader {
         let mut reader = reader.read_master(ID_TRACKS).or_fail()?;
         loop {
             if reader.is_eos() {
-                return Err(orfail::Failure::new("No video track"));
+                // 映像トラックが存在しないパターン
+                // コーデックの値は、実際に参照されることはないので、あり得ない値を適当に設定しておく
+                log::warn!("no video track");
+                return Ok(Self {
+                    codec: VideoFormat::I420,
+                });
             }
 
             let mut reader = reader.read_master(ID_TRACK_ENTRY).or_fail()?;
