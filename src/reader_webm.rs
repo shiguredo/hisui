@@ -232,6 +232,12 @@ impl<R: Read> ElementReader<R> {
     }
 }
 
+impl<R: Read> ElementReader<std::io::Take<R>> {
+    fn is_eos(&self) -> bool {
+        self.inner.limit() == 0
+    }
+}
+
 fn check_ebml_header_element<R: Read>(reader: &mut ElementReader<R>) -> orfail::Result<()> {
     let mut reader = reader.read_master(ID_EBML).or_fail()?;
 
@@ -286,6 +292,10 @@ impl VideoTrackHeader {
     fn read<R: Read>(reader: &mut ElementReader<R>) -> orfail::Result<Self> {
         let mut reader = reader.read_master(ID_TRACKS).or_fail()?;
         loop {
+            if reader.is_eos() {
+                return Err(orfail::Failure::new("No video track"));
+            }
+
             let mut reader = reader.read_master(ID_TRACK_ENTRY).or_fail()?;
             let track_number = reader.read_u64(ID_TRACK_NUMBER).or_fail()?;
             if track_number != TRACK_NUMBER_VIDEO {
