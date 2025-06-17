@@ -52,12 +52,22 @@ pub fn run<P: AsRef<Path>>(
                 (audio, video)
             }
             ContainerFormat::Mp4 => {
-                let audio = Box::new(
-                    Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-                );
-                let video = Box::new(
-                    Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-                );
+                let audio = if Mp4AudioReader::has_audio_track(&input_file_path).or_fail()? {
+                    Box::new(
+                        Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                    ) as Box<dyn Iterator<Item = _>>
+                } else {
+                    // audio track が存在しない
+                    Box::new(std::iter::empty())
+                };
+                let video = if Mp4VideoReader::has_video_track(&input_file_path).or_fail()? {
+                    Box::new(
+                        Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                    ) as Box<dyn Iterator<Item = _>>
+                } else {
+                    // video track が存在しない
+                    Box::new(std::iter::empty())
+                };
                 (audio, video)
             }
         };

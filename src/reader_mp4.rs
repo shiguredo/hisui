@@ -9,7 +9,7 @@ use std::{
 use orfail::OrFail;
 use shiguredo_mp4::{
     aux::SampleTableAccessor,
-    boxes::{FtypBox, HdlrBox, IgnoredBox, MoovBox, SampleEntry, StblBox},
+    boxes::{FtypBox, HdlrBox, IgnoredBox, MoovBox, SampleEntry, StblBox, TrakBox},
     Decode, Either,
 };
 
@@ -38,19 +38,8 @@ impl Mp4VideoReader {
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut file = BufReader::new(file);
-
-        let _ = FtypBox::decode(&mut file).or_fail()?;
-        let moov: MoovBox = loop {
-            if let Either::A(moov) =
-                IgnoredBox::decode_or_ignore(&mut file, |t| t == MoovBox::TYPE).or_fail()?
-            {
-                break moov;
-            }
-        };
-        let trak = moov
-            .trak_boxes
-            .iter()
-            .find(|t| t.mdia_box.hdlr_box.handler_type == HdlrBox::HANDLER_TYPE_VIDE)
+        let trak = Self::find_trak_box(&mut file)
+            .or_fail()?
             .or_fail_with(|()| "No video track".to_string())?;
         let table = SampleTableAccessor::new(trak.mdia_box.minf_box.stbl_box.clone()).or_fail()?;
 
@@ -70,6 +59,29 @@ impl Mp4VideoReader {
             prev_sample_entry: None,
             stats,
         })
+    }
+
+    pub fn has_video_track<P: AsRef<Path>>(path: P) -> orfail::Result<bool> {
+        let file = File::open(&path)
+            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+        Self::find_trak_box(BufReader::new(file))
+            .map(|t| t.is_some())
+            .or_fail()
+    }
+
+    fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
+        let _ = FtypBox::decode(&mut reader).or_fail()?;
+        let moov: MoovBox = loop {
+            if let Either::A(moov) =
+                IgnoredBox::decode_or_ignore(&mut reader, |t| t == MoovBox::TYPE).or_fail()?
+            {
+                break moov;
+            }
+        };
+        Ok(moov
+            .trak_boxes
+            .into_iter()
+            .find(|t| t.mdia_box.hdlr_box.handler_type == HdlrBox::HANDLER_TYPE_VIDE))
     }
 
     pub fn stats(&self) -> &Mp4VideoReaderStats {
@@ -189,19 +201,8 @@ impl Mp4AudioReader {
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut file = BufReader::new(file);
-
-        let _ = FtypBox::decode(&mut file).or_fail()?;
-        let moov: MoovBox = loop {
-            if let Either::A(moov) =
-                IgnoredBox::decode_or_ignore(&mut file, |t| t == MoovBox::TYPE).or_fail()?
-            {
-                break moov;
-            }
-        };
-        let trak = moov
-            .trak_boxes
-            .iter()
-            .find(|t| t.mdia_box.hdlr_box.handler_type == HdlrBox::HANDLER_TYPE_SOUN)
+        let trak = Self::find_trak_box(&mut file)
+            .or_fail()?
             .or_fail_with(|()| "No audio track".to_string())?;
         let table = SampleTableAccessor::new(trak.mdia_box.minf_box.stbl_box.clone()).or_fail()?;
 
@@ -221,6 +222,29 @@ impl Mp4AudioReader {
             next_sample_index: NonZeroU32::MIN,
             stats,
         })
+    }
+
+    pub fn has_audio_track<P: AsRef<Path>>(path: P) -> orfail::Result<bool> {
+        let file = File::open(&path)
+            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+        Self::find_trak_box(BufReader::new(file))
+            .map(|t| t.is_some())
+            .or_fail()
+    }
+
+    fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
+        let _ = FtypBox::decode(&mut reader).or_fail()?;
+        let moov: MoovBox = loop {
+            if let Either::A(moov) =
+                IgnoredBox::decode_or_ignore(&mut reader, |t| t == MoovBox::TYPE).or_fail()?
+            {
+                break moov;
+            }
+        };
+        Ok(moov
+            .trak_boxes
+            .into_iter()
+            .find(|t| t.mdia_box.hdlr_box.handler_type == HdlrBox::HANDLER_TYPE_SOUN))
     }
 
     pub fn stats(&self) -> &Mp4AudioReaderStats {
