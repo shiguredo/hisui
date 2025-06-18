@@ -23,6 +23,43 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
+    // ビデオトラックが存在しない場合は None になる
+    inner: Option<Mp4VideoReaderInner>,
+
+    // ビデオトラックが存在しない時の統計値
+    default_stats: Mp4VideoReaderStats,
+}
+
+impl Mp4VideoReader {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+        let mut default_stats = Mp4VideoReaderStats::default();
+        default_stats.input_file = path.as_ref().canonicalize().or_fail()?;
+
+        let inner = Mp4VideoReaderInner::new(source_id, path).or_fail()?;
+
+        Ok(Self {
+            inner,
+            default_stats,
+        })
+    }
+
+    pub fn stats(&self) -> &Mp4VideoReaderStats {
+        self.inner
+            .as_ref()
+            .map_or(&self.default_stats, |x| &x.stats)
+    }
+}
+
+impl Iterator for Mp4VideoReader {
+    type Item = orfail::Result<VideoFrame>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.as_mut()?.next()
+    }
+}
+
+#[derive(Debug)]
+pub struct Mp4VideoReaderInner {
     file: BufReader<File>,
     source_id: SourceId,
     table: SampleTableAccessor<StblBox>,
@@ -32,15 +69,15 @@ pub struct Mp4VideoReader {
     stats: Mp4VideoReaderStats,
 }
 
-impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+impl Mp4VideoReaderInner {
+    fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Option<Self>> {
         let start_time = Instant::now();
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut file = BufReader::new(file);
-        let trak = Self::find_trak_box(&mut file)
-            .or_fail()?
-            .or_fail_with(|()| "No video track".to_string())?;
+        let Some(trak) = Self::find_trak_box(&mut file).or_fail()? else {
+            return Ok(None);
+        };
         let table = SampleTableAccessor::new(trak.mdia_box.minf_box.stbl_box.clone()).or_fail()?;
 
         file.seek(SeekFrom::Start(0)).or_fail()?;
@@ -50,7 +87,7 @@ impl Mp4VideoReader {
             total_processing_seconds: Seconds::new(start_time.elapsed()),
             ..Default::default()
         };
-        Ok(Self {
+        Ok(Some(Self {
             file,
             source_id,
             table,
@@ -58,15 +95,7 @@ impl Mp4VideoReader {
             next_sample_index: NonZeroU32::MIN,
             prev_sample_entry: None,
             stats,
-        })
-    }
-
-    pub fn has_video_track<P: AsRef<Path>>(path: P) -> orfail::Result<bool> {
-        let file = File::open(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-        Self::find_trak_box(BufReader::new(file))
-            .map(|t| t.is_some())
-            .or_fail()
+        }))
     }
 
     fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
@@ -82,10 +111,6 @@ impl Mp4VideoReader {
             .trak_boxes
             .into_iter()
             .find(|t| t.mdia_box.hdlr_box.handler_type == HdlrBox::HANDLER_TYPE_VIDE))
-    }
-
-    pub fn stats(&self) -> &Mp4VideoReaderStats {
-        &self.stats
     }
 
     fn next_video_frame(&mut self) -> Option<orfail::Result<VideoFrame>> {
@@ -172,7 +197,7 @@ impl Mp4VideoReader {
     }
 }
 
-impl Iterator for Mp4VideoReader {
+impl Iterator for Mp4VideoReaderInner {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
