@@ -30,6 +30,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("情報取得対象の録画ファイル(.mp4|.webm)")
         .take(&mut args)
         .then(|a| a.value().parse())?;
+    if let Some(help) = args.finish()? {
+        print!("{help}");
+        return Ok(());
+    }
 
     let format = match input_file_path
         .extension()
