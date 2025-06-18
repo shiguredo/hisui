@@ -34,7 +34,7 @@ fn main() -> noargs::Result<()> {
     if INSPECT_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_inspect::run(args)?;
     } else if LEGACY_COMMAND.take(&mut args).is_present() {
-        todo!()
+        hisui::subcommand_legacy::run(args)?;
     } else if args.metadata().help_mode {
         // help_mode=true なので `Ok(None)` が返されることはない
         let help = args.finish()?.expect("infallible");
@@ -43,26 +43,8 @@ fn main() -> noargs::Result<()> {
     } else {
         // サブコマンドが指定されておらず、ヘルプ表示モードでもないなら
         // legacy コマンド指定の場合と同じ挙動にする
-        todo!()
+        hisui::subcommand_legacy::run(args)?;
     }
 
     Ok(())
-
-    // TODO: remove
-    // let args = Args::parse(args)?;
-
-    // if let Some(text) = args.get_help() {
-    //     print!("{text}");
-    //     return Ok(());
-    // }
-
-    // match args.sub_command {
-    //     Some(SubCommand::Inspect {
-    //         input_file,
-    //         decode,
-    //         openh264,
-    //     }) => hisui::subcommand_inspect::run(input_file, decode, openh264)?,
-    //     None => Runner::new(args).run()?,
-    // }
-    // Ok(())
 }
