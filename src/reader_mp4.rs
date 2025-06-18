@@ -187,6 +187,43 @@ impl Iterator for Mp4VideoReader {
 
 #[derive(Debug)]
 pub struct Mp4AudioReader {
+    // 音声トラックが存在しない場合は None になる
+    inner: Option<Mp4AudioReaderInner>,
+
+    // 音声トラックが存在しない時の統計値
+    default_stats: Mp4AudioReaderStats,
+}
+
+impl Mp4AudioReader {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+        let mut default_stats = Mp4AudioReaderStats::default();
+        default_stats.input_file = path.as_ref().to_path_buf();
+
+        let inner = Mp4AudioReaderInner::new(source_id, path).or_fail()?;
+
+        Ok(Self {
+            inner,
+            default_stats,
+        })
+    }
+
+    pub fn stats(&self) -> &Mp4AudioReaderStats {
+        self.inner
+            .as_ref()
+            .map_or(&self.default_stats, |x| &x.stats)
+    }
+}
+
+impl Iterator for Mp4AudioReader {
+    type Item = orfail::Result<AudioData>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.as_mut()?.next()
+    }
+}
+
+#[derive(Debug)]
+pub struct Mp4AudioReaderInner {
     file: BufReader<File>,
     source_id: SourceId,
     table: SampleTableAccessor<StblBox>,
@@ -195,15 +232,15 @@ pub struct Mp4AudioReader {
     stats: Mp4AudioReaderStats,
 }
 
-impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+impl Mp4AudioReaderInner {
+    fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Option<Self>> {
         let start_time = Instant::now();
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut file = BufReader::new(file);
-        let trak = Self::find_trak_box(&mut file)
-            .or_fail()?
-            .or_fail_with(|()| "No audio track".to_string())?;
+        let Some(trak) = Self::find_trak_box(&mut file).or_fail()? else {
+            return Ok(None);
+        };
         let table = SampleTableAccessor::new(trak.mdia_box.minf_box.stbl_box.clone()).or_fail()?;
 
         file.seek(SeekFrom::Start(0)).or_fail()?;
@@ -214,22 +251,14 @@ impl Mp4AudioReader {
             total_processing_seconds: Seconds::new(start_time.elapsed()),
             ..Default::default()
         };
-        Ok(Self {
+        Ok(Some(Self {
             source_id,
             file,
             table,
             timescale: trak.mdia_box.mdhd_box.timescale,
             next_sample_index: NonZeroU32::MIN,
             stats,
-        })
-    }
-
-    pub fn has_audio_track<P: AsRef<Path>>(path: P) -> orfail::Result<bool> {
-        let file = File::open(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-        Self::find_trak_box(BufReader::new(file))
-            .map(|t| t.is_some())
-            .or_fail()
+        }))
     }
 
     fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
@@ -245,10 +274,6 @@ impl Mp4AudioReader {
             .trak_boxes
             .into_iter()
             .find(|t| t.mdia_box.hdlr_box.handler_type == HdlrBox::HANDLER_TYPE_SOUN))
-    }
-
-    pub fn stats(&self) -> &Mp4AudioReaderStats {
-        &self.stats
     }
 
     fn next_audio_data(&mut self) -> Option<orfail::Result<AudioData>> {
@@ -303,7 +328,7 @@ impl Mp4AudioReader {
     }
 }
 
-impl Iterator for Mp4AudioReader {
+impl Iterator for Mp4AudioReaderInner {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
