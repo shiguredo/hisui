@@ -46,6 +46,9 @@ impl Args {
             .take(&mut args)
             .is_present()
             .then(|| format!("{} {}\n", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")));
+
+        let sub_command = SubCommand::new(&mut args)?;
+
         let codec_engines = noargs::flag("codec-engines")
             .doc("利用可能なエンコーダ・デコーダの一覧を JSON 形式で表示します")
             .take(&mut args)
@@ -256,8 +259,6 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
         {
             eprintln!("[WARN] `--h264-encoder` is obsolete\n");
         }
-
-        let sub_command = SubCommand::new(&mut args)?;
 
         if version.is_none()
             && in_metadata_file.is_none()
