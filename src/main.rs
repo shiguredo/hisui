@@ -8,7 +8,6 @@ const VERBOSE_FLAG: noargs::FlagSpec =
 
 const INSPECT_COMMAND: noargs::CmdSpec =
     noargs::cmd("inspect").doc("録画ファイルの情報を取得します");
-
 const LEGACY_COMMAND: noargs::CmdSpec =
     noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです（省略可能）");
 
@@ -31,8 +30,9 @@ fn main() -> noargs::Result<()> {
         Logger::init(log::LevelFilter::Warn)?;
     };
 
+    // サブコマンドで分岐する
     if INSPECT_COMMAND.take(&mut args).is_present() {
-        todo!()
+        hisui::subcommand_inspect::run(args)?;
     } else if LEGACY_COMMAND.take(&mut args).is_present() {
         todo!()
     } else if args.metadata().help_mode {
@@ -46,6 +46,9 @@ fn main() -> noargs::Result<()> {
         todo!()
     }
 
+    Ok(())
+
+    // TODO: remove
     // let args = Args::parse(args)?;
 
     // if let Some(text) = args.get_help() {
