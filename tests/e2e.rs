@@ -34,15 +34,15 @@ fn empty_source() -> noargs::Result<()> {
     assert!(out_file.path().exists());
     assert_eq!(
         Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
-            .err()
-            .map(|e| e.message),
-        Some("No audio track".to_owned())
+            .or_fail()?
+            .count(),
+        0
     );
     assert_eq!(
         Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())
-            .err()
-            .map(|e| e.message),
-        Some("No video track".to_owned())
+            .or_fail()?
+            .count(),
+        0
     );
 
     Ok(())
@@ -345,9 +345,9 @@ fn two_regions() -> noargs::Result<()> {
     // 音声はなし
     assert_eq!(
         Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
-            .err()
-            .map(|e| e.message),
-        Some("No audio track".to_owned())
+            .or_fail()?
+            .count(),
+        0
     );
 
     // 後でデコードするために読み込み結果を覚えておく
