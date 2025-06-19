@@ -1,7 +1,35 @@
 use orfail::OrFail;
 
+// fn show_codec_engines(&self) -> orfail::Result<()> {
+//     let openh264_lib = if let Some(path) = &self.args.openh264 {
+//         Some(Openh264Library::load(path).or_fail()?)
+//     } else {
+//         None
+//     };
+//     let options = VideoDecoderOptions {
+//         openh264_lib: openh264_lib.clone(),
+//     };
+
+//     let mut codec_engines = CodecEngines::default();
+
+//     AudioDecoder::update_codec_engines(&mut codec_engines);
+//     VideoDecoder::update_codec_engines(&mut codec_engines, options.clone());
+//     AudioEncoder::update_codec_engines(&mut codec_engines);
+//     VideoEncoder::update_codec_engines(&mut codec_engines, options);
+
+//     println!(
+//         "{}",
+//         nojson::json(|f| {
+//             f.set_indent_size(2);
+//             f.set_spacing(true);
+//             f.value(&codec_engines)
+//         })
+//     );
+
+//     Ok(())
+// }
+
 pub fn run(args: noargs::RawArgs) -> noargs::Result<()> {
-    // 引数の解析を完了する（このサブコマンドは追加の引数を取らない）
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());

@@ -8,7 +8,7 @@ use crate::{
     audio::AudioDataReceiver,
     channel::{self, ErrorFlag},
     command_line_args::Args,
-    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
     metadata::{ContainerFormat, RecordingMetadata},
@@ -16,7 +16,7 @@ use crate::{
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},
     stats::{Seconds, SharedStats, WriterStats},
-    types::{CodecEngines, CodecName},
+    types::CodecName,
     video::VideoFrameReceiver,
     writer_mp4::Mp4Writer,
 };
@@ -32,12 +32,6 @@ impl Runner {
     }
 
     pub fn run(&mut self) -> orfail::Result<()> {
-        if self.args.codec_engines {
-            // 利用可能なエンジンやコーデックを表示して終了する
-            self.show_codec_engines().or_fail()?;
-            return Ok(());
-        }
-
         // 利用する CPU コア数を制限する
         if let Some(cores) = self.args.cpu_cores {
             limit_cpu_cores(cores).or_fail()?;
@@ -126,35 +120,6 @@ impl Runner {
             // エラー発生時は終了コードを変える
             std::process::exit(1);
         }
-
-        Ok(())
-    }
-
-    fn show_codec_engines(&self) -> orfail::Result<()> {
-        let openh264_lib = if let Some(path) = &self.args.openh264 {
-            Some(Openh264Library::load(path).or_fail()?)
-        } else {
-            None
-        };
-        let options = VideoDecoderOptions {
-            openh264_lib: openh264_lib.clone(),
-        };
-
-        let mut codec_engines = CodecEngines::default();
-
-        AudioDecoder::update_codec_engines(&mut codec_engines);
-        VideoDecoder::update_codec_engines(&mut codec_engines, options.clone());
-        AudioEncoder::update_codec_engines(&mut codec_engines);
-        VideoEncoder::update_codec_engines(&mut codec_engines, options);
-
-        println!(
-            "{}",
-            nojson::json(|f| {
-                f.set_indent_size(2);
-                f.set_spacing(true);
-                f.value(&codec_engines)
-            })
-        );
 
         Ok(())
     }
