@@ -21,6 +21,11 @@ use crate::{
 // 値は適当なので必要に応じて調整すること
 const TIMESTAMP_GAP_THRESHOLD: Duration = Duration::from_secs(60);
 
+// 入力がこの期間更新されなかった場合には、尺調整ではなくエラーとする（最終的な安全弁）
+//
+// 値は適当なので必要に応じて調整すること
+const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60);
+
 #[derive(Debug)]
 pub struct VideoMixerThread {
     inputs: Vec<Input>,
@@ -209,7 +214,11 @@ impl VideoMixerThread {
                 return Ok(None);
             }
 
-            if now.saturating_sub(self.last_input_update_time) > TIMESTAMP_GAP_THRESHOLD {
+            let elapsed_since_last_input = now.saturating_sub(self.last_input_update_time);
+            if elapsed_since_last_input > TIMESTAMP_GAP_THRESHOLD {
+                (elapsed_since_last_input <= TIMESTAMP_GAP_ERROR_THRESHOLD)
+                    .or_fail_with(|()| "too large timestamp gap".to_owned())?;
+
                 // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
                 let duration = self.next_output_duration();
                 let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
