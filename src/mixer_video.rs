@@ -22,6 +22,7 @@ pub struct VideoMixerThread {
     current_frames: HashMap<SourceId, VideoFrame>,
     eos_source_ids: HashSet<SourceId>,
     last_mixed_frame: Option<VideoFrame>,
+    last_input_update_time: Duration,
     stats: VideoMixerStats,
 }
 
@@ -47,6 +48,7 @@ impl VideoMixerThread {
             current_frames: HashMap::new(),
             eos_source_ids: HashSet::new(),
             last_mixed_frame: None,
+            last_input_update_time: Duration::ZERO,
             stats: VideoMixerStats {
                 output_video_resolution: VideoResolution {
                     width: resolution.width().get(),
@@ -137,6 +139,7 @@ impl VideoMixerThread {
                 input.source_id = Some(source_id.clone());
             }
             self.current_frames.insert(source_id, frame);
+            self.last_input_update_time = now;
             self.stats.total_input_video_frame_count += 1;
         }
         Ok(())
@@ -166,6 +169,8 @@ impl VideoMixerThread {
                 // まだ表示時刻に収まっている
                 return true;
             }
+
+            self.last_input_update_time = now;
             false
         });
 
