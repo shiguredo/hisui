@@ -33,16 +33,6 @@ pub enum AudioEncoder {
 }
 
 impl AudioEncoder {
-    pub fn update_codec_engines(engines: &mut CodecEngines) {
-        engines.insert_encoder(CodecName::Opus, EngineName::Opus);
-
-        #[cfg(feature = "fdk-aac")]
-        engines.insert_encoder(CodecName::Aac, EngineName::FdkAac);
-
-        #[cfg(target_os = "macos")]
-        engines.insert_encoder(CodecName::Aac, EngineName::AudioToobox);
-    }
-
     pub fn new_opus(bitrate: NonZeroUsize) -> orfail::Result<Self> {
         OpusEncoder::new(bitrate).map(Self::Opus).or_fail()
     }
@@ -98,6 +88,36 @@ impl AudioEncoder {
             AudioEncoder::Opus(_) => CodecName::Opus,
         }
     }
+
+    pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
+        let mut engines = Vec::new();
+        match codec {
+            CodecName::Aac => {
+                #[cfg(feature = "fdk-aac")]
+                {
+                    engines.push(EngineName::FdkAac);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::AudioToobox);
+                }
+            }
+            CodecName::Opus => engines.push(EngineName::Opus),
+            _ => unreachable!(),
+        }
+        engines
+    }
+
+    // TODO: delete
+    pub fn update_codec_engines(engines: &mut CodecEngines) {
+        engines.insert_encoder(CodecName::Opus, EngineName::Opus);
+
+        #[cfg(feature = "fdk-aac")]
+        engines.insert_encoder(CodecName::Aac, EngineName::FdkAac);
+
+        #[cfg(target_os = "macos")]
+        engines.insert_encoder(CodecName::Aac, EngineName::AudioToobox);
+    }
 }
 
 #[derive(Debug)]
@@ -110,6 +130,37 @@ pub enum VideoEncoder {
 }
 
 impl VideoEncoder {
+    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
+        let mut engines = Vec::new();
+        match codec {
+            CodecName::Vp8 | CodecName::Vp9 => {
+                engines.push(EngineName::Libvpx);
+            }
+            CodecName::H264 => {
+                engines.push(EngineName::Openh264);
+                if is_openh264_available {
+                    engines.push(EngineName::Openh264);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::H265 => {
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::Av1 => {
+                engines.push(EngineName::SvtAv1);
+            }
+            _ => unreachable!(),
+        }
+        engines
+    }
+
+    // TODO: delete
     pub fn update_codec_engines(engines: &mut CodecEngines, options: VideoDecoderOptions) {
         engines.insert_encoder(CodecName::Vp8, EngineName::Libvpx);
         engines.insert_encoder(CodecName::Vp9, EngineName::Libvpx);

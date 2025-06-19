@@ -30,6 +30,15 @@ impl AudioDecoder {
         }
     }
 
+    pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
+        match codec {
+            CodecName::Aac => vec![],
+            CodecName::Opus => vec![EngineName::Opus],
+            _ => unreachable!(),
+        }
+    }
+
+    // TODO: remove
     pub fn update_codec_engines(engines: &mut CodecEngines) {
         engines.insert_decoder(CodecName::Opus, EngineName::Opus);
     }
@@ -58,6 +67,36 @@ impl VideoDecoder {
         Self::Initial { options }
     }
 
+    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
+        let mut engines = Vec::new();
+        match codec {
+            CodecName::Vp8 | CodecName::Vp9 => {
+                engines.push(EngineName::Libvpx);
+            }
+            CodecName::H264 => {
+                if is_openh264_available {
+                    engines.push(EngineName::Openh264);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::H265 => {
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::Av1 => {
+                engines.push(EngineName::Dav1d);
+            }
+            _ => unreachable!(),
+        }
+        engines
+    }
+
+    // TODO: delete
     pub fn update_codec_engines(engines: &mut CodecEngines, options: VideoDecoderOptions) {
         engines.insert_decoder(CodecName::Vp8, EngineName::Libvpx);
         engines.insert_decoder(CodecName::Vp9, EngineName::Libvpx);

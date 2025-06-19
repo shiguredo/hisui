@@ -1,10 +1,8 @@
-use orfail::OrFail;
-use std::collections::BTreeSet;
-
-// Import the necessary types from the codebase
-use crate::decoder::VideoDecoderOptions;
-use crate::encoder::{AudioEncoder, VideoEncoder};
-use crate::types::{CodecEngines, CodecName, EngineName};
+use crate::{
+    decoder::{AudioDecoder, VideoDecoder},
+    encoder::{AudioEncoder, VideoEncoder},
+    types::{CodecName, EngineName},
+};
 
 pub fn run(args: noargs::RawArgs) -> noargs::Result<()> {
     if let Some(help) = args.finish()? {
@@ -12,79 +10,33 @@ pub fn run(args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    // Get codec engines information
-    let mut codec_engines = CodecEngines::default();
+    // TODO:
+    let is_openh264_available = false;
 
-    // Update codec engines with available encoders and decoders
-    AudioEncoder::update_codec_engines(&mut codec_engines);
-    VideoEncoder::update_codec_engines(&mut codec_engines, VideoDecoderOptions::default());
-    // Add decoder updates if available in your codebase
-
-    // 利用可能なコーデック情報を収集
     let mut codecs = Vec::new();
 
-    // 音声コーデック
-    codecs.push(CodecInfo {
-        name: CodecName::Opus,
-        encoders: get_engines_for_codec(&codec_engines, CodecName::Opus, true),
-        decoders: get_engines_for_codec(&codec_engines, CodecName::Opus, false),
-    });
+    for name in [CodecName::Opus, CodecName::Aac] {
+        codecs.push(CodecInfo {
+            name,
+            decoders: AudioDecoder::get_engines(name),
+            encoders: AudioEncoder::get_engines(name),
+        });
+    }
 
-    #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-    codecs.push(CodecInfo {
-        name: CodecName::Aac,
-        encoders: get_engines_for_codec(&codec_engines, CodecName::Aac, true),
-        decoders: get_engines_for_codec(&codec_engines, CodecName::Aac, false),
-    });
+    for name in [
+        CodecName::Vp8,
+        CodecName::Vp9,
+        CodecName::H264,
+        CodecName::H265,
+        CodecName::Av1,
+    ] {
+        codecs.push(CodecInfo {
+            name,
+            decoders: VideoDecoder::get_engines(name, is_openh264_available),
+            encoders: VideoEncoder::get_engines(name, is_openh264_available),
+        });
+    }
 
-    #[cfg(not(any(target_os = "macos", feature = "fdk-aac")))]
-    codecs.push(CodecInfo {
-        name: CodecName::Aac,
-        codec_type: "audio".to_string(),
-        encoders: BTreeSet::new(),
-        decoders: BTreeSet::new(),
-    });
-
-    // 映像コーデック
-    codecs.push(CodecInfo {
-        name: CodecName::Vp8,
-        encoders: get_engines_for_codec(&codec_engines, CodecName::Vp8, true),
-        decoders: get_engines_for_codec(&codec_engines, CodecName::Vp8, false),
-    });
-
-    codecs.push(CodecInfo {
-        name: CodecName::Vp9,
-        encoders: get_engines_for_codec(&codec_engines, CodecName::Vp9, true),
-        decoders: get_engines_for_codec(&codec_engines, CodecName::Vp9, false),
-    });
-
-    codecs.push(CodecInfo {
-        name: CodecName::H264,
-        encoders: get_engines_for_codec(&codec_engines, CodecName::H264, true),
-        decoders: get_engines_for_codec(&codec_engines, CodecName::H264, false),
-    });
-
-    #[cfg(target_os = "macos")]
-    codecs.push(CodecInfo {
-        name: CodecName::H265,
-        encoders: get_engines_for_codec(&codec_engines, CodecName::H265, true),
-        decoders: get_engines_for_codec(&codec_engines, CodecName::H265, false),
-    });
-
-    #[cfg(not(target_os = "macos"))]
-    codecs.push(CodecInfo {
-        name: CodecName::H265,
-        encoders: BTreeSet::new(),
-        decoders: BTreeSet::new(),
-    });
-
-    codecs.push(CodecInfo {
-        name: CodecName::Av1,
-        encoders: get_engines_for_codec(&codec_engines, CodecName::Av1, true),
-        decoders: get_engines_for_codec(&codec_engines, CodecName::Av1, false),
-    });
-
-    // JSON形式で出力
     println!(
         "{}",
         nojson::json(|f| {
@@ -100,8 +52,8 @@ pub fn run(args: noargs::RawArgs) -> noargs::Result<()> {
 #[derive(Debug)]
 struct CodecInfo {
     name: CodecName,
-    encoders: BTreeSet<EngineName>,
-    decoders: BTreeSet<EngineName>,
+    decoders: Vec<EngineName>,
+    encoders: Vec<EngineName>,
 }
 
 impl nojson::DisplayJson for CodecInfo {
@@ -116,20 +68,25 @@ impl nojson::DisplayJson for CodecInfo {
                     "video"
                 },
             )?;
-            f.member("encoders", &self.encoders)?;
-            f.member("decoders", &self.decoders)
+            f.member(
+                "encoders",
+                nojson::json(|f| {
+                    f.set_indent_size(0);
+                    f.value(&self.encoders)?;
+                    f.set_indent_size(2);
+                    Ok(())
+                }),
+            )?;
+            f.member(
+                "decoders",
+                nojson::json(|f| {
+                    f.set_indent_size(0);
+                    f.value(&self.decoders)?;
+                    f.set_indent_size(2);
+                    Ok(())
+                }),
+            )?;
+            Ok(())
         })
     }
-}
-
-// Helper function to extract engines for a specific codec
-fn get_engines_for_codec(
-    codec_engines: &CodecEngines,
-    codec: CodecName,
-    is_encoder: bool,
-) -> BTreeSet<EngineName> {
-    // This function would need to be implemented based on how CodecEngines works
-    // You'll need to check the CodecEngines implementation to see how to query it
-    // This is a placeholder - you'll need to adapt based on the actual API
-    BTreeSet::new()
 }
