@@ -120,14 +120,14 @@ impl VideoMixerThread {
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
             self.stats.total_output_video_frame_count
-                + self.stats.total_merged_video_frame_count
+                + self.stats.total_extended_video_frame_count
                 + self.stats.total_trimmed_video_frame_count,
         )
     }
 
     fn next_output_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count + self.stats.total_merged_video_frame_count,
+            self.stats.total_output_video_frame_count + self.stats.total_extended_video_frame_count,
         )
     }
 
@@ -135,7 +135,7 @@ impl VideoMixerThread {
         // 丸め誤差が蓄積しないように次のフレームのタイスタンプとの差をとる
         self.frames_to_timestamp(
             self.stats.total_output_video_frame_count
-                + self.stats.total_merged_video_frame_count
+                + self.stats.total_extended_video_frame_count
                 + 1,
         ) - self.next_output_timestamp()
     }
@@ -224,7 +224,7 @@ impl VideoMixerThread {
                 let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
 
                 last_frame.duration += duration;
-                self.stats.total_merged_video_frame_count += 1;
+                self.stats.total_extended_video_frame_count += 1;
                 self.stats.total_output_video_frame_seconds += duration; // 出力フレーム数は増えないけど尺は伸びる
 
                 continue;
