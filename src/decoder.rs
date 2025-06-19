@@ -10,7 +10,7 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     stats::VideoDecoderStats,
-    types::{CodecEngines, CodecName, EngineName},
+    types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
 };
 
@@ -30,8 +30,12 @@ impl AudioDecoder {
         }
     }
 
-    pub fn update_codec_engines(engines: &mut CodecEngines) {
-        engines.insert_decoder(CodecName::Opus, EngineName::Opus);
+    pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
+        match codec {
+            CodecName::Aac => vec![],
+            CodecName::Opus => vec![EngineName::Opus],
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -58,20 +62,33 @@ impl VideoDecoder {
         Self::Initial { options }
     }
 
-    pub fn update_codec_engines(engines: &mut CodecEngines, options: VideoDecoderOptions) {
-        engines.insert_decoder(CodecName::Vp8, EngineName::Libvpx);
-        engines.insert_decoder(CodecName::Vp9, EngineName::Libvpx);
-        engines.insert_decoder(CodecName::Av1, EngineName::Dav1d);
-
-        if options.openh264_lib.is_some() {
-            engines.insert_decoder(CodecName::H264, EngineName::Openh264);
+    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
+        let mut engines = Vec::new();
+        match codec {
+            CodecName::Vp8 | CodecName::Vp9 => {
+                engines.push(EngineName::Libvpx);
+            }
+            CodecName::H264 => {
+                if is_openh264_available {
+                    engines.push(EngineName::Openh264);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::H265 => {
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::Av1 => {
+                engines.push(EngineName::Dav1d);
+            }
+            _ => unreachable!(),
         }
-
-        #[cfg(target_os = "macos")]
-        {
-            engines.insert_decoder(CodecName::H264, EngineName::VideoToolbox);
-            engines.insert_decoder(CodecName::H265, EngineName::VideoToolbox);
-        }
+        engines
     }
 
     pub fn decode(

@@ -32,6 +32,7 @@ pub mod source;
 pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_legacy;
+pub mod subcommand_list_codecs;
 pub mod types;
 pub mod video;
 pub mod video_h264;

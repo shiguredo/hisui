@@ -12,14 +12,13 @@ use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
     audio::AudioData,
     channel::{self, ErrorFlag},
-    decoder::VideoDecoderOptions,
     encoder_libvpx::LibvpxEncoder,
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
     stats::{AudioEncoderStats, EncoderStats, Seconds, SharedStats, VideoEncoderStats},
-    types::{CodecEngines, CodecName, EngineName},
+    types::{CodecName, EngineName},
     video::VideoFrame,
 };
 
@@ -33,16 +32,6 @@ pub enum AudioEncoder {
 }
 
 impl AudioEncoder {
-    pub fn update_codec_engines(engines: &mut CodecEngines) {
-        engines.insert_encoder(CodecName::Opus, EngineName::Opus);
-
-        #[cfg(feature = "fdk-aac")]
-        engines.insert_encoder(CodecName::Aac, EngineName::FdkAac);
-
-        #[cfg(target_os = "macos")]
-        engines.insert_encoder(CodecName::Aac, EngineName::AudioToobox);
-    }
-
     pub fn new_opus(bitrate: NonZeroUsize) -> orfail::Result<Self> {
         OpusEncoder::new(bitrate).map(Self::Opus).or_fail()
     }
@@ -98,6 +87,25 @@ impl AudioEncoder {
             AudioEncoder::Opus(_) => CodecName::Opus,
         }
     }
+
+    pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
+        let mut engines = Vec::new();
+        match codec {
+            CodecName::Aac => {
+                #[cfg(feature = "fdk-aac")]
+                {
+                    engines.push(EngineName::FdkAac);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::AudioToobox);
+                }
+            }
+            CodecName::Opus => engines.push(EngineName::Opus),
+            _ => unreachable!(),
+        }
+        engines
+    }
 }
 
 #[derive(Debug)]
@@ -110,22 +118,6 @@ pub enum VideoEncoder {
 }
 
 impl VideoEncoder {
-    pub fn update_codec_engines(engines: &mut CodecEngines, options: VideoDecoderOptions) {
-        engines.insert_encoder(CodecName::Vp8, EngineName::Libvpx);
-        engines.insert_encoder(CodecName::Vp9, EngineName::Libvpx);
-        engines.insert_encoder(CodecName::Av1, EngineName::SvtAv1);
-
-        if options.openh264_lib.is_some() {
-            engines.insert_encoder(CodecName::H264, EngineName::Openh264);
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            engines.insert_encoder(CodecName::H264, EngineName::VideoToolbox);
-            engines.insert_encoder(CodecName::H265, EngineName::VideoToolbox);
-        }
-    }
-
     pub fn new_vp8(
         layout: &Layout,
         cq_level: usize,
@@ -216,6 +208,35 @@ impl VideoEncoder {
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.codec(),
         }
+    }
+
+    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
+        let mut engines = Vec::new();
+        match codec {
+            CodecName::Vp8 | CodecName::Vp9 => {
+                engines.push(EngineName::Libvpx);
+            }
+            CodecName::H264 => {
+                if is_openh264_available {
+                    engines.push(EngineName::Openh264);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::H265 => {
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::Av1 => {
+                engines.push(EngineName::SvtAv1);
+            }
+            _ => unreachable!(),
+        }
+        engines
     }
 }
 

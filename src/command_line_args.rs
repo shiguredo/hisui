@@ -19,7 +19,6 @@ pub struct Args {
     pub out_aac_bit_rate: NonZeroUsize,
     pub openh264: Option<PathBuf>,
     pub audio_only: bool,
-    pub codec_engines: bool,
     pub show_progress_bar: bool,
     pub layout: Option<PathBuf>,
     pub cpu_cores: Option<usize>,
@@ -27,10 +26,6 @@ pub struct Args {
 
 impl Args {
     pub fn parse(mut args: noargs::RawArgs) -> noargs::Result<Self> {
-        let codec_engines = noargs::flag("codec-engines")
-            .doc("利用可能なエンコーダ・デコーダの一覧を JSON 形式で表示します")
-            .take(&mut args)
-            .is_present();
         let in_metadata_file = noargs::opt("in-metadata-file")
             .short('f')
             .ty("PATH")
@@ -198,7 +193,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             // まだロガーのセットアップが行われていないので eprintln!() で直接出力する
             // （以降も同様）
             eprintln!(
-                "[WARN] `--video-codec-engines` is obsolete (please use `--codec-engines` instead)\n"
+                "[WARN] `--video-codec-engines` is obsolete (please use `list-codecs` command instead)\n"
             );
         }
         if noargs::opt("mp4-muxer")
@@ -234,13 +229,12 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             eprintln!("[WARN] `--h264-encoder` is obsolete\n");
         }
 
-        if in_metadata_file.is_none() && layout.is_none() && !codec_engines {
+        if in_metadata_file.is_none() && layout.is_none() {
             // 最低限必要な引数が指定されていない場合にはヘルプを表示する
             args.metadata_mut().help_mode = true;
         }
 
         Ok(Self {
-            codec_engines,
             in_metadata_file,
             layout,
             out_file,
