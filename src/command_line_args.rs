@@ -166,7 +166,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .doc("true が指定された場合には合成の進捗を表示します")
             .take(&mut args)
             .then(|a| a.value().parse())?;
-        let cpu_cores = noargs::opt("cpu-cores")
+        let cpu_cores = noargs::opt("max-cpu-cores")
             .short('c')
             .ty("INTEGER")
             .doc(concat!(
