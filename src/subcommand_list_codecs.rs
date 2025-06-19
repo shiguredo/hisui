@@ -1,17 +1,26 @@
+use std::path::PathBuf;
+
+use shiguredo_openh264::Openh264Library;
+
 use crate::{
     decoder::{AudioDecoder, VideoDecoder},
     encoder::{AudioEncoder, VideoEncoder},
     types::{CodecName, EngineName},
 };
 
-pub fn run(args: noargs::RawArgs) -> noargs::Result<()> {
+pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+    let openh264: Option<PathBuf> = noargs::opt("openh264")
+        .ty("PATH")
+        .env("HISUI_OPENH264_PATH")
+        .doc("OpenH264 の共有ライブラリのパス")
+        .take(&mut args)
+        .present_and_then(|a| a.value().parse())?;
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
     }
 
-    // TODO:
-    let is_openh264_available = false;
+    let is_openh264_available = openh264.is_some_and(|path| Openh264Library::load(path).is_ok());
 
     let mut codecs = Vec::new();
 
