@@ -246,9 +246,9 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "noargs"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a0c67c67bde59ae289ec6d68089f3e399b9cb7a2941875d1e94a1123c401308"
+checksum = "1356539d51c722559df2fc78d29ceb2e9f7d169e4a6ff2deb851f70fcddb3425"
 
 [[package]]
 name = "nojson"
