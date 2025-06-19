@@ -137,7 +137,6 @@ impl VideoEncoder {
                 engines.push(EngineName::Libvpx);
             }
             CodecName::H264 => {
-                engines.push(EngineName::Openh264);
                 if is_openh264_available {
                     engines.push(EngineName::Openh264);
                 }

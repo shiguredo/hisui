@@ -69,19 +69,19 @@ impl nojson::DisplayJson for CodecInfo {
                 },
             )?;
             f.member(
-                "encoders",
+                "decoders",
                 nojson::json(|f| {
                     f.set_indent_size(0);
-                    f.value(&self.encoders)?;
+                    f.value(&self.decoders)?;
                     f.set_indent_size(2);
                     Ok(())
                 }),
             )?;
             f.member(
-                "decoders",
+                "encoders",
                 nojson::json(|f| {
                     f.set_indent_size(0);
-                    f.value(&self.decoders)?;
+                    f.value(&self.encoders)?;
                     f.set_indent_size(2);
                     Ok(())
                 }),
