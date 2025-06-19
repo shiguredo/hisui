@@ -193,7 +193,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             // まだロガーのセットアップが行われていないので eprintln!() で直接出力する
             // （以降も同様）
             eprintln!(
-                "[WARN] `--video-codec-engines` is obsolete (please use `--codec-engines` instead)\n"
+                "[WARN] `--video-codec-engines` is obsolete (please use `list-codecs` command instead)\n"
             );
         }
         if noargs::opt("mp4-muxer")
