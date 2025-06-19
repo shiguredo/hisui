@@ -14,6 +14,18 @@ use crate::{
     video::{VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
 };
 
+// 入力がこの期間更新されなかった場合には、以後は合成ではなく
+// 一つ前の合成フレームの尺を伸ばすことで対処する
+// (入力のバグによって、非現実的な数のフレームが合成されるのを防ぐため）
+//
+// 値は適当なので必要に応じて調整すること
+const TIMESTAMP_GAP_THRESHOLD: Duration = Duration::from_secs(60);
+
+// 入力がこの期間更新されなかった場合には、尺調整ではなくエラーとする（最終的な安全弁）
+//
+// 値は適当なので必要に応じて調整すること
+const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60);
+
 #[derive(Debug)]
 pub struct VideoMixerThread {
     inputs: Vec<Input>,
@@ -21,6 +33,8 @@ pub struct VideoMixerThread {
     output_tx: VideoFrameSyncSender,
     current_frames: HashMap<SourceId, VideoFrame>,
     eos_source_ids: HashSet<SourceId>,
+    last_mixed_frame: Option<VideoFrame>,
+    last_input_update_time: Duration,
     stats: VideoMixerStats,
 }
 
@@ -45,6 +59,8 @@ impl VideoMixerThread {
             output_tx: tx,
             current_frames: HashMap::new(),
             eos_source_ids: HashSet::new(),
+            last_mixed_frame: None,
+            last_input_update_time: Duration::ZERO,
             stats: VideoMixerStats {
                 output_video_resolution: VideoResolution {
                     width: resolution.width().get(),
@@ -71,12 +87,27 @@ impl VideoMixerThread {
 
     fn run(&mut self) -> orfail::Result<()> {
         while let Some(frame) = self.next_output_frame().or_fail()? {
-            if !self.output_tx.send(frame) {
+            let Some(last_frame) = self.last_mixed_frame.take() else {
+                // 最初のフレームの場合はバッファに溜めて次に進む
+                self.last_mixed_frame = Some(frame);
+                continue;
+            };
+            self.last_mixed_frame = Some(frame);
+
+            if !self.output_tx.send(last_frame) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                 log::warn!("receiver of mixed video stream has been closed");
-                break;
+                return Ok(());
             }
         }
+
+        // バッファに残っていた最後のフレームを送る
+        if let Some(last_frame) = self.last_mixed_frame.take() {
+            if !self.output_tx.send(last_frame) {
+                log::warn!("receiver of mixed video stream has been closed");
+            }
+        }
+
         Ok(())
     }
 
@@ -88,18 +119,25 @@ impl VideoMixerThread {
 
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count + self.stats.total_trimmed_video_frame_count,
+            self.stats.total_output_video_frame_count
+                + self.stats.total_extended_video_frame_count
+                + self.stats.total_trimmed_video_frame_count,
         )
     }
 
     fn next_output_timestamp(&self) -> Duration {
-        self.frames_to_timestamp(self.stats.total_output_video_frame_count)
+        self.frames_to_timestamp(
+            self.stats.total_output_video_frame_count + self.stats.total_extended_video_frame_count,
+        )
     }
 
     fn next_output_duration(&self) -> Duration {
         // 丸め誤差が蓄積しないように次のフレームのタイスタンプとの差をとる
-        self.frames_to_timestamp(self.stats.total_output_video_frame_count + 1)
-            - self.next_output_timestamp()
+        self.frames_to_timestamp(
+            self.stats.total_output_video_frame_count
+                + self.stats.total_extended_video_frame_count
+                + 1,
+        ) - self.next_output_timestamp()
     }
 
     // 必要に応じて、現在の合成対象となっているフレーム群を更新する
@@ -120,62 +158,83 @@ impl VideoMixerThread {
                 input.source_id = Some(source_id.clone());
             }
             self.current_frames.insert(source_id, frame);
+            self.last_input_update_time = now;
             self.stats.total_input_video_frame_count += 1;
         }
         Ok(())
     }
 
     fn next_output_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
-        let mut now = self.next_input_timestamp();
+        loop {
+            let mut now = self.next_input_timestamp();
 
-        // トリム対象期間ならその分はスキップする
-        while self.layout.is_in_trim_span(now) {
-            self.stats.total_trimmed_video_frame_count += 1;
-            now = self.next_input_timestamp();
-        }
-
-        // EOS に到達したソースの最後のフレームは、その表示時刻を過ぎたら破棄する
-        //
-        // なお、EOS ではないソースの場合は、仮に途中のフレーム間のギャップがあったとしても、
-        // 破棄はせずに連続しているものとして扱う
-        // (入力ファイル作成時の数値計算誤差などで、僅かなギャップが生じたとしても、
-        //  その部分を黒塗りにしたくはないため)
-        self.current_frames.retain(|source_id, f| {
-            if !self.eos_source_ids.contains(source_id) {
-                // まだ EOS に達していない
-                return true;
+            // トリム対象期間ならその分はスキップする
+            while self.layout.is_in_trim_span(now) {
+                self.stats.total_trimmed_video_frame_count += 1;
+                now = self.next_input_timestamp();
             }
-            if now < f.end_timestamp() {
-                // まだ表示時刻に収まっている
-                return true;
+
+            // EOS に到達したソースの最後のフレームは、その表示時刻を過ぎたら破棄する
+            //
+            // なお、EOS ではないソースの場合は、仮に途中のフレーム間のギャップがあったとしても、
+            // 破棄はせずに連続しているものとして扱う
+            // (入力ファイル作成時の数値計算誤差などで、僅かなギャップが生じたとしても、
+            //  その部分を黒塗りにしたくはないため)
+            self.current_frames.retain(|source_id, f| {
+                if !self.eos_source_ids.contains(source_id) {
+                    // まだ EOS に達していない
+                    return true;
+                }
+                if now < f.end_timestamp() {
+                    // まだ表示時刻に収まっている
+                    return true;
+                }
+
+                self.last_input_update_time = now;
+                false
+            });
+
+            // 表示対象のフレームを更新する
+            for mut input in std::mem::take(&mut self.inputs) {
+                self.maybe_update_current_frame(now, &mut input).or_fail()?;
+                if input.rx.peek().is_some() {
+                    // この入力（ソース）にはまだフレームが残っている
+                    self.inputs.push(input);
+                } else if let Some(source_id) = input.source_id {
+                    // EOS に達したソースを覚えておく（最終フレーム破棄判定用)
+                    self.eos_source_ids.insert(source_id);
+                } else {
+                    // 一つも映像フレームを受信せずに EOS に達したソースがある場合はここに来る
+                    // (特に何もする必要はない)
+                }
             }
-            false
-        });
 
-        // 表示対象のフレームを更新する
-        for mut input in std::mem::take(&mut self.inputs) {
-            self.maybe_update_current_frame(now, &mut input).or_fail()?;
-            if input.rx.peek().is_some() {
-                // この入力（ソース）にはまだフレームが残っている
-                self.inputs.push(input);
-            } else if let Some(source_id) = input.source_id {
-                // EOS に達したソースを覚えておく（最終フレーム破棄判定用)
-                self.eos_source_ids.insert(source_id);
-            } else {
-                // 一つも映像フレームを受信せずに EOS に達したソースがある場合はここに来る
-                // (特に何もする必要はない)
+            if self.inputs.is_empty() && self.current_frames.is_empty() {
+                // 全部の入力フレームを処理した
+                return Ok(None);
             }
-        }
 
-        if self.inputs.is_empty() && self.current_frames.is_empty() {
-            // 全部の入力フレームを処理した
-            return Ok(None);
-        }
+            let elapsed_since_last_input = now.saturating_sub(self.last_input_update_time);
+            if elapsed_since_last_input > TIMESTAMP_GAP_THRESHOLD {
+                (elapsed_since_last_input <= TIMESTAMP_GAP_ERROR_THRESHOLD)
+                    .or_fail_with(|()| "too large timestamp gap".to_owned())?;
 
-        // 現在のフレームを合成する
-        let (result, elapsed) = Seconds::elapsed(|| self.mix().or_fail());
-        self.stats.total_processing_seconds += elapsed;
-        result.map(Some)
+                // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
+                let duration = self.next_output_duration();
+                let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
+
+                last_frame.duration += duration;
+                self.stats.total_extended_video_frame_count += 1;
+                self.stats.total_output_video_frame_seconds += duration; // 出力フレーム数は増えないけど尺は伸びる
+
+                continue;
+            }
+
+            // 現在のフレームを合成する
+            let (result, elapsed) = Seconds::elapsed(|| self.mix().or_fail());
+            self.stats.total_processing_seconds += elapsed;
+            return result.map(Some);
+        }
     }
 
     fn mix(&mut self) -> orfail::Result<VideoFrame> {
