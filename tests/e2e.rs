@@ -16,7 +16,7 @@ use orfail::OrFail;
 fn empty_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(
+    let args = Args::parse(noargs::RawArgs::new(
         [
             "hisui",
             "--show-progress-bar=false",
@@ -27,7 +27,7 @@ fn empty_source() -> noargs::Result<()> {
         ]
         .into_iter()
         .map(|s| s.to_string()),
-    )?;
+    ))?;
     Runner::new(args).run()?;
 
     // 結果ファイルを確認（映像・音声トラックが存在しない）
@@ -64,7 +64,7 @@ fn empty_source() -> noargs::Result<()> {
 fn simple_single_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(
+    let args = Args::parse(noargs::RawArgs::new(
         [
             "hisui",
             "--show-progress-bar=false",
@@ -75,7 +75,7 @@ fn simple_single_source() -> noargs::Result<()> {
         ]
         .into_iter()
         .map(|s| s.to_string()),
-    )?;
+    ))?;
     Runner::new(args).run()?;
 
     // 変換結果ファイルを読み込む
@@ -150,7 +150,7 @@ fn simple_single_source() -> noargs::Result<()> {
 fn simple_multi_sources() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(
+    let args = Args::parse(noargs::RawArgs::new(
         [
             "hisui",
             "--show-progress-bar=false",
@@ -161,7 +161,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
         ]
         .into_iter()
         .map(|s| s.to_string()),
-    )?;
+    ))?;
     Runner::new(args).run()?;
 
     // 変換結果ファイルを読み込む
@@ -214,7 +214,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
 fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(
+    let args = Args::parse(noargs::RawArgs::new(
         [
             "hisui",
             "--show-progress-bar=false",
@@ -225,7 +225,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         ]
         .into_iter()
         .map(|s| s.to_string()),
-    )?;
+    ))?;
     Runner::new(args).run()?;
 
     // 変換結果ファイルを読み込む
@@ -323,7 +323,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 fn two_regions() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(
+    let args = Args::parse(noargs::RawArgs::new(
         [
             "hisui",
             "--show-progress-bar=false",
@@ -334,7 +334,7 @@ fn two_regions() -> noargs::Result<()> {
         ]
         .into_iter()
         .map(|s| s.to_string()),
-    )?;
+    ))?;
     Runner::new(args).run()?;
 
     // 変換結果ファイルを読み込む

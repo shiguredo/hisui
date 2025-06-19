@@ -1,32 +1,50 @@
-use hisui::{
-    command_line_args::{Args, SubCommand},
-    logger::Logger,
-    runner::Runner,
-};
+use hisui::logger::Logger;
+
+const HELP_FLAG: noargs::FlagSpec = noargs::HELP_FLAG
+    .doc("このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)");
+const VERSION_FLAG: noargs::FlagSpec = noargs::VERSION_FLAG.doc("バージョン番号を表示します");
+const VERBOSE_FLAG: noargs::FlagSpec =
+    noargs::flag("verbose").doc("警告未満のログメッセージも出力します");
+
+const INSPECT_COMMAND: noargs::CmdSpec =
+    noargs::cmd("inspect").doc("録画ファイルの情報を取得します");
+const LEGACY_COMMAND: noargs::CmdSpec =
+    noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです（省略可能）");
 
 fn main() -> noargs::Result<()> {
-    let args = Args::parse(std::env::args())?;
+    let mut args = noargs::raw_args();
+    args.metadata_mut().app_name = env!("CARGO_PKG_NAME");
+    args.metadata_mut().app_description = env!("CARGO_PKG_DESCRIPTION");
 
-    // ロガーの設定はプロセス生存中に一回だけにする必要があるのでRunner の外で行う
-    let log_level = if args.verbose {
-        log::LevelFilter::Debug
-    } else {
-        log::LevelFilter::Warn
-    };
-    Logger::init(log_level)?;
+    // 共通系のフラグ引数は先に処理する
+    HELP_FLAG.take_help(&mut args);
 
-    if let Some(text) = args.get_help_or_version() {
-        print!("{text}");
+    if VERSION_FLAG.take(&mut args).is_present() {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
-    match args.sub_command {
-        Some(SubCommand::Inspect {
-            input_file,
-            decode,
-            openh264,
-        }) => hisui::subcommand_inspect::run(input_file, decode, openh264)?,
-        None => Runner::new(args).run()?,
+    if VERBOSE_FLAG.take(&mut args).is_present() {
+        Logger::init(log::LevelFilter::Debug)?;
+    } else {
+        Logger::init(log::LevelFilter::Warn)?;
+    };
+
+    // サブコマンドで分岐する
+    if INSPECT_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_inspect::run(args)?;
+    } else if LEGACY_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_legacy::run(args)?;
+    } else if args.metadata().help_mode {
+        // help_mode=true なので `Ok(None)` が返されることはない
+        let help = args.finish()?.expect("infallible");
+        print!("{help}");
+        return Ok(());
+    } else {
+        // サブコマンドが指定されておらず、ヘルプ表示モードでもないなら
+        // legacy コマンド指定の場合と同じ挙動にする
+        hisui::subcommand_legacy::run(args)?;
     }
+
     Ok(())
 }

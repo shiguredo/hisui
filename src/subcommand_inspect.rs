@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
@@ -17,13 +14,28 @@ use crate::{
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-pub fn run<P: AsRef<Path>>(
-    input_file_path: P,
-    decode: bool,
-    openh264: Option<PathBuf>,
-) -> orfail::Result<()> {
+pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+    let decode: bool = noargs::flag("decode")
+        .doc("指定された場合にはデコードまで行う")
+        .take(&mut args)
+        .is_present();
+    let openh264: Option<PathBuf> = noargs::opt("openh264")
+        .ty("PATH")
+        .env("HISUI_OPENH264_PATH")
+        .doc("OpenH264 の共有ライブラリのパス")
+        .take(&mut args)
+        .present_and_then(|a| a.value().parse())?;
+    let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
+        .example("/path/to/archive.mp4")
+        .doc("情報取得対象の録画ファイル(.mp4|.webm)")
+        .take(&mut args)
+        .then(|a| a.value().parse())?;
+    if let Some(help) = args.finish()? {
+        print!("{help}");
+        return Ok(());
+    }
+
     let format = match input_file_path
-        .as_ref()
         .extension()
         .unwrap_or_default()
         .to_string_lossy()
@@ -32,9 +44,7 @@ pub fn run<P: AsRef<Path>>(
         "mp4" => ContainerFormat::Mp4,
         "webm" => ContainerFormat::Webm,
         ext => {
-            return Err(orfail::Failure::new(format!(
-                "unsupported container format: {ext}"
-            )))
+            return Err(orfail::Failure::new(format!("unsupported container format: {ext}")).into())
         }
     };
 
@@ -139,7 +149,7 @@ pub fn run<P: AsRef<Path>>(
 
     // 入力ファイルから取得した情報を出力する
     let info = FileInfo {
-        path: input_file_path.as_ref().to_path_buf(),
+        path: input_file_path.to_path_buf(),
         format,
         audio_codec,
         audio_samples,

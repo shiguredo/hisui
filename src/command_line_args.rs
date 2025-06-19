@@ -4,7 +4,6 @@ use crate::{types::CodecName, video::FrameRate};
 
 #[derive(Debug, Clone)]
 pub struct Args {
-    pub version: Option<String>,
     pub help: Option<String>,
     pub in_metadata_file: Option<PathBuf>,
     pub out_video_codec: CodecName,
@@ -19,36 +18,15 @@ pub struct Args {
     pub out_opus_bit_rate: NonZeroUsize,
     pub out_aac_bit_rate: NonZeroUsize,
     pub openh264: Option<PathBuf>,
-    pub verbose: bool,
     pub audio_only: bool,
     pub codec_engines: bool,
     pub show_progress_bar: bool,
     pub layout: Option<PathBuf>,
     pub cpu_cores: Option<usize>,
-    pub sub_command: Option<SubCommand>,
 }
 
 impl Args {
-    pub fn parse<I>(args: I) -> noargs::Result<Self>
-    where
-        I: Iterator<Item = String>,
-    {
-        let mut args = noargs::RawArgs::new(args);
-        args.metadata_mut().app_name = env!("CARGO_PKG_NAME");
-        args.metadata_mut().app_description = env!("CARGO_PKG_DESCRIPTION");
-
-        // Hisui がサポートしている引数を処理する
-        noargs::HELP_FLAG
-            .doc("このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)")
-            .take_help(&mut args);
-        let version = noargs::VERSION_FLAG
-            .doc("バージョン番号を表示します")
-            .take(&mut args)
-            .is_present()
-            .then(|| format!("{} {}\n", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")));
-
-        let sub_command = SubCommand::new(&mut args)?;
-
+    pub fn parse(mut args: noargs::RawArgs) -> noargs::Result<Self> {
         let codec_engines = noargs::flag("codec-engines")
             .doc("利用可能なエンコーダ・デコーダの一覧を JSON 形式で表示します")
             .take(&mut args)
@@ -193,10 +171,6 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .doc("true が指定された場合には合成の進捗を表示します")
             .take(&mut args)
             .then(|a| a.value().parse())?;
-        let verbose = noargs::flag("verbose")
-            .doc("警告未満のログメッセージも出力します")
-            .take(&mut args)
-            .is_present();
         let cpu_cores = noargs::opt("cpu-cores")
             .short('c')
             .ty("INTEGER")
@@ -260,18 +234,12 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             eprintln!("[WARN] `--h264-encoder` is obsolete\n");
         }
 
-        if version.is_none()
-            && in_metadata_file.is_none()
-            && layout.is_none()
-            && !codec_engines
-            && sub_command.is_none()
-        {
+        if in_metadata_file.is_none() && layout.is_none() && !codec_engines {
             // 最低限必要な引数が指定されていない場合にはヘルプを表示する
             args.metadata_mut().help_mode = true;
         }
 
         Ok(Self {
-            version,
             codec_engines,
             in_metadata_file,
             layout,
@@ -288,64 +256,13 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             out_opus_bit_rate,
             out_aac_bit_rate,
             show_progress_bar,
-            verbose,
             cpu_cores,
             out_stats_file,
-            sub_command,
             help: args.finish()?,
         })
     }
 
-    pub fn get_help_or_version(&self) -> Option<&String> {
-        self.help.as_ref().or(self.version.as_ref())
-    }
-}
-
-// TODO(sile): -h の時のサブコマンドのヘルプの見せ方は改善する
-//             (e.g., サブコマンドを指定しているかどうかで引数処理を大元で分岐させる）
-#[derive(Debug, Clone)]
-pub enum SubCommand {
-    Inspect {
-        input_file: PathBuf,
-        decode: bool,
-        openh264: Option<PathBuf>,
-    },
-}
-
-impl SubCommand {
-    fn new(args: &mut noargs::RawArgs) -> noargs::Result<Option<Self>> {
-        if args
-            .remaining_args()
-            .find(|a| matches!(a.1, "inspect"))
-            .is_none()
-        {
-            // サブコマンドなし
-            return Ok(None);
-        }
-
-        if noargs::cmd("inspect")
-            .doc("録画ファイルの情報を取得する")
-            .take(args)
-            .is_present()
-        {
-            Ok(Some(Self::Inspect {
-                decode: noargs::flag("decode")
-                    .doc("指定された場合にはデコードまで行う")
-                    .take(args)
-                    .is_present(),
-                openh264: noargs::opt("openh264")
-                    .ty("PATH")
-                    .doc("OpenH264 の共有ライブラリのパス")
-                    .take(args)
-                    .present_and_then(|a| a.value().parse())?,
-                input_file: noargs::arg("INPUT_FILE")
-                    .example("/path/to/archive.mp4")
-                    .doc("情報取得対象の録画ファイル(.mp4|.webm)")
-                    .take(args)
-                    .then(|a| a.value().parse())?,
-            }))
-        } else {
-            unreachable!()
-        }
+    pub fn get_help(&self) -> Option<&String> {
+        self.help.as_ref()
     }
 }
