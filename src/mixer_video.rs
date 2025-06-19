@@ -21,6 +21,7 @@ pub struct VideoMixerThread {
     output_tx: VideoFrameSyncSender,
     current_frames: HashMap<SourceId, VideoFrame>,
     eos_source_ids: HashSet<SourceId>,
+    last_mixed_frame: Option<VideoFrame>,
     stats: VideoMixerStats,
 }
 
@@ -45,6 +46,7 @@ impl VideoMixerThread {
             output_tx: tx,
             current_frames: HashMap::new(),
             eos_source_ids: HashSet::new(),
+            last_mixed_frame: None,
             stats: VideoMixerStats {
                 output_video_resolution: VideoResolution {
                     width: resolution.width().get(),
@@ -71,12 +73,27 @@ impl VideoMixerThread {
 
     fn run(&mut self) -> orfail::Result<()> {
         while let Some(frame) = self.next_output_frame().or_fail()? {
-            if !self.output_tx.send(frame) {
+            let Some(last_frame) = self.last_mixed_frame.take() else {
+                // 最初のフレームの場合はバッファに溜めて次に進む
+                self.last_mixed_frame = Some(frame);
+                continue;
+            };
+            self.last_mixed_frame = Some(frame);
+
+            if !self.output_tx.send(last_frame) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                 log::warn!("receiver of mixed video stream has been closed");
-                break;
+                return Ok(());
             }
         }
+
+        // バッファに残っていた最後のフレームを送る
+        if let Some(last_frame) = self.last_mixed_frame.take() {
+            if !self.output_tx.send(last_frame) {
+                log::warn!("receiver of mixed video stream has been closed");
+            }
+        }
+
         Ok(())
     }
 
