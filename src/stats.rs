@@ -222,6 +222,9 @@ pub struct VideoMixerStats {
     /// 出力から除去された映像フレームの合計数
     pub total_trimmed_video_frame_count: u64,
 
+    /// 合成を省略して前フレームに統合されたフレームの数
+    pub total_merged_video_frame_count: u64,
+
     /// 合成処理部分に掛かった時間
     pub total_processing_seconds: Seconds,
 
@@ -249,6 +252,10 @@ impl nojson::DisplayJson for VideoMixerStats {
             f.member(
                 "total_trimmed_video_frame_count",
                 &self.total_trimmed_video_frame_count,
+            )?;
+            f.member(
+                "total_merged_video_frame_count",
+                &self.total_merged_video_frame_count,
             )?;
             f.member("total_processing_seconds", &self.total_processing_seconds)?;
             f.member("error", &self.error)?;

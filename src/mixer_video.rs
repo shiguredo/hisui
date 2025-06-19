@@ -114,18 +114,25 @@ impl VideoMixerThread {
 
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count + self.stats.total_trimmed_video_frame_count,
+            self.stats.total_output_video_frame_count
+                + self.stats.total_merged_video_frame_count
+                + self.stats.total_trimmed_video_frame_count,
         )
     }
 
     fn next_output_timestamp(&self) -> Duration {
-        self.frames_to_timestamp(self.stats.total_output_video_frame_count)
+        self.frames_to_timestamp(
+            self.stats.total_output_video_frame_count + self.stats.total_merged_video_frame_count,
+        )
     }
 
     fn next_output_duration(&self) -> Duration {
         // 丸め誤差が蓄積しないように次のフレームのタイスタンプとの差をとる
-        self.frames_to_timestamp(self.stats.total_output_video_frame_count + 1)
-            - self.next_output_timestamp()
+        self.frames_to_timestamp(
+            self.stats.total_output_video_frame_count
+                + self.stats.total_merged_video_frame_count
+                + 1,
+        ) - self.next_output_timestamp()
     }
 
     // 必要に応じて、現在の合成対象となっているフレーム群を更新する
@@ -203,15 +210,13 @@ impl VideoMixerThread {
             }
 
             if now.saturating_sub(self.last_input_update_time) > TIMESTAMP_GAP_THRESHOLD {
+                // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
                 let duration = self.next_output_duration();
                 let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
-                // TODO: 統計値
-                //
-                // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
 
                 last_frame.duration += duration;
-                self.stats.total_output_video_frame_count += 1; // TODO: 名前的に不適切
-                self.stats.total_output_video_frame_seconds += duration;
+                self.stats.total_merged_video_frame_count += 1;
+                self.stats.total_output_video_frame_seconds += duration; // 出力フレーム数は増えないけど尺は伸びる
 
                 continue;
             }
