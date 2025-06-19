@@ -10,7 +10,7 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     stats::VideoDecoderStats,
-    types::{CodecEngines, CodecName, EngineName},
+    types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
 };
 
@@ -36,11 +36,6 @@ impl AudioDecoder {
             CodecName::Opus => vec![EngineName::Opus],
             _ => unreachable!(),
         }
-    }
-
-    // TODO: remove
-    pub fn update_codec_engines(engines: &mut CodecEngines) {
-        engines.insert_decoder(CodecName::Opus, EngineName::Opus);
     }
 }
 
@@ -94,23 +89,6 @@ impl VideoDecoder {
             _ => unreachable!(),
         }
         engines
-    }
-
-    // TODO: delete
-    pub fn update_codec_engines(engines: &mut CodecEngines, options: VideoDecoderOptions) {
-        engines.insert_decoder(CodecName::Vp8, EngineName::Libvpx);
-        engines.insert_decoder(CodecName::Vp9, EngineName::Libvpx);
-        engines.insert_decoder(CodecName::Av1, EngineName::Dav1d);
-
-        if options.openh264_lib.is_some() {
-            engines.insert_decoder(CodecName::H264, EngineName::Openh264);
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            engines.insert_decoder(CodecName::H264, EngineName::VideoToolbox);
-            engines.insert_decoder(CodecName::H265, EngineName::VideoToolbox);
-        }
     }
 
     pub fn decode(

@@ -1,8 +1,5 @@
 //! 雑多な型定義をまとめたモジュール
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    str::FromStr,
-};
+use std::str::FromStr;
 
 /// コーデック名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -182,51 +179,5 @@ impl std::ops::Mul<usize> for EvenUsize {
 
     fn mul(self, rhs: usize) -> Self::Output {
         Self(self.0 * rhs)
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct CodecEngines(BTreeMap<CodecName, Engines>);
-
-impl CodecEngines {
-    pub fn insert_decoder(&mut self, codec: CodecName, engine: EngineName) {
-        self.0.entry(codec).or_default().decoders.insert(engine);
-    }
-
-    pub fn insert_encoder(&mut self, codec: CodecName, engine: EngineName) {
-        self.0.entry(codec).or_default().encoders.insert(engine);
-    }
-}
-
-impl nojson::DisplayJson for CodecEngines {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.members(
-                self.0
-                    .iter()
-                    .map(|(name, engines)| (name.as_str(), engines)),
-            )
-        })
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct Engines {
-    pub encoders: BTreeSet<EngineName>,
-    pub decoders: BTreeSet<EngineName>,
-}
-
-impl nojson::DisplayJson for Engines {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member(
-                "encoders",
-                nojson::json(|f| f.array(|f| f.elements(self.encoders.iter().map(|x| x.as_str())))),
-            )?;
-            f.member(
-                "decoders",
-                nojson::json(|f| f.array(|f| f.elements(self.decoders.iter().map(|x| x.as_str())))),
-            )
-        })
     }
 }
