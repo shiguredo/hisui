@@ -1,6 +1,5 @@
 pub mod audio;
 pub mod channel;
-pub mod command_line_args; // TODO: rename or merge with legacy
 pub mod composer;
 pub mod decoder;
 pub mod decoder_dav1d;

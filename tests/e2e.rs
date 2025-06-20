@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use hisui::{
-    command_line_args::Args,
     decoder_libvpx::LibvpxDecoder,
     decoder_opus::OpusDecoder,
     metadata::SourceId,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    subcommand_legacy::Runner,
+    subcommand_legacy::{Args, Runner},
     types::CodecName,
 };
 use orfail::OrFail;
