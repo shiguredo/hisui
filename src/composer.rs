@@ -1,4 +1,4 @@
-use std::{collections::HashSet, num::NonZeroUsize, time::Instant};
+use std::{collections::HashSet, num::NonZeroUsize, path::PathBuf, time::Instant};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use orfail::OrFail;
@@ -28,8 +28,8 @@ pub struct Composer {
     pub out_audio_codec: CodecName,
     pub openh264_lib: Option<Openh264Library>,
     pub show_progress_bar: bool,
-    pub cpu_cores: Option<usize>,
-    pub out_stats_file: Option<std::path::PathBuf>,
+    pub max_cpu_cores: Option<usize>,
+    pub out_stats_file: Option<PathBuf>,
 
     // TODO: 以降はレイアウトに移動する
     pub libvpx_cq_level: usize,
@@ -40,9 +40,9 @@ pub struct Composer {
 }
 
 #[derive(Debug)]
-pub struct ComposerResult {
+pub struct ComposeResult {
     pub stats: SharedStats,
-    pub error_occurred: bool,
+    pub success: bool,
 }
 
 impl Composer {
@@ -53,7 +53,7 @@ impl Composer {
             out_audio_codec: CodecName::Opus,
             openh264_lib: None,
             show_progress_bar: false,
-            cpu_cores: None,
+            max_cpu_cores: None,
             out_stats_file: None,
             libvpx_cq_level: encoder_libvpx::DEFAULT_CQ_LEVEL
                 .parse()
@@ -65,56 +65,9 @@ impl Composer {
         }
     }
 
-    pub fn with_video_codec(mut self, codec: CodecName) -> Self {
-        self.out_video_codec = codec;
-        self
-    }
-
-    pub fn with_audio_codec(mut self, codec: CodecName) -> Self {
-        self.out_audio_codec = codec;
-        self
-    }
-
-    pub fn with_openh264_lib(mut self, lib: Option<Openh264Library>) -> Self {
-        self.openh264_lib = lib;
-        self
-    }
-
-    pub fn with_progress_bar(mut self, show: bool) -> Self {
-        self.show_progress_bar = show;
-        self
-    }
-
-    pub fn with_cpu_cores(mut self, cores: Option<usize>) -> Self {
-        self.cpu_cores = cores;
-        self
-    }
-
-    pub fn with_stats_file(mut self, path: Option<std::path::PathBuf>) -> Self {
-        self.out_stats_file = path;
-        self
-    }
-
-    pub fn with_libvpx_options(mut self, cq_level: usize, min_q: usize, max_q: usize) -> Self {
-        self.libvpx_cq_level = cq_level;
-        self.libvpx_min_q = min_q;
-        self.libvpx_max_q = max_q;
-        self
-    }
-
-    pub fn with_audio_bitrates(
-        mut self,
-        aac_bit_rate: NonZeroUsize,
-        opus_bit_rate: NonZeroUsize,
-    ) -> Self {
-        self.out_aac_bit_rate = aac_bit_rate;
-        self.out_opus_bit_rate = opus_bit_rate;
-        self
-    }
-
-    pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposerResult> {
+    pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
         // 利用する CPU コア数を制限する
-        if let Some(cores) = self.cpu_cores {
+        if let Some(cores) = self.max_cpu_cores {
             limit_cpu_cores(cores).or_fail()?;
         }
 
@@ -166,9 +119,9 @@ impl Composer {
         progress_bar.finish();
         self.finish_stats(stats.clone(), &mp4_writer, start_time);
 
-        Ok(ComposerResult {
+        Ok(ComposeResult {
             stats,
-            error_occurred: error_flag.get(),
+            success: !error_flag.get(),
         })
     }
 
