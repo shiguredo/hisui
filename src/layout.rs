@@ -205,76 +205,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
 }
 
 impl RawLayout {
-    fn into_layout(mut self, base_path: PathBuf, fps: FrameRate) -> orfail::Result<Layout> {
-        let resolution = if let Some(resolution) = self.resolution {
-            resolution
-        } else {
-            // "resolution" が未指定の場合はリージョンから求める
-            todo!()
-        };
-
-        for (name, region) in &mut self.video_layout {
-            // Check height.
-            if region.height != 0 {
-                (16..=resolution.height.get())
-                    .contains(&region.height)
-                    .or_fail_with(|()| {
-                        format!(
-                            "video_layout.{name}.height is out of range: {}",
-                            region.height
-                        )
-                    })?;
-                region.height -= region.height % 2;
-            } else {
-                // 0 の場合は自動で求める
-                region.height = resolution.height.get().saturating_sub(region.y_pos);
-            }
-
-            // Check width.
-            if region.width != 0 {
-                (16..=resolution.width.get())
-                    .contains(&region.width)
-                    .or_fail_with(|()| {
-                        format!(
-                            "video_layout.{name}.width is out of range: {}",
-                            region.width
-                        )
-                    })?;
-                region.width -= region.width % 2;
-            } else {
-                // 0 の場合は自動で求める
-                region.width = resolution.width.get().saturating_sub(region.x_pos);
-            }
-
-            // Check y_pos.
-            (0..resolution.height.get())
-                .contains(&region.y_pos)
-                .or_fail_with(|()| {
-                    format!(
-                        "video_layout.{name}.y_pos is out of range: {}",
-                        region.y_pos
-                    )
-                })?;
-
-            // Check x_pos.
-            (0..resolution.width.get())
-                .contains(&region.x_pos)
-                .or_fail_with(|()| {
-                    format!(
-                        "video_layout.{name}.x_pos is out of range: {}",
-                        region.x_pos
-                    )
-                })?;
-
-            // Check z_pos.
-            (-99..=99).contains(&region.z_pos).or_fail_with(|()| {
-                format!(
-                    "video_layout.{name}.z_pos is out of range: {}",
-                    region.z_pos
-                )
-            })?;
-        }
-
+    fn into_layout(self, base_path: PathBuf, fps: FrameRate) -> orfail::Result<Layout> {
         // 利用するソース一覧を確定して、情報を読み込む
         let mut audio_source_ids = BTreeSet::new();
         let mut sources = BTreeMap::<SourceId, AggregatedSourceInfo>::new();
@@ -295,11 +226,90 @@ impl RawLayout {
         let mut video_regions = Vec::new();
         for (_region_name, raw_region) in self.video_layout {
             let region = raw_region
-                .into_region(&base_path, &mut sources, &resolution)
+                .into_region(&base_path, &mut sources, &self.resolution.clone().unwrap()) // TODO: remove unwrap
                 .or_fail()?;
             video_regions.push(region);
         }
         video_regions.sort_by_key(|r| r.z_pos);
+
+        // 解像度の決定やバリデーションを行う
+        let resolution = if let Some(resolution) = self.resolution {
+            resolution
+        } else if video_regions.is_empty() {
+            // 音声のみの場合は使われないので何でもいい
+            Resolution::new(Resolution::MIN, Resolution::MIN).or_fail()?
+        } else {
+            // "resolution" が未指定の場合はリージョンから求める
+            let mut resolution = Resolution::new(Resolution::MIN, Resolution::MIN).or_fail()?;
+            for region in &video_regions {
+                resolution.width = resolution.width.max(region.position.x + region.width);
+                resolution.height = resolution.height.max(region.position.y + region.height);
+            }
+            resolution
+        };
+
+        // TODO: into_region() の中でやる
+        // for (name, region) in &mut self.video_layout {
+        //     // Check height.
+        //     if region.height != 0 {
+        //         (16..=resolution.height.get())
+        //             .contains(&region.height)
+        //             .or_fail_with(|()| {
+        //                 format!(
+        //                     "video_layout.{name}.height is out of range: {}",
+        //                     region.height
+        //                 )
+        //             })?;
+        //         region.height -= region.height % 2;
+        //     } else {
+        //         // 0 の場合は自動で求める
+        //         region.height = resolution.height.get().saturating_sub(region.y_pos);
+        //     }
+
+        //     // Check width.
+        //     if region.width != 0 {
+        //         (16..=resolution.width.get())
+        //             .contains(&region.width)
+        //             .or_fail_with(|()| {
+        //                 format!(
+        //                     "video_layout.{name}.width is out of range: {}",
+        //                     region.width
+        //                 )
+        //             })?;
+        //         region.width -= region.width % 2;
+        //     } else {
+        //         // 0 の場合は自動で求める
+        //         region.width = resolution.width.get().saturating_sub(region.x_pos);
+        //     }
+
+        //     // Check y_pos.
+        //     (0..resolution.height.get())
+        //         .contains(&region.y_pos)
+        //         .or_fail_with(|()| {
+        //             format!(
+        //                 "video_layout.{name}.y_pos is out of range: {}",
+        //                 region.y_pos
+        //             )
+        //         })?;
+
+        //     // Check x_pos.
+        //     (0..resolution.width.get())
+        //         .contains(&region.x_pos)
+        //         .or_fail_with(|()| {
+        //             format!(
+        //                 "video_layout.{name}.x_pos is out of range: {}",
+        //                 region.x_pos
+        //             )
+        //         })?;
+
+        //     // Check z_pos.
+        //     (-99..=99).contains(&region.z_pos).or_fail_with(|()| {
+        //         format!(
+        //             "video_layout.{name}.z_pos is out of range: {}",
+        //             region.z_pos
+        //         )
+        //     })?;
+        // }
 
         let mut trim_spans = BTreeMap::new();
         if self.trim {
