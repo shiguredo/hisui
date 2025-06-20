@@ -71,7 +71,7 @@ impl Composer {
             limit_cpu_cores(cores).or_fail()?;
         }
 
-        // 統計情報の準備
+        // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
         let stats = SharedStats::new();
         let start_time = Instant::now();
 
@@ -98,7 +98,7 @@ impl Composer {
             .create_audio_mixer_and_encoder(error_flag.clone(), stats.clone(), audio_source_rxs)
             .or_fail()?;
 
-        // 合成後の映像と音声への MP4 への書き出しを行う
+        // 合成後の映像と音声への MP4 への書き出しを行う（この処理は現在のスレッドで行う）
         let mut mp4_writer = Mp4Writer::new(
             out_file_path,
             &self.layout,
@@ -110,6 +110,7 @@ impl Composer {
         while let Some(timestamp) = mp4_writer.poll().or_fail()? {
             progress_bar.set_position(timestamp.as_secs());
             if error_flag.get() {
+                // ファイル読み込み、デコード、合成、エンコード、のいずれかで失敗したものがあるとここに来る
                 log::error!("The composition process was aborted");
                 break;
             }
@@ -149,6 +150,7 @@ impl Composer {
         video_source_rxs: Vec<VideoFrameReceiver>,
     ) -> orfail::Result<VideoFrameReceiver> {
         if !self.layout.has_video() {
+            // 映像が処理対象外の場合には、ダミーのレシーバーを返す
             let (_, rx) = channel::sync_channel();
             return Ok(rx);
         }
@@ -204,6 +206,7 @@ impl Composer {
         audio_source_rxs: Vec<AudioDataReceiver>,
     ) -> orfail::Result<AudioDataReceiver> {
         if !self.layout.has_audio() {
+            // 音声が処理対象外の場合には、ダミーのレシーバーを返す
             let (_, rx) = channel::sync_channel();
             return Ok(rx);
         }
@@ -256,6 +259,7 @@ impl Composer {
                 })
                 .to_string();
                 if let Err(e) = std::fs::write(path, json) {
+                    // 統計が出力できなくても全体を失敗扱いにはしない
                     log::warn!(
                         "failed to write stats JSON: path={}, reason={e}",
                         path.display()
