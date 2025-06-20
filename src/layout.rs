@@ -248,69 +248,6 @@ impl RawLayout {
             resolution
         };
 
-        // TODO: into_region() の中でやる
-        // for (name, region) in &mut self.video_layout {
-        //     // Check height.
-        //     if region.height != 0 {
-        //         (16..=resolution.height.get())
-        //             .contains(&region.height)
-        //             .or_fail_with(|()| {
-        //                 format!(
-        //                     "video_layout.{name}.height is out of range: {}",
-        //                     region.height
-        //                 )
-        //             })?;
-        //         region.height -= region.height % 2;
-        //     } else {
-        //         // 0 の場合は自動で求める
-        //         region.height = resolution.height.get().saturating_sub(region.y_pos);
-        //     }
-
-        //     // Check width.
-        //     if region.width != 0 {
-        //         (16..=resolution.width.get())
-        //             .contains(&region.width)
-        //             .or_fail_with(|()| {
-        //                 format!(
-        //                     "video_layout.{name}.width is out of range: {}",
-        //                     region.width
-        //                 )
-        //             })?;
-        //         region.width -= region.width % 2;
-        //     } else {
-        //         // 0 の場合は自動で求める
-        //         region.width = resolution.width.get().saturating_sub(region.x_pos);
-        //     }
-
-        //     // Check y_pos.
-        //     (0..resolution.height.get())
-        //         .contains(&region.y_pos)
-        //         .or_fail_with(|()| {
-        //             format!(
-        //                 "video_layout.{name}.y_pos is out of range: {}",
-        //                 region.y_pos
-        //             )
-        //         })?;
-
-        //     // Check x_pos.
-        //     (0..resolution.width.get())
-        //         .contains(&region.x_pos)
-        //         .or_fail_with(|()| {
-        //             format!(
-        //                 "video_layout.{name}.x_pos is out of range: {}",
-        //                 region.x_pos
-        //             )
-        //         })?;
-
-        //     // Check z_pos.
-        //     (-99..=99).contains(&region.z_pos).or_fail_with(|()| {
-        //         format!(
-        //             "video_layout.{name}.z_pos is out of range: {}",
-        //             region.z_pos
-        //         )
-        //     })?;
-        // }
-
         let mut trim_spans = BTreeMap::new();
         if self.trim {
             trim_spans = decide_trim_spans(&sources);
@@ -439,7 +376,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
 
 impl RawRegion {
     fn into_region(
-        self,
+        mut self,
         base_path: &Path,
         sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
         resolution: &Resolution,
@@ -472,9 +409,59 @@ impl RawRegion {
             &self.cells_excluded,
         );
 
+        // Validate and adjust dimensions directly on self
+        // Check and adjust height
+        if self.height != 0 {
+            (16..=resolution.height.get())
+                .contains(&self.height)
+                .or_fail_with(|()| {
+                    format!(
+                        "video_layout region height is out of range: {}",
+                        self.height
+                    )
+                })?;
+            self.height -= self.height % 2; // Make even
+        } else {
+            // 0 means auto-calculate
+            self.height = resolution.height.get().saturating_sub(self.y_pos);
+        }
+
+        // Check and adjust width
+        if self.width != 0 {
+            (16..=resolution.width.get())
+                .contains(&self.width)
+                .or_fail_with(|()| {
+                    format!("video_layout region width is out of range: {}", self.width)
+                })?;
+            self.width -= self.width % 2; // Make even
+        } else {
+            // 0 means auto-calculate
+            self.width = resolution.width.get().saturating_sub(self.x_pos);
+        }
+
+        // Check y_pos
+        (0..resolution.height.get())
+            .contains(&self.y_pos)
+            .or_fail_with(|()| {
+                format!("video_layout region y_pos is out of range: {}", self.y_pos)
+            })?;
+
+        // Check x_pos
+        (0..resolution.width.get())
+            .contains(&self.x_pos)
+            .or_fail_with(|()| {
+                format!("video_layout region x_pos is out of range: {}", self.x_pos)
+            })?;
+
+        // Check z_pos
+        (-99..=99).contains(&self.z_pos).or_fail_with(|()| {
+            format!("video_layout region z_pos is out of range: {}", self.z_pos)
+        })?;
+
         let (cell_width, cell_height, top_border_pixels, left_border_pixels) = self
             .decide_cell_resolution_and_borders(rows, columns, resolution)
             .or_fail()?;
+
         let grid = Grid {
             assigned_sources: assigned,
             rows,
