@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod channel;
 pub mod command_line_args;
+pub mod composer;
 pub mod decoder;
 pub mod decoder_dav1d;
 pub mod decoder_libvpx;
@@ -27,7 +28,7 @@ pub mod mixer_video;
 pub mod reader;
 pub mod reader_mp4;
 pub mod reader_webm;
-pub mod runner;
+pub mod runner; // TODO: rename to legacy
 pub mod source;
 pub mod stats;
 pub mod subcommand_compose;
