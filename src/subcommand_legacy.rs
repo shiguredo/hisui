@@ -58,10 +58,10 @@ impl Args {
 {
   "resolution": ${ セルサイズを 320x240 として自動で計算 },
   "audio_sources": [ ${ 録画メタデータ内の全てのソース } ],
-  "video_layout": {
+  "video_layout": {"main": {
     "max_columns": [ ${ `--max-columns` 引数の値 } ],
     "video_sources": [ ${ 録画メタデータ内の全てのソース } ]
-  }
+  }}
 }
 
 NOTE: `--layout` 引数が指定されている場合にはこの引数は無視されます"#,
