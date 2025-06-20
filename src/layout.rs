@@ -168,7 +168,7 @@ struct RawLayout {
     audio_sources_excluded: Vec<PathBuf>,
     video_layout: BTreeMap<String, RawRegion>,
     trim: bool,
-    resolution: Resolution,
+    resolution: Option<Resolution>, // TODO: ユニットテスト追加 (None の場合)
     bitrate: usize,
 }
 
@@ -176,10 +176,16 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        let ([audio_sources, resolution], [audio_sources_excluded, video_layout, trim, bitrate]) =
+        let ([audio_sources], [audio_sources_excluded, video_layout, trim, bitrate, resolution]) =
             value.to_fixed_object(
-                ["audio_sources", "resolution"],
-                ["audio_sources_excluded", "video_layout", "trim", "bitrate"],
+                ["audio_sources"],
+                [
+                    "audio_sources_excluded",
+                    "video_layout",
+                    "trim",
+                    "bitrate",
+                    "resolution",
+                ],
             )?;
         Ok(Self {
             audio_sources: audio_sources.try_to()?,
@@ -192,76 +198,14 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 .transpose()?
                 .unwrap_or_default(),
             trim: trim.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            resolution: resolution.try_to()?,
+            resolution: resolution.map(|v| v.try_to()).transpose()?,
             bitrate: bitrate.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
         })
     }
 }
 
 impl RawLayout {
-    fn into_layout(mut self, base_path: PathBuf, fps: FrameRate) -> orfail::Result<Layout> {
-        for (name, region) in &mut self.video_layout {
-            // Check height.
-            if region.height != 0 {
-                (16..=self.resolution.height.get())
-                    .contains(&region.height)
-                    .or_fail_with(|()| {
-                        format!(
-                            "video_layout.{name}.height is out of range: {}",
-                            region.height
-                        )
-                    })?;
-                region.height -= region.height % 2;
-            } else {
-                // 0 の場合は自動で求める
-                region.height = self.resolution.height.get().saturating_sub(region.y_pos);
-            }
-
-            // Check width.
-            if region.width != 0 {
-                (16..=self.resolution.width.get())
-                    .contains(&region.width)
-                    .or_fail_with(|()| {
-                        format!(
-                            "video_layout.{name}.width is out of range: {}",
-                            region.width
-                        )
-                    })?;
-                region.width -= region.width % 2;
-            } else {
-                // 0 の場合は自動で求める
-                region.width = self.resolution.width.get().saturating_sub(region.x_pos);
-            }
-
-            // Check y_pos.
-            (0..self.resolution.height.get())
-                .contains(&region.y_pos)
-                .or_fail_with(|()| {
-                    format!(
-                        "video_layout.{name}.y_pos is out of range: {}",
-                        region.y_pos
-                    )
-                })?;
-
-            // Check x_pos.
-            (0..self.resolution.width.get())
-                .contains(&region.x_pos)
-                .or_fail_with(|()| {
-                    format!(
-                        "video_layout.{name}.x_pos is out of range: {}",
-                        region.x_pos
-                    )
-                })?;
-
-            // Check z_pos.
-            (-99..=99).contains(&region.z_pos).or_fail_with(|()| {
-                format!(
-                    "video_layout.{name}.z_pos is out of range: {}",
-                    region.z_pos
-                )
-            })?;
-        }
-
+    fn into_layout(self, base_path: PathBuf, fps: FrameRate) -> orfail::Result<Layout> {
         // 利用するソース一覧を確定して、情報を読み込む
         let mut audio_source_ids = BTreeSet::new();
         let mut sources = BTreeMap::<SourceId, AggregatedSourceInfo>::new();
@@ -282,11 +226,27 @@ impl RawLayout {
         let mut video_regions = Vec::new();
         for (_region_name, raw_region) in self.video_layout {
             let region = raw_region
-                .into_region(&base_path, &mut sources, &self.resolution)
+                .into_region(&base_path, &mut sources, self.resolution)
                 .or_fail()?;
             video_regions.push(region);
         }
         video_regions.sort_by_key(|r| r.z_pos);
+
+        // 解像度の決定やバリデーションを行う
+        let resolution = if let Some(resolution) = self.resolution {
+            resolution
+        } else if video_regions.is_empty() {
+            // 音声のみの場合は使われないので何でもいい
+            Resolution::new(Resolution::MIN, Resolution::MIN).or_fail()?
+        } else {
+            // "resolution" が未指定の場合はリージョンから求める
+            let mut resolution = Resolution::new(Resolution::MIN, Resolution::MIN).or_fail()?;
+            for region in &video_regions {
+                resolution.width = resolution.width.max(region.position.x + region.width);
+                resolution.height = resolution.height.max(region.position.y + region.height);
+            }
+            resolution
+        };
 
         let mut trim_spans = BTreeMap::new();
         if self.trim {
@@ -297,7 +257,7 @@ impl RawLayout {
             base_path,
             video_regions,
             trim_spans,
-            resolution: self.resolution,
+            resolution,
             bitrate_kbps: self.bitrate,
             audio_source_ids,
             sources,
@@ -359,6 +319,8 @@ struct RawRegion {
     video_sources: Vec<PathBuf>,
     video_sources_excluded: Vec<PathBuf>,
     width: usize,
+    cell_width: usize,  // TODO: ユニットテスト追加
+    cell_height: usize, // TODO: ユニットテスト追加
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
@@ -370,7 +332,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
     ) -> Result<Self, nojson::JsonParseError> {
         let (
             [video_sources],
-            [cells_excluded, height, max_columns, max_rows, reuse, video_sources_excluded, width, x_pos, y_pos, z_pos],
+            [cells_excluded, height, max_columns, max_rows, reuse, video_sources_excluded, width, cell_width, cell_height, x_pos, y_pos, z_pos],
         ) = value.to_fixed_object(
             ["video_sources"],
             [
@@ -381,6 +343,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
                 "reuse",
                 "video_sources_excluded",
                 "width",
+                "cell_width",
+                "cell_height",
                 "x_pos",
                 "y_pos",
                 "z_pos",
@@ -407,6 +371,14 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
                 .transpose()?
                 .unwrap_or_default(),
             width: width.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            cell_width: cell_width
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            cell_height: cell_height
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
             x_pos: x_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             y_pos: y_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             z_pos: z_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
@@ -416,11 +388,23 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
 
 impl RawRegion {
     fn into_region(
-        self,
+        mut self,
         base_path: &Path,
         sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
-        resolution: &Resolution,
+        resolution: Option<Resolution>,
     ) -> orfail::Result<Region> {
+        if self.width != 0 && self.cell_width != 0 {
+            return Err(orfail::Failure::new(
+                "Cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
+            ));
+        }
+
+        if self.height != 0 && self.cell_height != 0 {
+            return Err(orfail::Failure::new(
+                "Cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
+            ));
+        }
+
         let resolved = resolve_source_and_media_path_pairs(
             base_path,
             &self.video_sources,
@@ -449,9 +433,104 @@ impl RawRegion {
             &self.cells_excluded,
         );
 
+        if self.cell_width != 0 {
+            let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
+            let grid_width = self.cell_width * columns + horizontal_inner_borders;
+
+            // 外枠を考慮
+            self.width = if resolution
+                .is_some_and(|r| grid_width + BORDER_PIXELS.get() * 2 <= r.width.get())
+            {
+                grid_width + BORDER_PIXELS.get() * 2
+            } else {
+                grid_width
+            };
+        }
+
+        if self.cell_height != 0 {
+            let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
+            let grid_height = self.cell_height * rows + vertical_inner_borders;
+
+            // 外枠を考慮
+            self.height = if resolution
+                .is_some_and(|r| grid_height + BORDER_PIXELS.get() * 2 <= r.height.get())
+            {
+                grid_height + BORDER_PIXELS.get() * 2
+            } else {
+                grid_height
+            };
+        }
+
+        // 解像度を確定する
+        let resolution = if let Some(resolution) = resolution {
+            resolution
+        } else {
+            // 全体の解像度が未指定の場合には、リージョンの width / height から求める
+            (self.width > 0).or_fail_with(|()| {
+                "Region width must be specified when resolution is not set".to_owned()
+            })?;
+            (self.height > 0).or_fail_with(|()| {
+                "Region height must be specified when resolution is not set".to_owned()
+            })?;
+
+            // リージョンの位置とサイズから必要な解像度を計算
+            let required_width = self.x_pos + self.width;
+            let required_height = self.y_pos + self.height;
+            Resolution::new(required_width, required_height).or_fail()?
+        };
+
+        // 高さの確認と調整
+        if self.height != 0 {
+            (16..=resolution.height.get())
+                .contains(&self.height)
+                .or_fail_with(|()| {
+                    format!(
+                        "video_layout region height is out of range: {}",
+                        self.height
+                    )
+                })?;
+            self.height -= self.height % 2; // 偶数にする
+        } else {
+            // 0 は自動計算を意味する
+            self.height = resolution.height.get().saturating_sub(self.y_pos);
+        }
+
+        // 幅の確認と調整
+        if self.width != 0 {
+            (16..=resolution.width.get())
+                .contains(&self.width)
+                .or_fail_with(|()| {
+                    format!("video_layout region width is out of range: {}", self.width)
+                })?;
+            self.width -= self.width % 2; // 偶数にする
+        } else {
+            // 0 は自動計算を意味する
+            self.width = resolution.width.get().saturating_sub(self.x_pos);
+        }
+
+        // y_pos の確認
+        (0..resolution.height.get())
+            .contains(&self.y_pos)
+            .or_fail_with(|()| {
+                format!("video_layout region y_pos is out of range: {}", self.y_pos)
+            })?;
+
+        // x_pos の確認
+        (0..resolution.width.get())
+            .contains(&self.x_pos)
+            .or_fail_with(|()| {
+                format!("video_layout region x_pos is out of range: {}", self.x_pos)
+            })?;
+
+        // z_pos の確認
+        (-99..=99).contains(&self.z_pos).or_fail_with(|()| {
+            format!("video_layout region z_pos is out of range: {}", self.z_pos)
+        })?;
+
         let (cell_width, cell_height, top_border_pixels, left_border_pixels) = self
             .decide_cell_resolution_and_borders(rows, columns, resolution)
             .or_fail()?;
+
         let grid = Grid {
             assigned_sources: assigned,
             rows,
@@ -479,7 +558,7 @@ impl RawRegion {
         &self,
         rows: usize,
         columns: usize,
-        resolution: &Resolution,
+        resolution: Resolution,
     ) -> orfail::Result<(EvenUsize, EvenUsize, EvenUsize, EvenUsize)> {
         let mut grid_width = self.width;
         let mut grid_height = self.height;
