@@ -19,18 +19,6 @@ const DEFAULT_LAYOUT_JSON: &str = r#"{
 }"#;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
-    let root_dir: PathBuf = noargs::opt("root-dir")
-        .short('r')
-        .ty("PATH")
-        .default(".")
-        .doc(concat!(
-            "合成処理を行う際のルートディレクトリを指定します\n",
-            "\n",
-            "レイアウトファイル内に記載された相対パスの基点は、このディレクトリとなります。\n",
-            "また、レイアウトで、このディレクトリの外のファイルが指定された場合にはエラーとなります。"
-        ))
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
     let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
         .short('l')
         .ty("PATH")
@@ -90,6 +78,28 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
+    let root_dir: PathBuf = noargs::arg("ROOT_DIR")
+        .example("/path/to/archive/RECORDING_ID/")
+        .doc(concat!(
+            "合成処理を行う際のルートディレクトリを指定します\n",
+            "\n",
+            "レイアウトファイル内に記載された相対パスの基点は、このディレクトリとなります。\n",
+            "また、レイアウト内で、",
+            "このディレクトリの外のファイルが参照された場合にはエラーとなります。"
+        ))
+        .take(&mut args)
+        .then(|a| -> Result<_, Box<dyn std::error::Error>> {
+            let path: PathBuf = a.value().parse()?;
+
+            if matches!(a, noargs::Arg::Example { .. }) {
+            } else if !path.exists() {
+                return Err("no such directory".into());
+            } else if !path.is_dir() {
+                return Err("not a directory".into());
+            }
+
+            Ok(path)
+        })?;
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
