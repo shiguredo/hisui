@@ -168,7 +168,7 @@ struct RawLayout {
     audio_sources_excluded: Vec<PathBuf>,
     video_layout: BTreeMap<String, RawRegion>,
     trim: bool,
-    resolution: Resolution,
+    resolution: Option<Resolution>,
     bitrate: usize,
 }
 
@@ -176,10 +176,16 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        let ([audio_sources, resolution], [audio_sources_excluded, video_layout, trim, bitrate]) =
+        let ([audio_sources], [audio_sources_excluded, video_layout, trim, bitrate, resolution]) =
             value.to_fixed_object(
-                ["audio_sources", "resolution"],
-                ["audio_sources_excluded", "video_layout", "trim", "bitrate"],
+                ["audio_sources"],
+                [
+                    "audio_sources_excluded",
+                    "video_layout",
+                    "trim",
+                    "bitrate",
+                    "resolution",
+                ],
             )?;
         Ok(Self {
             audio_sources: audio_sources.try_to()?,
@@ -192,7 +198,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 .transpose()?
                 .unwrap_or_default(),
             trim: trim.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            resolution: resolution.try_to()?,
+            resolution: resolution.map(|v| v.try_to()).transpose()?,
             bitrate: bitrate.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
         })
     }
@@ -200,10 +206,17 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
 
 impl RawLayout {
     fn into_layout(mut self, base_path: PathBuf, fps: FrameRate) -> orfail::Result<Layout> {
+        let resolution = if let Some(resolution) = self.resolution {
+            resolution
+        } else {
+            // "resolution" が未指定の場合はリージョンから求める
+            todo!()
+        };
+
         for (name, region) in &mut self.video_layout {
             // Check height.
             if region.height != 0 {
-                (16..=self.resolution.height.get())
+                (16..=resolution.height.get())
                     .contains(&region.height)
                     .or_fail_with(|()| {
                         format!(
@@ -214,12 +227,12 @@ impl RawLayout {
                 region.height -= region.height % 2;
             } else {
                 // 0 の場合は自動で求める
-                region.height = self.resolution.height.get().saturating_sub(region.y_pos);
+                region.height = resolution.height.get().saturating_sub(region.y_pos);
             }
 
             // Check width.
             if region.width != 0 {
-                (16..=self.resolution.width.get())
+                (16..=resolution.width.get())
                     .contains(&region.width)
                     .or_fail_with(|()| {
                         format!(
@@ -230,11 +243,11 @@ impl RawLayout {
                 region.width -= region.width % 2;
             } else {
                 // 0 の場合は自動で求める
-                region.width = self.resolution.width.get().saturating_sub(region.x_pos);
+                region.width = resolution.width.get().saturating_sub(region.x_pos);
             }
 
             // Check y_pos.
-            (0..self.resolution.height.get())
+            (0..resolution.height.get())
                 .contains(&region.y_pos)
                 .or_fail_with(|()| {
                     format!(
@@ -244,7 +257,7 @@ impl RawLayout {
                 })?;
 
             // Check x_pos.
-            (0..self.resolution.width.get())
+            (0..resolution.width.get())
                 .contains(&region.x_pos)
                 .or_fail_with(|()| {
                     format!(
@@ -282,7 +295,7 @@ impl RawLayout {
         let mut video_regions = Vec::new();
         for (_region_name, raw_region) in self.video_layout {
             let region = raw_region
-                .into_region(&base_path, &mut sources, &self.resolution)
+                .into_region(&base_path, &mut sources, &resolution)
                 .or_fail()?;
             video_regions.push(region);
         }
@@ -297,7 +310,7 @@ impl RawLayout {
             base_path,
             video_regions,
             trim_spans,
-            resolution: self.resolution,
+            resolution,
             bitrate_kbps: self.bitrate,
             audio_source_ids,
             sources,
