@@ -226,7 +226,7 @@ impl RawLayout {
         let mut video_regions = Vec::new();
         for (_region_name, raw_region) in self.video_layout {
             let region = raw_region
-                .into_region(&base_path, &mut sources, &self.resolution.clone().unwrap()) // TODO: remove unwrap
+                .into_region(&base_path, &mut sources, self.resolution)
                 .or_fail()?;
             video_regions.push(region);
         }
@@ -379,7 +379,7 @@ impl RawRegion {
         mut self,
         base_path: &Path,
         sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
-        resolution: &Resolution,
+        resolution: Option<Resolution>,
     ) -> orfail::Result<Region> {
         let resolved = resolve_source_and_media_path_pairs(
             base_path,
@@ -408,6 +408,24 @@ impl RawRegion {
             rows * columns,
             &self.cells_excluded,
         );
+
+        // 解像度を確定する
+        let resolution = if let Some(resolution) = resolution {
+            resolution
+        } else {
+            // 全体の解像度が未指定の場合には、リージョンの width / height から求める
+            (self.width > 0).or_fail_with(|()| {
+                "Region width must be specified when resolution is not set".to_owned()
+            })?;
+            (self.height > 0).or_fail_with(|()| {
+                "Region height must be specified when resolution is not set".to_owned()
+            })?;
+
+            // リージョンの位置とサイズから必要な解像度を計算
+            let required_width = self.x_pos + self.width;
+            let required_height = self.y_pos + self.height;
+            Resolution::new(required_width, required_height).or_fail()?
+        };
 
         // Validate and adjust dimensions directly on self
         // Check and adjust height
@@ -489,7 +507,7 @@ impl RawRegion {
         &self,
         rows: usize,
         columns: usize,
-        resolution: &Resolution,
+        resolution: Resolution,
     ) -> orfail::Result<(EvenUsize, EvenUsize, EvenUsize, EvenUsize)> {
         let mut grid_width = self.width;
         let mut grid_height = self.height;
