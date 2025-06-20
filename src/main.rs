@@ -10,6 +10,7 @@ const INSPECT_COMMAND: noargs::CmdSpec =
     noargs::cmd("inspect").doc("録画ファイルの情報を取得します");
 const LIST_CODECS_COMMAND: noargs::CmdSpec =
     noargs::cmd("list-codecs").doc("利用可能なコーデック一覧を表示します");
+const COMPOSE_COMMAND: noargs::CmdSpec = noargs::cmd("compose").doc("録画ファイルの合成を行います");
 const LEGACY_COMMAND: noargs::CmdSpec =
     noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです（省略可能）");
 
@@ -37,6 +38,8 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_inspect::run(args)?;
     } else if LIST_CODECS_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_list_codecs::run(args)?;
+    } else if COMPOSE_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_compose::run(args)?;
     } else if LEGACY_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_legacy::run(args)?;
     } else if args.metadata().help_mode {

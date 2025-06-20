@@ -12,6 +12,11 @@ use crate::{
     video::{self, VideoFormat, VideoFrame},
 };
 
+// エンコードパラメーターのデフォルト値
+pub const DEFAULT_CQ_LEVEL: &str = "30";
+pub const DEFAULT_MIN_Q: &str = "10";
+pub const DEFAULT_MAX_Q: &str = "50";
+
 // サンプルパラメーター用の設定値
 const CHROMA_SUBSAMPLING_I420: Uint<u8, 3, 1> = Uint::new(1); // 4:2:0 colocated with luma (0,0)
 const BIT_DEPTH: Uint<u8, 4, 4> = Uint::new(8);

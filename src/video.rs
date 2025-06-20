@@ -292,6 +292,11 @@ impl FrameRate {
         numerator: NonZeroUsize::MIN,
         denumerator: NonZeroUsize::MIN,
     };
+
+    pub const FPS_25: Self = Self {
+        numerator: NonZeroUsize::MIN.saturating_add(24),
+        denumerator: NonZeroUsize::MIN,
+    };
 }
 
 impl FromStr for FrameRate {
