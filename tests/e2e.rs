@@ -6,7 +6,7 @@ use hisui::{
     decoder_opus::OpusDecoder,
     metadata::SourceId,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    runner::Runner,
+    subcommand_legacy::Runner,
     types::CodecName,
 };
 use orfail::OrFail;

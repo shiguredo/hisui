@@ -28,7 +28,6 @@ pub mod mixer_video;
 pub mod reader;
 pub mod reader_mp4;
 pub mod reader_webm;
-pub mod runner; // TODO: rename to legacy
 pub mod source;
 pub mod stats;
 pub mod subcommand_compose;
