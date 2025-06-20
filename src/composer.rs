@@ -24,12 +24,12 @@ use crate::{
 #[derive(Debug)]
 pub struct Composer {
     pub layout: Layout,
-    pub out_video_codec: CodecName,
-    pub out_audio_codec: CodecName,
+    pub video_codec: CodecName,
+    pub audio_codec: CodecName,
     pub openh264_lib: Option<Openh264Library>,
     pub show_progress_bar: bool,
     pub max_cpu_cores: Option<usize>,
-    pub out_stats_file: Option<PathBuf>,
+    pub stats_file_path: Option<PathBuf>,
 
     // TODO: 以降はレイアウトに移動する
     pub libvpx_cq_level: usize,
@@ -49,12 +49,12 @@ impl Composer {
     pub fn new(layout: Layout) -> Self {
         Self {
             layout,
-            out_video_codec: CodecName::Vp8,
-            out_audio_codec: CodecName::Opus,
+            video_codec: CodecName::Vp8,
+            audio_codec: CodecName::Opus,
             openh264_lib: None,
             show_progress_bar: false,
             max_cpu_cores: None,
-            out_stats_file: None,
+            stats_file_path: None,
             libvpx_cq_level: encoder_libvpx::DEFAULT_CQ_LEVEL
                 .parse()
                 .expect("infallible"),
@@ -160,7 +160,7 @@ impl Composer {
             stats.clone(),
         );
 
-        let encoder = match self.out_video_codec {
+        let encoder = match self.video_codec {
             CodecName::Vp8 => VideoEncoder::new_vp8(
                 &self.layout,
                 self.libvpx_cq_level,
@@ -215,7 +215,7 @@ impl Composer {
             stats.clone(),
         );
 
-        let audio_encoder = match self.out_audio_codec {
+        let audio_encoder = match self.audio_codec {
             #[cfg(feature = "fdk-aac")]
             CodecName::Aac => AudioEncoder::new_fdk_aac(self.out_aac_bit_rate).or_fail()?,
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
@@ -248,7 +248,7 @@ impl Composer {
         stats.with_lock(|stats| {
             log::debug!("stats: {}", nojson::Json(&stats));
 
-            if let Some(path) = &self.out_stats_file {
+            if let Some(path) = &self.stats_file_path {
                 let json = nojson::json(|f| {
                     f.set_indent_size(2);
                     f.set_spacing(true);

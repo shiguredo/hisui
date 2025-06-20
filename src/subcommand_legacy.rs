@@ -316,12 +316,12 @@ impl Runner {
 
         // Composer を作成して設定
         let mut composer = Composer::new(layout);
-        composer.out_video_codec = self.args.out_video_codec;
-        composer.out_audio_codec = self.args.out_audio_codec;
+        composer.video_codec = self.args.out_video_codec;
+        composer.audio_codec = self.args.out_audio_codec;
         composer.openh264_lib = openh264_lib;
         composer.show_progress_bar = self.args.show_progress_bar;
         composer.max_cpu_cores = self.args.cpu_cores;
-        composer.out_stats_file = self.args.out_stats_file.clone();
+        composer.stats_file_path = self.args.out_stats_file.clone();
         composer.libvpx_cq_level = self.args.libvpx_cq_level;
         composer.libvpx_min_q = self.args.libvpx_min_q;
         composer.libvpx_max_q = self.args.libvpx_max_q;
