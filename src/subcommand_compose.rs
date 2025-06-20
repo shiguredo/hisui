@@ -8,12 +8,14 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{composer::Composer, layout::Layout, types::CodecName, video::FrameRate};
 
+// TODO: resolution は必須ではなくして、省略時には動的に求められるようにする
 const DEFAULT_LAYOUT_JSON: &str = r#"{
+  "resolution": "1280x720",
   "audio_sources": [ "archive*.json" ],
-  "video_layout": {
+  "video_layout": {"main": {
     "max_columns": 3,
     "video_sources": [ "archive*.json" ]
-  }
+  }}
 }"#;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
@@ -40,10 +42,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             // TODO: DEFAULT_LAYOUT_JSON を参照するようにしたい
             r#"{"#,
             r#"  "audio_sources": [ "archive*.json" ],"#,
-            r#"  "video_layout": {"#,
+            r#"  "video_layout": {"main": {"#,
             r#"    "max_columns": 3,"#,
             r#"    "video_sources": [ "archive*.json" ]"#,
-            r#"  }"#,
+            r#"  }}"#,
             r#"}"#
         ))
         .take(&mut args)
