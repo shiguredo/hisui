@@ -8,7 +8,6 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{composer::Composer, layout::Layout, types::CodecName, video::FrameRate};
 
-// TODO: resolution は必須ではなくして、省略時には動的に求められるようにする
 const DEFAULT_LAYOUT_JSON: &str = r#"{
   "audio_sources": [ "archive*.json" ],
   "video_layout": {"main": {
