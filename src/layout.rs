@@ -319,6 +319,8 @@ struct RawRegion {
     video_sources: Vec<PathBuf>,
     video_sources_excluded: Vec<PathBuf>,
     width: usize,
+    cell_width: usize,
+    cell_height: usize,
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
@@ -330,7 +332,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
     ) -> Result<Self, nojson::JsonParseError> {
         let (
             [video_sources],
-            [cells_excluded, height, max_columns, max_rows, reuse, video_sources_excluded, width, x_pos, y_pos, z_pos],
+            [cells_excluded, height, max_columns, max_rows, reuse, video_sources_excluded, width, cell_width, cell_height, x_pos, y_pos, z_pos],
         ) = value.to_fixed_object(
             ["video_sources"],
             [
@@ -341,6 +343,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
                 "reuse",
                 "video_sources_excluded",
                 "width",
+                "cell_width",
+                "cell_height",
                 "x_pos",
                 "y_pos",
                 "z_pos",
@@ -367,6 +371,14 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
                 .transpose()?
                 .unwrap_or_default(),
             width: width.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            cell_width: cell_width
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
+            cell_height: cell_height
+                .map(|v| v.try_to())
+                .transpose()?
+                .unwrap_or_default(),
             x_pos: x_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             y_pos: y_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             z_pos: z_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
@@ -381,6 +393,18 @@ impl RawRegion {
         sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
         resolution: Option<Resolution>,
     ) -> orfail::Result<Region> {
+        if self.width != 0 && self.cell_width != 0 {
+            return Err(orfail::Failure::new(
+                "Cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
+            ));
+        }
+
+        if self.height != 0 && self.cell_height != 0 {
+            return Err(orfail::Failure::new(
+                "Cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
+            ));
+        }
+
         let resolved = resolve_source_and_media_path_pairs(
             base_path,
             &self.video_sources,
@@ -426,6 +450,30 @@ impl RawRegion {
             let required_height = self.y_pos + self.height;
             Resolution::new(required_width, required_height).or_fail()?
         };
+
+        if self.cell_width != 0 {
+            let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
+            let grid_width = self.cell_width * columns + horizontal_inner_borders;
+
+            // 外枠を考慮
+            self.width = if grid_width + BORDER_PIXELS.get() * 2 <= resolution.width.get() {
+                grid_width + BORDER_PIXELS.get() * 2
+            } else {
+                grid_width
+            };
+        }
+
+        if self.cell_height != 0 {
+            let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
+            let grid_height = self.cell_height * rows + vertical_inner_borders;
+
+            // 外枠を考慮
+            self.height = if grid_height + BORDER_PIXELS.get() * 2 <= resolution.height.get() {
+                grid_height + BORDER_PIXELS.get() * 2
+            } else {
+                grid_height
+            };
+        }
 
         // Validate and adjust dimensions directly on self
         // Check and adjust height
