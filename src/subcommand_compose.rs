@@ -1,7 +1,23 @@
-use std::{num::NonZeroUsize, path::PathBuf};
+use std::{
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+};
+
+use orfail::OrFail;
+use shiguredo_openh264::Openh264Library;
+
+use crate::{composer::Composer, layout::Layout, types::CodecName, video::FrameRate};
+
+const DEFAULT_LAYOUT_JSON: &str = r#"{
+  "audio_sources": [ "archive*.json" ],
+  "video_layout": {
+    "max_columns": 3,
+    "video_sources": [ "archive*.json" ]
+  }
+}"#;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
-    let _root_dir: PathBuf = noargs::opt("root-dir")
+    let root_dir: PathBuf = noargs::opt("root-dir")
         .short('r')
         .ty("PATH")
         .default(".")
@@ -13,25 +29,26 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .then(|a| a.value().parse())?;
-    let _layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
+    let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
         .short('l')
         .ty("PATH")
         .env("HISUI_LAYOUT_FILE_PATH")
-        .doc(
-            r#"合成に使用するレイアウトファイルを指定します
-
-省略された場合には、以下の内容のレイアウトで合成が行われます:
-{
-  "audio_sources": [ "archive*.json" ],
-  "video_layout": {
-    "max_columns": 3,
-    "video_sources": [ "archive*.json" ]
-  }
-}"#,
-        )
+        .doc(concat!(
+            "合成に使用するレイアウトファイルを指定します\n",
+            "\n",
+            "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
+            // TODO: DEFAULT_LAYOUT_JSON を参照するようにしたい
+            r#"{"#,
+            r#"  "audio_sources": [ "archive*.json" ],"#,
+            r#"  "video_layout": {"#,
+            r#"    "max_columns": 3,"#,
+            r#"    "video_sources": [ "archive*.json" ]"#,
+            r#"  }"#,
+            r#"}"#
+        ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let _output_file_path: Option<PathBuf> = noargs::opt("output-file")
+    let output_file_path: Option<PathBuf> = noargs::opt("output-file")
         .short('o')
         .ty("PATH")
         .doc(concat!(
@@ -42,24 +59,24 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let _stats_file_path: Option<PathBuf> = noargs::opt("stats-file")
+    let stats_file_path: Option<PathBuf> = noargs::opt("stats-file")
         .short('s')
         .ty("PATH")
         .doc("合成中に収集した統計情報 (JSON) を保存するファイルを指定します")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let _openh264: Option<PathBuf> = noargs::opt("openh264")
+    let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
         .doc("OpenH264 の共有ライブラリのパスを指定します")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let _progress_bar: bool = noargs::flag("progress-bar")
+    let progress_bar: bool = noargs::flag("progress-bar")
         .short('p')
         .doc("指定された場合は、合成の進捗を表示します")
         .take(&mut args)
         .is_present();
-    let _max_cpu_cores: Option<NonZeroUsize> = noargs::opt("max-cpu-cores")
+    let max_cpu_cores: Option<NonZeroUsize> = noargs::opt("max-cpu-cores")
         .short('c')
         .ty("INTEGER")
         .env("HISUI_MAX_CPU_CORES")
@@ -76,5 +93,54 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    todo!()
+    // レイアウトを準備
+    let layout = create_layout(&root_dir, layout_file_path.as_deref()).or_fail()?;
+    log::debug!("layout: {layout:?}");
+
+    // 必要に応じて openh264 の共有ライブラリを読み込む
+    let openh264_lib = if let Some(path) = openh264.as_ref().filter(|_| layout.has_video()) {
+        Some(Openh264Library::load(path).or_fail()?)
+    } else {
+        None
+    };
+
+    // 出力ファイルパスを決定
+    let out_file_path = output_file_path.unwrap_or_else(|| {
+        if !layout.has_video() && layout.has_audio() {
+            root_dir.join("output.mp4a")
+        } else {
+            root_dir.join("output.mp4")
+        }
+    });
+
+    // Composer を作成して設定
+    let mut composer = Composer::new(layout);
+    composer.out_video_codec = CodecName::Vp8; // デフォルト値
+    composer.out_audio_codec = CodecName::Opus; // デフォルト値
+    composer.openh264_lib = openh264_lib;
+    composer.show_progress_bar = progress_bar;
+    composer.max_cpu_cores = max_cpu_cores.map(|n| n.get());
+    composer.out_stats_file = stats_file_path;
+
+    // 合成を実行
+    let result = composer.compose(&out_file_path).or_fail()?;
+
+    if !result.success {
+        // エラー発生時は終了コードを変える
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail::Result<Layout> {
+    if let Some(layout_file_path) = layout_file_path {
+        // レイアウトファイルが指定された場合
+        let layout_json = std::fs::read_to_string(layout_file_path)
+            .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
+        Layout::from_layout_json(layout_file_path, &layout_json, FrameRate::FPS_25).or_fail()
+    } else {
+        // デフォルトレイアウトを作成
+        Layout::from_layout_json(root_dir, DEFAULT_LAYOUT_JSON, FrameRate::FPS_25).or_fail()
+    }
 }
