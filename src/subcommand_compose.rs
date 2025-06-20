@@ -143,6 +143,11 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
         Layout::from_layout_json(layout_file_path, &layout_json, FrameRate::FPS_25).or_fail()
     } else {
         // デフォルトレイアウトを作成
-        Layout::from_layout_json(root_dir, DEFAULT_LAYOUT_JSON, FrameRate::FPS_25).or_fail()
+        Layout::from_layout_json(
+            &root_dir.join("default-layout.json"),
+            DEFAULT_LAYOUT_JSON,
+            FrameRate::FPS_25,
+        )
+        .or_fail()
     }
 }
