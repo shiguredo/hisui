@@ -73,9 +73,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパスを指定します")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let progress_bar: bool = noargs::flag("progress-bar")
-        .short('p')
-        .doc("指定された場合は、合成の進捗を表示します")
+    let no_progress_bar: bool = noargs::flag("no-progress-bar")
+        .short('P')
+        .doc("指定された場合は、合成の進捗を非表示にします")
         .take(&mut args)
         .is_present();
     let max_cpu_cores: Option<NonZeroUsize> = noargs::opt("max-cpu-cores")
@@ -114,7 +114,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     composer.out_video_codec = CodecName::Vp8; // デフォルト値
     composer.out_audio_codec = CodecName::Opus; // デフォルト値
     composer.openh264_lib = openh264_lib;
-    composer.show_progress_bar = progress_bar;
+    composer.show_progress_bar = !no_progress_bar;
     composer.max_cpu_cores = max_cpu_cores.map(|n| n.get());
     composer.out_stats_file = stats_file_path;
 
