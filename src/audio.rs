@@ -17,6 +17,10 @@ pub const SAMPLE_RATE: u16 = 48000;
 // 現時点ではステレオ固定
 pub const CHANNELS: u16 = 2;
 
+// エンコードパラメーターのデフォルト値
+pub const DEFAULT_OPUS_BITRATE: &str = "65536";
+pub const DEFAULT_AAC_BITRATE: &str = "64000";
+
 #[derive(Debug, Clone)]
 pub struct AudioData {
     pub source_id: Option<SourceId>,

@@ -1,14 +1,15 @@
-use std::{collections::HashSet, time::Instant};
+use std::{collections::HashSet, num::NonZeroUsize, time::Instant};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-    audio::AudioDataReceiver,
+    audio::{AudioDataReceiver, DEFAULT_AAC_BITRATE, DEFAULT_OPUS_BITRATE},
     channel::{self, ErrorFlag},
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
+    encoder_libvpx,
     layout::Layout,
     metadata::ContainerFormat,
     mixer_audio::AudioMixerThread,
@@ -29,13 +30,13 @@ pub struct Composer {
     pub show_progress_bar: bool,
     pub cpu_cores: Option<usize>,
     pub out_stats_file: Option<std::path::PathBuf>,
-    // Video codec specific options
-    pub libvpx_cq_level: Option<u32>,
-    pub libvpx_min_q: Option<u32>,
-    pub libvpx_max_q: Option<u32>,
-    // Audio codec specific options
-    pub out_aac_bit_rate: Option<u32>,
-    pub out_opus_bit_rate: Option<u32>,
+
+    // TODO: 以降はレイアウトに移動する
+    pub libvpx_cq_level: usize,
+    pub libvpx_min_q: usize,
+    pub libvpx_max_q: usize,
+    pub out_aac_bit_rate: NonZeroUsize,
+    pub out_opus_bit_rate: NonZeroUsize,
 }
 
 #[derive(Debug)]
@@ -54,11 +55,13 @@ impl Composer {
             show_progress_bar: false,
             cpu_cores: None,
             out_stats_file: None,
-            libvpx_cq_level: None,
-            libvpx_min_q: None,
-            libvpx_max_q: None,
-            out_aac_bit_rate: None,
-            out_opus_bit_rate: None,
+            libvpx_cq_level: encoder_libvpx::DEFAULT_CQ_LEVEL
+                .parse()
+                .expect("infallible"),
+            libvpx_min_q: encoder_libvpx::DEFAULT_MIN_Q.parse().expect("infallible"),
+            libvpx_max_q: encoder_libvpx::DEFAULT_MAX_Q.parse().expect("infallible"),
+            out_aac_bit_rate: DEFAULT_AAC_BITRATE.parse().expect("infallible"),
+            out_opus_bit_rate: DEFAULT_OPUS_BITRATE.parse().expect("infallible"),
         }
     }
 
@@ -92,12 +95,7 @@ impl Composer {
         self
     }
 
-    pub fn with_libvpx_options(
-        mut self,
-        cq_level: Option<u32>,
-        min_q: Option<u32>,
-        max_q: Option<u32>,
-    ) -> Self {
+    pub fn with_libvpx_options(mut self, cq_level: usize, min_q: usize, max_q: usize) -> Self {
         self.libvpx_cq_level = cq_level;
         self.libvpx_min_q = min_q;
         self.libvpx_max_q = max_q;
@@ -106,8 +104,8 @@ impl Composer {
 
     pub fn with_audio_bitrates(
         mut self,
-        aac_bit_rate: Option<u32>,
-        opus_bit_rate: Option<u32>,
+        aac_bit_rate: NonZeroUsize,
+        opus_bit_rate: NonZeroUsize,
     ) -> Self {
         self.out_aac_bit_rate = aac_bit_rate;
         self.out_opus_bit_rate = opus_bit_rate;

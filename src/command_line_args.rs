@@ -1,6 +1,11 @@
 use std::{num::NonZeroUsize, path::PathBuf};
 
-use crate::{types::CodecName, video::FrameRate};
+use crate::{
+    audio::{DEFAULT_AAC_BITRATE, DEFAULT_OPUS_BITRATE},
+    encoder_libvpx,
+    types::CodecName,
+    video::FrameRate,
+};
 
 #[derive(Debug, Clone)]
 pub struct Args {
@@ -119,7 +124,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .present_and_then(|a| a.value().parse())?;
         let libvpx_cq_level = noargs::opt("libvpx-cq-level")
             .ty("NON_NEGATIVE_INTEGER")
-            .default("30")
+            .default(encoder_libvpx::DEFAULT_CQ_LEVEL)
             .doc(concat!(
                 "libvpx のエンコードパラメータ\n",
                 "\n",
@@ -130,7 +135,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .then(|a| a.value().parse())?;
         let libvpx_min_q = noargs::opt("libvpx-min-q")
             .ty("NON_NEGATIVE_INTEGER")
-            .default("10")
+            .default(encoder_libvpx::DEFAULT_MIN_Q)
             .doc(concat!(
                 "libvpx のエンコードパラメータ\n",
                 "\n",
@@ -140,7 +145,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .then(|a| a.value().parse())?;
         let libvpx_max_q = noargs::opt("libvpx-max-q")
             .ty("NON_NEGATIVE_INTEGER")
-            .default("50")
+            .default(encoder_libvpx::DEFAULT_MAX_Q)
             .doc(concat!(
                 "libvpx のエンコードパラメータ\n",
                 "\n",
@@ -150,13 +155,13 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .then(|a| a.value().parse())?;
         let out_opus_bit_rate = noargs::opt("out-opus-bit-rate")
             .ty("BPS")
-            .default("65536")
+            .default(DEFAULT_OPUS_BITRATE)
             .doc("Opus でエンコードする際のビットレート")
             .take(&mut args)
             .then(|a| a.value().parse())?;
         let out_aac_bit_rate = noargs::opt("out-aac-bit-rate")
             .ty("BPS")
-            .default("64000")
+            .default(DEFAULT_AAC_BITRATE)
             .doc("AAC でエンコードする際のビットレート")
             .take(&mut args)
             .then(|a| a.value().parse())?;
