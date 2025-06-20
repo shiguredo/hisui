@@ -433,6 +433,34 @@ impl RawRegion {
             &self.cells_excluded,
         );
 
+        if self.cell_width != 0 {
+            let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
+            let grid_width = self.cell_width * columns + horizontal_inner_borders;
+
+            // 外枠を考慮
+            self.width = if resolution
+                .is_some_and(|r| grid_width + BORDER_PIXELS.get() * 2 <= r.width.get())
+            {
+                grid_width + BORDER_PIXELS.get() * 2
+            } else {
+                grid_width
+            };
+        }
+
+        if self.cell_height != 0 {
+            let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
+            let grid_height = self.cell_height * rows + vertical_inner_borders;
+
+            // 外枠を考慮
+            self.height = if resolution
+                .is_some_and(|r| grid_height + BORDER_PIXELS.get() * 2 <= r.height.get())
+            {
+                grid_height + BORDER_PIXELS.get() * 2
+            } else {
+                grid_height
+            };
+        }
+
         // 解像度を確定する
         let resolution = if let Some(resolution) = resolution {
             resolution
@@ -451,32 +479,7 @@ impl RawRegion {
             Resolution::new(required_width, required_height).or_fail()?
         };
 
-        if self.cell_width != 0 {
-            let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
-            let grid_width = self.cell_width * columns + horizontal_inner_borders;
-
-            // 外枠を考慮
-            self.width = if grid_width + BORDER_PIXELS.get() * 2 <= resolution.width.get() {
-                grid_width + BORDER_PIXELS.get() * 2
-            } else {
-                grid_width
-            };
-        }
-
-        if self.cell_height != 0 {
-            let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
-            let grid_height = self.cell_height * rows + vertical_inner_borders;
-
-            // 外枠を考慮
-            self.height = if grid_height + BORDER_PIXELS.get() * 2 <= resolution.height.get() {
-                grid_height + BORDER_PIXELS.get() * 2
-            } else {
-                grid_height
-            };
-        }
-
-        // Validate and adjust dimensions directly on self
-        // Check and adjust height
+        // 高さの確認と調整
         if self.height != 0 {
             (16..=resolution.height.get())
                 .contains(&self.height)
@@ -486,40 +489,40 @@ impl RawRegion {
                         self.height
                     )
                 })?;
-            self.height -= self.height % 2; // Make even
+            self.height -= self.height % 2; // 偶数にする
         } else {
-            // 0 means auto-calculate
+            // 0 は自動計算を意味する
             self.height = resolution.height.get().saturating_sub(self.y_pos);
         }
 
-        // Check and adjust width
+        // 幅の確認と調整
         if self.width != 0 {
             (16..=resolution.width.get())
                 .contains(&self.width)
                 .or_fail_with(|()| {
                     format!("video_layout region width is out of range: {}", self.width)
                 })?;
-            self.width -= self.width % 2; // Make even
+            self.width -= self.width % 2; // 偶数にする
         } else {
-            // 0 means auto-calculate
+            // 0 は自動計算を意味する
             self.width = resolution.width.get().saturating_sub(self.x_pos);
         }
 
-        // Check y_pos
+        // y_pos の確認
         (0..resolution.height.get())
             .contains(&self.y_pos)
             .or_fail_with(|()| {
                 format!("video_layout region y_pos is out of range: {}", self.y_pos)
             })?;
 
-        // Check x_pos
+        // x_pos の確認
         (0..resolution.width.get())
             .contains(&self.x_pos)
             .or_fail_with(|()| {
                 format!("video_layout region x_pos is out of range: {}", self.x_pos)
             })?;
 
-        // Check z_pos
+        // z_pos の確認
         (-99..=99).contains(&self.z_pos).or_fail_with(|()| {
             format!("video_layout region z_pos is out of range: {}", self.z_pos)
         })?;
