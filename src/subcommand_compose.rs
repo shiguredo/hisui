@@ -107,13 +107,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // 出力ファイルパスを決定
-    let out_file_path = output_file_path.unwrap_or_else(|| {
-        if !layout.has_video() && layout.has_audio() {
-            root_dir.join("output.mp4a")
-        } else {
-            root_dir.join("output.mp4")
-        }
-    });
+    let out_file_path = output_file_path.unwrap_or_else(|| root_dir.join("output.mp4"));
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
