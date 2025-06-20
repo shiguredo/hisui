@@ -44,7 +44,7 @@ fn main() {
     }
 
     // バインディングを生成する
-    if let Some(source_dir) = std::env::var(ENV_FDK_AAC_SOURCE_DIR).ok() {
+    if let Ok(source_dir) = std::env::var(ENV_FDK_AAC_SOURCE_DIR) {
         // [NOTE]
         // システムにインストールされたものではなく、
         // fdk-aac のソースを直接参照してバインディングを生成する場合には
@@ -53,7 +53,7 @@ fn main() {
         let libaacenc_include_dir = source_dir.join("libAACenc/include/");
         let libsys_include_dir = source_dir.join("libSYS/include/");
         bindgen::Builder::default()
-            .clang_arg(format!("-I{}", libsys_include_dir.display().to_string()))
+            .clang_arg(format!("-I{}", libsys_include_dir.display()))
             .header(
                 libaacenc_include_dir
                     .join("aacenc_lib.h")
