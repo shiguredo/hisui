@@ -10,10 +10,12 @@ use crate::{composer::Composer, layout::Layout, types::CodecName, video::FrameRa
 
 // TODO: resolution は必須ではなくして、省略時には動的に求められるようにする
 const DEFAULT_LAYOUT_JSON: &str = r#"{
-  "resolution": "1280x720",
   "audio_sources": [ "archive*.json" ],
   "video_layout": {"main": {
-    "max_columns": 3,
+    "cell_width": 320,
+    "cell_height": 240,
+    "max_columns": 4,
+    "max_rows": 4,
     "video_sources": [ "archive*.json" ]
   }}
 }"#;
@@ -31,7 +33,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             r#"{"#,
             r#"  "audio_sources": [ "archive*.json" ],"#,
             r#"  "video_layout": {"main": {"#,
-            r#"    "max_columns": 3,"#,
+            r#"    "cell_width": 320,"#,
+            r#"    "cell_height": 240,"#,
+            r#"    "max_columns": 4,"#,
+            r#"    "max_rows": 4,"#,
             r#"    "video_sources": [ "archive*.json" ]"#,
             r#"  }}"#,
             r#"}"#
