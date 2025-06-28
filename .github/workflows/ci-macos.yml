@@ -13,7 +13,7 @@ jobs:
   test:
     runs-on:
       group: Self
-      labels: [self-hosted, macOS, ARM64, Apple-M1]
+      labels: [self-hosted, macOS, ARM64, Apple-M2-Pro]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
