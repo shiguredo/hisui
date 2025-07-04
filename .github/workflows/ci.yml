@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -72,6 +73,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -99,6 +101,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -140,6 +143,7 @@ jobs:
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
     steps:
       - uses: actions/checkout@v4
+      - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -175,6 +179,7 @@ jobs:
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
     steps:
       - uses: actions/checkout@v4
+      - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -214,6 +219,7 @@ jobs:
     steps:
       # docs.rs 向けでは外部ライブラリのビルドは走らないので依存パッケージなどのインストールは不要
       - uses: actions/checkout@v4
+      - run: rustup update stable
       - run: cargo doc --workspace --exclude hisui
 
   slack_notify_failed:
