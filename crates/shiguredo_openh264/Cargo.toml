@@ -20,4 +20,4 @@ toml = "0.8.20"
 # 以降は外部ライブラリビルド用のメタデータ
 # (この内容は build.rs の中からのみ参照される)
 [package.metadata.external-dependencies]
-openh264 = { git = "https://github.com/cisco/openh264.git", version = "v2.5.0" }
+openh264 = { git = "https://github.com/cisco/openh264.git", version = "v2.6.0" }
