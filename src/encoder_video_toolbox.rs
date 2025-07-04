@@ -38,6 +38,7 @@ impl VideoToolboxEncoder {
             target_bitrate: layout.video_bitrate_bps(),
             fps_numerator: layout.fps.numerator.get(),
             fps_denominator: layout.fps.denumerator.get(),
+            ..Default::default()
         };
         let inner = shiguredo_video_toolbox::Encoder::new_h264(&config).or_fail()?;
         Ok(Self {
@@ -61,6 +62,8 @@ impl VideoToolboxEncoder {
             target_bitrate: layout.video_bitrate_bps(),
             fps_numerator: layout.fps.numerator.get(),
             fps_denominator: layout.fps.denumerator.get(),
+            profile_level: shiguredo_video_toolbox::ProfileLevel::H265Main,
+            ..Default::default()
         };
         let inner = shiguredo_video_toolbox::Encoder::new_h265(&config).or_fail()?;
         Ok(Self {
