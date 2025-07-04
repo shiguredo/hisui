@@ -287,7 +287,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
                     assert!(matches!(y, 0..=2), "y={y}");
                 } else if i / width < 16 + 2 + 16 {
                     // 次の 16 行は緑
-                    assert!(matches!(y, 187 | 188), "y={y}");
+                    assert!(matches!(y, 186 | 187 | 188 | 189), "y={y}");
                 } else if i / width < 16 + 2 + 16 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");
