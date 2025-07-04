@@ -1150,6 +1150,7 @@ mod tests {
             min_quantizer: 1,
             max_quantizer: 1,
             cq_level: 1,
+            ..Default::default()
         }
     }
 
