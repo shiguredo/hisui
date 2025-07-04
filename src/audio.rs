@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    boxes::{AudioSampleEntryFields, SampleEntry},
     FixedPointNumber,
+    boxes::{AudioSampleEntryFields, SampleEntry},
 };
 
 use crate::{metadata::SourceId, types::CodecName};

@@ -2,9 +2,9 @@ use std::{num::NonZeroUsize, time::Duration};
 
 use orfail::OrFail;
 use shiguredo_mp4::{
+    Uint,
     boxes::{EsdsBox, Mp4aBox, SampleEntry},
     descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
-    Uint,
 };
 
 use crate::audio::{self, AudioData, AudioFormat, SAMPLE_RATE};

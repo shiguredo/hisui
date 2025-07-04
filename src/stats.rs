@@ -16,6 +16,12 @@ pub struct SharedStats {
     inner: Arc<Mutex<Stats>>,
 }
 
+impl Default for SharedStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SharedStats {
     pub fn new() -> Self {
         let inner = Arc::new(Mutex::new(Stats::default()));
@@ -28,14 +34,13 @@ impl SharedStats {
     {
         match self.inner.lock() {
             Ok(mut stats) => {
-                f(&mut *stats);
+                f(&mut stats);
             }
             Err(e) => {
                 // 統計情報の更新ができなくても致命的ではないので警告に止める
                 log::warn!("failed to acqure stats lock: {e}");
-                return;
             }
-        };
+        }
     }
 }
 
@@ -178,27 +183,27 @@ impl nojson::DisplayJson for AudioMixerStats {
             f.member("kind", "audio")?;
             f.member(
                 "total_input_audio_data_count",
-                &self.total_input_audio_data_count,
+                self.total_input_audio_data_count,
             )?;
             f.member(
                 "total_output_audio_data_count",
-                &self.total_output_audio_data_count,
+                self.total_output_audio_data_count,
             )?;
             f.member(
                 "total_output_audio_data_seconds",
-                &self.total_output_audio_data_seconds,
+                self.total_output_audio_data_seconds,
             )?;
-            f.member("total_output_sample_count", &self.total_output_sample_count)?;
+            f.member("total_output_sample_count", self.total_output_sample_count)?;
             f.member(
                 "total_output_filled_sample_count",
-                &self.total_output_filled_sample_count,
+                self.total_output_filled_sample_count,
             )?;
             f.member(
                 "total_trimmed_sample_count",
-                &self.total_trimmed_sample_count,
+                self.total_trimmed_sample_count,
             )?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -236,29 +241,29 @@ impl nojson::DisplayJson for VideoMixerStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("kind", "video")?;
-            f.member("output_video_resolution", &self.output_video_resolution)?;
+            f.member("output_video_resolution", self.output_video_resolution)?;
             f.member(
                 "total_input_video_frame_count",
-                &self.total_input_video_frame_count,
+                self.total_input_video_frame_count,
             )?;
             f.member(
                 "total_output_video_frame_count",
-                &self.total_output_video_frame_count,
+                self.total_output_video_frame_count,
             )?;
             f.member(
                 "total_output_video_frame_seconds",
-                &self.total_output_video_frame_seconds,
+                self.total_output_video_frame_seconds,
             )?;
             f.member(
                 "total_trimmed_video_frame_count",
-                &self.total_trimmed_video_frame_count,
+                self.total_trimmed_video_frame_count,
             )?;
             f.member(
                 "total_extended_video_frame_count",
-                &self.total_extended_video_frame_count,
+                self.total_extended_video_frame_count,
             )?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -303,11 +308,11 @@ impl nojson::DisplayJson for AudioEncoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("kind", "audio")?;
-            f.member("engine", &self.engine)?;
-            f.member("codec", &self.codec)?;
-            f.member("total_audio_data_count", &self.total_audio_data_count)?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("engine", self.engine)?;
+            f.member("codec", self.codec)?;
+            f.member("total_audio_data_count", self.total_audio_data_count)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -339,18 +344,18 @@ impl nojson::DisplayJson for VideoEncoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("kind", "video")?;
-            f.member("engine", &self.engine)?;
-            f.member("codec", &self.codec)?;
+            f.member("engine", self.engine)?;
+            f.member("codec", self.codec)?;
             f.member(
                 "total_input_video_frame_count",
-                &self.total_input_video_frame_count,
+                self.total_input_video_frame_count,
             )?;
             f.member(
                 "total_output_video_frame_count",
-                &self.total_output_video_frame_count,
+                self.total_output_video_frame_count,
             )?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -399,11 +404,11 @@ impl nojson::DisplayJson for AudioDecoderStats {
         f.object(|f| {
             f.member("kind", "audio")?;
             f.member("source_id", &self.source_id)?;
-            f.member("engine", &self.engine)?;
-            f.member("codec", &self.codec)?;
-            f.member("total_audio_data_count", &self.total_audio_data_count)?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("engine", self.engine)?;
+            f.member("codec", self.codec)?;
+            f.member("total_audio_data_count", self.total_audio_data_count)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -442,19 +447,19 @@ impl nojson::DisplayJson for VideoDecoderStats {
         f.object(|f| {
             f.member("kind", "video")?;
             f.member("source_id", &self.source_id)?;
-            f.member("engine", &self.engine)?;
-            f.member("codec", &self.codec)?;
+            f.member("engine", self.engine)?;
+            f.member("codec", self.codec)?;
             f.member(
                 "total_input_video_frame_count",
-                &self.total_input_video_frame_count,
+                self.total_input_video_frame_count,
             )?;
             f.member(
                 "total_output_video_frame_count",
-                &self.total_output_video_frame_count,
+                self.total_output_video_frame_count,
             )?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
             f.member("resolutions", &self.resolutions)?;
-            f.member("error", &self.error)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -507,11 +512,11 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
         f.object(|f| {
             f.member("kind", "mp4_audio")?;
             f.member("input_file", &self.input_file)?;
-            f.member("codec", &self.codec)?;
-            f.member("total_sample_count", &self.total_sample_count)?;
-            f.member("total_track_seconds", &self.total_track_seconds)?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("codec", self.codec)?;
+            f.member("total_sample_count", self.total_sample_count)?;
+            f.member("total_track_seconds", self.total_track_seconds)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -547,7 +552,7 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
         f.object(|f| {
             f.member("kind", "mp4_video")?;
             f.member("input_file", &self.input_file)?;
-            f.member("codec", &self.codec)?;
+            f.member("codec", self.codec)?;
             f.member(
                 "resolutions",
                 nojson::json(|f| {
@@ -556,10 +561,10 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
                     })
                 }),
             )?;
-            f.member("total_sample_count", &self.total_sample_count)?;
-            f.member("total_track_seconds", &self.total_track_seconds)?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("total_sample_count", self.total_sample_count)?;
+            f.member("total_track_seconds", self.total_track_seconds)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -595,12 +600,12 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
         f.object(|f| {
             f.member("kind", "webm_audio")?;
             f.member("input_file", &self.input_file)?;
-            f.member("codec", &self.codec)?;
-            f.member("total_cluster_count", &self.total_cluster_count)?;
-            f.member("total_simple_block_count", &self.total_simple_block_count)?;
-            f.member("total_track_seconds", &self.total_track_seconds)?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("codec", self.codec)?;
+            f.member("total_cluster_count", self.total_cluster_count)?;
+            f.member("total_simple_block_count", self.total_simple_block_count)?;
+            f.member("total_track_seconds", self.total_track_seconds)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -636,12 +641,12 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
         f.object(|f| {
             f.member("kind", "webm_video")?;
             f.member("input_file", &self.input_file)?;
-            f.member("codec", &self.codec)?;
-            f.member("total_cluster_count", &self.total_cluster_count)?;
-            f.member("total_simple_block_count", &self.total_simple_block_count)?;
-            f.member("total_track_seconds", &self.total_track_seconds)?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
-            f.member("error", &self.error)?;
+            f.member("codec", self.codec)?;
+            f.member("total_cluster_count", self.total_cluster_count)?;
+            f.member("total_simple_block_count", self.total_simple_block_count)?;
+            f.member("total_track_seconds", self.total_track_seconds)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("error", self.error)?;
             Ok(())
         })
     }
@@ -702,17 +707,17 @@ impl nojson::DisplayJson for Mp4WriterStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("kind", "mp4")?;
-            f.member("audio_codec", &self.audio_codec)?;
-            f.member("video_codec", &self.video_codec)?;
-            f.member("reserved_moov_box_size", &self.reserved_moov_box_size)?;
-            f.member("actual_moov_box_size", &self.actual_moov_box_size)?;
-            f.member("total_audio_chunk_count", &self.total_audio_chunk_count)?;
-            f.member("total_video_chunk_count", &self.total_video_chunk_count)?;
-            f.member("total_audio_sample_count", &self.total_audio_sample_count)?;
-            f.member("total_video_sample_count", &self.total_video_sample_count)?;
-            f.member("total_audio_track_seconds", &self.total_audio_track_seconds)?;
-            f.member("total_video_track_seconds", &self.total_video_track_seconds)?;
-            f.member("total_processing_seconds", &self.total_processing_seconds)?;
+            f.member("audio_codec", self.audio_codec)?;
+            f.member("video_codec", self.video_codec)?;
+            f.member("reserved_moov_box_size", self.reserved_moov_box_size)?;
+            f.member("actual_moov_box_size", self.actual_moov_box_size)?;
+            f.member("total_audio_chunk_count", self.total_audio_chunk_count)?;
+            f.member("total_video_chunk_count", self.total_video_chunk_count)?;
+            f.member("total_audio_sample_count", self.total_audio_sample_count)?;
+            f.member("total_video_sample_count", self.total_video_sample_count)?;
+            f.member("total_audio_track_seconds", self.total_audio_track_seconds)?;
+            f.member("total_video_track_seconds", self.total_video_track_seconds)?;
+            f.member("total_processing_seconds", self.total_processing_seconds)?;
             Ok(())
         })
     }

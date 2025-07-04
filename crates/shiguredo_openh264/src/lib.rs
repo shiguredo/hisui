@@ -112,10 +112,10 @@ impl Openh264Library {
 
 // 以下は共有ライブラリからの取得されるそれぞれの関数の型定義。
 // Rust では関数から直接その型をコンパイル時に取得する方法がないので、自前で定義している。
-type WelsCreateSVCEncoder = unsafe extern "C" fn(ppEncoder: *mut *mut sys::ISVCEncoder) -> c_int;
-type WelsDestroySVCEncoder = unsafe extern "C" fn(pEncoder: *mut sys::ISVCEncoder);
-type WelsCreateDecoder = unsafe extern "C" fn(ppDecoder: *mut *mut sys::ISVCDecoder) -> c_int;
-type WelsDestroyDecoder = unsafe extern "C" fn(pDecoder: *mut sys::ISVCDecoder);
+type WelsCreateSVCEncoder = unsafe extern "C" fn(pp_encoder: *mut *mut sys::ISVCEncoder) -> c_int;
+type WelsDestroySVCEncoder = unsafe extern "C" fn(p_encoder: *mut sys::ISVCEncoder);
+type WelsCreateDecoder = unsafe extern "C" fn(pp_decoder: *mut *mut sys::ISVCDecoder) -> c_int;
+type WelsDestroyDecoder = unsafe extern "C" fn(p_decoder: *mut sys::ISVCDecoder);
 
 /// H.264 デコーダー
 #[derive(Debug)]

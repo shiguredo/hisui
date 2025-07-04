@@ -121,8 +121,8 @@ fn mix_single_source_with_offset() {
 
     // 各種サイズ (region, cell となるにつれて、外側に 1 pixel ずつのマージンや枠線が入る）
     let output_size = size(MIN_OUTPUT_WIDTH, MIN_OUTPUT_HEIGHT);
-    let region_size = size(output_size.width - 1 * 2, output_size.height - 1 * 2);
-    let cell_size = size(region_size.width - 1 * 2, region_size.height - 1 * 2);
+    let region_size = size(output_size.width - 2, output_size.height - 2);
+    let cell_size = size(region_size.width - 2, region_size.height - 2);
 
     // リージョン設定
     let mut region = region(region_size, cell_size);
@@ -797,13 +797,16 @@ fn region(region_size: Size, cell_size: Size) -> Region {
             assigned_sources: HashMap::new(),
             rows: 0,
             columns: 0,
-            cell_width: EvenUsize::new(cell_size.width).expect(&format!("not even: {cell_size:?}")),
+            cell_width: EvenUsize::new(cell_size.width)
+                .unwrap_or_else(|| panic!("not even: {cell_size:?}")),
             cell_height: EvenUsize::new(cell_size.height)
-                .expect(&format!("not even: {cell_size:?}")),
+                .unwrap_or_else(|| panic!("not even: {cell_size:?}")),
         },
         source_ids: Default::default(),
-        width: EvenUsize::new(region_size.width).expect(&format!("not even: {region_size:?}")),
-        height: EvenUsize::new(region_size.height).expect(&format!("not even: {region_size:?}")),
+        width: EvenUsize::new(region_size.width)
+            .unwrap_or_else(|| panic!("not even: {region_size:?}")),
+        height: EvenUsize::new(region_size.height)
+            .unwrap_or_else(|| panic!("not even: {region_size:?}")),
         position: PixelPosition::default(),
         top_border_pixels: EvenUsize::default(),
         left_border_pixels: EvenUsize::default(),

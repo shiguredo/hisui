@@ -11,8 +11,8 @@ use hisui::{
 };
 use orfail::OrFail;
 use shiguredo_mp4::{
-    boxes::{SampleEntry, UnknownBox},
     BoxSize, BoxType,
+    boxes::{SampleEntry, UnknownBox},
 };
 
 #[test]

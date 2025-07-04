@@ -96,18 +96,27 @@ impl<'text> nojson::FromRawJsonValue<'text> for ArchiveMetadata {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        let ([connection_id, format, audio, video, start_time_offset, stop_time_offset], []) =
-            value.to_fixed_object(
-                [
-                    "connection_id",
-                    "format",
-                    "audio",
-                    "video",
-                    "start_time_offset",
-                    "stop_time_offset",
-                ],
-                [],
-            )?;
+        let (
+            [
+                connection_id,
+                format,
+                audio,
+                video,
+                start_time_offset,
+                stop_time_offset,
+            ],
+            [],
+        ) = value.to_fixed_object(
+            [
+                "connection_id",
+                "format",
+                "audio",
+                "video",
+                "start_time_offset",
+                "stop_time_offset",
+            ],
+            [],
+        )?;
         Ok(Self {
             connection_id: connection_id.try_to()?,
             format: format.try_to()?,

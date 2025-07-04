@@ -46,7 +46,7 @@ impl Layout {
         let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
 
         let json = nojson::RawJson::parse(json)
-            .map_err(|e| malformed_json_error(layout_file_path, &json, e))
+            .map_err(|e| malformed_json_error(layout_file_path, json, e))
             .or_fail()?;
         let raw: RawLayout = json
             .value()
@@ -176,17 +176,25 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        let ([audio_sources], [audio_sources_excluded, video_layout, trim, bitrate, resolution]) =
-            value.to_fixed_object(
-                ["audio_sources"],
-                [
-                    "audio_sources_excluded",
-                    "video_layout",
-                    "trim",
-                    "bitrate",
-                    "resolution",
-                ],
-            )?;
+        let (
+            [audio_sources],
+            [
+                audio_sources_excluded,
+                video_layout,
+                trim,
+                bitrate,
+                resolution,
+            ],
+        ) = value.to_fixed_object(
+            ["audio_sources"],
+            [
+                "audio_sources_excluded",
+                "video_layout",
+                "trim",
+                "bitrate",
+                "resolution",
+            ],
+        )?;
         Ok(Self {
             audio_sources: audio_sources.try_to()?,
             audio_sources_excluded: audio_sources_excluded
@@ -332,7 +340,20 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
     ) -> Result<Self, nojson::JsonParseError> {
         let (
             [video_sources],
-            [cells_excluded, height, max_columns, max_rows, reuse, video_sources_excluded, width, cell_width, cell_height, x_pos, y_pos, z_pos],
+            [
+                cells_excluded,
+                height,
+                max_columns,
+                max_rows,
+                reuse,
+                video_sources_excluded,
+                width,
+                cell_width,
+                cell_height,
+                x_pos,
+                y_pos,
+                z_pos,
+            ],
         ) = value.to_fixed_object(
             ["video_sources"],
             [

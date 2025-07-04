@@ -19,4 +19,4 @@ toml = "0.8.20"
 # 以降は外部ライブラリビルド用のメタデータ
 # (この内容は build.rs の中からのみ参照される)
 [package.metadata.external-dependencies]
-libvpx = { git = "https://github.com/webmproject/libvpx.git", version = "v1.15.0" }
+libvpx = { git = "https://github.com/webmproject/libvpx.git", version = "v1.15.2" }

@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    boxes::{Av01Box, Av1cBox, SampleEntry},
     Uint,
+    boxes::{Av01Box, Av1cBox, SampleEntry},
 };
 
 use crate::{
@@ -41,8 +41,8 @@ impl SvtAv1Encoder {
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
-            width: width,
-            height: height,
+            width,
+            height,
         })
     }
 

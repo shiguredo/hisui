@@ -8,12 +8,12 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
+    BaseBox, BoxSize, BoxType, Either, Encode, FixedPointNumber, Mp4FileTime, Utf8String,
     boxes::{
         Brand, Co64Box, DinfBox, FreeBox, FtypBox, HdlrBox, MdatBox, MdhdBox, MdiaBox, MinfBox,
         MoovBox, MvhdBox, SampleEntry, SmhdBox, StblBox, StcoBox, StscBox, StscEntry, StsdBox,
         StssBox, StszBox, SttsBox, TkhdBox, TrakBox, UnknownBox, VmhdBox,
     },
-    BaseBox, BoxSize, BoxType, Either, Encode, FixedPointNumber, Mp4FileTime, Utf8String,
 };
 
 use crate::{
@@ -548,7 +548,7 @@ impl Mp4Writer {
         let moov_box = self.build_dummy_moov_box(layout);
         let max_moov_box_size = moov_box.box_size().get();
         self.stats.reserved_moov_box_size = max_moov_box_size;
-        log::debug!("reserved moov box size: {}", max_moov_box_size);
+        log::debug!("reserved moov box size: {max_moov_box_size}");
 
         // 初期化時点では free ボックスで領域だけ確保しておく
         let free_box = FreeBox {

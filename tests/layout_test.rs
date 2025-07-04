@@ -198,7 +198,7 @@ fn assign_sources() {
     let assigned = layout::assign_sources(
         ReuseKind::None,
         sources.values().cloned().collect(),
-        1 * 1,
+        1,
         &cells_excluded,
     );
     assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
@@ -215,7 +215,7 @@ fn assign_sources() {
     let assigned = layout::assign_sources(
         ReuseKind::ShowOldest,
         sources.values().cloned().collect(),
-        1 * 1,
+        1,
         &cells_excluded,
     );
     assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
@@ -232,7 +232,7 @@ fn assign_sources() {
     let assigned = layout::assign_sources(
         ReuseKind::ShowNewest,
         sources.values().cloned().collect(),
-        1 * 1,
+        1,
         &cells_excluded,
     );
     assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
@@ -249,7 +249,7 @@ fn assign_sources() {
     let assigned = layout::assign_sources(
         ReuseKind::None,
         sources.values().cloned().collect(),
-        1 * 2,
+        2,
         &cells_excluded,
     );
     assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
@@ -275,7 +275,7 @@ fn assign_sources() {
     let assigned = layout::assign_sources(
         ReuseKind::ShowOldest,
         sources.values().cloned().collect(),
-        1 * 2,
+        2,
         &cells_excluded,
     );
     assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
@@ -301,7 +301,7 @@ fn assign_sources() {
     let assigned = layout::assign_sources(
         ReuseKind::ShowNewest,
         sources.values().cloned().collect(),
-        1 * 2,
+        2,
         &cells_excluded,
     );
     assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));

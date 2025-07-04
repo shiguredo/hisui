@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    boxes::{SampleEntry, Vp08Box, Vp09Box, VpccBox},
     Uint,
+    boxes::{SampleEntry, Vp08Box, Vp09Box, VpccBox},
 };
 
 use crate::{
@@ -48,6 +48,7 @@ impl LibvpxEncoder {
             min_quantizer: min_q,
             max_quantizer: max_q,
             cq_level,
+            ..Default::default()
         };
         let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
 
@@ -79,6 +80,7 @@ impl LibvpxEncoder {
             min_quantizer: min_q,
             max_quantizer: max_q,
             cq_level,
+            ..Default::default()
         };
         let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;
 
