@@ -330,7 +330,6 @@ pub struct EncoderConfig {
     /// FPS の分母
     pub fps_denominator: usize,
 
-    // === 高速化関連の新規パラメータ ===
     /// 複雑度モード (LOW_COMPLEXITY, MEDIUM_COMPLEXITY, HIGH_COMPLEXITY)
     pub complexity_mode: Option<ComplexityMode>,
 
@@ -361,7 +360,6 @@ pub struct EncoderConfig {
     /// 最小QP値
     pub min_qp: Option<i32>,
 
-    // === 前処理機能の有効/無効 ===
     /// ノイズ除去機能
     pub denoise: Option<bool>,
 
