@@ -4,7 +4,7 @@
 //! [SVT-AV1]: https://gitlab.com/AOMediaCodec/SVT-AV1
 #![warn(missing_docs)]
 
-use std::{mem::MaybeUninit, sync::Mutex};
+use std::{mem::MaybeUninit, num::NonZeroUsize, sync::Mutex};
 
 mod sys;
 
@@ -86,7 +86,7 @@ pub struct EncoderConfig {
 
     // === GOP・フレーム構造関連 ===
     /// イントラフレーム間隔 (-1=無制限, 0=イントラオンリー, 1以上=間隔)
-    pub intra_period_length: i32,
+    pub intra_period_length: isize,
 
     /// 階層レベル数 (0=自動設定, 1-5=指定値)
     pub hierarchical_levels: u8,
@@ -94,24 +94,24 @@ pub struct EncoderConfig {
     /// 予測構造 (1=低遅延, 2=ランダムアクセス)
     pub pred_structure: u8,
 
-    /// シーンチェンジ検出 (0=無効, 1=有効)
-    pub scene_change_detection: u8,
+    /// シーンチェンジ検出
+    pub scene_change_detection: bool,
 
     /// 先読み距離 (0=無効, 1-256=フレーム数)
-    pub look_ahead_distance: u32,
+    pub look_ahead_distance: usize,
 
     // === 並列処理関連 ===
-    /// スレッド数 (0=自動設定)
-    pub pin_threads: u32,
+    /// スレッド数 (None=自動設定)
+    pub pin_threads: Option<NonZeroUsize>,
 
-    /// タイル列数 (0=自動)
-    pub tile_columns: u32,
+    /// タイル列数 (None=自動)
+    pub tile_columns: Option<NonZeroUsize>,
 
-    /// タイル行数 (0=自動)
-    pub tile_rows: u32,
+    /// タイル行数 (None=自動)
+    pub tile_rows: Option<NonZeroUsize>,
 
     /// 対象ソケット (-1=両方, 0=ソケット0, 1=ソケット1)
-    pub target_socket: i32,
+    pub target_socket: isize,
 
     // === フィルタリング関連 ===
     /// デブロッキングフィルタ有効
@@ -131,7 +131,7 @@ pub struct EncoderConfig {
     pub enable_overlays: bool,
 
     /// フィルムグレインデノイズ強度 (0=無効, 1-50=強度)
-    pub film_grain_denoise_strength: u32,
+    pub film_grain_denoise_strength: Option<NonZeroUsize>,
 
     /// TPL (Temporal Dependency Model) 有効
     pub enable_tpl_la: bool,
@@ -203,23 +203,23 @@ impl Default for EncoderConfig {
             max_qp_allowed: None,
             rate_control_mode: RateControlMode::Vbr,
             max_bit_rate: None,
-            over_shoot_pct: 25,        // SVT-AV1のデフォルト値
-            under_shoot_pct: 25,       // SVT-AV1のデフォルト値
-            intra_period_length: 120,  // 4秒間隔（30fps想定）
-            hierarchical_levels: 0,    // 自動設定
-            pred_structure: 2,         // ランダムアクセス
-            scene_change_detection: 1, // 有効
+            over_shoot_pct: 25,       // SVT-AV1のデフォルト値
+            under_shoot_pct: 25,      // SVT-AV1のデフォルト値
+            intra_period_length: 120, // 4秒間隔（30fps想定）
+            hierarchical_levels: 0,   // 自動設定
+            pred_structure: 2,        // ランダムアクセス
+            scene_change_detection: true,
             look_ahead_distance: 32,
-            pin_threads: 0,    // 自動設定
-            tile_columns: 0,   // 自動設定
-            tile_rows: 0,      // 自動設定
-            target_socket: -1, // 両方のソケット
+            pin_threads: None,  // 自動設定
+            tile_columns: None, // 自動設定
+            tile_rows: None,    // 自動設定
+            target_socket: -1,  // 両方のソケット
             enable_dlf_flag: true,
             cdef_level: -1, // 自動設定
             enable_restoration_filtering: true,
             enable_tf: true,
             enable_overlays: false,
-            film_grain_denoise_strength: 0, // 無効
+            film_grain_denoise_strength: None, // 無効
             enable_tpl_la: true,
             force_key_frames: false,
             stat_report: false,
@@ -238,14 +238,14 @@ impl EncoderConfig {
     /// 高速エンコード用の設定
     pub fn fast_encode() -> Self {
         Self {
-            enc_mode: 10,              // 高速プリセット
-            look_ahead_distance: 16,   // 先読み距離を短縮
-            enable_tf: false,          // テンポラルフィルタ無効
-            enable_overlays: false,    // オーバーレイ無効
-            scene_change_detection: 0, // シーンチェンジ検出無効
-            enable_tpl_la: false,      // TPL無効
-            tile_columns: 2,           // タイル分割で並列化
-            tile_rows: 1,
+            enc_mode: 10,                                            // 高速プリセット
+            look_ahead_distance: 16,                                 // 先読み距離を短縮
+            enable_tf: false,                                        // テンポラルフィルタ無効
+            enable_overlays: false,                                  // オーバーレイ無効
+            scene_change_detection: false,                           // シーンチェンジ検出無効
+            enable_tpl_la: false,                                    // TPL無効
+            tile_columns: Some(NonZeroUsize::MIN.saturating_add(1)), // タイル分割で並列化
+            tile_rows: Some(NonZeroUsize::MIN),
             hierarchical_levels: 4, // 階層レベルを制限
             ..Default::default()
         }
@@ -274,12 +274,12 @@ impl EncoderConfig {
             look_ahead_distance: 0,                  // 先読み無効
             enable_tf: false,                        // テンポラルフィルタ無効
             enable_overlays: false,                  // オーバーレイ無効
-            scene_change_detection: 0,               // シーンチェンジ検出無効
+            scene_change_detection: false,           // シーンチェンジ検出無効
             enable_tpl_la: false,                    // TPL無効
             hierarchical_levels: 3,                  // 階層レベルを制限
             pred_structure: 1,                       // 低遅延
-            tile_columns: 1,
-            tile_rows: 1,
+            tile_columns: Some(NonZeroUsize::MIN),
+            tile_rows: Some(NonZeroUsize::MIN),
             fast_decode: true,
             over_shoot_pct: 50, // リアルタイム用途では緩い制御
             under_shoot_pct: 50,
@@ -368,17 +368,17 @@ impl Encoder {
             svt_config.under_shoot_pct = config.under_shoot_pct as u32;
 
             // === GOP・フレーム構造 ===
-            svt_config.intra_period_length = config.intra_period_length;
+            svt_config.intra_period_length = config.intra_period_length as i32;
             svt_config.hierarchical_levels = config.hierarchical_levels as u32;
             svt_config.pred_structure = config.pred_structure;
             svt_config.scene_change_detection = config.scene_change_detection as u32;
-            svt_config.look_ahead_distance = config.look_ahead_distance;
+            svt_config.look_ahead_distance = config.look_ahead_distance as u32;
 
             // === 並列処理 ===
-            svt_config.pin_threads = config.pin_threads;
-            svt_config.tile_columns = config.tile_columns as i32;
-            svt_config.tile_rows = config.tile_rows as i32;
-            svt_config.target_socket = config.target_socket;
+            svt_config.pin_threads = config.pin_threads.map_or(0, |v| v.get()) as u32;
+            svt_config.tile_columns = config.tile_columns.map_or(0, |v| v.get()) as i32;
+            svt_config.tile_rows = config.tile_rows.map_or(0, |v| v.get()) as i32;
+            svt_config.target_socket = config.target_socket as i32;
 
             // === フィルタリング ===
             svt_config.enable_dlf_flag = config.enable_dlf_flag;
@@ -388,7 +388,8 @@ impl Encoder {
             // === 高度な設定 ===
             svt_config.enable_tf = config.enable_tf as u8;
             svt_config.enable_overlays = config.enable_overlays;
-            svt_config.film_grain_denoise_strength = config.film_grain_denoise_strength;
+            svt_config.film_grain_denoise_strength =
+                config.film_grain_denoise_strength.map_or(0, |v| v.get()) as u32;
             svt_config.enable_tpl_la = config.enable_tpl_la as u8;
             svt_config.force_key_frames = config.force_key_frames;
             svt_config.stat_report = config.stat_report as u32;
