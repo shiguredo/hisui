@@ -465,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_video_toolbox"
-version = "2025.1.0-canary.1"
+version = "2025.1.0-canary.2"
 dependencies = [
  "bindgen",
  "log",
