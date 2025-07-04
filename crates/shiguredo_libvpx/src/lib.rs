@@ -5,8 +5,9 @@
 #![warn(missing_docs)]
 
 use std::{
-    ffi::{CStr, c_int, c_uint},
+    ffi::{c_int, c_uint, CStr},
     mem::MaybeUninit,
+    num::NonZeroUsize,
 };
 
 mod sys;
@@ -289,7 +290,7 @@ pub struct EncoderConfig {
     pub cq_level: usize,
 
     /// エンコード速度設定 (VP8: 0-16, VP9: 0-9, 大きいほど高速)
-    pub cpu_used: Option<i32>,
+    pub cpu_used: Option<usize>,
 
     /// エンコード期限設定
     pub deadline: EncodingDeadline,
@@ -297,17 +298,17 @@ pub struct EncoderConfig {
     /// レート制御モード
     pub rate_control: RateControlMode,
 
-    /// 先読みフレーム数 (0で無効、品質 vs 速度のトレードオフ)
-    pub lag_in_frames: Option<usize>,
+    /// 先読みフレーム数 (None で無効、品質 vs 速度のトレードオフ)
+    pub lag_in_frames: Option<NonZeroUsize>,
 
-    /// スレッド数 (0で自動設定)
-    pub threads: Option<usize>,
+    /// スレッド数 (None で自動設定)
+    pub threads: Option<NonZeroUsize>,
 
     /// エラー耐性モード (リアルタイム用途で有効)
     pub error_resilient: bool,
 
     /// キーフレーム間隔 (フレーム数)
-    pub keyframe_interval: Option<usize>,
+    pub keyframe_interval: Option<NonZeroUsize>,
 
     // TODO(sile): 今は encode() がタイムスタンプの情報を受け取らないので、フレームドロップとは相性が悪い
     /// フレームドロップ閾値 (0-100, リアルタイム用途)
@@ -437,7 +438,7 @@ impl EncoderConfig {
         Self {
             deadline: EncodingDeadline::Realtime,
             rate_control: RateControlMode::Cbr,
-            lag_in_frames: Some(0),
+            lag_in_frames: None,
             error_resilient: true,
             frame_drop_threshold: Some(30),
             cpu_used: Some(7), // 高速設定
@@ -459,9 +460,9 @@ impl EncoderConfig {
         Self {
             deadline: EncodingDeadline::Good,
             rate_control: RateControlMode::Vbr,
-            lag_in_frames: Some(10),
+            lag_in_frames: Some(NonZeroUsize::MIN.saturating_add(9)),
             cpu_used: Some(5),
-            threads: Some(8),
+            threads: None,
             vp9_config: Some(Vp9Config {
                 tile_columns: Some(3),
                 tile_rows: Some(1),
@@ -480,7 +481,7 @@ impl EncoderConfig {
         Self {
             deadline: EncodingDeadline::Best,
             rate_control: RateControlMode::Vbr,
-            lag_in_frames: Some(25),
+            lag_in_frames: Some(NonZeroUsize::MIN.saturating_add(24)),
             cpu_used: Some(1), // 品質重視
             min_quantizer: 0,
             max_quantizer: 50,
@@ -557,11 +558,11 @@ impl Encoder {
         vpx_config.g_timebase.den = encoder_config.fps_numerator as c_int;
 
         if let Some(lag) = encoder_config.lag_in_frames {
-            vpx_config.g_lag_in_frames = lag as c_uint;
+            vpx_config.g_lag_in_frames = lag.get() as c_uint;
         }
 
         if let Some(threads) = encoder_config.threads {
-            vpx_config.g_threads = threads as c_uint;
+            vpx_config.g_threads = threads.get() as c_uint;
         }
 
         if encoder_config.error_resilient {
@@ -569,7 +570,7 @@ impl Encoder {
         }
 
         if let Some(kf_interval) = encoder_config.keyframe_interval {
-            vpx_config.kf_max_dist = kf_interval as c_uint;
+            vpx_config.kf_max_dist = kf_interval.get() as c_uint;
         }
 
         if let Some(threshold) = encoder_config.frame_drop_threshold {
