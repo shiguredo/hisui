@@ -556,7 +556,6 @@ impl Encoder {
         vpx_config.g_timebase.num = encoder_config.fps_denominator as c_int;
         vpx_config.g_timebase.den = encoder_config.fps_numerator as c_int;
 
-        // 新しい設定パラメータの適用
         if let Some(lag) = encoder_config.lag_in_frames {
             vpx_config.g_lag_in_frames = lag as c_uint;
         }
