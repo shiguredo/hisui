@@ -10,6 +10,7 @@ use std::{
     marker::PhantomData,
     mem::MaybeUninit,
     num::NonZeroUsize,
+    time::Duration,
 };
 
 use sys::VTCompressionSessionCreate;
@@ -85,8 +86,8 @@ pub struct EncoderConfig {
     /// キーフレーム間隔 (フレーム数、小さいほど高速)
     pub max_key_frame_interval: Option<NonZeroUsize>,
 
-    /// キーフレーム間隔 (秒数、小さいほど高速)
-    pub max_key_frame_interval_duration: Option<f64>,
+    /// キーフレーム間隔 (小さいほど高速)
+    pub max_key_frame_interval_duration: Option<Duration>,
 
     /// プロファイルレベル設定
     pub profile_level: ProfileLevel,
@@ -445,7 +446,7 @@ impl Encoder {
 
             // キーフレーム間隔（秒数）
             if let Some(duration) = config.max_key_frame_interval_duration {
-                let duration_value = cf_number_f64(duration);
+                let duration_value = cf_number_f64(duration.as_secs_f64());
                 properties.push((
                     sys::kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
                     duration_value.0,
