@@ -9,6 +9,7 @@ use std::{
     ffi::{c_int, c_void},
     marker::PhantomData,
     mem::MaybeUninit,
+    num::NonZeroUsize,
 };
 
 use sys::VTCompressionSessionCreate;
@@ -82,7 +83,7 @@ pub struct EncoderConfig {
     pub allow_temporal_compression: bool,
 
     /// キーフレーム間隔 (フレーム数、小さいほど高速)
-    pub max_key_frame_interval: Option<usize>,
+    pub max_key_frame_interval: Option<NonZeroUsize>,
 
     /// キーフレーム間隔 (秒数、小さいほど高速)
     pub max_key_frame_interval_duration: Option<f64>,
@@ -97,7 +98,7 @@ pub struct EncoderConfig {
     pub quality: Option<f32>,
 
     /// フレーム遅延制限 (小さいほど高速)
-    pub max_frame_delay_count: Option<usize>,
+    pub max_frame_delay_count: Option<NonZeroUsize>,
 
     /// 並列処理を使用
     pub use_parallelization: bool,
@@ -171,12 +172,12 @@ impl EncoderConfig {
             allow_frame_reordering: false, // B-frame無効
             allow_open_gop: false,
             allow_temporal_compression: true,
-            max_key_frame_interval: Some(30), // 短い間隔
+            max_key_frame_interval: Some(NonZeroUsize::MIN.saturating_add(29)), // 短い間隔
             max_key_frame_interval_duration: None,
             profile_level: ProfileLevel::H264Baseline, // 最軽量
             h264_entropy_mode: H264EntropyMode::Cavlc, // 高速
             quality: Some(0.5),                        // 中程度の品質
-            max_frame_delay_count: Some(1),            // 最小遅延
+            max_frame_delay_count: Some(NonZeroUsize::MIN), // 最小遅延
             use_parallelization: true,
         }
     }
@@ -197,12 +198,12 @@ impl EncoderConfig {
             allow_frame_reordering: false, // B-frame無効
             allow_open_gop: false,
             allow_temporal_compression: true,
-            max_key_frame_interval: Some(60),
+            max_key_frame_interval: Some(NonZeroUsize::MIN.saturating_add(59)),
             max_key_frame_interval_duration: None,
             profile_level: ProfileLevel::H264Main,
             h264_entropy_mode: H264EntropyMode::Cavlc,
             quality: Some(0.6),
-            max_frame_delay_count: Some(4),
+            max_frame_delay_count: Some(NonZeroUsize::MIN.saturating_add(3)),
             use_parallelization: true,
         }
     }
@@ -233,7 +234,7 @@ impl EncoderConfig {
             allow_frame_reordering: true, // B-frame有効
             allow_open_gop: true,
             allow_temporal_compression: true,
-            max_key_frame_interval: Some(120), // 長い間隔
+            max_key_frame_interval: Some(NonZeroUsize::MIN.saturating_add(119)), // 長い間隔
             max_key_frame_interval_duration: None,
             profile_level: ProfileLevel::H264High,
             h264_entropy_mode: H264EntropyMode::Cabac, // 高品質
@@ -379,7 +380,7 @@ impl Encoder {
 
             // キーフレーム間隔（フレーム数）
             if let Some(interval) = config.max_key_frame_interval {
-                let interval_value = cf_number_i32(interval as i32);
+                let interval_value = cf_number_i32(interval.get() as i32);
                 properties.push((
                     sys::kVTCompressionPropertyKey_MaxKeyFrameInterval,
                     interval_value.0,
@@ -397,7 +398,7 @@ impl Encoder {
 
             // フレーム遅延制限
             if let Some(delay_count) = config.max_frame_delay_count {
-                let delay_value = cf_number_i32(delay_count as i32);
+                let delay_value = cf_number_i32(delay_count.get() as i32);
                 properties.push((
                     sys::kVTCompressionPropertyKey_MaxFrameDelayCount,
                     delay_value.0,
@@ -542,7 +543,7 @@ impl Encoder {
 
             // キーフレーム間隔（フレーム数）
             if let Some(interval) = config.max_key_frame_interval {
-                let interval_value = cf_number_i32(interval as i32);
+                let interval_value = cf_number_i32(interval.get() as i32);
                 properties.push((
                     sys::kVTCompressionPropertyKey_MaxKeyFrameInterval,
                     interval_value.0,
@@ -560,7 +561,7 @@ impl Encoder {
 
             // フレーム遅延制限
             if let Some(delay_count) = config.max_frame_delay_count {
-                let delay_value = cf_number_i32(delay_count as i32);
+                let delay_value = cf_number_i32(delay_count.get() as i32);
                 properties.push((
                     sys::kVTCompressionPropertyKey_MaxFrameDelayCount,
                     delay_value.0,
