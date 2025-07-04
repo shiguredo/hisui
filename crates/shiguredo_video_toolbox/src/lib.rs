@@ -62,6 +62,195 @@ pub struct EncoderConfig {
 
     /// FPS の分母
     pub fps_denominator: usize,
+
+    /// 速度優先モード (true: 速度優先, false: 品質優先)
+    pub prioritize_speed_over_quality: bool,
+
+    /// リアルタイムモード (false: オフライン処理)
+    pub real_time: bool,
+
+    /// 電力効率最大化 (true: バックグラウンド処理時)
+    pub maximize_power_efficiency: bool,
+
+    /// フレーム再順序付けを許可 (false: B-frame無効で高速化)
+    pub allow_frame_reordering: bool,
+
+    /// Open GOP を許可 (false: 高速化、H.265のみ)
+    pub allow_open_gop: bool,
+
+    /// 時間的圧縮を許可 (false: キーフレームのみで高速化)
+    pub allow_temporal_compression: bool,
+
+    /// キーフレーム間隔 (フレーム数、小さいほど高速)
+    pub max_key_frame_interval: Option<usize>,
+
+    /// キーフレーム間隔 (秒数、小さいほど高速)
+    pub max_key_frame_interval_duration: Option<f64>,
+
+    /// プロファイルレベル設定
+    pub profile_level: ProfileLevel,
+
+    /// H.264エントロピー符号化モード (CAVLC: 高速, CABAC: 高品質)
+    pub h264_entropy_mode: H264EntropyMode,
+
+    /// 品質設定 (0.0-1.0, 低いほど高速)
+    pub quality: Option<f32>,
+
+    /// フレーム遅延制限 (小さいほど高速)
+    pub max_frame_delay_count: Option<usize>,
+
+    /// 並列処理を使用
+    pub use_parallelization: bool,
+}
+
+/// プロファイルレベル設定
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileLevel {
+    /// H.264 Baseline (最高速)
+    H264Baseline,
+    /// H.264 Main
+    H264Main,
+    /// H.264 High (高品質)
+    H264High,
+    /// H.265 Main (デフォルト)
+    H265Main,
+    /// H.265 Main10
+    H265Main10,
+}
+
+/// H.264エントロピー符号化モード
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum H264EntropyMode {
+    /// CAVLC (高速)
+    Cavlc,
+    /// CABAC (高品質)
+    Cabac,
+}
+
+impl Default for EncoderConfig {
+    fn default() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+
+            // デフォルトはバランス設定
+            prioritize_speed_over_quality: false,
+            real_time: false,
+            maximize_power_efficiency: false,
+            allow_frame_reordering: true,
+            allow_open_gop: true,
+            allow_temporal_compression: true,
+            max_key_frame_interval: None,
+            max_key_frame_interval_duration: None,
+            profile_level: ProfileLevel::H264Main,
+            h264_entropy_mode: H264EntropyMode::Cabac,
+            quality: None,
+            max_frame_delay_count: None,
+            use_parallelization: false,
+        }
+    }
+}
+
+impl EncoderConfig {
+    /// 最高速度優先の設定 (オフライン処理用)
+    pub fn fastest_offline() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+
+            // 最高速設定
+            prioritize_speed_over_quality: true,
+            real_time: false,
+            maximize_power_efficiency: false,
+            allow_frame_reordering: false, // B-frame無効
+            allow_open_gop: false,
+            allow_temporal_compression: true,
+            max_key_frame_interval: Some(30), // 短い間隔
+            max_key_frame_interval_duration: None,
+            profile_level: ProfileLevel::H264Baseline, // 最軽量
+            h264_entropy_mode: H264EntropyMode::Cavlc, // 高速
+            quality: Some(0.5),                        // 中程度の品質
+            max_frame_delay_count: Some(1),            // 最小遅延
+            use_parallelization: true,
+        }
+    }
+
+    /// 高速オフライン設定 (品質とのバランス)
+    pub fn fast_offline() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+
+            // 高速設定
+            prioritize_speed_over_quality: true,
+            real_time: false,
+            maximize_power_efficiency: false,
+            allow_frame_reordering: false, // B-frame無効
+            allow_open_gop: false,
+            allow_temporal_compression: true,
+            max_key_frame_interval: Some(60),
+            max_key_frame_interval_duration: None,
+            profile_level: ProfileLevel::H264Main,
+            h264_entropy_mode: H264EntropyMode::Cavlc,
+            quality: Some(0.6),
+            max_frame_delay_count: Some(4),
+            use_parallelization: true,
+        }
+    }
+
+    /// バックグラウンド処理用設定
+    pub fn background_processing() -> Self {
+        Self {
+            prioritize_speed_over_quality: false,
+            real_time: false,
+            maximize_power_efficiency: true, // 電力効率優先
+            ..Self::fast_offline()
+        }
+    }
+
+    /// 品質重視設定
+    pub fn high_quality() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+
+            // 品質重視設定
+            prioritize_speed_over_quality: false,
+            real_time: false,
+            maximize_power_efficiency: false,
+            allow_frame_reordering: true, // B-frame有効
+            allow_open_gop: true,
+            allow_temporal_compression: true,
+            max_key_frame_interval: Some(120), // 長い間隔
+            max_key_frame_interval_duration: None,
+            profile_level: ProfileLevel::H264High,
+            h264_entropy_mode: H264EntropyMode::Cabac, // 高品質
+            quality: Some(0.8),
+            max_frame_delay_count: None, // 制限なし
+            use_parallelization: false,
+        }
+    }
+
+    /// H.265用の高速設定
+    pub fn h265_fast() -> Self {
+        Self {
+            profile_level: ProfileLevel::H265Main,
+            allow_open_gop: false, // H.265でOpen GOP無効
+            ..Self::fast_offline()
+        }
+    }
 }
 
 /// H.264 / H.265 エンコーダー
@@ -103,41 +292,136 @@ impl Encoder {
             );
             Error::check(status, "VTCompressionSessionCreate")?;
 
-            // 各種設定を指定する
+            // EncoderConfig の設定値を使用してプロパティを設定
+            let mut properties = Vec::new();
+
+            // 基本設定
             let target_bitrate = cf_number_i32(config.target_bitrate as i32);
             let fps = cf_number_i32(config.fps_numerator.div_ceil(config.fps_denominator) as i32);
             let pixel_format =
                 cf_number_i32(sys::kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange as i32);
-            let properties = cf_dictionary(&[
-                // リアルタイム
-                (
-                    sys::kVTCompressionPropertyKey_RealTime,
+
+            properties.push((
+                sys::kVTCompressionPropertyKey_AverageBitRate,
+                target_bitrate.0,
+            ));
+            properties.push((sys::kVTCompressionPropertyKey_ExpectedFrameRate, fps.0));
+            properties.push((
+                sys::kVTCompressionPropertyKey_PixelTransferProperties,
+                pixel_format.0,
+            ));
+
+            // リアルタイムモード
+            properties.push((
+                sys::kVTCompressionPropertyKey_RealTime,
+                if config.real_time {
+                    sys::kCFBooleanTrue
+                } else {
+                    sys::kCFBooleanFalse
+                }
+                .cast(),
+            ));
+
+            // フレーム再順序付け
+            properties.push((
+                sys::kVTCompressionPropertyKey_AllowFrameReordering,
+                if config.allow_frame_reordering {
+                    sys::kCFBooleanTrue
+                } else {
+                    sys::kCFBooleanFalse
+                }
+                .cast(),
+            ));
+
+            // 時間的圧縮
+            properties.push((
+                sys::kVTCompressionPropertyKey_AllowTemporalCompression,
+                if config.allow_temporal_compression {
+                    sys::kCFBooleanTrue
+                } else {
+                    sys::kCFBooleanFalse
+                }
+                .cast(),
+            ));
+
+            // プロファイルレベル設定
+            let profile_level = match config.profile_level {
+                ProfileLevel::H264Baseline => sys::kVTProfileLevel_H264_Baseline_3_1,
+                ProfileLevel::H264Main => sys::kVTProfileLevel_H264_Main_3_1,
+                ProfileLevel::H264High => sys::kVTProfileLevel_H264_High_3_1,
+                ProfileLevel::H265Main | ProfileLevel::H265Main10 => {
+                    return Err(Error {
+                        status: -1,
+                        function: "new_h264: invalid profile for H.264",
+                    });
+                }
+            };
+            properties.push((
+                sys::kVTCompressionPropertyKey_ProfileLevel,
+                profile_level.cast(),
+            ));
+
+            // H.264エントロピー符号化モード
+            let entropy_mode = match config.h264_entropy_mode {
+                H264EntropyMode::Cavlc => sys::kVTH264EntropyMode_CAVLC,
+                H264EntropyMode::Cabac => sys::kVTH264EntropyMode_CABAC,
+            };
+            properties.push((
+                sys::kVTCompressionPropertyKey_H264EntropyMode,
+                entropy_mode.cast(),
+            ));
+
+            // 品質設定
+            if let Some(quality) = config.quality {
+                let quality_value = cf_number_f32(quality);
+                properties.push((sys::kVTCompressionPropertyKey_Quality, quality_value.0));
+            }
+
+            // キーフレーム間隔（フレーム数）
+            if let Some(interval) = config.max_key_frame_interval {
+                let interval_value = cf_number_i32(interval as i32);
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaxKeyFrameInterval,
+                    interval_value.0,
+                ));
+            }
+
+            // キーフレーム間隔（秒数）
+            if let Some(duration) = config.max_key_frame_interval_duration {
+                let duration_value = cf_number_f64(duration);
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
+                    duration_value.0,
+                ));
+            }
+
+            // フレーム遅延制限
+            if let Some(delay_count) = config.max_frame_delay_count {
+                let delay_value = cf_number_i32(delay_count as i32);
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaxFrameDelayCount,
+                    delay_value.0,
+                ));
+            }
+
+            // 速度優先モード
+            if config.prioritize_speed_over_quality {
+                properties.push((
+                    sys::kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality,
                     sys::kCFBooleanTrue.cast(),
-                ),
-                // B フレーム無効化
-                (
-                    sys::kVTCompressionPropertyKey_AllowFrameReordering,
-                    sys::kCFBooleanFalse.cast(),
-                ),
-                // プロファイルとレベル
-                (
-                    sys::kVTCompressionPropertyKey_ProfileLevel,
-                    sys::kVTProfileLevel_H264_Baseline_3_1.cast(),
-                ),
-                // ピクセルフォーマット
-                (
-                    sys::kVTCompressionPropertyKey_PixelTransferProperties,
-                    pixel_format.0,
-                ),
-                // ターゲットビットレート
-                (
-                    sys::kVTCompressionPropertyKey_AverageBitRate,
-                    target_bitrate.0,
-                ),
-                // フレームレート
-                (sys::kVTCompressionPropertyKey_ExpectedFrameRate, fps.0),
-            ]);
-            let status = sys::VTSessionSetProperties(session.cast(), properties);
+                ));
+            }
+
+            // 電力効率最大化
+            if config.maximize_power_efficiency {
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaximizePowerEfficiency,
+                    sys::kCFBooleanTrue.cast(),
+                ));
+            }
+
+            let properties_dict = cf_dictionary(&properties);
+            let status = sys::VTSessionSetProperties(session.cast(), properties_dict);
             Error::check(status, "VTSessionSetProperties")?;
 
             Ok(Self {
@@ -174,41 +458,133 @@ impl Encoder {
             );
             Error::check(status, "VTCompressionSessionCreate")?;
 
-            // 各種設定を指定する
+            // EncoderConfig の設定値を使用してプロパティを設定
+            let mut properties = Vec::new();
+
+            // 基本設定
             let target_bitrate = cf_number_i32(config.target_bitrate as i32);
             let fps = cf_number_i32(config.fps_numerator.div_ceil(config.fps_denominator) as i32);
             let pixel_format =
                 cf_number_i32(sys::kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange as i32);
-            let properties = cf_dictionary(&[
-                // リアルタイム
-                (
-                    sys::kVTCompressionPropertyKey_RealTime,
-                    sys::kCFBooleanTrue.cast(),
-                ),
-                // B フレーム無効化
-                (
-                    sys::kVTCompressionPropertyKey_AllowFrameReordering,
+
+            properties.push((
+                sys::kVTCompressionPropertyKey_AverageBitRate,
+                target_bitrate.0,
+            ));
+            properties.push((sys::kVTCompressionPropertyKey_ExpectedFrameRate, fps.0));
+            properties.push((
+                sys::kVTCompressionPropertyKey_PixelTransferProperties,
+                pixel_format.0,
+            ));
+
+            // リアルタイムモード
+            properties.push((
+                sys::kVTCompressionPropertyKey_RealTime,
+                if config.real_time {
+                    sys::kCFBooleanTrue
+                } else {
+                    sys::kCFBooleanFalse
+                }
+                .cast(),
+            ));
+
+            // フレーム再順序付け
+            properties.push((
+                sys::kVTCompressionPropertyKey_AllowFrameReordering,
+                if config.allow_frame_reordering {
+                    sys::kCFBooleanTrue
+                } else {
+                    sys::kCFBooleanFalse
+                }
+                .cast(),
+            ));
+
+            // 時間的圧縮
+            properties.push((
+                sys::kVTCompressionPropertyKey_AllowTemporalCompression,
+                if config.allow_temporal_compression {
+                    sys::kCFBooleanTrue
+                } else {
+                    sys::kCFBooleanFalse
+                }
+                .cast(),
+            ));
+
+            // プロファイルレベル設定
+            let profile_level = match config.profile_level {
+                ProfileLevel::H265Main => sys::kVTProfileLevel_HEVC_Main_AutoLevel,
+                ProfileLevel::H265Main10 => sys::kVTProfileLevel_HEVC_Main10_AutoLevel,
+                ProfileLevel::H264Baseline | ProfileLevel::H264Main | ProfileLevel::H264High => {
+                    return Err(Error {
+                        status: -1,
+                        function: "new_h265: invalid profile for H.265",
+                    });
+                }
+            };
+            properties.push((
+                sys::kVTCompressionPropertyKey_ProfileLevel,
+                profile_level.cast(),
+            ));
+
+            // Open GOP設定（H.265のみ）
+            if !config.allow_open_gop {
+                properties.push((
+                    sys::kVTCompressionPropertyKey_AllowOpenGOP,
                     sys::kCFBooleanFalse.cast(),
-                ),
-                // プロファイル
-                (
-                    sys::kVTCompressionPropertyKey_ProfileLevel,
-                    sys::kVTProfileLevel_HEVC_Main_AutoLevel.cast(),
-                ),
-                // ピクセルフォーマット
-                (
-                    sys::kVTCompressionPropertyKey_PixelTransferProperties,
-                    pixel_format.0,
-                ),
-                // ターゲットビットレート
-                (
-                    sys::kVTCompressionPropertyKey_AverageBitRate,
-                    target_bitrate.0,
-                ),
-                // フレームレート
-                (sys::kVTCompressionPropertyKey_ExpectedFrameRate, fps.0),
-            ]);
-            let status = sys::VTSessionSetProperties(session.cast(), properties);
+                ));
+            }
+
+            // 品質設定
+            if let Some(quality) = config.quality {
+                let quality_value = cf_number_f32(quality);
+                properties.push((sys::kVTCompressionPropertyKey_Quality, quality_value.0));
+            }
+
+            // キーフレーム間隔（フレーム数）
+            if let Some(interval) = config.max_key_frame_interval {
+                let interval_value = cf_number_i32(interval as i32);
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaxKeyFrameInterval,
+                    interval_value.0,
+                ));
+            }
+
+            // キーフレーム間隔（秒数）
+            if let Some(duration) = config.max_key_frame_interval_duration {
+                let duration_value = cf_number_f64(duration);
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
+                    duration_value.0,
+                ));
+            }
+
+            // フレーム遅延制限
+            if let Some(delay_count) = config.max_frame_delay_count {
+                let delay_value = cf_number_i32(delay_count as i32);
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaxFrameDelayCount,
+                    delay_value.0,
+                ));
+            }
+
+            // 速度優先モード
+            if config.prioritize_speed_over_quality {
+                properties.push((
+                    sys::kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality,
+                    sys::kCFBooleanTrue.cast(),
+                ));
+            }
+
+            // 電力効率最大化
+            if config.maximize_power_efficiency {
+                properties.push((
+                    sys::kVTCompressionPropertyKey_MaximizePowerEfficiency,
+                    sys::kCFBooleanTrue.cast(),
+                ));
+            }
+
+            let properties_dict = cf_dictionary(&properties);
+            let status = sys::VTSessionSetProperties(session.cast(), properties_dict);
             Error::check(status, "VTSessionSetProperties")?;
 
             Ok(Self {
@@ -883,6 +1259,28 @@ fn cf_number_i32(n: i32) -> CfPtr<c_void> {
     CfPtr(ptr.cast())
 }
 
+fn cf_number_f32(n: f32) -> CfPtr<c_void> {
+    let ptr = unsafe {
+        sys::CFNumberCreate(
+            std::ptr::null_mut(),
+            sys::kCFNumberFloat32Type as sys::CFNumberType,
+            ((&n) as *const f32).cast(),
+        )
+    };
+    CfPtr(ptr.cast())
+}
+
+fn cf_number_f64(n: f64) -> CfPtr<c_void> {
+    let ptr = unsafe {
+        sys::CFNumberCreate(
+            std::ptr::null_mut(),
+            sys::kCFNumberFloat64Type as sys::CFNumberType,
+            ((&n) as *const f64).cast(),
+        )
+    };
+    CfPtr(ptr.cast())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1021,6 +1419,7 @@ mod tests {
             target_bitrate: 100_000,
             fps_numerator: 1,
             fps_denominator: 1,
+            ..Default::default()
         }
     }
 }
