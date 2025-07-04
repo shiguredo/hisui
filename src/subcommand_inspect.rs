@@ -182,7 +182,7 @@ impl nojson::DisplayJson for FileInfo {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("path", &self.path)?;
-            f.member("format", &self.format)?;
+            f.member("format", self.format)?;
             if let Some(c) = self.audio_codec {
                 f.member("audio_codec", c)?;
                 f.member(

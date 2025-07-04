@@ -304,7 +304,7 @@ impl VideoMixerThread {
                 EvenUsize::truncating_new((region.grid.cell_height - frame_height).get() / 2);
             frame.resize(frame_width, frame_height).or_fail()?;
 
-            canvas.draw_frame(position, &frame).or_fail()?;
+            canvas.draw_frame(position, frame).or_fail()?;
         }
 
         Ok(())

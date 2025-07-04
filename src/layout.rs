@@ -46,7 +46,7 @@ impl Layout {
         let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
 
         let json = nojson::RawJson::parse(json)
-            .map_err(|e| malformed_json_error(layout_file_path, &json, e))
+            .map_err(|e| malformed_json_error(layout_file_path, json, e))
             .or_fail()?;
         let raw: RawLayout = json
             .value()

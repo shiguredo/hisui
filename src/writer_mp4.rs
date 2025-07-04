@@ -548,7 +548,7 @@ impl Mp4Writer {
         let moov_box = self.build_dummy_moov_box(layout);
         let max_moov_box_size = moov_box.box_size().get();
         self.stats.reserved_moov_box_size = max_moov_box_size;
-        log::debug!("reserved moov box size: {}", max_moov_box_size);
+        log::debug!("reserved moov box size: {max_moov_box_size}");
 
         // 初期化時点では free ボックスで領域だけ確保しておく
         let free_box = FreeBox {

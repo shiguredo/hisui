@@ -41,8 +41,8 @@ impl SvtAv1Encoder {
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
-            width: width,
-            height: height,
+            width,
+            height,
         })
     }
 
