@@ -439,7 +439,7 @@ checksum = "d74bd04dc827a7f96d11d77dc432d92666198bb813ab8db477e869539b5b7ccb"
 
 [[package]]
 name = "shiguredo_openh264"
-version = "2025.1.0-canary.1"
+version = "2025.1.0-canary.2"
 dependencies = [
  "bindgen",
  "libloading",
