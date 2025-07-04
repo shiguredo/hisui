@@ -92,8 +92,7 @@ fn get_git_url_and_version() -> (String, String) {
         (git_url.to_string(), version.to_string())
     } else {
         panic!(
-            "Cargo.toml does not contain a valid [package.metadata.external-dependencies.{}] table",
-             LIB_NAME
+            "Cargo.toml does not contain a valid [package.metadata.external-dependencies.{LIB_NAME}] table"
         );
     }
 }

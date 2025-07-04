@@ -22,7 +22,6 @@ jobs:
       - name: Install rustup
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      - run: rustup update stable
       - name: Update PATH
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
       - name: Install packages to build external dependencies
