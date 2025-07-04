@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_libvpx"
-version = "2025.1.0-canary.2"
+version = "2025.1.0-canary.3"
 dependencies = [
  "bindgen",
  "toml",
