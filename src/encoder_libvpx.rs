@@ -48,6 +48,7 @@ impl LibvpxEncoder {
             min_quantizer: min_q,
             max_quantizer: max_q,
             cq_level,
+            ..Default::default()
         };
         let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
 
@@ -79,6 +80,7 @@ impl LibvpxEncoder {
             min_quantizer: min_q,
             max_quantizer: max_q,
             cq_level,
+            ..Default::default()
         };
         let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;
 
