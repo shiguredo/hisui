@@ -5,9 +5,10 @@
 #![warn(missing_docs)]
 
 use std::{
-    ffi::{c_int, c_longlong, c_ushort},
+    ffi::{c_int, c_longlong, c_uint, c_ushort},
     marker::PhantomData,
     mem::MaybeUninit,
+    num::NonZeroUsize,
     path::Path,
     sync::Arc,
     time::Duration,
@@ -22,11 +23,6 @@ const LEVEL: sys::ELevelIdc = sys::ELevelIdc_LEVEL_3_1;
 
 // Hisui でのエンコード時のプロファイル
 const PROFILE: sys::EProfileIdc = sys::EProfileIdc_PRO_BASELINE;
-
-// 以下のエンコード設定は Hisui では固定
-const ENCODE_THREADS: c_ushort = 1;
-const ENCODE_MIN_QP: c_int = 0;
-const ENCODE_MAX_QP: c_int = 51;
 
 /// エラー
 #[derive(Debug)]
@@ -330,6 +326,199 @@ pub struct EncoderConfig {
 
     /// FPS の分母
     pub fps_denominator: usize,
+
+    /// 複雑度モード (LOW_COMPLEXITY, MEDIUM_COMPLEXITY, HIGH_COMPLEXITY)
+    pub complexity_mode: ComplexityMode,
+
+    /// エントロピー符号化モード (false: CAVLC, true: CABAC)
+    pub entropy_coding: bool,
+
+    /// 参照フレーム数 (1で最高速)
+    pub ref_frame_count: NonZeroUsize,
+
+    /// マルチスレッド数 (None なら自動)
+    pub thread_count: Option<NonZeroUsize>,
+
+    /// 空間レイヤー数 (1で最高速)
+    pub spatial_layers: NonZeroUsize,
+
+    /// 時間レイヤー数 (1で最高速)
+    pub temporal_layers: NonZeroUsize,
+
+    /// Intra フレーム間隔
+    pub intra_period: Option<usize>,
+
+    /// レート制御モード
+    pub rate_control_mode: RateControlMode,
+
+    /// 最大QP値
+    pub max_qp: usize,
+
+    /// 最小QP値
+    pub min_qp: usize,
+
+    /// ノイズ除去機能
+    pub denoise: bool,
+
+    /// 背景検出機能
+    pub background_detection: bool,
+
+    /// 適応量子化機能
+    pub adaptive_quantization: bool,
+
+    /// シーン変化検出機能
+    pub scene_change_detection: bool,
+
+    /// デブロッキングフィルタ
+    pub deblocking_filter: bool,
+
+    /// 長期参照フレーム機能
+    pub long_term_reference: bool,
+
+    /// スライスモード
+    pub slice_mode: SliceMode,
+}
+
+/// 複雑度モード
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ComplexityMode {
+    /// 最低複雑度 (最高速)
+    #[default]
+    Low,
+    /// 中程度複雑度
+    Medium,
+    /// 高複雑度 (最高品質)
+    High,
+}
+
+/// レート制御モード
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum RateControlMode {
+    /// レート制御無効 (最高速)
+    Off,
+    /// 品質モード
+    #[default]
+    Quality,
+    /// ビットレートモード
+    Bitrate,
+    /// タイムスタンプモード
+    Timestamp,
+}
+
+/// スライスモード
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SliceMode {
+    /// 単一スライス (最高速)
+    #[default]
+    Single,
+    /// 固定スライス数
+    FixedCount(usize),
+    /// サイズ制限スライス
+    SizeConstrained(usize),
+}
+
+impl EncoderConfig {
+    /// 最高速度優先の設定
+    pub fn fastest() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+
+            // 高速化設定
+            complexity_mode: ComplexityMode::Low,
+            entropy_coding: false, // CAVLC
+            ref_frame_count: NonZeroUsize::MIN,
+            thread_count: None, // 自動
+            spatial_layers: NonZeroUsize::MIN,
+            temporal_layers: NonZeroUsize::MIN,
+            intra_period: Some(30),
+            rate_control_mode: RateControlMode::Off,
+            max_qp: 51,
+            min_qp: 0,
+
+            // 前処理機能を全て無効化
+            denoise: false,
+            background_detection: false,
+            adaptive_quantization: false,
+            scene_change_detection: false,
+            deblocking_filter: false,
+            long_term_reference: false,
+            slice_mode: SliceMode::Single,
+        }
+    }
+
+    /// 高速オフライン用設定
+    pub fn fast_offline() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+
+            // バランス重視の高速化設定
+            complexity_mode: ComplexityMode::Low,
+            entropy_coding: false, // CAVLC
+            ref_frame_count: NonZeroUsize::MIN,
+            thread_count: None, // 自動
+            spatial_layers: NonZeroUsize::MIN,
+            temporal_layers: NonZeroUsize::MIN,
+            intra_period: Some(60),
+            rate_control_mode: RateControlMode::Bitrate,
+            max_qp: 40,
+            min_qp: 10,
+
+            // 最低限の前処理機能のみ有効
+            denoise: false,
+            background_detection: false,
+            adaptive_quantization: false,
+            scene_change_detection: false,
+            deblocking_filter: true, // 品質維持のため有効
+            long_term_reference: false,
+            slice_mode: SliceMode::Single,
+        }
+    }
+
+    /// 品質重視設定
+    pub fn high_quality() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+
+            // 品質重視設定
+            complexity_mode: ComplexityMode::High,
+            entropy_coding: true, // CABAC
+            ref_frame_count: NonZeroUsize::MIN.saturating_add(3),
+            thread_count: None, // 自動
+            spatial_layers: NonZeroUsize::MIN,
+            temporal_layers: NonZeroUsize::MIN,
+            intra_period: Some(120),
+            rate_control_mode: RateControlMode::Quality,
+            max_qp: 30,
+            min_qp: 5,
+
+            // 前処理機能を有効活用
+            denoise: true,
+            background_detection: true,
+            adaptive_quantization: true,
+            scene_change_detection: true,
+            deblocking_filter: true,
+            long_term_reference: true,
+            slice_mode: SliceMode::Single,
+        }
+    }
+}
+
+impl Default for EncoderConfig {
+    fn default() -> Self {
+        Self::fast_offline()
+    }
 }
 
 /// H.264 エンコーダー
@@ -363,21 +552,96 @@ impl Encoder {
             Error::check(code, name)?;
 
             let mut param = param.assume_init();
+
+            // 基本設定
             param.iUsageType = sys::EUsageType_CAMERA_VIDEO_REAL_TIME;
-            param.iRCMode = sys::RC_MODES_RC_QUALITY_MODE;
-            for layer in &mut param.sSpatialLayers {
-                layer.uiLevelIdc = LEVEL;
-                layer.uiProfileIdc = PROFILE;
-            }
             param.fMaxFrameRate = config.fps_numerator as f32 / config.fps_denominator as f32;
             param.iPicWidth = config.width as c_int;
             param.iPicHeight = config.height as c_int;
             param.iTargetBitrate = config.target_bitrate as c_int;
-            param.iMultipleThreadIdc = ENCODE_THREADS;
-            param.iMinQp = ENCODE_MIN_QP;
-            param.iMaxQp = ENCODE_MAX_QP;
-            param.iSpatialLayerNum = 1;
-            param.iTemporalLayerNum = 1;
+
+            // 複雑度モード設定
+            param.iComplexityMode = match config.complexity_mode {
+                ComplexityMode::Low => sys::ECOMPLEXITY_MODE_LOW_COMPLEXITY,
+                ComplexityMode::Medium => sys::ECOMPLEXITY_MODE_MEDIUM_COMPLEXITY,
+                ComplexityMode::High => sys::ECOMPLEXITY_MODE_HIGH_COMPLEXITY,
+            };
+
+            // エントロピー符号化設定
+            param.iEntropyCodingModeFlag = if config.entropy_coding { 1 } else { 0 };
+
+            // 参照フレーム数設定
+            param.iNumRefFrame = config.ref_frame_count.get() as c_int;
+
+            // マルチスレッド設定
+            param.iMultipleThreadIdc = config.thread_count.map_or(0, |v| v.get()) as c_ushort;
+
+            // 空間レイヤー数設定
+            param.iSpatialLayerNum = config.spatial_layers.get() as c_int;
+
+            // 時間レイヤー数設定
+            param.iTemporalLayerNum = config.temporal_layers.get() as c_int;
+
+            // Intra期間設定
+            if let Some(intra) = config.intra_period {
+                param.uiIntraPeriod = intra as c_uint;
+            }
+
+            // レート制御モード設定
+            param.iRCMode = match config.rate_control_mode {
+                RateControlMode::Off => sys::RC_MODES_RC_OFF_MODE,
+                RateControlMode::Quality => sys::RC_MODES_RC_QUALITY_MODE,
+                RateControlMode::Bitrate => sys::RC_MODES_RC_BITRATE_MODE,
+                RateControlMode::Timestamp => sys::RC_MODES_RC_TIMESTAMP_MODE,
+            };
+
+            // QP設定
+            param.iMaxQp = config.max_qp as i32;
+            param.iMinQp = config.min_qp as i32;
+
+            // 前処理機能設定
+            param.bEnableDenoise = config.denoise;
+            param.bEnableBackgroundDetection = config.background_detection;
+            param.bEnableAdaptiveQuant = config.adaptive_quantization;
+            param.bEnableSceneChangeDetect = config.scene_change_detection;
+
+            // デブロッキングフィルタ設定
+            param.iLoopFilterDisableIdc = if config.deblocking_filter { 0 } else { 1 };
+
+            // 長期参照フレーム設定
+            if config.long_term_reference {
+                param.bEnableLongTermReference = true;
+                param.iLTRRefNum = 1; // 基本的に1つの長期参照フレーム
+            } else {
+                param.bEnableLongTermReference = false;
+                param.iLTRRefNum = 0;
+            }
+
+            // 空間レイヤー設定
+            for layer in &mut param.sSpatialLayers[..param.iSpatialLayerNum as usize] {
+                layer.uiLevelIdc = LEVEL;
+                layer.uiProfileIdc = PROFILE;
+                layer.iVideoWidth = config.width as c_int;
+                layer.iVideoHeight = config.height as c_int;
+                layer.fFrameRate = param.fMaxFrameRate;
+                layer.iSpatialBitrate = config.target_bitrate as c_int;
+                layer.iMaxSpatialBitrate = (config.target_bitrate * 2) as c_int; // 2倍をmax値として設定
+
+                // スライスモード設定
+                match config.slice_mode {
+                    SliceMode::Single => {
+                        layer.sSliceArgument.uiSliceMode = sys::SliceModeEnum_SM_SINGLE_SLICE;
+                    }
+                    SliceMode::FixedCount(count) => {
+                        layer.sSliceArgument.uiSliceMode = sys::SliceModeEnum_SM_FIXEDSLCNUM_SLICE;
+                        layer.sSliceArgument.uiSliceNum = count as c_uint;
+                    }
+                    SliceMode::SizeConstrained(size) => {
+                        layer.sSliceArgument.uiSliceMode = sys::SliceModeEnum_SM_SIZELIMITED_SLICE;
+                        layer.sSliceArgument.uiSliceSizeConstraint = size as c_uint;
+                    }
+                }
+            }
 
             let name = "ISVCEncoder.InitializeExt";
             let code = (**inner)
@@ -385,7 +649,7 @@ impl Encoder {
                 .ok_or(Error::UnavailableMethod(name))?(inner, &param);
             Error::check(code, name)?;
 
-            // Hisui では I420 に固定
+            // I420 フォーマット設定
             let mut i420 = sys::EVideoFormatType_videoFormatI420;
             let name = "ISVCEncoder.SetOption";
             let code = (**inner).SetOption.ok_or(Error::UnavailableMethod(name))?(
@@ -395,6 +659,7 @@ impl Encoder {
             );
             Error::check(code, name)?;
 
+            // 画像設定
             let mut pic = pic.assume_init();
             pic.iPicWidth = config.width as c_int;
             pic.iPicHeight = config.height as c_int;
@@ -571,6 +836,7 @@ mod tests {
             width: 64,
             height: 64,
             target_bitrate: 100_000,
+            ..Default::default()
         };
         assert!(Encoder::new(lib, &config).is_ok());
     }
@@ -588,6 +854,7 @@ mod tests {
             width: 64,
             height: 64,
             target_bitrate: 100_000,
+            ..Default::default()
         };
         let mut encoder = Encoder::new(lib, &config).expect("create encoder error");
         let encoded = encoder

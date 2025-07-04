@@ -1,7 +1,7 @@
 use orfail::OrFail;
 use shiguredo_mp4::{
-    Uint,
     boxes::{Avc1Box, AvccBox, SampleEntry},
+    Uint,
 };
 
 use crate::{
@@ -9,8 +9,8 @@ use crate::{
     types::EvenUsize,
     video::{self, VideoFormat, VideoFrame},
     video_h264::{
-        H264_LEVEL_3_1, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SEI, H264_NALU_TYPE_SPS,
-        H264_PROFILE_BASELINE, H264AnnexBNalUnits, NALU_HEADER_LENGTH,
+        H264AnnexBNalUnits, H264_LEVEL_3_1, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SEI,
+        H264_NALU_TYPE_SPS, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH,
     },
 };
 
@@ -31,6 +31,7 @@ impl Openh264Encoder {
             width,
             height,
             target_bitrate: layout.video_bitrate_bps(),
+            ..Default::default()
         };
         let inner = shiguredo_openh264::Encoder::new(lib, &config).or_fail()?;
         Ok(Self {
