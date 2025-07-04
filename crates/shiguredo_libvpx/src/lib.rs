@@ -309,6 +309,7 @@ pub struct EncoderConfig {
     /// キーフレーム間隔 (フレーム数)
     pub keyframe_interval: Option<usize>,
 
+    // TODO(sile): 今は encode() がタイムスタンプの情報を受け取らないので、フレームドロップとは相性が悪い
     /// フレームドロップ閾値 (0-100, リアルタイム用途)
     pub frame_drop_threshold: Option<usize>,
 
