@@ -635,165 +635,209 @@ impl Encoder {
                 Error::check(code, "vpx_codec_control_")?;
             }
 
-            // VP9固有設定
-            if is_vp9 {
-                if let Some(vp9_config) = &encoder_config.vp9_config {
-                    // 適応的量子化モード
-                    if let Some(aq_mode) = vp9_config.aq_mode {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP9E_SET_AQ_MODE as c_int,
-                            aq_mode,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // デノイザー設定
-                    if let Some(noise_sensitivity) = vp9_config.noise_sensitivity {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP9E_SET_NOISE_SENSITIVITY as c_int,
-                            noise_sensitivity,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // タイル列数
-                    if let Some(tile_columns) = vp9_config.tile_columns {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP9E_SET_TILE_COLUMNS as c_int,
-                            tile_columns,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // タイル行数
-                    if let Some(tile_rows) = vp9_config.tile_rows {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP9E_SET_TILE_ROWS as c_int,
-                            tile_rows,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // 行マルチスレッド
-                    if vp9_config.row_mt {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP9E_SET_ROW_MT as c_int,
-                            1,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // フレーム並列デコード
-                    if vp9_config.frame_parallel_decoding {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP9E_SET_FRAME_PARALLEL_DECODING as c_int,
-                            1,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // コンテンツタイプ最適化
-                    if let Some(tune_content) = vp9_config.tune_content {
-                        let content_type = match tune_content {
-                            ContentType::Default => sys::vp9e_tune_content_VP9E_CONTENT_DEFAULT,
-                            ContentType::Screen => sys::vp9e_tune_content_VP9E_CONTENT_SCREEN,
-                        };
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP9E_SET_TUNE_CONTENT as c_int,
-                            content_type as c_int,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-                }
-            } else {
+            if is_vp9 && let Some(vp9_config) = &encoder_config.vp9_config {
+                // VP9固有設定
+                this.configure_vp9(vp9_config)?;
+            } else if !is_vp9 && let Some(vp8_config) = &encoder_config.vp8_config {
                 // VP8固有設定
-                if let Some(vp8_config) = &encoder_config.vp8_config {
-                    // デノイザー設定
-                    if let Some(noise_sensitivity) = vp8_config.noise_sensitivity {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_NOISE_SENSITIVITY as c_int,
-                            noise_sensitivity,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // 静的閾値
-                    if let Some(static_threshold) = vp8_config.static_threshold {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_STATIC_THRESHOLD as c_int,
-                            static_threshold,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // トークンパーティション数
-                    if let Some(token_partitions) = vp8_config.token_partitions {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_TOKEN_PARTITIONS as c_int,
-                            token_partitions,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // 最大イントラビットレート率
-                    if let Some(max_intra_bitrate_pct) = vp8_config.max_intra_bitrate_pct {
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_MAX_INTRA_BITRATE_PCT as c_int,
-                            max_intra_bitrate_pct,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-
-                    // ARNRフィルタ設定
-                    if let Some(arnr_config) = &vp8_config.arnr_config {
-                        // ARNRを有効化
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_ENABLEAUTOALTREF as c_int,
-                            1,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-
-                        // ARNR最大フレーム数
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_ARNR_MAXFRAMES as c_int,
-                            arnr_config.max_frames,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-
-                        // ARNR強度
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_ARNR_STRENGTH as c_int,
-                            arnr_config.strength,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-
-                        // ARNRタイプ
-                        let code = sys::vpx_codec_control_(
-                            &mut this.ctx,
-                            sys::vp8e_enc_control_id_VP8E_SET_ARNR_TYPE as c_int,
-                            arnr_config.filter_type,
-                        );
-                        Error::check(code, "vpx_codec_control_")?;
-                    }
-                }
+                this.configure_vp8(vp8_config)?;
             }
 
             Ok(this)
         }
+    }
+
+    fn configure_vp9(&mut self, vp9_config: &Vp9Config) -> Result<(), Error> {
+        // 適応的量子化モード
+        if let Some(aq_mode) = vp9_config.aq_mode {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP9E_SET_AQ_MODE as c_int,
+                    aq_mode,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // デノイザー設定
+        if let Some(noise_sensitivity) = vp9_config.noise_sensitivity {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP9E_SET_NOISE_SENSITIVITY as c_int,
+                    noise_sensitivity,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // タイル列数
+        if let Some(tile_columns) = vp9_config.tile_columns {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP9E_SET_TILE_COLUMNS as c_int,
+                    tile_columns,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // タイル行数
+        if let Some(tile_rows) = vp9_config.tile_rows {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP9E_SET_TILE_ROWS as c_int,
+                    tile_rows,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // 行マルチスレッド
+        if vp9_config.row_mt {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP9E_SET_ROW_MT as c_int,
+                    1,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // フレーム並列デコード
+        if vp9_config.frame_parallel_decoding {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP9E_SET_FRAME_PARALLEL_DECODING as c_int,
+                    1,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // コンテンツタイプ最適化
+        if let Some(tune_content) = vp9_config.tune_content {
+            let content_type = match tune_content {
+                ContentType::Default => sys::vp9e_tune_content_VP9E_CONTENT_DEFAULT,
+                ContentType::Screen => sys::vp9e_tune_content_VP9E_CONTENT_SCREEN,
+            };
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP9E_SET_TUNE_CONTENT as c_int,
+                    content_type as c_int,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        Ok(())
+    }
+
+    fn configure_vp8(&mut self, vp8_config: &Vp8Config) -> Result<(), Error> {
+        // デノイザー設定
+        if let Some(noise_sensitivity) = vp8_config.noise_sensitivity {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP8E_SET_NOISE_SENSITIVITY as c_int,
+                    noise_sensitivity,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // 静的閾値
+        if let Some(static_threshold) = vp8_config.static_threshold {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP8E_SET_STATIC_THRESHOLD as c_int,
+                    static_threshold,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // トークンパーティション数
+        if let Some(token_partitions) = vp8_config.token_partitions {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP8E_SET_TOKEN_PARTITIONS as c_int,
+                    token_partitions,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // 最大イントラビットレート率
+        if let Some(max_intra_bitrate_pct) = vp8_config.max_intra_bitrate_pct {
+            let code = unsafe {
+                sys::vpx_codec_control_(
+                    &mut self.ctx,
+                    sys::vp8e_enc_control_id_VP8E_SET_MAX_INTRA_BITRATE_PCT as c_int,
+                    max_intra_bitrate_pct,
+                )
+            };
+            Error::check(code, "vpx_codec_control_")?;
+        }
+
+        // ARNRフィルタ設定
+        if let Some(arnr_config) = &vp8_config.arnr_config {
+            self.configure_vp8_arnr(arnr_config)?;
+        }
+
+        Ok(())
+    }
+
+    fn configure_vp8_arnr(&mut self, arnr_config: &ArnrConfig) -> Result<(), Error> {
+        // ARNRを有効化
+        let code = unsafe {
+            sys::vpx_codec_control_(
+                &mut self.ctx,
+                sys::vp8e_enc_control_id_VP8E_SET_ENABLEAUTOALTREF as c_int,
+                1,
+            )
+        };
+        Error::check(code, "vpx_codec_control_")?;
+
+        // ARNR最大フレーム数
+        let code = unsafe {
+            sys::vpx_codec_control_(
+                &mut self.ctx,
+                sys::vp8e_enc_control_id_VP8E_SET_ARNR_MAXFRAMES as c_int,
+                arnr_config.max_frames,
+            )
+        };
+        Error::check(code, "vpx_codec_control_")?;
+
+        // ARNR強度
+        let code = unsafe {
+            sys::vpx_codec_control_(
+                &mut self.ctx,
+                sys::vp8e_enc_control_id_VP8E_SET_ARNR_STRENGTH as c_int,
+                arnr_config.strength,
+            )
+        };
+        Error::check(code, "vpx_codec_control_")?;
+
+        // ARNRタイプ
+        let code = unsafe {
+            sys::vpx_codec_control_(
+                &mut self.ctx,
+                sys::vp8e_enc_control_id_VP8E_SET_ARNR_TYPE as c_int,
+                arnr_config.filter_type,
+            )
+        };
+        Error::check(code, "vpx_codec_control_")?;
+
+        Ok(())
     }
 
     /// I420 形式の画像データをエンコードする
