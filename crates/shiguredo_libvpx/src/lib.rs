@@ -5,7 +5,7 @@
 #![warn(missing_docs)]
 
 use std::{
-    ffi::{c_int, c_uint, CStr},
+    ffi::{CStr, c_int, c_uint},
     mem::MaybeUninit,
 };
 

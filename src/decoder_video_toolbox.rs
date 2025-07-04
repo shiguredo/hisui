@@ -5,7 +5,7 @@ use crate::{
     types::EvenUsize,
     video::{VideoFormat, VideoFrame},
     video_h264::{
-        H264AnnexBNalUnits, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H265_NALU_TYPE_PPS,
+        H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, H265_NALU_TYPE_PPS,
         H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
     },
 };
@@ -39,9 +39,7 @@ impl VideoToolboxDecoder {
 
     pub fn new_h265(frame: &VideoFrame) -> orfail::Result<Self> {
         let (vps, sps, pps) = get_h265_vps_sps_pps(frame).or_fail()?;
-        log::debug!(
-            "Initialize H.264 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}"
-        );
+        log::debug!("Initialize H.264 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
 
         let inner = shiguredo_video_toolbox::Decoder::new_h265(vps, sps, pps, NALU_HEADER_LENGTH)
             .or_fail()?;

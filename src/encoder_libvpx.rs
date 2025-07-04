@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    boxes::{SampleEntry, Vp08Box, Vp09Box, VpccBox},
     Uint,
+    boxes::{SampleEntry, Vp08Box, Vp09Box, VpccBox},
 };
 
 use crate::{

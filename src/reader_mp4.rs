@@ -8,9 +8,9 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
+    Decode, Either,
     aux::SampleTableAccessor,
     boxes::{FtypBox, HdlrBox, IgnoredBox, MoovBox, SampleEntry, StblBox, TrakBox},
-    Decode, Either,
 };
 
 use crate::{
@@ -127,7 +127,7 @@ impl Mp4VideoReaderInner {
             entry => {
                 return Some(Err(orfail::Failure::new(format!(
                     "unsupported sample entry: {entry:?}"
-                ))))
+                ))));
             }
         };
 
@@ -311,7 +311,7 @@ impl Mp4AudioReaderInner {
             entry => {
                 return Some(Err(orfail::Failure::new(format!(
                     "unsupported sample entry: {entry:?}"
-                ))))
+                ))));
             }
         };
 

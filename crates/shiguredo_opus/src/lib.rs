@@ -4,7 +4,7 @@
 //! [Opus]: https://github.com/xiph/opus
 #![warn(missing_docs)]
 
-use std::ffi::{c_int, CStr};
+use std::ffi::{CStr, c_int};
 
 mod sys;
 

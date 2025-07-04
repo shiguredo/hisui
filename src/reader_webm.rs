@@ -124,9 +124,7 @@ impl<R: Read> ElementReader<R> {
     fn expect_id(&mut self, expected_id: u32) -> orfail::Result<()> {
         let id = self.read_id().or_fail()?;
         (id == expected_id).or_fail_with(|()| {
-            format!(
-                "expected WebM element ID 0x{expected_id:X}, but got 0x{id:X}"
-            )
+            format!("expected WebM element ID 0x{expected_id:X}, but got 0x{id:X}")
         })?;
         Ok(())
     }
@@ -316,7 +314,7 @@ impl VideoTrackHeader {
                 _ => {
                     return Err(orfail::Failure::new(format!(
                         "unknown video codec ID: {bytes:?}"
-                    )))
+                    )));
                 }
             };
             reader.skip_all().or_fail()?;
@@ -425,9 +423,7 @@ impl WebmAudioReader {
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block().or_fail()? {
                         let timestamp = current.timestamp;
-                        if let Some(mut prev) =
-                            self.prev_audio_data.replace(current)
-                        {
+                        if let Some(mut prev) = self.prev_audio_data.replace(current) {
                             // 尺を確定する
                             prev.duration = timestamp.saturating_sub(prev.timestamp);
                             self.last_duration = prev.duration;
@@ -524,9 +520,7 @@ impl WebmVideoReader {
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block().or_fail()? {
                         let timestamp = current.timestamp;
-                        if let Some(mut prev) =
-                            self.prev_video_frame.replace(current)
-                        {
+                        if let Some(mut prev) = self.prev_video_frame.replace(current) {
                             // 尺を確定する
                             prev.duration = timestamp.saturating_sub(prev.timestamp);
                             self.last_duration = prev.duration;

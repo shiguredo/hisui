@@ -44,7 +44,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         "mp4" => ContainerFormat::Mp4,
         "webm" => ContainerFormat::Webm,
         ext => {
-            return Err(orfail::Failure::new(format!("unsupported container format: {ext}")).into())
+            return Err(orfail::Failure::new(format!("unsupported container format: {ext}")).into());
         }
     };
 

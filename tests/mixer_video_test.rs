@@ -797,13 +797,16 @@ fn region(region_size: Size, cell_size: Size) -> Region {
             assigned_sources: HashMap::new(),
             rows: 0,
             columns: 0,
-            cell_width: EvenUsize::new(cell_size.width).unwrap_or_else(|| panic!("not even: {cell_size:?}")),
+            cell_width: EvenUsize::new(cell_size.width)
+                .unwrap_or_else(|| panic!("not even: {cell_size:?}")),
             cell_height: EvenUsize::new(cell_size.height)
                 .unwrap_or_else(|| panic!("not even: {cell_size:?}")),
         },
         source_ids: Default::default(),
-        width: EvenUsize::new(region_size.width).unwrap_or_else(|| panic!("not even: {region_size:?}")),
-        height: EvenUsize::new(region_size.height).unwrap_or_else(|| panic!("not even: {region_size:?}")),
+        width: EvenUsize::new(region_size.width)
+            .unwrap_or_else(|| panic!("not even: {region_size:?}")),
+        height: EvenUsize::new(region_size.height)
+            .unwrap_or_else(|| panic!("not even: {region_size:?}")),
         position: PixelPosition::default(),
         top_border_pixels: EvenUsize::default(),
         left_border_pixels: EvenUsize::default(),
