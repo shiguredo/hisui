@@ -46,6 +46,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
