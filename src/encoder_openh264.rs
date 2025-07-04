@@ -1,7 +1,7 @@
 use orfail::OrFail;
 use shiguredo_mp4::{
-    boxes::{Avc1Box, AvccBox, SampleEntry},
     Uint,
+    boxes::{Avc1Box, AvccBox, SampleEntry},
 };
 
 use crate::{
@@ -9,8 +9,8 @@ use crate::{
     types::EvenUsize,
     video::{self, VideoFormat, VideoFrame},
     video_h264::{
-        H264AnnexBNalUnits, H264_LEVEL_3_1, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SEI,
-        H264_NALU_TYPE_SPS, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH,
+        H264_LEVEL_3_1, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SEI, H264_NALU_TYPE_SPS,
+        H264_PROFILE_BASELINE, H264AnnexBNalUnits, NALU_HEADER_LENGTH,
     },
 };
 

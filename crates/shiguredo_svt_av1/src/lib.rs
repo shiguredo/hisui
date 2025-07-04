@@ -4,7 +4,7 @@
 //! [SVT-AV1]: https://gitlab.com/AOMediaCodec/SVT-AV1
 #![warn(missing_docs)]
 
-use std::{mem::MaybeUninit, sync::Mutex};
+use std::{mem::MaybeUninit, num::NonZeroUsize, sync::Mutex};
 
 mod sys;
 
@@ -57,6 +57,235 @@ pub struct EncoderConfig {
 
     /// FPS の分母
     pub fps_denominator: usize,
+
+    // === 品質・速度制御関連 ===
+    /// エンコードプリセット (0-13, 0=最高品質・最遅, 13=最低品質・最速)
+    pub enc_mode: u8,
+
+    /// 量子化パラメータ (0-63, CQP/CRF モード時に使用)
+    pub qp: Option<u8>,
+
+    /// 最小許可QP値 (0-63)
+    pub min_qp_allowed: Option<u8>,
+
+    /// 最大許可QP値 (0-63)
+    pub max_qp_allowed: Option<u8>,
+
+    // === レート制御関連 ===
+    /// レート制御モード
+    pub rate_control_mode: RateControlMode,
+
+    /// 最大ビットレート (bps 単位, Capped CRF用)
+    pub max_bit_rate: Option<usize>,
+
+    /// オーバーシュート許容率 (0-100%)
+    pub over_shoot_pct: u8,
+
+    /// アンダーシュート許容率 (0-100%)
+    pub under_shoot_pct: u8,
+
+    // === GOP・フレーム構造関連 ===
+    /// イントラフレーム間隔 (-1=無制限, 0=イントラオンリー, 1以上=間隔)
+    pub intra_period_length: isize,
+
+    /// 階層レベル数 (0=自動設定, 1-5=指定値)
+    pub hierarchical_levels: u8,
+
+    /// 予測構造 (1=低遅延, 2=ランダムアクセス)
+    pub pred_structure: u8,
+
+    /// シーンチェンジ検出
+    pub scene_change_detection: bool,
+
+    /// 先読み距離 (0=無効, 1-256=フレーム数)
+    pub look_ahead_distance: usize,
+
+    // === 並列処理関連 ===
+    /// スレッド数 (None=自動設定)
+    pub pin_threads: Option<NonZeroUsize>,
+
+    /// タイル列数 (None=自動)
+    pub tile_columns: Option<NonZeroUsize>,
+
+    /// タイル行数 (None=自動)
+    pub tile_rows: Option<NonZeroUsize>,
+
+    /// 対象ソケット (-1=両方, 0=ソケット0, 1=ソケット1)
+    pub target_socket: isize,
+
+    // === フィルタリング関連 ===
+    /// デブロッキングフィルタ有効
+    pub enable_dlf_flag: bool,
+
+    /// CDEFレベル (-1=自動, 0=無効, 1-5=レベル)
+    pub cdef_level: i8,
+
+    /// 復元フィルタリング有効
+    pub enable_restoration_filtering: bool,
+
+    // === 高度な設定 ===
+    /// テンポラルフィルタリング有効
+    pub enable_tf: bool,
+
+    /// オーバーレイフレーム有効
+    pub enable_overlays: bool,
+
+    /// フィルムグレインデノイズ強度 (0=無効, 1-50=強度)
+    pub film_grain_denoise_strength: Option<NonZeroUsize>,
+
+    /// TPL (Temporal Dependency Model) 有効
+    pub enable_tpl_la: bool,
+
+    /// 強制キーフレーム有効
+    pub force_key_frames: bool,
+
+    /// 統計レポート有効
+    pub stat_report: bool,
+
+    /// 再構築画像出力有効
+    pub recon_enabled: bool,
+
+    // === エンコーダー固有設定 ===
+    /// ビット深度 (8, 10)
+    pub encoder_bit_depth: u8,
+
+    /// カラーフォーマット
+    pub encoder_color_format: ColorFormat,
+
+    /// プロファイル (0=Main, 1=High, 2=Professional)
+    pub profile: u8,
+
+    /// レベル (0=自動検出, 20-73=AV1レベル)
+    pub level: u8,
+
+    /// ティア (0=Main, 1=High)
+    pub tier: u8,
+
+    /// 高速デコード有効
+    pub fast_decode: bool,
+}
+
+/// レート制御モード
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateControlMode {
+    /// CQP (Constant Quantization Parameter) / CRF (Constant Rate Factor)
+    CqpOrCrf,
+    /// VBR (Variable Bit Rate)
+    Vbr,
+    /// CBR (Constant Bit Rate)
+    Cbr,
+}
+
+/// カラーフォーマット
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorFormat {
+    /// YUV400 (モノクロ)
+    Yuv400,
+    /// YUV420 (標準)
+    Yuv420,
+    /// YUV422
+    Yuv422,
+    /// YUV444
+    Yuv444,
+}
+
+impl Default for EncoderConfig {
+    fn default() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            target_bitrate: 2_000_000,
+            fps_numerator: 30,
+            fps_denominator: 1,
+            enc_mode: 8, // バランスの良いプリセット
+            qp: None,
+            min_qp_allowed: None,
+            max_qp_allowed: None,
+            rate_control_mode: RateControlMode::Vbr,
+            max_bit_rate: None,
+            over_shoot_pct: 25,       // SVT-AV1のデフォルト値
+            under_shoot_pct: 25,      // SVT-AV1のデフォルト値
+            intra_period_length: 120, // 4秒間隔（30fps想定）
+            hierarchical_levels: 0,   // 自動設定
+            pred_structure: 2,        // ランダムアクセス
+            scene_change_detection: true,
+            look_ahead_distance: 32,
+            pin_threads: None,  // 自動設定
+            tile_columns: None, // 自動設定
+            tile_rows: None,    // 自動設定
+            target_socket: -1,  // 両方のソケット
+            enable_dlf_flag: true,
+            cdef_level: -1, // 自動設定
+            enable_restoration_filtering: true,
+            enable_tf: true,
+            enable_overlays: false,
+            film_grain_denoise_strength: None, // 無効
+            enable_tpl_la: true,
+            force_key_frames: false,
+            stat_report: false,
+            recon_enabled: false,
+            encoder_bit_depth: 8,
+            encoder_color_format: ColorFormat::Yuv420,
+            profile: 0, // Main
+            level: 0,   // 自動検出
+            tier: 0,    // Main
+            fast_decode: false,
+        }
+    }
+}
+
+impl EncoderConfig {
+    /// 高速エンコード用の設定
+    pub fn fast_encode() -> Self {
+        Self {
+            enc_mode: 10,                                            // 高速プリセット
+            look_ahead_distance: 16,                                 // 先読み距離を短縮
+            enable_tf: false,                                        // テンポラルフィルタ無効
+            enable_overlays: false,                                  // オーバーレイ無効
+            scene_change_detection: false,                           // シーンチェンジ検出無効
+            enable_tpl_la: false,                                    // TPL無効
+            tile_columns: Some(NonZeroUsize::MIN.saturating_add(1)), // タイル分割で並列化
+            tile_rows: Some(NonZeroUsize::MIN),
+            hierarchical_levels: 4, // 階層レベルを制限
+            ..Default::default()
+        }
+    }
+
+    /// 高品質エンコード用の設定
+    pub fn high_quality() -> Self {
+        Self {
+            enc_mode: 4,             // 高品質プリセット
+            look_ahead_distance: 64, // 長い先読み
+            enable_tf: true,         // テンポラルフィルタ有効
+            enable_tpl_la: true,     // TPL有効
+            cdef_level: 1,           // CDEF有効
+            enable_restoration_filtering: true,
+            over_shoot_pct: 10, // より厳しい制御
+            under_shoot_pct: 10,
+            ..Default::default()
+        }
+    }
+
+    /// リアルタイム配信用の設定
+    pub fn realtime() -> Self {
+        Self {
+            enc_mode: 12,                            // 最高速プリセット
+            rate_control_mode: RateControlMode::Cbr, // CBR
+            look_ahead_distance: 0,                  // 先読み無効
+            enable_tf: false,                        // テンポラルフィルタ無効
+            enable_overlays: false,                  // オーバーレイ無効
+            scene_change_detection: false,           // シーンチェンジ検出無効
+            enable_tpl_la: false,                    // TPL無効
+            hierarchical_levels: 3,                  // 階層レベルを制限
+            pred_structure: 1,                       // 低遅延
+            tile_columns: Some(NonZeroUsize::MIN),
+            tile_rows: Some(NonZeroUsize::MIN),
+            fast_decode: true,
+            over_shoot_pct: 50, // リアルタイム用途では緩い制御
+            under_shoot_pct: 50,
+            ..Default::default()
+        }
+    }
 }
 
 /// AV1 エンコーダー
@@ -106,22 +335,78 @@ impl Encoder {
 
             let mut svt_config = svt_config.assume_init();
 
-            // C++ 版では CBR を使っているけど、SVT-AV1-2.3.0 では以下のようなメッセージでエラーとなるので、
-            // VBR を指定している。
-            // "CBR Rate control is currently not supported for SVT_AV1_PRED_RANDOM_ACCESS, use VBR mode"
-            // TODO: 後で全体的にパラメーターは見直す
-            svt_config.rate_control_mode = sys::SvtAv1RcMode_SVT_AV1_RC_MODE_VBR as u8;
-            svt_config.target_bit_rate = config.target_bitrate as u32;
-            svt_config.force_key_frames = false;
+            // === 基本設定 ===
             svt_config.source_width = config.width as u32;
             svt_config.source_height = config.height as u32;
             svt_config.frame_rate_numerator = config.fps_numerator as u32;
             svt_config.frame_rate_denominator = config.fps_denominator as u32;
-            svt_config.hierarchical_levels = 0; // B フレームを無効にする
-            svt_config.encoder_color_format = sys::EbColorFormat_EB_YUV420;
-            svt_config.profile = 0;
-            svt_config.level = 0;
-            svt_config.tier = 0;
+            svt_config.target_bit_rate = config.target_bitrate as u32;
+
+            // === 品質・速度制御 ===
+            svt_config.enc_mode = config.enc_mode as i8;
+            if let Some(qp) = config.qp {
+                svt_config.qp = qp as u32;
+            }
+            if let Some(min_qp) = config.min_qp_allowed {
+                svt_config.min_qp_allowed = min_qp as u32;
+            }
+            if let Some(max_qp) = config.max_qp_allowed {
+                svt_config.max_qp_allowed = max_qp as u32;
+            }
+
+            // === レート制御 ===
+            svt_config.rate_control_mode = match config.rate_control_mode {
+                RateControlMode::CqpOrCrf => sys::SvtAv1RcMode_SVT_AV1_RC_MODE_CQP_OR_CRF,
+                RateControlMode::Vbr => sys::SvtAv1RcMode_SVT_AV1_RC_MODE_VBR,
+                RateControlMode::Cbr => sys::SvtAv1RcMode_SVT_AV1_RC_MODE_CBR,
+            } as u8;
+
+            if let Some(max_bitrate) = config.max_bit_rate {
+                svt_config.max_bit_rate = max_bitrate as u32;
+            }
+            svt_config.over_shoot_pct = config.over_shoot_pct as u32;
+            svt_config.under_shoot_pct = config.under_shoot_pct as u32;
+
+            // === GOP・フレーム構造 ===
+            svt_config.intra_period_length = config.intra_period_length as i32;
+            svt_config.hierarchical_levels = config.hierarchical_levels as u32;
+            svt_config.pred_structure = config.pred_structure;
+            svt_config.scene_change_detection = config.scene_change_detection as u32;
+            svt_config.look_ahead_distance = config.look_ahead_distance as u32;
+
+            // === 並列処理 ===
+            svt_config.pin_threads = config.pin_threads.map_or(0, |v| v.get()) as u32;
+            svt_config.tile_columns = config.tile_columns.map_or(0, |v| v.get()) as i32;
+            svt_config.tile_rows = config.tile_rows.map_or(0, |v| v.get()) as i32;
+            svt_config.target_socket = config.target_socket as i32;
+
+            // === フィルタリング ===
+            svt_config.enable_dlf_flag = config.enable_dlf_flag;
+            svt_config.cdef_level = config.cdef_level as i32;
+            svt_config.enable_restoration_filtering = config.enable_restoration_filtering as i32;
+
+            // === 高度な設定 ===
+            svt_config.enable_tf = config.enable_tf as u8;
+            svt_config.enable_overlays = config.enable_overlays;
+            svt_config.film_grain_denoise_strength =
+                config.film_grain_denoise_strength.map_or(0, |v| v.get()) as u32;
+            svt_config.enable_tpl_la = config.enable_tpl_la as u8;
+            svt_config.force_key_frames = config.force_key_frames;
+            svt_config.stat_report = config.stat_report as u32;
+            svt_config.recon_enabled = config.recon_enabled;
+
+            // === エンコーダー固有設定 ===
+            svt_config.encoder_bit_depth = config.encoder_bit_depth as u32;
+            svt_config.encoder_color_format = match config.encoder_color_format {
+                ColorFormat::Yuv400 => sys::EbColorFormat_EB_YUV400,
+                ColorFormat::Yuv420 => sys::EbColorFormat_EB_YUV420,
+                ColorFormat::Yuv422 => sys::EbColorFormat_EB_YUV422,
+                ColorFormat::Yuv444 => sys::EbColorFormat_EB_YUV444,
+            };
+            svt_config.profile = config.profile as u32;
+            svt_config.level = config.level as u32;
+            svt_config.tier = config.tier as u32;
+            svt_config.fast_decode = config.fast_decode as u8;
 
             // core dump する場合を予防する (C++ 版からの移植コード）
             svt_config.frame_scale_evts.start_frame_nums = std::ptr::null_mut();
@@ -359,6 +644,7 @@ mod tests {
             height: 320,
             fps_numerator: 1,
             fps_denominator: 1,
+            ..Default::default()
         }
     }
 }
