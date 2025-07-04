@@ -287,6 +287,214 @@ pub struct EncoderConfig {
 
     /// libvpx に指定する品質調整用パラメーター
     pub cq_level: usize,
+
+    /// エンコード速度設定 (VP8: 0-16, VP9: 0-9, 大きいほど高速)
+    pub cpu_used: Option<i32>,
+
+    /// エンコード期限設定
+    pub deadline: EncodingDeadline,
+
+    /// レート制御モード
+    pub rate_control: RateControlMode,
+
+    /// 先読みフレーム数 (0で無効、品質 vs 速度のトレードオフ)
+    pub lag_in_frames: Option<usize>,
+
+    /// スレッド数 (0で自動設定)
+    pub threads: Option<usize>,
+
+    /// エラー耐性モード (リアルタイム用途で有効)
+    pub error_resilient: bool,
+
+    /// キーフレーム間隔 (フレーム数)
+    pub keyframe_interval: Option<usize>,
+
+    /// フレームドロップ閾値 (0-100, リアルタイム用途)
+    pub frame_drop_threshold: Option<usize>,
+
+    /// VP9固有設定
+    pub vp9_config: Option<Vp9Config>,
+
+    /// VP8固有設定
+    pub vp8_config: Option<Vp8Config>,
+}
+
+/// エンコード期限設定
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodingDeadline {
+    /// 最高品質 (最も時間がかかる)
+    Best,
+    /// 良い品質 (品質と速度のバランス)
+    Good,
+    /// リアルタイム (最も高速)
+    Realtime,
+}
+
+/// レート制御モード
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateControlMode {
+    /// Variable Bitrate (可変ビットレート)
+    Vbr,
+    /// Constant Bitrate (固定ビットレート)
+    Cbr,
+    /// Constant Quality (固定品質)
+    Cq,
+}
+
+/// VP9固有の設定
+#[derive(Debug, Clone)]
+pub struct Vp9Config {
+    /// 適応的量子化モード (0-3)
+    pub aq_mode: Option<i32>,
+
+    /// デノイザー設定 (0-3)
+    pub noise_sensitivity: Option<i32>,
+
+    /// タイル列数 (並列処理用)
+    pub tile_columns: Option<i32>,
+
+    /// タイル行数 (並列処理用)
+    pub tile_rows: Option<i32>,
+
+    /// 行マルチスレッド有効
+    pub row_mt: bool,
+
+    /// フレーム並列デコード有効
+    pub frame_parallel_decoding: bool,
+
+    /// コンテンツタイプ最適化
+    pub tune_content: Option<ContentType>,
+}
+
+/// VP8固有の設定
+#[derive(Debug, Clone)]
+pub struct Vp8Config {
+    /// デノイザー設定 (0-3)
+    pub noise_sensitivity: Option<i32>,
+
+    /// 静的閾値
+    pub static_threshold: Option<i32>,
+
+    /// トークンパーティション数
+    pub token_partitions: Option<i32>,
+
+    /// 最大イントラビットレート率
+    pub max_intra_bitrate_pct: Option<i32>,
+
+    /// ARNRフィルタ設定
+    pub arnr_config: Option<ArnrConfig>,
+}
+
+/// コンテンツタイプ
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentType {
+    /// 通常の映像
+    Default,
+    /// スクリーン録画
+    Screen,
+}
+
+/// ARNRフィルタ設定
+#[derive(Debug, Clone)]
+pub struct ArnrConfig {
+    /// 最大フレーム数
+    pub max_frames: i32,
+    /// 強度
+    pub strength: i32,
+    /// タイプ
+    pub filter_type: i32,
+}
+
+impl Default for EncoderConfig {
+    fn default() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            fps_numerator: 30,
+            fps_denominator: 1,
+            target_bitrate: 2_000_000,
+            min_quantizer: 0,
+            max_quantizer: 63,
+            cq_level: 10,
+            cpu_used: None,
+            deadline: EncodingDeadline::Good,
+            rate_control: RateControlMode::Vbr,
+            lag_in_frames: None,
+            threads: None,
+            error_resilient: false,
+            keyframe_interval: None,
+            frame_drop_threshold: None,
+            vp9_config: None,
+            vp8_config: None,
+        }
+    }
+}
+
+impl EncoderConfig {
+    /// リアルタイム用途向けの設定
+    pub fn realtime() -> Self {
+        Self {
+            deadline: EncodingDeadline::Realtime,
+            rate_control: RateControlMode::Cbr,
+            lag_in_frames: Some(0),
+            error_resilient: true,
+            frame_drop_threshold: Some(30),
+            cpu_used: Some(7), // 高速設定
+            vp9_config: Some(Vp9Config {
+                aq_mode: Some(3),
+                noise_sensitivity: Some(1),
+                tile_columns: Some(2),
+                tile_rows: Some(1),
+                row_mt: true,
+                frame_parallel_decoding: true,
+                tune_content: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// 高速オフライン用途向けの設定
+    pub fn fast_offline() -> Self {
+        Self {
+            deadline: EncodingDeadline::Good,
+            rate_control: RateControlMode::Vbr,
+            lag_in_frames: Some(10),
+            cpu_used: Some(5),
+            threads: Some(8),
+            vp9_config: Some(Vp9Config {
+                tile_columns: Some(3),
+                tile_rows: Some(1),
+                row_mt: true,
+                frame_parallel_decoding: true,
+                aq_mode: Some(0), // AQ無効で高速化
+                noise_sensitivity: None,
+                tune_content: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// 高品質用途向けの設定
+    pub fn high_quality() -> Self {
+        Self {
+            deadline: EncodingDeadline::Best,
+            rate_control: RateControlMode::Vbr,
+            lag_in_frames: Some(25),
+            cpu_used: Some(1), // 品質重視
+            min_quantizer: 0,
+            max_quantizer: 50,
+            vp9_config: Some(Vp9Config {
+                aq_mode: Some(1),
+                noise_sensitivity: Some(1),
+                tile_columns: Some(1),
+                tile_rows: Some(0),
+                row_mt: false,
+                frame_parallel_decoding: false,
+                tune_content: None,
+            }),
+            ..Default::default()
+        }
+    }
 }
 
 /// VP8 / VP9 エンコーダー
@@ -295,6 +503,7 @@ pub struct Encoder {
     img: sys::vpx_image,
     iter: sys::vpx_codec_iter_t,
     frame_count: usize,
+    deadline: EncodingDeadline,
     y_size: usize,
     u_size: usize,
     v_size: usize,
@@ -311,7 +520,7 @@ impl Encoder {
             Error::check(code, "vpx_codec_enc_config_default")?;
 
             let cfg = cfg.assume_init();
-            Self::new(config, cfg, iface)
+            Self::new(config, cfg, iface, false) // VP8の場合はfalse
         }
     }
 
@@ -325,7 +534,7 @@ impl Encoder {
             Error::check(code, "vpx_codec_enc_config_default")?;
 
             let cfg = cfg.assume_init();
-            Self::new(config, cfg, iface)
+            Self::new(config, cfg, iface, true) // VP9の場合はtrue
         }
     }
 
@@ -333,7 +542,9 @@ impl Encoder {
         encoder_config: &EncoderConfig,
         mut vpx_config: sys::vpx_codec_enc_cfg,
         iface: *const sys::vpx_codec_iface,
+        is_vp9: bool,
     ) -> Result<Self, Error> {
+        // 基本設定
         vpx_config.g_w = encoder_config.width as c_uint;
         vpx_config.g_h = encoder_config.height as c_uint;
         vpx_config.rc_target_bitrate = encoder_config.target_bitrate as c_uint / 1000;
@@ -343,6 +554,34 @@ impl Encoder {
         // FPS とは分子・分母の関係が逆になる
         vpx_config.g_timebase.num = encoder_config.fps_denominator as c_int;
         vpx_config.g_timebase.den = encoder_config.fps_numerator as c_int;
+
+        // 新しい設定パラメータの適用
+        if let Some(lag) = encoder_config.lag_in_frames {
+            vpx_config.g_lag_in_frames = lag as c_uint;
+        }
+
+        if let Some(threads) = encoder_config.threads {
+            vpx_config.g_threads = threads as c_uint;
+        }
+
+        if encoder_config.error_resilient {
+            vpx_config.g_error_resilient = 1;
+        }
+
+        if let Some(kf_interval) = encoder_config.keyframe_interval {
+            vpx_config.kf_max_dist = kf_interval as c_uint;
+        }
+
+        if let Some(threshold) = encoder_config.frame_drop_threshold {
+            vpx_config.rc_dropframe_thresh = threshold as c_uint;
+        }
+
+        // レート制御モード設定
+        vpx_config.rc_end_usage = match encoder_config.rate_control {
+            RateControlMode::Vbr => sys::vpx_rc_mode_VPX_VBR,
+            RateControlMode::Cbr => sys::vpx_rc_mode_VPX_CBR,
+            RateControlMode::Cq => sys::vpx_rc_mode_VPX_CQ,
+        };
 
         let mut ctx = MaybeUninit::<sys::vpx_codec_ctx>::zeroed();
         unsafe {
@@ -370,19 +609,187 @@ impl Encoder {
                 img,
                 iter: std::ptr::null(),
                 frame_count: 0,
+                deadline: encoder_config.deadline,
                 y_size: encoder_config.height * img.stride[0] as usize,
                 u_size: encoder_config.height.div_ceil(2) * img.stride[1] as usize,
                 v_size: encoder_config.height.div_ceil(2) * img.stride[2] as usize,
             };
             // NOTE: これ以降の操作に失敗しても ctx は Drop によって確実に解放される
 
+            // CQ Level設定
             let code = sys::vpx_codec_control_(
                 &mut this.ctx,
-                // 名前に VP8 が含まれているけど、ドキュメントを見ると VP9 でも使える模様
                 sys::vp8e_enc_control_id_VP8E_SET_CQ_LEVEL as c_int,
                 encoder_config.cq_level as c_uint,
             );
             Error::check(code, "vpx_codec_control_")?;
+
+            // CPU使用率設定
+            if let Some(cpu_used) = encoder_config.cpu_used {
+                let code = sys::vpx_codec_control_(
+                    &mut this.ctx,
+                    sys::vp8e_enc_control_id_VP8E_SET_CPUUSED as c_int,
+                    cpu_used,
+                );
+                Error::check(code, "vpx_codec_control_")?;
+            }
+
+            // VP9固有設定
+            if is_vp9 {
+                if let Some(vp9_config) = &encoder_config.vp9_config {
+                    // 適応的量子化モード
+                    if let Some(aq_mode) = vp9_config.aq_mode {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP9E_SET_AQ_MODE as c_int,
+                            aq_mode,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // デノイザー設定
+                    if let Some(noise_sensitivity) = vp9_config.noise_sensitivity {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP9E_SET_NOISE_SENSITIVITY as c_int,
+                            noise_sensitivity,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // タイル列数
+                    if let Some(tile_columns) = vp9_config.tile_columns {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP9E_SET_TILE_COLUMNS as c_int,
+                            tile_columns,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // タイル行数
+                    if let Some(tile_rows) = vp9_config.tile_rows {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP9E_SET_TILE_ROWS as c_int,
+                            tile_rows,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // 行マルチスレッド
+                    if vp9_config.row_mt {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP9E_SET_ROW_MT as c_int,
+                            1,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // フレーム並列デコード
+                    if vp9_config.frame_parallel_decoding {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP9E_SET_FRAME_PARALLEL_DECODING as c_int,
+                            1,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // コンテンツタイプ最適化
+                    if let Some(tune_content) = vp9_config.tune_content {
+                        let content_type = match tune_content {
+                            ContentType::Default => sys::vp9e_tune_content_VP9E_CONTENT_DEFAULT,
+                            ContentType::Screen => sys::vp9e_tune_content_VP9E_CONTENT_SCREEN,
+                        };
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP9E_SET_TUNE_CONTENT as c_int,
+                            content_type as c_int,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+                }
+            } else {
+                // VP8固有設定
+                if let Some(vp8_config) = &encoder_config.vp8_config {
+                    // デノイザー設定
+                    if let Some(noise_sensitivity) = vp8_config.noise_sensitivity {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_NOISE_SENSITIVITY as c_int,
+                            noise_sensitivity,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // 静的閾値
+                    if let Some(static_threshold) = vp8_config.static_threshold {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_STATIC_THRESHOLD as c_int,
+                            static_threshold,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // トークンパーティション数
+                    if let Some(token_partitions) = vp8_config.token_partitions {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_TOKEN_PARTITIONS as c_int,
+                            token_partitions,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // 最大イントラビットレート率
+                    if let Some(max_intra_bitrate_pct) = vp8_config.max_intra_bitrate_pct {
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_MAX_INTRA_BITRATE_PCT as c_int,
+                            max_intra_bitrate_pct,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+
+                    // ARNRフィルタ設定
+                    if let Some(arnr_config) = &vp8_config.arnr_config {
+                        // ARNRを有効化
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_ENABLEAUTOALTREF as c_int,
+                            1,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+
+                        // ARNR最大フレーム数
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_ARNR_MAXFRAMES as c_int,
+                            arnr_config.max_frames,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+
+                        // ARNR強度
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_ARNR_STRENGTH as c_int,
+                            arnr_config.strength,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+
+                        // ARNRタイプ
+                        let code = sys::vpx_codec_control_(
+                            &mut this.ctx,
+                            sys::vp8e_enc_control_id_VP8E_SET_ARNR_TYPE as c_int,
+                            arnr_config.filter_type,
+                        );
+                        Error::check(code, "vpx_codec_control_")?;
+                    }
+                }
+            }
 
             Ok(this)
         }
@@ -409,18 +816,27 @@ impl Encoder {
             ));
         }
 
+        // deadline設定を適用
+        let deadline = match self.deadline {
+            EncodingDeadline::Best => sys::VPX_DL_BEST_QUALITY,
+            EncodingDeadline::Good => sys::VPX_DL_GOOD_QUALITY,
+            EncodingDeadline::Realtime => sys::VPX_DL_REALTIME,
+        };
+
         let code = unsafe {
+            // YUVデータを画像バッファにコピー
             std::slice::from_raw_parts_mut(self.img.planes[0], y.len()).copy_from_slice(y);
             std::slice::from_raw_parts_mut(self.img.planes[1], u.len()).copy_from_slice(u);
             std::slice::from_raw_parts_mut(self.img.planes[2], v.len()).copy_from_slice(v);
 
+            // エンコード実行
             sys::vpx_codec_encode(
                 &mut self.ctx,
                 &self.img,
                 self.frame_count as sys::vpx_codec_pts_t,
                 1, // duration: 1 は「1 フレーム分」を意味する
                 0, // flags
-                sys::VPX_DL_REALTIME as sys::vpx_enc_deadline_t,
+                deadline as sys::vpx_enc_deadline_t,
             )
         };
         Error::check(code, "vpx_codec_encode")?;
