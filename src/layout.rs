@@ -43,12 +43,11 @@ pub struct Layout {
 impl Layout {
     /// レイアウト JSON ファイルで指示されたレイアウトを作成する
     pub fn from_layout_json(
+        base_path: PathBuf,
         layout_file_path: &Path,
         json: &str,
         fps: FrameRate,
     ) -> orfail::Result<Self> {
-        let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
-
         let json = nojson::RawJson::parse(json)
             .map_err(|e| malformed_json_error(layout_file_path, json, e))
             .or_fail()?;

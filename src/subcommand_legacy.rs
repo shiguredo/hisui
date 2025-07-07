@@ -343,7 +343,9 @@ impl Runner {
         if let Some(layout_file_path) = &self.args.layout {
             let layout_json = std::fs::read_to_string(layout_file_path)
                 .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
+            let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
             Layout::from_layout_json(
+                base_path,
                 layout_file_path,
                 &layout_json,
                 self.args.out_video_frame_rate,
