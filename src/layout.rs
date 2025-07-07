@@ -8,6 +8,7 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
+    layout_encode_params::LayoutEncodeParams,
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFrame},
@@ -18,7 +19,7 @@ use crate::{
 const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
 
 /// 合成レイアウト
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Layout {
     pub base_path: PathBuf,
     // z-pos 順に並んだリージョン列
@@ -32,7 +33,10 @@ pub struct Layout {
     pub audio_source_ids: BTreeSet<SourceId>,
     pub sources: BTreeMap<SourceId, AggregatedSourceInfo>,
 
+    pub encode_params: LayoutEncodeParams,
+
     // 以降は JSON には含まれないフィールド
+    // TODO: 含めるようにする ＆ audio bitrate も含める
     pub fps: FrameRate,
 }
 
@@ -162,7 +166,7 @@ impl Layout {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct RawLayout {
     audio_sources: Vec<PathBuf>,
     audio_sources_excluded: Vec<PathBuf>,
@@ -170,6 +174,7 @@ struct RawLayout {
     trim: bool,
     resolution: Option<Resolution>, // TODO: ユニットテスト追加 (None の場合)
     bitrate: usize,
+    encode_params: LayoutEncodeParams,
 }
 
 impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
@@ -208,6 +213,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
             trim: trim.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             resolution: resolution.map(|v| v.try_to()).transpose()?,
             bitrate: bitrate.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            encode_params: value.try_to()?,
         })
     }
 }
@@ -269,6 +275,7 @@ impl RawLayout {
             bitrate_kbps: self.bitrate,
             audio_source_ids,
             sources,
+            encode_params: self.encode_params,
             fps,
         })
     }

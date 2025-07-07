@@ -20,6 +20,7 @@ pub mod encoder_svt_av1;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox;
 pub mod layout;
+pub mod layout_encode_params;
 pub mod logger;
 pub mod metadata;
 pub mod mixer_audio;
