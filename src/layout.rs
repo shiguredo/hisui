@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     error::Error,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -8,6 +9,7 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
+    audio,
     layout_encode_params::LayoutEncodeParams,
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, EvenUsize, PixelPosition},
@@ -28,13 +30,13 @@ pub struct Layout {
     pub trim_spans: BTreeMap<Duration, Duration>,
     pub resolution: Resolution,
 
-    pub bitrate_kbps: usize,
-
     pub audio_source_ids: BTreeSet<SourceId>,
     pub sources: BTreeMap<SourceId, AggregatedSourceInfo>,
 
     pub audio_codec: CodecName,
     pub video_codec: CodecName,
+    pub audio_bitrate: Option<NonZeroUsize>,
+    pub video_bitrate: Option<usize>,
     pub encode_params: LayoutEncodeParams,
     pub frame_rate: FrameRate,
 }
@@ -120,11 +122,13 @@ impl Layout {
     }
 
     pub fn video_bitrate_bps(&self) -> usize {
-        if self.bitrate_kbps == 0 {
-            (200 * self.video_source_ids().count()) * 1024
-        } else {
-            self.bitrate_kbps * 1024
-        }
+        self.video_bitrate
+            .unwrap_or_else(|| 200 * self.video_source_ids().count() * 1024)
+    }
+
+    pub fn audio_bitrate_bps(&self) -> NonZeroUsize {
+        self.audio_bitrate
+            .unwrap_or(NonZeroUsize::new(audio::DEFAULT_BITRATE).expect("infallible"))
     }
 
     pub fn has_audio(&self) -> bool {
@@ -169,7 +173,8 @@ struct RawLayout {
     video_layout: BTreeMap<String, RawRegion>,
     trim: bool,
     resolution: Option<Resolution>, // TODO: ユニットテスト追加 (None の場合)
-    bitrate: usize,
+    audio_bitrate: Option<NonZeroUsize>,
+    video_bitrate: Option<usize>,
     audio_codec: CodecName,
     video_codec: CodecName,
     encode_params: LayoutEncodeParams,
@@ -180,6 +185,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
+        // TODO: JsonObject を使う
         let (
             [audio_sources],
             [
@@ -187,6 +193,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 video_layout,
                 trim,
                 bitrate,
+                audio_bitrate,
+                video_bitrate,
                 resolution,
                 video_codec,
                 audio_codec,
@@ -199,6 +207,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 "video_layout",
                 "trim",
                 "bitrate",
+                "audio_bitrate",
+                "video_bitrate",
                 "resolution",
                 "video_codec",
                 "audio_codec",
@@ -217,7 +227,15 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 .unwrap_or_default(),
             trim: trim.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             resolution: resolution.map(|v| v.try_to()).transpose()?,
-            bitrate: bitrate.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            audio_bitrate: audio_bitrate.map(|v| v.try_to()).transpose()?,
+            video_bitrate: if let Some(bitrate) = video_bitrate {
+                Some(bitrate.try_to()?)
+            } else {
+                // "bitrate" の方は kbps 単位
+                bitrate
+                    .map(|v| v.try_to::<usize>().map(|v| v * 1024))
+                    .transpose()?
+            },
             encode_params: value.try_to()?,
             video_codec: video_codec
                 .map(|v| {
@@ -295,11 +313,12 @@ impl RawLayout {
             video_regions,
             trim_spans,
             resolution,
-            bitrate_kbps: self.bitrate,
             audio_source_ids,
             sources,
             audio_codec: self.audio_codec,
             video_codec: self.video_codec,
+            audio_bitrate: self.audio_bitrate,
+            video_bitrate: self.video_bitrate,
             encode_params: self.encode_params,
             frame_rate: self.frame_rate,
         })

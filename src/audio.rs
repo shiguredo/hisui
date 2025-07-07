@@ -18,7 +18,8 @@ pub const SAMPLE_RATE: u16 = 48000;
 pub const CHANNELS: u16 = 2;
 
 // エンコードパラメーターのデフォルト値
-pub const DEFAULT_OPUS_BITRATE: &str = "65536";
+pub const DEFAULT_BITRATE: usize = 65536;
+pub const DEFAULT_OPUS_BITRATE: &str = "65536"; // TODO: delete
 pub const DEFAULT_AAC_BITRATE: &str = "64000";
 
 #[derive(Debug, Clone)]
