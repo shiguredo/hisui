@@ -543,7 +543,7 @@ fn is_wildcard_name_matched(wildcard_name: &str, mut name: &str) -> bool {
     wildcard_name.ends_with('*') || name.is_empty()
 }
 
-pub fn decide_trim_spans<'a>(
+fn decide_trim_spans<'a>(
     sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
 ) -> BTreeMap<Duration, Duration> {
     // 時刻順でソートする
