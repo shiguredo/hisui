@@ -1,7 +1,6 @@
-use crate::{
-    encoder_libvpx_params, encoder_openh264_params, encoder_svt_av1_params,
-    encoder_video_toolbox_params,
-};
+#[cfg(target_os = "macos")]
+use crate::encoder_video_toolbox_params;
+use crate::{encoder_libvpx_params, encoder_openh264_params, encoder_svt_av1_params};
 
 #[derive(Debug, Clone, Default)]
 pub struct LayoutEncodeParams {
