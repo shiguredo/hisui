@@ -189,7 +189,9 @@ impl Composer {
 
         let audio_encoder = match self.layout.audio_codec {
             #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => AudioEncoder::new_fdk_aac(self.out_aac_bit_rate).or_fail()?,
+            CodecName::Aac => {
+                AudioEncoder::new_fdk_aac(self.layout.audio_bitrate_bps()).or_fail()?
+            }
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
             CodecName::Aac => {
                 AudioEncoder::new_audio_toolbox_aac(self.layout.audio_bitrate_bps()).or_fail()?
