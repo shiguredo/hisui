@@ -4,7 +4,6 @@ use crate::{encoder_libvpx_params, encoder_openh264_params, encoder_svt_av1_para
 
 #[derive(Debug, Clone, Default)]
 pub struct LayoutEncodeParams {
-    // TODO: bitrate とかはこっちに移動してもいい
     pub libvpx_vp8: Option<shiguredo_libvpx::EncoderConfig>,
     pub libvpx_vp9: Option<shiguredo_libvpx::EncoderConfig>,
     pub openh264: Option<shiguredo_openh264::EncoderConfig>,
