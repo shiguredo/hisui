@@ -1,11 +1,11 @@
-use std::{collections::HashSet, num::NonZeroUsize, path::PathBuf, time::Instant};
+use std::{collections::HashSet, path::PathBuf, time::Instant};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-    audio::{AudioDataReceiver, DEFAULT_AAC_BITRATE, DEFAULT_OPUS_BITRATE},
+    audio::AudioDataReceiver,
     channel::{self, ErrorFlag},
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
@@ -27,10 +27,6 @@ pub struct Composer {
     pub show_progress_bar: bool,
     pub max_cpu_cores: Option<usize>,
     pub stats_file_path: Option<PathBuf>,
-
-    // TODO: 以降はレイアウトに移動する
-    pub out_aac_bit_rate: NonZeroUsize,
-    pub out_opus_bit_rate: NonZeroUsize,
 }
 
 #[derive(Debug)]
@@ -47,8 +43,6 @@ impl Composer {
             show_progress_bar: false,
             max_cpu_cores: None,
             stats_file_path: None,
-            out_aac_bit_rate: DEFAULT_AAC_BITRATE.parse().expect("infallible"),
-            out_opus_bit_rate: DEFAULT_OPUS_BITRATE.parse().expect("infallible"),
         }
     }
 
@@ -195,16 +189,18 @@ impl Composer {
 
         let audio_encoder = match self.layout.audio_codec {
             #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => AudioEncoder::new_fdk_aac(self.out_aac_bit_rate).or_fail()?,
+            CodecName::Aac => {
+                AudioEncoder::new_fdk_aac(self.layout.audio_bitrate_bps()).or_fail()?
+            }
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
             CodecName::Aac => {
-                AudioEncoder::new_audio_toolbox_aac(self.out_aac_bit_rate).or_fail()?
+                AudioEncoder::new_audio_toolbox_aac(self.layout.audio_bitrate_bps()).or_fail()?
             }
             #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
             CodecName::Aac => {
                 return Err(orfail::Failure::new("AAC output is not supported"));
             }
-            CodecName::Opus => AudioEncoder::new_opus(self.out_opus_bit_rate).or_fail()?,
+            CodecName::Opus => AudioEncoder::new_opus(self.layout.audio_bitrate_bps()).or_fail()?,
             _ => unreachable!(),
         };
         let encoded_audio_rx = AudioEncoderThread::start(

@@ -580,8 +580,9 @@ impl Mp4Writer {
             trak_boxes.push(self.build_dummy_trak_box(audio_sample_count));
         }
         if layout.has_video() {
-            let video_sample_count = duration.as_secs() as usize * layout.fps.numerator.get()
-                / layout.fps.denumerator.get();
+            let video_sample_count = duration.as_secs() as usize
+                * layout.frame_rate.numerator.get()
+                / layout.frame_rate.denumerator.get();
             trak_boxes.push(self.build_dummy_trak_box(video_sample_count));
         }
 

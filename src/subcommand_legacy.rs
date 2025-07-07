@@ -299,6 +299,12 @@ impl Runner {
 
         layout.video_codec = self.args.out_video_codec;
         layout.audio_codec = self.args.out_audio_codec;
+        layout.frame_rate = self.args.out_video_frame_rate;
+        layout.audio_bitrate = Some(match layout.audio_codec {
+            CodecName::Aac => self.args.out_aac_bit_rate,
+            CodecName::Opus => self.args.out_opus_bit_rate,
+            _ => unreachable!(),
+        });
 
         // レガシーではエンコードパラメータの JSON 経由での指定には非対応
         layout.encode_params = Default::default();
@@ -338,8 +344,6 @@ impl Runner {
         composer.show_progress_bar = self.args.show_progress_bar;
         composer.max_cpu_cores = self.args.cpu_cores;
         composer.stats_file_path = self.args.out_stats_file.clone();
-        composer.out_aac_bit_rate = self.args.out_aac_bit_rate;
-        composer.out_opus_bit_rate = self.args.out_opus_bit_rate;
 
         // 合成を実行
         let ComposeResult { stats: _, success } = composer.compose(&out_file_path).or_fail()?;
@@ -357,13 +361,7 @@ impl Runner {
             let layout_json = std::fs::read_to_string(layout_file_path)
                 .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
             let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
-            Layout::from_layout_json(
-                base_path,
-                layout_file_path,
-                &layout_json,
-                self.args.out_video_frame_rate,
-            )
-            .or_fail()
+            Layout::from_layout_json(base_path, layout_file_path, &layout_json).or_fail()
         } else if let Some(report_file_path) = &self.args.in_metadata_file {
             let report = RecordingMetadata::from_file(report_file_path).or_fail()?;
             log::debug!("loaded recording report: {report:?}");
@@ -372,7 +370,6 @@ impl Runner {
                 &report,
                 self.args.audio_only,
                 self.args.max_columns.get(),
-                self.args.out_video_frame_rate,
             )
             .or_fail()
         } else {
