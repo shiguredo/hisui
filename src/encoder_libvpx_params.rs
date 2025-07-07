@@ -5,7 +5,7 @@ const DEFAULT_CQ_LEVEL: usize = 30;
 const DEFAULT_MIN_Q: usize = 10;
 const DEFAULT_MAX_Q: usize = 50;
 
-pub fn parse_libvpx_vp8_encode_params(
+pub fn parse_vp8_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_libvpx::EncoderConfig, nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
@@ -24,28 +24,26 @@ pub fn parse_libvpx_vp8_encode_params(
     config.cpu_used = params.get("cpu_used")?;
 
     // エンコード期限設定
-    if let Some(deadline) =
-        params.get_with("deadline", |v| match v.to_unquoted_string_str()?.as_ref() {
+    config.deadline = params
+        .get_with("deadline", |v| match v.to_unquoted_string_str()?.as_ref() {
             "best" => Ok(shiguredo_libvpx::EncodingDeadline::Best),
             "good" => Ok(shiguredo_libvpx::EncodingDeadline::Good),
             "realtime" => Ok(shiguredo_libvpx::EncodingDeadline::Realtime),
             _ => Err(v.invalid("unknown 'deadline' value")),
         })?
-    {
-        config.deadline = deadline;
-    }
+        .unwrap_or(config.deadline);
 
     // レート制御モード
-    if let Some(rate_control) = params.get_with("rate_control", |v| {
-        match v.to_unquoted_string_str()?.as_ref() {
-            "vbr" => Ok(shiguredo_libvpx::RateControlMode::Vbr),
-            "cbr" => Ok(shiguredo_libvpx::RateControlMode::Cbr),
-            "cq" => Ok(shiguredo_libvpx::RateControlMode::Cq),
-            _ => Err(v.invalid("unknown 'rate_control' value")),
-        }
-    })? {
-        config.rate_control = rate_control;
-    }
+    config.rate_control = params
+        .get_with("rate_control", |v| {
+            match v.to_unquoted_string_str()?.as_ref() {
+                "vbr" => Ok(shiguredo_libvpx::RateControlMode::Vbr),
+                "cbr" => Ok(shiguredo_libvpx::RateControlMode::Cbr),
+                "cq" => Ok(shiguredo_libvpx::RateControlMode::Cq),
+                _ => Err(v.invalid("unknown 'rate_control' value")),
+            }
+        })?
+        .unwrap_or(config.rate_control);
 
     // 先読みフレーム数
     config.lag_in_frames = params.get("lag_in_frames")?;
@@ -89,7 +87,7 @@ pub fn parse_libvpx_vp8_encode_params(
     Ok(config)
 }
 
-pub fn parse_libvpx_vp9_encode_params(
+pub fn parse_vp9_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_libvpx::EncoderConfig, nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
@@ -108,28 +106,26 @@ pub fn parse_libvpx_vp9_encode_params(
     config.cpu_used = params.get("cpu_used")?;
 
     // エンコード期限設定
-    if let Some(deadline) =
-        params.get_with("deadline", |v| match v.to_unquoted_string_str()?.as_ref() {
+    config.deadline = params
+        .get_with("deadline", |v| match v.to_unquoted_string_str()?.as_ref() {
             "best" => Ok(shiguredo_libvpx::EncodingDeadline::Best),
             "good" => Ok(shiguredo_libvpx::EncodingDeadline::Good),
             "realtime" => Ok(shiguredo_libvpx::EncodingDeadline::Realtime),
             _ => Err(v.invalid("unknown 'deadline' value")),
         })?
-    {
-        config.deadline = deadline;
-    }
+        .unwrap_or(config.deadline);
 
     // レート制御モード
-    if let Some(rate_control) = params.get_with("rate_control", |v| {
-        match v.to_unquoted_string_str()?.as_ref() {
-            "vbr" => Ok(shiguredo_libvpx::RateControlMode::Vbr),
-            "cbr" => Ok(shiguredo_libvpx::RateControlMode::Cbr),
-            "cq" => Ok(shiguredo_libvpx::RateControlMode::Cq),
-            _ => Err(v.invalid("unknown 'rate_control' value")),
-        }
-    })? {
-        config.rate_control = rate_control;
-    }
+    config.rate_control = params
+        .get_with("rate_control", |v| {
+            match v.to_unquoted_string_str()?.as_ref() {
+                "vbr" => Ok(shiguredo_libvpx::RateControlMode::Vbr),
+                "cbr" => Ok(shiguredo_libvpx::RateControlMode::Cbr),
+                "cq" => Ok(shiguredo_libvpx::RateControlMode::Cq),
+                _ => Err(v.invalid("unknown 'rate_control' value")),
+            }
+        })?
+        .unwrap_or(config.rate_control);
 
     // 先読みフレーム数
     config.lag_in_frames = params.get("lag_in_frames")?;

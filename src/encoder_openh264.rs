@@ -31,7 +31,7 @@ impl Openh264Encoder {
             width,
             height,
             target_bitrate: layout.video_bitrate_bps(),
-            ..Default::default()
+            ..layout.encode_params.openh264.clone().unwrap_or_default()
         };
         let inner = shiguredo_openh264::Encoder::new(lib, &config).or_fail()?;
         Ok(Self {
