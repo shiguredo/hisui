@@ -118,23 +118,13 @@ pub enum VideoEncoder {
 }
 
 impl VideoEncoder {
-    pub fn new_vp8(
-        layout: &Layout,
-        cq_level: usize,
-        min_q: usize,
-        max_q: usize,
-    ) -> orfail::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp8(layout, cq_level, min_q, max_q).or_fail()?;
+    pub fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp8(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 
-    pub fn new_vp9(
-        layout: &Layout,
-        cq_level: usize,
-        min_q: usize,
-        max_q: usize,
-    ) -> orfail::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp9(layout, cq_level, min_q, max_q).or_fail()?;
+    pub fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp9(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 

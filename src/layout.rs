@@ -8,8 +8,9 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
+    layout_encode_params::LayoutEncodeParams,
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
-    types::{EvenUsize, PixelPosition},
+    types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFrame},
 };
 
@@ -18,7 +19,7 @@ use crate::{
 const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
 
 /// 合成レイアウト
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Layout {
     pub base_path: PathBuf,
     // z-pos 順に並んだリージョン列
@@ -32,19 +33,23 @@ pub struct Layout {
     pub audio_source_ids: BTreeSet<SourceId>,
     pub sources: BTreeMap<SourceId, AggregatedSourceInfo>,
 
+    pub audio_codec: CodecName,
+    pub video_codec: CodecName,
+    pub encode_params: LayoutEncodeParams,
+
     // 以降は JSON には含まれないフィールド
+    // TODO: 含めるようにする ＆ audio bitrate も含める
     pub fps: FrameRate,
 }
 
 impl Layout {
     /// レイアウト JSON ファイルで指示されたレイアウトを作成する
     pub fn from_layout_json(
+        base_path: PathBuf,
         layout_file_path: &Path,
         json: &str,
         fps: FrameRate,
     ) -> orfail::Result<Self> {
-        let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
-
         let json = nojson::RawJson::parse(json)
             .map_err(|e| malformed_json_error(layout_file_path, json, e))
             .or_fail()?;
@@ -162,7 +167,7 @@ impl Layout {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct RawLayout {
     audio_sources: Vec<PathBuf>,
     audio_sources_excluded: Vec<PathBuf>,
@@ -170,6 +175,9 @@ struct RawLayout {
     trim: bool,
     resolution: Option<Resolution>, // TODO: ユニットテスト追加 (None の場合)
     bitrate: usize,
+    audio_codec: CodecName,
+    video_codec: CodecName,
+    encode_params: LayoutEncodeParams,
 }
 
 impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
@@ -184,6 +192,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 trim,
                 bitrate,
                 resolution,
+                video_codec,
+                audio_codec,
             ],
         ) = value.to_fixed_object(
             ["audio_sources"],
@@ -193,6 +203,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 "trim",
                 "bitrate",
                 "resolution",
+                "video_codec",
+                "audio_codec",
             ],
         )?;
         Ok(Self {
@@ -208,6 +220,21 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
             trim: trim.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             resolution: resolution.map(|v| v.try_to()).transpose()?,
             bitrate: bitrate.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            encode_params: value.try_to()?,
+            video_codec: video_codec
+                .map(|v| {
+                    v.to_unquoted_string_str()
+                        .and_then(|s| CodecName::parse_video(&s).map_err(|e| v.invalid(e)))
+                })
+                .transpose()?
+                .unwrap_or(CodecName::Vp8),
+            audio_codec: audio_codec
+                .map(|v| {
+                    v.to_unquoted_string_str()
+                        .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))
+                })
+                .transpose()?
+                .unwrap_or(CodecName::Opus),
         })
     }
 }
@@ -269,6 +296,9 @@ impl RawLayout {
             bitrate_kbps: self.bitrate,
             audio_source_ids,
             sources,
+            audio_codec: self.audio_codec,
+            video_codec: self.video_codec,
+            encode_params: self.encode_params,
             fps,
         })
     }

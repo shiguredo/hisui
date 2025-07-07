@@ -14,12 +14,15 @@ pub mod encoder_audio_toolbox;
 #[cfg(feature = "fdk-aac")]
 pub mod encoder_fdk_aac;
 pub mod encoder_libvpx;
+pub mod encoder_libvpx_params;
 pub mod encoder_openh264;
 pub mod encoder_opus;
 pub mod encoder_svt_av1;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox;
+pub mod json;
 pub mod layout;
+pub mod layout_encode_params;
 pub mod logger;
 pub mod metadata;
 pub mod mixer_audio;

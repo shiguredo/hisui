@@ -11,7 +11,7 @@ use hisui::{
     metadata::{SourceId, SourceInfo},
     mixer_video::VideoMixerThread,
     stats::{MixerStats, SharedStats, Stats, VideoMixerStats},
-    types::{EvenUsize, PixelPosition},
+    types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
 use orfail::OrFail;
@@ -788,6 +788,9 @@ fn layout(
         audio_source_ids: Default::default(),
         bitrate_kbps: 0,
         fps: FPS,
+        audio_codec: CodecName::Opus,
+        video_codec: CodecName::Vp8,
+        encode_params: Default::default(),
     }
 }
 

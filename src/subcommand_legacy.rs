@@ -294,8 +294,26 @@ impl Runner {
 
     pub fn run(&mut self) -> orfail::Result<()> {
         // レイアウトを準備
-        let layout = self.create_layout().or_fail()?;
+        let mut layout = self.create_layout().or_fail()?;
         log::debug!("layout: {layout:?}");
+
+        layout.video_codec = self.args.out_video_codec;
+        layout.audio_codec = self.args.out_audio_codec;
+
+        // レガシーではエンコードパラメータの JSON 経由での指定には非対応
+        layout.encode_params = Default::default();
+        layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
+            max_quantizer: self.args.libvpx_max_q,
+            min_quantizer: self.args.libvpx_min_q,
+            cq_level: self.args.libvpx_cq_level,
+            ..Default::default()
+        });
+        layout.encode_params.libvpx_vp9 = Some(shiguredo_libvpx::EncoderConfig {
+            max_quantizer: self.args.libvpx_max_q,
+            min_quantizer: self.args.libvpx_min_q,
+            cq_level: self.args.libvpx_cq_level,
+            ..Default::default()
+        });
 
         // 必要に応じて openh264 の共有ライブラリを読み込む
         let openh264_lib =
@@ -316,15 +334,10 @@ impl Runner {
 
         // Composer を作成して設定
         let mut composer = Composer::new(layout);
-        composer.video_codec = self.args.out_video_codec;
-        composer.audio_codec = self.args.out_audio_codec;
         composer.openh264_lib = openh264_lib;
         composer.show_progress_bar = self.args.show_progress_bar;
         composer.max_cpu_cores = self.args.cpu_cores;
         composer.stats_file_path = self.args.out_stats_file.clone();
-        composer.libvpx_cq_level = self.args.libvpx_cq_level;
-        composer.libvpx_min_q = self.args.libvpx_min_q;
-        composer.libvpx_max_q = self.args.libvpx_max_q;
         composer.out_aac_bit_rate = self.args.out_aac_bit_rate;
         composer.out_opus_bit_rate = self.args.out_opus_bit_rate;
 
@@ -343,7 +356,9 @@ impl Runner {
         if let Some(layout_file_path) = &self.args.layout {
             let layout_json = std::fs::read_to_string(layout_file_path)
                 .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
+            let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
             Layout::from_layout_json(
+                base_path,
                 layout_file_path,
                 &layout_json,
                 self.args.out_video_frame_rate,
