@@ -786,10 +786,11 @@ fn layout(
         // 以下のフィールドはテストで使われないので、適当な値を設定しておく
         base_path: PathBuf::from(""),
         audio_source_ids: Default::default(),
-        bitrate_kbps: 0,
         frame_rate: FPS,
         audio_codec: CodecName::Opus,
         video_codec: CodecName::Vp8,
+        audio_bitrate: None,
+        video_bitrate: None,
         encode_params: Default::default(),
     }
 }

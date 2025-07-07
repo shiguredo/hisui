@@ -187,9 +187,10 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
         trim_spans: BTreeMap::new(),
         base_path: PathBuf::from(""),
         resolution: Resolution::new(16, 16).expect("infallible"),
-        bitrate_kbps: 0,
         audio_codec: CodecName::Opus,
         video_codec: CodecName::Vp8,
+        audio_bitrate: None,
+        video_bitrate: None,
         encode_params: Default::default(),
     }
 }
