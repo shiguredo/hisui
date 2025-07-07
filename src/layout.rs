@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     error::Error,
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -11,14 +11,15 @@ use orfail::OrFail;
 use crate::{
     audio,
     layout_encode_params::LayoutEncodeParams,
+    layout_region::{RawRegion, Region, decide_grid_dimensions},
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
-    types::{CodecName, EvenUsize, PixelPosition},
-    video::{FrameRate, VideoFrame},
+    types::{CodecName, EvenUsize},
+    video::FrameRate,
 };
 
 // セルの枠線のピクセル数
 // なお外枠のピクセル数は、解像度やその他の要因によって、これより大きくなったり小さくなったりすることがある
-const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
+pub const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
 
 /// 合成レイアウト
 #[derive(Debug, Clone)]
@@ -325,348 +326,6 @@ impl RawLayout {
     }
 }
 
-/// 映像リージョン
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Region {
-    pub grid: Grid,
-    pub source_ids: BTreeSet<SourceId>,
-    pub height: EvenUsize,
-    pub width: EvenUsize,
-    pub position: PixelPosition,
-    pub z_pos: isize,
-    pub top_border_pixels: EvenUsize,
-    pub left_border_pixels: EvenUsize,
-}
-
-impl Region {
-    pub fn decide_frame_size(&self, frame: &VideoFrame) -> (EvenUsize, EvenUsize) {
-        let width_ratio = self.grid.cell_width.get() as f64 / frame.width.get() as f64;
-        let height_ratio = self.grid.cell_height.get() as f64 / frame.height.get() as f64;
-        let ratio = if width_ratio < height_ratio {
-            // 横に合わせて上下に黒帯を入れる
-            width_ratio
-        } else {
-            // 縦に合わせて左右に黒帯を入れる
-            height_ratio
-        };
-        (
-            EvenUsize::truncating_new((frame.width.get() as f64 * ratio).floor() as usize),
-            EvenUsize::truncating_new((frame.height.get() as f64 * ratio).floor() as usize),
-        )
-    }
-
-    pub fn cell_position(&self, cell_index: usize) -> PixelPosition {
-        let cell = self.grid.get_cell_position(cell_index);
-        let mut x = self.position.x + self.left_border_pixels;
-        let mut y = self.position.y + self.top_border_pixels;
-
-        x += self.grid.cell_width * cell.column + BORDER_PIXELS * cell.column;
-        y += self.grid.cell_height * cell.row + BORDER_PIXELS * cell.row;
-
-        PixelPosition { x, y }
-    }
-}
-
-/// 映像リージョン
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RawRegion {
-    cells_excluded: Vec<usize>,
-    height: usize,
-    max_columns: usize,
-    max_rows: usize,
-    reuse: ReuseKind,
-    video_sources: Vec<PathBuf>,
-    video_sources_excluded: Vec<PathBuf>,
-    width: usize,
-    cell_width: usize,  // TODO: ユニットテスト追加
-    cell_height: usize, // TODO: ユニットテスト追加
-    x_pos: usize,
-    y_pos: usize,
-    z_pos: isize,
-}
-
-impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
-        let (
-            [video_sources],
-            [
-                cells_excluded,
-                height,
-                max_columns,
-                max_rows,
-                reuse,
-                video_sources_excluded,
-                width,
-                cell_width,
-                cell_height,
-                x_pos,
-                y_pos,
-                z_pos,
-            ],
-        ) = value.to_fixed_object(
-            ["video_sources"],
-            [
-                "cells_excluded",
-                "height",
-                "max_columns",
-                "max_rows",
-                "reuse",
-                "video_sources_excluded",
-                "width",
-                "cell_width",
-                "cell_height",
-                "x_pos",
-                "y_pos",
-                "z_pos",
-            ],
-        )?;
-        Ok(Self {
-            video_sources: video_sources.try_to()?,
-            cells_excluded: cells_excluded
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            height: height.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            max_columns: max_columns
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            max_rows: max_rows
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            reuse: reuse.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            video_sources_excluded: video_sources_excluded
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            width: width.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            cell_width: cell_width
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            cell_height: cell_height
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            x_pos: x_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            y_pos: y_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            z_pos: z_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-        })
-    }
-}
-
-impl RawRegion {
-    fn into_region(
-        mut self,
-        base_path: &Path,
-        sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
-        resolution: Option<Resolution>,
-    ) -> orfail::Result<Region> {
-        if self.width != 0 && self.cell_width != 0 {
-            return Err(orfail::Failure::new(
-                "Cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
-            ));
-        }
-
-        if self.height != 0 && self.cell_height != 0 {
-            return Err(orfail::Failure::new(
-                "Cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
-            ));
-        }
-
-        let resolved = resolve_source_and_media_path_pairs(
-            base_path,
-            &self.video_sources,
-            &self.video_sources_excluded,
-        )
-        .or_fail()?;
-
-        let mut source_ids = BTreeSet::new();
-        for (source, media_path) in resolved {
-            sources
-                .entry(source.id.clone())
-                .or_default()
-                .update(&source, &media_path);
-            source_ids.insert(source.id);
-        }
-
-        let mut grid_sources = sources.clone();
-        grid_sources.retain(|id, _| source_ids.contains(id));
-
-        let max_sources = decide_max_simultaneous_sources(&grid_sources, &self.cells_excluded);
-        let (rows, columns) = decide_grid_dimensions(self.max_rows, self.max_columns, max_sources);
-        let assigned = assign_sources(
-            self.reuse,
-            grid_sources.values().cloned().collect(),
-            rows * columns,
-            &self.cells_excluded,
-        );
-
-        if self.cell_width != 0 {
-            let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
-            let grid_width = self.cell_width * columns + horizontal_inner_borders;
-
-            // 外枠を考慮
-            self.width = if resolution
-                .is_some_and(|r| grid_width + BORDER_PIXELS.get() * 2 <= r.width.get())
-            {
-                grid_width + BORDER_PIXELS.get() * 2
-            } else {
-                grid_width
-            };
-        }
-
-        if self.cell_height != 0 {
-            let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
-            let grid_height = self.cell_height * rows + vertical_inner_borders;
-
-            // 外枠を考慮
-            self.height = if resolution
-                .is_some_and(|r| grid_height + BORDER_PIXELS.get() * 2 <= r.height.get())
-            {
-                grid_height + BORDER_PIXELS.get() * 2
-            } else {
-                grid_height
-            };
-        }
-
-        // 解像度を確定する
-        let resolution = if let Some(resolution) = resolution {
-            resolution
-        } else {
-            // 全体の解像度が未指定の場合には、リージョンの width / height から求める
-            (self.width > 0).or_fail_with(|()| {
-                "Region width must be specified when resolution is not set".to_owned()
-            })?;
-            (self.height > 0).or_fail_with(|()| {
-                "Region height must be specified when resolution is not set".to_owned()
-            })?;
-
-            // リージョンの位置とサイズから必要な解像度を計算
-            let required_width = self.x_pos + self.width;
-            let required_height = self.y_pos + self.height;
-            Resolution::new(required_width, required_height).or_fail()?
-        };
-
-        // 高さの確認と調整
-        if self.height != 0 {
-            (16..=resolution.height.get())
-                .contains(&self.height)
-                .or_fail_with(|()| {
-                    format!(
-                        "video_layout region height is out of range: {}",
-                        self.height
-                    )
-                })?;
-            self.height -= self.height % 2; // 偶数にする
-        } else {
-            // 0 は自動計算を意味する
-            self.height = resolution.height.get().saturating_sub(self.y_pos);
-        }
-
-        // 幅の確認と調整
-        if self.width != 0 {
-            (16..=resolution.width.get())
-                .contains(&self.width)
-                .or_fail_with(|()| {
-                    format!("video_layout region width is out of range: {}", self.width)
-                })?;
-            self.width -= self.width % 2; // 偶数にする
-        } else {
-            // 0 は自動計算を意味する
-            self.width = resolution.width.get().saturating_sub(self.x_pos);
-        }
-
-        // y_pos の確認
-        (0..resolution.height.get())
-            .contains(&self.y_pos)
-            .or_fail_with(|()| {
-                format!("video_layout region y_pos is out of range: {}", self.y_pos)
-            })?;
-
-        // x_pos の確認
-        (0..resolution.width.get())
-            .contains(&self.x_pos)
-            .or_fail_with(|()| {
-                format!("video_layout region x_pos is out of range: {}", self.x_pos)
-            })?;
-
-        // z_pos の確認
-        (-99..=99).contains(&self.z_pos).or_fail_with(|()| {
-            format!("video_layout region z_pos is out of range: {}", self.z_pos)
-        })?;
-
-        let (cell_width, cell_height, top_border_pixels, left_border_pixels) = self
-            .decide_cell_resolution_and_borders(rows, columns, resolution)
-            .or_fail()?;
-
-        let grid = Grid {
-            assigned_sources: assigned,
-            rows,
-            columns,
-            cell_width,
-            cell_height,
-        };
-
-        Ok(Region {
-            grid,
-            source_ids,
-            height: EvenUsize::truncating_new(self.height),
-            width: EvenUsize::truncating_new(self.width),
-            position: PixelPosition {
-                x: EvenUsize::truncating_new(self.x_pos), // 偶数位置に丸める
-                y: EvenUsize::truncating_new(self.y_pos), // 同上
-            },
-            z_pos: self.z_pos,
-            top_border_pixels,
-            left_border_pixels,
-        })
-    }
-
-    fn decide_cell_resolution_and_borders(
-        &self,
-        rows: usize,
-        columns: usize,
-        resolution: Resolution,
-    ) -> orfail::Result<(EvenUsize, EvenUsize, EvenUsize, EvenUsize)> {
-        let mut grid_width = self.width;
-        let mut grid_height = self.height;
-        if grid_width != resolution.width.get() {
-            grid_width = grid_width.checked_sub(BORDER_PIXELS.get() * 2).or_fail()?;
-        }
-        if grid_height != resolution.height.get() {
-            grid_height = grid_height.checked_sub(BORDER_PIXELS.get() * 2).or_fail()?;
-        }
-
-        let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
-        let grid_width_without_inner_borders = grid_width.saturating_sub(horizontal_inner_borders);
-
-        let cell_width = EvenUsize::truncating_new(grid_width_without_inner_borders / columns);
-
-        let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
-        let grid_height_without_inner_borders = grid_height.saturating_sub(vertical_inner_borders);
-
-        let cell_height = EvenUsize::truncating_new(grid_height_without_inner_borders / rows);
-
-        let vertical_outer_borders =
-            self.height - (cell_height.get() * rows + vertical_inner_borders);
-        let horizontal_outer_borders =
-            self.width - (cell_width.get() * columns + horizontal_inner_borders);
-
-        let top_border_pixels = EvenUsize::truncating_new(vertical_outer_borders / 2);
-        let left_border_pixels = EvenUsize::truncating_new(horizontal_outer_borders / 2);
-        Ok((
-            cell_width,
-            cell_height,
-            top_border_pixels,
-            left_border_pixels,
-        ))
-    }
-}
-
 /// ソースのセルへの割り当て情報
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AssignedSource {
@@ -681,7 +340,7 @@ pub struct AssignedSource {
 }
 
 impl AssignedSource {
-    fn new(cell_index: usize, priority: usize) -> Self {
+    pub fn new(cell_index: usize, priority: usize) -> Self {
         Self {
             cell_index,
             priority,
@@ -689,87 +348,11 @@ impl AssignedSource {
     }
 }
 
-/// 各リージョンのグリッドの情報
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Grid {
-    /// 各ソースがどのセルに割り当てられているか
-    pub assigned_sources: HashMap<SourceId, AssignedSource>,
-
-    /// グリッドの行数
-    pub rows: usize,
-
-    /// グリッドの列数
-    pub columns: usize,
-
-    /// セルの幅
-    pub cell_width: EvenUsize,
-
-    /// セルの高さ
-    pub cell_height: EvenUsize,
-}
-
-impl Grid {
-    /// セルのインデックスから、対応する行列位置を返す
-    pub fn get_cell_position(&self, cell_index: usize) -> CellPosition {
-        let row = cell_index / self.columns;
-        let column = cell_index % self.columns;
-        CellPosition { row, column }
-    }
-
-    pub fn assign_source(&mut self, source_id: SourceId, cell_index: usize, priority: usize) {
-        self.assigned_sources
-            .insert(source_id, AssignedSource::new(cell_index, priority));
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CellPosition {
-    pub row: usize,
-    pub column: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Cell {
-    Excluded,
-    Fresh,
-    Used(Duration), // 値は stop_timestamp
-}
-
-/// 各セルの再利用方法
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum ReuseKind {
-    /// 再利用しない
-    None,
-
-    /// 再利用する（競合時には開始時刻が早い映像ソースが優先される）
-    #[default]
-    ShowOldest,
-
-    /// 再利用する（競合時には開始時刻が遅い映像ソースが優先される）
-    ShowNewest,
-}
-
-impl<'text> nojson::FromRawJsonValue<'text> for ReuseKind {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
-        match value.to_unquoted_string_str()?.as_ref() {
-            "none" => Ok(Self::None),
-            "show_oldest" => Ok(Self::ShowOldest),
-            "show_newest" => Ok(Self::ShowNewest),
-            v => Err(nojson::JsonParseError::invalid_value(
-                value,
-                format!("unknown reuse kind: {v}"),
-            )),
-        }
-    }
-}
-
 /// 映像の解像度
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Resolution {
-    width: EvenUsize,
-    height: EvenUsize,
+    pub width: EvenUsize,
+    pub height: EvenUsize,
 }
 
 impl Resolution {
@@ -836,156 +419,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for Resolution {
     }
 }
 
-/// 最大同時ソース数を求める
-pub fn decide_max_simultaneous_sources(
-    sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
-    cells_excluded: &[usize],
-) -> usize {
-    // ソース数はどんなに多くても数十オーダーだと思うので非効率だけど分かりやすい実装にしている
-    let mut max = sources
-        .values()
-        .map(|s0| {
-            sources
-                .values()
-                .filter(|s1| s0.is_overlapped_with(s1))
-                .count()
-        })
-        .max()
-        .unwrap_or_default();
-
-    // 除外セルの分を考慮する
-    for cell_index in BTreeSet::from_iter(cells_excluded.iter().copied()) {
-        if cell_index < max {
-            max += 1;
-        } else {
-            // そもそも範囲外のセルが除外指定されている場合はここに来る
-            break;
-        }
-    }
-
-    max
-}
-
-/// 行列の最大値指定と最大同時ソース数をもとに、実際に使用するグリッドの行数と列数を求める
-///
-/// なお max_rows ないし max_columns で 0 が指定されたら未指定扱いとなる
-pub fn decide_grid_dimensions(
-    mut max_rows: usize,
-    mut max_columns: usize,
-    max_sources: usize,
-) -> (usize, usize) {
-    // まずは以下の方針で制約がない場合の行列数を求める:
-    // - `max_sources` を保持可能なサイズを確保する
-    // - できるだけ正方形に近くなるようにする:
-    //   - ただし、列は行よりも一つ値が大きくてもいい
-    let mut columns = (max_sources as f32).sqrt().ceil().max(1.0) as usize;
-    let mut rows = (columns - 1).max(1);
-    if rows * columns < max_sources {
-        // 正方形にしないと `max_sources` を保持できない
-        rows += 1;
-    }
-
-    // 以降では `max_rows` と `max_columns` を考慮した調整を行う
-
-    // コードを単純にするために、未指定は `usize::MAX` 扱いにする
-    if max_rows == 0 {
-        max_rows = usize::MAX;
-    }
-    if max_columns == 0 {
-        max_columns = usize::MAX;
-    }
-
-    // 行と列のどちらを基準にして調整を行うかを決める
-    let row_based_adjustment = match (rows <= max_rows, columns <= max_columns) {
-        (true, true) => return (rows, columns), // 制約を破っていないならここで終わり
-        (false, true) => true,                  // 行の制約が破れているので行基準
-        (true, false) => false,                 // 列の制約が破れているので列基準
-        (false, false) => {
-            // 両方ダメなら正方形に近くなるように最大値が小さい方を基準とする
-            // (max_rows == max_columns の場合はどっちが基準となってもいい)
-            max_rows < max_columns
-        }
-    };
-
-    // 基準となった方に従い調整を行う
-    if row_based_adjustment {
-        rows = max_rows;
-        columns = ((max_sources as f32 / rows as f32).ceil() as usize).clamp(1, max_columns);
-    } else {
-        columns = max_columns;
-        rows = ((max_sources as f32 / columns as f32).ceil() as usize).clamp(1, max_rows);
-    }
-
-    (rows, columns)
-}
-
-/// ソースのセルへの割り当てを行う
-pub fn assign_sources(
-    reuse: ReuseKind,
-    mut sources: Vec<AggregatedSourceInfo>,
-    cells: usize,
-    cells_excluded: &[usize],
-) -> HashMap<SourceId, AssignedSource> {
-    let mut cells = vec![Cell::Fresh; cells];
-    for &i in cells_excluded {
-        cells[i] = Cell::Excluded;
-    }
-    sources.sort_by_key(|x| (x.start_timestamp, x.stop_timestamp));
-
-    let mut assigned = HashMap::new();
-    let mut priority = usize::MAX / 2;
-    for source in &sources {
-        match reuse {
-            ReuseKind::None => {
-                // Fresh なセルを探す
-                if let Some(i) = cells.iter().position(|c| *c == Cell::Fresh) {
-                    cells[i] = Cell::Used(source.stop_timestamp);
-                    assigned.insert(source.id.clone(), AssignedSource::new(i, priority));
-                } else {
-                    // もう割り当て可能なセルがないのでここで終了
-                    break;
-                }
-            }
-            ReuseKind::ShowOldest | ReuseKind::ShowNewest => {
-                // Fresh or Used だけどもう期間を過ぎているセルを探す
-                if let Some(i) = cells.iter().position(|c| match *c {
-                    Cell::Fresh => true,
-                    Cell::Used(stop_timestamp) => stop_timestamp < source.start_timestamp,
-                    _ => false,
-                }) {
-                    cells[i] = Cell::Used(source.stop_timestamp);
-                    assigned.insert(source.id.clone(), AssignedSource::new(i, priority));
-                    continue;
-                }
-
-                // 現時点で利用可能なセルがない場合には、終了時刻が一番早いセルを探す
-                if let Some((i, stop_timestamp)) = cells
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, c)| {
-                        if let Cell::Used(stop_timestamp) = *c {
-                            Some((i, stop_timestamp))
-                        } else {
-                            None
-                        }
-                    })
-                    .min_by_key(|(i, t)| (*t, *i))
-                {
-                    cells[i] = Cell::Used(stop_timestamp.max(source.stop_timestamp));
-                    if reuse == ReuseKind::ShowOldest {
-                        priority += 1; // 古い方を優先する
-                    } else {
-                        priority -= 1; // 新しい方を優先する
-                    }
-                    assigned.insert(source.id.clone(), AssignedSource::new(i, priority));
-                }
-            }
-        }
-    }
-    assigned
-}
-
-fn resolve_source_and_media_path_pairs(
+pub fn resolve_source_and_media_path_pairs(
     base_path: &Path,
     sources: &[PathBuf],
     excluded: &[PathBuf],
@@ -1153,7 +587,7 @@ pub struct AggregatedSourceInfo {
 }
 
 impl AggregatedSourceInfo {
-    fn update(&mut self, source_info: &SourceInfo, media_path: &Path) {
+    pub fn update(&mut self, source_info: &SourceInfo, media_path: &Path) {
         self.id = source_info.id.clone();
         self.format = source_info.format;
         self.audio = source_info.audio;
@@ -1165,7 +599,7 @@ impl AggregatedSourceInfo {
     }
 
     // 二つのソースが時間的に重なる部分があるかどうかを求める
-    fn is_overlapped_with(&self, other: &Self) -> bool {
+    pub fn is_overlapped_with(&self, other: &Self) -> bool {
         if self.start_timestamp <= other.start_timestamp {
             other.start_timestamp <= self.stop_timestamp
         } else {

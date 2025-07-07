@@ -5,7 +5,10 @@ use std::{
 };
 
 use hisui::{
-    layout::{self, AggregatedSourceInfo, AssignedSource, Resolution, ReuseKind},
+    layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
+    layout_region::{
+        ReuseKind, assign_sources, decide_grid_dimensions, decide_max_simultaneous_sources,
+    },
     metadata::{SourceId, SourceInfo},
 };
 use orfail::OrFail;
@@ -29,64 +32,64 @@ fn valid_resolutions() -> orfail::Result<()> {
 }
 
 #[test]
-fn decide_grid_dimensions() {
+fn decide_grid_dimensions_works() {
     // max_rows / max_columns の両方が未指定の場合
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 1), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 2), (1, 2));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 3), (2, 2));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 4), (2, 2));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 5), (2, 3));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 6), (2, 3));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 7), (3, 3));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 9), (3, 3));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 10), (3, 4));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 12), (3, 4));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 17), (4, 5));
-    assert_eq!(layout::decide_grid_dimensions(0, 0, 20), (4, 5));
+    assert_eq!(decide_grid_dimensions(0, 0, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(0, 0, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(0, 0, 3), (2, 2));
+    assert_eq!(decide_grid_dimensions(0, 0, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(0, 0, 5), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 6), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 7), (3, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 9), (3, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 10), (3, 4));
+    assert_eq!(decide_grid_dimensions(0, 0, 12), (3, 4));
+    assert_eq!(decide_grid_dimensions(0, 0, 17), (4, 5));
+    assert_eq!(decide_grid_dimensions(0, 0, 20), (4, 5));
 
     // max_rows / max_columns の片方が未指定の場合
-    assert_eq!(layout::decide_grid_dimensions(1, 0, 1), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(0, 1, 1), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 0, 2), (1, 2));
-    assert_eq!(layout::decide_grid_dimensions(0, 1, 2), (2, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 0, 3), (1, 3));
-    assert_eq!(layout::decide_grid_dimensions(0, 1, 3), (3, 1));
-    assert_eq!(layout::decide_grid_dimensions(2, 0, 4), (2, 2));
-    assert_eq!(layout::decide_grid_dimensions(0, 2, 4), (2, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 0, 5), (2, 3));
-    assert_eq!(layout::decide_grid_dimensions(0, 2, 5), (3, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 0, 6), (2, 3));
-    assert_eq!(layout::decide_grid_dimensions(0, 2, 6), (3, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 0, 7), (2, 4));
-    assert_eq!(layout::decide_grid_dimensions(0, 2, 7), (4, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 0, 9), (2, 5));
-    assert_eq!(layout::decide_grid_dimensions(0, 2, 9), (5, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 0, 12), (2, 6));
-    assert_eq!(layout::decide_grid_dimensions(0, 2, 12), (6, 2));
+    assert_eq!(decide_grid_dimensions(1, 0, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(0, 1, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 0, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(0, 1, 2), (2, 1));
+    assert_eq!(decide_grid_dimensions(1, 0, 3), (1, 3));
+    assert_eq!(decide_grid_dimensions(0, 1, 3), (3, 1));
+    assert_eq!(decide_grid_dimensions(2, 0, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(0, 2, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 5), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 2, 5), (3, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 6), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 2, 6), (3, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 7), (2, 4));
+    assert_eq!(decide_grid_dimensions(0, 2, 7), (4, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 9), (2, 5));
+    assert_eq!(decide_grid_dimensions(0, 2, 9), (5, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 12), (2, 6));
+    assert_eq!(decide_grid_dimensions(0, 2, 12), (6, 2));
 
     // max_rows / max_columns の両方が指定されている場合
-    assert_eq!(layout::decide_grid_dimensions(1, 1, 1), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 2, 1), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(2, 2, 1), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 1, 2), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 2, 2), (1, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 2, 2), (1, 2));
-    assert_eq!(layout::decide_grid_dimensions(1, 1, 3), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 2, 3), (1, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 2, 3), (2, 2));
-    assert_eq!(layout::decide_grid_dimensions(1, 1, 4), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 2, 4), (1, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 2, 4), (2, 2));
-    assert_eq!(layout::decide_grid_dimensions(1, 1, 5), (1, 1));
-    assert_eq!(layout::decide_grid_dimensions(1, 2, 5), (1, 2));
-    assert_eq!(layout::decide_grid_dimensions(2, 2, 5), (2, 2));
-    assert_eq!(layout::decide_grid_dimensions(1, 7, 9), (1, 7));
-    assert_eq!(layout::decide_grid_dimensions(2, 7, 9), (2, 5));
-    assert_eq!(layout::decide_grid_dimensions(3, 7, 9), (3, 3));
+    assert_eq!(decide_grid_dimensions(1, 1, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(2, 2, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 1, 2), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(1, 1, 3), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 3), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 3), (2, 2));
+    assert_eq!(decide_grid_dimensions(1, 1, 4), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 4), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(1, 1, 5), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 5), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 5), (2, 2));
+    assert_eq!(decide_grid_dimensions(1, 7, 9), (1, 7));
+    assert_eq!(decide_grid_dimensions(2, 7, 9), (2, 5));
+    assert_eq!(decide_grid_dimensions(3, 7, 9), (3, 3));
 }
 
 #[test]
-fn decide_max_simultaneous_sources() {
+fn decide_max_simultaneous_sources_works() {
     // https://s3.amazonaws.com/com.twilio.prod.twilio-docs/images/composer_understanding_trim.original.png
     let source0 = source(0, 2);
     let source1 = source(1, 1);
@@ -114,11 +117,11 @@ fn decide_max_simultaneous_sources() {
     // 除外セルなし
     let cells_excluded = [];
     assert_eq!(
-        layout::decide_max_simultaneous_sources(&sources, &cells_excluded),
+        decide_max_simultaneous_sources(&sources, &cells_excluded),
         3
     );
     assert_eq!(
-        layout::decide_max_simultaneous_sources(
+        decide_max_simultaneous_sources(
             &sources.clone().into_iter().take(2).collect(),
             &cells_excluded
         ),
@@ -128,26 +131,26 @@ fn decide_max_simultaneous_sources() {
     // 除外セルあり
     let cells_excluded = [1, 3];
     assert_eq!(
-        layout::decide_max_simultaneous_sources(&sources, &cells_excluded),
+        decide_max_simultaneous_sources(&sources, &cells_excluded),
         5
     );
 
     let cells_excluded = [2];
     assert_eq!(
-        layout::decide_max_simultaneous_sources(&sources, &cells_excluded),
+        decide_max_simultaneous_sources(&sources, &cells_excluded),
         4
     );
 
     // 除外セルがあるけど、範囲外なので考慮されない
     let cells_excluded = [3];
     assert_eq!(
-        layout::decide_max_simultaneous_sources(&sources, &cells_excluded),
+        decide_max_simultaneous_sources(&sources, &cells_excluded),
         3
     );
 }
 
 #[test]
-fn assign_sources() {
+fn assign_sources_works() {
     // https://s3.amazonaws.com/com.twilio.prod.twilio-docs/images/composer_understanding_trim.original.png
     let source0 = source(0, 2);
     let source1 = source(1, 1);
@@ -195,7 +198,7 @@ fn assign_sources() {
     }
 
     // 1x1 region, ReuseKind::None
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::None,
         sources.values().cloned().collect(),
         1,
@@ -212,7 +215,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), None);
 
     // 1x1 region, ReuseKind::ShowOldest
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::ShowOldest,
         sources.values().cloned().collect(),
         1,
@@ -229,7 +232,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), Some(4));
 
     // 1x1 region, ReuseKind::ShowNewest
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::ShowNewest,
         sources.values().cloned().collect(),
         1,
@@ -246,7 +249,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), Some(4));
 
     // 1x2 region, ReuseKind::None
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::None,
         sources.values().cloned().collect(),
         2,
@@ -272,7 +275,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
 
     // 1x2 region, ReuseKind::ShowOldest
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::ShowOldest,
         sources.values().cloned().collect(),
         2,
@@ -298,7 +301,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
 
     // 1x2 region, ReuseKind::ShowNewest
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::ShowNewest,
         sources.values().cloned().collect(),
         2,
@@ -324,7 +327,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
 
     // 2x3 region, ReuseKind::None
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::None,
         sources.values().cloned().collect(),
         2 * 3,
@@ -386,7 +389,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 5), None);
 
     // 2x2 region, ReuseKind::ShowOldest
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::ShowOldest,
         sources.values().cloned().collect(),
         2 * 2,
@@ -430,7 +433,7 @@ fn assign_sources() {
     assert_eq!(get_assigned_source(&assigned, &sources, 8, 3), None);
 
     // 2x2 region, ReuseKind::ShowNewest
-    let assigned = layout::assign_sources(
+    let assigned = assign_sources(
         ReuseKind::ShowNewest,
         sources.values().cloned().collect(),
         2 * 2,
