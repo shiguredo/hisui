@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: anthropics/claude-code-action@beta
-        if: github.event.pull_request.author_association == 'MEMBER'
+        if: github.event.comment.user.login != 'copilot' && github.event.comment.author_association == 'MEMBER'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_SORA_OSS_SONNET }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
