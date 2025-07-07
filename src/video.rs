@@ -303,12 +303,8 @@ impl FromStr for FrameRate {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains('/') {
+        if let Some((integer, fraction)) = s.split_once('/') {
             // 分数表記
-            let mut tokens = s.splitn(2, '/');
-            let integer = tokens.next().expect("infallible");
-            let fraction = tokens.next().expect("infallible");
-
             let integer = NonZeroUsize::from_str(integer).map_err(|_| {
                 format!("the integer part of {s:?} is not a valid positive integer")
             })?;
