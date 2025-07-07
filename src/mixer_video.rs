@@ -7,7 +7,8 @@ use orfail::OrFail;
 
 use crate::{
     channel::{self, ErrorFlag},
-    layout::{Layout, Region},
+    layout::Layout,
+    layout_region::Region,
     metadata::SourceId,
     stats::{MixerStats, Seconds, SharedStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},

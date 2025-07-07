@@ -7,7 +7,8 @@ use std::{
 
 use hisui::{
     channel::{self, ErrorFlag},
-    layout::{AggregatedSourceInfo, Grid, Layout, Region, Resolution},
+    layout::{AggregatedSourceInfo, Grid, Layout, Resolution},
+    layout_region::Region,
     metadata::{SourceId, SourceInfo},
     mixer_video::VideoMixerThread,
     stats::{MixerStats, SharedStats, Stats, VideoMixerStats},

@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 use hisui::{
     audio::{AudioData, AudioDataReceiver, AudioDataSyncSender, AudioFormat, SAMPLE_RATE},
     channel,
-    layout::{AggregatedSourceInfo, AssignedSource, Grid, Layout, Region, Resolution},
+    layout::{AggregatedSourceInfo, AssignedSource, Grid, Layout, Resolution},
+    layout_region::Region,
     metadata::{SourceId, SourceInfo},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
