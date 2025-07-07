@@ -181,7 +181,7 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
                 )
             })
             .collect(),
-        fps: FrameRate::FPS_1,
+        frame_rate: FrameRate::FPS_1,
 
         // 以下のフィールドはテストで使われないので、適当な値を設定しておく
         trim_spans: BTreeMap::new(),

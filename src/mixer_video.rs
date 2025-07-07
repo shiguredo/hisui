@@ -113,8 +113,8 @@ impl VideoMixerThread {
 
     // フレーム数に対応するタイムスタンプを求める
     fn frames_to_timestamp(&self, frames: u64) -> Duration {
-        Duration::from_secs(frames * self.layout.fps.denumerator.get() as u64)
-            / self.layout.fps.numerator.get() as u32
+        Duration::from_secs(frames * self.layout.frame_rate.denumerator.get() as u64)
+            / self.layout.frame_rate.numerator.get() as u32
     }
 
     fn next_input_timestamp(&self) -> Duration {

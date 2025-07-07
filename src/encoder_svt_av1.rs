@@ -30,8 +30,8 @@ impl SvtAv1Encoder {
             target_bitrate: layout.video_bitrate_bps(),
             width: width.get(),
             height: height.get(),
-            fps_numerator: layout.fps.numerator.get(),
-            fps_denominator: layout.fps.denumerator.get(),
+            fps_numerator: layout.frame_rate.numerator.get(),
+            fps_denominator: layout.frame_rate.denumerator.get(),
             ..layout.encode_params.svt_av1.clone().unwrap_or_default()
         };
         let inner = shiguredo_svt_av1::Encoder::new(&config).or_fail()?;

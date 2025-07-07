@@ -36,10 +36,7 @@ pub struct Layout {
     pub audio_codec: CodecName,
     pub video_codec: CodecName,
     pub encode_params: LayoutEncodeParams,
-
-    // 以降は JSON には含まれないフィールド
-    // TODO: 含めるようにする ＆ audio bitrate も含める
-    pub fps: FrameRate,
+    pub frame_rate: FrameRate,
 }
 
 impl Layout {
@@ -48,7 +45,6 @@ impl Layout {
         base_path: PathBuf,
         layout_file_path: &Path,
         json: &str,
-        fps: FrameRate,
     ) -> orfail::Result<Self> {
         let json = nojson::RawJson::parse(json)
             .map_err(|e| malformed_json_error(layout_file_path, json, e))
@@ -58,7 +54,7 @@ impl Layout {
             .try_to()
             .map_err(|e| invalid_json_error(layout_file_path, &json, e))
             .or_fail()?;
-        raw.into_layout(base_path, fps).or_fail()
+        raw.into_layout(base_path).or_fail()
     }
 
     /// recording.report から合成レイアウトを作成する
@@ -67,7 +63,6 @@ impl Layout {
         report: &RecordingMetadata,
         audio_only: bool,
         max_columns: usize,
-        fps: FrameRate,
     ) -> orfail::Result<Self> {
         let base_path = report_file_path.parent().or_fail()?.to_path_buf();
 
@@ -121,7 +116,7 @@ impl Layout {
             .parse()
             .map(|nojson::Json(v)| v)
             .or_fail()?;
-        raw.into_layout(base_path, fps).or_fail()
+        raw.into_layout(base_path).or_fail()
     }
 
     pub fn video_bitrate_bps(&self) -> usize {
@@ -178,6 +173,7 @@ struct RawLayout {
     audio_codec: CodecName,
     video_codec: CodecName,
     encode_params: LayoutEncodeParams,
+    frame_rate: FrameRate,
 }
 
 impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
@@ -194,6 +190,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 resolution,
                 video_codec,
                 audio_codec,
+                frame_rate,
             ],
         ) = value.to_fixed_object(
             ["audio_sources"],
@@ -205,6 +202,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 "resolution",
                 "video_codec",
                 "audio_codec",
+                "frame_rate",
             ],
         )?;
         Ok(Self {
@@ -235,12 +233,19 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 })
                 .transpose()?
                 .unwrap_or(CodecName::Opus),
+            frame_rate: frame_rate
+                .map(|v| {
+                    v.to_unquoted_string_str()
+                        .and_then(|s| s.parse().map_err(|e| v.invalid(e)))
+                })
+                .transpose()?
+                .unwrap_or(FrameRate::FPS_25),
         })
     }
 }
 
 impl RawLayout {
-    fn into_layout(self, base_path: PathBuf, fps: FrameRate) -> orfail::Result<Layout> {
+    fn into_layout(self, base_path: PathBuf) -> orfail::Result<Layout> {
         // 利用するソース一覧を確定して、情報を読み込む
         let mut audio_source_ids = BTreeSet::new();
         let mut sources = BTreeMap::<SourceId, AggregatedSourceInfo>::new();
@@ -299,7 +304,7 @@ impl RawLayout {
             audio_codec: self.audio_codec,
             video_codec: self.video_codec,
             encode_params: self.encode_params,
-            fps,
+            frame_rate: self.frame_rate,
         })
     }
 }

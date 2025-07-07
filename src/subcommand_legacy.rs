@@ -299,6 +299,7 @@ impl Runner {
 
         layout.video_codec = self.args.out_video_codec;
         layout.audio_codec = self.args.out_audio_codec;
+        layout.frame_rate = self.args.out_video_frame_rate;
 
         // レガシーではエンコードパラメータの JSON 経由での指定には非対応
         layout.encode_params = Default::default();
@@ -357,13 +358,7 @@ impl Runner {
             let layout_json = std::fs::read_to_string(layout_file_path)
                 .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
             let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
-            Layout::from_layout_json(
-                base_path,
-                layout_file_path,
-                &layout_json,
-                self.args.out_video_frame_rate,
-            )
-            .or_fail()
+            Layout::from_layout_json(base_path, layout_file_path, &layout_json).or_fail()
         } else if let Some(report_file_path) = &self.args.in_metadata_file {
             let report = RecordingMetadata::from_file(report_file_path).or_fail()?;
             log::debug!("loaded recording report: {report:?}");
@@ -372,7 +367,6 @@ impl Runner {
                 &report,
                 self.args.audio_only,
                 self.args.max_columns.get(),
-                self.args.out_video_frame_rate,
             )
             .or_fail()
         } else {

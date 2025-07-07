@@ -787,7 +787,7 @@ fn layout(
         base_path: PathBuf::from(""),
         audio_source_ids: Default::default(),
         bitrate_kbps: 0,
-        fps: FPS,
+        frame_rate: FPS,
         audio_codec: CodecName::Opus,
         video_codec: CodecName::Vp8,
         encode_params: Default::default(),

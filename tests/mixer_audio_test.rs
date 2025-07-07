@@ -390,7 +390,7 @@ fn layout(audio_sources: &[SourceInfo], trim_span: Option<(Duration, Duration)>)
         video_regions: Vec::new(),
         resolution: Resolution::new(16, 16).expect("infallible"),
         bitrate_kbps: 0,
-        fps: FrameRate::FPS_1,
+        frame_rate: FrameRate::FPS_1,
         audio_codec: CodecName::Opus,
         video_codec: CodecName::Vp8,
         encode_params: Default::default(),
