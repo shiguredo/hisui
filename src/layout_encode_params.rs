@@ -1,4 +1,4 @@
-use crate::{encoder_libvpx_params, encoder_openh264_params};
+use crate::{encoder_libvpx_params, encoder_openh264_params, encoder_svt_av1_params};
 
 #[derive(Debug, Clone, Default)]
 pub struct LayoutEncodeParams {
@@ -6,6 +6,7 @@ pub struct LayoutEncodeParams {
     pub libvpx_vp8: Option<shiguredo_libvpx::EncoderConfig>,
     pub libvpx_vp9: Option<shiguredo_libvpx::EncoderConfig>,
     pub openh264: Option<shiguredo_openh264::EncoderConfig>,
+    pub svt_av1: Option<shiguredo_svt_av1::EncoderConfig>,
 }
 
 impl<'text> nojson::FromRawJsonValue<'text> for LayoutEncodeParams {
@@ -25,6 +26,9 @@ impl<'text> nojson::FromRawJsonValue<'text> for LayoutEncodeParams {
                 }
                 "openh264_encode_params" => {
                     params.openh264 = Some(encoder_openh264_params::parse_encode_params(value)?);
+                }
+                "svt_av1_encode_params" => {
+                    params.svt_av1 = Some(encoder_svt_av1_params::parse_encode_params(value)?);
                 }
                 _ => {}
             }

@@ -19,6 +19,7 @@ pub mod encoder_openh264;
 pub mod encoder_openh264_params;
 pub mod encoder_opus;
 pub mod encoder_svt_av1;
+pub mod encoder_svt_av1_params;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox;
 pub mod json;
