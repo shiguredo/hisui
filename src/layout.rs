@@ -234,10 +234,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 .transpose()?
                 .unwrap_or(CodecName::Opus),
             frame_rate: frame_rate
-                .map(|v| {
-                    v.to_unquoted_string_str()
-                        .and_then(|s| s.parse().map_err(|e| v.invalid(e)))
-                })
+                .map(|v| v.as_raw_str().parse().map_err(|e| v.invalid(e)))
                 .transpose()?
                 .unwrap_or(FrameRate::FPS_25),
         })
