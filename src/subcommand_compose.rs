@@ -6,7 +6,7 @@ use std::{
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::{composer::Composer, layout::Layout, types::CodecName, video::FrameRate};
+use crate::{composer::Composer, layout::Layout, video::FrameRate};
 
 const DEFAULT_LAYOUT_JSON: &str = r#"{
   "audio_sources": [ "archive*.json" ],
@@ -125,8 +125,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
-    composer.video_codec = CodecName::Vp8; // デフォルト値
-    composer.audio_codec = CodecName::Opus; // デフォルト値
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !no_progress_bar;
     composer.max_cpu_cores = max_cpu_cores.map(|n| n.get());

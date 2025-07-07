@@ -297,6 +297,9 @@ impl Runner {
         let mut layout = self.create_layout().or_fail()?;
         log::debug!("layout: {layout:?}");
 
+        layout.video_codec = self.args.out_video_codec;
+        layout.audio_codec = self.args.out_audio_codec;
+
         // レガシーではエンコードパラメータの JSON 経由での指定には非対応
         layout.encode_params = Default::default();
         layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
@@ -331,8 +334,6 @@ impl Runner {
 
         // Composer を作成して設定
         let mut composer = Composer::new(layout);
-        composer.video_codec = self.args.out_video_codec;
-        composer.audio_codec = self.args.out_audio_codec;
         composer.openh264_lib = openh264_lib;
         composer.show_progress_bar = self.args.show_progress_bar;
         composer.max_cpu_cores = self.args.cpu_cores;

@@ -5,7 +5,7 @@ use hisui::{
     channel,
     layout::{AggregatedSourceInfo, AssignedSource, Grid, Layout, Region, Resolution},
     metadata::{SourceId, SourceInfo},
-    types::{EvenUsize, PixelPosition},
+    types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
     writer_mp4::Mp4Writer,
 };
@@ -188,6 +188,8 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
         base_path: PathBuf::from(""),
         resolution: Resolution::new(16, 16).expect("infallible"),
         bitrate_kbps: 0,
+        audio_codec: CodecName::Opus,
+        video_codec: CodecName::Vp8,
         encode_params: Default::default(),
     }
 }

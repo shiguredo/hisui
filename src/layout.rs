@@ -10,7 +10,7 @@ use orfail::OrFail;
 use crate::{
     layout_encode_params::LayoutEncodeParams,
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
-    types::{EvenUsize, PixelPosition},
+    types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFrame},
 };
 
@@ -33,6 +33,8 @@ pub struct Layout {
     pub audio_source_ids: BTreeSet<SourceId>,
     pub sources: BTreeMap<SourceId, AggregatedSourceInfo>,
 
+    pub audio_codec: CodecName,
+    pub video_codec: CodecName,
     pub encode_params: LayoutEncodeParams,
 
     // 以降は JSON には含まれないフィールド
@@ -173,6 +175,8 @@ struct RawLayout {
     trim: bool,
     resolution: Option<Resolution>, // TODO: ユニットテスト追加 (None の場合)
     bitrate: usize,
+    audio_codec: CodecName,
+    video_codec: CodecName,
     encode_params: LayoutEncodeParams,
 }
 
@@ -188,6 +192,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 trim,
                 bitrate,
                 resolution,
+                video_codec,
+                audio_codec,
             ],
         ) = value.to_fixed_object(
             ["audio_sources"],
@@ -197,6 +203,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 "trim",
                 "bitrate",
                 "resolution",
+                "video_codec",
+                "audio_codec",
             ],
         )?;
         Ok(Self {
@@ -213,6 +221,20 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
             resolution: resolution.map(|v| v.try_to()).transpose()?,
             bitrate: bitrate.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
             encode_params: value.try_to()?,
+            video_codec: video_codec
+                .map(|v| {
+                    v.to_unquoted_string_str()
+                        .and_then(|s| CodecName::parse_video(&s).map_err(|e| v.invalid(e)))
+                })
+                .transpose()?
+                .unwrap_or(CodecName::Vp8),
+            audio_codec: audio_codec
+                .map(|v| {
+                    v.to_unquoted_string_str()
+                        .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))
+                })
+                .transpose()?
+                .unwrap_or(CodecName::Opus),
         })
     }
 }
@@ -274,6 +296,8 @@ impl RawLayout {
             bitrate_kbps: self.bitrate,
             audio_source_ids,
             sources,
+            audio_codec: self.audio_codec,
+            video_codec: self.video_codec,
             encode_params: self.encode_params,
             fps,
         })

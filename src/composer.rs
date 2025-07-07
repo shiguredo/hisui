@@ -23,8 +23,6 @@ use crate::{
 #[derive(Debug)]
 pub struct Composer {
     pub layout: Layout,
-    pub video_codec: CodecName,
-    pub audio_codec: CodecName,
     pub openh264_lib: Option<Openh264Library>,
     pub show_progress_bar: bool,
     pub max_cpu_cores: Option<usize>,
@@ -45,8 +43,6 @@ impl Composer {
     pub fn new(layout: Layout) -> Self {
         Self {
             layout,
-            video_codec: CodecName::Vp8,
-            audio_codec: CodecName::Opus,
             openh264_lib: None,
             show_progress_bar: false,
             max_cpu_cores: None,
@@ -153,7 +149,7 @@ impl Composer {
             stats.clone(),
         );
 
-        let encoder = match self.video_codec {
+        let encoder = match self.layout.video_codec {
             CodecName::Vp8 => VideoEncoder::new_vp8(&self.layout).or_fail()?,
             CodecName::Vp9 => VideoEncoder::new_vp9(&self.layout).or_fail()?,
             #[cfg(target_os = "macos")]
@@ -197,7 +193,7 @@ impl Composer {
             stats.clone(),
         );
 
-        let audio_encoder = match self.audio_codec {
+        let audio_encoder = match self.layout.audio_codec {
             #[cfg(feature = "fdk-aac")]
             CodecName::Aac => AudioEncoder::new_fdk_aac(self.out_aac_bit_rate).or_fail()?,
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]

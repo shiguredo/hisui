@@ -9,6 +9,7 @@ use hisui::{
     metadata::{SourceId, SourceInfo},
     mixer_audio::AudioMixerThread,
     stats::{AudioMixerStats, MixerStats, Seconds, SharedStats, Stats},
+    types::CodecName,
     video::FrameRate,
 };
 use orfail::OrFail;
@@ -390,6 +391,8 @@ fn layout(audio_sources: &[SourceInfo], trim_span: Option<(Duration, Duration)>)
         resolution: Resolution::new(16, 16).expect("infallible"),
         bitrate_kbps: 0,
         fps: FrameRate::FPS_1,
+        audio_codec: CodecName::Opus,
+        video_codec: CodecName::Vp8,
         encode_params: Default::default(),
     }
 }
