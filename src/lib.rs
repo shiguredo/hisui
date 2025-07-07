@@ -16,6 +16,7 @@ pub mod encoder_fdk_aac;
 pub mod encoder_libvpx;
 pub mod encoder_libvpx_params;
 pub mod encoder_openh264;
+pub mod encoder_openh264_params;
 pub mod encoder_opus;
 pub mod encoder_svt_av1;
 #[cfg(target_os = "macos")]

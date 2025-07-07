@@ -5,7 +5,7 @@ const DEFAULT_CQ_LEVEL: usize = 30;
 const DEFAULT_MIN_Q: usize = 10;
 const DEFAULT_MAX_Q: usize = 50;
 
-pub fn parse_libvpx_vp8_encode_params(
+pub fn parse_vp8_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_libvpx::EncoderConfig, nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
@@ -89,7 +89,7 @@ pub fn parse_libvpx_vp8_encode_params(
     Ok(config)
 }
 
-pub fn parse_libvpx_vp9_encode_params(
+pub fn parse_vp9_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_libvpx::EncoderConfig, nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
