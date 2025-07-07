@@ -1,14 +1,14 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::Path,
+    time::Duration,
 };
 
 use orfail::OrFail;
 
 use crate::{
     layout::{
-        AggregatedSourceInfo, BORDER_PIXELS, Grid, Resolution, ReuseKind, assign_sources,
-        decide_grid_dimensions, decide_max_simultaneous_sources,
+        AggregatedSourceInfo, AssignedSource, BORDER_PIXELS, Resolution,
         resolve_source_and_media_path_pairs,
     },
     metadata::SourceId,
@@ -356,4 +356,229 @@ impl RawRegion {
             left_border_pixels,
         ))
     }
+}
+
+/// 各リージョンのグリッドの情報
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grid {
+    /// 各ソースがどのセルに割り当てられているか
+    pub assigned_sources: HashMap<SourceId, AssignedSource>,
+
+    /// グリッドの行数
+    pub rows: usize,
+
+    /// グリッドの列数
+    pub columns: usize,
+
+    /// セルの幅
+    pub cell_width: EvenUsize,
+
+    /// セルの高さ
+    pub cell_height: EvenUsize,
+}
+
+impl Grid {
+    /// セルのインデックスから、対応する行列位置を返す
+    pub fn get_cell_position(&self, cell_index: usize) -> CellPosition {
+        let row = cell_index / self.columns;
+        let column = cell_index % self.columns;
+        CellPosition { row, column }
+    }
+
+    pub fn assign_source(&mut self, source_id: SourceId, cell_index: usize, priority: usize) {
+        self.assigned_sources
+            .insert(source_id, AssignedSource::new(cell_index, priority));
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CellPosition {
+    pub row: usize,
+    pub column: usize,
+}
+
+/// 各セルの再利用方法
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ReuseKind {
+    /// 再利用しない
+    None,
+
+    /// 再利用する（競合時には開始時刻が早い映像ソースが優先される）
+    #[default]
+    ShowOldest,
+
+    /// 再利用する（競合時には開始時刻が遅い映像ソースが優先される）
+    ShowNewest,
+}
+
+impl<'text> nojson::FromRawJsonValue<'text> for ReuseKind {
+    fn from_raw_json_value(
+        value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        match value.to_unquoted_string_str()?.as_ref() {
+            "none" => Ok(Self::None),
+            "show_oldest" => Ok(Self::ShowOldest),
+            "show_newest" => Ok(Self::ShowNewest),
+            v => Err(nojson::JsonParseError::invalid_value(
+                value,
+                format!("unknown reuse kind: {v}"),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Cell {
+    Excluded,
+    Fresh,
+    Used(Duration), // 値は stop_timestamp
+}
+
+/// 行列の最大値指定と最大同時ソース数をもとに、実際に使用するグリッドの行数と列数を求める
+///
+/// なお max_rows ないし max_columns で 0 が指定されたら未指定扱いとなる
+pub fn decide_grid_dimensions(
+    mut max_rows: usize,
+    mut max_columns: usize,
+    max_sources: usize,
+) -> (usize, usize) {
+    // まずは以下の方針で制約がない場合の行列数を求める:
+    // - `max_sources` を保持可能なサイズを確保する
+    // - できるだけ正方形に近くなるようにする:
+    //   - ただし、列は行よりも一つ値が大きくてもいい
+    let mut columns = (max_sources as f32).sqrt().ceil().max(1.0) as usize;
+    let mut rows = (columns - 1).max(1);
+    if rows * columns < max_sources {
+        // 正方形にしないと `max_sources` を保持できない
+        rows += 1;
+    }
+
+    // 以降では `max_rows` と `max_columns` を考慮した調整を行う
+
+    // コードを単純にするために、未指定は `usize::MAX` 扱いにする
+    if max_rows == 0 {
+        max_rows = usize::MAX;
+    }
+    if max_columns == 0 {
+        max_columns = usize::MAX;
+    }
+
+    // 行と列のどちらを基準にして調整を行うかを決める
+    let row_based_adjustment = match (rows <= max_rows, columns <= max_columns) {
+        (true, true) => return (rows, columns), // 制約を破っていないならここで終わり
+        (false, true) => true,                  // 行の制約が破れているので行基準
+        (true, false) => false,                 // 列の制約が破れているので列基準
+        (false, false) => {
+            // 両方ダメなら正方形に近くなるように最大値が小さい方を基準とする
+            // (max_rows == max_columns の場合はどっちが基準となってもいい)
+            max_rows < max_columns
+        }
+    };
+
+    // 基準となった方に従い調整を行う
+    if row_based_adjustment {
+        rows = max_rows;
+        columns = ((max_sources as f32 / rows as f32).ceil() as usize).clamp(1, max_columns);
+    } else {
+        columns = max_columns;
+        rows = ((max_sources as f32 / columns as f32).ceil() as usize).clamp(1, max_rows);
+    }
+
+    (rows, columns)
+}
+
+/// 最大同時ソース数を求める
+pub fn decide_max_simultaneous_sources(
+    sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
+    cells_excluded: &[usize],
+) -> usize {
+    // ソース数はどんなに多くても数十オーダーだと思うので非効率だけど分かりやすい実装にしている
+    let mut max = sources
+        .values()
+        .map(|s0| {
+            sources
+                .values()
+                .filter(|s1| s0.is_overlapped_with(s1))
+                .count()
+        })
+        .max()
+        .unwrap_or_default();
+
+    // 除外セルの分を考慮する
+    for cell_index in BTreeSet::from_iter(cells_excluded.iter().copied()) {
+        if cell_index < max {
+            max += 1;
+        } else {
+            // そもそも範囲外のセルが除外指定されている場合はここに来る
+            break;
+        }
+    }
+
+    max
+}
+
+/// ソースのセルへの割り当てを行う
+pub fn assign_sources(
+    reuse: ReuseKind,
+    mut sources: Vec<AggregatedSourceInfo>,
+    cells: usize,
+    cells_excluded: &[usize],
+) -> HashMap<SourceId, AssignedSource> {
+    let mut cells = vec![Cell::Fresh; cells];
+    for &i in cells_excluded {
+        cells[i] = Cell::Excluded;
+    }
+    sources.sort_by_key(|x| (x.start_timestamp, x.stop_timestamp));
+
+    let mut assigned = HashMap::new();
+    let mut priority = usize::MAX / 2;
+    for source in &sources {
+        match reuse {
+            ReuseKind::None => {
+                // Fresh なセルを探す
+                if let Some(i) = cells.iter().position(|c| *c == Cell::Fresh) {
+                    cells[i] = Cell::Used(source.stop_timestamp);
+                    assigned.insert(source.id.clone(), AssignedSource::new(i, priority));
+                } else {
+                    // もう割り当て可能なセルがないのでここで終了
+                    break;
+                }
+            }
+            ReuseKind::ShowOldest | ReuseKind::ShowNewest => {
+                // Fresh or Used だけどもう期間を過ぎているセルを探す
+                if let Some(i) = cells.iter().position(|c| match *c {
+                    Cell::Fresh => true,
+                    Cell::Used(stop_timestamp) => stop_timestamp < source.start_timestamp,
+                    _ => false,
+                }) {
+                    cells[i] = Cell::Used(source.stop_timestamp);
+                    assigned.insert(source.id.clone(), AssignedSource::new(i, priority));
+                    continue;
+                }
+
+                // 現時点で利用可能なセルがない場合には、終了時刻が一番早いセルを探す
+                if let Some((i, stop_timestamp)) = cells
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, c)| {
+                        if let Cell::Used(stop_timestamp) = *c {
+                            Some((i, stop_timestamp))
+                        } else {
+                            None
+                        }
+                    })
+                    .min_by_key(|(i, t)| (*t, *i))
+                {
+                    cells[i] = Cell::Used(stop_timestamp.max(source.stop_timestamp));
+                    if reuse == ReuseKind::ShowOldest {
+                        priority += 1; // 古い方を優先する
+                    } else {
+                        priority -= 1; // 新しい方を優先する
+                    }
+                    assigned.insert(source.id.clone(), AssignedSource::new(i, priority));
+                }
+            }
+        }
+    }
+    assigned
 }
