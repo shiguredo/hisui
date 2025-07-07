@@ -294,8 +294,23 @@ impl Runner {
 
     pub fn run(&mut self) -> orfail::Result<()> {
         // レイアウトを準備
-        let layout = self.create_layout().or_fail()?;
+        let mut layout = self.create_layout().or_fail()?;
         log::debug!("layout: {layout:?}");
+
+        // レガシーではエンコードパラメータの JSON 経由での指定には非対応
+        layout.encode_params = Default::default();
+        layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
+            max_quantizer: self.args.libvpx_max_q,
+            min_quantizer: self.args.libvpx_min_q,
+            cq_level: self.args.libvpx_cq_level,
+            ..Default::default()
+        });
+        layout.encode_params.libvpx_vp9 = Some(shiguredo_libvpx::EncoderConfig {
+            max_quantizer: self.args.libvpx_max_q,
+            min_quantizer: self.args.libvpx_min_q,
+            cq_level: self.args.libvpx_cq_level,
+            ..Default::default()
+        });
 
         // 必要に応じて openh264 の共有ライブラリを読み込む
         let openh264_lib =
@@ -322,9 +337,6 @@ impl Runner {
         composer.show_progress_bar = self.args.show_progress_bar;
         composer.max_cpu_cores = self.args.cpu_cores;
         composer.stats_file_path = self.args.out_stats_file.clone();
-        composer.libvpx_cq_level = self.args.libvpx_cq_level;
-        composer.libvpx_min_q = self.args.libvpx_min_q;
-        composer.libvpx_max_q = self.args.libvpx_max_q;
         composer.out_aac_bit_rate = self.args.out_aac_bit_rate;
         composer.out_opus_bit_rate = self.args.out_opus_bit_rate;
 

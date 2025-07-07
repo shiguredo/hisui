@@ -9,7 +9,6 @@ use crate::{
     channel::{self, ErrorFlag},
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
-    encoder_libvpx,
     layout::Layout,
     metadata::ContainerFormat,
     mixer_audio::AudioMixerThread,
@@ -32,9 +31,6 @@ pub struct Composer {
     pub stats_file_path: Option<PathBuf>,
 
     // TODO: 以降はレイアウトに移動する
-    pub libvpx_cq_level: usize,
-    pub libvpx_min_q: usize,
-    pub libvpx_max_q: usize,
     pub out_aac_bit_rate: NonZeroUsize,
     pub out_opus_bit_rate: NonZeroUsize,
 }
@@ -55,11 +51,6 @@ impl Composer {
             show_progress_bar: false,
             max_cpu_cores: None,
             stats_file_path: None,
-            libvpx_cq_level: encoder_libvpx::DEFAULT_CQ_LEVEL
-                .parse()
-                .expect("infallible"),
-            libvpx_min_q: encoder_libvpx::DEFAULT_MIN_Q.parse().expect("infallible"),
-            libvpx_max_q: encoder_libvpx::DEFAULT_MAX_Q.parse().expect("infallible"),
             out_aac_bit_rate: DEFAULT_AAC_BITRATE.parse().expect("infallible"),
             out_opus_bit_rate: DEFAULT_OPUS_BITRATE.parse().expect("infallible"),
         }
@@ -163,20 +154,8 @@ impl Composer {
         );
 
         let encoder = match self.video_codec {
-            CodecName::Vp8 => VideoEncoder::new_vp8(
-                &self.layout,
-                self.libvpx_cq_level,
-                self.libvpx_min_q,
-                self.libvpx_max_q,
-            )
-            .or_fail()?,
-            CodecName::Vp9 => VideoEncoder::new_vp9(
-                &self.layout,
-                self.libvpx_cq_level,
-                self.libvpx_min_q,
-                self.libvpx_max_q,
-            )
-            .or_fail()?,
+            CodecName::Vp8 => VideoEncoder::new_vp8(&self.layout).or_fail()?,
+            CodecName::Vp9 => VideoEncoder::new_vp9(&self.layout).or_fail()?,
             #[cfg(target_os = "macos")]
             CodecName::H264 if self.openh264_lib.is_none() => {
                 VideoEncoder::new_video_toolbox_h264(&self.layout).or_fail()?

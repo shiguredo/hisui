@@ -33,21 +33,13 @@ pub struct LibvpxEncoder {
 }
 
 impl LibvpxEncoder {
-    pub fn new_vp8(
-        layout: &Layout,
-        cq_level: usize,
-        min_q: usize,
-        max_q: usize,
-    ) -> orfail::Result<Self> {
+    pub fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
         let config = shiguredo_libvpx::EncoderConfig {
             width: layout.resolution.width().get(),
             height: layout.resolution.height().get(),
             fps_numerator: layout.fps.numerator.get(),
             fps_denominator: layout.fps.denumerator.get(),
             target_bitrate: layout.video_bitrate_bps(),
-            min_quantizer: min_q, // TODO: layout の値を使うようにする
-            max_quantizer: max_q, // TODO: layout の値を使うようにする
-            cq_level,
             ..layout.encode_params.libvpx_vp8.clone().unwrap_or_default()
         };
         log::debug!("libvpx vp8 encoder config: {config:?}");
@@ -66,21 +58,13 @@ impl LibvpxEncoder {
         })
     }
 
-    pub fn new_vp9(
-        layout: &Layout,
-        cq_level: usize,
-        min_q: usize,
-        max_q: usize,
-    ) -> orfail::Result<Self> {
+    pub fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
         let config = shiguredo_libvpx::EncoderConfig {
             width: layout.resolution.width().get(),
             height: layout.resolution.height().get(),
             fps_numerator: layout.fps.numerator.get(),
             fps_denominator: layout.fps.denumerator.get(),
             target_bitrate: layout.video_bitrate_bps(),
-            min_quantizer: min_q, // TODO: layout の値を使うようにする
-            max_quantizer: max_q, // TODO: layout の値を使うようにする
-            cq_level,
             ..layout.encode_params.libvpx_vp9.clone().unwrap_or_default()
         };
         log::debug!("libvpx vp9 encoder config: {config:?}");
