@@ -390,6 +390,7 @@ fn layout(audio_sources: &[SourceInfo], trim_span: Option<(Duration, Duration)>)
         resolution: Resolution::new(16, 16).expect("infallible"),
         bitrate_kbps: 0,
         fps: FrameRate::FPS_1,
+        encode_params: Default::default(),
     }
 }
 

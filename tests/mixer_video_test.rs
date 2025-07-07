@@ -788,6 +788,7 @@ fn layout(
         audio_source_ids: Default::default(),
         bitrate_kbps: 0,
         fps: FPS,
+        encode_params: Default::default(),
     }
 }
 

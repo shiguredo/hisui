@@ -188,6 +188,7 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
         base_path: PathBuf::from(""),
         resolution: Resolution::new(16, 16).expect("infallible"),
         bitrate_kbps: 0,
+        encode_params: Default::default(),
     }
 }
 

@@ -45,10 +45,10 @@ impl LibvpxEncoder {
             fps_numerator: layout.fps.numerator.get(),
             fps_denominator: layout.fps.denumerator.get(),
             target_bitrate: layout.video_bitrate_bps(),
-            min_quantizer: min_q,
-            max_quantizer: max_q,
+            min_quantizer: min_q, // TODO: layout の値を使うようにする
+            max_quantizer: max_q, // TODO: layout の値を使うようにする
             cq_level,
-            ..Default::default()
+            ..layout.encode_params.libvpx_vp8.clone().unwrap_or_default()
         };
         let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
 
@@ -77,10 +77,10 @@ impl LibvpxEncoder {
             fps_numerator: layout.fps.numerator.get(),
             fps_denominator: layout.fps.denumerator.get(),
             target_bitrate: layout.video_bitrate_bps(),
-            min_quantizer: min_q,
-            max_quantizer: max_q,
+            min_quantizer: min_q, // TODO: layout の値を使うようにする
+            max_quantizer: max_q, // TODO: layout の値を使うようにする
             cq_level,
-            ..Default::default()
+            ..layout.encode_params.libvpx_vp9.clone().unwrap_or_default()
         };
         let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;
 
