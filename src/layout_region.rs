@@ -526,7 +526,9 @@ pub fn assign_sources(
 ) -> HashMap<SourceId, AssignedSource> {
     let mut cells = vec![Cell::Fresh; cells];
     for &i in cells_excluded {
-        cells[i] = Cell::Excluded;
+        if i < cells.len() {
+            cells[i] = Cell::Excluded;
+        }
     }
     sources.sort_by_key(|x| (x.start_timestamp, x.stop_timestamp));
 
