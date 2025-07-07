@@ -36,8 +36,8 @@ impl VideoToolboxEncoder {
             width: width.get(),
             height: height.get(),
             target_bitrate: layout.video_bitrate_bps(),
-            fps_numerator: layout.fps.numerator.get(),
-            fps_denominator: layout.fps.denumerator.get(),
+            fps_numerator: layout.frame_rate.numerator.get(),
+            fps_denominator: layout.frame_rate.denumerator.get(),
             ..layout
                 .encode_params
                 .video_toolbox_h264
@@ -53,7 +53,7 @@ impl VideoToolboxEncoder {
             width,
             height,
             format: VideoFormat::H264,
-            fps: layout.fps,
+            fps: layout.frame_rate,
         })
     }
 
@@ -64,8 +64,8 @@ impl VideoToolboxEncoder {
             width: width.get(),
             height: height.get(),
             target_bitrate: layout.video_bitrate_bps(),
-            fps_numerator: layout.fps.numerator.get(),
-            fps_denominator: layout.fps.denumerator.get(),
+            fps_numerator: layout.frame_rate.numerator.get(),
+            fps_denominator: layout.frame_rate.denumerator.get(),
             ..layout
                 .encode_params
                 .video_toolbox_h265
@@ -81,7 +81,7 @@ impl VideoToolboxEncoder {
             width,
             height,
             format: VideoFormat::H265,
-            fps: layout.fps,
+            fps: layout.frame_rate,
         })
     }
 

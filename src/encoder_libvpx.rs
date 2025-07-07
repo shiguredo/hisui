@@ -37,8 +37,8 @@ impl LibvpxEncoder {
         let config = shiguredo_libvpx::EncoderConfig {
             width: layout.resolution.width().get(),
             height: layout.resolution.height().get(),
-            fps_numerator: layout.fps.numerator.get(),
-            fps_denominator: layout.fps.denumerator.get(),
+            fps_numerator: layout.frame_rate.numerator.get(),
+            fps_denominator: layout.frame_rate.denumerator.get(),
             target_bitrate: layout.video_bitrate_bps(),
             ..layout.encode_params.libvpx_vp8.clone().unwrap_or_default()
         };
@@ -62,8 +62,8 @@ impl LibvpxEncoder {
         let config = shiguredo_libvpx::EncoderConfig {
             width: layout.resolution.width().get(),
             height: layout.resolution.height().get(),
-            fps_numerator: layout.fps.numerator.get(),
-            fps_denominator: layout.fps.denumerator.get(),
+            fps_numerator: layout.frame_rate.numerator.get(),
+            fps_denominator: layout.frame_rate.denumerator.get(),
             target_bitrate: layout.video_bitrate_bps(),
             ..layout.encode_params.libvpx_vp9.clone().unwrap_or_default()
         };

@@ -26,8 +26,8 @@ impl Openh264Encoder {
         let width = layout.resolution.width().get();
         let height = layout.resolution.height().get();
         let config = shiguredo_openh264::EncoderConfig {
-            fps_numerator: layout.fps.numerator.get(),
-            fps_denominator: layout.fps.denumerator.get(),
+            fps_numerator: layout.frame_rate.numerator.get(),
+            fps_denominator: layout.frame_rate.denumerator.get(),
             width,
             height,
             target_bitrate: layout.video_bitrate_bps(),
