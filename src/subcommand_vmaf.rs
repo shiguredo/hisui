@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::LazyLock,
+    time::Instant,
 };
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -16,7 +17,7 @@ use crate::{
     encoder::{VideoEncoder, VideoEncoderThread},
     layout::Layout,
     mixer_video::VideoMixerThread,
-    stats::{SharedStats, VideoDecoderStats},
+    stats::{Seconds, SharedStats, VideoDecoderStats},
     writer_yuv::YuvWriter,
 };
 
@@ -76,6 +77,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .default("vmaf-output.json")
         .doc(concat!(
             "vmaf コマンドの実行結果ファイルの出力先を指定します\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
+        ))
+        .take(&mut args)
+        .then(|a| a.value().parse())?;
+    let stats_file_path: PathBuf = noargs::opt("stats-file")
+        .ty("PATH")
+        .default("stats.json")
+        .doc(concat!(
+            "合成中に収集した統計情報 (JSON) を保存するファイルを指定します\n",
             "\n",
             "相対パスの場合は ROOT_DIR が起点となります"
         ))
@@ -161,6 +172,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
     let stats = SharedStats::new();
+    let start_time = Instant::now();
 
     // 映像ソースの準備（音声の方は使わないので単に無視する）
     let error_flag = ErrorFlag::new();
@@ -251,6 +263,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // VMAF の下準備としての処理は全て完了した
     progress_bar.finish();
 
+    let stats_file_path = root_dir.join(stats_file_path);
+    finish_stats(&stats_file_path, stats, start_time);
+
     // vmaf コマンドを実行
     let vmaf_output_file_path = root_dir.join(vmaf_output_file_path);
     run_vmaf_evaluation(
@@ -330,4 +345,25 @@ fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressB
             .progress_chars("#>-"),
     );
     progress_bar
+}
+
+fn finish_stats(stats_file_path: &Path, stats: SharedStats, start_time: Instant) {
+    stats.with_lock(|stats| {
+        stats.elapsed_seconds = Seconds::new(start_time.elapsed());
+        log::debug!("stats: {}", nojson::Json(&stats));
+
+        let json = nojson::json(|f| {
+            f.set_indent_size(2);
+            f.set_spacing(true);
+            f.value(&stats)
+        })
+        .to_string();
+        if let Err(e) = std::fs::write(stats_file_path, json) {
+            // 統計が出力できなくても全体を失敗扱いにはしない
+            log::warn!(
+                "failed to write stats JSON: path={}, reason={e}",
+                stats_file_path.display()
+            );
+        }
+    });
 }
