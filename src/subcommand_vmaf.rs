@@ -11,7 +11,12 @@ use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-    channel::ErrorFlag, composer, layout::Layout, mixer_video::VideoMixerThread, stats::SharedStats,
+    channel::ErrorFlag,
+    composer,
+    encoder::{VideoEncoder, VideoEncoderThread},
+    layout::Layout,
+    mixer_video::VideoMixerThread,
+    stats::SharedStats,
 };
 
 const DEFAULT_LAYOUT_JSON: &str = r#"{
@@ -169,6 +174,32 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     );
 
     // TODO: エンコード前の画像保存用の YuvWriter をここで挟む
+
+    // 映像エンコードスレッドを起動
+    let encoder = VideoEncoder::new(&layout, openh264_lib.clone()).or_fail()?;
+    let mut encoded_video_rx =
+        VideoEncoderThread::start(error_flag.clone(), mixed_video_rx, encoder, stats.clone());
+
+    // TODO: デコーダー
+    // TODO: エンコード後の画像保存用の YuvWriter をここで挟む
+
+    // 必要なフレームの処理が終わるまでループを回す
+    for _ in 0..frame_count {
+        let Some(_) = encoded_video_rx.recv() else {
+            // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
+            break;
+        };
+
+        progress_bar.inc(1);
+        if error_flag.get() {
+            // ファイル読み込み、デコード、合成、エンコード、のいずれかで失敗したものがあるとここに来る
+            log::error!("The composition process was aborted");
+            break;
+        }
+    }
+
+    // 全ての処理が完了した
+    progress_bar.finish();
 
     Ok(())
 }
@@ -348,7 +379,7 @@ fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressB
     progress_bar.set_style(
         ProgressStyle::default_bar()
             .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}s ({eta})",
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
             )
             .unwrap()
             .progress_chars("#>-"),
