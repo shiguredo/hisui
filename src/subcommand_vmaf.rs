@@ -13,10 +13,11 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     channel::ErrorFlag,
     composer,
+    decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{VideoEncoder, VideoEncoderThread},
     layout::Layout,
     mixer_video::VideoMixerThread,
-    stats::SharedStats,
+    stats::{SharedStats, VideoDecoderStats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = r#"{
@@ -150,7 +151,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
     let stats = SharedStats::new();
-    let start_time = Instant::now();
 
     // 映像ソースの準備（音声の方は使わないので単に無視する）
     let error_flag = ErrorFlag::new();
@@ -181,22 +181,34 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         VideoEncoderThread::start(error_flag.clone(), mixed_video_rx, encoder, stats.clone());
 
     // TODO: デコーダー
+    let options = VideoDecoderOptions {
+        openh264_lib: openh264_lib.clone(),
+    };
+    let mut decoder = VideoDecoder::new(options);
+
     // TODO: エンコード後の画像保存用の YuvWriter をここで挟む
 
     // 必要なフレームの処理が終わるまでループを回す
+    let mut dummy_video_decoder_stats = VideoDecoderStats::default();
     for _ in 0..frame_count {
-        let Some(_) = encoded_video_rx.recv() else {
+        let Some(encoded_frame) = encoded_video_rx.recv() else {
             // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
             break;
         };
+        decoder
+            .decode(encoded_frame, &mut dummy_video_decoder_stats)
+            .or_fail()?;
+        while let Some(decoded_frame) = decoder.next_decoded_frame() {
+            progress_bar.inc(1);
+        }
 
-        progress_bar.inc(1);
         if error_flag.get() {
             // ファイル読み込み、デコード、合成、エンコード、のいずれかで失敗したものがあるとここに来る
             log::error!("The composition process was aborted");
             break;
         }
     }
+    // TODO: decoder.finish()
 
     // 全ての処理が完了した
     progress_bar.finish();
