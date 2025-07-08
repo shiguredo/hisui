@@ -41,7 +41,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         })
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let reference_yuv: PathBuf = noargs::opt("reference-yuv")
+    let reference_yuv_file_path: PathBuf = noargs::opt("reference-yuv-file")
         .ty("PATH")
         .default("reference.yuv")
         .doc(concat!(
@@ -51,7 +51,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .then(|a| a.value().parse())?;
-    let distorted_yuv: PathBuf = noargs::opt("distorted-yuv")
+    let distorted_yuv_file_path: PathBuf = noargs::opt("distorted-yuv-file")
         .ty("PATH")
         .default("distorted.yuv")
         .doc(concat!(
@@ -141,7 +141,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // VMAFコンポーザーを作成して設定
-    let mut composer = VmafComposer::new(layout.clone(), reference_yuv, distorted_yuv);
+    let mut composer = VmafComposer::new(
+        layout.clone(),
+        reference_yuv_file_path,
+        distorted_yuv_file_path,
+    );
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !no_progress_bar;
     composer.max_cpu_cores = max_cpu_cores.map(|n| n.get());
