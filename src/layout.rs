@@ -12,7 +12,7 @@ use crate::{
     audio,
     json::JsonObject,
     layout_encode_params::LayoutEncodeParams,
-    layout_region::{RawRegion, Region, decide_grid_dimensions},
+    layout_region::{self, RawRegion, Region},
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, EvenUsize},
     video::FrameRate,
@@ -78,7 +78,7 @@ impl Layout {
         let (rows, columns) = if audio_only {
             (1, 1)
         } else {
-            decide_grid_dimensions(0, max_columns, report.archives.len())
+            layout_region::decide_grid_dimensions(0, max_columns, report.archives.len())
         };
 
         // 全体の解像度を求める（キリを良くするために内枠のことはここでは考慮しない）
