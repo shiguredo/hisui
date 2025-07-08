@@ -210,6 +210,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     for _ in 0..frame_count {
         let Some(encoded_frame) = encoded_video_rx.recv() else {
             // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
+
+            decoder.finish().or_fail()?;
+            while let Some(decoded_frame) = decoder.next_decoded_frame() {
+                distorted_yuv_writer.append(&decoded_frame).or_fail()?;
+                progress_bar.inc(1);
+            }
             break;
         };
         decoder
@@ -226,9 +232,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             break;
         }
     }
-    // TODO: decoder.finish()
 
-    // 全ての処理が完了した
+    // VMAF の下準備としての処理は全て完了した
     progress_bar.finish();
 
     Ok(())
