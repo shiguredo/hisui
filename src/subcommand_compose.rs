@@ -47,7 +47,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc(concat!(
             "合成結果を保存するファイルを指定します\n",
             "\n",
-            "この引数が未指定の場合には `--root-dir` 引数で\n",
+            "この引数が未指定の場合には ROOT_DIR 引数で\n",
             "指定したディレクトリに `output.mp4` という名前で保存されます"
         ))
         .take(&mut args)

@@ -41,55 +41,37 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         })
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-
-    let start_time: Option<f64> = noargs::opt("start-time")
-        .short('s')
-        .ty("SECONDS")
-        .doc("変換を開始する位置（先頭からの経過秒数）を指定します")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-
-    let duration: Option<f64> = noargs::opt("duration")
-        .short('d')
-        .ty("SECONDS")
-        .doc("変換する尺（秒数）を指定します")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-
     let reference_yuv: PathBuf = noargs::opt("reference-yuv")
-        .short('r')
         .ty("PATH")
-        .doc("参照映像（合成前）のYUVファイルの出力先を指定します")
+        .default("reference.yuv")
+        .doc(concat!(
+            "参照映像（合成前）のYUVファイルの出力先を指定します\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
+        ))
         .take(&mut args)
         .then(|a| a.value().parse())?;
-
     let distorted_yuv: PathBuf = noargs::opt("distorted-yuv")
-        .short('t')
         .ty("PATH")
-        .doc("歪み映像（合成後）のYUVファイルの出力先を指定します")
+        .default("distorted.yuv")
+        .doc(concat!(
+            "歪み映像（合成後）のYUVファイルの出力先を指定します\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
+        ))
         .take(&mut args)
         .then(|a| a.value().parse())?;
-
-    let vmaf_output: PathBuf = noargs::opt("vmaf-output")
-        .short('o')
-        .ty("PATH")
-        .doc("VMAF評価結果のJSONファイルの出力先を指定します")
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
         .doc("OpenH264 の共有ライブラリのパスを指定します")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-
     let no_progress_bar: bool = noargs::flag("no-progress-bar")
         .short('P')
         .doc("指定された場合は、合成の進捗を非表示にします")
         .take(&mut args)
         .is_present();
-
     let max_cpu_cores: Option<NonZeroUsize> = noargs::opt("max-cpu-cores")
         .short('c')
         .ty("INTEGER")
@@ -102,6 +84,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
+
+    // TODO: 後で対応する
+    // let duration: Option<f64> = noargs::opt("duration")
+    //     .short('d')
+    //     .ty("SECONDS")
+    //     .doc("変換する尺（秒数）を指定します")
+    //     .take(&mut args)
+    //     .present_and_then(|a| a.value().parse())?;
 
     let root_dir: PathBuf = noargs::arg("ROOT_DIR")
         .example("/path/to/archive/RECORDING_ID/")
@@ -167,13 +157,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // VMAF評価を実行
-    run_vmaf_evaluation(
-        &composer.reference_yuv,
-        &composer.distorted_yuv,
-        &vmaf_output,
-        &layout,
-    )
-    .or_fail()?;
+    run_vmaf_evaluation(&composer.reference_yuv, &composer.distorted_yuv, &layout).or_fail()?;
 
     Ok(())
 }
@@ -298,7 +282,6 @@ pub struct VmafComposeResult {
 fn run_vmaf_evaluation(
     reference_yuv: &Path,
     distorted_yuv: &Path,
-    vmaf_output: &Path,
     layout: &Layout,
 ) -> orfail::Result<()> {
     todo!()
