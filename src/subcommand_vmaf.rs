@@ -18,6 +18,7 @@ use crate::{
     layout::Layout,
     mixer_video::VideoMixerThread,
     stats::{SharedStats, VideoDecoderStats},
+    writer_yuv::YuvWriter,
 };
 
 const DEFAULT_LAYOUT_JSON: &str = r#"{
@@ -180,13 +181,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut encoded_video_rx =
         VideoEncoderThread::start(error_flag.clone(), mixed_video_rx, encoder, stats.clone());
 
-    // TODO: デコーダー
+    // 最終的な映像のデコード＆ YUV 書き出しの準備
     let options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
     };
     let mut decoder = VideoDecoder::new(options);
-
-    // TODO: エンコード後の画像保存用の YuvWriter をここで挟む
+    let mut distorted_yuv_writer = YuvWriter::new(root_dir.join(distorted_yuv_file_path));
 
     // 必要なフレームの処理が終わるまでループを回す
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
