@@ -2,12 +2,11 @@ use std::{
     fs::File,
     io::{BufWriter, Write},
     path::Path,
-    time::Duration,
 };
 
 use orfail::OrFail;
 
-use crate::video::{VideoFormat, VideoFrameReceiver};
+use crate::video::{VideoFormat, VideoFrame, VideoFrameReceiver};
 
 /// 合成結果を含んだ YUV ファイルを書き出すための構造体
 #[derive(Debug)]
@@ -34,11 +33,11 @@ impl YuvWriter {
         })
     }
 
-    pub fn poll(&mut self) -> orfail::Result<Option<Duration>> {
+    pub fn poll(&mut self) -> orfail::Result<Option<VideoFrame>> {
         if let Some(frame) = self.input_video_rx.recv() {
             matches!(frame.format, VideoFormat::I420).or_fail()?;
             self.file.write_all(&frame.data).or_fail()?;
-            Ok(Some(frame.timestamp))
+            Ok(Some(frame))
         } else {
             self.file.flush().or_fail()?;
             Ok(None)
