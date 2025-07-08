@@ -186,7 +186,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         openh264_lib: openh264_lib.clone(),
     };
     let mut decoder = VideoDecoder::new(options);
-    let mut distorted_yuv_writer = YuvWriter::new(root_dir.join(distorted_yuv_file_path));
+    let mut distorted_yuv_writer =
+        YuvWriter::new(root_dir.join(distorted_yuv_file_path)).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
@@ -199,6 +200,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             .decode(encoded_frame, &mut dummy_video_decoder_stats)
             .or_fail()?;
         while let Some(decoded_frame) = decoder.next_decoded_frame() {
+            distorted_yuv_writer.append(&decoded_frame).or_fail()?;
             progress_bar.inc(1);
         }
 
