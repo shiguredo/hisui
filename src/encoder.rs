@@ -139,34 +139,34 @@ impl VideoEncoder {
         }
     }
 
-    pub fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
+    fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
         let encoder = LibvpxEncoder::new_vp8(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 
-    pub fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
+    fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
         let encoder = LibvpxEncoder::new_vp9(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 
-    pub fn new_openh264(lib: Openh264Library, layout: &Layout) -> orfail::Result<Self> {
+    fn new_openh264(lib: Openh264Library, layout: &Layout) -> orfail::Result<Self> {
         let encoder = Openh264Encoder::new(lib, layout).or_fail()?;
         Ok(Self::Openh264(encoder))
     }
 
-    pub fn new_svt_av1(layout: &Layout) -> orfail::Result<Self> {
+    fn new_svt_av1(layout: &Layout) -> orfail::Result<Self> {
         let encoder = SvtAv1Encoder::new(layout).or_fail()?;
         Ok(Self::SvtAv1(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    pub fn new_video_toolbox_h264(layout: &Layout) -> orfail::Result<Self> {
+    fn new_video_toolbox_h264(layout: &Layout) -> orfail::Result<Self> {
         let encoder = VideoToolboxEncoder::new_h264(layout).or_fail()?;
         Ok(Self::VideoToolbox(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    pub fn new_video_toolbox_h265(layout: &Layout) -> orfail::Result<Self> {
+    fn new_video_toolbox_h265(layout: &Layout) -> orfail::Result<Self> {
         let encoder = VideoToolboxEncoder::new_h265(layout).or_fail()?;
         Ok(Self::VideoToolbox(encoder))
     }
