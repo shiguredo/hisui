@@ -41,21 +41,28 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         })
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let output_file_path: Option<PathBuf> = noargs::opt("output-file")
+    let output_file_path: PathBuf = noargs::opt("output-file")
         .short('o')
         .ty("PATH")
+        .default("output.mp4")
         .doc(concat!(
             "合成結果を保存するファイルを指定します\n",
             "\n",
             "この引数が未指定の場合には ROOT_DIR 引数で\n",
-            "指定したディレクトリに `output.mp4` という名前で保存されます"
+            "指定したディレクトリに `output.mp4` という名前で保存されます\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
         ))
         .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
+        .then(|a| a.value().parse())?;
     let stats_file_path: Option<PathBuf> = noargs::opt("stats-file")
         .short('s')
         .ty("PATH")
-        .doc("合成中に収集した統計情報 (JSON) を保存するファイルを指定します")
+        .doc(concat!(
+            "合成中に収集した統計情報 (JSON) を保存するファイルを指定します\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
+        ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
@@ -120,14 +127,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // 出力ファイルパスを決定
-    let out_file_path = output_file_path.unwrap_or_else(|| root_dir.join("output.mp4"));
+    let out_file_path = root_dir.join(output_file_path);
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !no_progress_bar;
     composer.max_cpu_cores = max_cpu_cores.map(|n| n.get());
-    composer.stats_file_path = stats_file_path;
+    composer.stats_file_path = stats_file_path.map(|path| root_dir.join(path));
 
     // 合成を実行
     let result = composer.compose(&out_file_path).or_fail()?;
