@@ -177,14 +177,18 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         YuvWriter::new(root_dir.join(reference_yuv_file_path)).or_fail()?;
     let (mixed_video_temp_tx, mixed_video_temp_rx) = crate::channel::sync_channel();
     std::thread::spawn(move || {
+        let mut count = 0;
         while let Some(frame) = mixed_video_rx.recv() {
-            if let Err(e) = reference_yuv_writer.append(&frame).or_fail() {
-                log::error!("failed to write reference YUV frame: {e}");
-                break;
+            if count < frame_count {
+                if let Err(e) = reference_yuv_writer.append(&frame).or_fail() {
+                    log::error!("failed to write reference YUV frame: {e}");
+                    break;
+                }
             }
             if !mixed_video_temp_tx.send(frame) {
                 break;
             }
+            count += 1;
         }
     });
 
@@ -256,106 +260,6 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
     }
 }
 
-// /// VMAF用のコンポーザー
-// pub struct VmafComposer {
-//     pub layout: Layout,
-//     pub openh264_lib: Option<Openh264Library>,
-//     pub show_progress_bar: bool,
-//     pub max_cpu_cores: Option<usize>,
-//     pub reference_yuv: PathBuf,
-//     pub distorted_yuv: PathBuf,
-// }
-
-// impl VmafComposer {
-//     pub fn new(layout: Layout, reference_yuv: PathBuf, distorted_yuv: PathBuf) -> Self {
-//         Self {
-//             layout,
-//             openh264_lib: None,
-//             show_progress_bar: false,
-//             max_cpu_cores: None,
-//             reference_yuv,
-//             distorted_yuv,
-//         }
-//     }
-
-//     pub fn compose(&self) -> orfail::Result<VmafComposeResult> {
-//         // // 通常のComposerを使用して合成処理を実行
-//         // let mut composer = Composer::new(self.layout.clone());
-//         // composer.openh264_lib = self.openh264_lib.clone();
-//         // composer.show_progress_bar = self.show_progress_bar;
-//         // composer.max_cpu_cores = self.max_cpu_cores;
-
-//         // // 一時的なMP4ファイルを作成
-//         // let temp_file = tempfile::NamedTempFile::new().or_fail()?;
-//         // let result = composer.compose(temp_file.path()).or_fail()?;
-
-//         // if result.success {
-//         //     // MP4からYUVを抽出
-//         //     self.extract_yuv_from_mp4(temp_file.path()).or_fail()?;
-//         // }
-
-//         // Ok(VmafComposeResult {
-//         //     success: result.success,
-//         // })
-//         todo!()
-//     }
-
-//     fn extract_yuv_from_mp4(&self, mp4_path: &Path) -> orfail::Result<()> {
-//         // 参照映像（合成前）のYUVを抽出
-//         // 実際の実装では、最初のソースから直接YUVを抽出する必要がある
-//         // ここでは簡略化のため、合成後のファイルから抽出
-//         let output = Command::new("ffmpeg")
-//             .args([
-//                 "-i",
-//                 mp4_path.to_str().unwrap(),
-//                 "-pix_fmt",
-//                 "yuv420p",
-//                 "-f",
-//                 "rawvideo",
-//                 "-y",
-//                 self.reference_yuv.to_str().unwrap(),
-//             ])
-//             .output()
-//             .or_fail()?;
-
-//         if !output.status.success() {
-//             // return Err(
-//             //     format!("ffmpeg failed: {}", String::from_utf8_lossy(&output.stderr)).into(),
-//             // );
-//             todo!()
-//         }
-
-//         // 歪み映像（合成後）のYUVを抽出
-//         let output = Command::new("ffmpeg")
-//             .args([
-//                 "-i",
-//                 mp4_path.to_str().unwrap(),
-//                 "-pix_fmt",
-//                 "yuv420p",
-//                 "-f",
-//                 "rawvideo",
-//                 "-y",
-//                 self.distorted_yuv.to_str().unwrap(),
-//             ])
-//             .output()
-//             .or_fail()?;
-
-//         if !output.status.success() {
-//             // return Err(
-//             //     format!("ffmpeg failed: {}", String::from_utf8_lossy(&output.stderr)).into(),
-//             // );
-//             todo!()
-//         }
-
-//         Ok(())
-//     }
-// }
-
-// #[derive(Debug)]
-// pub struct VmafComposeResult {
-//     pub success: bool,
-// }
-
 // fn run_vmaf_evaluation(
 //     reference_yuv: &Path,
 //     distorted_yuv: &Path,
@@ -401,9 +305,6 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
 //     //         }
 //     //     }
 //     // }
-
-//     // Ok(())
-// }
 
 fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressBar {
     let progress_bar = if show_progress_bar {
