@@ -3,12 +3,14 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::LazyLock,
+    time::Instant,
 };
 
+use indicatif::{ProgressBar, ProgressStyle};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::{composer, layout::Layout};
+use crate::{channel::ErrorFlag, composer, layout::Layout, stats::SharedStats};
 
 const DEFAULT_LAYOUT_JSON: &str = r#"{
   "video_layout": {"main": {
@@ -84,7 +86,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let frame_count: u32 = noargs::opt("frame-count")
+    let frame_count: usize = noargs::opt("frame-count")
         .short('f')
         .ty("FRAMES")
         .default("1000")
@@ -136,26 +138,22 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         composer::limit_cpu_cores(cores.get()).or_fail()?;
     }
 
-    // VMAFコンポーザーを作成して設定
-    let mut composer = VmafComposer::new(
-        layout.clone(),
-        reference_yuv_file_path,
-        distorted_yuv_file_path,
-    );
-    composer.openh264_lib = openh264_lib;
-    composer.show_progress_bar = !no_progress_bar;
-    composer.max_cpu_cores = max_cpu_cores.map(|n| n.get());
+    // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
+    let stats = SharedStats::new();
+    let start_time = Instant::now();
 
-    // 合成を実行してYUVファイルを出力
-    let result = composer.compose().or_fail()?;
+    // 映像ソースの準備（音声の方は使わないので単に無視する）
+    let error_flag = ErrorFlag::new();
+    let (_audio_source_rxs, video_source_rxs) = composer::create_audio_and_video_sources(
+        &layout,
+        error_flag.clone(),
+        stats.clone(),
+        openh264_lib.clone(),
+    )
+    .or_fail()?;
 
-    if !result.success {
-        // エラー発生時は終了コードを変える
-        std::process::exit(1);
-    }
-
-    // VMAF評価を実行
-    run_vmaf_evaluation(&composer.reference_yuv, &composer.distorted_yuv, &layout).or_fail()?;
+    // プログレスバーを準備
+    let progress_bar = create_progress_bar(!no_progress_bar, frame_count);
 
     Ok(())
 }
@@ -177,151 +175,168 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
     }
 }
 
-/// VMAF用のコンポーザー
-pub struct VmafComposer {
-    pub layout: Layout,
-    pub openh264_lib: Option<Openh264Library>,
-    pub show_progress_bar: bool,
-    pub max_cpu_cores: Option<usize>,
-    pub reference_yuv: PathBuf,
-    pub distorted_yuv: PathBuf,
-}
+// /// VMAF用のコンポーザー
+// pub struct VmafComposer {
+//     pub layout: Layout,
+//     pub openh264_lib: Option<Openh264Library>,
+//     pub show_progress_bar: bool,
+//     pub max_cpu_cores: Option<usize>,
+//     pub reference_yuv: PathBuf,
+//     pub distorted_yuv: PathBuf,
+// }
 
-impl VmafComposer {
-    pub fn new(layout: Layout, reference_yuv: PathBuf, distorted_yuv: PathBuf) -> Self {
-        Self {
-            layout,
-            openh264_lib: None,
-            show_progress_bar: false,
-            max_cpu_cores: None,
-            reference_yuv,
-            distorted_yuv,
-        }
-    }
+// impl VmafComposer {
+//     pub fn new(layout: Layout, reference_yuv: PathBuf, distorted_yuv: PathBuf) -> Self {
+//         Self {
+//             layout,
+//             openh264_lib: None,
+//             show_progress_bar: false,
+//             max_cpu_cores: None,
+//             reference_yuv,
+//             distorted_yuv,
+//         }
+//     }
 
-    pub fn compose(&self) -> orfail::Result<VmafComposeResult> {
-        // // 通常のComposerを使用して合成処理を実行
-        // let mut composer = Composer::new(self.layout.clone());
-        // composer.openh264_lib = self.openh264_lib.clone();
-        // composer.show_progress_bar = self.show_progress_bar;
-        // composer.max_cpu_cores = self.max_cpu_cores;
+//     pub fn compose(&self) -> orfail::Result<VmafComposeResult> {
+//         // // 通常のComposerを使用して合成処理を実行
+//         // let mut composer = Composer::new(self.layout.clone());
+//         // composer.openh264_lib = self.openh264_lib.clone();
+//         // composer.show_progress_bar = self.show_progress_bar;
+//         // composer.max_cpu_cores = self.max_cpu_cores;
 
-        // // 一時的なMP4ファイルを作成
-        // let temp_file = tempfile::NamedTempFile::new().or_fail()?;
-        // let result = composer.compose(temp_file.path()).or_fail()?;
+//         // // 一時的なMP4ファイルを作成
+//         // let temp_file = tempfile::NamedTempFile::new().or_fail()?;
+//         // let result = composer.compose(temp_file.path()).or_fail()?;
 
-        // if result.success {
-        //     // MP4からYUVを抽出
-        //     self.extract_yuv_from_mp4(temp_file.path()).or_fail()?;
-        // }
+//         // if result.success {
+//         //     // MP4からYUVを抽出
+//         //     self.extract_yuv_from_mp4(temp_file.path()).or_fail()?;
+//         // }
 
-        // Ok(VmafComposeResult {
-        //     success: result.success,
-        // })
-        todo!()
-    }
+//         // Ok(VmafComposeResult {
+//         //     success: result.success,
+//         // })
+//         todo!()
+//     }
 
-    fn extract_yuv_from_mp4(&self, mp4_path: &Path) -> orfail::Result<()> {
-        // 参照映像（合成前）のYUVを抽出
-        // 実際の実装では、最初のソースから直接YUVを抽出する必要がある
-        // ここでは簡略化のため、合成後のファイルから抽出
-        let output = Command::new("ffmpeg")
-            .args([
-                "-i",
-                mp4_path.to_str().unwrap(),
-                "-pix_fmt",
-                "yuv420p",
-                "-f",
-                "rawvideo",
-                "-y",
-                self.reference_yuv.to_str().unwrap(),
-            ])
-            .output()
-            .or_fail()?;
+//     fn extract_yuv_from_mp4(&self, mp4_path: &Path) -> orfail::Result<()> {
+//         // 参照映像（合成前）のYUVを抽出
+//         // 実際の実装では、最初のソースから直接YUVを抽出する必要がある
+//         // ここでは簡略化のため、合成後のファイルから抽出
+//         let output = Command::new("ffmpeg")
+//             .args([
+//                 "-i",
+//                 mp4_path.to_str().unwrap(),
+//                 "-pix_fmt",
+//                 "yuv420p",
+//                 "-f",
+//                 "rawvideo",
+//                 "-y",
+//                 self.reference_yuv.to_str().unwrap(),
+//             ])
+//             .output()
+//             .or_fail()?;
 
-        if !output.status.success() {
-            // return Err(
-            //     format!("ffmpeg failed: {}", String::from_utf8_lossy(&output.stderr)).into(),
-            // );
-            todo!()
-        }
+//         if !output.status.success() {
+//             // return Err(
+//             //     format!("ffmpeg failed: {}", String::from_utf8_lossy(&output.stderr)).into(),
+//             // );
+//             todo!()
+//         }
 
-        // 歪み映像（合成後）のYUVを抽出
-        let output = Command::new("ffmpeg")
-            .args([
-                "-i",
-                mp4_path.to_str().unwrap(),
-                "-pix_fmt",
-                "yuv420p",
-                "-f",
-                "rawvideo",
-                "-y",
-                self.distorted_yuv.to_str().unwrap(),
-            ])
-            .output()
-            .or_fail()?;
+//         // 歪み映像（合成後）のYUVを抽出
+//         let output = Command::new("ffmpeg")
+//             .args([
+//                 "-i",
+//                 mp4_path.to_str().unwrap(),
+//                 "-pix_fmt",
+//                 "yuv420p",
+//                 "-f",
+//                 "rawvideo",
+//                 "-y",
+//                 self.distorted_yuv.to_str().unwrap(),
+//             ])
+//             .output()
+//             .or_fail()?;
 
-        if !output.status.success() {
-            // return Err(
-            //     format!("ffmpeg failed: {}", String::from_utf8_lossy(&output.stderr)).into(),
-            // );
-            todo!()
-        }
+//         if !output.status.success() {
+//             // return Err(
+//             //     format!("ffmpeg failed: {}", String::from_utf8_lossy(&output.stderr)).into(),
+//             // );
+//             todo!()
+//         }
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
 
-#[derive(Debug)]
-pub struct VmafComposeResult {
-    pub success: bool,
-}
+// #[derive(Debug)]
+// pub struct VmafComposeResult {
+//     pub success: bool,
+// }
 
-fn run_vmaf_evaluation(
-    reference_yuv: &Path,
-    distorted_yuv: &Path,
-    layout: &Layout,
-) -> orfail::Result<()> {
-    todo!()
-    // let width = layout.resolution.width().to_string();
-    // let height = layout.resolution.height().to_string();
+// fn run_vmaf_evaluation(
+//     reference_yuv: &Path,
+//     distorted_yuv: &Path,
+//     layout: &Layout,
+// ) -> orfail::Result<()> {
+//     todo!()
+//     // let width = layout.resolution.width().to_string();
+//     // let height = layout.resolution.height().to_string();
 
-    // let output = Command::new("vmaf")
-    //     .args([
-    //         "--reference",
-    //         reference_yuv.to_str().unwrap(),
-    //         "--distorted",
-    //         distorted_yuv.to_str().unwrap(),
-    //         "--width",
-    //         &width,
-    //         "--height",
-    //         &height,
-    //         "--pixel_format",
-    //         "yuv420p",
-    //         "--bitdepth",
-    //         "8",
-    //         "--output",
-    //         vmaf_output.to_str().unwrap(),
-    //         "--json",
-    //     ])
-    //     .output()
-    //     .or_fail()?;
+//     // let output = Command::new("vmaf")
+//     //     .args([
+//     //         "--reference",
+//     //         reference_yuv.to_str().unwrap(),
+//     //         "--distorted",
+//     //         distorted_yuv.to_str().unwrap(),
+//     //         "--width",
+//     //         &width,
+//     //         "--height",
+//     //         &height,
+//     //         "--pixel_format",
+//     //         "yuv420p",
+//     //         "--bitdepth",
+//     //         "8",
+//     //         "--output",
+//     //         vmaf_output.to_str().unwrap(),
+//     //         "--json",
+//     //     ])
+//     //     .output()
+//     //     .or_fail()?;
 
-    // if !output.status.success() {
-    //     return Err(format!("vmaf failed: {}", String::from_utf8_lossy(&output.stderr)).into());
-    // }
+//     // if !output.status.success() {
+//     //     return Err(format!("vmaf failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+//     // }
 
-    // VMAF結果を読み込んで表示
-    // let vmaf_result = std::fs::read_to_string(vmaf_output).or_fail()?;
-    // let json: Value = serde_json::from_str(&vmaf_result).or_fail()?;
+//     // VMAF結果を読み込んで表示
+//     // let vmaf_result = std::fs::read_to_string(vmaf_output).or_fail()?;
+//     // let json: Value = serde_json::from_str(&vmaf_result).or_fail()?;
 
-    // if let Some(pooled_metrics) = json.get("pooled_metrics") {
-    //     if let Some(vmaf) = pooled_metrics.get("vmaf") {
-    //         if let Some(mean) = vmaf.get("mean") {
-    //             println!("VMAF Score: {}", mean);
-    //         }
-    //     }
-    // }
+//     // if let Some(pooled_metrics) = json.get("pooled_metrics") {
+//     //     if let Some(vmaf) = pooled_metrics.get("vmaf") {
+//     //         if let Some(mean) = vmaf.get("mean") {
+//     //             println!("VMAF Score: {}", mean);
+//     //         }
+//     //     }
+//     // }
 
-    // Ok(())
+//     // Ok(())
+// }
+
+fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressBar {
+    let progress_bar = if show_progress_bar {
+        ProgressBar::new(frame_count as u64)
+    } else {
+        ProgressBar::hidden()
+    };
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}s ({eta})",
+            )
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+    progress_bar
 }

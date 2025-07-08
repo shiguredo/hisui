@@ -269,7 +269,7 @@ pub fn limit_cpu_cores(cores: usize) -> orfail::Result<()> {
     Ok(())
 }
 
-fn create_audio_and_video_sources(
+pub fn create_audio_and_video_sources(
     layout: &Layout,
     error_flag: ErrorFlag,
     stats: SharedStats,
