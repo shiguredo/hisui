@@ -381,6 +381,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for Resolution {
     }
 }
 
+// TODO: base_path の範囲外を参照していたらエラーにする
 pub fn resolve_source_and_media_path_pairs(
     base_path: &Path,
     sources: &[PathBuf],
