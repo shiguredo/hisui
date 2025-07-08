@@ -10,16 +10,13 @@ use orfail::OrFail;
 
 use crate::{
     audio,
+    json::JsonObject,
     layout_encode_params::LayoutEncodeParams,
-    layout_region::{RawRegion, Region, decide_grid_dimensions},
+    layout_region::{self, RawRegion, Region},
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, EvenUsize},
     video::FrameRate,
 };
-
-// セルの枠線のピクセル数
-// なお外枠のピクセル数は、解像度やその他の要因によって、これより大きくなったり小さくなったりすることがある
-pub const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
 
 /// 合成レイアウト
 #[derive(Debug, Clone)]
@@ -77,7 +74,7 @@ impl Layout {
         let (rows, columns) = if audio_only {
             (1, 1)
         } else {
-            decide_grid_dimensions(0, max_columns, report.archives.len())
+            layout_region::decide_grid_dimensions(0, max_columns, report.archives.len())
         };
 
         // 全体の解像度を求める（キリを良くするために内枠のことはここでは考慮しない）
@@ -186,76 +183,41 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        // TODO: JsonObject を使う
-        let (
-            [audio_sources],
-            [
-                audio_sources_excluded,
-                video_layout,
-                trim,
-                bitrate,
-                audio_bitrate,
-                video_bitrate,
-                resolution,
-                video_codec,
-                audio_codec,
-                frame_rate,
-            ],
-        ) = value.to_fixed_object(
-            ["audio_sources"],
-            [
-                "audio_sources_excluded",
-                "video_layout",
-                "trim",
-                "bitrate",
-                "audio_bitrate",
-                "video_bitrate",
-                "resolution",
-                "video_codec",
-                "audio_codec",
-                "frame_rate",
-            ],
-        )?;
+        let object = JsonObject::new(value)?;
         Ok(Self {
-            audio_sources: audio_sources.try_to()?,
-            audio_sources_excluded: audio_sources_excluded
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            video_layout: video_layout
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            trim: trim.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            resolution: resolution.map(|v| v.try_to()).transpose()?,
-            audio_bitrate: audio_bitrate.map(|v| v.try_to()).transpose()?,
-            video_bitrate: if let Some(bitrate) = video_bitrate {
-                Some(bitrate.try_to()?)
+            audio_sources: object.get("audio_sources")?.unwrap_or_default(),
+            audio_sources_excluded: object.get("audio_sources_excluded")?.unwrap_or_default(),
+            video_layout: object.get("video_layout")?.unwrap_or_default(),
+            trim: object.get("trim")?.unwrap_or_default(),
+            resolution: object.get("resolution")?,
+            audio_bitrate: object.get("audio_bitrate")?,
+            video_bitrate: if let Some(bitrate) = object.get("video_bitrate")? {
+                Some(bitrate)
             } else {
-                // "bitrate" の方は kbps 単位
-                bitrate
-                    .map(|v| v.try_to::<usize>().map(|v| v * 1024))
-                    .transpose()?
+                // レガシー版との互換性維持のための "bitrate" フィールドも考慮する
+                // こちらは kbps 単位なのでパース後に変換する
+                object.get::<usize>("bitrate")?.map(|v| v * 1024)
             },
-            encode_params: value.try_to()?,
-            video_codec: video_codec
-                .map(|v| {
+            video_codec: object
+                .get_with("video_codec", |v| {
                     v.to_unquoted_string_str()
                         .and_then(|s| CodecName::parse_video(&s).map_err(|e| v.invalid(e)))
-                })
-                .transpose()?
+                })?
                 .unwrap_or(CodecName::Vp8),
-            audio_codec: audio_codec
-                .map(|v| {
+            audio_codec: object
+                .get_with("audio_codec", |v| {
                     v.to_unquoted_string_str()
                         .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))
-                })
-                .transpose()?
+                })?
                 .unwrap_or(CodecName::Opus),
-            frame_rate: frame_rate
-                .map(|v| v.as_raw_str().parse().map_err(|e| v.invalid(e)))
-                .transpose()?
+            frame_rate: object
+                .get_with("frame_rate", |v| {
+                    v.as_raw_str().parse().map_err(|e| v.invalid(e))
+                })?
                 .unwrap_or(FrameRate::FPS_25),
+
+            // エンコードパラメータ群はトップレベルに配置されているので object を経由せずに value を直接変換する
+            encode_params: value.try_to()?,
         })
     }
 }
