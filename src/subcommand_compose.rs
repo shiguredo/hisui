@@ -1,6 +1,7 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
 use orfail::OrFail;
@@ -24,22 +25,20 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .short('l')
         .ty("PATH")
         .env("HISUI_LAYOUT_FILE_PATH")
-        .doc(concat!(
-            "合成に使用するレイアウトファイルを指定します\n",
-            "\n",
-            "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
-            // TODO: DEFAULT_LAYOUT_JSON を参照するようにしたい
-            r#"{"#,
-            r#"  "audio_sources": [ "archive*.json" ],"#,
-            r#"  "video_layout": {"main": {"#,
-            r#"    "cell_width": 320,"#,
-            r#"    "cell_height": 240,"#,
-            r#"    "max_columns": 4,"#,
-            r#"    "max_rows": 4,"#,
-            r#"    "video_sources": [ "archive*.json" ]"#,
-            r#"  }}"#,
-            r#"}"#
-        ))
+        .doc({
+            static DOC: LazyLock<String> = LazyLock::new(|| {
+                format!(
+                    concat!(
+                        "合成に使用するレイアウトファイルを指定します\n",
+                        "\n",
+                        "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
+                        "{}"
+                    ),
+                    DEFAULT_LAYOUT_JSON
+                )
+            });
+            &*DOC
+        })
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
     let output_file_path: Option<PathBuf> = noargs::opt("output-file")

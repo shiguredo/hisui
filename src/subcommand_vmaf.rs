@@ -2,6 +2,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::Command,
+    sync::LazyLock,
 };
 
 use orfail::OrFail;
@@ -24,20 +25,20 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .short('l')
         .ty("PATH")
         .env("HISUI_LAYOUT_FILE_PATH")
-        .doc(concat!(
-            "合成に使用するレイアウトファイルを指定します\n",
-            "\n",
-            "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
-            "{\n",
-            "  \"video_layout\": {\"main\": {\n",
-            "    \"cell_width\": 320,\n",
-            "    \"cell_height\": 240,\n",
-            "    \"max_columns\": 4,\n",
-            "    \"max_rows\": 4,\n",
-            "    \"video_sources\": [ \"archive*.json\" ]\n",
-            "  }}\n",
-            "}"
-        ))
+        .doc({
+            static DOC: LazyLock<String> = LazyLock::new(|| {
+                format!(
+                    concat!(
+                        "合成に使用するレイアウトファイルを指定します\n",
+                        "\n",
+                        "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
+                        "{}"
+                    ),
+                    DEFAULT_LAYOUT_JSON
+                )
+            });
+            &*DOC
+        })
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
 
