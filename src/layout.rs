@@ -198,7 +198,8 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
             video_bitrate: if let Some(bitrate) = object.get("video_bitrate")? {
                 Some(bitrate)
             } else {
-                // "bitrate" の方は kbps 単位
+                // レガシー版との互換性維持のための "bitrate" フィールドも考慮する
+                // こちらは kbps 単位なのでパース後に変換する
                 object.get::<usize>("bitrate")?.map(|v| v * 1024)
             },
             video_codec: object
