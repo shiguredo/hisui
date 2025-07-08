@@ -1,6 +1,7 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::LazyLock,
 };
 
@@ -65,6 +66,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .default("distorted.yuv")
         .doc(concat!(
             "歪み映像（合成後）のYUVファイルの出力先を指定します\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
+        ))
+        .take(&mut args)
+        .then(|a| a.value().parse())?;
+    let vmaf_output_file_path: PathBuf = noargs::opt("vmaf-output-file")
+        .ty("PATH")
+        .default("vmaf-output.json")
+        .doc(concat!(
+            "vmaf コマンドの実行結果ファイルの出力先を指定します\n",
             "\n",
             "相対パスの場合は ROOT_DIR が起点となります"
         ))
@@ -173,8 +184,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     );
 
     // エンコード前の画像の書き込みスレッドを起動
-    let mut reference_yuv_writer =
-        YuvWriter::new(root_dir.join(reference_yuv_file_path)).or_fail()?;
+    let reference_yuv_file_path = root_dir.join(&reference_yuv_file_path);
+    let mut reference_yuv_writer = YuvWriter::new(&reference_yuv_file_path).or_fail()?;
     let (mixed_video_temp_tx, mixed_video_temp_rx) = crate::channel::sync_channel();
     std::thread::spawn(move || {
         let mut count = 0;
@@ -206,8 +217,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         openh264_lib: openh264_lib.clone(),
     };
     let mut decoder = VideoDecoder::new(options);
-    let mut distorted_yuv_writer =
-        YuvWriter::new(root_dir.join(distorted_yuv_file_path)).or_fail()?;
+    let distorted_yuv_file_path = root_dir.join(&distorted_yuv_file_path);
+    let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
@@ -240,6 +251,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // VMAF の下準備としての処理は全て完了した
     progress_bar.finish();
 
+    // vmaf コマンドを実行
+    let vmaf_output_file_path = root_dir.join(vmaf_output_file_path);
+    run_vmaf_evaluation(
+        &reference_yuv_file_path,
+        &distorted_yuv_file_path,
+        &vmaf_output_file_path,
+        &layout,
+    )
+    .or_fail()?;
+
     Ok(())
 }
 
@@ -260,51 +281,51 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
     }
 }
 
-// fn run_vmaf_evaluation(
-//     reference_yuv: &Path,
-//     distorted_yuv: &Path,
-//     layout: &Layout,
-// ) -> orfail::Result<()> {
-//     todo!()
-//     // let width = layout.resolution.width().to_string();
-//     // let height = layout.resolution.height().to_string();
+fn run_vmaf_evaluation(
+    reference_yuv_file_path: &Path,
+    distorted_yuv_file_path: &Path,
+    vmaf_output_file_path: &Path,
+    layout: &Layout,
+) -> orfail::Result<()> {
+    let output = Command::new("vmaf")
+        .args([
+            "--reference",
+            reference_yuv_file_path.to_str().or_fail()?,
+            "--distorted",
+            distorted_yuv_file_path.to_str().or_fail()?,
+            "--width",
+            &layout.resolution.width().get().to_string(),
+            "--height",
+            &layout.resolution.height().get().to_string(),
+            "--pixel_format",
+            "420",
+            "--bitdepth",
+            "8",
+            "--output",
+            vmaf_output_file_path.to_str().or_fail()?,
+            "--json",
+        ])
+        .stderr(Stdio::inherit())
+        .output()
+        .or_fail()?;
+    output
+        .status
+        .success()
+        .or_fail_with(|()| format!("vmaf failed: {}", String::from_utf8_lossy(&output.stderr)))?;
 
-//     // let output = Command::new("vmaf")
-//     //     .args([
-//     //         "--reference",
-//     //         reference_yuv.to_str().unwrap(),
-//     //         "--distorted",
-//     //         distorted_yuv.to_str().unwrap(),
-//     //         "--width",
-//     //         &width,
-//     //         "--height",
-//     //         &height,
-//     //         "--pixel_format",
-//     //         "yuv420p",
-//     //         "--bitdepth",
-//     //         "8",
-//     //         "--output",
-//     //         vmaf_output.to_str().unwrap(),
-//     //         "--json",
-//     //     ])
-//     //     .output()
-//     //     .or_fail()?;
+    // // VMAF結果を読み込んで表示
+    // let vmaf_result = std::fs::read_to_string(vmaf_output).or_fail()?;
+    // let json: Value = serde_json::from_str(&vmaf_result).or_fail()?;
 
-//     // if !output.status.success() {
-//     //     return Err(format!("vmaf failed: {}", String::from_utf8_lossy(&output.stderr)).into());
-//     // }
-
-//     // VMAF結果を読み込んで表示
-//     // let vmaf_result = std::fs::read_to_string(vmaf_output).or_fail()?;
-//     // let json: Value = serde_json::from_str(&vmaf_result).or_fail()?;
-
-//     // if let Some(pooled_metrics) = json.get("pooled_metrics") {
-//     //     if let Some(vmaf) = pooled_metrics.get("vmaf") {
-//     //         if let Some(mean) = vmaf.get("mean") {
-//     //             println!("VMAF Score: {}", mean);
-//     //         }
-//     //     }
-//     // }
+    // if let Some(pooled_metrics) = json.get("pooled_metrics") {
+    //     if let Some(vmaf) = pooled_metrics.get("vmaf") {
+    //         if let Some(mean) = vmaf.get("mean") {
+    //             println!("VMAF Score: {}", mean);
+    //         }
+    //     }
+    // }
+    Ok(())
+}
 
 fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressBar {
     let progress_bar = if show_progress_bar {
