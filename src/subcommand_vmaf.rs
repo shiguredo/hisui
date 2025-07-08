@@ -125,6 +125,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut layout = create_layout(&root_dir, layout_file_path.as_deref()).or_fail()?;
     layout.audio_source_ids.clear();
     log::debug!("layout: {layout:?}");
+    layout
+        .has_video()
+        .or_fail_with(|()| "no video sources".to_owned())?;
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
     let openh264_lib = if let Some(path) = openh264.as_ref().filter(|_| layout.has_video()) {
