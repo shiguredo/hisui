@@ -3,7 +3,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::LazyLock,
-    time::Duration,
 };
 
 use orfail::OrFail;
@@ -85,13 +84,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let duration: Duration = noargs::opt("duration")
-        .short('d')
-        .ty("SECONDS")
-        .default("60")
-        .doc("変換する尺（秒数）を指定します")
+    let frame_count: u32 = noargs::opt("frame-count")
+        .short('f')
+        .ty("FRAMES")
+        .default("1000")
+        .doc("変換するフレーム数を指定します")
         .take(&mut args)
-        .then(|a| a.value().parse::<f64>().map(Duration::from_secs_f64))?;
+        .then(|a| a.value().parse())?;
     let root_dir: PathBuf = noargs::arg("ROOT_DIR")
         .example("/path/to/archive/RECORDING_ID/")
         .doc(concat!(
