@@ -7,14 +7,16 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
-    layout::{
-        AggregatedSourceInfo, AssignedSource, BORDER_PIXELS, Resolution,
-        resolve_source_and_media_path_pairs,
-    },
+    json::JsonObject,
+    layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
     metadata::SourceId,
     types::{EvenUsize, PixelPosition},
     video::VideoFrame,
 };
+
+// セルの枠線のピクセル数
+// なお外枠のピクセル数は、解像度やその他の要因によって、これより大きくなったり小さくなったりすることがある
+const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
 
 /// 映像リージョン
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,71 +82,21 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
     fn from_raw_json_value(
         value: nojson::RawJsonValue<'text, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        let (
-            [video_sources],
-            [
-                cells_excluded,
-                height,
-                max_columns,
-                max_rows,
-                reuse,
-                video_sources_excluded,
-                width,
-                cell_width,
-                cell_height,
-                x_pos,
-                y_pos,
-                z_pos,
-            ],
-        ) = value.to_fixed_object(
-            ["video_sources"],
-            [
-                "cells_excluded",
-                "height",
-                "max_columns",
-                "max_rows",
-                "reuse",
-                "video_sources_excluded",
-                "width",
-                "cell_width",
-                "cell_height",
-                "x_pos",
-                "y_pos",
-                "z_pos",
-            ],
-        )?;
+        let object = JsonObject::new(value)?;
         Ok(Self {
-            video_sources: video_sources.try_to()?,
-            cells_excluded: cells_excluded
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            height: height.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            max_columns: max_columns
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            max_rows: max_rows
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            reuse: reuse.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            video_sources_excluded: video_sources_excluded
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            width: width.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            cell_width: cell_width
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            cell_height: cell_height
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            x_pos: x_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            y_pos: y_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
-            z_pos: z_pos.map(|v| v.try_to()).transpose()?.unwrap_or_default(),
+            video_sources: object.get_required("video_sources")?,
+            cells_excluded: object.get("cells_excluded")?.unwrap_or_default(),
+            width: object.get("width")?.unwrap_or_default(),
+            height: object.get("height")?.unwrap_or_default(),
+            max_columns: object.get("max_columns")?.unwrap_or_default(),
+            max_rows: object.get("max_rows")?.unwrap_or_default(),
+            reuse: object.get("reuse")?.unwrap_or_default(),
+            video_sources_excluded: object.get("video_sources_excluded")?.unwrap_or_default(),
+            cell_width: object.get("cell_width")?.unwrap_or_default(),
+            cell_height: object.get("cell_height")?.unwrap_or_default(),
+            x_pos: object.get("x_pos")?.unwrap_or_default(),
+            y_pos: object.get("y_pos")?.unwrap_or_default(),
+            z_pos: object.get("z_pos")?.unwrap_or_default(),
         })
     }
 }
@@ -168,7 +120,7 @@ impl RawRegion {
             ));
         }
 
-        let resolved = resolve_source_and_media_path_pairs(
+        let resolved = layout::resolve_source_and_media_path_pairs(
             base_path,
             &self.video_sources,
             &self.video_sources_excluded,

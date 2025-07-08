@@ -18,10 +18,6 @@ use crate::{
     video::FrameRate,
 };
 
-// セルの枠線のピクセル数
-// なお外枠のピクセル数は、解像度やその他の要因によって、これより大きくなったり小さくなったりすることがある
-pub const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
-
 /// 合成レイアウト
 #[derive(Debug, Clone)]
 pub struct Layout {
