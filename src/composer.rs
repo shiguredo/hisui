@@ -242,13 +242,13 @@ impl Composer {
 }
 
 #[cfg(target_os = "macos")]
-fn limit_cpu_cores(_cores: usize) -> orfail::Result<()> {
+pub fn limit_cpu_cores(_cores: usize) -> orfail::Result<()> {
     log::warn!("`--cpu-cores` option is ignored on MacOS");
     Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn limit_cpu_cores(cores: usize) -> orfail::Result<()> {
+pub fn limit_cpu_cores(cores: usize) -> orfail::Result<()> {
     unsafe {
         let mut cpu_set = std::mem::MaybeUninit::zeroed().assume_init();
         libc::CPU_ZERO(&mut cpu_set);

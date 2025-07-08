@@ -8,7 +8,7 @@ use std::{
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::layout::Layout;
+use crate::{composer, layout::Layout};
 
 const DEFAULT_LAYOUT_JSON: &str = r#"{
   "video_layout": {"main": {
@@ -121,16 +121,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // レイアウトを準備（音声処理は無効化）
     let mut layout = create_layout(&root_dir, layout_file_path.as_deref()).or_fail()?;
-    // TODO: layout.audio_sources.clear(); // 音声処理を無効化
-
-    // 時間範囲の設定
-    // if let Some(start) = start_time {
-    //     layout.start_time = Some(Duration::from_secs_f64(start));
-    // }
-    // if let Some(dur) = duration {
-    //     layout.duration = Some(Duration::from_secs_f64(dur));
-    // }
-
+    layout.audio_source_ids.clear();
     log::debug!("layout: {layout:?}");
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
@@ -139,6 +130,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     } else {
         None
     };
+
+    // CPU コア数制限を適用
+    if let Some(cores) = max_cpu_cores {
+        composer::limit_cpu_cores(cores.get()).or_fail()?;
+    }
 
     // VMAFコンポーザーを作成して設定
     let mut composer = VmafComposer::new(
