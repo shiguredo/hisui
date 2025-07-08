@@ -10,7 +10,9 @@ use indicatif::{ProgressBar, ProgressStyle};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::{channel::ErrorFlag, composer, layout::Layout, stats::SharedStats};
+use crate::{
+    channel::ErrorFlag, composer, layout::Layout, mixer_video::VideoMixerThread, stats::SharedStats,
+};
 
 const DEFAULT_LAYOUT_JSON: &str = r#"{
   "video_layout": {"main": {
@@ -157,6 +159,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // プログレスバーを準備
     let progress_bar = create_progress_bar(!no_progress_bar, frame_count);
+
+    // ミキサースレッドを起動
+    let mixed_video_rx = VideoMixerThread::start(
+        error_flag.clone(),
+        layout.clone(),
+        video_source_rxs,
+        stats.clone(),
+    );
+
+    // TODO: エンコード前の画像保存用の YuvWriter をここで挟む
 
     Ok(())
 }

@@ -143,26 +143,7 @@ impl Composer {
             stats.clone(),
         );
 
-        let encoder = match self.layout.video_codec {
-            CodecName::Vp8 => VideoEncoder::new_vp8(&self.layout).or_fail()?,
-            CodecName::Vp9 => VideoEncoder::new_vp9(&self.layout).or_fail()?,
-            #[cfg(target_os = "macos")]
-            CodecName::H264 if self.openh264_lib.is_none() => {
-                VideoEncoder::new_video_toolbox_h264(&self.layout).or_fail()?
-            }
-            CodecName::H264 => {
-                let lib = self.openh264_lib.clone().or_fail()?;
-                VideoEncoder::new_openh264(lib, &self.layout).or_fail()?
-            }
-            #[cfg(target_os = "macos")]
-            CodecName::H265 => VideoEncoder::new_video_toolbox_h265(&self.layout).or_fail()?,
-            #[cfg(not(target_os = "macos"))]
-            CodecName::H265 => {
-                return Err(orfail::Failure::new("no available H.265 encoder"));
-            }
-            CodecName::Av1 => VideoEncoder::new_svt_av1(&self.layout).or_fail()?,
-            _ => unreachable!(),
-        };
+        let encoder = VideoEncoder::new(&self.layout, self.openh264_lib.clone()).or_fail()?;
         let encoded_video_rx =
             VideoEncoderThread::start(error_flag.clone(), mixed_video_rx, encoder, stats.clone());
         Ok(encoded_video_rx)

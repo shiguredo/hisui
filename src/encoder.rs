@@ -118,6 +118,27 @@ pub enum VideoEncoder {
 }
 
 impl VideoEncoder {
+    pub fn new(layout: &Layout, openh264_lib: Option<Openh264Library>) -> orfail::Result<Self> {
+        match layout.video_codec {
+            CodecName::Vp8 => VideoEncoder::new_vp8(layout).or_fail(),
+            CodecName::Vp9 => VideoEncoder::new_vp9(layout).or_fail(),
+            #[cfg(target_os = "macos")]
+            CodecName::H264 if openh264_lib.is_none() => {
+                VideoEncoder::new_video_toolbox_h264(layout).or_fail()
+            }
+            CodecName::H264 => {
+                let lib = openh264_lib.or_fail()?;
+                VideoEncoder::new_openh264(lib, layout).or_fail()
+            }
+            #[cfg(target_os = "macos")]
+            CodecName::H265 => VideoEncoder::new_video_toolbox_h265(layout).or_fail(),
+            #[cfg(not(target_os = "macos"))]
+            CodecName::H265 => Err(orfail::Failure::new("no available H.265 encoder")),
+            CodecName::Av1 => VideoEncoder::new_svt_av1(layout).or_fail(),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
         let encoder = LibvpxEncoder::new_vp8(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
