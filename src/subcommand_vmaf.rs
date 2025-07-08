@@ -1,9 +1,7 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    process::Command,
     sync::LazyLock,
-    time::Instant,
 };
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -167,19 +165,37 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let progress_bar = create_progress_bar(!no_progress_bar, frame_count);
 
     // ミキサースレッドを起動
-    let mixed_video_rx = VideoMixerThread::start(
+    let mut mixed_video_rx = VideoMixerThread::start(
         error_flag.clone(),
         layout.clone(),
         video_source_rxs,
         stats.clone(),
     );
 
-    // TODO: エンコード前の画像保存用の YuvWriter をここで挟む
+    // エンコード前の画像の書き込みスレッドを起動
+    let mut reference_yuv_writer =
+        YuvWriter::new(root_dir.join(reference_yuv_file_path)).or_fail()?;
+    let (mixed_video_temp_tx, mixed_video_temp_rx) = crate::channel::sync_channel();
+    std::thread::spawn(move || {
+        while let Some(frame) = mixed_video_rx.recv() {
+            if let Err(e) = reference_yuv_writer.append(&frame).or_fail() {
+                log::error!("failed to write reference YUV frame: {e}");
+                break;
+            }
+            if !mixed_video_temp_tx.send(frame) {
+                break;
+            }
+        }
+    });
 
     // 映像エンコードスレッドを起動
     let encoder = VideoEncoder::new(&layout, openh264_lib.clone()).or_fail()?;
-    let mut encoded_video_rx =
-        VideoEncoderThread::start(error_flag.clone(), mixed_video_rx, encoder, stats.clone());
+    let mut encoded_video_rx = VideoEncoderThread::start(
+        error_flag.clone(),
+        mixed_video_temp_rx,
+        encoder,
+        stats.clone(),
+    );
 
     // 最終的な映像のデコード＆ YUV 書き出しの準備
     let options = VideoDecoderOptions {
