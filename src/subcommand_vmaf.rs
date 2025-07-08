@@ -312,18 +312,6 @@ fn run_vmaf_evaluation(
         .status
         .success()
         .or_fail_with(|()| format!("vmaf failed: {}", String::from_utf8_lossy(&output.stderr)))?;
-
-    // // VMAF結果を読み込んで表示
-    // let vmaf_result = std::fs::read_to_string(vmaf_output).or_fail()?;
-    // let json: Value = serde_json::from_str(&vmaf_result).or_fail()?;
-
-    // if let Some(pooled_metrics) = json.get("pooled_metrics") {
-    //     if let Some(vmaf) = pooled_metrics.get("vmaf") {
-    //         if let Some(mean) = vmaf.get("mean") {
-    //             println!("VMAF Score: {}", mean);
-    //         }
-    //     }
-    // }
     Ok(())
 }
 
