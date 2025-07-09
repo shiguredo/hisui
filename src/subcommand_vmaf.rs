@@ -143,6 +143,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    // 最初に vmaf コマンドが利用可能かどうかをチェックする
+    check_vmaf_availability().or_fail()?;
+
     // レイアウトを準備（音声処理は無効化）
     let mut layout = create_layout(&root_dir, layout_file_path.as_deref()).or_fail()?;
     layout.audio_source_ids.clear();
@@ -319,6 +322,27 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
             DEFAULT_LAYOUT_JSON,
         )
         .or_fail()
+    }
+}
+
+fn check_vmaf_availability() -> orfail::Result<()> {
+    let output = Command::new("vmaf")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(_) => Err(orfail::Failure::new(
+            "vmaf command failed to execute properly",
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(orfail::Failure::new(
+            "vmaf command not found. Please install vmaf and ensure it's in your PATH",
+        )),
+        Err(e) => Err(orfail::Failure::new(format!(
+            "failed to check vmaf availability: {e}"
+        ))),
     }
 }
 
