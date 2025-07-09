@@ -84,7 +84,7 @@ impl AudioSourceThread {
                 self.decoder_stats.source_id = data.source_id;
                 if !self.tx.send(decoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::warn!("receiver of audio source has been closed");
+                    log::info!("receiver of audio source has been closed");
                     return Ok(());
                 }
             }
@@ -179,7 +179,7 @@ impl VideoSourceThread {
                     .insert(VideoResolution::new(&frame));
                 if !self.tx.send(frame) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::warn!("receiver of video source has been closed");
+                    log::info!("receiver of video source has been closed");
                     return Ok(next_timestamp);
                 }
             }
@@ -215,7 +215,7 @@ impl VideoSourceThread {
                 .insert(VideoResolution::new(&frame));
             if !self.tx.send(frame) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::warn!("receiver of video source has been closed");
+                log::info!("receiver of video source has been closed");
                 return Ok(next_timestamp);
             }
         }

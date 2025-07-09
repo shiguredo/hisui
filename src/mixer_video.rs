@@ -97,7 +97,7 @@ impl VideoMixerThread {
 
             if !self.output_tx.send(last_frame) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::warn!("receiver of mixed video stream has been closed");
+                log::info!("receiver of mixed video stream has been closed");
                 return Ok(());
             }
         }
@@ -105,7 +105,7 @@ impl VideoMixerThread {
         // バッファに残っていた最後のフレームを送る
         if let Some(last_frame) = self.last_mixed_frame.take() {
             if !self.output_tx.send(last_frame) {
-                log::warn!("receiver of mixed video stream has been closed");
+                log::info!("receiver of mixed video stream has been closed");
             }
         }
 

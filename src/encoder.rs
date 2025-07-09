@@ -303,14 +303,14 @@ impl AudioEncoderThread {
 
             if !self.output_tx.send(encoded) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::warn!("receiver of encoded audio stream has been closed");
+                log::info!("receiver of encoded audio stream has been closed");
                 break;
             }
         }
 
         if let Some(encoded) = self.encoder.finish().or_fail()? {
             if !self.output_tx.send(encoded) {
-                log::warn!("receiver of encoded audio stream has been closed");
+                log::info!("receiver of encoded audio stream has been closed");
             }
         }
 
@@ -368,7 +368,7 @@ impl VideoEncoderThread {
                 self.stats.total_output_video_frame_count += 1;
                 if !self.output_tx.send(encoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::warn!("receiver of encoded video stream has been closed");
+                    log::info!("receiver of encoded video stream has been closed");
                     return Ok(());
                 }
             }
@@ -381,7 +381,7 @@ impl VideoEncoderThread {
             self.stats.total_output_video_frame_count += 1;
             if !self.output_tx.send(encoded) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::warn!("receiver of encoded video stream has been closed");
+                log::info!("receiver of encoded video stream has been closed");
                 break;
             }
         }
