@@ -118,34 +118,55 @@ pub enum VideoEncoder {
 }
 
 impl VideoEncoder {
-    pub fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
+    pub fn new(layout: &Layout, openh264_lib: Option<Openh264Library>) -> orfail::Result<Self> {
+        match layout.video_codec {
+            CodecName::Vp8 => VideoEncoder::new_vp8(layout).or_fail(),
+            CodecName::Vp9 => VideoEncoder::new_vp9(layout).or_fail(),
+            #[cfg(target_os = "macos")]
+            CodecName::H264 if openh264_lib.is_none() => {
+                VideoEncoder::new_video_toolbox_h264(layout).or_fail()
+            }
+            CodecName::H264 => {
+                let lib = openh264_lib.or_fail()?;
+                VideoEncoder::new_openh264(lib, layout).or_fail()
+            }
+            #[cfg(target_os = "macos")]
+            CodecName::H265 => VideoEncoder::new_video_toolbox_h265(layout).or_fail(),
+            #[cfg(not(target_os = "macos"))]
+            CodecName::H265 => Err(orfail::Failure::new("no available H.265 encoder")),
+            CodecName::Av1 => VideoEncoder::new_svt_av1(layout).or_fail(),
+            _ => unreachable!(),
+        }
+    }
+
+    fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
         let encoder = LibvpxEncoder::new_vp8(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 
-    pub fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
+    fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
         let encoder = LibvpxEncoder::new_vp9(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 
-    pub fn new_openh264(lib: Openh264Library, layout: &Layout) -> orfail::Result<Self> {
+    fn new_openh264(lib: Openh264Library, layout: &Layout) -> orfail::Result<Self> {
         let encoder = Openh264Encoder::new(lib, layout).or_fail()?;
         Ok(Self::Openh264(encoder))
     }
 
-    pub fn new_svt_av1(layout: &Layout) -> orfail::Result<Self> {
+    fn new_svt_av1(layout: &Layout) -> orfail::Result<Self> {
         let encoder = SvtAv1Encoder::new(layout).or_fail()?;
         Ok(Self::SvtAv1(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    pub fn new_video_toolbox_h264(layout: &Layout) -> orfail::Result<Self> {
+    fn new_video_toolbox_h264(layout: &Layout) -> orfail::Result<Self> {
         let encoder = VideoToolboxEncoder::new_h264(layout).or_fail()?;
         Ok(Self::VideoToolbox(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    pub fn new_video_toolbox_h265(layout: &Layout) -> orfail::Result<Self> {
+    fn new_video_toolbox_h265(layout: &Layout) -> orfail::Result<Self> {
         let encoder = VideoToolboxEncoder::new_h265(layout).or_fail()?;
         Ok(Self::VideoToolbox(encoder))
     }
@@ -180,7 +201,7 @@ impl VideoEncoder {
         }
     }
 
-    fn name(&self) -> EngineName {
+    pub fn name(&self) -> EngineName {
         match self {
             Self::Libvpx(_) => EngineName::Libvpx,
             Self::Openh264(_) => EngineName::Openh264,
@@ -282,14 +303,14 @@ impl AudioEncoderThread {
 
             if !self.output_tx.send(encoded) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::warn!("receiver of encoded audio stream has been closed");
+                log::info!("receiver of encoded audio stream has been closed");
                 break;
             }
         }
 
         if let Some(encoded) = self.encoder.finish().or_fail()? {
             if !self.output_tx.send(encoded) {
-                log::warn!("receiver of encoded audio stream has been closed");
+                log::info!("receiver of encoded audio stream has been closed");
             }
         }
 
@@ -347,7 +368,7 @@ impl VideoEncoderThread {
                 self.stats.total_output_video_frame_count += 1;
                 if !self.output_tx.send(encoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::warn!("receiver of encoded video stream has been closed");
+                    log::info!("receiver of encoded video stream has been closed");
                     return Ok(());
                 }
             }
@@ -360,7 +381,7 @@ impl VideoEncoderThread {
             self.stats.total_output_video_frame_count += 1;
             if !self.output_tx.send(encoded) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::warn!("receiver of encoded video stream has been closed");
+                log::info!("receiver of encoded video stream has been closed");
                 break;
             }
         }

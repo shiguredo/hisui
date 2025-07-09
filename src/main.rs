@@ -11,6 +11,8 @@ const INSPECT_COMMAND: noargs::CmdSpec =
 const LIST_CODECS_COMMAND: noargs::CmdSpec =
     noargs::cmd("list-codecs").doc("利用可能なコーデック一覧を表示します");
 const COMPOSE_COMMAND: noargs::CmdSpec = noargs::cmd("compose").doc("録画ファイルの合成を行います");
+const VMAF_COMMAND: noargs::CmdSpec =
+    noargs::cmd("vmaf").doc("VMAF を用いた映像エンコード品質の評価を行います");
 const LEGACY_COMMAND: noargs::CmdSpec =
     noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです（省略可能）");
 
@@ -42,6 +44,8 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_compose::run(args)?;
     } else if LEGACY_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_legacy::run(args)?;
+    } else if VMAF_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_vmaf::run(args)?;
     } else if args.metadata().help_mode {
         // help_mode=true なので `Ok(None)` が返されることはない
         let help = args.finish()?.expect("infallible");

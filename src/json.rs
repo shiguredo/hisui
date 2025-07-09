@@ -28,6 +28,16 @@ impl<'a, 'text> JsonObject<'a, 'text> {
         Ok(Some(value.try_to()?))
     }
 
+    pub fn get_with<T, F>(&self, key: &str, f: F) -> Result<Option<T>, nojson::JsonParseError>
+    where
+        F: FnOnce(nojson::RawJsonValue<'text, 'a>) -> Result<T, nojson::JsonParseError>,
+    {
+        let Some(value) = self.members.get(key).copied() else {
+            return Ok(None);
+        };
+        Ok(Some(f(value)?))
+    }
+
     pub fn get_required<T>(&self, key: &str) -> Result<T, nojson::JsonParseError>
     where
         T: nojson::FromRawJsonValue<'text>,
@@ -40,13 +50,15 @@ impl<'a, 'text> JsonObject<'a, 'text> {
         value.try_to()
     }
 
-    pub fn get_with<T, F>(&self, key: &str, f: F) -> Result<Option<T>, nojson::JsonParseError>
+    pub fn get_required_with<T, F>(&self, key: &str, f: F) -> Result<T, nojson::JsonParseError>
     where
         F: FnOnce(nojson::RawJsonValue<'text, 'a>) -> Result<T, nojson::JsonParseError>,
     {
         let Some(value) = self.members.get(key).copied() else {
-            return Ok(None);
+            return Err(self
+                .object
+                .invalid(format!("missing required member {key:?}")));
         };
-        Ok(Some(f(value)?))
+        f(value)
     }
 }

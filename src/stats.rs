@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeSet,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -41,6 +41,26 @@ impl SharedStats {
                 log::warn!("failed to acqure stats lock: {e}");
             }
         }
+    }
+
+    pub fn finish(&self, start_time: Instant, output_file_path: &Path) {
+        self.with_lock(|stats| {
+            stats.elapsed_seconds = Seconds::new(start_time.elapsed());
+
+            let json = nojson::json(|f| {
+                f.set_indent_size(2);
+                f.set_spacing(true);
+                f.value(&stats)
+            })
+            .to_string();
+            if let Err(e) = std::fs::write(output_file_path, json) {
+                // 統計が出力できなくても全体を失敗扱いにはしない
+                log::warn!(
+                    "failed to write stats JSON: path={}, reason={e}",
+                    output_file_path.display()
+                );
+            }
+        });
     }
 }
 

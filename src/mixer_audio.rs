@@ -72,7 +72,7 @@ impl AudioMixerThread {
         while let Some(data) = self.next_data().or_fail()? {
             if !self.output_tx.send(data) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::warn!("receiver of mixed audio stream has been closed");
+                log::info!("receiver of mixed audio stream has been closed");
                 break;
             }
         }

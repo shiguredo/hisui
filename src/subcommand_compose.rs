@@ -1,6 +1,7 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
 use orfail::OrFail;
@@ -24,39 +25,44 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .short('l')
         .ty("PATH")
         .env("HISUI_LAYOUT_FILE_PATH")
-        .doc(concat!(
-            "合成に使用するレイアウトファイルを指定します\n",
-            "\n",
-            "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
-            // TODO: DEFAULT_LAYOUT_JSON を参照するようにしたい
-            r#"{"#,
-            r#"  "audio_sources": [ "archive*.json" ],"#,
-            r#"  "video_layout": {"main": {"#,
-            r#"    "cell_width": 320,"#,
-            r#"    "cell_height": 240,"#,
-            r#"    "max_columns": 4,"#,
-            r#"    "max_rows": 4,"#,
-            r#"    "video_sources": [ "archive*.json" ]"#,
-            r#"  }}"#,
-            r#"}"#
-        ))
+        .doc({
+            static DOC: LazyLock<String> = LazyLock::new(|| {
+                format!(
+                    concat!(
+                        "合成に使用するレイアウトファイルを指定します\n",
+                        "\n",
+                        "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
+                        "{}"
+                    ),
+                    DEFAULT_LAYOUT_JSON
+                )
+            });
+            &*DOC
+        })
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let output_file_path: Option<PathBuf> = noargs::opt("output-file")
+    let output_file_path: PathBuf = noargs::opt("output-file")
         .short('o')
         .ty("PATH")
+        .default("output.mp4")
         .doc(concat!(
             "合成結果を保存するファイルを指定します\n",
             "\n",
-            "この引数が未指定の場合には `--root-dir` 引数で\n",
-            "指定したディレクトリに `output.mp4` という名前で保存されます"
+            "この引数が未指定の場合には ROOT_DIR 引数で\n",
+            "指定したディレクトリに `output.mp4` という名前で保存されます\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
         ))
         .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
+        .then(|a| a.value().parse())?;
     let stats_file_path: Option<PathBuf> = noargs::opt("stats-file")
         .short('s')
         .ty("PATH")
-        .doc("合成中に収集した統計情報 (JSON) を保存するファイルを指定します")
+        .doc(concat!(
+            "合成中に収集した統計情報 (JSON) を保存するファイルを指定します\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
+        ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
@@ -121,14 +127,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // 出力ファイルパスを決定
-    let out_file_path = output_file_path.unwrap_or_else(|| root_dir.join("output.mp4"));
+    let out_file_path = root_dir.join(output_file_path);
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !no_progress_bar;
     composer.max_cpu_cores = max_cpu_cores.map(|n| n.get());
-    composer.stats_file_path = stats_file_path;
+    composer.stats_file_path = stats_file_path.map(|path| root_dir.join(path));
 
     // 合成を実行
     let result = composer.compose(&out_file_path).or_fail()?;

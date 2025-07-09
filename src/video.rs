@@ -327,6 +327,16 @@ impl FromStr for FrameRate {
     }
 }
 
+impl nojson::DisplayJson for FrameRate {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        if self.denumerator.get() == 1 {
+            f.value(self.numerator.get())
+        } else {
+            f.string(format!("{}/{}", self.numerator, self.denumerator))
+        }
+    }
+}
+
 pub fn sample_entry_visual_fields(width: EvenUsize, height: EvenUsize) -> VisualSampleEntryFields {
     VisualSampleEntryFields {
         data_reference_index: VisualSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
