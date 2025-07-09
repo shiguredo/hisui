@@ -327,6 +327,16 @@ impl FromStr for FrameRate {
     }
 }
 
+impl std::fmt::Display for FrameRate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.denumerator.get() == 1 {
+            write!(f, "{}", self.numerator)
+        } else {
+            write!(f, "{}/{}", self.numerator, self.denumerator)
+        }
+    }
+}
+
 pub fn sample_entry_visual_fields(width: EvenUsize, height: EvenUsize) -> VisualSampleEntryFields {
     VisualSampleEntryFields {
         data_reference_index: VisualSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,

@@ -18,6 +18,7 @@ use crate::{
     layout::Layout,
     mixer_video::VideoMixerThread,
     stats::{Seconds, SharedStats, VideoDecoderStats},
+    video::FrameRate,
     writer_yuv::YuvWriter,
 };
 
@@ -263,13 +264,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // VMAF の下準備としての処理は全て完了した
     progress_bar.finish();
-    eprintln!("=> done");
+    eprintln!("=> done\n");
 
     let stats_file_path = root_dir.join(stats_file_path);
     finish_stats(&stats_file_path, stats, start_time);
 
     // vmaf コマンドを実行
-    eprintln!();
     eprintln!("# Run vmaf command");
     let vmaf_output_file_path = root_dir.join(vmaf_output_file_path);
     run_vmaf_evaluation(
@@ -279,7 +279,26 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         &layout,
     )
     .or_fail()?;
-    eprintln!("=> done");
+    eprintln!("=> done\n");
+
+    // 実行結果の要約を標準出力に出力する
+    let output = Output {
+        width: layout.resolution.width().get(),
+        height: layout.resolution.height().get(),
+        frame_rate: layout.frame_rate,
+        reference_yuv_file_path,
+        distorted_yuv_file_path,
+        vmaf_output_file_path,
+        hisui_stats_file_path: stats_file_path,
+    };
+    println!(
+        "{}",
+        nojson::json(|f| {
+            f.set_indent_size(2);
+            f.set_spacing(true);
+            f.value(&output)
+        })
+    );
 
     Ok(())
 }
@@ -371,4 +390,30 @@ fn finish_stats(stats_file_path: &Path, stats: SharedStats, start_time: Instant)
             );
         }
     });
+}
+
+#[derive(Debug)]
+struct Output {
+    width: usize,
+    height: usize,
+    frame_rate: FrameRate,
+    reference_yuv_file_path: PathBuf,
+    distorted_yuv_file_path: PathBuf,
+    vmaf_output_file_path: PathBuf,
+    hisui_stats_file_path: PathBuf,
+}
+
+impl nojson::DisplayJson for Output {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("width", self.width)?;
+            f.member("height", self.height)?;
+            f.member("frame_rate", self.frame_rate.to_string())?;
+            f.member("reference_yuv_file_path", &self.reference_yuv_file_path)?;
+            f.member("distorted_yuv_file_path", &self.distorted_yuv_file_path)?;
+            f.member("vmaf_output_file_path", &self.vmaf_output_file_path)?;
+            f.member("hisui_stats_file_path", &self.hisui_stats_file_path)?;
+            Ok(())
+        })
+    }
 }
