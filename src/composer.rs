@@ -14,7 +14,7 @@ use crate::{
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},
-    stats::{Seconds, SharedStats, WriterStats},
+    stats::{SharedStats, WriterStats},
     types::CodecName,
     video::VideoFrameReceiver,
     writer_mp4::Mp4Writer,
@@ -195,30 +195,15 @@ impl Composer {
 
     fn finish_stats(&self, stats: SharedStats, mp4_writer: &Mp4Writer, start_time: Instant) {
         stats.with_lock(|stats| {
-            stats.elapsed_seconds = Seconds::new(start_time.elapsed());
             stats
                 .writers
                 .push(WriterStats::Mp4(mp4_writer.stats().clone()));
-        });
-        stats.with_lock(|stats| {
             log::debug!("stats: {}", nojson::Json(&stats));
-
-            if let Some(path) = &self.stats_file_path {
-                let json = nojson::json(|f| {
-                    f.set_indent_size(2);
-                    f.set_spacing(true);
-                    f.value(&stats)
-                })
-                .to_string();
-                if let Err(e) = std::fs::write(path, json) {
-                    // 統計が出力できなくても全体を失敗扱いにはしない
-                    log::warn!(
-                        "failed to write stats JSON: path={}, reason={e}",
-                        path.display()
-                    );
-                }
-            }
         });
+
+        if let Some(path) = &self.stats_file_path {
+            stats.finish(start_time, path);
+        }
     }
 }
 

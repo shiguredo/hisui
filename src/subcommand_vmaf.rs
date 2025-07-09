@@ -17,7 +17,7 @@ use crate::{
     encoder::{VideoEncoder, VideoEncoderThread},
     layout::Layout,
     mixer_video::VideoMixerThread,
-    stats::{Seconds, SharedStats, VideoDecoderStats},
+    stats::{SharedStats, VideoDecoderStats},
     video::FrameRate,
     writer_yuv::YuvWriter,
 };
@@ -267,7 +267,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("=> done\n");
 
     let stats_file_path = root_dir.join(stats_file_path);
-    finish_stats(&stats_file_path, stats, start_time);
+    stats.finish(start_time, &stats_file_path);
 
     // vmaf コマンドを実行
     eprintln!("# Run vmaf command");
@@ -369,27 +369,6 @@ fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressB
             .progress_chars("#>-"),
     );
     progress_bar
-}
-
-fn finish_stats(stats_file_path: &Path, stats: SharedStats, start_time: Instant) {
-    stats.with_lock(|stats| {
-        stats.elapsed_seconds = Seconds::new(start_time.elapsed());
-        log::debug!("stats: {}", nojson::Json(&stats));
-
-        let json = nojson::json(|f| {
-            f.set_indent_size(2);
-            f.set_spacing(true);
-            f.value(&stats)
-        })
-        .to_string();
-        if let Err(e) = std::fs::write(stats_file_path, json) {
-            // 統計が出力できなくても全体を失敗扱いにはしない
-            log::warn!(
-                "failed to write stats JSON: path={}, reason={e}",
-                stats_file_path.display()
-            );
-        }
-    });
 }
 
 #[derive(Debug)]
