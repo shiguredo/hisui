@@ -62,3 +62,33 @@ impl<'a, 'text> JsonObject<'a, 'text> {
         f(value)
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum JsonNumber {
+    Integer(i64),
+    Float(f64),
+}
+
+impl<'text> nojson::FromRawJsonValue<'text> for JsonNumber {
+    fn from_raw_json_value(
+        value: nojson::RawJsonValue<'text, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        match value.kind() {
+            nojson::JsonValueKind::Integer => {
+                let int_value = value
+                    .as_integer_str()?
+                    .parse::<i64>()
+                    .map_err(|e| value.invalid(e))?;
+                Ok(JsonNumber::Integer(int_value))
+            }
+            nojson::JsonValueKind::Float => {
+                let float_value = value
+                    .as_float_str()?
+                    .parse::<f64>()
+                    .map_err(|e| value.invalid(e))?;
+                Ok(JsonNumber::Float(float_value))
+            }
+            _ => Err(value.invalid("expected a number (integer or float)")),
+        }
+    }
+}

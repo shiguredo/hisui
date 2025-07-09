@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     num::NonZeroUsize,
     path::PathBuf,
     process::{Command, Stdio},
@@ -6,9 +7,13 @@ use std::{
 
 use orfail::OrFail;
 
-use crate::subcommand_vmaf;
+use crate::{
+    json::{JsonNumber, JsonObject},
+    subcommand_vmaf,
+};
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-vp8.json");
+const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.json");
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
@@ -47,7 +52,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("Optuna の study 名を指定します")
         .take(&mut args)
         .then(|a| a.value().parse())?;
-    let n_trials: usize = noargs::opt("n-trials")
+    let trial_count: usize = noargs::opt("trial-count")
         .short('n')
         .ty("INTEGER")
         .default("100")
@@ -128,11 +133,78 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         })?;
     }
 
+    // レイアウトファイル（テンプレート）を読み込む
+    let layout_template = if let Some(path) = &layout_file_path {
+        std::fs::read_to_string(path).or_fail()?
+    } else {
+        DEFAULT_LAYOUT_JSON.to_owned()
+    };
+    let layout_template_json = nojson::RawJson::parse(&layout_template).or_fail()?;
+
+    // 探索空間ファイルを読み込む
+    let search_space_json_string = if let Some(path) = &search_space_file_path {
+        std::fs::read_to_string(path).or_fail()?
+    } else {
+        DEFAULT_SEARCH_SPACE_JSON.to_owned()
+    };
+    let search_space_raw_json = nojson::RawJson::parse(&search_space_json_string).or_fail()?;
+    let search_space = SearchSpace::new(search_space_raw_json.value()).or_fail()?;
+
     // optuna の study を作る
     let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
     create_optuna_study(&study_name, &storage_url).or_fail()?;
 
+    for _ in 0..trial_count {
+        //
+    }
+
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct JsonObjectMemberPath(Vec<String>);
+
+#[derive(Debug)]
+struct SearchSpace<'text, 'a> {
+    items: BTreeMap<JsonObjectMemberPath, SearchSpaceItem<'text, 'a>>,
+}
+
+impl<'text, 'a> SearchSpace<'text, 'a> {
+    fn new(root: nojson::RawJsonValue<'text, 'a>) -> Result<Self, nojson::JsonParseError> {
+        let mut items = BTreeMap::new();
+        for (key, value) in root.to_object()? {
+            let path = JsonObjectMemberPath(
+                key.to_unquoted_string_str()?
+                    .split('.')
+                    .map(|s| s.to_owned())
+                    .collect(),
+            );
+            let item = SearchSpaceItem::new(value)?;
+            items.insert(path, item);
+        }
+        Ok(Self { items })
+    }
+}
+
+#[derive(Debug)]
+enum SearchSpaceItem<'text, 'a> {
+    Number { min: JsonNumber, max: JsonNumber },
+    Categorical(Vec<nojson::RawJsonValue<'text, 'a>>),
+}
+
+impl<'text, 'a> SearchSpaceItem<'text, 'a> {
+    fn new(value: nojson::RawJsonValue<'text, 'a>) -> Result<Self, nojson::JsonParseError> {
+        if let Ok(array) = value.to_array() {
+            Ok(Self::Categorical(array.collect()))
+        } else if let Ok(object) = JsonObject::new(value) {
+            Ok(Self::Number {
+                min: object.get_required("min")?,
+                max: object.get_required("min")?,
+            })
+        } else {
+            Err(value.invalid("not JSON array or JSON object"))
+        }
+    }
 }
 
 fn check_optuna_availability() -> orfail::Result<()> {
