@@ -15,7 +15,7 @@ log = "0.4.27"
 
 [build-dependencies]
 bindgen = "0.72.0"
-toml = "0.8.20"
+toml = "0.9.0"
 
 # 以降は外部ライブラリビルド用のメタデータ
 # (この内容は build.rs の中からのみ参照される)
