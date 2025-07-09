@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -15,6 +16,7 @@ use crate::{
     composer,
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{VideoEncoder, VideoEncoderThread},
+    json::JsonObject,
     layout::Layout,
     mixer_video::VideoMixerThread,
     stats::{Seconds, SharedStats, VideoDecoderStats},
@@ -271,6 +273,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
     eprintln!("=> done\n");
 
+    // VMAF結果を読み込んで解析
+    let vmaf_summary = parse_vmaf_output(&vmaf_output_file_path).or_fail()?;
+
     // 実行結果の要約を標準出力に出力する
     let output = Output {
         reference_yuv_file_path,
@@ -283,6 +288,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         encoded_byte_size,
         encoded_duration_seconds: Seconds::new(encoded_duration),
         elapsed_seconds: Seconds::new(start_time.elapsed()),
+        vmaf_summary,
     };
     println!(
         "{}",
@@ -364,6 +370,108 @@ fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressB
     progress_bar
 }
 
+fn parse_vmaf_output(vmaf_output_file_path: &Path) -> orfail::Result<VmafSummary> {
+    let vmaf_content = std::fs::read_to_string(vmaf_output_file_path)
+        .or_fail_with(|e| format!("failed to read VMAF output file: {e}"))?;
+
+    let json = nojson::RawJson::parse(&vmaf_content).or_fail()?;
+    let vmaf_data = JsonObject::new(json.value()).or_fail()?;
+
+    // フレームごとの VMAF スコアを収集
+    let frames = vmaf_data
+        .get_required_with("frames", |v| Ok(v.to_array()?.collect::<Vec<_>>()))
+        .or_fail()?;
+
+    let mut vmaf_scores = Vec::new();
+    for frame in frames {
+        let frame = JsonObject::new(frame).or_fail()?;
+        let metrics = frame
+            .get_required_with("metrics", JsonObject::new)
+            .or_fail()?;
+        if let Some(vmaf_score) = metrics.get_required("vmaf").or_fail()? {
+            vmaf_scores.push(vmaf_score);
+        }
+    }
+
+    // pooled_metrics から統計情報を抽出
+    let pooled_metrics = vmaf_data
+        .get_required_with("pooled_metrics", Ok)
+        .or_fail()?;
+
+    let mut metrics_summary = BTreeMap::new();
+
+    for (metric_name, metric_data) in pooled_metrics.to_object().or_fail()? {
+        let metric_name = metric_name.to_unquoted_string_str().or_fail()?.into_owned();
+        if let Ok(metric_obj) = JsonObject::new(metric_data) {
+            let summary = MetricSummary {
+                min: metric_obj.get("min").or_fail()?.unwrap_or(0.0),
+                max: metric_obj.get("max").or_fail()?.unwrap_or(0.0),
+                mean: metric_obj.get("mean").or_fail()?.unwrap_or(0.0),
+                harmonic_mean: metric_obj.get("harmonic_mean").or_fail()?,
+            };
+            metrics_summary.insert(metric_name, summary);
+        }
+    }
+
+    // VMAFスコアの統計を計算
+    let vmaf_stats = calculate_vmaf_statistics(&vmaf_scores);
+
+    Ok(VmafSummary {
+        vmaf_statistics: vmaf_stats,
+        metrics_summary,
+    })
+}
+
+fn calculate_vmaf_statistics(scores: &[f64]) -> VmafStatistics {
+    if scores.is_empty() {
+        return VmafStatistics {
+            min: 0.0,
+            max: 0.0,
+            mean: 0.0,
+            percentile_25: 0.0,
+            median: 0.0,
+            percentile_75: 0.0,
+        };
+    }
+
+    let mut sorted_scores = scores.to_vec();
+    sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let min = sorted_scores[0];
+    let max = sorted_scores[sorted_scores.len() - 1];
+    let mean = sorted_scores.iter().sum::<f64>() / sorted_scores.len() as f64;
+
+    let percentile_25 = percentile(&sorted_scores, 25.0);
+    let median = percentile(&sorted_scores, 50.0);
+    let percentile_75 = percentile(&sorted_scores, 75.0);
+
+    VmafStatistics {
+        min,
+        max,
+        mean,
+        percentile_25,
+        median,
+        percentile_75,
+    }
+}
+
+fn percentile(sorted_values: &[f64], p: f64) -> f64 {
+    if sorted_values.is_empty() {
+        return 0.0;
+    }
+
+    let index = (p / 100.0) * (sorted_values.len() - 1) as f64;
+    let lower_index = index.floor() as usize;
+    let upper_index = index.ceil() as usize;
+
+    if lower_index == upper_index {
+        sorted_values[lower_index]
+    } else {
+        let weight = index - lower_index as f64;
+        sorted_values[lower_index] * (1.0 - weight) + sorted_values[upper_index] * weight
+    }
+}
+
 #[derive(Debug)]
 struct Output {
     reference_yuv_file_path: PathBuf,
@@ -376,6 +484,7 @@ struct Output {
     encoded_byte_size: u64,
     encoded_duration_seconds: Seconds,
     elapsed_seconds: Seconds,
+    vmaf_summary: VmafSummary,
 }
 
 impl nojson::DisplayJson for Output {
@@ -400,6 +509,70 @@ impl nojson::DisplayJson for Output {
                     / self.elapsed_seconds.get().as_secs_f64(),
             )?;
 
+            f.member("vmaf_summary", &self.vmaf_summary)?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+struct VmafSummary {
+    vmaf_statistics: VmafStatistics,
+    metrics_summary: BTreeMap<String, MetricSummary>,
+}
+
+#[derive(Debug)]
+struct VmafStatistics {
+    min: f64,
+    max: f64,
+    mean: f64,
+    percentile_25: f64,
+    median: f64,
+    percentile_75: f64,
+}
+
+#[derive(Debug)]
+struct MetricSummary {
+    min: f64,
+    max: f64,
+    mean: f64,
+    harmonic_mean: Option<f64>,
+}
+
+impl nojson::DisplayJson for VmafSummary {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("vmaf_statistics", &self.vmaf_statistics)?;
+            f.member("metrics_summary", &self.metrics_summary)?;
+            Ok(())
+        })
+    }
+}
+
+impl nojson::DisplayJson for VmafStatistics {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("min", self.min)?;
+            f.member("max", self.max)?;
+            f.member("mean", self.mean)?;
+            f.member("percentile_25", self.percentile_25)?;
+            f.member("median", self.median)?;
+            f.member("percentile_75", self.percentile_75)?;
+            Ok(())
+        })
+    }
+}
+
+impl nojson::DisplayJson for MetricSummary {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("min", self.min)?;
+            f.member("max", self.max)?;
+            f.member("mean", self.mean)?;
+            if let Some(harmonic_mean) = self.harmonic_mean {
+                f.member("harmonic_mean", harmonic_mean)?;
+            }
             Ok(())
         })
     }
