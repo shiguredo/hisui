@@ -233,6 +233,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
+    eprintln!("# Compose");
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
     for _ in 0..frame_count {
         let Some(encoded_frame) = encoded_video_rx.recv() else {
@@ -262,11 +263,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // VMAF の下準備としての処理は全て完了した
     progress_bar.finish();
+    eprintln!("=> done");
 
     let stats_file_path = root_dir.join(stats_file_path);
     finish_stats(&stats_file_path, stats, start_time);
 
     // vmaf コマンドを実行
+    eprintln!();
+    eprintln!("# Run vmaf command");
     let vmaf_output_file_path = root_dir.join(vmaf_output_file_path);
     run_vmaf_evaluation(
         &reference_yuv_file_path,
@@ -275,6 +279,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         &layout,
     )
     .or_fail()?;
+    eprintln!("=> done");
 
     Ok(())
 }
