@@ -17,7 +17,7 @@ use crate::{
     encoder::{VideoEncoder, VideoEncoderThread},
     layout::Layout,
     mixer_video::VideoMixerThread,
-    stats::{SharedStats, VideoDecoderStats},
+    stats::{Seconds, SharedStats, VideoDecoderStats},
     video::FrameRate,
     writer_yuv::YuvWriter,
 };
@@ -78,16 +78,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .default("vmaf-output.json")
         .doc(concat!(
             "vmaf コマンドの実行結果ファイルの出力先を指定します\n",
-            "\n",
-            "相対パスの場合は ROOT_DIR が起点となります"
-        ))
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let stats_file_path: PathBuf = noargs::opt("stats-file")
-        .ty("PATH")
-        .default("stats.json")
-        .doc(concat!(
-            "合成中に収集した統計情報 (JSON) を保存するファイルを指定します\n",
             "\n",
             "相対パスの場合は ROOT_DIR が起点となります"
         ))
@@ -266,9 +256,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     progress_bar.finish();
     eprintln!("=> done\n");
 
-    let stats_file_path = root_dir.join(stats_file_path);
-    stats.finish(start_time, &stats_file_path);
-
     // vmaf コマンドを実行
     eprintln!("# Run vmaf command");
     let vmaf_output_file_path = root_dir.join(vmaf_output_file_path);
@@ -283,13 +270,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 実行結果の要約を標準出力に出力する
     let output = Output {
-        width: layout.resolution.width().get(),
-        height: layout.resolution.height().get(),
-        frame_rate: layout.frame_rate,
         reference_yuv_file_path,
         distorted_yuv_file_path,
         vmaf_output_file_path,
-        hisui_stats_file_path: stats_file_path,
+        width: layout.resolution.width().get(),
+        height: layout.resolution.height().get(),
+        frame_rate: layout.frame_rate,
+        elapsed_seconds: Seconds::new(start_time.elapsed()),
     };
     println!(
         "{}",
@@ -373,25 +360,25 @@ fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressB
 
 #[derive(Debug)]
 struct Output {
-    width: usize,
-    height: usize,
-    frame_rate: FrameRate,
     reference_yuv_file_path: PathBuf,
     distorted_yuv_file_path: PathBuf,
     vmaf_output_file_path: PathBuf,
-    hisui_stats_file_path: PathBuf,
+    width: usize,
+    height: usize,
+    frame_rate: FrameRate,
+    elapsed_seconds: Seconds,
 }
 
 impl nojson::DisplayJson for Output {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("width", self.width)?;
-            f.member("height", self.height)?;
-            f.member("frame_rate", self.frame_rate.to_string())?;
             f.member("reference_yuv_file_path", &self.reference_yuv_file_path)?;
             f.member("distorted_yuv_file_path", &self.distorted_yuv_file_path)?;
             f.member("vmaf_output_file_path", &self.vmaf_output_file_path)?;
-            f.member("hisui_stats_file_path", &self.hisui_stats_file_path)?;
+            f.member("width", self.width)?;
+            f.member("height", self.height)?;
+            f.member("frame_rate", self.frame_rate.to_string())?;
+            f.member("elapsed_seconds", self.elapsed_seconds)?;
             Ok(())
         })
     }
