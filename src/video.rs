@@ -327,12 +327,12 @@ impl FromStr for FrameRate {
     }
 }
 
-impl std::fmt::Display for FrameRate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl nojson::DisplayJson for FrameRate {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         if self.denumerator.get() == 1 {
-            write!(f, "{}", self.numerator)
+            f.value(self.numerator.get())
         } else {
-            write!(f, "{}/{}", self.numerator, self.denumerator)
+            f.string(format!("{}/{}", self.numerator, self.denumerator))
         }
     }
 }

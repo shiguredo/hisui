@@ -226,10 +226,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // 必要なフレームの処理が終わるまでループを回す
     eprintln!("# Compose");
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
+    let mut encoded_size = 0;
     for _ in 0..frame_count {
         let Some(encoded_frame) = encoded_video_rx.recv() else {
             // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
-
             decoder.finish().or_fail()?;
             while let Some(decoded_frame) = decoder.next_decoded_frame() {
                 distorted_yuv_writer.append(&decoded_frame).or_fail()?;
@@ -237,6 +237,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             }
             break;
         };
+        encoded_size += encoded_frame.data.len() as u64;
         decoder
             .decode(encoded_frame, &mut dummy_video_decoder_stats)
             .or_fail()?;
@@ -276,7 +277,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
+        frame_count: progress_bar.length().unwrap_or_default() as usize,
         elapsed_seconds: Seconds::new(start_time.elapsed()),
+        encoded_size,
     };
     println!(
         "{}",
@@ -366,7 +369,9 @@ struct Output {
     width: usize,
     height: usize,
     frame_rate: FrameRate,
+    frame_count: usize,
     elapsed_seconds: Seconds,
+    encoded_size: u64,
 }
 
 impl nojson::DisplayJson for Output {
@@ -377,8 +382,10 @@ impl nojson::DisplayJson for Output {
             f.member("vmaf_output_file_path", &self.vmaf_output_file_path)?;
             f.member("width", self.width)?;
             f.member("height", self.height)?;
-            f.member("frame_rate", self.frame_rate.to_string())?;
+            f.member("frame_rate", self.frame_rate)?;
+            f.member("frame_count", self.frame_count)?;
             f.member("elapsed_seconds", self.elapsed_seconds)?;
+            f.member("encoded_size", self.encoded_size)?;
             Ok(())
         })
     }
