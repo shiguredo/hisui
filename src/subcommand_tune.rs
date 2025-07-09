@@ -1,12 +1,13 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
 };
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::layout::Layout;
+use crate::{layout::Layout, subcommand_vmaf};
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-vp8.json");
 
@@ -103,127 +104,47 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    // TODO: Optuna の availability チェック
+    // 最初に optuna と vmaf コマンドが利用可能かどうかをチェックする
     check_optuna_availability().or_fail()?;
-
-    // レイアウトを準備（音声処理は無効化）
-    let mut layout = create_layout(&root_dir, layout_file_path.as_deref()).or_fail()?;
-    layout.audio_source_ids.clear();
-    log::debug!("layout: {layout:?}");
-    layout
-        .has_video()
-        .or_fail_with(|()| "no video sources".to_owned())?;
-
-    // 必要に応じて openh264 の共有ライブラリを読み込む
-    let openh264_lib = if let Some(path) = openh264.as_ref().filter(|_| layout.has_video()) {
-        Some(Openh264Library::load(path).or_fail()?)
-    } else {
-        None
-    };
-
-    // CPU コア数制限を適用
-    if let Some(cores) = max_cpu_cores {
-        crate::composer::limit_cpu_cores(cores.get()).or_fail()?;
-    }
-
-    // // 出力ファイルパスを決定
-    // let out_file_path = root_dir.join(output_file_path);
-
-    // 調整設定を作成
-    let tune_config = TuneConfig {
-        layout,
-        openh264_lib,
-        study_name,
-        n_trials,
-        show_progress_bar: !no_progress_bar,
-        frame_count,
-        root_dir,
-    };
-
-    // 調整を実行
-    eprintln!("# Starting parameter tuning with Optuna");
-    let result = run_parameter_tuning(tune_config).or_fail()?;
-
-    // 結果を出力
-    println!(
-        "{}",
-        nojson::json(|f| {
-            f.set_indent_size(2);
-            f.set_spacing(true);
-            f.value(&result)
-        })
-    );
+    subcommand_vmaf::check_vmaf_availability().or_fail()?;
 
     Ok(())
-}
-
-fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail::Result<Layout> {
-    if let Some(layout_file_path) = layout_file_path {
-        // レイアウトファイルが指定された場合
-        let layout_json = std::fs::read_to_string(layout_file_path)
-            .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
-        Layout::from_layout_json(root_dir.clone(), layout_file_path, &layout_json).or_fail()
-    } else {
-        // デフォルトレイアウトを作成
-        Layout::from_layout_json(
-            root_dir.clone(),
-            &root_dir.join("default-layout.json"),
-            DEFAULT_LAYOUT_JSON,
-        )
-        .or_fail()
-    }
 }
 
 fn check_optuna_availability() -> orfail::Result<()> {
-    // TODO: Optuna の availability チェック実装
-    // Python の optuna パッケージが利用可能かチェック
-    eprintln!("# Checking Optuna availability");
-    Ok(())
-}
+    let output = Command::new("optuna")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
 
-fn run_parameter_tuning(config: TuneConfig) -> orfail::Result<TuneResult> {
-    // TODO: 実際の parameter tuning 実装
-    eprintln!("# Running parameter tuning");
-    eprintln!("  Study name: {}", config.study_name);
-    eprintln!("  Trials: {}", config.n_trials);
-    eprintln!("  Frame count: {}", config.frame_count);
-
-    // 仮の結果を返す
-    Ok(TuneResult {
-        study_name: config.study_name,
-        n_trials: config.n_trials,
-        best_score: 85.0, // 仮の値
-                          // best_params: std::collections::HashMap::new(),
-    })
-}
-
-#[derive(Debug)]
-struct TuneConfig {
-    layout: Layout,
-    openh264_lib: Option<Openh264Library>,
-    study_name: String,
-    n_trials: usize,
-    show_progress_bar: bool,
-    frame_count: usize,
-    root_dir: PathBuf,
-}
-
-#[derive(Debug)]
-struct TuneResult {
-    study_name: String,
-    n_trials: usize,
-    best_score: f64,
-    //best_params: todo!(),
-}
-
-impl nojson::DisplayJson for TuneResult {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("study_name", &self.study_name)?;
-            f.member("n_trials", self.n_trials)?;
-            f.member("best_score", self.best_score)?;
-            //f.member("best_params", &self.best_params)?;
-            Ok(())
-        })
+    match output {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(_) => Err(orfail::Failure::new(
+            "optuna command failed to execute properly",
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(orfail::Failure::new(
+            "optuna command not found. Please install optuna and ensure it's in your PATH",
+        )),
+        Err(e) => Err(orfail::Failure::new(format!(
+            "failed to check optuna availability: {e}"
+        ))),
     }
 }
+
+// fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail::Result<Layout> {
+//     if let Some(layout_file_path) = layout_file_path {
+//         // レイアウトファイルが指定された場合
+//         let layout_json = std::fs::read_to_string(layout_file_path)
+//             .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
+//         Layout::from_layout_json(root_dir.clone(), layout_file_path, &layout_json).or_fail()
+//     } else {
+//         // デフォルトレイアウトを作成
+//         Layout::from_layout_json(
+//             root_dir.clone(),
+//             &root_dir.join("default-layout.json"),
+//             DEFAULT_LAYOUT_JSON,
+//         )
+//         .or_fail()
+//     }
+// }

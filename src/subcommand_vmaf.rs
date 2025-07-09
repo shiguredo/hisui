@@ -325,7 +325,7 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
     }
 }
 
-fn check_vmaf_availability() -> orfail::Result<()> {
+pub fn check_vmaf_availability() -> orfail::Result<()> {
     let output = Command::new("vmaf")
         .arg("--version")
         .stdout(Stdio::null())
