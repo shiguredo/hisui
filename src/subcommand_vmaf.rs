@@ -362,13 +362,14 @@ fn run_vmaf_evaluation(
             &layout.resolution.width().get().to_string(),
             "--height",
             &layout.resolution.height().get().to_string(),
+            "--output",
+            vmaf_output_file_path.to_str().or_fail()?,
+            "--json",
+            // 以降のパラメータは hisui では固定
             "--pixel_format",
             "420",
             "--bitdepth",
             "8",
-            "--output",
-            vmaf_output_file_path.to_str().or_fail()?,
-            "--json",
         ])
         .stderr(Stdio::inherit())
         .output()
