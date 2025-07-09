@@ -14,9 +14,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
         .short('l')
         .ty("PATH")
-        .env("HISUI_LAYOUT_FILE_PATH")
         .doc(concat!(
-            "合成に使用するレイアウトファイルを指定します\n",
+            "パラメータ調整に使用するレイアウトファイルを指定します\n",
             "\n",
             "省略された場合には hisui/layout-examples/tune-vp8.json が使用されます",
         ))
@@ -26,7 +25,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .short('s')
         .ty("PATH")
         .doc(concat!(
-            "Optuna の探索空間定義ファイル（JSON）のパスを指定します\n",
+            "探索空間定義ファイル（JSON）のパスを指定します\n",
             "\n",
             "省略された場合には hisui/search-space-examples/full.json が使用されます",
         ))
@@ -71,7 +70,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let frame_count: usize = noargs::opt("frame-count")
         .short('f')
         .ty("FRAMES")
-        .default("1000")
+        // 全体の実行時間に大きく影響するので vmaf コマンドに比べてデフォルト値が小さめにしておく
+        .default("300")
         .doc("調整用にエンコードする映像フレームの数を指定します")
         .take(&mut args)
         .then(|a| a.value().parse())?;
