@@ -1,13 +1,12 @@
 use std::{
     num::NonZeroUsize,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Stdio},
 };
 
 use orfail::OrFail;
-use shiguredo_openh264::Openh264Library;
 
-use crate::{layout::Layout, subcommand_vmaf};
+use crate::subcommand_vmaf;
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-vp8.json");
 
@@ -32,6 +31,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
+    let tune_working_dir: PathBuf = noargs::opt("tune-working-dir")
+        .ty("PATH")
+        .default("hisui-tune/")
+        .doc(concat!(
+            "チューニング用に使われる作業ディレクトリを指定します\n",
+            "\n",
+            "相対パスの場合は ROOT_DIR が起点となります"
+        ))
+        .take(&mut args)
+        .then(|a| a.value().parse())?;
     let study_name: String = noargs::opt("study-name")
         .ty("NAME")
         .default("hisui-tune")
@@ -108,6 +117,21 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     check_optuna_availability().or_fail()?;
     subcommand_vmaf::check_vmaf_availability().or_fail()?;
 
+    // 必要なら tune_working_dir を作る
+    let tune_working_dir = root_dir.join(tune_working_dir);
+    if !tune_working_dir.exists() {
+        std::fs::create_dir_all(&tune_working_dir).or_fail_with(|e| {
+            format!(
+                "failed to create tune working directory {}: {e}",
+                tune_working_dir.display()
+            )
+        })?;
+    }
+
+    // optuna の study を作る
+    let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
+    create_optuna_study(&study_name, &storage_url).or_fail()?;
+
     Ok(())
 }
 
@@ -132,19 +156,23 @@ fn check_optuna_availability() -> orfail::Result<()> {
     }
 }
 
-// fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail::Result<Layout> {
-//     if let Some(layout_file_path) = layout_file_path {
-//         // レイアウトファイルが指定された場合
-//         let layout_json = std::fs::read_to_string(layout_file_path)
-//             .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
-//         Layout::from_layout_json(root_dir.clone(), layout_file_path, &layout_json).or_fail()
-//     } else {
-//         // デフォルトレイアウトを作成
-//         Layout::from_layout_json(
-//             root_dir.clone(),
-//             &root_dir.join("default-layout.json"),
-//             DEFAULT_LAYOUT_JSON,
-//         )
-//         .or_fail()
-//     }
-// }
+fn create_optuna_study(study_name: &str, storage_url: &str) -> orfail::Result<()> {
+    let output = Command::new("optuna")
+        .arg("create-study")
+        .arg("--study-name")
+        .arg(study_name)
+        .arg("--storage")
+        .arg(storage_url)
+        .arg("--skip-if-exists")
+        // 「エンコード時間の最小化」と「VMAF スコアの最大化」
+        .arg("--directions")
+        .arg("minimize")
+        .arg("maximize")
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .output()
+        .or_fail_with(|e| format!("failed to execute optuna create-study command: {e}"))?;
+
+    output.status.success().or_fail()?;
+    Ok(())
+}
