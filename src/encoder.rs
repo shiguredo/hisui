@@ -201,7 +201,7 @@ impl VideoEncoder {
         }
     }
 
-    fn name(&self) -> EngineName {
+    pub fn name(&self) -> EngineName {
         match self {
             Self::Libvpx(_) => EngineName::Libvpx,
             Self::Openh264(_) => EngineName::Openh264,

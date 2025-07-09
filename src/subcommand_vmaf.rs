@@ -19,6 +19,7 @@ use crate::{
     layout::Layout,
     mixer_video::VideoMixerThread,
     stats::{Seconds, SharedStats, VideoDecoderStats},
+    types::EngineName,
     video::FrameRate,
     writer_yuv::YuvWriter,
 };
@@ -209,6 +210,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 映像エンコードスレッドを起動
     let encoder = VideoEncoder::new(&layout, openh264_lib.clone()).or_fail()?;
+    let encoder_name = encoder.name();
     let mut encoded_video_rx = VideoEncoderThread::start(
         error_flag.clone(),
         mixed_video_temp_rx,
@@ -277,9 +279,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 実行結果の要約を標準出力に出力する
     let output = Output {
+        layout_file_path,
         reference_yuv_file_path,
         distorted_yuv_file_path,
         vmaf_output_file_path,
+        encoder_name,
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
@@ -390,9 +394,11 @@ fn parse_vmaf_output(vmaf_output_file_path: &Path) -> orfail::Result<VmafScoreSt
 
 #[derive(Debug)]
 struct Output {
+    layout_file_path: Option<PathBuf>,
     reference_yuv_file_path: PathBuf,
     distorted_yuv_file_path: PathBuf,
     vmaf_output_file_path: PathBuf,
+    encoder_name: EngineName,
     width: usize,
     height: usize,
     frame_rate: FrameRate,
@@ -406,9 +412,13 @@ struct Output {
 impl nojson::DisplayJson for Output {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
+            if let Some(path) = &self.layout_file_path {
+                f.member("layout_file_path", path)?;
+            }
             f.member("reference_yuv_file_path", &self.reference_yuv_file_path)?;
             f.member("distorted_yuv_file_path", &self.distorted_yuv_file_path)?;
             f.member("vmaf_output_file_path", &self.vmaf_output_file_path)?;
+            f.member("encoder_name", self.encoder_name)?;
             f.member("width", self.width)?;
             f.member("height", self.height)?;
             f.member("frame_rate", self.frame_rate)?;
