@@ -1,7 +1,6 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::LazyLock,
 };
 
 use orfail::OrFail;
@@ -9,51 +8,30 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::layout::Layout;
 
-const DEFAULT_LAYOUT_JSON: &str = r#"{
-  "video_layout": {"main": {
-    "cell_width": 320,
-    "cell_height": 240,
-    "max_columns": 4,
-    "max_rows": 4,
-    "video_sources": [ "archive*.json" ]
-  }}
-}"#;
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-vp8.json");
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
         .short('l')
         .ty("PATH")
         .env("HISUI_LAYOUT_FILE_PATH")
-        .doc({
-            static DOC: LazyLock<String> = LazyLock::new(|| {
-                format!(
-                    concat!(
-                        "合成に使用するレイアウトファイルを指定します\n",
-                        "\n",
-                        "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
-                        "{}"
-                    ),
-                    DEFAULT_LAYOUT_JSON
-                )
-            });
-            &*DOC
-        })
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let output_file_path: PathBuf = noargs::opt("output-file")
-        .short('o')
-        .ty("PATH")
-        .default("tuned-output.mp4")
         .doc(concat!(
-            "調整結果を保存するファイルを指定します\n",
+            "合成に使用するレイアウトファイルを指定します\n",
             "\n",
-            "この引数が未指定の場合には ROOT_DIR 引数で\n",
-            "指定したディレクトリに `tuned-output.mp4` という名前で保存されます\n",
-            "\n",
-            "相対パスの場合は ROOT_DIR が起点となります"
+            "省略された場合には hisui/layout-examples/tune-vp8.json が使用されます",
         ))
         .take(&mut args)
-        .then(|a| a.value().parse())?;
+        .present_and_then(|a| a.value().parse())?;
+    let search_space_file_path: Option<PathBuf> = noargs::opt("search-space-file")
+        .short('s')
+        .ty("PATH")
+        .doc(concat!(
+            "Optuna の探索空間定義ファイル（JSON）のパスを指定します\n",
+            "\n",
+            "省略された場合には hisui/search-space-examples/full.json が使用されます",
+        ))
+        .take(&mut args)
+        .present_and_then(|a| a.value().parse())?;
     let study_name: String = noargs::opt("study-name")
         .ty("NAME")
         .default("hisui-tune")
@@ -67,12 +45,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("実行する試行回数を指定します")
         .take(&mut args)
         .then(|a| a.value().parse())?;
-    let timeout: Option<u64> = noargs::opt("timeout")
-        .short('t')
-        .ty("SECONDS")
-        .doc("調整処理のタイムアウト時間（秒）を指定します")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
@@ -100,13 +72,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .short('f')
         .ty("FRAMES")
         .default("1000")
-        .doc("調整に使用するフレーム数を指定します")
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let target_metric: String = noargs::opt("target-metric")
-        .ty("METRIC")
-        .default("vmaf")
-        .doc("最適化対象の指標を指定します (vmaf, psnr, ssim)")
+        .doc("調整用にエンコードする映像フレームの数を指定します")
         .take(&mut args)
         .then(|a| a.value().parse())?;
     let root_dir: PathBuf = noargs::arg("ROOT_DIR")
@@ -160,8 +126,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         crate::composer::limit_cpu_cores(cores.get()).or_fail()?;
     }
 
-    // 出力ファイルパスを決定
-    let out_file_path = root_dir.join(output_file_path);
+    // // 出力ファイルパスを決定
+    // let out_file_path = root_dir.join(output_file_path);
 
     // 調整設定を作成
     let tune_config = TuneConfig {
@@ -169,12 +135,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         openh264_lib,
         study_name,
         n_trials,
-        timeout,
         show_progress_bar: !no_progress_bar,
         frame_count,
-        target_metric,
         root_dir,
-        out_file_path,
     };
 
     // 調整を実行
@@ -224,15 +187,13 @@ fn run_parameter_tuning(config: TuneConfig) -> orfail::Result<TuneResult> {
     eprintln!("  Study name: {}", config.study_name);
     eprintln!("  Trials: {}", config.n_trials);
     eprintln!("  Frame count: {}", config.frame_count);
-    eprintln!("  Target metric: {}", config.target_metric);
 
     // 仮の結果を返す
     Ok(TuneResult {
         study_name: config.study_name,
         n_trials: config.n_trials,
         best_score: 85.0, // 仮の値
-        // best_params: std::collections::HashMap::new(),
-        output_file_path: config.out_file_path,
+                          // best_params: std::collections::HashMap::new(),
     })
 }
 
@@ -242,12 +203,9 @@ struct TuneConfig {
     openh264_lib: Option<Openh264Library>,
     study_name: String,
     n_trials: usize,
-    timeout: Option<u64>,
     show_progress_bar: bool,
     frame_count: usize,
-    target_metric: String,
     root_dir: PathBuf,
-    out_file_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -256,7 +214,6 @@ struct TuneResult {
     n_trials: usize,
     best_score: f64,
     //best_params: todo!(),
-    output_file_path: PathBuf,
 }
 
 impl nojson::DisplayJson for TuneResult {
@@ -266,7 +223,6 @@ impl nojson::DisplayJson for TuneResult {
             f.member("n_trials", self.n_trials)?;
             f.member("best_score", self.best_score)?;
             //f.member("best_params", &self.best_params)?;
-            f.member("output_file_path", &self.output_file_path)?;
             Ok(())
         })
     }
