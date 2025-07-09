@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::LazyLock,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -227,6 +227,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("# Compose");
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
     let mut encoded_byte_size = 0;
+    let mut encoded_duration = Duration::ZERO;
     for _ in 0..frame_count {
         let Some(encoded_frame) = encoded_video_rx.recv() else {
             // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
@@ -238,6 +239,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             break;
         };
         encoded_byte_size += encoded_frame.data.len() as u64;
+        encoded_duration += encoded_frame.duration;
         decoder
             .decode(encoded_frame, &mut dummy_video_decoder_stats)
             .or_fail()?;
@@ -277,9 +279,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
-        frame_count: progress_bar.length().unwrap_or_default() as usize,
-        elapsed_seconds: Seconds::new(start_time.elapsed()),
+        encoded_frame_count: progress_bar.length().unwrap_or_default() as usize,
         encoded_byte_size,
+        encoded_duration_seconds: Seconds::new(encoded_duration),
+        elapsed_seconds: Seconds::new(start_time.elapsed()),
     };
     println!(
         "{}",
@@ -369,9 +372,10 @@ struct Output {
     width: usize,
     height: usize,
     frame_rate: FrameRate,
-    frame_count: usize,
-    elapsed_seconds: Seconds,
+    encoded_frame_count: usize,
     encoded_byte_size: u64,
+    encoded_duration_seconds: Seconds,
+    elapsed_seconds: Seconds,
 }
 
 impl nojson::DisplayJson for Output {
@@ -383,9 +387,19 @@ impl nojson::DisplayJson for Output {
             f.member("width", self.width)?;
             f.member("height", self.height)?;
             f.member("frame_rate", self.frame_rate)?;
-            f.member("frame_count", self.frame_count)?;
-            f.member("elapsed_seconds", self.elapsed_seconds)?;
+            f.member("encoded_frame_count", self.encoded_frame_count)?;
             f.member("encoded_byte_size", self.encoded_byte_size)?;
+            f.member("encoded_duration_seconds", self.encoded_duration_seconds)?;
+            f.member("elapsed_seconds", self.elapsed_seconds)?;
+
+            // 何倍速で変換が行えたか
+            //（elapsed_seconds にはデコードや合成の時間も含まれているのであくまでも概算値）
+            f.member(
+                "encoding_speed_ratio",
+                self.encoded_duration_seconds.get().as_secs_f64()
+                    / self.elapsed_seconds.get().as_secs_f64(),
+            )?;
+
             Ok(())
         })
     }
