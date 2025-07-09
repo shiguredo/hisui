@@ -226,7 +226,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // 必要なフレームの処理が終わるまでループを回す
     eprintln!("# Compose");
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
-    let mut encoded_size = 0;
+    let mut encoded_byte_size = 0;
     for _ in 0..frame_count {
         let Some(encoded_frame) = encoded_video_rx.recv() else {
             // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
@@ -237,7 +237,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             }
             break;
         };
-        encoded_size += encoded_frame.data.len() as u64;
+        encoded_byte_size += encoded_frame.data.len() as u64;
         decoder
             .decode(encoded_frame, &mut dummy_video_decoder_stats)
             .or_fail()?;
@@ -279,7 +279,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         frame_rate: layout.frame_rate,
         frame_count: progress_bar.length().unwrap_or_default() as usize,
         elapsed_seconds: Seconds::new(start_time.elapsed()),
-        encoded_size,
+        encoded_byte_size,
     };
     println!(
         "{}",
@@ -371,7 +371,7 @@ struct Output {
     frame_rate: FrameRate,
     frame_count: usize,
     elapsed_seconds: Seconds,
-    encoded_size: u64,
+    encoded_byte_size: u64,
 }
 
 impl nojson::DisplayJson for Output {
@@ -385,7 +385,7 @@ impl nojson::DisplayJson for Output {
             f.member("frame_rate", self.frame_rate)?;
             f.member("frame_count", self.frame_count)?;
             f.member("elapsed_seconds", self.elapsed_seconds)?;
-            f.member("encoded_size", self.encoded_size)?;
+            f.member("encoded_byte_size", self.encoded_byte_size)?;
             Ok(())
         })
     }
