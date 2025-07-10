@@ -13,17 +13,16 @@ pub struct RecordingMetadata {
     pub archives: Vec<ArchiveEntry>,
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for RecordingMetadata {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
-        let ([archives], [split_only]) = value.to_fixed_object(["archives"], ["split_only"])?;
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RecordingMetadata {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let archives = value.to_member("archives")?.required()?;
+        let split_only = value.to_member("split_only")?;
+
         Ok(Self {
-            split_only: split_only
-                .map(|v| v.try_to())
-                .transpose()?
-                .unwrap_or_default(),
-            archives: archives.try_to()?,
+            split_only: Option::unwrap_or_default(split_only.try_into()?),
+            archives: archives.try_into()?,
         })
     }
 }
@@ -67,16 +66,18 @@ pub struct ArchiveEntry {
     pub metadata_filename: Option<PathBuf>,
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for ArchiveEntry {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
-        let ([connection_id], [split_last_index, metadata_filename]) =
-            value.to_fixed_object(["connection_id"], ["split_last_index", "metadata_filename"])?;
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveEntry {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let connection_id = value.to_member("connection_id")?.required()?;
+        let split_last_index = value.to_member("split_last_index")?;
+        let metadata_filename = value.to_member("metadata_filename")?;
+
         Ok(Self {
-            connection_id: connection_id.try_to()?,
-            split_last_index: split_last_index.map(|v| v.try_to()).transpose()?,
-            metadata_filename: metadata_filename.map(|v| v.try_to()).transpose()?,
+            connection_id: connection_id.try_into()?,
+            split_last_index: Option::unwrap_or_default(split_last_index.try_into()?),
+            metadata_filename: Option::unwrap_or_default(metadata_filename.try_into()?),
         })
     }
 }
@@ -92,38 +93,24 @@ pub struct ArchiveMetadata {
     pub stop_time_offset: u64,
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for ArchiveMetadata {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
-        let (
-            [
-                connection_id,
-                format,
-                audio,
-                video,
-                start_time_offset,
-                stop_time_offset,
-            ],
-            [],
-        ) = value.to_fixed_object(
-            [
-                "connection_id",
-                "format",
-                "audio",
-                "video",
-                "start_time_offset",
-                "stop_time_offset",
-            ],
-            [],
-        )?;
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let connection_id = value.to_member("connection_id")?.required()?;
+        let format = value.to_member("format")?.required()?;
+        let audio = value.to_member("audio")?.required()?;
+        let video = value.to_member("video")?.required()?;
+        let start_time_offset = value.to_member("start_time_offset")?.required()?;
+        let stop_time_offset = value.to_member("stop_time_offset")?.required()?;
+
         Ok(Self {
-            connection_id: connection_id.try_to()?,
-            format: format.try_to()?,
-            audio: audio.try_to()?,
-            video: video.try_to()?,
-            start_time_offset: start_time_offset.try_to()?,
-            stop_time_offset: stop_time_offset.try_to()?,
+            connection_id: connection_id.try_into()?,
+            format: format.try_into()?,
+            audio: audio.try_into()?,
+            video: video.try_into()?,
+            start_time_offset: start_time_offset.try_into()?,
+            stop_time_offset: stop_time_offset.try_into()?,
         })
     }
 }
@@ -198,10 +185,10 @@ impl nojson::DisplayJson for ContainerFormat {
     }
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for ContainerFormat {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ContainerFormat {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         match value.to_unquoted_string_str()?.as_ref() {
             "webm" => Ok(Self::Webm),
             "mp4" => Ok(Self::Mp4),

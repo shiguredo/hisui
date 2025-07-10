@@ -51,7 +51,7 @@ impl Layout {
             .or_fail()?;
         let raw: RawLayout = json
             .value()
-            .try_to()
+            .try_into()
             .map_err(|e| invalid_json_error(layout_file_path, &json, e))
             .or_fail()?;
         raw.into_layout(base_path).or_fail()
@@ -179,10 +179,10 @@ struct RawLayout {
     frame_rate: FrameRate,
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let object = JsonObject::new(value)?;
         Ok(Self {
             audio_sources: object.get("audio_sources")?.unwrap_or_default(),
@@ -217,7 +217,7 @@ impl<'text> nojson::FromRawJsonValue<'text> for RawLayout {
                 .unwrap_or(FrameRate::FPS_25),
 
             // エンコードパラメータ群はトップレベルに配置されているので object を経由せずに value を直接変換する
-            encode_params: value.try_to()?,
+            encode_params: value.try_into()?,
         })
     }
 }
@@ -358,10 +358,10 @@ impl Resolution {
     }
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for Resolution {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Resolution {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let s = value.to_unquoted_string_str()?;
 
         let Some((Ok(width), Ok(height))) = s.split_once('x').map(|(w, h)| (w.parse(), h.parse()))

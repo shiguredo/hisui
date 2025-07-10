@@ -78,10 +78,10 @@ pub struct RawRegion {
     z_pos: isize,
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for RawRegion {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawRegion {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let object = JsonObject::new(value)?;
         Ok(Self {
             video_sources: object.get_required("video_sources")?,
@@ -363,10 +363,10 @@ pub enum ReuseKind {
     ShowNewest,
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for ReuseKind {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ReuseKind {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         match value.to_unquoted_string_str()?.as_ref() {
             "none" => Ok(Self::None),
             "show_oldest" => Ok(Self::ShowOldest),
