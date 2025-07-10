@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     num::NonZeroUsize,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -169,13 +169,28 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     optuna.create_study().or_fail()?;
 
     for _ in 0..trial_count {
-        let mut layout = layout_template.clone();
         let ask_output = optuna.ask(&search_space).or_fail()?;
+
+        let mut layout = layout_template.clone();
         ask_output.update_layout(&mut layout).or_fail()?;
         log::debug!(
             "[trial:{}] actual layout: {layout:?}",
             ask_output.trial_number
         );
+
+        let metrics = run_trial_evaluation(
+            &tune_working_dir,
+            &study_name,
+            ask_output.trial_number,
+            &root_dir,
+            &layout,
+            frame_count,
+            openh264.as_ref(),
+            max_cpu_cores,
+        )
+        .or_fail()?;
+
+        optuna.tell(ask_output.trial_number, &metrics).or_fail()?;
     }
 
     Ok(())
@@ -406,6 +421,32 @@ impl Optuna {
 
         Ok(output)
     }
+
+    fn tell(&self, trial_number: usize, metrics: &TrialMetrics) -> orfail::Result<()> {
+        let values = format!("[{}, {}]", metrics.encoding_time, metrics.vmaf_score);
+
+        let output = Command::new("optuna")
+            .arg("tell")
+            .arg("--storage")
+            .arg(&self.storage_url)
+            .arg("--study-name")
+            .arg(&self.study_name)
+            .arg("--trial-number")
+            .arg(trial_number.to_string())
+            .arg("--values")
+            .arg(&values)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .output()
+            .or_fail_with(|e| format!("failed to execute optuna tell command: {e}"))?;
+
+        output
+            .status
+            .success()
+            .or_fail_with(|()| "optuna tell command failed".to_string())?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -432,4 +473,104 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AskOutput {
             params: value.to_member("params")?.required()?.try_into()?,
         })
     }
+}
+
+fn run_trial_evaluation(
+    tune_working_dir: &Path,
+    study_name: &str,
+    trial_number: usize,
+    root_dir: &Path,
+    layout: &JsonValue,
+    frame_count: usize,
+    openh264: Option<&PathBuf>,
+    max_cpu_cores: Option<NonZeroUsize>,
+) -> orfail::Result<TrialMetrics> {
+    // トライアルの作業用ディレクトリを作成
+    let trial_dir = tune_working_dir
+        .join(study_name)
+        .join(format!("trial-{}", trial_number));
+    std::fs::create_dir_all(&trial_dir).or_fail_with(|e| {
+        format!(
+            "failed to create trial directory {}: {e}",
+            trial_dir.display()
+        )
+    })?;
+
+    // レイアウトファイルを作成
+    let layout_file_path = trial_dir.join("layout.json");
+    let layout_json = nojson::json(|f| {
+        f.set_indent_size(2);
+        f.set_spacing(true);
+        f.value(layout)
+    })
+    .to_string();
+    std::fs::write(&layout_file_path, layout_json).or_fail_with(|e| {
+        format!(
+            "failed to write layout file {}: {e}",
+            layout_file_path.display()
+        )
+    })?;
+
+    // hisui vmaf コマンドを実行
+    let mut cmd = Command::new("hisui");
+    cmd.arg("vmaf")
+        .arg("--layout-file")
+        .arg(&layout_file_path)
+        .arg("--frame-count")
+        .arg(frame_count.to_string())
+        .arg("--reference-yuv-file")
+        .arg(trial_dir.join("reference.yuv"))
+        .arg("--distorted-yuv-file")
+        .arg(trial_dir.join("distorted.yuv"))
+        .arg("--vmaf-output-file")
+        .arg(trial_dir.join("vmaf-output.json"))
+        .arg("--no-progress-bar")
+        .arg(root_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if let Some(openh264_path) = openh264 {
+        cmd.arg("--openh264").arg(openh264_path);
+    }
+
+    if let Some(cores) = max_cpu_cores {
+        cmd.arg("--max-cpu-cores").arg(cores.to_string());
+    }
+
+    let output = cmd
+        .output()
+        .or_fail_with(|e| format!("failed to execute hisui vmaf command: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(orfail::Failure::new(format!(
+            "hisui vmaf command failed: {stderr}"
+        )));
+    }
+
+    // 出力結果をパース
+    let stdout = String::from_utf8(output.stdout).or_fail()?;
+    let result = nojson::RawJson::parse(&stdout).or_fail()?;
+    let result_obj = JsonObject::new(result.value()).or_fail()?;
+
+    // メトリクスを抽出
+    let vmaf_mean: f64 = result_obj.get_required("vmaf_mean").or_fail()?;
+    let encoding_speed_ratio: f64 = result_obj.get_required("encoding_speed_ratio").or_fail()?;
+
+    // エンコード時間を算出（速度比の逆数 × エンコード時間）
+    let encoded_duration_seconds: f64 = result_obj
+        .get_required("encoded_duration_seconds")
+        .or_fail()?;
+    let encoding_time = encoded_duration_seconds / encoding_speed_ratio;
+
+    Ok(TrialMetrics {
+        encoding_time,
+        vmaf_score: vmaf_mean,
+    })
+}
+
+#[derive(Debug)]
+struct TrialMetrics {
+    encoding_time: f64, // 最小化したい（minimize）
+    vmaf_score: f64,    // 最大化したい（maximize）
 }
