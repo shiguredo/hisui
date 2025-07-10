@@ -69,10 +69,10 @@ pub enum JsonNumber {
     Float(f64),
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for JsonNumber {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for JsonNumber {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         match value.kind() {
             nojson::JsonValueKind::Integer => {
                 let int_value = value
