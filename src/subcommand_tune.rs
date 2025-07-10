@@ -424,8 +424,6 @@ impl Optuna {
     }
 
     fn tell(&self, trial_number: usize, metrics: &TrialMetrics) -> orfail::Result<()> {
-        let values = format!("[{}, {}]", metrics.encoding_speed_ratio, metrics.vmaf_mean);
-
         let output = Command::new("optuna")
             .arg("tell")
             .arg("--storage")
@@ -435,7 +433,8 @@ impl Optuna {
             .arg("--trial-number")
             .arg(trial_number.to_string())
             .arg("--values")
-            .arg(&values)
+            .arg(&metrics.encoding_speed_ratio.to_string())
+            .arg(&metrics.vmaf_mean.to_string())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
