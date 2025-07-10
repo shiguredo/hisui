@@ -187,6 +187,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             frame_count,
             openh264.as_ref(),
             max_cpu_cores,
+            no_progress_bar,
         )
         .or_fail()?;
 
@@ -484,6 +485,7 @@ fn run_trial_evaluation(
     frame_count: usize,
     openh264: Option<&PathBuf>,
     max_cpu_cores: Option<NonZeroUsize>,
+    no_progress_bar: bool,
 ) -> orfail::Result<TrialMetrics> {
     // トライアルの作業用ディレクトリを作成
     let trial_dir = tune_working_dir
@@ -513,8 +515,11 @@ fn run_trial_evaluation(
 
     // hisui vmaf コマンドを実行
     let mut cmd = Command::new("hisui");
-    cmd.arg("vmaf")
-        .arg("--layout-file")
+    cmd.arg("vmaf");
+    if no_progress_bar {
+        cmd.arg("--no-progress-bar");
+    }
+    cmd.arg("--layout-file")
         .arg(&layout_file_path)
         .arg("--frame-count")
         .arg(frame_count.to_string())
@@ -524,7 +529,6 @@ fn run_trial_evaluation(
         .arg(trial_dir.join("distorted.yuv"))
         .arg("--vmaf-output-file")
         .arg(trial_dir.join("vmaf-output.json"))
-        .arg("--no-progress-bar")
         .arg(root_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
