@@ -168,7 +168,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let optuna = Optuna::new(study_name.clone(), storage_url);
     optuna.create_study().or_fail()?;
 
-    for _ in 0..trial_count {}
+    for _ in 0..trial_count {
+        let params = optuna.ask(&search_space).or_fail()?;
+    }
 
     Ok(())
 }
@@ -208,6 +210,21 @@ impl SearchSpace {
         }
         Ok(Self { items })
     }
+
+    fn to_ask_search_space(&self) -> String {
+        nojson::json(|f| {
+            f.object(|f| {
+                for (path, item) in &self.items {
+                    f.member(
+                        path.0.join("."),
+                        nojson::json(|f| item.to_optuna_distribution(f)),
+                    )?;
+                }
+                Ok(())
+            })
+        })
+        .to_string()
+    }
 }
 
 #[derive(Debug)]
@@ -228,6 +245,54 @@ impl SearchSpaceItem {
         } else {
             Err(value.invalid("not JSON array or JSON object"))
         }
+    }
+
+    fn to_optuna_distribution(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            SearchSpaceItem::Number {
+                min: JsonNumber::Integer(min),
+                max: JsonNumber::Integer(max),
+            } => {
+                // 両方整数なら IntDistribution
+                f.object(|f| {
+                    f.member("name", "IntDistribution")?;
+                    f.member(
+                        "attributes",
+                        nojson::json(|f| {
+                            f.object(|f| {
+                                f.member("low", min)?;
+                                f.member("high", max)
+                            })
+                        }),
+                    )
+                })?;
+            }
+            SearchSpaceItem::Number { min, max } => {
+                // それ以外の数値は FloatDistribution
+                f.object(|f| {
+                    f.member("name", "FloatDistribution")?;
+                    f.member(
+                        "attributes",
+                        nojson::json(|f| {
+                            f.object(|f| {
+                                f.member("low", min)?;
+                                f.member("high", max)
+                            })
+                        }),
+                    )
+                })?;
+            }
+            SearchSpaceItem::Categorical(choices) => {
+                f.object(|f| {
+                    f.member("name", "CategoricalDistribution")?;
+                    f.member(
+                        "attributes",
+                        nojson::json(|f| f.object(|f| f.member("choices", choices))),
+                    )
+                })?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -285,5 +350,109 @@ impl Optuna {
 
         output.status.success().or_fail()?;
         Ok(())
+    }
+
+    fn ask(
+        &self,
+        search_space: &SearchSpace,
+    ) -> orfail::Result<BTreeMap<JsonObjectMemberPath, JsonValue>> {
+        let search_space_json = search_space.to_ask_search_space();
+        log::debug!("ask search space: {search_space_json}");
+
+        // for (path, item) in &search_space.items {
+        //     let distribution_json = match item {
+        //         SearchSpaceItem::Number { min, max } => {
+        //             serde_json::json!({
+        //                 "name": "FloatDistribution",
+        //                 "attributes": {
+        //                     "low": min,
+        //                     "high": max,
+        //                     "step": null,
+        //                     "log": false
+        //                 }
+        //             })
+        //         }
+        //         SearchSpaceItem::Categorical(values) => {
+        //             serde_json::json!({
+        //                 "name": "CategoricalDistribution",
+        //                 "attributes": {
+        //                     "choices": values
+        //                 }
+        //             })
+        //         }
+        //     };
+
+        //     let path_key = path.0.join(".");
+        //     search_space_json.insert(path_key, distribution_json);
+        // }
+
+        // let search_space_str = serde_json::to_string(&search_space_json)
+        //     .or_fail_with(|e| format!("failed to serialize search space: {e}"))?;
+
+        // // Execute optuna ask command
+        // let output = Command::new("optuna")
+        //     .arg("ask")
+        //     .arg("--storage")
+        //     .arg(&self.storage_url)
+        //     .arg("--study-name")
+        //     .arg(&self.study_name)
+        //     .arg("--search-space")
+        //     .arg(&search_space_str)
+        //     .stdout(Stdio::piped())
+        //     .stderr(Stdio::piped())
+        //     .output()
+        //     .or_fail_with(|e| format!("failed to execute optuna ask command: {e}"))?;
+
+        // if !output.status.success() {
+        //     let stderr = String::from_utf8_lossy(&output.stderr);
+        //     return Err(orfail::Failure::new(format!(
+        //         "optuna ask command failed: {stderr}"
+        //     )));
+        // }
+
+        // // Parse the output to extract parameters
+        // let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // // The output contains a JSON line with the trial info
+        // // We need to find the JSON line (it's the last line that starts with '{')
+        // let json_line = stdout
+        //     .lines()
+        //     .filter(|line| line.trim().starts_with('{'))
+        //     .last()
+        //     .ok_or_else(|| orfail::Failure::new("no JSON output found from optuna ask command"))?;
+
+        // // Parse the JSON to extract parameters
+        // let trial_info: serde_json::Value = serde_json::from_str(json_line)
+        //     .or_fail_with(|e| format!("failed to parse optuna ask output: {e}"))?;
+
+        // let params = trial_info
+        //     .get("params")
+        //     .and_then(|p| p.as_object())
+        //     .ok_or_else(|| orfail::Failure::new("no params found in optuna ask output"))?;
+
+        // // Convert the parameters back to our format
+        // let mut result = BTreeMap::new();
+        // for (key, value) in params {
+        //     let path = JsonObjectMemberPath(key.split('.').map(|s| s.to_owned()).collect());
+        //     let json_value = match value {
+        //         serde_json::Value::Number(n) => {
+        //             if let Some(f) = n.as_f64() {
+        //                 JsonValue::Number(JsonNumber::from_f64(f).unwrap())
+        //             } else if let Some(i) = n.as_i64() {
+        //                 JsonValue::Number(JsonNumber::from_i64(i).unwrap())
+        //             } else {
+        //                 return Err(orfail::Failure::new("unsupported number type"));
+        //             }
+        //         }
+        //         serde_json::Value::String(s) => JsonValue::String(s.clone()),
+        //         serde_json::Value::Bool(b) => JsonValue::Bool(*b),
+        //         serde_json::Value::Null => JsonValue::Null,
+        //         _ => return Err(orfail::Failure::new("unsupported parameter type")),
+        //     };
+        //     result.insert(path, json_value);
+        // }
+
+        //Ok(result)
+        todo!()
     }
 }

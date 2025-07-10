@@ -93,6 +93,15 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for JsonNumber {
     }
 }
 
+impl nojson::DisplayJson for JsonNumber {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            JsonNumber::Integer(v) => v.fmt(f),
+            JsonNumber::Float(v) => v.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum JsonValue {
     Null,
@@ -116,6 +125,20 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for JsonValue {
             nojson::JsonValueKind::String => Ok(JsonValue::String(value.try_into()?)),
             nojson::JsonValueKind::Array => Ok(JsonValue::Array(value.try_into()?)),
             nojson::JsonValueKind::Object => Ok(JsonValue::Object(value.try_into()?)),
+        }
+    }
+}
+
+impl nojson::DisplayJson for JsonValue {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            JsonValue::Null => None::<()>.fmt(f),
+            JsonValue::Boolean(v) => v.fmt(f),
+            JsonValue::Integer(v) => v.fmt(f),
+            JsonValue::Float(v) => v.fmt(f),
+            JsonValue::String(v) => v.fmt(f),
+            JsonValue::Array(v) => v.fmt(f),
+            JsonValue::Object(v) => v.fmt(f),
         }
     }
 }
