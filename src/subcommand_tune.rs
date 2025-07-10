@@ -169,7 +169,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     optuna.create_study().or_fail()?;
 
     for _ in 0..trial_count {
-        let params = optuna.ask(&search_space).or_fail()?;
+        let mut layout = layout_template.clone();
+        let ask_output = optuna.ask(&search_space).or_fail()?;
+        ask_output.update_layout(&mut layout).or_fail()?;
+        log::debug!(
+            "[trial:{}] actual layout: {layout:?}",
+            ask_output.trial_number
+        );
     }
 
     Ok(())
@@ -185,6 +191,16 @@ impl JsonObjectMemberPath {
                 return None;
             };
             value = object.get(name)?;
+        }
+        Some(value)
+    }
+
+    fn get_mut<'a>(&self, mut value: &'a mut JsonValue) -> Option<&'a mut JsonValue> {
+        for name in &self.0 {
+            let JsonValue::Object(object) = value else {
+                return None;
+            };
+            value = object.get_mut(name)?;
         }
         Some(value)
     }
@@ -396,6 +412,15 @@ impl Optuna {
 struct AskOutput {
     trial_number: usize,
     params: BTreeMap<JsonObjectMemberPath, JsonValue>,
+}
+
+impl AskOutput {
+    fn update_layout(&self, layout: &mut JsonValue) -> orfail::Result<()> {
+        for (path, new_value) in &self.params {
+            *path.get_mut(layout).or_fail()? = new_value.clone();
+        }
+        Ok(())
+    }
 }
 
 impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AskOutput {
