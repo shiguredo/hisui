@@ -15,9 +15,8 @@ impl YuvWriter {
             .create(true)
             .truncate(true)
             .write(true)
-            .open(path)
-            .or_fail()?;
-
+            .open(&path)
+            .or_fail_with(|e| format!("{e}: {}", path.as_ref().display()))?;
         Ok(Self { file })
     }
 

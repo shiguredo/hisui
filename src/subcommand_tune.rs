@@ -497,6 +497,7 @@ fn run_trial_evaluation(
             trial_dir.display()
         )
     })?;
+    let trial_dir = trial_dir.canonicalize().or_fail()?;
 
     // レイアウトファイルを作成
     let layout_file_path = trial_dir.join("layout.json");
