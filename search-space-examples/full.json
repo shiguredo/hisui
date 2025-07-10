@@ -26,7 +26,7 @@
     "cq"
   ],
   "libvpx_vp8_encode_params.lag_in_frames": {
-    "min": 0,
+    "min": 1,
     "max": 25
   },
   "libvpx_vp8_encode_params.threads": {
