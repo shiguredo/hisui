@@ -45,7 +45,7 @@ pub fn parse_h264_encode_params(
     // キーフレーム間隔設定（秒数）
     config.max_key_frame_interval_duration = params
         .get_with("max_key_frame_interval_duration", |v| {
-            Ok(Duration::from_secs_f64(v.try_to()?))
+            Ok(Duration::from_secs_f64(v.try_into()?))
         })?;
 
     // プロファイルレベル設定
@@ -108,7 +108,7 @@ pub fn parse_h265_encode_params(
 
     // 品質設定
     config.quality = params.get_with("quality", |v| {
-        let q: f32 = v.try_to()?;
+        let q: f32 = v.try_into()?;
         if 0.0 <= q && q <= 1.0 {
             Ok(q)
         } else {
@@ -144,7 +144,7 @@ pub fn parse_h265_encode_params(
     // キーフレーム間隔設定（秒数）
     config.max_key_frame_interval_duration = params
         .get_with("max_key_frame_interval_duration", |v| {
-            Ok(Duration::from_secs_f64(v.try_to()?))
+            Ok(Duration::from_secs_f64(v.try_into()?))
         })?;
 
     // プロファイルレベル設定（H.265用）

@@ -14,10 +14,10 @@ pub struct LayoutEncodeParams {
     pub video_toolbox_h265: Option<shiguredo_video_toolbox::EncoderConfig>,
 }
 
-impl<'text> nojson::FromRawJsonValue<'text> for LayoutEncodeParams {
-    fn from_raw_json_value(
-        value: nojson::RawJsonValue<'text, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodeParams {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let mut params = Self::default();
         for (key, value) in value.to_object()? {
             match &*key.to_unquoted_string_str()? {

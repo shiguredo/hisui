@@ -14,18 +14,18 @@ impl<'a, 'text> JsonObject<'a, 'text> {
             members: value
                 .to_object()?
                 .map(|(k, v)| Ok((k.to_unquoted_string_str()?, v)))
-                .collect::<Result<_, _>>()?,
+                .collect::<Result<_, nojson::JsonParseError>>()?,
         })
     }
 
     pub fn get<T>(&self, key: &str) -> Result<Option<T>, nojson::JsonParseError>
     where
-        T: nojson::FromRawJsonValue<'text>,
+        T: TryFrom<nojson::RawJsonValue<'text, 'a>, Error = nojson::JsonParseError>,
     {
-        let Some(value) = self.members.get(key) else {
+        let Some(value) = self.members.get(key).copied() else {
             return Ok(None);
         };
-        Ok(Some(value.try_to()?))
+        Ok(Some(value.try_into()?))
     }
 
     pub fn get_with<T, F>(&self, key: &str, f: F) -> Result<Option<T>, nojson::JsonParseError>
@@ -40,14 +40,14 @@ impl<'a, 'text> JsonObject<'a, 'text> {
 
     pub fn get_required<T>(&self, key: &str) -> Result<T, nojson::JsonParseError>
     where
-        T: nojson::FromRawJsonValue<'text>,
+        T: TryFrom<nojson::RawJsonValue<'text, 'a>, Error = nojson::JsonParseError>,
     {
-        let Some(value) = self.members.get(key) else {
+        let Some(value) = self.members.get(key).copied() else {
             return Err(self
                 .object
                 .invalid(format!("missing required member {key:?}")));
         };
-        value.try_to()
+        value.try_into()
     }
 
     pub fn get_required_with<T, F>(&self, key: &str, f: F) -> Result<T, nojson::JsonParseError>
