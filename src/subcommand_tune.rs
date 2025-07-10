@@ -447,6 +447,9 @@ impl Optuna {
             .arg(&metrics.vmaf_mean.to_string())
             .arg("--state")
             .arg("complete")
+            // optuna tell コマンドは「実験的機能です」という警告を出すけど、
+            // Hisui 側で対処できるものでもなく、ノイジーなだけなので抑制する
+            .env("PYTHONWARNINGS", "ignore")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
@@ -471,6 +474,9 @@ impl Optuna {
             .arg(trial_number.to_string())
             .arg("--state")
             .arg("fail")
+            // optuna tell コマンドは「実験的機能です」という警告を出すけど、
+            // Hisui 側で対処できるものでもなく、ノイジーなだけなので抑制する
+            .env("PYTHONWARNINGS", "ignore")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
