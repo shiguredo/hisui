@@ -594,6 +594,9 @@ fn run_trial_evaluation(
     let vmaf_mean: f64 = result_obj.get_required("vmaf_mean").or_fail()?;
     let encoding_speed_ratio: f64 = result_obj.get_required("encoding_speed_ratio").or_fail()?;
 
+    // 後から参照できるように保存しておく
+    std::fs::write(trial_dir.join("metrics.json"), &stdout).or_fail()?;
+
     Ok(TrialMetrics {
         encoding_speed_ratio,
         vmaf_mean,
