@@ -190,6 +190,14 @@ impl JsonObjectMemberPath {
     }
 }
 
+impl std::str::FromStr for JsonObjectMemberPath {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.split('.').map(|s| s.to_owned()).collect()))
+    }
+}
+
 #[derive(Debug)]
 struct SearchSpace {
     items: BTreeMap<JsonObjectMemberPath, SearchSpaceItem>,
@@ -352,107 +360,51 @@ impl Optuna {
         Ok(())
     }
 
-    fn ask(
-        &self,
-        search_space: &SearchSpace,
-    ) -> orfail::Result<BTreeMap<JsonObjectMemberPath, JsonValue>> {
+    fn ask(&self, search_space: &SearchSpace) -> orfail::Result<AskOutput> {
         let search_space_json = search_space.to_ask_search_space();
         log::debug!("ask search space: {search_space_json}");
 
-        // for (path, item) in &search_space.items {
-        //     let distribution_json = match item {
-        //         SearchSpaceItem::Number { min, max } => {
-        //             serde_json::json!({
-        //                 "name": "FloatDistribution",
-        //                 "attributes": {
-        //                     "low": min,
-        //                     "high": max,
-        //                     "step": null,
-        //                     "log": false
-        //                 }
-        //             })
-        //         }
-        //         SearchSpaceItem::Categorical(values) => {
-        //             serde_json::json!({
-        //                 "name": "CategoricalDistribution",
-        //                 "attributes": {
-        //                     "choices": values
-        //                 }
-        //             })
-        //         }
-        //     };
+        // Execute optuna ask command
+        let output = Command::new("optuna")
+            .arg("ask")
+            .arg("--storage")
+            .arg(&self.storage_url)
+            .arg("--study-name")
+            .arg(&self.study_name)
+            .arg("--search-space")
+            .arg(&search_space_json)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .or_fail_with(|e| format!("failed to execute optuna ask command: {e}"))?;
 
-        //     let path_key = path.0.join(".");
-        //     search_space_json.insert(path_key, distribution_json);
-        // }
+        output.status.success().or_fail_with(|()| {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            format!("optuna ask command failed: {stderr}")
+        })?;
 
-        // let search_space_str = serde_json::to_string(&search_space_json)
-        //     .or_fail_with(|e| format!("failed to serialize search space: {e}"))?;
+        // Parse the output to extract parameters
+        let stdout = String::from_utf8(output.stdout).or_fail()?;
+        let output = stdout.parse().map(|nojson::Json(v)| v).or_fail()?;
+        log::info!("ask result: {output:?}");
 
-        // // Execute optuna ask command
-        // let output = Command::new("optuna")
-        //     .arg("ask")
-        //     .arg("--storage")
-        //     .arg(&self.storage_url)
-        //     .arg("--study-name")
-        //     .arg(&self.study_name)
-        //     .arg("--search-space")
-        //     .arg(&search_space_str)
-        //     .stdout(Stdio::piped())
-        //     .stderr(Stdio::piped())
-        //     .output()
-        //     .or_fail_with(|e| format!("failed to execute optuna ask command: {e}"))?;
+        Ok(output)
+    }
+}
 
-        // if !output.status.success() {
-        //     let stderr = String::from_utf8_lossy(&output.stderr);
-        //     return Err(orfail::Failure::new(format!(
-        //         "optuna ask command failed: {stderr}"
-        //     )));
-        // }
+#[derive(Debug)]
+struct AskOutput {
+    trial_number: usize,
+    params: BTreeMap<JsonObjectMemberPath, JsonValue>,
+}
 
-        // // Parse the output to extract parameters
-        // let stdout = String::from_utf8_lossy(&output.stdout);
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AskOutput {
+    type Error = nojson::JsonParseError;
 
-        // // The output contains a JSON line with the trial info
-        // // We need to find the JSON line (it's the last line that starts with '{')
-        // let json_line = stdout
-        //     .lines()
-        //     .filter(|line| line.trim().starts_with('{'))
-        //     .last()
-        //     .ok_or_else(|| orfail::Failure::new("no JSON output found from optuna ask command"))?;
-
-        // // Parse the JSON to extract parameters
-        // let trial_info: serde_json::Value = serde_json::from_str(json_line)
-        //     .or_fail_with(|e| format!("failed to parse optuna ask output: {e}"))?;
-
-        // let params = trial_info
-        //     .get("params")
-        //     .and_then(|p| p.as_object())
-        //     .ok_or_else(|| orfail::Failure::new("no params found in optuna ask output"))?;
-
-        // // Convert the parameters back to our format
-        // let mut result = BTreeMap::new();
-        // for (key, value) in params {
-        //     let path = JsonObjectMemberPath(key.split('.').map(|s| s.to_owned()).collect());
-        //     let json_value = match value {
-        //         serde_json::Value::Number(n) => {
-        //             if let Some(f) = n.as_f64() {
-        //                 JsonValue::Number(JsonNumber::from_f64(f).unwrap())
-        //             } else if let Some(i) = n.as_i64() {
-        //                 JsonValue::Number(JsonNumber::from_i64(i).unwrap())
-        //             } else {
-        //                 return Err(orfail::Failure::new("unsupported number type"));
-        //             }
-        //         }
-        //         serde_json::Value::String(s) => JsonValue::String(s.clone()),
-        //         serde_json::Value::Bool(b) => JsonValue::Bool(*b),
-        //         serde_json::Value::Null => JsonValue::Null,
-        //         _ => return Err(orfail::Failure::new("unsupported parameter type")),
-        //     };
-        //     result.insert(path, json_value);
-        // }
-
-        //Ok(result)
-        todo!()
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            trial_number: value.to_member("number")?.required()?.try_into()?,
+            params: value.to_member("params")?.required()?.try_into()?,
+        })
     }
 }
