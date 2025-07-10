@@ -281,3 +281,15 @@ impl SearchSpaceItem {
         Ok(())
     }
 }
+
+impl nojson::DisplayJson for SearchSpaceItem {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            SearchSpaceItem::Number { min, max } => f.object(|f| {
+                f.member("min", min)?;
+                f.member("max", max)
+            }),
+            SearchSpaceItem::Categorical(choices) => f.value(choices),
+        }
+    }
+}

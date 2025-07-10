@@ -163,8 +163,34 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
     log::debug!("search space: {search_space:?}");
 
-    // optuna の study を作る
+    // 最初にいろいろと情報を表示する
     let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
+    eprintln!("====== INFO ======");
+    eprintln!(
+        "- layout file to tune:\t {}",
+        layout_file_path
+            .as_ref()
+            .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
+    );
+    eprintln!(
+        "- search space file:\t {}",
+        search_space_file_path
+            .as_ref()
+            .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
+    );
+    eprintln!("- tune working dir:\t {}", tune_working_dir.display());
+    eprintln!("- optuna storage:\t {storage_url}");
+    eprintln!("- optuna study name:\t {study_name}");
+    eprintln!("- optuna trial count:\t {trial_count}");
+    eprintln!("- tuning metrics:\t [Encoding Speed Ratio (maximize), VMAF Score Mean (maximize)]");
+    eprintln!("- tuning parameters ({}):", search_space.items.len());
+    for (key, value) in &search_space.items {
+        eprintln!("    - {key}:\t {}", nojson::Json(value));
+    }
+    eprintln!();
+
+    // optuna の study を作る
+    eprintln!("====== TUNE ======");
     let optuna = Optuna::new(study_name.clone(), storage_url);
     optuna.create_study().or_fail()?;
 
