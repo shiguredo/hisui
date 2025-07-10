@@ -1,1 +1,76 @@
-{}
+{
+  "libvpx_vp8_encode_params.min_quantizer": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp8_encode_params.max_quantizer": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp8_encode_params.cq_level": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp8_encode_params.cpu_used": {
+    "min": -16,
+    "max": 16
+  },
+  "libvpx_vp8_encode_params.deadline": [
+    "best",
+    "good",
+    "realtime"
+  ],
+  "libvpx_vp8_encode_params.rate_control": [
+    "vbr",
+    "cbr",
+    "cq"
+  ],
+  "libvpx_vp8_encode_params.lag_in_frames": {
+    "min": 0,
+    "max": 25
+  },
+  "libvpx_vp8_encode_params.threads": {
+    "min": 1,
+    "max": 16
+  },
+  "libvpx_vp8_encode_params.error_resilient": [
+    true,
+    false
+  ],
+  "libvpx_vp8_encode_params.keyframe_interval": {
+    "min": 1,
+    "max": 9999
+  },
+  "libvpx_vp8_encode_params.frame_drop_threshold": {
+    "min": 0,
+    "max": 100
+  },
+  "libvpx_vp8_encode_params.noise_sensitivity": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp8_encode_params.static_threshold": {
+    "min": 0,
+    "max": 10000
+  },
+  "libvpx_vp8_encode_params.token_partitions": {
+    "min": 0,
+    "max": 3
+  },
+  "libvpx_vp8_encode_params.max_intra_bitrate_pct": {
+    "min": 0,
+    "max": 10000
+  },
+  "libvpx_vp8_encode_params.arnr_config.max_frames": {
+    "min": 0,
+    "max": 15
+  },
+  "libvpx_vp8_encode_params.arnr_config.strength": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp8_encode_params.arnr_config.filter_type": {
+    "min": 1,
+    "max": 3
+  }
+}
