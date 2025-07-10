@@ -178,7 +178,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             ask_output.trial_number
         );
 
-        let metrics = run_trial_evaluation(
+        match run_trial_evaluation(
             &tune_working_dir,
             &study_name,
             ask_output.trial_number,
@@ -189,9 +189,19 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             max_cpu_cores,
             no_progress_bar,
         )
-        .or_fail()?;
-
-        optuna.tell(ask_output.trial_number, &metrics).or_fail()?;
+        .or_fail()
+        {
+            Ok(metrics) => {
+                optuna.tell(ask_output.trial_number, &metrics).or_fail()?;
+            }
+            Err(e) => {
+                log::warn!(
+                    "[trial:{}] failed to VMAF evaluation: {e}",
+                    ask_output.trial_number
+                );
+                optuna.tell_fail(ask_output.trial_number).or_fail()?;
+            }
+        }
     }
 
     Ok(())
@@ -435,6 +445,32 @@ impl Optuna {
             .arg("--values")
             .arg(&metrics.encoding_speed_ratio.to_string())
             .arg(&metrics.vmaf_mean.to_string())
+            .arg("--state")
+            .arg("complete")
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .output()
+            .or_fail_with(|e| format!("failed to execute optuna tell command: {e}"))?;
+
+        output
+            .status
+            .success()
+            .or_fail_with(|()| "optuna tell command failed".to_string())?;
+
+        Ok(())
+    }
+
+    fn tell_fail(&self, trial_number: usize) -> orfail::Result<()> {
+        let output = Command::new("optuna")
+            .arg("tell")
+            .arg("--storage")
+            .arg(&self.storage_url)
+            .arg("--study-name")
+            .arg(&self.study_name)
+            .arg("--trial-number")
+            .arg(trial_number.to_string())
+            .arg("--state")
+            .arg("fail")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
