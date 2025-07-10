@@ -8,5 +8,27 @@
         "archive*.json"
       ]
     }
+  },
+  "libvpx_vp8_encode_params": {
+    "min_quantizer": null,
+    "max_quantizer": null,
+    "cq_level": null,
+    "cpu_used": null,
+    "deadline": null,
+    "rate_control": null,
+    "lag_in_frames": null,
+    "threads": null,
+    "error_resilient": null,
+    "keyframe_interval": null,
+    "frame_drop_threshold": null,
+    "noise_sensitivity": null,
+    "static_threshold": null,
+    "token_partitions": null,
+    "max_intra_bitrate_pct": null,
+    "arnr_config": {
+      "max_frames": null,
+      "strength": null,
+      "filter_type": null
+    }
   }
 }

@@ -134,12 +134,19 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // レイアウトファイル（テンプレート）を読み込む
-    let layout_template = if let Some(path) = &layout_file_path {
-        std::fs::read_to_string(path).or_fail()?
+    let layout_template: JsonValue = if let Some(path) = &layout_file_path {
+        std::fs::read_to_string(path)
+            .or_fail()?
+            .parse()
+            .map(|nojson::Json(v)| v)
+            .or_fail()?
     } else {
-        DEFAULT_LAYOUT_JSON.to_owned()
+        DEFAULT_LAYOUT_JSON
+            .parse()
+            .map(|nojson::Json(v)| v)
+            .or_fail()?
     };
-    let layout_template_json = nojson::RawJson::parse(&layout_template).or_fail()?;
+    log::debug!("template: {layout_template:?}");
 
     // 探索空間ファイルを読み込む
     let search_space_json_string = if let Some(path) = &search_space_file_path {
@@ -148,7 +155,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         DEFAULT_SEARCH_SPACE_JSON.to_owned()
     };
     let search_space_raw_json = nojson::RawJson::parse(&search_space_json_string).or_fail()?;
-    let search_space = SearchSpace::new(search_space_raw_json.value()).or_fail()?;
+    let mut search_space = SearchSpace::new(search_space_raw_json.value()).or_fail()?;
+    search_space
+        .items
+        .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
+    log::debug!("search space: {search_space:?}");
 
     // optuna の study を作る
     let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
@@ -163,6 +174,18 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct JsonObjectMemberPath(Vec<String>);
+
+impl JsonObjectMemberPath {
+    fn get<'a>(&self, mut value: &'a JsonValue) -> Option<&'a JsonValue> {
+        for name in &self.0 {
+            let JsonValue::Object(object) = value else {
+                return None;
+            };
+            value = object.get(name)?;
+        }
+        Some(value)
+    }
+}
 
 #[derive(Debug)]
 struct SearchSpace {
