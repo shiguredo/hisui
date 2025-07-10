@@ -156,6 +156,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     };
     let search_space_raw_json = nojson::RawJson::parse(&search_space_json_string).or_fail()?;
     let mut search_space = SearchSpace::new(search_space_raw_json.value()).or_fail()?;
+
+    // レイアウトテンプレートの処理に不要なエントリは捨てる
     search_space
         .items
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
@@ -163,11 +165,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // optuna の study を作る
     let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
-    create_optuna_study(&study_name, &storage_url).or_fail()?;
+    let optuna = Optuna::new(study_name.clone(), storage_url);
+    optuna.create_study().or_fail()?;
 
-    for _ in 0..trial_count {
-        //
-    }
+    for _ in 0..trial_count {}
 
     Ok(())
 }
@@ -251,23 +252,38 @@ fn check_optuna_availability() -> orfail::Result<()> {
     }
 }
 
-fn create_optuna_study(study_name: &str, storage_url: &str) -> orfail::Result<()> {
-    let output = Command::new("optuna")
-        .arg("create-study")
-        .arg("--study-name")
-        .arg(study_name)
-        .arg("--storage")
-        .arg(storage_url)
-        .arg("--skip-if-exists")
-        // 「エンコード時間の最小化」と「VMAF スコアの最大化」
-        .arg("--directions")
-        .arg("minimize")
-        .arg("maximize")
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .output()
-        .or_fail_with(|e| format!("failed to execute optuna create-study command: {e}"))?;
+#[derive(Debug)]
+struct Optuna {
+    study_name: String,
+    storage_url: String,
+}
 
-    output.status.success().or_fail()?;
-    Ok(())
+impl Optuna {
+    fn new(study_name: String, storage_url: String) -> Self {
+        Self {
+            study_name,
+            storage_url,
+        }
+    }
+
+    fn create_study(&self) -> orfail::Result<()> {
+        let output = Command::new("optuna")
+            .arg("create-study")
+            .arg("--study-name")
+            .arg(&self.study_name)
+            .arg("--storage")
+            .arg(&self.storage_url)
+            .arg("--skip-if-exists")
+            // 「エンコード時間の最小化」と「VMAF スコアの最大化」
+            .arg("--directions")
+            .arg("minimize")
+            .arg("maximize")
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .output()
+            .or_fail_with(|e| format!("failed to execute optuna create-study command: {e}"))?;
+
+        output.status.success().or_fail()?;
+        Ok(())
+    }
 }
