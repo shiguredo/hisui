@@ -379,9 +379,9 @@ impl Optuna {
             .arg("--storage")
             .arg(&self.storage_url)
             .arg("--skip-if-exists")
-            // 「エンコード時間の最小化」と「VMAF スコアの最大化」
+            // 「エンコード効率（何倍速変換か）の最小化」と「VMAF スコアの最大化」
             .arg("--directions")
-            .arg("minimize")
+            .arg("maximize")
             .arg("maximize")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -424,7 +424,7 @@ impl Optuna {
     }
 
     fn tell(&self, trial_number: usize, metrics: &TrialMetrics) -> orfail::Result<()> {
-        let values = format!("[{}, {}]", metrics.encoding_time, metrics.vmaf_score);
+        let values = format!("[{}, {}]", metrics.encoding_speed_ratio, metrics.vmaf_mean);
 
         let output = Command::new("optuna")
             .arg("tell")
@@ -532,7 +532,7 @@ fn run_trial_evaluation(
         .arg(trial_dir.join("vmaf-output.json"))
         .arg(root_dir)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::inherit());
 
     if let Some(openh264_path) = openh264 {
         cmd.arg("--openh264").arg(openh264_path);
@@ -545,13 +545,10 @@ fn run_trial_evaluation(
     let output = cmd
         .output()
         .or_fail_with(|e| format!("failed to execute hisui vmaf command: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(orfail::Failure::new(format!(
-            "hisui vmaf command failed: {stderr}"
-        )));
-    }
+    output
+        .status
+        .success()
+        .or_fail_with(|()| "hisui vmaf command failed".to_owned())?;
 
     // 出力結果をパース
     let stdout = String::from_utf8(output.stdout).or_fail()?;
@@ -562,20 +559,14 @@ fn run_trial_evaluation(
     let vmaf_mean: f64 = result_obj.get_required("vmaf_mean").or_fail()?;
     let encoding_speed_ratio: f64 = result_obj.get_required("encoding_speed_ratio").or_fail()?;
 
-    // エンコード時間を算出（速度比の逆数 × エンコード時間）
-    let encoded_duration_seconds: f64 = result_obj
-        .get_required("encoded_duration_seconds")
-        .or_fail()?;
-    let encoding_time = encoded_duration_seconds / encoding_speed_ratio;
-
     Ok(TrialMetrics {
-        encoding_time,
-        vmaf_score: vmaf_mean,
+        encoding_speed_ratio,
+        vmaf_mean,
     })
 }
 
 #[derive(Debug)]
 struct TrialMetrics {
-    encoding_time: f64, // 最小化したい（minimize）
-    vmaf_score: f64,    // 最大化したい（maximize）
+    encoding_speed_ratio: f64,
+    vmaf_mean: f64,
 }
