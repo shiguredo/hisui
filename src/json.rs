@@ -92,3 +92,30 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for JsonNumber {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub enum JsonValue {
+    Null,
+    Boolean(bool),
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<JsonValue>),
+    Object(BTreeMap<String, JsonValue>),
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for JsonValue {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        match value.kind() {
+            nojson::JsonValueKind::Null => Ok(JsonValue::Null),
+            nojson::JsonValueKind::Boolean => Ok(JsonValue::Boolean(value.try_into()?)),
+            nojson::JsonValueKind::Integer => Ok(JsonValue::Integer(value.try_into()?)),
+            nojson::JsonValueKind::Float => Ok(JsonValue::Float(value.try_into()?)),
+            nojson::JsonValueKind::String => Ok(JsonValue::String(value.try_into()?)),
+            nojson::JsonValueKind::Array => Ok(JsonValue::Array(value.try_into()?)),
+            nojson::JsonValueKind::Object => Ok(JsonValue::Object(value.try_into()?)),
+        }
+    }
+}

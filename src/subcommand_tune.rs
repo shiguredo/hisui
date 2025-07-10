@@ -8,7 +8,7 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
-    json::{JsonNumber, JsonObject},
+    json::{JsonNumber, JsonObject, JsonValue},
     subcommand_vmaf,
 };
 
@@ -165,12 +165,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 struct JsonObjectMemberPath(Vec<String>);
 
 #[derive(Debug)]
-struct SearchSpace<'text, 'a> {
-    items: BTreeMap<JsonObjectMemberPath, SearchSpaceItem<'text, 'a>>,
+struct SearchSpace {
+    items: BTreeMap<JsonObjectMemberPath, SearchSpaceItem>,
 }
 
-impl<'text, 'a> SearchSpace<'text, 'a> {
-    fn new(root: nojson::RawJsonValue<'text, 'a>) -> Result<Self, nojson::JsonParseError> {
+impl SearchSpace {
+    fn new(root: nojson::RawJsonValue<'_, '_>) -> Result<Self, nojson::JsonParseError> {
         let mut items = BTreeMap::new();
         for (key, value) in root.to_object()? {
             let path = JsonObjectMemberPath(
@@ -187,19 +187,19 @@ impl<'text, 'a> SearchSpace<'text, 'a> {
 }
 
 #[derive(Debug)]
-enum SearchSpaceItem<'text, 'a> {
+enum SearchSpaceItem {
     Number { min: JsonNumber, max: JsonNumber },
-    Categorical(Vec<nojson::RawJsonValue<'text, 'a>>),
+    Categorical(Vec<JsonValue>),
 }
 
-impl<'text, 'a> SearchSpaceItem<'text, 'a> {
-    fn new(value: nojson::RawJsonValue<'text, 'a>) -> Result<Self, nojson::JsonParseError> {
-        if let Ok(array) = value.to_array() {
-            Ok(Self::Categorical(array.collect()))
+impl SearchSpaceItem {
+    fn new(value: nojson::RawJsonValue<'_, '_>) -> Result<Self, nojson::JsonParseError> {
+        if value.kind().is_array() {
+            Ok(Self::Categorical(value.try_into()?))
         } else if let Ok(object) = JsonObject::new(value) {
             Ok(Self::Number {
                 min: object.get_required("min")?,
-                max: object.get_required("min")?,
+                max: object.get_required("max")?,
             })
         } else {
             Err(value.invalid("not JSON array or JSON object"))
