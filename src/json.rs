@@ -142,3 +142,42 @@ impl nojson::DisplayJson for JsonValue {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct JsonObjectMemberPath(Vec<String>);
+
+impl JsonObjectMemberPath {
+    pub fn get<'a>(&self, mut value: &'a JsonValue) -> Option<&'a JsonValue> {
+        for name in &self.0 {
+            let JsonValue::Object(object) = value else {
+                return None;
+            };
+            value = object.get(name)?;
+        }
+        Some(value)
+    }
+
+    pub fn get_mut<'a>(&self, mut value: &'a mut JsonValue) -> Option<&'a mut JsonValue> {
+        for name in &self.0 {
+            let JsonValue::Object(object) = value else {
+                return None;
+            };
+            value = object.get_mut(name)?;
+        }
+        Some(value)
+    }
+}
+
+impl std::str::FromStr for JsonObjectMemberPath {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.split('.').map(|s| s.to_owned()).collect()))
+    }
+}
+
+impl std::fmt::Display for JsonObjectMemberPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.join("."))
+    }
+}
