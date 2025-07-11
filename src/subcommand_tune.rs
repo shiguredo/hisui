@@ -238,7 +238,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         }
 
         if (i + 1) % best_trials_interval == 0 {
-            display_best_trials(&optuna, &root_dir).or_fail()?;
+            display_best_trials(&optuna, &root_dir, &tune_working_dir).or_fail()?;
         }
     }
 
@@ -257,6 +257,7 @@ fn run_trial_evaluation(
     no_progress_bar: bool,
 ) -> orfail::Result<TrialMetrics> {
     // トライアルの作業用ディレクトリを作成
+    // TODO: パス作成部分を共通化
     let trial_dir = tune_working_dir
         .join(study_name)
         .join(format!("trial-{}", trial_number));
@@ -337,7 +338,11 @@ fn run_trial_evaluation(
     })
 }
 
-fn display_best_trials(optuna: &Optuna, root_dir: &Path) -> orfail::Result<()> {
+fn display_best_trials(
+    optuna: &Optuna,
+    root_dir: &Path,
+    tune_working_dir: &Path,
+) -> orfail::Result<()> {
     let mut best_trials = optuna.get_best_trials().or_fail()?;
     if best_trials.is_empty() {
         return Ok(());
@@ -359,15 +364,15 @@ fn display_best_trials(optuna: &Optuna, root_dir: &Path) -> orfail::Result<()> {
         for (key, value) in &trial.params {
             eprintln!("    {}: {}", key, format_param_value(value));
         }
-        let layout_file_path = format!(
-            "hisui-tune/{}/trial-{}/layout.json",
-            optuna.study_name, trial.number
-        );
+
+        let layout_file_path = tune_working_dir
+            .join(&optuna.study_name)
+            .join(format!("trial-{}/layout.json", trial.number));
 
         eprintln!("  Compose command:");
         eprintln!(
             "    hisui compose -l {} {}",
-            layout_file_path,
+            layout_file_path.display(),
             root_dir.display()
         );
 
