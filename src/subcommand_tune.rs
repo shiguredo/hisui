@@ -59,13 +59,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("実行する試行回数を指定します")
         .take(&mut args)
         .then(|a| a.value().parse())?;
-    let best_trials_interval: usize = noargs::opt("best-trials-interval")
-        .short('i')
-        .ty("INTEGER")
-        .default("10")
-        .doc("最適化結果の最良試行を表示する間隔を指定します（トライアル数）")
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
@@ -197,7 +190,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!();
 
     // optuna の study を作る
-    let optuna = Optuna::new(study_name.clone(), storage_url);
+    let mut optuna = Optuna::new(study_name.clone(), storage_url);
     optuna.create_study().or_fail()?;
 
     for i in 0..trial_count {
@@ -237,9 +230,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             }
         }
 
-        if (i + 1) % best_trials_interval == 0 {
-            display_best_trials(&optuna, &root_dir, &tune_working_dir).or_fail()?;
-        }
+        display_best_trials(&mut optuna, &root_dir, &tune_working_dir).or_fail()?;
     }
 
     Ok(())
@@ -341,14 +332,14 @@ fn run_trial_evaluation(
 }
 
 fn display_best_trials(
-    optuna: &Optuna,
+    optuna: &mut Optuna,
     root_dir: &Path,
     tune_working_dir: &Path,
 ) -> orfail::Result<()> {
-    let mut best_trials = optuna.get_best_trials().or_fail()?;
-    if best_trials.is_empty() {
+    let Some(mut best_trials) = optuna.get_updated_best_trials().or_fail()? else {
+        // 更新なし
         return Ok(());
-    }
+    };
     best_trials.sort_by(|a, b| a.values[0].total_cmp(&b.values[0]));
 
     eprintln!("====== BEST TRIALS ======");

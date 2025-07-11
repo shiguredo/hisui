@@ -102,7 +102,7 @@ impl nojson::DisplayJson for JsonNumber {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
     Null,
     Boolean(bool),

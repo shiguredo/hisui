@@ -11,6 +11,7 @@ use crate::json::{JsonNumber, JsonObject, JsonObjectMemberPath, JsonValue};
 pub struct Optuna {
     pub study_name: String,
     storage_url: String,
+    pub last_best_trials: Vec<BestTrial>,
 }
 
 impl Optuna {
@@ -39,6 +40,7 @@ impl Optuna {
         Self {
             study_name,
             storage_url,
+            last_best_trials: Vec::new(),
         }
     }
 
@@ -151,7 +153,7 @@ impl Optuna {
         Ok(())
     }
 
-    pub fn get_best_trials(&self) -> orfail::Result<Vec<BestTrial>> {
+    pub fn get_updated_best_trials(&mut self) -> orfail::Result<Option<Vec<BestTrial>>> {
         let output = Command::new("optuna")
             .arg("best-trials")
             .arg("--storage")
@@ -174,8 +176,12 @@ impl Optuna {
         let trials: Vec<BestTrial> =
             Vec::<BestTrial>::try_from(nojson::RawJson::parse(&stdout).or_fail()?.value())
                 .or_fail()?;
-
-        Ok(trials)
+        if self.last_best_trials == trials {
+            Ok(None)
+        } else {
+            self.last_best_trials = trials.clone();
+            Ok(Some(trials))
+        }
     }
 }
 
@@ -321,11 +327,10 @@ impl nojson::DisplayJson for SearchSpaceItem {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BestTrial {
     pub number: usize,
     pub values: Vec<f64>,
-    pub duration: String,
     pub params: BTreeMap<String, JsonValue>,
 }
 
@@ -336,7 +341,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for BestTrial {
         Ok(Self {
             number: value.to_member("number")?.required()?.try_into()?,
             values: value.to_member("values")?.required()?.try_into()?,
-            duration: value.to_member("duration")?.required()?.try_into()?,
             params: value.to_member("params")?.required()?.try_into()?,
         })
     }
