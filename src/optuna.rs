@@ -7,14 +7,16 @@ use orfail::OrFail;
 
 use crate::json::{JsonNumber, JsonObject, JsonObjectMemberPath, JsonValue};
 
+/// Optuna のスタディ関連操作を行いやすくするための構造体
 #[derive(Debug)]
-pub struct Optuna {
-    pub study_name: String,
+pub struct OptunaStudy {
+    study_name: String,
     storage_url: String,
-    pub last_best_trials: Vec<BestTrial>,
+    last_best_trials: Vec<BestTrial>,
 }
 
-impl Optuna {
+impl OptunaStudy {
+    /// optuna コマンドが利用可能かどうかをチェックする
     pub fn check_optuna_availability() -> orfail::Result<()> {
         let output = Command::new("optuna")
             .arg("--version")
@@ -25,7 +27,7 @@ impl Optuna {
         match output {
             Ok(output) if output.status.success() => Ok(()),
             Ok(_) => Err(orfail::Failure::new(
-                "optuna command failed to execute properly",
+                "`$ optuna --version` command failed to execute properly",
             )),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(orfail::Failure::new(
                 "optuna command not found. Please install optuna and ensure it's in your PATH",
@@ -36,6 +38,7 @@ impl Optuna {
         }
     }
 
+    /// 新しい `OptunaStudy` インスタンスを生成する
     pub fn new(study_name: String, storage_url: String) -> Self {
         Self {
             study_name,
@@ -44,6 +47,12 @@ impl Optuna {
         }
     }
 
+    /// スタディ名を返す
+    pub fn study_name(&self) -> &str {
+        &self.study_name
+    }
+
+    /// スタディを作成する
     pub fn create_study(&self) -> orfail::Result<()> {
         let output = Command::new("optuna")
             .arg("create-study")
@@ -51,25 +60,23 @@ impl Optuna {
             .arg(&self.study_name)
             .arg("--storage")
             .arg(&self.storage_url)
-            .arg("--skip-if-exists")
-            // 「合成処理時間の最小化」と「VMAF スコアの最大化」
+            .arg("--skip-if-exists") // すでに同じ名前のものが存在する場合には作成しない
             .arg("--directions")
-            .arg("minimize")
-            .arg("maximize")
-            .stdout(Stdio::inherit())
+            .arg("minimize") // 合成処理時間の最小化
+            .arg("maximize") // VMAF スコアの最大か
+            .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute optuna create-study command: {e}"))?;
-
-        output.status.success().or_fail()?;
+            .or_fail_with(|e| format!("failed to execute `$ optuna create-study` command: {e}"))?;
+        output
+            .status
+            .success()
+            .or_fail_with(|()| "`$ optuna create-study` command failed".to_owned())?;
         Ok(())
     }
 
-    pub fn ask(&self, search_space: &SearchSpace) -> orfail::Result<AskOutput> {
-        let search_space_json = search_space.to_ask_search_space();
-        log::debug!("ask search space: {search_space_json}");
-
-        // Execute optuna ask command
+    /// 次に探索すべきパラメータセットを問い合わせる
+    pub fn ask(&self, search_space: &SearchSpace) -> orfail::Result<Trial> {
         let output = Command::new("optuna")
             .arg("ask")
             .arg("--storage")
@@ -77,25 +84,21 @@ impl Optuna {
             .arg("--study-name")
             .arg(&self.study_name)
             .arg("--search-space")
-            .arg(&search_space_json)
+            .arg(search_space.to_ask_search_space())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute optuna ask command: {e}"))?;
+            .or_fail_with(|e| format!("failed to execute `$ optuna ask` command: {e}"))?;
+        output
+            .status
+            .success()
+            .or_fail_with(|()| "`$ optuna ask` command failed".to_owned())?;
 
-        output.status.success().or_fail_with(|()| {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            format!("optuna ask command failed: {stderr}")
-        })?;
-
-        // Parse the output to extract parameters
         let stdout = String::from_utf8(output.stdout).or_fail()?;
-        let output = stdout.parse().map(|nojson::Json(v)| v).or_fail()?;
-        log::info!("ask result: {output:?}");
-
-        Ok(output)
+        stdout.parse().map(|nojson::Json(v)| v).or_fail()
     }
 
+    /// 探索結果（成功応答）を optuna に伝える
     pub fn tell(&self, trial_number: usize, metrics: &TrialMetrics) -> orfail::Result<()> {
         let output = Command::new("optuna")
             .arg("tell")
@@ -106,8 +109,8 @@ impl Optuna {
             .arg("--trial-number")
             .arg(trial_number.to_string())
             .arg("--values")
-            .arg(&metrics.elapsed_seconds.to_string())
-            .arg(&metrics.vmaf_mean.to_string())
+            .arg(metrics.elapsed_seconds.to_string())
+            .arg(metrics.vmaf_mean.to_string())
             .arg("--state")
             .arg("complete")
             // optuna tell コマンドは「実験的機能です」という警告を出すけど、
@@ -116,16 +119,15 @@ impl Optuna {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute optuna tell command: {e}"))?;
-
+            .or_fail_with(|e| format!("failed to execute `$ optuna tell` command: {e}"))?;
         output
             .status
             .success()
-            .or_fail_with(|()| "optuna tell command failed".to_string())?;
-
+            .or_fail_with(|()| "`$ optuna tell` command failed".to_owned())?;
         Ok(())
     }
 
+    /// 探索結果（失敗応答）を optuna に伝える
     pub fn tell_fail(&self, trial_number: usize) -> orfail::Result<()> {
         let output = Command::new("optuna")
             .arg("tell")
@@ -143,16 +145,17 @@ impl Optuna {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute optuna tell command: {e}"))?;
-
+            .or_fail_with(|e| format!("failed to execute `$ optuna tell` command: {e}"))?;
         output
             .status
             .success()
-            .or_fail_with(|()| "optuna tell command failed".to_string())?;
-
+            .or_fail_with(|()| "`$ optuna tell` command failed".to_owned())?;
         Ok(())
     }
 
+    /// 現時点でのパレートフロント（最適解の集合）を取得する
+    ///
+    /// 前回呼び出し時から更新がない場合には None が返される
     pub fn get_updated_best_trials(&mut self) -> orfail::Result<Option<Vec<BestTrial>>> {
         let output = Command::new("optuna")
             .arg("best-trials")
@@ -163,19 +166,16 @@ impl Optuna {
             .arg("-f")
             .arg("json")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute optuna best-trials command: {e}"))?;
-
-        output.status.success().or_fail_with(|()| {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            format!("optuna best-trials command failed: {stderr}")
-        })?;
+            .or_fail_with(|e| format!("failed to execute `$ optuna best-trials` command: {e}"))?;
+        output
+            .status
+            .success()
+            .or_fail_with(|()| "`$ optuna best-trials` command failed".to_owned())?;
 
         let stdout = String::from_utf8(output.stdout).or_fail()?;
-        let trials: Vec<BestTrial> =
-            Vec::<BestTrial>::try_from(nojson::RawJson::parse(&stdout).or_fail()?.value())
-                .or_fail()?;
+        let trials = stdout.parse::<nojson::Json<Vec<BestTrial>>>().or_fail()?.0;
         if self.last_best_trials == trials {
             Ok(None)
         } else {
@@ -185,13 +185,15 @@ impl Optuna {
     }
 }
 
+/// トライアルの情報
 #[derive(Debug)]
-pub struct AskOutput {
-    pub trial_number: usize,
+pub struct Trial {
+    pub number: usize,
     pub params: BTreeMap<JsonObjectMemberPath, JsonValue>,
 }
 
-impl AskOutput {
+impl Trial {
+    // TODO:
     pub fn update_layout(&self, layout: &mut JsonValue) -> orfail::Result<()> {
         for (path, new_value) in &self.params {
             *path.get_mut(layout).or_fail()? = new_value.clone();
@@ -200,12 +202,12 @@ impl AskOutput {
     }
 }
 
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AskOutput {
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Trial {
     type Error = nojson::JsonParseError;
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         Ok(Self {
-            trial_number: value.to_member("number")?.required()?.try_into()?,
+            number: value.to_member("number")?.required()?.try_into()?,
             params: value.to_member("params")?.required()?.try_into()?,
         })
     }

@@ -8,7 +8,7 @@ use orfail::OrFail;
 
 use crate::{
     json::{JsonObject, JsonValue},
-    optuna::{Optuna, SearchSpace, TrialMetrics},
+    optuna::{OptunaStudy, SearchSpace, TrialMetrics},
     subcommand_vmaf,
 };
 
@@ -119,7 +119,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // 最初に optuna と vmaf コマンドが利用可能かどうかをチェックする
-    Optuna::check_optuna_availability().or_fail()?;
+    OptunaStudy::check_optuna_availability().or_fail()?;
     subcommand_vmaf::check_vmaf_availability().or_fail()?;
 
     // 必要なら tune_working_dir を作る
@@ -190,8 +190,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!();
 
     // optuna の study を作る
-    let mut optuna = Optuna::new(study_name.clone(), storage_url);
+    let mut optuna = OptunaStudy::new(study_name.clone(), storage_url);
     optuna.create_study().or_fail()?;
+    eprintln!();
 
     for i in 0..trial_count {
         eprintln!("====== TUNE TRIAL ({}/{trial_count}) ======", i + 1);
@@ -201,15 +202,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
         let mut layout = layout_template.clone();
         ask_output.update_layout(&mut layout).or_fail()?;
-        log::debug!(
-            "[trial:{}] actual layout: {layout:?}",
-            ask_output.trial_number
-        );
+        log::debug!("[trial:{}] actual layout: {layout:?}", ask_output.number);
 
         match run_trial_evaluation(
             &tune_working_dir,
             &study_name,
-            ask_output.trial_number,
+            ask_output.number,
             &root_dir,
             &layout,
             frame_count,
@@ -220,18 +218,19 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .or_fail()
         {
             Ok(metrics) => {
-                optuna.tell(ask_output.trial_number, &metrics).or_fail()?;
+                optuna.tell(ask_output.number, &metrics).or_fail()?;
             }
             Err(e) => {
                 log::warn!(
                     "[trial:{}] failed to VMAF evaluation: {e}",
-                    ask_output.trial_number
+                    ask_output.number
                 );
-                optuna.tell_fail(ask_output.trial_number).or_fail()?;
+                optuna.tell_fail(ask_output.number).or_fail()?;
             }
         }
 
         display_best_trials(&mut optuna, &root_dir, &tune_working_dir).or_fail()?;
+        eprintln!();
     }
 
     Ok(())
@@ -333,7 +332,7 @@ fn run_trial_evaluation(
 }
 
 fn display_best_trials(
-    optuna: &mut Optuna,
+    optuna: &mut OptunaStudy,
     root_dir: &Path,
     tune_working_dir: &Path,
 ) -> orfail::Result<()> {
@@ -360,7 +359,7 @@ fn display_best_trials(
         }
 
         let layout_file_path = tune_working_dir
-            .join(&optuna.study_name)
+            .join(optuna.study_name())
             .join(format!("trial-{}/layout.json", trial.number));
 
         eprintln!("  Compose command:");
