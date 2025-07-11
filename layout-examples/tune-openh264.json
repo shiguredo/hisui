@@ -22,7 +22,6 @@
     "background_detection": null,
     "adaptive_quantization": null,
     "scene_change_detection": null,
-    "deblocking_filter": null,
-    "long_term_reference": null
+    "deblocking_filter": null
   }
 }
