@@ -251,5 +251,77 @@
   "svt_av1_encode_params.fast_decode": [
     true,
     false
+  ],
+  "openh264_encode_params.thread_count": {
+    "min": 1,
+    "max": 16
+  },
+  "openh264_encode_params.intra_period": {
+    "min": 1,
+    "max": 1000
+  },
+  "openh264_encode_params.complexity_mode": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "openh264_encode_params.entropy_coding": [
+    true,
+    false
+  ],
+  "openh264_encode_params.ref_frame_count": {
+    "min": 1,
+    "max": 16
+  },
+  "openh264_encode_params.spatial_layers": {
+    "min": 1,
+    "max": 4
+  },
+  "openh264_encode_params.temporal_layers": {
+    "min": 1,
+    "max": 4
+  },
+  "openh264_encode_params.rate_control_mode": [
+    "off",
+    "quality",
+    "bitrate",
+    "timestamp"
+  ],
+  "openh264_encode_params.max_qp": {
+    "min": 30,
+    "max": 51
+  },
+  "openh264_encode_params.min_qp": {
+    "min": 1,
+    "max": 28
+  },
+  "openh264_encode_params.denoise": [
+    true,
+    false
+  ],
+  "openh264_encode_params.background_detection": [
+    true,
+    false
+  ],
+  "openh264_encode_params.adaptive_quantization": [
+    true,
+    false
+  ],
+  "openh264_encode_params.scene_change_detection": [
+    true,
+    false
+  ],
+  "openh264_encode_params.deblocking_filter": [
+    true,
+    false
+  ],
+  "openh264_encode_params.long_term_reference": [
+    true,
+    false
+  ],
+  "openh264_encode_params.slice_mode": [
+    "single",
+    "fixed_count",
+    "size_constrained"
   ]
 }
