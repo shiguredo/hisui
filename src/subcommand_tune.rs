@@ -65,11 +65,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパスを指定します")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let no_progress_bar: bool = noargs::flag("no-progress-bar")
-        .short('P')
-        .doc("指定された場合は、調整の進捗を非表示にします")
-        .take(&mut args)
-        .is_present();
     let max_cpu_cores: Option<NonZeroUsize> = noargs::opt("max-cpu-cores")
         .short('c')
         .ty("INTEGER")
@@ -212,7 +207,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             frame_count,
             openh264.as_ref(),
             max_cpu_cores,
-            no_progress_bar,
         )
         .or_fail()
         {
@@ -244,7 +238,6 @@ fn run_trial_evaluation(
     frame_count: usize,
     openh264: Option<&PathBuf>,
     max_cpu_cores: Option<NonZeroUsize>,
-    no_progress_bar: bool,
 ) -> orfail::Result<TrialValues> {
     // トライアルの作業用ディレクトリを作成
     // TODO: パス作成部分を共通化
@@ -276,11 +269,8 @@ fn run_trial_evaluation(
 
     // hisui vmaf コマンドを実行
     let mut cmd = Command::new("hisui");
-    cmd.arg("vmaf");
-    if no_progress_bar {
-        cmd.arg("--no-progress-bar");
-    }
-    cmd.arg("--layout-file")
+    cmd.arg("vmaf")
+        .arg("--layout-file")
         .arg(&layout_file_path)
         .arg("--frame-count")
         .arg(frame_count.to_string())
