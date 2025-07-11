@@ -451,17 +451,6 @@ impl nojson::DisplayJson for Output {
             f.member("encoded_byte_size", self.encoded_byte_size)?;
             f.member("encoded_duration_seconds", self.encoded_duration_seconds)?;
             f.member("elapsed_seconds", self.elapsed_seconds)?;
-
-            // 何倍速で変換が行えたか
-            //（elapsed_seconds にはデコードや合成の時間も含まれているのであくまでも概算値）
-            //
-            // TODO(sile): 値はこれでいいとして、名前が紛らわしいので変更したい
-            f.member(
-                "encoding_speed_ratio",
-                self.encoded_duration_seconds.get().as_secs_f64()
-                    / self.elapsed_seconds.get().as_secs_f64(),
-            )?;
-
             f.member("vmaf_min", &self.vmaf.min)?;
             f.member("vmaf_max", &self.vmaf.max)?;
             f.member("vmaf_mean", &self.vmaf.mean)?;

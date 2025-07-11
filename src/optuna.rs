@@ -50,9 +50,9 @@ impl Optuna {
             .arg("--storage")
             .arg(&self.storage_url)
             .arg("--skip-if-exists")
-            // 「エンコード効率（何倍速変換か）の最小化」と「VMAF スコアの最大化」
+            // 「合成処理時間の最小化」と「VMAF スコアの最大化」
             .arg("--directions")
-            .arg("maximize")
+            .arg("minimize")
             .arg("maximize")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -104,7 +104,7 @@ impl Optuna {
             .arg("--trial-number")
             .arg(trial_number.to_string())
             .arg("--values")
-            .arg(&metrics.encoding_speed_ratio.to_string())
+            .arg(&metrics.elapsed_seconds.to_string())
             .arg(&metrics.vmaf_mean.to_string())
             .arg("--state")
             .arg("complete")
@@ -207,7 +207,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AskOutput {
 
 #[derive(Debug)]
 pub struct TrialMetrics {
-    pub encoding_speed_ratio: f64,
+    pub elapsed_seconds: f64,
     pub vmaf_mean: f64,
 }
 

@@ -189,7 +189,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("- optuna storage:\t {storage_url}");
     eprintln!("- optuna study name:\t {study_name}");
     eprintln!("- optuna trial count:\t {trial_count}");
-    eprintln!("- tuning metrics:\t [Encoding Speed Ratio (maximize), VMAF Score Mean (maximize)]");
+    eprintln!("- tuning metrics:\t [Execution time (minimize), VMAF Score Mean (maximize)]");
     eprintln!("- tuning parameters ({}):", search_space.items.len());
     for (key, value) in &search_space.items {
         eprintln!("    - {key}:\t {}", nojson::Json(value));
@@ -327,13 +327,13 @@ fn run_trial_evaluation(
 
     // メトリクスを抽出
     let vmaf_mean: f64 = result_obj.get_required("vmaf_mean").or_fail()?;
-    let encoding_speed_ratio: f64 = result_obj.get_required("encoding_speed_ratio").or_fail()?;
+    let elapsed_seconds: f64 = result_obj.get_required("elapsed_seconds").or_fail()?;
 
     // 後から参照できるように保存しておく
     std::fs::write(trial_dir.join("metrics.json"), &stdout).or_fail()?;
 
     Ok(TrialMetrics {
-        encoding_speed_ratio,
+        elapsed_seconds,
         vmaf_mean,
     })
 }
@@ -347,18 +347,18 @@ fn display_best_trials(
     if best_trials.is_empty() {
         return Ok(());
     }
-    best_trials.sort_by(|a, b| a.values[0].total_cmp(&b.values[0]).reverse());
+    best_trials.sort_by(|a, b| a.values[0].total_cmp(&b.values[0]));
 
     eprintln!("====== BEST TRIALS ======");
     eprintln!(
-        "Top {} trials (sorted by encoding speed ratio):",
+        "Top {} trials (sorted by execution time):",
         best_trials.len()
     );
     eprintln!();
 
     for trial in best_trials {
         eprintln!("Trial #{}", trial.number);
-        eprintln!("  Encoding Speed Ratio: {:.4}", trial.values[0]);
+        eprintln!("  Execution time: {:.4}s", trial.values[0]);
         eprintln!("  VMAF Score Mean: {:.4}", trial.values[1]);
         eprintln!("  Parameters:");
         for (key, value) in &trial.params {
@@ -370,6 +370,7 @@ fn display_best_trials(
             .join(format!("trial-{}/layout.json", trial.number));
 
         eprintln!("  Compose command:");
+        // TODO: -o {study-name}-trial-{number}.mp4
         eprintln!(
             "    hisui compose -l {} {}",
             layout_file_path.display(),
