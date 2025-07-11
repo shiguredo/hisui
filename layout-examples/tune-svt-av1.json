@@ -1,0 +1,46 @@
+{
+  "resolution": "1280x720",
+  "video_codec": "AV1",
+  "video_bitrate": 1000000,
+  "frame_rate": 30,
+  "video_layout": {
+    "main": {
+      "max_columns": 3,
+      "video_sources": [
+        "archive*.json"
+      ]
+    }
+  },
+  "svt_av1_encode_params": {
+    "pin_threads": 1,
+    "intra_period_length": 300,
+    "enc_mode": null,
+    "qp": null,
+    "min_qp_allowed": null,
+    "max_qp_allowed": null,
+    "rate_control_mode": null,
+    "over_shoot_pct": null,
+    "under_shoot_pct": null,
+    "hierarchical_levels": null,
+    "pred_structure": null,
+    "scene_change_detection": null,
+    "look_ahead_distance": null,
+    "tile_columns": null,
+    "tile_rows": null,
+    "target_socket": null,
+    "enable_dlf_flag": null,
+    "cdef_level": null,
+    "enable_restoration_filtering": null,
+    "enable_tf": null,
+    "enable_overlays": null,
+    "film_grain_denoise_strength": null,
+    "enable_tpl_la": null,
+    "force_key_frames": null,
+    "stat_report": null,
+    "recon_enabled": null,
+    "profile": null,
+    "level": null,
+    "tier": null,
+    "fast_decode": null
+  }
+}

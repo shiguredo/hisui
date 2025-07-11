@@ -139,5 +139,126 @@
   "libvpx_vp9_encode_params.tune_content": [
     "default",
     "screen"
+  ],
+  "svt_av1_encode_params.enc_mode": {
+    "min": 0,
+    "max": 13
+  },
+  "svt_av1_encode_params.qp": {
+    "min": 0,
+    "max": 63
+  },
+  "svt_av1_encode_params.min_qp_allowed": {
+    "min": 0,
+    "max": 63
+  },
+  "svt_av1_encode_params.max_qp_allowed": {
+    "min": 0,
+    "max": 63
+  },
+  "svt_av1_encode_params.rate_control_mode": [
+    "cqp_or_crf",
+    "vbr",
+    "cbr"
+  ],
+  "svt_av1_encode_params.over_shoot_pct": {
+    "min": 0,
+    "max": 100
+  },
+  "svt_av1_encode_params.under_shoot_pct": {
+    "min": 0,
+    "max": 100
+  },
+  "svt_av1_encode_params.intra_period_length": {
+    "min": -1,
+    "max": 1000
+  },
+  "svt_av1_encode_params.hierarchical_levels": {
+    "min": 0,
+    "max": 5
+  },
+  "svt_av1_encode_params.pred_structure": [
+    1,
+    2
+  ],
+  "svt_av1_encode_params.scene_change_detection": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.look_ahead_distance": {
+    "min": 0,
+    "max": 256
+  },
+  "svt_av1_encode_params.pin_threads": {
+    "min": 0,
+    "max": 128
+  },
+  "svt_av1_encode_params.tile_columns": {
+    "min": 0,
+    "max": 6
+  },
+  "svt_av1_encode_params.tile_rows": {
+    "min": 0,
+    "max": 6
+  },
+  "svt_av1_encode_params.target_socket": {
+    "min": -1,
+    "max": 1
+  },
+  "svt_av1_encode_params.enable_dlf_flag": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.cdef_level": {
+    "min": -1,
+    "max": 5
+  },
+  "svt_av1_encode_params.enable_restoration_filtering": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.enable_tf": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.enable_overlays": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.film_grain_denoise_strength": {
+    "min": 0,
+    "max": 50
+  },
+  "svt_av1_encode_params.enable_tpl_la": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.force_key_frames": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.stat_report": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.recon_enabled": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.profile": {
+    "min": 0,
+    "max": 2
+  },
+  "svt_av1_encode_params.level": {
+    "min": 0,
+    "max": 73
+  },
+  "svt_av1_encode_params.tier": {
+    "min": 0,
+    "max": 1
+  },
+  "svt_av1_encode_params.fast_decode": [
+    true,
+    false
   ]
 }
