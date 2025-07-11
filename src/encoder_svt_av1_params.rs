@@ -22,7 +22,7 @@ pub fn parse_encode_params(
     config.rate_control_mode = params
         .get_with("rate_control_mode", |v| {
             match v.to_unquoted_string_str()?.as_ref() {
-                "cqp" | "crf" => Ok(shiguredo_svt_av1::RateControlMode::CqpOrCrf),
+                "cqp_or_crf" => Ok(shiguredo_svt_av1::RateControlMode::CqpOrCrf),
                 "vbr" => Ok(shiguredo_svt_av1::RateControlMode::Vbr),
                 "cbr" => Ok(shiguredo_svt_av1::RateControlMode::Cbr),
                 _ => Err(v.invalid("unknown 'rate_control_mode' value")),

@@ -149,15 +149,14 @@
     "max": 63
   },
   "svt_av1_encode_params.min_qp_allowed": {
-    "min": 0,
-    "max": 63
+    "min": 1,
+    "max": 20
   },
   "svt_av1_encode_params.max_qp_allowed": {
-    "min": 0,
+    "min": 35,
     "max": 63
   },
   "svt_av1_encode_params.rate_control_mode": [
-    "cqp_or_crf",
     "vbr",
     "cbr"
   ],
@@ -174,7 +173,7 @@
     "max": 1000
   },
   "svt_av1_encode_params.hierarchical_levels": {
-    "min": 0,
+    "min": 2,
     "max": 5
   },
   "svt_av1_encode_params.pred_structure": [
@@ -187,18 +186,18 @@
   ],
   "svt_av1_encode_params.look_ahead_distance": {
     "min": 0,
-    "max": 256
+    "max": 120
   },
   "svt_av1_encode_params.pin_threads": {
     "min": 0,
     "max": 128
   },
   "svt_av1_encode_params.tile_columns": {
-    "min": 0,
+    "min": 1,
     "max": 6
   },
   "svt_av1_encode_params.tile_rows": {
-    "min": 0,
+    "min": 1,
     "max": 6
   },
   "svt_av1_encode_params.target_socket": {
@@ -245,14 +244,6 @@
     true,
     false
   ],
-  "svt_av1_encode_params.profile": {
-    "min": 0,
-    "max": 2
-  },
-  "svt_av1_encode_params.level": {
-    "min": 0,
-    "max": 73
-  },
   "svt_av1_encode_params.tier": {
     "min": 0,
     "max": 1

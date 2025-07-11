@@ -370,7 +370,11 @@ impl Encoder {
             // === GOP・フレーム構造 ===
             svt_config.intra_period_length = config.intra_period_length as i32;
             svt_config.hierarchical_levels = config.hierarchical_levels as u32;
-            svt_config.pred_structure = config.pred_structure;
+            svt_config.pred_structure = match config.rate_control_mode {
+                RateControlMode::CqpOrCrf => config.pred_structure,
+                RateControlMode::Vbr => 2, // VBR の場合にはランダムアクセスのみサポート
+                RateControlMode::Cbr => 1, // CBR の場合には低遅延のみサポート
+            };
             svt_config.scene_change_detection = config.scene_change_detection as u32;
             svt_config.look_ahead_distance = config.look_ahead_distance as u32;
 
