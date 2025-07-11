@@ -84,7 +84,7 @@ impl OptunaStudy {
             .arg("--study-name")
             .arg(&self.study_name)
             .arg("--search-space")
-            .arg(search_space.to_ask_search_space())
+            .arg(search_space.to_optuna_search_space())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .output()
@@ -95,11 +95,11 @@ impl OptunaStudy {
             .or_fail_with(|()| "`$ optuna ask` command failed".to_owned())?;
 
         let stdout = String::from_utf8(output.stdout).or_fail()?;
-        stdout.parse().map(|nojson::Json(v)| v).or_fail()
+        crate::json::parse_json(&stdout).or_fail()
     }
 
     /// 探索結果（成功応答）を optuna に伝える
-    pub fn tell(&self, trial_number: usize, metrics: &TrialMetrics) -> orfail::Result<()> {
+    pub fn tell(&self, trial_number: usize, values: &TrialValues) -> orfail::Result<()> {
         let output = Command::new("optuna")
             .arg("tell")
             .arg("--storage")
@@ -109,8 +109,8 @@ impl OptunaStudy {
             .arg("--trial-number")
             .arg(trial_number.to_string())
             .arg("--values")
-            .arg(metrics.elapsed_seconds.to_string())
-            .arg(metrics.vmaf_mean.to_string())
+            .arg(values.elapsed_seconds.to_string())
+            .arg(values.vmaf_mean.to_string())
             .arg("--state")
             .arg("complete")
             // optuna tell コマンドは「実験的機能です」という警告を出すけど、
@@ -175,7 +175,7 @@ impl OptunaStudy {
             .or_fail_with(|()| "`$ optuna best-trials` command failed".to_owned())?;
 
         let stdout = String::from_utf8(output.stdout).or_fail()?;
-        let trials = stdout.parse::<nojson::Json<Vec<BestTrial>>>().or_fail()?.0;
+        let trials: Vec<BestTrial> = crate::json::parse_json(&stdout).or_fail()?;
         if self.last_best_trials == trials {
             Ok(None)
         } else {
@@ -193,10 +193,10 @@ pub struct Trial {
 }
 
 impl Trial {
-    // TODO:
-    pub fn update_layout(&self, layout: &mut JsonValue) -> orfail::Result<()> {
-        for (path, new_value) in &self.params {
-            *path.get_mut(layout).or_fail()? = new_value.clone();
+    /// Optuna が提案したパラメータセットを使ってレイアウトを更新する
+    pub fn apply_params_to_layout(&self, layout: &mut JsonValue) -> orfail::Result<()> {
+        for (path, value) in &self.params {
+            *path.get_mut(layout).or_fail()? = value.clone();
         }
         Ok(())
     }
@@ -213,32 +213,25 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Trial {
     }
 }
 
-#[derive(Debug)]
-pub struct TrialMetrics {
+/// トライアルの評価結果
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrialValues {
     pub elapsed_seconds: f64,
     pub vmaf_mean: f64,
 }
 
+/// 探索空間
 #[derive(Debug)]
 pub struct SearchSpace {
-    pub items: BTreeMap<JsonObjectMemberPath, SearchSpaceItem>,
+    pub params: BTreeMap<JsonObjectMemberPath, ParameterDistribution>,
 }
 
 impl SearchSpace {
-    pub fn new(root: nojson::RawJsonValue<'_, '_>) -> Result<Self, nojson::JsonParseError> {
-        let mut items = BTreeMap::new();
-        for (key, value) in root.to_object()? {
-            let path = key.to_unquoted_string_str()?.parse().expect("infallible");
-            let item = SearchSpaceItem::new(value)?;
-            items.insert(path, item);
-        }
-        Ok(Self { items })
-    }
-
-    pub fn to_ask_search_space(&self) -> String {
+    /// Optuna 形式の探索空間 JSON に変換する
+    pub fn to_optuna_search_space(&self) -> String {
         nojson::json(|f| {
             f.object(|f| {
-                for (path, item) in &self.items {
+                for (path, item) in &self.params {
                     f.member(path, nojson::json(|f| item.to_optuna_distribution(f)))?;
                 }
                 Ok(())
@@ -248,29 +241,28 @@ impl SearchSpace {
     }
 }
 
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for SearchSpace {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            params: value.try_into()?,
+        })
+    }
+}
+
+/// 各パラメータの探索空間定義
 #[derive(Debug)]
-pub enum SearchSpaceItem {
-    Number { min: JsonNumber, max: JsonNumber },
+pub enum ParameterDistribution {
+    Numeric { min: JsonNumber, max: JsonNumber },
     Categorical(Vec<JsonValue>),
 }
 
-impl SearchSpaceItem {
-    fn new(value: nojson::RawJsonValue<'_, '_>) -> Result<Self, nojson::JsonParseError> {
-        if value.kind().is_array() {
-            Ok(Self::Categorical(value.try_into()?))
-        } else if let Ok(object) = JsonObject::new(value) {
-            Ok(Self::Number {
-                min: object.get_required("min")?,
-                max: object.get_required("max")?,
-            })
-        } else {
-            Err(value.invalid("not JSON array or JSON object"))
-        }
-    }
-
+impl ParameterDistribution {
+    /// Optuna がサポートする形式の JSON に変換する
     fn to_optuna_distribution(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
-            SearchSpaceItem::Number {
+            ParameterDistribution::Numeric {
                 min: JsonNumber::Integer(min),
                 max: JsonNumber::Integer(max),
             } => {
@@ -288,7 +280,7 @@ impl SearchSpaceItem {
                     )
                 })?;
             }
-            SearchSpaceItem::Number { min, max } => {
+            ParameterDistribution::Numeric { min, max } => {
                 // それ以外の数値は FloatDistribution
                 f.object(|f| {
                     f.member("name", "FloatDistribution")?;
@@ -303,7 +295,7 @@ impl SearchSpaceItem {
                     )
                 })?;
             }
-            SearchSpaceItem::Categorical(choices) => {
+            ParameterDistribution::Categorical(choices) => {
                 f.object(|f| {
                     f.member("name", "CategoricalDistribution")?;
                     f.member(
@@ -317,22 +309,40 @@ impl SearchSpaceItem {
     }
 }
 
-impl nojson::DisplayJson for SearchSpaceItem {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            SearchSpaceItem::Number { min, max } => f.object(|f| {
-                f.member("min", min)?;
-                f.member("max", max)
-            }),
-            SearchSpaceItem::Categorical(choices) => f.value(choices),
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ParameterDistribution {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        if value.kind().is_array() {
+            Ok(Self::Categorical(value.try_into()?))
+        } else if let Ok(object) = JsonObject::new(value) {
+            Ok(Self::Numeric {
+                min: object.get_required("min")?,
+                max: object.get_required("max")?,
+            })
+        } else {
+            Err(value.invalid("not JSON array or JSON object"))
         }
     }
 }
 
+impl nojson::DisplayJson for ParameterDistribution {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            ParameterDistribution::Numeric { min, max } => f.object(|f| {
+                f.member("min", min)?;
+                f.member("max", max)
+            }),
+            ParameterDistribution::Categorical(choices) => f.value(choices),
+        }
+    }
+}
+
+/// パレートフロント上に位置しているトライアルの情報
 #[derive(Debug, Clone, PartialEq)]
 pub struct BestTrial {
     pub number: usize,
-    pub values: Vec<f64>,
+    pub values: TrialValues,
     pub params: BTreeMap<String, JsonValue>,
 }
 
@@ -340,9 +350,13 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for BestTrial {
     type Error = nojson::JsonParseError;
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let values: [f64; 2] = value.to_member("values")?.required()?.try_into()?;
         Ok(Self {
             number: value.to_member("number")?.required()?.try_into()?,
-            values: value.to_member("values")?.required()?.try_into()?,
+            values: TrialValues {
+                elapsed_seconds: values[0],
+                vmaf_mean: values[1],
+            },
             params: value.to_member("params")?.required()?.try_into()?,
         })
     }

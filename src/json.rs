@@ -1,6 +1,16 @@
 //! JSON 関連のユーティリティモジュール
 use std::{borrow::Cow, collections::BTreeMap};
 
+use orfail::OrFail;
+
+pub fn parse_json<T>(json: &str) -> orfail::Result<T>
+where
+    T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
+{
+    // TODO: エラーメッセージをわかりやすくする
+    Ok(json.parse::<nojson::Json<T>>().or_fail()?.0)
+}
+
 #[derive(Debug)]
 pub struct JsonObject<'a, 'text> {
     object: nojson::RawJsonValue<'text, 'a>,

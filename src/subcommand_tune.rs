@@ -8,7 +8,7 @@ use orfail::OrFail;
 
 use crate::{
     json::{JsonObject, JsonValue},
-    optuna::{OptunaStudy, SearchSpace, TrialMetrics},
+    optuna::{OptunaStudy, SearchSpace, TrialValues},
     subcommand_vmaf,
 };
 
@@ -149,17 +149,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     log::debug!("template: {layout_template:?}");
 
     // 探索空間ファイルを読み込む
-    let search_space_json_string = if let Some(path) = &search_space_file_path {
+    let search_space_json = if let Some(path) = &search_space_file_path {
         std::fs::read_to_string(path).or_fail()?
     } else {
         DEFAULT_SEARCH_SPACE_JSON.to_owned()
     };
-    let search_space_raw_json = nojson::RawJson::parse(&search_space_json_string).or_fail()?;
-    let mut search_space = SearchSpace::new(search_space_raw_json.value()).or_fail()?;
+    let mut search_space: SearchSpace = crate::json::parse_json(&search_space_json).or_fail()?;
 
     // レイアウトテンプレートの処理に不要なエントリは捨てる
     search_space
-        .items
+        .params
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
     log::debug!("search space: {search_space:?}");
 
@@ -183,8 +182,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("- optuna study name:\t {study_name}");
     eprintln!("- optuna trial count:\t {trial_count}");
     eprintln!("- tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
-    eprintln!("- tuning parameters ({}):", search_space.items.len());
-    for (key, value) in &search_space.items {
+    eprintln!("- tuning parameters ({}):", search_space.params.len());
+    for (key, value) in &search_space.params {
         eprintln!("    - {key}:\t {}", nojson::Json(value));
     }
     eprintln!();
@@ -201,7 +200,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         let ask_output = optuna.ask(&search_space).or_fail()?;
 
         let mut layout = layout_template.clone();
-        ask_output.update_layout(&mut layout).or_fail()?;
+        ask_output.apply_params_to_layout(&mut layout).or_fail()?;
         log::debug!("[trial:{}] actual layout: {layout:?}", ask_output.number);
 
         match run_trial_evaluation(
@@ -246,7 +245,7 @@ fn run_trial_evaluation(
     openh264: Option<&PathBuf>,
     max_cpu_cores: Option<NonZeroUsize>,
     no_progress_bar: bool,
-) -> orfail::Result<TrialMetrics> {
+) -> orfail::Result<TrialValues> {
     // トライアルの作業用ディレクトリを作成
     // TODO: パス作成部分を共通化
     let trial_dir = tune_working_dir
@@ -325,7 +324,7 @@ fn run_trial_evaluation(
     // 後から参照できるように保存しておく
     std::fs::write(trial_dir.join("metrics.json"), &stdout).or_fail()?;
 
-    Ok(TrialMetrics {
+    Ok(TrialValues {
         elapsed_seconds,
         vmaf_mean,
     })
@@ -340,7 +339,11 @@ fn display_best_trials(
         // 更新なし
         return Ok(());
     };
-    best_trials.sort_by(|a, b| a.values[0].total_cmp(&b.values[0]));
+    best_trials.sort_by(|a, b| {
+        a.values
+            .elapsed_seconds
+            .total_cmp(&b.values.elapsed_seconds)
+    });
 
     eprintln!("====== BEST TRIALS ======");
     eprintln!(
@@ -351,8 +354,8 @@ fn display_best_trials(
 
     for trial in best_trials {
         eprintln!("Trial #{}", trial.number);
-        eprintln!("  Execution Time: {:.4}s", trial.values[0]);
-        eprintln!("  VMAF Score Mean: {:.4}", trial.values[1]);
+        eprintln!("  Execution Time: {:.4}s", trial.values.elapsed_seconds);
+        eprintln!("  VMAF Score Mean: {:.4}", trial.values.vmaf_mean);
         eprintln!("  Parameters:");
         for (key, value) in &trial.params {
             eprintln!("    {}: {}", key, format_param_value(value));
