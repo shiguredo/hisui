@@ -95,7 +95,7 @@ impl OptunaStudy {
             .or_fail_with(|()| "`$ optuna ask` command failed".to_owned())?;
 
         let stdout = String::from_utf8(output.stdout).or_fail()?;
-        crate::json::parse_json(&stdout).or_fail()
+        crate::json::parse_str(&stdout).or_fail()
     }
 
     /// 探索結果（成功応答）を optuna に伝える
@@ -175,7 +175,7 @@ impl OptunaStudy {
             .or_fail_with(|()| "`$ optuna best-trials` command failed".to_owned())?;
 
         let stdout = String::from_utf8(output.stdout).or_fail()?;
-        let trials: Vec<BestTrial> = crate::json::parse_json(&stdout).or_fail()?;
+        let trials: Vec<BestTrial> = crate::json::parse_str(&stdout).or_fail()?;
         if self.last_best_trials == trials {
             Ok(None)
         } else {

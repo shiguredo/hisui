@@ -1,9 +1,18 @@
 //! JSON 関連のユーティリティモジュール
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, path::Path};
 
 use orfail::OrFail;
 
-pub fn parse_json<T>(json: &str) -> orfail::Result<T>
+pub fn parse_file<P: AsRef<Path>, T>(path: P) -> orfail::Result<T>
+where
+    T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
+{
+    // TODO: エラーメッセージをわかりやすくする
+    let json = std::fs::read_to_string(path).or_fail()?;
+    parse_str(&json).or_fail()
+}
+
+pub fn parse_str<T>(json: &str) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {

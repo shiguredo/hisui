@@ -16,6 +16,7 @@ const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-vp8.json
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.json");
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+    // コマンドライン引数処理
     let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
         .short('l')
         .ty("PATH")
@@ -107,7 +108,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
             Ok(path)
         })?;
-
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
@@ -122,7 +122,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     if !tune_working_dir.exists() {
         std::fs::create_dir_all(&tune_working_dir).or_fail_with(|e| {
             format!(
-                "failed to create tune working directory {}: {e}",
+                "failed to create working directory {}: {e}",
                 tune_working_dir.display()
             )
         })?;
@@ -130,34 +130,26 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // レイアウトファイル（テンプレート）を読み込む
     let layout_template: JsonValue = if let Some(path) = &layout_file_path {
-        std::fs::read_to_string(path)
-            .or_fail()?
-            .parse()
-            .map(|nojson::Json(v)| v)
-            .or_fail()?
+        crate::json::parse_file(path).or_fail()?
     } else {
-        DEFAULT_LAYOUT_JSON
-            .parse()
-            .map(|nojson::Json(v)| v)
-            .or_fail()?
+        crate::json::parse_str(DEFAULT_LAYOUT_JSON).or_fail()?
     };
-    log::debug!("template: {layout_template:?}");
+    log::debug!("layout template: {layout_template:?}");
 
     // 探索空間ファイルを読み込む
-    let search_space_json = if let Some(path) = &search_space_file_path {
-        std::fs::read_to_string(path).or_fail()?
+    let mut search_space: SearchSpace = if let Some(path) = &search_space_file_path {
+        crate::json::parse_file(path).or_fail()?
     } else {
-        DEFAULT_SEARCH_SPACE_JSON.to_owned()
+        crate::json::parse_str(DEFAULT_SEARCH_SPACE_JSON).or_fail()?
     };
-    let mut search_space: SearchSpace = crate::json::parse_json(&search_space_json).or_fail()?;
 
-    // レイアウトテンプレートの処理に不要なエントリは捨てる
+    // 探索空間から不要なエントリを除外する（Optuna の探索を効率化するため）
     search_space
         .params
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
     log::debug!("search space: {search_space:?}");
 
-    // 最初にいろいろと情報を表示する
+    // 探索を始める前にいろいろと情報を表示する
     let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
     eprintln!("====== INFO ======");
     eprintln!(
