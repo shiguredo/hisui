@@ -59,6 +59,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("実行する試行回数を指定します")
         .take(&mut args)
         .then(|a| a.value().parse())?;
+    let best_trials_interval: usize = noargs::opt("best-trials-interval")
+        .short('i')
+        .ty("INTEGER")
+        .default("10")
+        .doc("最適化結果の最良試行を表示する間隔を指定します（トライアル数）")
+        .take(&mut args)
+        .then(|a| a.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
@@ -190,11 +197,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!();
 
     // optuna の study を作る
-    eprintln!("====== TUNE ======");
     let optuna = Optuna::new(study_name.clone(), storage_url);
     optuna.create_study().or_fail()?;
 
-    for _ in 0..trial_count {
+    for i in 0..trial_count {
+        eprintln!("====== TUNE TRIAL ({i}/{trial_count}) ======");
+        // TODO: layout ファイルのパスを表示
         let ask_output = optuna.ask(&search_space).or_fail()?;
 
         let mut layout = layout_template.clone();
@@ -227,6 +235,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 );
                 optuna.tell_fail(ask_output.trial_number).or_fail()?;
             }
+        }
+
+        if (i + 1) % best_trials_interval == 0 {
+            display_best_trials(&optuna, &root_dir).or_fail()?;
         }
     }
 
@@ -267,7 +279,7 @@ fn run_trial_evaluation(
     std::fs::write(&layout_file_path, layout_json).or_fail_with(|e| {
         format!(
             "failed to write layout file {}: {e}",
-            layout_file_path.display()
+            layout_file_path.display(),
         )
     })?;
 
@@ -323,4 +335,56 @@ fn run_trial_evaluation(
         encoding_speed_ratio,
         vmaf_mean,
     })
+}
+
+fn display_best_trials(optuna: &Optuna, root_dir: &Path) -> orfail::Result<()> {
+    let best_trials = optuna.get_best_trials().or_fail()?;
+    if best_trials.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!("====== BEST TRIALS ======");
+    eprintln!(
+        "Top {} trials (sorted by Pareto optimality):",
+        best_trials.len()
+    );
+    eprintln!();
+
+    for trial in best_trials {
+        eprintln!("Trial #{}", trial.number);
+        eprintln!("  Encoding Speed Ratio: {:.4}", trial.values[0]);
+        eprintln!("  VMAF Score Mean: {:.4}", trial.values[1]);
+        eprintln!("  Parameters:");
+        for (key, value) in &trial.params {
+            eprintln!("    {}: {}", key, format_param_value(value));
+        }
+        let layout_file_path = format!(
+            "hisui-tune/{}/trial-{}/layout.json",
+            optuna.study_name, trial.number
+        );
+        eprintln!("  Layout file: {}", layout_file_path);
+
+        eprintln!("  Compose command:");
+        eprintln!(
+            "    hisui compose -l {} {}",
+            layout_file_path,
+            root_dir.display()
+        );
+
+        // TODO: layout ファイルのパスを表示
+        // TODO: このレイアウトファイルを使った hisui compose コマンドを表示（手軽に試せるように）
+        eprintln!();
+    }
+
+    Ok(())
+}
+
+fn format_param_value(value: &JsonValue) -> String {
+    match value {
+        JsonValue::String(s) => s.clone(),
+        JsonValue::Integer(n) => n.to_string(),
+        JsonValue::Float(n) => n.to_string(),
+        JsonValue::Boolean(b) => b.to_string(),
+        _ => format!("{:?}", value),
+    }
 }

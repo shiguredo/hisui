@@ -9,7 +9,7 @@ use crate::json::{JsonNumber, JsonObject, JsonObjectMemberPath, JsonValue};
 
 #[derive(Debug)]
 pub struct Optuna {
-    study_name: String,
+    pub study_name: String,
     storage_url: String,
 }
 
@@ -149,6 +149,33 @@ impl Optuna {
             .or_fail_with(|()| "optuna tell command failed".to_string())?;
 
         Ok(())
+    }
+
+    pub fn get_best_trials(&self) -> orfail::Result<Vec<BestTrial>> {
+        let output = Command::new("optuna")
+            .arg("best-trials")
+            .arg("--storage")
+            .arg(&self.storage_url)
+            .arg("--study-name")
+            .arg(&self.study_name)
+            .arg("-f")
+            .arg("json")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .or_fail_with(|e| format!("failed to execute optuna best-trials command: {e}"))?;
+
+        output.status.success().or_fail_with(|()| {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            format!("optuna best-trials command failed: {stderr}")
+        })?;
+
+        let stdout = String::from_utf8(output.stdout).or_fail()?;
+        let trials: Vec<BestTrial> =
+            Vec::<BestTrial>::try_from(nojson::RawJson::parse(&stdout).or_fail()?.value())
+                .or_fail()?;
+
+        Ok(trials)
     }
 }
 
@@ -291,5 +318,26 @@ impl nojson::DisplayJson for SearchSpaceItem {
             }),
             SearchSpaceItem::Categorical(choices) => f.value(choices),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct BestTrial {
+    pub number: usize,
+    pub values: Vec<f64>,
+    pub duration: String,
+    pub params: BTreeMap<String, JsonValue>,
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for BestTrial {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            number: value.to_member("number")?.required()?.try_into()?,
+            values: value.to_member("values")?.required()?.try_into()?,
+            duration: value.to_member("duration")?.required()?.try_into()?,
+            params: value.to_member("params")?.required()?.try_into()?,
+        })
     }
 }
