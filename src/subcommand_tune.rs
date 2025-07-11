@@ -201,7 +201,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     optuna.create_study().or_fail()?;
 
     for i in 0..trial_count {
-        eprintln!("====== TUNE TRIAL ({i}/{trial_count}) ======");
+        eprintln!("====== TUNE TRIAL ({}/{trial_count}) ======", i + 1);
         // TODO: layout ファイルのパスを表示
         let ask_output = optuna.ask(&search_space).or_fail()?;
 
@@ -338,14 +338,15 @@ fn run_trial_evaluation(
 }
 
 fn display_best_trials(optuna: &Optuna, root_dir: &Path) -> orfail::Result<()> {
-    let best_trials = optuna.get_best_trials().or_fail()?;
+    let mut best_trials = optuna.get_best_trials().or_fail()?;
     if best_trials.is_empty() {
         return Ok(());
     }
+    best_trials.sort_by(|a, b| a.values[0].total_cmp(&b.values[0]).reverse());
 
     eprintln!("====== BEST TRIALS ======");
     eprintln!(
-        "Top {} trials (sorted by Pareto optimality):",
+        "Top {} trials (sorted by encoding speed ratio):",
         best_trials.len()
     );
     eprintln!();
@@ -362,7 +363,6 @@ fn display_best_trials(optuna: &Optuna, root_dir: &Path) -> orfail::Result<()> {
             "hisui-tune/{}/trial-{}/layout.json",
             optuna.study_name, trial.number
         );
-        eprintln!("  Layout file: {}", layout_file_path);
 
         eprintln!("  Compose command:");
         eprintln!(
