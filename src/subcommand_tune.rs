@@ -189,7 +189,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("- optuna storage:\t {storage_url}");
     eprintln!("- optuna study name:\t {study_name}");
     eprintln!("- optuna trial count:\t {trial_count}");
-    eprintln!("- tuning metrics:\t [Execution time (minimize), VMAF Score Mean (maximize)]");
+    eprintln!("- tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
     eprintln!("- tuning parameters ({}):", search_space.items.len());
     for (key, value) in &search_space.items {
         eprintln!("    - {key}:\t {}", nojson::Json(value));
@@ -329,6 +329,8 @@ fn run_trial_evaluation(
     let vmaf_mean: f64 = result_obj.get_required("vmaf_mean").or_fail()?;
     let elapsed_seconds: f64 = result_obj.get_required("elapsed_seconds").or_fail()?;
 
+    // TDOO: 実際に hisui compose コマンドを実行して所要時間を計測すれば、より正確な値が得られる
+
     // 後から参照できるように保存しておく
     std::fs::write(trial_dir.join("metrics.json"), &stdout).or_fail()?;
 
@@ -358,7 +360,7 @@ fn display_best_trials(
 
     for trial in best_trials {
         eprintln!("Trial #{}", trial.number);
-        eprintln!("  Execution time: {:.4}s", trial.values[0]);
+        eprintln!("  Execution Time: {:.4}s", trial.values[0]);
         eprintln!("  VMAF Score Mean: {:.4}", trial.values[1]);
         eprintln!("  Parameters:");
         for (key, value) in &trial.params {
