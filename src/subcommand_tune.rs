@@ -279,11 +279,6 @@ fn run_trial_evaluation(
         .arg(root_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
-    eprintln!();
-    eprintln!("=== EVALUATE PARAMETERS ===");
-    eprintln!("$ {cmd:?}");
-    eprintln!();
-
     if let Some(openh264_path) = openh264 {
         cmd.arg("--openh264").arg(openh264_path);
     }
@@ -291,6 +286,10 @@ fn run_trial_evaluation(
     if let Some(cores) = max_cpu_cores {
         cmd.arg("--max-cpu-cores").arg(cores.to_string());
     }
+    eprintln!();
+    eprintln!("=== EVALUATE PARAMETERS ===");
+    eprintln!("$ {cmd:?}");
+    eprintln!();
 
     let output = cmd
         .output()

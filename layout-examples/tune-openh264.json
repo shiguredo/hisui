@@ -15,10 +15,6 @@
     "thread_count": 1,
     "intra_period": 300,
     "complexity_mode": null,
-    "entropy_coding": null,
-    "ref_frame_count": null,
-    "spatial_layers": null,
-    "temporal_layers": null,
     "rate_control_mode": null,
     "max_qp": null,
     "min_qp": null,
@@ -27,7 +23,6 @@
     "adaptive_quantization": null,
     "scene_change_detection": null,
     "deblocking_filter": null,
-    "long_term_reference": null,
-    "slice_mode": null
+    "long_term_reference": null
   }
 }

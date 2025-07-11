@@ -318,10 +318,5 @@
   "openh264_encode_params.long_term_reference": [
     true,
     false
-  ],
-  "openh264_encode_params.slice_mode": [
-    "single",
-    "fixed_count",
-    "size_constrained"
   ]
 }
