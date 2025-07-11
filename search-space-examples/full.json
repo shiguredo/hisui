@@ -39,11 +39,7 @@
   ],
   "libvpx_vp8_encode_params.keyframe_interval": {
     "min": 1,
-    "max": 9999
-  },
-  "libvpx_vp8_encode_params.frame_drop_threshold": {
-    "min": 0,
-    "max": 100
+    "max": 600
   },
   "libvpx_vp8_encode_params.noise_sensitivity": {
     "min": 0,

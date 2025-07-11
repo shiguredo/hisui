@@ -1,6 +1,8 @@
 {
   "resolution": "1280x720",
   "video_codec": "VP8",
+  "video_bitrate": 1000000,
+  "frame_rate": 30,
   "video_layout": {
     "main": {
       "max_columns": 3,
@@ -10,6 +12,9 @@
     }
   },
   "libvpx_vp8_encode_params": {
+    "threads": 1,
+    "error_resilient": false,
+    "keyframe_interval": 300,
     "min_quantizer": null,
     "max_quantizer": null,
     "cq_level": null,
@@ -17,10 +22,6 @@
     "deadline": null,
     "rate_control": null,
     "lag_in_frames": null,
-    "threads": null,
-    "error_resilient": null,
-    "keyframe_interval": null,
-    "frame_drop_threshold": null,
     "noise_sensitivity": null,
     "static_threshold": null,
     "token_partitions": null,
