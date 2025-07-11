@@ -230,7 +230,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
-    eprintln!("# Compose");
+    eprintln!("# Compose for VMAF");
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
     let mut encoded_byte_size = 0;
     let mut encoded_duration = Duration::ZERO;

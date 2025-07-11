@@ -20,6 +20,15 @@ where
     Ok(json.parse::<nojson::Json<T>>().or_fail()?.0)
 }
 
+pub fn to_pretty_string<T: nojson::DisplayJson>(value: T) -> String {
+    nojson::json(|f| {
+        f.set_indent_size(2);
+        f.set_spacing(true);
+        f.value(&value)
+    })
+    .to_string()
+}
+
 #[derive(Debug)]
 pub struct JsonObject<'a, 'text> {
     object: nojson::RawJsonValue<'text, 'a>,

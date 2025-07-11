@@ -153,42 +153,42 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
     eprintln!("====== INFO ======");
     eprintln!(
-        "- layout file to tune:\t {}",
+        "layout file to tune:\t {}",
         layout_file_path
             .as_ref()
             .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
     );
     eprintln!(
-        "- search space file:\t {}",
+        "search space file:\t {}",
         search_space_file_path
             .as_ref()
             .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
     );
-    eprintln!("- tune working dir:\t {}", tune_working_dir.display());
-    eprintln!("- optuna storage:\t {storage_url}");
-    eprintln!("- optuna study name:\t {study_name}");
-    eprintln!("- optuna trial count:\t {trial_count}");
-    eprintln!("- tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
-    eprintln!("- tuning parameters ({}):", search_space.params.len());
+    eprintln!("tune working dir:\t {}", tune_working_dir.display());
+    eprintln!("optuna storage:\t {storage_url}");
+    eprintln!("optuna study name:\t {study_name}");
+    eprintln!("optuna trial count:\t {trial_count}");
+    eprintln!("tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
+    eprintln!("tuning parameters ({}):", search_space.params.len());
     for (key, value) in &search_space.params {
-        eprintln!("    - {key}:\t {}", nojson::Json(value));
+        eprintln!("    {key}:\t {}", nojson::Json(value));
     }
     eprintln!();
 
     // optuna の study を作る
+    eprintln!("====== CREATE OPTUNA STUDY ======");
     let mut optuna = OptunaStudy::new(study_name.clone(), storage_url);
     optuna.create_study().or_fail()?;
     eprintln!();
 
     for i in 0..trial_count {
-        eprintln!("====== TUNE TRIAL ({}/{trial_count}) ======", i + 1);
-        // TODO: layout ファイルのパスを表示
-        // TODO: hisui vmaf コマンドを表示する
+        eprintln!("====== OPTUNA TRIAL ({}/{trial_count}) ======", i + 1);
+        eprintln!("=== SAMPLE PARAMETERS ===");
         let ask_output = optuna.ask(&search_space).or_fail()?;
 
         let mut layout = layout_template.clone();
         ask_output.apply_params_to_layout(&mut layout).or_fail()?;
-        log::debug!("[trial:{}] actual layout: {layout:?}", ask_output.number);
+        log::debug!("actual layout: {layout:?}");
 
         match run_trial_evaluation(
             &tune_working_dir,
@@ -206,10 +206,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 optuna.tell(ask_output.number, &metrics).or_fail()?;
             }
             Err(e) => {
-                log::warn!(
-                    "[trial:{}] failed to VMAF evaluation: {e}",
-                    ask_output.number
-                );
+                eprintln!("failed to VMAF evaluation: {e}",);
                 optuna.tell_fail(ask_output.number).or_fail()?;
             }
         }
@@ -219,6 +216,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     Ok(())
+}
+
+fn trial_dir(tune_working_dir: &Path, study_name: &str, trial_number: usize) -> PathBuf {
+    tune_working_dir
+        .join(study_name)
+        .join(format!("trial-{}", trial_number))
 }
 
 fn run_trial_evaluation(
@@ -232,10 +235,7 @@ fn run_trial_evaluation(
     max_cpu_cores: Option<NonZeroUsize>,
 ) -> orfail::Result<TrialValues> {
     // トライアルの作業用ディレクトリを作成
-    // TODO: パス作成部分を共通化
-    let trial_dir = tune_working_dir
-        .join(study_name)
-        .join(format!("trial-{}", trial_number));
+    let trial_dir = trial_dir(tune_working_dir, study_name, trial_number);
     std::fs::create_dir_all(&trial_dir).or_fail_with(|e| {
         format!(
             "failed to create trial directory {}: {e}",
@@ -246,12 +246,7 @@ fn run_trial_evaluation(
 
     // レイアウトファイルを作成
     let layout_file_path = trial_dir.join("layout.json");
-    let layout_json = nojson::json(|f| {
-        f.set_indent_size(2);
-        f.set_spacing(true);
-        f.value(layout)
-    })
-    .to_string();
+    let layout_json = crate::json::to_pretty_string(layout);
     std::fs::write(&layout_file_path, layout_json).or_fail_with(|e| {
         format!(
             "failed to write layout file {}: {e}",
@@ -275,6 +270,10 @@ fn run_trial_evaluation(
         .arg(root_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+    eprintln!();
+    eprintln!("=== EVALUATE PARAMETERS ===");
+    eprintln!("$ {cmd:?}");
+    eprintln!();
 
     if let Some(openh264_path) = openh264 {
         cmd.arg("--openh264").arg(openh264_path);
@@ -286,22 +285,22 @@ fn run_trial_evaluation(
 
     let output = cmd
         .output()
-        .or_fail_with(|e| format!("failed to execute hisui vmaf command: {e}"))?;
+        .or_fail_with(|e| format!("failed to execute `$ hisui vmaf` command: {e}"))?;
     output
         .status
         .success()
-        .or_fail_with(|()| "hisui vmaf command failed".to_owned())?;
+        .or_fail_with(|()| "`$ hisui vmaf` command failed".to_owned())?;
 
     // 出力結果をパース
     let stdout = String::from_utf8(output.stdout).or_fail()?;
     let result = nojson::RawJson::parse(&stdout).or_fail()?;
-    let result_obj = JsonObject::new(result.value()).or_fail()?;
+    let object = JsonObject::new(result.value()).or_fail()?;
 
     // メトリクスを抽出
-    let vmaf_mean: f64 = result_obj.get_required("vmaf_mean").or_fail()?;
-    let elapsed_seconds: f64 = result_obj.get_required("elapsed_seconds").or_fail()?;
+    let vmaf_mean: f64 = object.get_required("vmaf_mean").or_fail()?;
+    let elapsed_seconds: f64 = object.get_required("elapsed_seconds").or_fail()?;
 
-    // TDOO: 実際に hisui compose コマンドを実行して所要時間を計測すれば、より正確な値が得られる
+    // TODO(sile): 実際に hisui compose コマンドを実行して所要時間を計測すれば、より正確な値が得られる
 
     // 後から参照できるように保存しておく
     std::fs::write(trial_dir.join("metrics.json"), &stdout).or_fail()?;
@@ -343,9 +342,8 @@ fn display_best_trials(
             eprintln!("    {}: {}", key, format_param_value(value));
         }
 
-        let layout_file_path = tune_working_dir
-            .join(optuna.study_name())
-            .join(format!("trial-{}/layout.json", trial.number));
+        let layout_file_path =
+            trial_dir(tune_working_dir, &optuna.study_name(), trial.number).join("layout.json");
 
         eprintln!("  Compose command:");
         // TODO: -o {study-name}-trial-{number}.mp4
