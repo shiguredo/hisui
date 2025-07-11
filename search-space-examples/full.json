@@ -69,5 +69,75 @@
     1,
     2,
     3
+  ],
+  "libvpx_vp9_encode_params.min_quantizer": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp9_encode_params.max_quantizer": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp9_encode_params.cq_level": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp9_encode_params.cpu_used": {
+    "min": 0,
+    "max": 9
+  },
+  "libvpx_vp9_encode_params.deadline": [
+    "best",
+    "good",
+    "realtime"
+  ],
+  "libvpx_vp9_encode_params.rate_control": [
+    "vbr",
+    "cbr",
+    "cq"
+  ],
+  "libvpx_vp9_encode_params.lag_in_frames": {
+    "min": 1,
+    "max": 25
+  },
+  "libvpx_vp9_encode_params.threads": {
+    "min": 1,
+    "max": 16
+  },
+  "libvpx_vp9_encode_params.error_resilient": [
+    true,
+    false
+  ],
+  "libvpx_vp9_encode_params.keyframe_interval": {
+    "min": 1,
+    "max": 600
+  },
+  "libvpx_vp9_encode_params.aq_mode": {
+    "min": 0,
+    "max": 3
+  },
+  "libvpx_vp9_encode_params.noise_sensitivity": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp9_encode_params.tile_columns": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp9_encode_params.tile_rows": {
+    "min": 0,
+    "max": 2
+  },
+  "libvpx_vp9_encode_params.row_mt": [
+    true,
+    false
+  ],
+  "libvpx_vp9_encode_params.frame_parallel_decoding": [
+    true,
+    false
+  ],
+  "libvpx_vp9_encode_params.tune_content": [
+    "default",
+    "screen"
   ]
 }
