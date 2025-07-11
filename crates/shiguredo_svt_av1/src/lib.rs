@@ -131,7 +131,7 @@ pub struct EncoderConfig {
     pub enable_overlays: bool,
 
     /// フィルムグレインデノイズ強度 (0=無効, 1-50=強度)
-    pub film_grain_denoise_strength: Option<NonZeroUsize>,
+    pub film_grain_denoise_strength: usize,
 
     /// TPL (Temporal Dependency Model) 有効
     pub enable_tpl_la: bool,
@@ -219,7 +219,7 @@ impl Default for EncoderConfig {
             enable_restoration_filtering: true,
             enable_tf: true,
             enable_overlays: false,
-            film_grain_denoise_strength: None, // 無効
+            film_grain_denoise_strength: 0, // 無効
             enable_tpl_la: true,
             force_key_frames: false,
             stat_report: false,
@@ -392,8 +392,7 @@ impl Encoder {
             // === 高度な設定 ===
             svt_config.enable_tf = config.enable_tf as u8;
             svt_config.enable_overlays = config.enable_overlays;
-            svt_config.film_grain_denoise_strength =
-                config.film_grain_denoise_strength.map_or(0, |v| v.get()) as u32;
+            svt_config.film_grain_denoise_strength = config.film_grain_denoise_strength as u32;
             svt_config.enable_tpl_la = config.enable_tpl_la as u8;
             svt_config.force_key_frames = config.force_key_frames;
             svt_config.stat_report = config.stat_report as u32;

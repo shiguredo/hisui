@@ -75,7 +75,7 @@ pub fn parse_encode_params(
     config.enable_overlays = params
         .get("enable_overlays")?
         .unwrap_or(config.enable_overlays);
-    config.film_grain_denoise_strength = params.get("film_grain_denoise_strength")?;
+    config.film_grain_denoise_strength = params.get("film_grain_denoise_strength")?.unwrap_or(0);
     config.enable_tpl_la = params.get("enable_tpl_la")?.unwrap_or(config.enable_tpl_la);
     config.force_key_frames = params
         .get("force_key_frames")?
