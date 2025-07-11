@@ -154,9 +154,7 @@ impl OptunaStudy {
     }
 
     /// 現時点でのパレートフロント（最適解の集合）を取得する
-    ///
-    /// 前回呼び出し時から更新がない場合には None が返される
-    pub fn get_updated_best_trials(&mut self) -> orfail::Result<Option<Vec<BestTrial>>> {
+    pub fn get_best_trials(&mut self) -> orfail::Result<(bool, Vec<BestTrial>)> {
         let output = Command::new("optuna")
             .arg("best-trials")
             .arg("--storage")
@@ -176,12 +174,9 @@ impl OptunaStudy {
 
         let stdout = String::from_utf8(output.stdout).or_fail()?;
         let trials: Vec<BestTrial> = crate::json::parse_str(&stdout).or_fail()?;
-        if self.last_best_trials == trials {
-            Ok(None)
-        } else {
-            self.last_best_trials = trials.clone();
-            Ok(Some(trials))
-        }
+        let updated = self.last_best_trials != trials;
+        self.last_best_trials = trials.clone();
+        Ok((updated, trials))
     }
 }
 

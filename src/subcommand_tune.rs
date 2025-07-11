@@ -181,6 +181,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     optuna.create_study().or_fail()?;
     eprintln!();
 
+    let mut displayed_best_trials = false;
     for i in 0..trial_count {
         eprintln!("====== OPTUNA TRIAL ({}/{trial_count}) ======", i + 1);
         eprintln!("=== SAMPLE PARAMETERS ===");
@@ -212,7 +213,15 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         }
         eprintln!();
 
-        display_best_trials_if_updated(&mut optuna, &root_dir, &tune_working_dir).or_fail()?;
+        displayed_best_trials =
+            display_best_trials_if_updated(&mut optuna, &root_dir, &tune_working_dir, false)
+                .or_fail()?;
+    }
+
+    if !displayed_best_trials {
+        // 直前で表示していないなら、最後に結果を表示する
+        display_best_trials_if_updated(&mut optuna, &root_dir, &tune_working_dir, true)
+            .or_fail()?;
     }
 
     Ok(())
@@ -315,10 +324,12 @@ fn display_best_trials_if_updated(
     optuna: &mut OptunaStudy,
     root_dir: &Path,
     tune_working_dir: &Path,
-) -> orfail::Result<()> {
-    let Some(mut best_trials) = optuna.get_updated_best_trials().or_fail()? else {
+    force: bool,
+) -> orfail::Result<bool> {
+    let (updated, mut best_trials) = optuna.get_best_trials().or_fail()?;
+    if !updated && !force {
         // 更新なし
-        return Ok(());
+        return Ok(false);
     };
 
     // 所要時間が短い順にソートする
@@ -328,7 +339,7 @@ fn display_best_trials_if_updated(
             .total_cmp(&b.values.elapsed_seconds)
     });
 
-    eprintln!("====== BEST TRIALS ======");
+    eprintln!("====== BEST TRIALS (sorted by execution time) ======");
     for trial in best_trials {
         eprintln!("Trial #{}", trial.number);
         eprintln!("  Execution Time:\t {:.4}s", trial.values.elapsed_seconds);
@@ -350,5 +361,5 @@ fn display_best_trials_if_updated(
         eprintln!();
     }
 
-    Ok(())
+    Ok(true)
 }
