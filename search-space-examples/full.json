@@ -71,12 +71,12 @@
     3
   ],
   "libvpx_vp9_encode_params.min_quantizer": {
-    "min": 0,
-    "max": 63
+    "min": 4,
+    "max": 29
   },
   "libvpx_vp9_encode_params.max_quantizer": {
-    "min": 0,
-    "max": 63
+    "min": 30,
+    "max": 58
   },
   "libvpx_vp9_encode_params.cq_level": {
     "min": 0,
