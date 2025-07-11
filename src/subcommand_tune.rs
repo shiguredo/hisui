@@ -196,6 +196,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     for i in 0..trial_count {
         eprintln!("====== TUNE TRIAL ({}/{trial_count}) ======", i + 1);
         // TODO: layout ファイルのパスを表示
+        // TODO: hisui vmaf コマンドを表示する
         let ask_output = optuna.ask(&search_space).or_fail()?;
 
         let mut layout = layout_template.clone();

@@ -260,6 +260,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             break;
         }
     }
+    (encoded_byte_size > 0).or_fail_with(|()| "failed to encode frames".to_owned())?;
 
     // VMAF の下準備としての処理は全て完了した
     progress_bar.finish();
