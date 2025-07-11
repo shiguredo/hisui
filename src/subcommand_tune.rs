@@ -171,7 +171,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
     eprintln!("tuning parameters ({}):", search_space.params.len());
     for (key, value) in &search_space.params {
-        eprintln!("    {key}:\t {}", nojson::Json(value));
+        eprintln!("  {key}:\t {}", nojson::Json(value));
     }
     eprintln!();
 
@@ -210,9 +210,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 optuna.tell_fail(ask_output.number).or_fail()?;
             }
         }
-
-        display_best_trials(&mut optuna, &root_dir, &tune_working_dir).or_fail()?;
         eprintln!();
+
+        display_best_trials_if_updated(&mut optuna, &root_dir, &tune_working_dir).or_fail()?;
     }
 
     Ok(())
@@ -311,7 +311,7 @@ fn run_trial_evaluation(
     })
 }
 
-fn display_best_trials(
+fn display_best_trials_if_updated(
     optuna: &mut OptunaStudy,
     root_dir: &Path,
     tune_working_dir: &Path,
@@ -320,6 +320,8 @@ fn display_best_trials(
         // 更新なし
         return Ok(());
     };
+
+    // 所要時間が短い順にソートする
     best_trials.sort_by(|a, b| {
         a.values
             .elapsed_seconds
@@ -327,46 +329,26 @@ fn display_best_trials(
     });
 
     eprintln!("====== BEST TRIALS ======");
-    eprintln!(
-        "Top {} trials (sorted by execution time):",
-        best_trials.len()
-    );
-    eprintln!();
-
     for trial in best_trials {
         eprintln!("Trial #{}", trial.number);
-        eprintln!("  Execution Time: {:.4}s", trial.values.elapsed_seconds);
-        eprintln!("  VMAF Score Mean: {:.4}", trial.values.vmaf_mean);
+        eprintln!("  Execution Time:\t {:.4}s", trial.values.elapsed_seconds);
+        eprintln!("  VMAF Score Mean:\t {:.4}", trial.values.vmaf_mean);
         eprintln!("  Parameters:");
         for (key, value) in &trial.params {
-            eprintln!("    {}: {}", key, format_param_value(value));
+            eprintln!("    {}:\t {}", key, nojson::Json(value));
         }
 
         let layout_file_path =
             trial_dir(tune_working_dir, &optuna.study_name(), trial.number).join("layout.json");
 
-        eprintln!("  Compose command:");
-        // TODO: -o {study-name}-trial-{number}.mp4
+        eprintln!("  Compose Command:");
         eprintln!(
-            "    hisui compose -l {} {}",
+            "    $ hisui compose -l {} {}",
             layout_file_path.display(),
             root_dir.display()
         );
-
-        // TODO: layout ファイルのパスを表示
-        // TODO: このレイアウトファイルを使った hisui compose コマンドを表示（手軽に試せるように）
         eprintln!();
     }
 
     Ok(())
-}
-
-fn format_param_value(value: &JsonValue) -> String {
-    match value {
-        JsonValue::String(s) => s.clone(),
-        JsonValue::Integer(n) => n.to_string(),
-        JsonValue::Float(n) => n.to_string(),
-        JsonValue::Boolean(b) => b.to_string(),
-        _ => format!("{:?}", value),
-    }
 }
