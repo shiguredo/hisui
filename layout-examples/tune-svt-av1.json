@@ -15,7 +15,7 @@
     "pin_threads": 1,
     "intra_period_length": 300,
     "force_key_frames": false,
-    "rate_control_mode": null,
+    "rate_control_mode": "vbr",
     "enc_mode": null,
     "qp": null,
     "min_qp_allowed": null,
@@ -23,7 +23,6 @@
     "over_shoot_pct": null,
     "under_shoot_pct": null,
     "hierarchical_levels": null,
-    "pred_structure": null,
     "scene_change_detection": null,
     "look_ahead_distance": null,
     "enable_dlf_flag": null,
@@ -34,7 +33,6 @@
     "film_grain_denoise_strength": null,
     "enable_tpl_la": null,
     "stat_report": null,
-    "recon_enabled": null,
     "tier": null,
     "fast_decode": null
   }

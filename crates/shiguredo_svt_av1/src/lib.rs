@@ -117,7 +117,7 @@ pub struct EncoderConfig {
     /// デブロッキングフィルタ有効
     pub enable_dlf_flag: bool,
 
-    /// CDEFレベル (-1=自動, 0=無効, 1-5=レベル)
+    /// CDEFレベル (-1=自動, 0=無効, 1-4=レベル)
     pub cdef_level: i8,
 
     /// 復元フィルタリング有効

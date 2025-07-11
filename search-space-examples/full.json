@@ -210,7 +210,7 @@
   ],
   "svt_av1_encode_params.cdef_level": {
     "min": -1,
-    "max": 5
+    "max": 4
   },
   "svt_av1_encode_params.enable_restoration_filtering": [
     true,
