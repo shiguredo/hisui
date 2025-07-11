@@ -12,7 +12,7 @@ use crate::{
     subcommand_vmaf,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-vp8.json");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp8.json");
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.json");
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
@@ -23,7 +23,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc(concat!(
             "パラメータ調整に使用するレイアウトファイルを指定します\n",
             "\n",
-            "省略された場合には hisui/layout-examples/tune-vp8.json が使用されます",
+            "省略された場合には hisui/layout-examples/tune-libvpx-vp8.json が使用されます",
         ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
