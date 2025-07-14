@@ -321,17 +321,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail::Result<Layout> {
     if let Some(layout_file_path) = layout_file_path {
         // レイアウトファイルが指定された場合
-        let layout_json = std::fs::read_to_string(layout_file_path)
-            .or_fail_with(|e| format!("failed to read {}: {e}", layout_file_path.display()))?;
-        Layout::from_layout_json(root_dir.clone(), layout_file_path, &layout_json).or_fail()
+        Layout::from_layout_json_file(root_dir.clone(), layout_file_path).or_fail()
     } else {
         // デフォルトレイアウトを作成
-        Layout::from_layout_json(
-            root_dir.clone(),
-            &root_dir.join("default-layout.json"),
-            DEFAULT_LAYOUT_JSON,
-        )
-        .or_fail()
+        Layout::from_layout_json_str(root_dir.clone(), DEFAULT_LAYOUT_JSON).or_fail()
     }
 }
 

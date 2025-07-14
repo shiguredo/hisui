@@ -1,5 +1,5 @@
 //! JSON 関連のユーティリティモジュール
-use std::{borrow::Cow, collections::BTreeMap, path::Path};
+use std::{borrow::Cow, collections::BTreeMap, error::Error, path::Path};
 
 use orfail::OrFail;
 
@@ -7,17 +7,29 @@ pub fn parse_file<P: AsRef<Path>, T>(path: P) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
-    // TODO: エラーメッセージをわかりやすくする
-    let json = std::fs::read_to_string(path).or_fail()?;
-    parse_str(&json).or_fail()
+    let json = std::fs::read_to_string(&path)
+        .or_fail_with(|e| format!("faild to read file {}: {e}", path.as_ref().display()))?;
+    parse(&json, path.as_ref()).or_fail()
 }
 
 pub fn parse_str<T>(json: &str) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
-    // TODO: エラーメッセージをわかりやすくする
-    Ok(json.parse::<nojson::Json<T>>().or_fail()?.0)
+    parse(json, Path::new("nofile")).or_fail()
+}
+
+fn parse<T>(text: &str, path: &Path) -> orfail::Result<T>
+where
+    T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
+{
+    let json = nojson::RawJson::parse(text)
+        .map_err(|e| malformed_json_error(path, text, e))
+        .or_fail()?;
+    json.value()
+        .try_into()
+        .map_err(|e| invalid_json_error(path, &json, e))
+        .or_fail()
 }
 
 pub fn to_pretty_string<T: nojson::DisplayJson>(value: T) -> String {
@@ -208,4 +220,74 @@ impl std::fmt::Display for JsonObjectMemberPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.join("."))
     }
+}
+
+fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> orfail::Failure {
+    let (line_num, column_num) = e.get_line_and_column_numbers(text).expect("infallible");
+    let line = e.get_line(text).expect("infallible");
+    let prev_line = if line_num.get() == 1 {
+        None
+    } else {
+        text.lines().nth(line_num.get() - 2)
+    };
+    orfail::Failure::new(format!(
+        r#"{e}
+
+INPUT: {}{}
+{:4} |{line}
+     |{:>column$} error
+
+BACKTRACE:"#,
+        path.display(),
+        if let Some(prev) = prev_line {
+            format!("\n     |{prev}")
+        } else {
+            "".to_owned()
+        },
+        line_num,
+        "^",
+        column = column_num.get()
+    ))
+}
+
+fn invalid_json_error(
+    path: &Path,
+    json: &nojson::RawJson,
+    e: nojson::JsonParseError,
+) -> orfail::Failure {
+    let text = json.text();
+    let (line_num, column_num) = e.get_line_and_column_numbers(text).expect("infallible");
+    let line = e.get_line(text).expect("infallible");
+    let prev_line = if line_num.get() == 1 {
+        None
+    } else {
+        text.lines().nth(line_num.get() - 2)
+    };
+    let value = json
+        .get_value_by_position(e.position())
+        .expect("infallible");
+    orfail::Failure::new(format!(
+        r#"{e}
+
+INPUT: {}{}
+{:4} |{line}
+     |{:>column$}{} {}
+
+BACKTRACE:"#,
+        path.display(),
+        if let Some(prev) = prev_line {
+            format!("\n     |{prev}")
+        } else {
+            "".to_owned()
+        },
+        line_num,
+        "^",
+        std::iter::repeat_n('^', value.as_raw_str().len() - 1).collect::<String>(),
+        if let Some(reason) = e.source() {
+            format!("{reason}")
+        } else {
+            "error".to_owned()
+        },
+        column = column_num.get()
+    ))
 }
