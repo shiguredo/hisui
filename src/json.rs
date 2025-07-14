@@ -8,7 +8,7 @@ where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
     let json = std::fs::read_to_string(&path)
-        .or_fail_with(|e| format!("faild to read file {}: {e}", path.as_ref().display()))?;
+        .or_fail_with(|e| format!("failed to read file {}: {e}", path.as_ref().display()))?;
     parse(&json, path.as_ref()).or_fail()
 }
 
