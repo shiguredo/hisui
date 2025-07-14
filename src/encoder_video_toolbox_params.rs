@@ -104,15 +104,14 @@ pub fn parse_h265_encode_params(
     }
 
     // 速度と品質のバランス設定
-    if let Some(prioritize_speed) = params.get("prioritize_speed_over_quality")? {
-        config.prioritize_speed_over_quality = prioritize_speed;
-    }
     if let Some(real_time) = params.get("real_time")? {
         config.real_time = real_time;
     }
     if let Some(maximize_power) = params.get("maximize_power_efficiency")? {
         config.maximize_power_efficiency = maximize_power;
     }
+
+    config.prioritize_speed_over_quality = true; // H.265 ではこれが false だとエラーになる
 
     // フレーム構造設定
     if let Some(allow_reordering) = params.get("allow_frame_reordering")? {

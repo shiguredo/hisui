@@ -364,10 +364,6 @@
     "min": 1,
     "max": 600
   },
-  "video_toolbox_h265_encode_params.prioritize_speed_over_quality": [
-    true,
-    false
-  ],
   "video_toolbox_h265_encode_params.real_time": [
     true,
     false
