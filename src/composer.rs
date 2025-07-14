@@ -1,6 +1,5 @@
 use std::{collections::HashSet, path::PathBuf, time::Instant};
 
-use indicatif::{ProgressBar, ProgressStyle};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
@@ -67,7 +66,10 @@ impl Composer {
         .or_fail()?;
 
         // プログレスバーを準備
-        let progress_bar = self.create_progress_bar();
+        let progress_bar = crate::arg_utils::create_time_progress_bar(
+            self.show_progress_bar,
+            self.layout.duration(),
+        );
 
         // 映像ミキサーとエンコーダーを準備
         let encoded_video_rx = self
@@ -105,23 +107,6 @@ impl Composer {
             stats,
             success: !error_flag.get(),
         })
-    }
-
-    fn create_progress_bar(&self) -> ProgressBar {
-        let progress_bar = if self.show_progress_bar {
-            ProgressBar::new(self.layout.duration().as_secs())
-        } else {
-            ProgressBar::hidden()
-        };
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}s ({eta})",
-                )
-                .unwrap()
-                .progress_chars("#>-"),
-        );
-        progress_bar
     }
 
     fn create_video_mixer_and_encoder(

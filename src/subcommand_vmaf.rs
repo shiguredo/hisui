@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use indicatif::{ProgressBar, ProgressStyle};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
@@ -179,7 +178,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
 
     // プログレスバーを準備
-    let progress_bar = create_progress_bar(!args.no_progress_bar, args.frame_count);
+    let progress_bar =
+        crate::arg_utils::create_frame_progress_bar(!args.no_progress_bar, args.frame_count as u64);
 
     // ミキサースレッドを起動
     let mut mixed_video_rx = VideoMixerThread::start(
@@ -370,23 +370,6 @@ fn run_vmaf_evaluation(
         .success()
         .or_fail_with(|()| format!("vmaf failed: {}", String::from_utf8_lossy(&output.stderr)))?;
     Ok(())
-}
-
-fn create_progress_bar(show_progress_bar: bool, frame_count: usize) -> ProgressBar {
-    let progress_bar = if show_progress_bar {
-        ProgressBar::new(frame_count as u64)
-    } else {
-        ProgressBar::hidden()
-    };
-    progress_bar.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
-            )
-            .unwrap()
-            .progress_chars("#>-"),
-    );
-    progress_bar
 }
 
 fn parse_vmaf_output(vmaf_output_file_path: &Path) -> orfail::Result<VmafScoreStats> {
