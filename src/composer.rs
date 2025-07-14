@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::PathBuf, time::Instant};
+use std::{collections::HashSet, num::NonZeroUsize, path::PathBuf, time::Instant};
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -24,7 +24,7 @@ pub struct Composer {
     pub layout: Layout,
     pub openh264_lib: Option<Openh264Library>,
     pub show_progress_bar: bool,
-    pub max_cpu_cores: Option<usize>,
+    pub max_cpu_cores: Option<NonZeroUsize>,
     pub stats_file_path: Option<PathBuf>,
 }
 
@@ -47,9 +47,7 @@ impl Composer {
 
     pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
         // 利用する CPU コア数を制限する
-        if let Some(cores) = self.max_cpu_cores {
-            limit_cpu_cores(cores).or_fail()?;
-        }
+        crate::arg_utils::maybe_limit_cpu_cores(self.max_cpu_cores).or_fail()?;
 
         // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
         let stats = SharedStats::new();
@@ -190,34 +188,6 @@ impl Composer {
             stats.finish(start_time, path);
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-pub fn limit_cpu_cores(_cores: usize) -> orfail::Result<()> {
-    log::warn!("`--cpu-cores` option is ignored on MacOS");
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn limit_cpu_cores(cores: usize) -> orfail::Result<()> {
-    unsafe {
-        let mut cpu_set = std::mem::MaybeUninit::zeroed().assume_init();
-        libc::CPU_ZERO(&mut cpu_set);
-
-        for i in 0..cores {
-            libc::CPU_SET(i, &mut cpu_set);
-        }
-
-        let pid = libc::getpid();
-        (libc::sched_setaffinity(pid, std::mem::size_of::<libc::cpu_set_t>(), &cpu_set) == 0)
-            .or_fail_with(|()| {
-                format!(
-                    "Failed to set CPU affinity: {}",
-                    std::io::Error::last_os_error()
-                )
-            })?;
-    }
-    Ok(())
 }
 
 pub fn create_audio_and_video_sources(

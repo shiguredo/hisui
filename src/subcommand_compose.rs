@@ -126,7 +126,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let mut composer = Composer::new(layout);
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !args.no_progress_bar;
-    composer.max_cpu_cores = args.max_cpu_cores.map(|n| n.get());
+    composer.max_cpu_cores = args.max_cpu_cores;
     composer.stats_file_path = args.stats_file_path.map(|path| args.root_dir.join(path));
 
     // 合成を実行

@@ -41,7 +41,7 @@ pub struct Args {
     pub audio_only: bool,
     pub show_progress_bar: bool,
     pub layout: Option<PathBuf>,
-    pub cpu_cores: Option<usize>,
+    pub cpu_cores: Option<NonZeroUsize>,
 }
 
 impl Args {

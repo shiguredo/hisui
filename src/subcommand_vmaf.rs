@@ -159,9 +159,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // CPU コア数制限を適用
-    if let Some(cores) = args.max_cpu_cores {
-        composer::limit_cpu_cores(cores.get()).or_fail()?;
-    }
+    crate::arg_utils::maybe_limit_cpu_cores(args.max_cpu_cores).or_fail()?;
 
     // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
     let stats = SharedStats::new();
