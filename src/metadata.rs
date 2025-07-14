@@ -29,9 +29,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RecordingMetada
 
 impl RecordingMetadata {
     pub fn from_file<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
-        let text = std::fs::read_to_string(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-        text.parse().map(|nojson::Json(v)| v).or_fail()
+        crate::json::parse_file(path).or_fail()
     }
 
     pub fn archive_metadata_paths(&self) -> orfail::Result<Vec<PathBuf>> {
@@ -117,9 +115,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
 
 impl ArchiveMetadata {
     pub fn from_file<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
-        let text = std::fs::read_to_string(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-        text.parse().map(|nojson::Json(v)| v).or_fail()
+        crate::json::parse_file(path).or_fail()
     }
 
     pub fn source_id(&self) -> SourceId {
@@ -192,10 +188,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ContainerFormat
         match value.to_unquoted_string_str()?.as_ref() {
             "webm" => Ok(Self::Webm),
             "mp4" => Ok(Self::Mp4),
-            v => Err(nojson::JsonParseError::invalid_value(
-                value,
-                format!("unknown container format: {v}"),
-            )),
+            v => Err(value.invalid(format!("unknown container format: {v}"))),
         }
     }
 }
