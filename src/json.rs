@@ -16,7 +16,7 @@ pub fn parse_str<T>(json: &str) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
-    parse(json, Path::new("nofile")).or_fail()
+    parse(json, Path::new("")).or_fail()
 }
 
 fn parse<T>(text: &str, path: &Path) -> orfail::Result<T>
@@ -245,11 +245,16 @@ fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> o
     orfail::Failure::new(format!(
         r#"{e}
 
-INPUT: {}{}
+INPUT:{}{}{}
 {:4} |{line}
      |{:>column$} error
 
 BACKTRACE:"#,
+        if path.display().to_string().is_empty() {
+            ""
+        } else {
+            " "
+        },
         path.display(),
         if let Some(prev) = prev_line {
             format!("\n     |{prev}")
@@ -281,11 +286,16 @@ fn invalid_json_error(
     orfail::Failure::new(format!(
         r#"{e}
 
-INPUT: {}{}
+INPUT:{}{}{}
 {:4} |{line}
      |{:>column$}{} {}
 
 BACKTRACE:"#,
+        if path.display().to_string().is_empty() {
+            ""
+        } else {
+            " "
+        },
         path.display(),
         if let Some(prev) = prev_line {
             format!("\n     |{prev}")
@@ -309,8 +319,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_singlie_line_malformed_json() {
-        let malformed_json = r#"{"key": "value", "another": 123"#; // 閉じかっこがない
+    fn test_parse_single_line_malformed_json() {
+        let malformed_json = r#"{"key": "value", "another": 123"#; // 閉じカッコがない
 
         let mut error = parse_str::<()>(malformed_json).err().expect("bug");
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
@@ -318,7 +328,7 @@ mod tests {
 
         let expected = r#"unexpected EOS while parsing Object at byte position 31
 
-INPUT: nofile
+INPUT:
    1 |{"key": "value", "another": 123
      |                               ^ error
 
@@ -327,139 +337,48 @@ BACKTRACE:
         assert_eq!(error.to_string(), expected);
     }
 
-    //     #[test]
-    //     fn test_malformed_json_error_with_multiline() {
-    //         // Test malformed JSON with multiple lines to check prev_line display
-    //         let malformed_json = r#"{
-    //     "key": "value",
-    //     "another": 123
-    //     "missing_comma": true
-    // }"#;
+    #[test]
+    fn test_parse_multiline_malformed_json() {
+        // "another" の値の後ろにカンマがない
+        let malformed_json = r#"{
+        "key": "value",
+        "another": 123
+        "missing_comma": true
+    }"#;
 
-    //         let result: orfail::Result<JsonValue> = parse_str(malformed_json);
-    //         assert!(result.is_err());
+        let mut error = parse_str::<()>(malformed_json).err().expect("bug");
+        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        eprintln!("{}", error.to_string());
 
-    //         let error_msg = format!("{}", result.unwrap_err());
-    //         let expected = r#"unexpected string at line 4, column 5
+        let expected = r#"unexpected char while parsing Object at byte position 57
 
-    // INPUT: nofile
-    //      |    "another": 123
-    //    4 |    "missing_comma": true
-    //      |     ^ error
+INPUT:
+     |        "another": 123
+   4 |        "missing_comma": true
+     |        ^ error
 
-    // BACKTRACE:"#;
+BACKTRACE:
+"#;
+        assert_eq!(error.to_string(), expected);
+    }
 
-    //         assert_eq!(error_msg, expected);
-    //     }
+    #[test]
+    fn test_parse_invalid_json() {
+        // 文法的には正しいけど値が不正な JSON
+        let invalid_json = r#""not_a_number""#;
 
-    //     #[test]
-    //     fn test_invalid_json_error_via_parse_str() {
-    //         // Test with syntactically valid JSON but invalid for specific type conversion
-    //         let valid_json_invalid_conversion = r#"{"key": "not_a_number"}"#;
+        let mut error = parse_str::<i32>(invalid_json).err().expect("bug");
+        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        eprintln!("{}", error.to_string());
 
-    //         // Try to parse as a number which should fail during conversion
-    //         let result: orfail::Result<i64> = parse_str(valid_json_invalid_conversion);
-    //         assert!(result.is_err());
+        let expected = r#"JSON String at byte position 0 is invalid: expected Integer, but found String
 
-    //         let error_msg = format!("{}", result.unwrap_err());
-    //         let expected = r#"expected integer at line 1, column 1
+INPUT:
+   1 |"not_a_number"
+     |^^^^^^^^^^^^^^ expected Integer, but found String
 
-    // INPUT: nofile
-    //    1 |{"key": "not_a_number"}
-    //      |^ error
-
-    // BACKTRACE:"#;
-
-    //         assert_eq!(error_msg, expected);
-    //     }
-
-    //     #[test]
-    //     fn test_invalid_json_error_with_multiline() {
-    //         // Test invalid JSON error with multiple lines
-    //         let json = r#"{
-    //     "valid_key": "valid_value",
-    //     "invalid_key": "this_should_be_number"
-    // }"#;
-
-    //         // This should parse as JSON but fail when trying to convert to a specific type
-    //         let result: orfail::Result<i64> = parse_str(json);
-    //         assert!(result.is_err());
-
-    //         let error_msg = format!("{}", result.unwrap_err());
-    //         let expected = r#"expected integer at line 1, column 1
-
-    // INPUT: nofile
-    //    1 |{
-    //      |^ error
-
-    // BACKTRACE:"#;
-
-    //         assert_eq!(error_msg, expected);
-    //     }
-
-    //     #[test]
-    //     fn test_error_formatting_with_first_line() {
-    //         // Test error on first line (no previous line to show)
-    //         let malformed_json = r#"{"key": "value""#; // Missing closing quote and brace
-
-    //         let result: orfail::Result<JsonValue> = parse_str(malformed_json);
-    //         assert!(result.is_err());
-
-    //         let error_msg = format!("{}", result.unwrap_err());
-    //         let expected = r#"unexpected end of input at line 1, column 16
-
-    // INPUT: nofile
-    //    1 |{"key": "value"
-    //      |                ^ error
-
-    // BACKTRACE:"#;
-
-    //         assert_eq!(error_msg, expected);
-    //     }
-
-    //     #[test]
-    //     fn test_malformed_json_error_second_line() {
-    //         // Test error on second line to verify previous line display
-    //         let malformed_json = r#"{
-    //     "key": "value",
-    //     "another": 123,
-    //     "bad": invalid
-    // }"#;
-
-    //         let result: orfail::Result<JsonValue> = parse_str(malformed_json);
-    //         assert!(result.is_err());
-
-    //         let error_msg = format!("{}", result.unwrap_err());
-    //         let expected = r#"unexpected keyword at line 4, column 12
-
-    // INPUT: nofile
-    //      |    "another": 123,
-    //    4 |    "bad": invalid
-    //      |            ^ error
-
-    // BACKTRACE:"#;
-
-    //         assert_eq!(error_msg, expected);
-    //     }
-
-    //     #[test]
-    //     fn test_invalid_json_error_with_specific_value() {
-    //         // Test invalid JSON error that targets a specific value
-    //         let json = r#"[1, 2, "not_a_number"]"#;
-
-    //         // Try to parse as Vec<i64> which should fail on the string element
-    //         let result: orfail::Result<Vec<i64>> = parse_str(json);
-    //         assert!(result.is_err());
-
-    //         let error_msg = format!("{}", result.unwrap_err());
-    //         let expected = r#"expected integer at line 1, column 8
-
-    // INPUT: nofile
-    //    1 |[1, 2, "not_a_number"]
-    //      |        ^^^^^^^^^^^^^^ error
-
-    // BACKTRACE:"#;
-
-    //         assert_eq!(error_msg, expected);
-    //     }
+BACKTRACE:
+"#;
+        assert_eq!(error.to_string(), expected);
+    }
 }
