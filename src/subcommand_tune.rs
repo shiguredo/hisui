@@ -15,100 +15,122 @@ use crate::{
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp8.json");
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.json");
 
-pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+#[derive(Debug)]
+struct Args {
+    layout_file_path: Option<PathBuf>,
+    search_space_file_path: Option<PathBuf>,
+    tune_working_dir: PathBuf,
+    study_name: String,
+    trial_count: usize,
+    openh264: Option<PathBuf>,
+    max_cpu_cores: Option<NonZeroUsize>,
+    frame_count: usize,
+    root_dir: PathBuf,
+}
+
+impl Args {
+    fn parse(raw_args: &mut noargs::RawArgs) -> noargs::Result<Self> {
+        Ok(Self {
+            layout_file_path: noargs::opt("layout-file")
+                .short('l')
+                .ty("PATH")
+                .doc(concat!(
+                    "パラメータ調整に使用するレイアウトファイルを指定します\n",
+                    "\n",
+                    "省略された場合には hisui/layout-examples/tune-libvpx-vp8.json が使用されます",
+                ))
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            search_space_file_path: noargs::opt("search-space-file")
+                .short('s')
+                .ty("PATH")
+                .doc(concat!(
+                    "探索空間定義ファイル（JSON）のパスを指定します\n",
+                    "\n",
+                    "省略された場合には hisui/search-space-examples/full.json が使用されます",
+                ))
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            tune_working_dir: noargs::opt("tune-working-dir")
+                .ty("PATH")
+                .default("hisui-tune/")
+                .doc(concat!(
+                    "チューニング用に使われる作業ディレクトリを指定します\n",
+                    "\n",
+                    "相対パスの場合は ROOT_DIR が起点となります"
+                ))
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            study_name: noargs::opt("study-name")
+                .ty("NAME")
+                .default("hisui-tune")
+                .doc("Optuna の study 名を指定します")
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            trial_count: noargs::opt("trial-count")
+                .short('n')
+                .ty("INTEGER")
+                .default("100")
+                .doc("実行する試行回数を指定します")
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            openh264: noargs::opt("openh264")
+                .ty("PATH")
+                .env("HISUI_OPENH264_PATH")
+                .doc("OpenH264 の共有ライブラリのパスを指定します")
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            max_cpu_cores: noargs::opt("max-cpu-cores")
+                .short('c')
+                .ty("INTEGER")
+                .env("HISUI_MAX_CPU_CORES")
+                .doc(concat!(
+                    "調整処理を行うプロセスが使用するコア数の上限を指定します\n",
+                    "（未指定時には上限なし）\n",
+                    "\n",
+                    "NOTE: macOS ではこの引数は無視されます",
+                ))
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            frame_count: noargs::opt("frame-count")
+                .short('f')
+                .ty("FRAMES")
+                // 全体の実行時間に大きく影響するので vmaf コマンドに比べてデフォルト値が小さめにしておく
+                .default("300")
+                .doc("調整用にエンコードする映像フレームの数を指定します")
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            root_dir: noargs::arg("ROOT_DIR")
+                .example("/path/to/archive/RECORDING_ID/")
+                .doc(concat!(
+                    "調整処理を行う際のルートディレクトリを指定します\n",
+                    "\n",
+                    "レイアウトファイル内に記載された相対パスの基点は、",
+                    "このディレクトリとなります。\n",
+                    "また、レイアウト内で、",
+                    "このディレクトリの外のファイルが参照された場合にはエラーとなります。"
+                ))
+                .take(raw_args)
+                .then(|a| -> Result<_, Box<dyn std::error::Error>> {
+                    let path: PathBuf = a.value().parse()?;
+
+                    if matches!(a, noargs::Arg::Example { .. }) {
+                    } else if !path.exists() {
+                        return Err("no such directory".into());
+                    } else if !path.is_dir() {
+                        return Err("not a directory".into());
+                    }
+
+                    Ok(path)
+                })?,
+        })
+    }
+}
+
+pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // コマンドライン引数処理
-    let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
-        .short('l')
-        .ty("PATH")
-        .doc(concat!(
-            "パラメータ調整に使用するレイアウトファイルを指定します\n",
-            "\n",
-            "省略された場合には hisui/layout-examples/tune-libvpx-vp8.json が使用されます",
-        ))
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let search_space_file_path: Option<PathBuf> = noargs::opt("search-space-file")
-        .short('s')
-        .ty("PATH")
-        .doc(concat!(
-            "探索空間定義ファイル（JSON）のパスを指定します\n",
-            "\n",
-            "省略された場合には hisui/search-space-examples/full.json が使用されます",
-        ))
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let tune_working_dir: PathBuf = noargs::opt("tune-working-dir")
-        .ty("PATH")
-        .default("hisui-tune/")
-        .doc(concat!(
-            "チューニング用に使われる作業ディレクトリを指定します\n",
-            "\n",
-            "相対パスの場合は ROOT_DIR が起点となります"
-        ))
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let study_name: String = noargs::opt("study-name")
-        .ty("NAME")
-        .default("hisui-tune")
-        .doc("Optuna の study 名を指定します")
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let trial_count: usize = noargs::opt("trial-count")
-        .short('n')
-        .ty("INTEGER")
-        .default("100")
-        .doc("実行する試行回数を指定します")
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let openh264: Option<PathBuf> = noargs::opt("openh264")
-        .ty("PATH")
-        .env("HISUI_OPENH264_PATH")
-        .doc("OpenH264 の共有ライブラリのパスを指定します")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let max_cpu_cores: Option<NonZeroUsize> = noargs::opt("max-cpu-cores")
-        .short('c')
-        .ty("INTEGER")
-        .env("HISUI_MAX_CPU_CORES")
-        .doc(concat!(
-            "調整処理を行うプロセスが使用するコア数の上限を指定します\n",
-            "（未指定時には上限なし）\n",
-            "\n",
-            "NOTE: macOS ではこの引数は無視されます",
-        ))
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let frame_count: usize = noargs::opt("frame-count")
-        .short('f')
-        .ty("FRAMES")
-        // 全体の実行時間に大きく影響するので vmaf コマンドに比べてデフォルト値が小さめにしておく
-        .default("300")
-        .doc("調整用にエンコードする映像フレームの数を指定します")
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let root_dir: PathBuf = noargs::arg("ROOT_DIR")
-        .example("/path/to/archive/RECORDING_ID/")
-        .doc(concat!(
-            "調整処理を行う際のルートディレクトリを指定します\n",
-            "\n",
-            "レイアウトファイル内に記載された相対パスの基点は、このディレクトリとなります。\n",
-            "また、レイアウト内で、",
-            "このディレクトリの外のファイルが参照された場合にはエラーとなります。"
-        ))
-        .take(&mut args)
-        .then(|a| -> Result<_, Box<dyn std::error::Error>> {
-            let path: PathBuf = a.value().parse()?;
-
-            if matches!(a, noargs::Arg::Example { .. }) {
-            } else if !path.exists() {
-                return Err("no such directory".into());
-            } else if !path.is_dir() {
-                return Err("not a directory".into());
-            }
-
-            Ok(path)
-        })?;
-    if let Some(help) = args.finish()? {
+    let args = Args::parse(&mut raw_args)?;
+    if let Some(help) = raw_args.finish()? {
         print!("{help}");
         return Ok(());
     }
@@ -118,7 +140,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     subcommand_vmaf::check_vmaf_availability().or_fail()?;
 
     // 必要なら tune_working_dir を作る
-    let tune_working_dir = root_dir.join(tune_working_dir);
+    let tune_working_dir = args.root_dir.join(args.tune_working_dir);
     if !tune_working_dir.exists() {
         std::fs::create_dir_all(&tune_working_dir).or_fail_with(|e| {
             format!(
@@ -129,7 +151,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // レイアウトファイル（テンプレート）を読み込む
-    let layout_template: JsonValue = if let Some(path) = &layout_file_path {
+    let layout_template: JsonValue = if let Some(path) = &args.layout_file_path {
         crate::json::parse_file(path).or_fail()?
     } else {
         crate::json::parse_str(DEFAULT_LAYOUT_JSON).or_fail()?
@@ -137,7 +159,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     log::debug!("layout template: {layout_template:?}");
 
     // 探索空間ファイルを読み込む
-    let mut search_space: SearchSpace = if let Some(path) = &search_space_file_path {
+    let mut search_space: SearchSpace = if let Some(path) = &args.search_space_file_path {
         crate::json::parse_file(path).or_fail()?
     } else {
         crate::json::parse_str(DEFAULT_SEARCH_SPACE_JSON).or_fail()?
@@ -154,20 +176,20 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("====== INFO ======");
     eprintln!(
         "layout file to tune:\t {}",
-        layout_file_path
+        args.layout_file_path
             .as_ref()
             .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
     );
     eprintln!(
         "search space file:\t {}",
-        search_space_file_path
+        args.search_space_file_path
             .as_ref()
             .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
     );
     eprintln!("tune working dir:\t {}", tune_working_dir.display());
     eprintln!("optuna storage:\t {storage_url}");
-    eprintln!("optuna study name:\t {study_name}");
-    eprintln!("optuna trial count:\t {trial_count}");
+    eprintln!("optuna study name:\t {}", args.study_name);
+    eprintln!("optuna trial count:\t {}", args.trial_count);
     eprintln!("tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
     eprintln!("tuning parameters ({}):", search_space.params.len());
     for (key, value) in &search_space.params {
@@ -177,13 +199,17 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // optuna の study を作る
     eprintln!("====== CREATE OPTUNA STUDY ======");
-    let mut optuna = OptunaStudy::new(study_name.clone(), storage_url);
+    let mut optuna = OptunaStudy::new(args.study_name.clone(), storage_url);
     optuna.create_study().or_fail()?;
     eprintln!();
 
     let mut displayed_best_trials = false;
-    for i in 0..trial_count {
-        eprintln!("====== OPTUNA TRIAL ({}/{trial_count}) ======", i + 1);
+    for i in 0..args.trial_count {
+        eprintln!(
+            "====== OPTUNA TRIAL ({}/{}) ======",
+            i + 1,
+            args.trial_count
+        );
         eprintln!("=== SAMPLE PARAMETERS ===");
         let ask_output = optuna.ask(&search_space).or_fail()?;
 
@@ -193,13 +219,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
         match run_trial_evaluation(
             &tune_working_dir,
-            &study_name,
+            &args.study_name,
             ask_output.number,
-            &root_dir,
+            &args.root_dir,
             &layout,
-            frame_count,
-            openh264.as_ref(),
-            max_cpu_cores,
+            args.frame_count,
+            args.openh264.as_ref(),
+            args.max_cpu_cores,
         )
         .or_fail()
         {
@@ -214,13 +240,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         eprintln!();
 
         displayed_best_trials =
-            display_best_trials_if_updated(&mut optuna, &root_dir, &tune_working_dir, false)
+            display_best_trials_if_updated(&mut optuna, &args.root_dir, &tune_working_dir, false)
                 .or_fail()?;
     }
 
     if !displayed_best_trials {
         // 直前で表示していないなら、最後に結果を表示する
-        display_best_trials_if_updated(&mut optuna, &root_dir, &tune_working_dir, true)
+        display_best_trials_if_updated(&mut optuna, &args.root_dir, &tune_working_dir, true)
             .or_fail()?;
     }
 
