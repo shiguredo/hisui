@@ -76,6 +76,8 @@ pub fn maybe_limit_cpu_cores(_cores: Option<NonZeroUsize>) -> orfail::Result<()>
 
 #[cfg(not(target_os = "macos"))]
 pub fn maybe_limit_cpu_cores(cores: Option<NonZeroUsize>) -> orfail::Result<()> {
+    use orfail::OrFail;
+
     let Some(cores) = cores else {
         // 制限なし
         return Ok(());
