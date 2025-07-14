@@ -111,11 +111,7 @@ impl Layout {
                 f.member("resolution", format!("{width}x{height}"))
             })
         });
-        let raw: RawLayout = layout_json
-            .to_string()
-            .parse()
-            .map(|nojson::Json(v)| v)
-            .or_fail()?;
+        let raw: RawLayout = crate::json::parse_str(&layout_json.to_string()).or_fail()?;
         raw.into_layout(base_path).or_fail()
     }
 
