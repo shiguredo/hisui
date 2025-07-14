@@ -34,111 +34,131 @@ const DEFAULT_LAYOUT_JSON: &str = r#"{
   }}
 }"#;
 
-pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
-    let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
-        .short('l')
-        .ty("PATH")
-        .env("HISUI_LAYOUT_FILE_PATH")
-        .doc({
-            static DOC: LazyLock<String> = LazyLock::new(|| {
-                format!(
-                    concat!(
-                        "合成に使用するレイアウトファイルを指定します\n",
-                        "\n",
-                        "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
-                        "{}"
-                    ),
-                    DEFAULT_LAYOUT_JSON
-                )
-            });
-            &*DOC
+#[derive(Debug)]
+struct Args {
+    layout_file_path: Option<PathBuf>,
+    reference_yuv_file_path: PathBuf,
+    distorted_yuv_file_path: PathBuf,
+    vmaf_output_file_path: PathBuf,
+    openh264: Option<PathBuf>,
+    no_progress_bar: bool,
+    max_cpu_cores: Option<NonZeroUsize>,
+    frame_count: usize,
+    root_dir: PathBuf,
+}
+
+impl Args {
+    fn parse(raw_args: &mut noargs::RawArgs) -> noargs::Result<Self> {
+        Ok(Self {
+            layout_file_path: noargs::opt("layout-file")
+                .short('l')
+                .ty("PATH")
+                .env("HISUI_LAYOUT_FILE_PATH")
+                .doc({
+                    static DOC: LazyLock<String> = LazyLock::new(|| {
+                        format!(
+                            concat!(
+                                "合成に使用するレイアウトファイルを指定します\n",
+                                "\n",
+                                "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
+                                "{}"
+                            ),
+                            DEFAULT_LAYOUT_JSON
+                        )
+                    });
+                    &*DOC
+                })
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            reference_yuv_file_path: noargs::opt("reference-yuv-file")
+                .ty("PATH")
+                .default("reference.yuv")
+                .doc(concat!(
+                    "参照映像（合成前）のYUVファイルの出力先を指定します\n",
+                    "\n",
+                    "相対パスの場合は ROOT_DIR が起点となります"
+                ))
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            distorted_yuv_file_path: noargs::opt("distorted-yuv-file")
+                .ty("PATH")
+                .default("distorted.yuv")
+                .doc(concat!(
+                    "歪み映像（合成後）のYUVファイルの出力先を指定します\n",
+                    "\n",
+                    "相対パスの場合は ROOT_DIR が起点となります"
+                ))
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            vmaf_output_file_path: noargs::opt("vmaf-output-file")
+                .ty("PATH")
+                .default("vmaf-output.json")
+                .doc(concat!(
+                    "vmaf コマンドの実行結果ファイルの出力先を指定します\n",
+                    "\n",
+                    "相対パスの場合は ROOT_DIR が起点となります"
+                ))
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            openh264: noargs::opt("openh264")
+                .ty("PATH")
+                .env("HISUI_OPENH264_PATH")
+                .doc("OpenH264 の共有ライブラリのパスを指定します")
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            no_progress_bar: noargs::flag("no-progress-bar")
+                .short('P')
+                .doc("指定された場合は、合成の進捗を非表示にします")
+                .take(raw_args)
+                .is_present(),
+            max_cpu_cores: noargs::opt("max-cpu-cores")
+                .short('c')
+                .ty("INTEGER")
+                .env("HISUI_MAX_CPU_CORES")
+                .doc(concat!(
+                    "合成処理を行うプロセスが使用するコア数の上限を指定します\n",
+                    "（未指定時には上限なし）\n",
+                    "\n",
+                    "NOTE: macOS ではこの引数は無視されます",
+                ))
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            frame_count: noargs::opt("frame-count")
+                .short('f')
+                .ty("FRAMES")
+                .default("1000")
+                .doc("変換するフレーム数を指定します")
+                .take(raw_args)
+                .then(|a| a.value().parse())?,
+            root_dir: noargs::arg("ROOT_DIR")
+                .example("/path/to/archive/RECORDING_ID/")
+                .doc(concat!(
+                    "合成処理を行う際のルートディレクトリを指定します\n",
+                    "\n",
+                    "レイアウトファイル内に記載された相対パスの基点は、このディレクトリとなります。\n",
+                    "また、レイアウト内で、",
+                    "このディレクトリの外のファイルが参照された場合にはエラーとなります。"
+                ))
+                .take(raw_args)
+                .then(|a| -> Result<_, Box<dyn std::error::Error>> {
+                    let path: PathBuf = a.value().parse()?;
+
+                    if matches!(a, noargs::Arg::Example { .. }) {
+                    } else if !path.exists() {
+                        return Err("no such directory".into());
+                    } else if !path.is_dir() {
+                        return Err("not a directory".into());
+                    }
+
+                    Ok(path)
+                })?,
         })
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let reference_yuv_file_path: PathBuf = noargs::opt("reference-yuv-file")
-        .ty("PATH")
-        .default("reference.yuv")
-        .doc(concat!(
-            "参照映像（合成前）のYUVファイルの出力先を指定します\n",
-            "\n",
-            "相対パスの場合は ROOT_DIR が起点となります"
-        ))
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let distorted_yuv_file_path: PathBuf = noargs::opt("distorted-yuv-file")
-        .ty("PATH")
-        .default("distorted.yuv")
-        .doc(concat!(
-            "歪み映像（合成後）のYUVファイルの出力先を指定します\n",
-            "\n",
-            "相対パスの場合は ROOT_DIR が起点となります"
-        ))
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let vmaf_output_file_path: PathBuf = noargs::opt("vmaf-output-file")
-        .ty("PATH")
-        .default("vmaf-output.json")
-        .doc(concat!(
-            "vmaf コマンドの実行結果ファイルの出力先を指定します\n",
-            "\n",
-            "相対パスの場合は ROOT_DIR が起点となります"
-        ))
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let openh264: Option<PathBuf> = noargs::opt("openh264")
-        .ty("PATH")
-        .env("HISUI_OPENH264_PATH")
-        .doc("OpenH264 の共有ライブラリのパスを指定します")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let no_progress_bar: bool = noargs::flag("no-progress-bar")
-        .short('P')
-        .doc("指定された場合は、合成の進捗を非表示にします")
-        .take(&mut args)
-        .is_present();
-    let max_cpu_cores: Option<NonZeroUsize> = noargs::opt("max-cpu-cores")
-        .short('c')
-        .ty("INTEGER")
-        .env("HISUI_MAX_CPU_CORES")
-        .doc(concat!(
-            "合成処理を行うプロセスが使用するコア数の上限を指定します\n",
-            "（未指定時には上限なし）\n",
-            "\n",
-            "NOTE: macOS ではこの引数は無視されます",
-        ))
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
-    let frame_count: usize = noargs::opt("frame-count")
-        .short('f')
-        .ty("FRAMES")
-        .default("1000")
-        .doc("変換するフレーム数を指定します")
-        .take(&mut args)
-        .then(|a| a.value().parse())?;
-    let root_dir: PathBuf = noargs::arg("ROOT_DIR")
-        .example("/path/to/archive/RECORDING_ID/")
-        .doc(concat!(
-            "合成処理を行う際のルートディレクトリを指定します\n",
-            "\n",
-            "レイアウトファイル内に記載された相対パスの基点は、このディレクトリとなります。\n",
-            "また、レイアウト内で、",
-            "このディレクトリの外のファイルが参照された場合にはエラーとなります。"
-        ))
-        .take(&mut args)
-        .then(|a| -> Result<_, Box<dyn std::error::Error>> {
-            let path: PathBuf = a.value().parse()?;
+    }
+}
 
-            if matches!(a, noargs::Arg::Example { .. }) {
-            } else if !path.exists() {
-                return Err("no such directory".into());
-            } else if !path.is_dir() {
-                return Err("not a directory".into());
-            }
-
-            Ok(path)
-        })?;
-
-    if let Some(help) = args.finish()? {
+pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
+    let args = Args::parse(&mut raw_args)?;
+    if let Some(help) = raw_args.finish()? {
         print!("{help}");
         return Ok(());
     }
@@ -147,7 +167,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     check_vmaf_availability().or_fail()?;
 
     // レイアウトを準備（音声処理は無効化）
-    let mut layout = create_layout(&root_dir, layout_file_path.as_deref()).or_fail()?;
+    let mut layout = create_layout(&args.root_dir, args.layout_file_path.as_deref()).or_fail()?;
     layout.audio_source_ids.clear();
     log::debug!("layout: {layout:?}");
     layout
@@ -155,14 +175,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .or_fail_with(|()| "no video sources".to_owned())?;
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
-    let openh264_lib = if let Some(path) = openh264.as_ref().filter(|_| layout.has_video()) {
+    let openh264_lib = if let Some(path) = args.openh264.as_ref().filter(|_| layout.has_video()) {
         Some(Openh264Library::load(path).or_fail()?)
     } else {
         None
     };
 
     // CPU コア数制限を適用
-    if let Some(cores) = max_cpu_cores {
+    if let Some(cores) = args.max_cpu_cores {
         composer::limit_cpu_cores(cores.get()).or_fail()?;
     }
 
@@ -181,7 +201,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
 
     // プログレスバーを準備
-    let progress_bar = create_progress_bar(!no_progress_bar, frame_count);
+    let progress_bar = create_progress_bar(!args.no_progress_bar, args.frame_count);
 
     // ミキサースレッドを起動
     let mut mixed_video_rx = VideoMixerThread::start(
@@ -192,13 +212,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     );
 
     // エンコード前の画像の書き込みスレッドを起動
-    let reference_yuv_file_path = root_dir.join(&reference_yuv_file_path);
+    let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
     let mut reference_yuv_writer = YuvWriter::new(&reference_yuv_file_path).or_fail()?;
     let (mixed_video_temp_tx, mixed_video_temp_rx) = crate::channel::sync_channel();
     std::thread::spawn(move || {
         let mut count = 0;
         while let Some(frame) = mixed_video_rx.recv() {
-            if count < frame_count {
+            if count < args.frame_count {
                 if let Err(e) = reference_yuv_writer.append(&frame).or_fail() {
                     log::error!("failed to write reference YUV frame: {e}");
                     break;
@@ -226,7 +246,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         openh264_lib: openh264_lib.clone(),
     };
     let mut decoder = VideoDecoder::new(options);
-    let distorted_yuv_file_path = root_dir.join(&distorted_yuv_file_path);
+    let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
     let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
@@ -235,7 +255,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut encoded_byte_size = 0;
     let mut encoded_duration = Duration::ZERO;
     let mut encoded_frame_count = 0;
-    while encoded_frame_count < frame_count {
+    while encoded_frame_count < args.frame_count {
         let Some(encoded_frame) = encoded_video_rx.recv() else {
             // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
             decoder.finish().or_fail()?;
@@ -243,7 +263,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 distorted_yuv_writer.append(&decoded_frame).or_fail()?;
                 progress_bar.inc(1);
                 encoded_frame_count += 1;
-                if encoded_frame_count >= frame_count {
+                if encoded_frame_count >= args.frame_count {
                     break;
                 }
             }
@@ -258,7 +278,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             distorted_yuv_writer.append(&decoded_frame).or_fail()?;
             progress_bar.inc(1);
             encoded_frame_count += 1;
-            if encoded_frame_count >= frame_count {
+            if encoded_frame_count >= args.frame_count {
                 break;
             }
         }
@@ -277,7 +297,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // vmaf コマンドを実行
     eprintln!("# Run vmaf command");
-    let vmaf_output_file_path = root_dir.join(vmaf_output_file_path);
+    let vmaf_output_file_path = args.root_dir.join(args.vmaf_output_file_path);
     run_vmaf_evaluation(
         &reference_yuv_file_path,
         &distorted_yuv_file_path,
@@ -292,7 +312,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 実行結果の要約を標準出力に出力する
     let output = Output {
-        layout_file_path,
+        layout_file_path: args.layout_file_path,
         reference_yuv_file_path,
         distorted_yuv_file_path,
         vmaf_output_file_path,
