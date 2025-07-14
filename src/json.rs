@@ -246,7 +246,7 @@ fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> o
     // 長い行を省略する
     let (display_line, display_column) = truncate_line_for_display(line, column_num.get());
     let prev_display_line = prev_line.map(|prev| {
-        let (truncated, _) = truncate_line_for_display(prev, 0);
+        let (truncated, _) = truncate_line_for_display(prev, column_num.get());
         truncated
     });
 
@@ -295,7 +295,7 @@ fn invalid_json_error(
     // 長い行を省略する
     let (display_line, display_column) = truncate_line_for_display(line, column_num.get());
     let prev_display_line = prev_line.map(|prev| {
-        let (truncated, _) = truncate_line_for_display(prev, 0);
+        let (truncated, _) = truncate_line_for_display(prev, column_num.get());
         truncated
     });
 
@@ -336,36 +336,34 @@ BACKTRACE:"#,
     ))
 }
 
+// エラー開始地点を起点にして、前後 50 文字まで含めるように切り詰める
 fn truncate_line_for_display(line: &str, column_pos: usize) -> (String, usize) {
-    let max_length = 80;
-    if line.chars().count() <= max_length {
-        return (line.to_string(), column_pos);
-    }
-
-    let half_max = max_length / 2;
     let chars: Vec<char> = line.chars().collect();
+    let max_context = 40;
 
-    // エラー位置を中心に表示範囲を決定
-    let start_pos = if column_pos <= half_max {
-        0
-    } else if column_pos + half_max >= chars.len() {
-        chars.len().saturating_sub(max_length)
-    } else {
-        column_pos.saturating_sub(half_max)
-    };
+    // column_pos は 1-based なので、0-based に変換
+    let error_pos = column_pos.saturating_sub(1);
 
-    let end_pos = std::cmp::min(start_pos + max_length, chars.len());
+    // エラー位置が文字数を超えている場合は調整
+    let error_pos = std::cmp::min(error_pos, chars.len());
+
+    // 前後 40 文字の範囲を計算
+    let start_pos = error_pos.saturating_sub(max_context);
+    let end_pos = std::cmp::min(error_pos + max_context + 1, chars.len());
 
     let mut result = String::new();
-    let mut new_column_pos = column_pos - start_pos;
+    let mut new_column_pos = error_pos - start_pos + 1; // 1-based に戻す
 
+    // 前方に省略がある場合
     if start_pos > 0 {
         result.push_str("...");
         new_column_pos += 3;
     }
 
+    // 実際の文字列部分を追加
     result.push_str(&chars[start_pos..end_pos].iter().collect::<String>());
 
+    // 後方に省略がある場合
     if end_pos < chars.len() {
         result.push_str("...");
     }
@@ -438,8 +436,8 @@ BACKTRACE:
         let expected = r#"unexpected char while parsing Object at byte position 47
 
 INPUT:
-   1 |..."value", "foo": "bar", "very_long_key" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
-     |                                          ^ error
+   1 |... "value", "foo": "bar", "very_long_key" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
+     |                                           ^ error
 
 BACKTRACE:
 "#;
@@ -463,12 +461,12 @@ BACKTRACE:
         eprintln!("{}", error.to_string());
 
         // エラーメッセージの行が 80 文字に収まるように切りつめられる
-        let expected = r#"unexpected char while parsing Object at byte position 181
+        let expected = r#"unexpected char while parsing Object at byte position 191
 
 INPUT:
-     |    "very_long_key_with_long_value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
-   4 |    "another_key" "missing_colon_value"
-     |                  ^ error
+     |...y_long_key_with_long_value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
+   3 |...": "value", "foo": "bar", "another_key" "missing_colon_value"
+     |                                           ^ error
 
 BACKTRACE:
 "#;
