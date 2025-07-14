@@ -363,5 +363,49 @@
   "video_toolbox_h264_encode_params.use_parallelization": [
     true,
     false
+  ],
+  "video_toolbox_h265_encode_params.max_key_frame_interval": {
+    "min": 1,
+    "max": 600
+  },
+  "video_toolbox_h265_encode_params.prioritize_speed_over_quality": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.real_time": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.maximize_power_efficiency": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.allow_frame_reordering": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.allow_temporal_compression": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.allow_open_gop": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.profile_level": [
+    "main",
+    "main10"
+  ],
+  "video_toolbox_h265_encode_params.quality": {
+    "min": 0.0,
+    "max": 1.0
+  },
+  "video_toolbox_h265_encode_params.max_frame_delay_count": {
+    "min": 1,
+    "max": 16
+  },
+  "video_toolbox_h265_encode_params.use_parallelization": [
+    true,
+    false
   ]
 }
