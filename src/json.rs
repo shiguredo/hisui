@@ -447,6 +447,35 @@ BACKTRACE:
     }
 
     #[test]
+    fn test_parse_long_multiline_malformed_json() {
+        // 複数行で長い行を含む JSON が不正なケース
+        let long_value = "a".repeat(100);
+        let invalid_json = format!(
+            r#"{{
+    "very_long_key_with_long_value": "{}",
+    "key": "value", "foo": "bar", "another_key" "missing_colon_value"
+}}"#,
+            long_value
+        );
+
+        let mut error = parse_str::<()>(&invalid_json).err().expect("bug");
+        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        eprintln!("{}", error.to_string());
+
+        // エラーメッセージの行が 80 文字に収まるように切りつめられる
+        let expected = r#"unexpected char while parsing Object at byte position 181
+
+INPUT:
+     |    "very_long_key_with_long_value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
+   4 |    "another_key" "missing_colon_value"
+     |                  ^ error
+
+BACKTRACE:
+"#;
+        assert_eq!(error.to_string(), expected);
+    }
+
+    #[test]
     fn test_parse_invalid_json() {
         // 文法的には正しいけど値が不正な JSON
         let invalid_json = r#""not_a_number""#;
