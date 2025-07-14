@@ -85,6 +85,9 @@ impl OptunaStudy {
             .arg(&self.study_name)
             .arg("--search-space")
             .arg(search_space.to_optuna_search_space())
+            // optuna ask コマンドは「実験的機能です」という警告を出すけど、
+            // Hisui 側で対処できるものでもなく、ノイジーなだけなので抑制する
+            .env("PYTHONWARNINGS", "ignore")
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .output()
@@ -163,6 +166,9 @@ impl OptunaStudy {
             .arg(&self.study_name)
             .arg("-f")
             .arg("json")
+            // optuna best-trials コマンドは「実験的機能です」という警告を出すけど、
+            // Hisui 側で対処できるものでもなく、ノイジーなだけなので抑制する
+            .env("PYTHONWARNINGS", "ignore")
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .output()
