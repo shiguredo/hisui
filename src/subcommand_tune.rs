@@ -37,7 +37,8 @@ impl Args {
                 .doc(concat!(
                     "パラメータ調整に使用するレイアウトファイルを指定します\n",
                     "\n",
-                    "省略された場合には hisui/layout-examples/tune-libvpx-vp8.json の内容が使用されます",
+                    "省略された場合には ",
+                    "hisui/layout-examples/tune-libvpx-vp8.json の内容が使用されます",
                 ))
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
@@ -111,18 +112,7 @@ impl Args {
                     "このディレクトリの外のファイルが参照された場合にはエラーとなります。"
                 ))
                 .take(raw_args)
-                .then(|a| -> Result<_, Box<dyn std::error::Error>> {
-                    let path: PathBuf = a.value().parse()?;
-
-                    if matches!(a, noargs::Arg::Example { .. }) {
-                    } else if !path.exists() {
-                        return Err("no such directory".into());
-                    } else if !path.is_dir() {
-                        return Err("not a directory".into());
-                    }
-
-                    Ok(path)
-                })?,
+                .then(crate::arg_utils::validate_existing_directory_path)?,
         })
     }
 }

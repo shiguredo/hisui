@@ -1,3 +1,4 @@
+pub mod arg_utils;
 pub mod audio;
 pub mod channel;
 pub mod composer;
