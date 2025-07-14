@@ -340,7 +340,7 @@ BACKTRACE:"#,
     ))
 }
 
-// エラー開始地点を起点にして、前後 50 文字まで含めるように切り詰める
+// エラー開始地点を起点にして、前後 MAX_ERROR_LINE_CHARS / 2 文字まで含めるように切り詰める
 fn truncate_line_for_display(line: &str, column_pos: usize) -> (String, usize) {
     let chars: Vec<char> = line.chars().collect();
     let max_context = MAX_ERROR_LINE_CHARS / 2;
@@ -351,7 +351,7 @@ fn truncate_line_for_display(line: &str, column_pos: usize) -> (String, usize) {
     // エラー位置が文字数を超えている場合は調整
     let error_pos = std::cmp::min(error_pos, chars.len());
 
-    // 前後 40 文字の範囲を計算
+    // 前後に含める文字の範囲を計算
     let start_pos = error_pos.saturating_sub(max_context);
     let end_pos = std::cmp::min(error_pos + max_context + 1, chars.len());
 
