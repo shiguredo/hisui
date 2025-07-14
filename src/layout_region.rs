@@ -371,10 +371,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ReuseKind {
             "none" => Ok(Self::None),
             "show_oldest" => Ok(Self::ShowOldest),
             "show_newest" => Ok(Self::ShowNewest),
-            v => Err(nojson::JsonParseError::invalid_value(
-                value,
-                format!("unknown reuse kind: {v}"),
-            )),
+            v => Err(value.invalid(format!("unknown reuse kind: {v}"))),
         }
     }
 }

@@ -192,10 +192,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ContainerFormat
         match value.to_unquoted_string_str()?.as_ref() {
             "webm" => Ok(Self::Webm),
             "mp4" => Ok(Self::Mp4),
-            v => Err(nojson::JsonParseError::invalid_value(
-                value,
-                format!("unknown container format: {v}"),
-            )),
+            v => Err(value.invalid(format!("unknown container format: {v}"))),
         }
     }
 }

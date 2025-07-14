@@ -366,18 +366,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Resolution {
 
         let Some((Ok(width), Ok(height))) = s.split_once('x').map(|(w, h)| (w.parse(), h.parse()))
         else {
-            return Err(nojson::JsonParseError::invalid_value(
-                value,
-                format!("invalid resolution: {s}"),
-            ));
+            return Err(value.invalid(format!("invalid resolution: {s}")));
         };
 
-        Self::new(width, height).map_err(|e| {
-            nojson::JsonParseError::invalid_value(
-                value,
-                format!("invalid resolution: {}", e.message),
-            )
-        })
+        Self::new(width, height)
+            .map_err(|e| value.invalid(format!("invalid resolution: {}", e.message)))
     }
 }
 
