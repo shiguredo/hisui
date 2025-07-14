@@ -4,7 +4,6 @@ use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-    audio::{DEFAULT_AAC_BITRATE, DEFAULT_OPUS_BITRATE},
     composer::{ComposeResult, Composer},
     encoder_libvpx,
     layout::Layout,
@@ -171,13 +170,13 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .then(|a| a.value().parse())?;
         let out_opus_bit_rate = noargs::opt("out-opus-bit-rate")
             .ty("BPS")
-            .default(DEFAULT_OPUS_BITRATE)
+            .default("65536")
             .doc("Opus でエンコードする際のビットレート")
             .take(&mut args)
             .then(|a| a.value().parse())?;
         let out_aac_bit_rate = noargs::opt("out-aac-bit-rate")
             .ty("BPS")
-            .default(DEFAULT_AAC_BITRATE)
+            .default("64000")
             .doc("AAC でエンコードする際のビットレート")
             .take(&mut args)
             .then(|a| a.value().parse())?;
