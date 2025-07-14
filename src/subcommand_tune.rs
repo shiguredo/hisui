@@ -37,7 +37,7 @@ impl Args {
                 .doc(concat!(
                     "パラメータ調整に使用するレイアウトファイルを指定します\n",
                     "\n",
-                    "省略された場合には hisui/layout-examples/tune-libvpx-vp8.json が使用されます",
+                    "省略された場合には hisui/layout-examples/tune-libvpx-vp8.json の内容が使用されます",
                 ))
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
@@ -47,7 +47,7 @@ impl Args {
                 .doc(concat!(
                     "探索空間定義ファイル（JSON）のパスを指定します\n",
                     "\n",
-                    "省略された場合には hisui/search-space-examples/full.json が使用されます",
+                    "省略された場合には hisui/search-space-examples/full.json の内容が使用されます",
                 ))
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,

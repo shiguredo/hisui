@@ -1,0 +1,13 @@
+{
+  "video_layout": {
+    "main": {
+      "cell_width": 320,
+      "cell_height": 240,
+      "max_columns": 4,
+      "max_rows": 4,
+      "video_sources": [
+        "archive*.json"
+      ]
+    }
+  }
+}

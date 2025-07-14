@@ -2,7 +2,6 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::LazyLock,
     time::{Duration, Instant},
 };
 
@@ -24,15 +23,7 @@ use crate::{
     writer_yuv::YuvWriter,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = r#"{
-  "video_layout": {"main": {
-    "cell_width": 320,
-    "cell_height": 240,
-    "max_columns": 4,
-    "max_rows": 4,
-    "video_sources": [ "archive*.json" ]
-  }}
-}"#;
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/vmaf.json");
 
 #[derive(Debug)]
 struct Args {
@@ -54,20 +45,11 @@ impl Args {
                 .short('l')
                 .ty("PATH")
                 .env("HISUI_LAYOUT_FILE_PATH")
-                .doc({
-                    static DOC: LazyLock<String> = LazyLock::new(|| {
-                        format!(
-                            concat!(
-                                "合成に使用するレイアウトファイルを指定します\n",
-                                "\n",
-                                "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
-                                "{}"
-                            ),
-                            DEFAULT_LAYOUT_JSON
-                        )
-                    });
-                    &*DOC
-                })
+                .doc(concat!(
+                    "合成に使用するレイアウトファイルを指定します\n",
+                    "\n",
+                    "省略された場合には hisui/layout-examples/vmaf.json の内容が使用されます",
+                ))
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
             reference_yuv_file_path: noargs::opt("reference-yuv-file")
@@ -135,7 +117,8 @@ impl Args {
                 .doc(concat!(
                     "合成処理を行う際のルートディレクトリを指定します\n",
                     "\n",
-                    "レイアウトファイル内に記載された相対パスの基点は、このディレクトリとなります。\n",
+                    "レイアウトファイル内に記載された相対パスの基点は、",
+                    "このディレクトリとなります。\n",
                     "また、レイアウト内で、",
                     "このディレクトリの外のファイルが参照された場合にはエラーとなります。"
                 ))
