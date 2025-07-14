@@ -436,7 +436,7 @@ BACKTRACE:
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
         eprintln!("{}", error.to_string());
 
-        // エラーメッセージの行が 80 文字に収まるように切りつめられる
+        // エラーメッセージの行が MAX_ERROR_LINE_CHARS 文字に収まるように切りつめられる
         let expected = r#"unexpected char while parsing Object at byte position 47
 
 INPUT:
@@ -464,7 +464,7 @@ BACKTRACE:
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
         eprintln!("{}", error.to_string());
 
-        // エラーメッセージの行が 80 文字に収まるように切りつめられる
+        // エラーメッセージの行が MAX_ERROR_LINE_CHARS 文字に収まるように切りつめられる
         let expected = r#"unexpected char while parsing Object at byte position 191
 
 INPUT:
