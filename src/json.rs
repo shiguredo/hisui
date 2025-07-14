@@ -248,9 +248,9 @@ fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> o
     };
 
     // 長い行を省略する
-    let (display_line, display_column) = truncate_line_around_position(line, column_num.get());
+    let (display_line, display_column) = format_line_around_position(line, column_num.get());
     let prev_display_line = prev_line.map(|prev| {
-        let (truncated, _) = truncate_line_around_position(prev, column_num.get());
+        let (truncated, _) = format_line_around_position(prev, column_num.get());
         truncated
     });
 
@@ -297,9 +297,9 @@ fn invalid_json_error(
         .expect("infallible");
 
     // 長い行を省略する
-    let (display_line, display_column) = truncate_line_around_position(line, column_num.get());
+    let (display_line, display_column) = format_line_around_position(line, column_num.get());
     let prev_display_line = prev_line.map(|prev| {
-        let (truncated, _) = truncate_line_around_position(prev, column_num.get());
+        let (truncated, _) = format_line_around_position(prev, column_num.get());
         truncated
     });
 
@@ -340,8 +340,12 @@ BACKTRACE:"#,
     ))
 }
 
-// エラー開始地点を起点にして、前後 MAX_ERROR_LINE_CHARS / 2 文字まで含めるように切り詰める
-fn truncate_line_around_position(line: &str, column_pos: usize) -> (String, usize) {
+// エラー表示用に指定位置周辺の行をフォーマットします
+//
+// この関数は、テキストの行と列位置を受け取り、エラー位置を中心として
+// MAX_ERROR_LINE_CHARS 文字以内に収まるように前後の内容を切り詰めてフォーマットします。
+// エラー位置は可能な限りフォーマット後の出力の中央付近に配置されます。
+fn format_line_around_position(line: &str, column_pos: usize) -> (String, usize) {
     let chars: Vec<char> = line.chars().collect();
     let max_context = MAX_ERROR_LINE_CHARS / 2;
 
