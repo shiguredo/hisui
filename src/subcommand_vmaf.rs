@@ -230,17 +230,22 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
-    eprintln!("# Compose");
+    eprintln!("# Compose for VMAF");
     let mut dummy_video_decoder_stats = VideoDecoderStats::default();
     let mut encoded_byte_size = 0;
     let mut encoded_duration = Duration::ZERO;
-    for _ in 0..frame_count {
+    let mut encoded_frame_count = 0;
+    while encoded_frame_count < frame_count {
         let Some(encoded_frame) = encoded_video_rx.recv() else {
             // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
             decoder.finish().or_fail()?;
             while let Some(decoded_frame) = decoder.next_decoded_frame() {
                 distorted_yuv_writer.append(&decoded_frame).or_fail()?;
                 progress_bar.inc(1);
+                encoded_frame_count += 1;
+                if encoded_frame_count >= frame_count {
+                    break;
+                }
             }
             break;
         };
@@ -252,6 +257,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         while let Some(decoded_frame) = decoder.next_decoded_frame() {
             distorted_yuv_writer.append(&decoded_frame).or_fail()?;
             progress_bar.inc(1);
+            encoded_frame_count += 1;
+            if encoded_frame_count >= frame_count {
+                break;
+            }
         }
 
         if error_flag.get() {
@@ -260,6 +269,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             break;
         }
     }
+    (encoded_frame_count > 0).or_fail_with(|()| "failed to encode frames".to_owned())?;
 
     // VMAF の下準備としての処理は全て完了した
     progress_bar.finish();
@@ -290,7 +300,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
-        encoded_frame_count: progress_bar.length().unwrap_or_default() as usize,
+        encoded_frame_count,
         encoded_byte_size,
         encoded_duration_seconds: Seconds::new(encoded_duration),
         elapsed_seconds: Seconds::new(start_time.elapsed()),
@@ -325,7 +335,7 @@ fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail:
     }
 }
 
-fn check_vmaf_availability() -> orfail::Result<()> {
+pub fn check_vmaf_availability() -> orfail::Result<()> {
     let output = Command::new("vmaf")
         .arg("--version")
         .stdout(Stdio::null())
@@ -451,15 +461,6 @@ impl nojson::DisplayJson for Output {
             f.member("encoded_byte_size", self.encoded_byte_size)?;
             f.member("encoded_duration_seconds", self.encoded_duration_seconds)?;
             f.member("elapsed_seconds", self.elapsed_seconds)?;
-
-            // 何倍速で変換が行えたか
-            //（elapsed_seconds にはデコードや合成の時間も含まれているのであくまでも概算値）
-            f.member(
-                "encoding_speed_ratio",
-                self.encoded_duration_seconds.get().as_secs_f64()
-                    / self.elapsed_seconds.get().as_secs_f64(),
-            )?;
-
             f.member("vmaf_min", &self.vmaf.min)?;
             f.member("vmaf_max", &self.vmaf.max)?;
             f.member("vmaf_mean", &self.vmaf.mean)?;

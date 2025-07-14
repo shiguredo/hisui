@@ -1,0 +1,399 @@
+{
+  "libvpx_vp8_encode_params.min_quantizer": {
+    "min": 4,
+    "max": 29
+  },
+  "libvpx_vp8_encode_params.max_quantizer": {
+    "min": 30,
+    "max": 58
+  },
+  "libvpx_vp8_encode_params.cq_level": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp8_encode_params.cpu_used": {
+    "min": 0,
+    "max": 16
+  },
+  "libvpx_vp8_encode_params.deadline": [
+    "best",
+    "good",
+    "realtime"
+  ],
+  "libvpx_vp8_encode_params.rate_control": [
+    "vbr",
+    "cbr",
+    "cq"
+  ],
+  "libvpx_vp8_encode_params.lag_in_frames": {
+    "min": 1,
+    "max": 25
+  },
+  "libvpx_vp8_encode_params.threads": {
+    "min": 1,
+    "max": 16
+  },
+  "libvpx_vp8_encode_params.error_resilient": [
+    true,
+    false
+  ],
+  "libvpx_vp8_encode_params.keyframe_interval": {
+    "min": 1,
+    "max": 600
+  },
+  "libvpx_vp8_encode_params.noise_sensitivity": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp8_encode_params.static_threshold": {
+    "min": 0,
+    "max": 10000
+  },
+  "libvpx_vp8_encode_params.token_partitions": {
+    "min": 0,
+    "max": 3
+  },
+  "libvpx_vp8_encode_params.max_intra_bitrate_pct": {
+    "min": 0,
+    "max": 10000
+  },
+  "libvpx_vp8_encode_params.arnr_config.max_frames": {
+    "min": 0,
+    "max": 15
+  },
+  "libvpx_vp8_encode_params.arnr_config.strength": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp8_encode_params.arnr_config.filter_type": [
+    1,
+    2,
+    3
+  ],
+  "libvpx_vp9_encode_params.min_quantizer": {
+    "min": 4,
+    "max": 29
+  },
+  "libvpx_vp9_encode_params.max_quantizer": {
+    "min": 30,
+    "max": 58
+  },
+  "libvpx_vp9_encode_params.cq_level": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp9_encode_params.cpu_used": {
+    "min": 0,
+    "max": 9
+  },
+  "libvpx_vp9_encode_params.deadline": [
+    "best",
+    "good",
+    "realtime"
+  ],
+  "libvpx_vp9_encode_params.rate_control": [
+    "vbr",
+    "cbr",
+    "cq"
+  ],
+  "libvpx_vp9_encode_params.lag_in_frames": {
+    "min": 1,
+    "max": 25
+  },
+  "libvpx_vp9_encode_params.threads": {
+    "min": 1,
+    "max": 16
+  },
+  "libvpx_vp9_encode_params.error_resilient": [
+    true,
+    false
+  ],
+  "libvpx_vp9_encode_params.keyframe_interval": {
+    "min": 1,
+    "max": 600
+  },
+  "libvpx_vp9_encode_params.aq_mode": {
+    "min": 0,
+    "max": 3
+  },
+  "libvpx_vp9_encode_params.noise_sensitivity": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp9_encode_params.tile_columns": {
+    "min": 0,
+    "max": 6
+  },
+  "libvpx_vp9_encode_params.tile_rows": {
+    "min": 0,
+    "max": 2
+  },
+  "libvpx_vp9_encode_params.row_mt": [
+    true,
+    false
+  ],
+  "libvpx_vp9_encode_params.frame_parallel_decoding": [
+    true,
+    false
+  ],
+  "libvpx_vp9_encode_params.tune_content": [
+    "default",
+    "screen"
+  ],
+  "svt_av1_encode_params.enc_mode": {
+    "min": 0,
+    "max": 13
+  },
+  "svt_av1_encode_params.qp": {
+    "min": 0,
+    "max": 63
+  },
+  "svt_av1_encode_params.min_qp_allowed": {
+    "min": 1,
+    "max": 20
+  },
+  "svt_av1_encode_params.max_qp_allowed": {
+    "min": 35,
+    "max": 63
+  },
+  "svt_av1_encode_params.rate_control_mode": [
+    "vbr",
+    "cbr"
+  ],
+  "svt_av1_encode_params.over_shoot_pct": {
+    "min": 0,
+    "max": 100
+  },
+  "svt_av1_encode_params.under_shoot_pct": {
+    "min": 0,
+    "max": 100
+  },
+  "svt_av1_encode_params.intra_period_length": {
+    "min": -1,
+    "max": 1000
+  },
+  "svt_av1_encode_params.hierarchical_levels": {
+    "min": 2,
+    "max": 5
+  },
+  "svt_av1_encode_params.pred_structure": [
+    1,
+    2
+  ],
+  "svt_av1_encode_params.scene_change_detection": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.look_ahead_distance": {
+    "min": 0,
+    "max": 120
+  },
+  "svt_av1_encode_params.pin_threads": {
+    "min": 0,
+    "max": 128
+  },
+  "svt_av1_encode_params.tile_columns": {
+    "min": 1,
+    "max": 6
+  },
+  "svt_av1_encode_params.tile_rows": {
+    "min": 1,
+    "max": 6
+  },
+  "svt_av1_encode_params.target_socket": {
+    "min": -1,
+    "max": 1
+  },
+  "svt_av1_encode_params.enable_dlf_flag": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.cdef_level": {
+    "min": -1,
+    "max": 4
+  },
+  "svt_av1_encode_params.enable_restoration_filtering": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.enable_tf": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.enable_overlays": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.film_grain_denoise_strength": {
+    "min": 0,
+    "max": 50
+  },
+  "svt_av1_encode_params.enable_tpl_la": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.force_key_frames": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.stat_report": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.recon_enabled": [
+    true,
+    false
+  ],
+  "svt_av1_encode_params.tier": {
+    "min": 0,
+    "max": 1
+  },
+  "svt_av1_encode_params.fast_decode": [
+    true,
+    false
+  ],
+  "openh264_encode_params.thread_count": {
+    "min": 1,
+    "max": 16
+  },
+  "openh264_encode_params.intra_period": {
+    "min": 1,
+    "max": 1000
+  },
+  "openh264_encode_params.complexity_mode": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "openh264_encode_params.entropy_coding": [
+    true,
+    false
+  ],
+  "openh264_encode_params.ref_frame_count": {
+    "min": 1,
+    "max": 16
+  },
+  "openh264_encode_params.spatial_layers": {
+    "min": 1,
+    "max": 4
+  },
+  "openh264_encode_params.temporal_layers": {
+    "min": 1,
+    "max": 4
+  },
+  "openh264_encode_params.rate_control_mode": [
+    "off",
+    "quality",
+    "bitrate",
+    "timestamp"
+  ],
+  "openh264_encode_params.max_qp": {
+    "min": 30,
+    "max": 51
+  },
+  "openh264_encode_params.min_qp": {
+    "min": 1,
+    "max": 28
+  },
+  "openh264_encode_params.denoise": [
+    true,
+    false
+  ],
+  "openh264_encode_params.background_detection": [
+    true,
+    false
+  ],
+  "openh264_encode_params.adaptive_quantization": [
+    true,
+    false
+  ],
+  "openh264_encode_params.scene_change_detection": [
+    true,
+    false
+  ],
+  "openh264_encode_params.deblocking_filter": [
+    true,
+    false
+  ],
+  "openh264_encode_params.long_term_reference": [
+    true,
+    false
+  ],
+  "video_toolbox_h264_encode_params.max_key_frame_interval": {
+    "min": 1,
+    "max": 600
+  },
+  "video_toolbox_h264_encode_params.prioritize_speed_over_quality": [
+    true,
+    false
+  ],
+  "video_toolbox_h264_encode_params.real_time": [
+    true,
+    false
+  ],
+  "video_toolbox_h264_encode_params.maximize_power_efficiency": [
+    true,
+    false
+  ],
+  "video_toolbox_h264_encode_params.allow_frame_reordering": [
+    true,
+    false
+  ],
+  "video_toolbox_h264_encode_params.allow_temporal_compression": [
+    true,
+    false
+  ],
+  "video_toolbox_h264_encode_params.profile_level": [
+    "baseline",
+    "main",
+    "high"
+  ],
+  "video_toolbox_h264_encode_params.h264_entropy_mode": [
+    "cavlc",
+    "cabac"
+  ],
+  "video_toolbox_h264_encode_params.max_frame_delay_count": {
+    "min": 1,
+    "max": 16
+  },
+  "video_toolbox_h264_encode_params.use_parallelization": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.max_key_frame_interval": {
+    "min": 1,
+    "max": 600
+  },
+  "video_toolbox_h265_encode_params.real_time": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.maximize_power_efficiency": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.allow_frame_reordering": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.allow_temporal_compression": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.allow_open_gop": [
+    true,
+    false
+  ],
+  "video_toolbox_h265_encode_params.profile_level": [
+    "main",
+    "main10"
+  ],
+  "video_toolbox_h265_encode_params.max_frame_delay_count": {
+    "min": 1,
+    "max": 16
+  },
+  "video_toolbox_h265_encode_params.use_parallelization": [
+    true,
+    false
+  ]
+}

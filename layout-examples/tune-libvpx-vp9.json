@@ -1,0 +1,33 @@
+{
+  "resolution": "1280x720",
+  "video_codec": "VP9",
+  "video_bitrate": 1000000,
+  "frame_rate": 30,
+  "video_layout": {
+    "main": {
+      "max_columns": 3,
+      "video_sources": [
+        "archive*.json"
+      ]
+    }
+  },
+  "libvpx_vp9_encode_params": {
+    "threads": 1,
+    "error_resilient": false,
+    "keyframe_interval": 300,
+    "min_quantizer": null,
+    "max_quantizer": null,
+    "cq_level": null,
+    "cpu_used": null,
+    "deadline": null,
+    "rate_control": null,
+    "lag_in_frames": null,
+    "aq_mode": null,
+    "noise_sensitivity": null,
+    "tile_columns": null,
+    "tile_rows": null,
+    "row_mt": false,
+    "frame_parallel_decoding": false,
+    "tune_content": null
+  }
+}
