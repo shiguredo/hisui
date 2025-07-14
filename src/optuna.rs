@@ -21,14 +21,28 @@ impl OptunaStudy {
         let output = Command::new("optuna")
             .arg("--version")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .output();
 
         match output {
             Ok(output) if output.status.success() => Ok(()),
-            Ok(_) => Err(orfail::Failure::new(
-                "`$ optuna --version` command failed to execute properly",
-            )),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let exit_code = output.status.code().unwrap_or(-1);
+
+                let mut error_msg = format!(
+                    "`$ optuna --version` command failed with exit code {}",
+                    exit_code
+                );
+
+                if !stderr.trim().is_empty() {
+                    error_msg.push_str(&format!("\nstderr: {}", stderr.trim()));
+                }
+
+                error_msg.push_str("\nPlease ensure optuna is properly installed and configured");
+
+                Err(orfail::Failure::new(error_msg))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(orfail::Failure::new(
                 "optuna command not found. Please install optuna and ensure it's in your PATH",
             )),
