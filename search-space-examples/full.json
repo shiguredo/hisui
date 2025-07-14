@@ -352,10 +352,6 @@
     "cavlc",
     "cabac"
   ],
-  "video_toolbox_h264_encode_params.quality": {
-    "min": 0.0,
-    "max": 1.0
-  },
   "video_toolbox_h264_encode_params.max_frame_delay_count": {
     "min": 1,
     "max": 16
@@ -396,10 +392,6 @@
     "main",
     "main10"
   ],
-  "video_toolbox_h265_encode_params.quality": {
-    "min": 0.0,
-    "max": 1.0
-  },
   "video_toolbox_h265_encode_params.max_frame_delay_count": {
     "min": 1,
     "max": 16

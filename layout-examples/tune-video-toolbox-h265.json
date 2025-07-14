@@ -20,7 +20,6 @@
     "allow_temporal_compression": null,
     "allow_open_gop": null,
     "profile_level": null,
-    "quality": null,
     "max_frame_delay_count": null,
     "use_parallelization": null
   }

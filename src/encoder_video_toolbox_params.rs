@@ -14,9 +14,6 @@ pub fn parse_h264_encode_params(
     let params = JsonObject::new(value)?;
     let mut config = EncoderConfig::default();
 
-    // 品質設定
-    config.quality = params.get("quality")?;
-
     // 速度と品質のバランス設定
     if let Some(prioritize_speed) = params.get("prioritize_speed_over_quality")? {
         config.prioritize_speed_over_quality = prioritize_speed;
@@ -105,16 +102,6 @@ pub fn parse_h265_encode_params(
     if let Some(fps_den) = params.get("fps_denominator")? {
         config.fps_denominator = fps_den;
     }
-
-    // 品質設定
-    config.quality = params.get_with("quality", |v| {
-        let q: f32 = v.try_into()?;
-        if 0.0 <= q && q <= 1.0 {
-            Ok(q)
-        } else {
-            Err(v.invalid("quality must be between 0.0 and 1.0"))
-        }
-    })?;
 
     // 速度と品質のバランス設定
     if let Some(prioritize_speed) = params.get("prioritize_speed_over_quality")? {

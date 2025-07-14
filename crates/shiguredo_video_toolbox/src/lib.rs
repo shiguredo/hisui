@@ -95,9 +95,6 @@ pub struct EncoderConfig {
     /// H.264エントロピー符号化モード (CAVLC: 高速, CABAC: 高品質)
     pub h264_entropy_mode: H264EntropyMode,
 
-    /// 品質設定 (0.0-1.0, 低いほど高速)
-    pub quality: Option<f32>,
-
     /// フレーム遅延制限 (小さいほど高速)
     pub max_frame_delay_count: Option<NonZeroUsize>,
 
@@ -149,7 +146,6 @@ impl Default for EncoderConfig {
             max_key_frame_interval_duration: None,
             profile_level: ProfileLevel::H264Main,
             h264_entropy_mode: H264EntropyMode::Cabac,
-            quality: None,
             max_frame_delay_count: None,
             use_parallelization: false,
         }
@@ -177,7 +173,6 @@ impl EncoderConfig {
             max_key_frame_interval_duration: None,
             profile_level: ProfileLevel::H264Baseline, // 最軽量
             h264_entropy_mode: H264EntropyMode::Cavlc, // 高速
-            quality: Some(0.5),                        // 中程度の品質
             max_frame_delay_count: Some(NonZeroUsize::MIN), // 最小遅延
             use_parallelization: true,
         }
@@ -203,7 +198,6 @@ impl EncoderConfig {
             max_key_frame_interval_duration: None,
             profile_level: ProfileLevel::H264Main,
             h264_entropy_mode: H264EntropyMode::Cavlc,
-            quality: Some(0.6),
             max_frame_delay_count: Some(NonZeroUsize::MIN.saturating_add(3)),
             use_parallelization: true,
         }
@@ -239,8 +233,7 @@ impl EncoderConfig {
             max_key_frame_interval_duration: None,
             profile_level: ProfileLevel::H264High,
             h264_entropy_mode: H264EntropyMode::Cabac, // 高品質
-            quality: Some(0.8),
-            max_frame_delay_count: None, // 制限なし
+            max_frame_delay_count: None,               // 制限なし
             use_parallelization: false,
         }
     }
@@ -428,12 +421,6 @@ impl Encoder {
                 }
                 .cast(),
             ));
-
-            // 品質設定
-            if let Some(quality) = config.quality {
-                let quality_value = cf_number_f32(quality);
-                properties.push((sys::kVTCompressionPropertyKey_Quality, quality_value.0));
-            }
 
             // キーフレーム間隔（フレーム数）
             if let Some(interval) = config.max_key_frame_interval {
@@ -1172,17 +1159,6 @@ fn cf_number_i32(n: i32) -> CfPtr<c_void> {
             std::ptr::null_mut(),
             sys::kCFNumberSInt32Type as sys::CFNumberType,
             ((&n) as *const i32).cast(),
-        )
-    };
-    CfPtr(ptr.cast())
-}
-
-fn cf_number_f32(n: f32) -> CfPtr<c_void> {
-    let ptr = unsafe {
-        sys::CFNumberCreate(
-            std::ptr::null_mut(),
-            sys::kCFNumberFloat32Type as sys::CFNumberType,
-            ((&n) as *const f32).cast(),
         )
     };
     CfPtr(ptr.cast())
