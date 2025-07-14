@@ -319,7 +319,18 @@ fn run_trial_evaluation(
     let vmaf_mean: f64 = object.get_required("vmaf_mean").or_fail()?;
     let elapsed_seconds: f64 = object.get_required("elapsed_seconds").or_fail()?;
 
-    // TODO(sile): 実際に hisui compose コマンドを実行して所要時間を計測すれば、より正確な値が得られる
+    // TODO(sile): hisui compose コマンドを実行して所要時間を計測することを検討する
+    //
+    // 今は `hisui vmaf` コマンドの所要時間を使って最適化を行っているが、
+    // これは以下の点で、実際の合成の処理とは異なっている:
+    // - YUV データの書き出しがある
+    // - 合成後の画像のエンコード後に、追加のデコード処理が走る (YUV 取得のため）
+    //   - デコードコストはコーデックやデコーダーによって変わるので、コーデックが変わった場合に `elapsed_seconds` の単純な比較が難しくなる
+    //
+    // そのため `hisui compose` を使って所要時間を計測した方が、実際の値に近くなる。
+    // ただし、その場合、（余計な合成処理が増えるので）最適化にかかる時間が長くなる、というデメリットがある。
+    // また、`hisui vmaf` での所要時間計測方法が多少不正確だとしても、最適化の用途では通常は問題ない
+    // とも考えられるので、この TODO は実際に必要になったタイミングで改めて対応を検討することにする。
 
     // 後から参照できるように保存しておく
     std::fs::write(trial_dir.join("metrics.json"), &stdout).or_fail()?;
