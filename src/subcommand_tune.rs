@@ -1,6 +1,6 @@
 use std::{
     num::NonZeroUsize,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Stdio},
 };
 
@@ -129,7 +129,7 @@ impl Args {
 
 pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // コマンドライン引数処理
-    let args = Args::parse(&mut raw_args)?;
+    let mut args = Args::parse(&mut raw_args)?;
     if let Some(help) = raw_args.finish()? {
         print!("{help}");
         return Ok(());
@@ -140,12 +140,12 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     subcommand_vmaf::check_vmaf_availability().or_fail()?;
 
     // 必要なら tune_working_dir を作る
-    let tune_working_dir = args.root_dir.join(args.tune_working_dir);
-    if !tune_working_dir.exists() {
-        std::fs::create_dir_all(&tune_working_dir).or_fail_with(|e| {
+    args.tune_working_dir = args.root_dir.join(args.tune_working_dir);
+    if !args.tune_working_dir.exists() {
+        std::fs::create_dir_all(&args.tune_working_dir).or_fail_with(|e| {
             format!(
                 "failed to create working directory {}: {e}",
-                tune_working_dir.display()
+                args.tune_working_dir.display()
             )
         })?;
     }
@@ -172,7 +172,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     log::debug!("search space: {search_space:?}");
 
     // 探索を始める前にいろいろと情報を表示する
-    let storage_url = format!("sqlite:///{}", tune_working_dir.join("optuna.db").display());
+    let storage_url = format!(
+        "sqlite:///{}",
+        args.tune_working_dir.join("optuna.db").display()
+    );
     eprintln!("====== INFO ======");
     eprintln!(
         "layout file to tune:\t {}",
@@ -186,7 +189,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             .as_ref()
             .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
     );
-    eprintln!("tune working dir:\t {}", tune_working_dir.display());
+    eprintln!("tune working dir:\t {}", args.tune_working_dir.display());
     eprintln!("optuna storage:\t {storage_url}");
     eprintln!("optuna study name:\t {}", args.study_name);
     eprintln!("optuna trial count:\t {}", args.trial_count);
@@ -217,18 +220,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         ask_output.apply_params_to_layout(&mut layout).or_fail()?;
         log::debug!("actual layout: {layout:?}");
 
-        match run_trial_evaluation(
-            &tune_working_dir,
-            &args.study_name,
-            ask_output.number,
-            &args.root_dir,
-            &layout,
-            args.frame_count,
-            args.openh264.as_ref(),
-            args.max_cpu_cores,
-        )
-        .or_fail()
-        {
+        match run_trial_evaluation(&args, ask_output.number, &layout).or_fail() {
             Ok(metrics) => {
                 optuna.tell(ask_output.number, &metrics).or_fail()?;
             }
@@ -240,37 +232,30 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         eprintln!();
 
         displayed_best_trials =
-            display_best_trials_if_updated(&mut optuna, &args.root_dir, &tune_working_dir, false)
-                .or_fail()?;
+            display_best_trials_if_updated(&args, &mut optuna, false).or_fail()?;
     }
 
     if !displayed_best_trials {
         // 直前で表示していないなら、最後に結果を表示する
-        display_best_trials_if_updated(&mut optuna, &args.root_dir, &tune_working_dir, true)
-            .or_fail()?;
+        display_best_trials_if_updated(&args, &mut optuna, true).or_fail()?;
     }
 
     Ok(())
 }
 
-fn trial_dir(tune_working_dir: &Path, study_name: &str, trial_number: usize) -> PathBuf {
-    tune_working_dir
-        .join(study_name)
+fn trial_dir(args: &Args, trial_number: usize) -> PathBuf {
+    args.tune_working_dir
+        .join(&args.study_name)
         .join(format!("trial-{}", trial_number))
 }
 
 fn run_trial_evaluation(
-    tune_working_dir: &Path,
-    study_name: &str,
+    args: &Args,
     trial_number: usize,
-    root_dir: &Path,
     layout: &JsonValue,
-    frame_count: usize,
-    openh264: Option<&PathBuf>,
-    max_cpu_cores: Option<NonZeroUsize>,
 ) -> orfail::Result<TrialValues> {
     // トライアルの作業用ディレクトリを作成
-    let trial_dir = trial_dir(tune_working_dir, study_name, trial_number);
+    let trial_dir = trial_dir(args, trial_number);
     std::fs::create_dir_all(&trial_dir).or_fail_with(|e| {
         format!(
             "failed to create trial directory {}: {e}",
@@ -295,21 +280,21 @@ fn run_trial_evaluation(
         .arg("--layout-file")
         .arg(&layout_file_path)
         .arg("--frame-count")
-        .arg(frame_count.to_string())
+        .arg(args.frame_count.to_string())
         .arg("--reference-yuv-file")
         .arg(trial_dir.join("reference.yuv"))
         .arg("--distorted-yuv-file")
         .arg(trial_dir.join("distorted.yuv"))
         .arg("--vmaf-output-file")
         .arg(trial_dir.join("vmaf-output.json"))
-        .arg(root_dir)
+        .arg(&args.root_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
-    if let Some(openh264_path) = openh264 {
+    if let Some(openh264_path) = &args.openh264 {
         cmd.arg("--openh264").arg(openh264_path);
     }
 
-    if let Some(cores) = max_cpu_cores {
+    if let Some(cores) = &args.max_cpu_cores {
         cmd.arg("--max-cpu-cores").arg(cores.to_string());
     }
     eprintln!();
@@ -346,9 +331,8 @@ fn run_trial_evaluation(
 }
 
 fn display_best_trials_if_updated(
+    args: &Args,
     optuna: &mut OptunaStudy,
-    root_dir: &Path,
-    tune_working_dir: &Path,
     force: bool,
 ) -> orfail::Result<bool> {
     let (updated, mut best_trials) = optuna.get_best_trials().or_fail()?;
@@ -374,14 +358,13 @@ fn display_best_trials_if_updated(
             eprintln!("    {}:\t {}", key, nojson::Json(value));
         }
 
-        let layout_file_path =
-            trial_dir(tune_working_dir, &optuna.study_name(), trial.number).join("layout.json");
+        let layout_file_path = trial_dir(args, trial.number).join("layout.json");
 
         eprintln!("  Compose Command:");
         eprintln!(
             "    $ hisui compose -l {} {}",
             layout_file_path.display(),
-            root_dir.display()
+            args.root_dir.display()
         );
         eprintln!();
     }
