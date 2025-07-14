@@ -1,7 +1,6 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::LazyLock,
 };
 
 use orfail::OrFail;
@@ -9,36 +8,18 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{composer::Composer, layout::Layout};
 
-const DEFAULT_LAYOUT_JSON: &str = r#"{
-  "audio_sources": [ "archive*.json" ],
-  "video_layout": {"main": {
-    "cell_width": 320,
-    "cell_height": 240,
-    "max_columns": 4,
-    "max_rows": 4,
-    "video_sources": [ "archive*.json" ]
-  }}
-}"#;
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let layout_file_path: Option<PathBuf> = noargs::opt("layout-file")
         .short('l')
         .ty("PATH")
         .env("HISUI_LAYOUT_FILE_PATH")
-        .doc({
-            static DOC: LazyLock<String> = LazyLock::new(|| {
-                format!(
-                    concat!(
-                        "合成に使用するレイアウトファイルを指定します\n",
-                        "\n",
-                        "省略された場合には、以下の内容のレイアウトで合成が行われます:\n",
-                        "{}"
-                    ),
-                    DEFAULT_LAYOUT_JSON
-                )
-            });
-            &*DOC
-        })
+        .doc(concat!(
+            "合成に使用するレイアウトファイルを指定します\n",
+            "\n",
+            "省略された場合には hisui/layout-examples/compose-default.json の内容が使用されます",
+        ))
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
     let output_file_path: PathBuf = noargs::opt("output-file")

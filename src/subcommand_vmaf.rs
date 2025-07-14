@@ -23,7 +23,7 @@ use crate::{
     writer_yuv::YuvWriter,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/vmaf.json");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/vmaf-default.json");
 
 #[derive(Debug)]
 struct Args {
@@ -48,7 +48,7 @@ impl Args {
                 .doc(concat!(
                     "合成に使用するレイアウトファイルを指定します\n",
                     "\n",
-                    "省略された場合には hisui/layout-examples/vmaf.json の内容が使用されます",
+                    "省略された場合には hisui/layout-examples/vmaf-default.json の内容が使用されます",
                 ))
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
