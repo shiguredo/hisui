@@ -57,6 +57,18 @@ impl Layout {
         raw.into_layout(base_path).or_fail()
     }
 
+    pub fn from_layout_json_file_or_default(
+        base_path: PathBuf,
+        layout_file_path: Option<&Path>,
+        default_layout_json: &str,
+    ) -> orfail::Result<Self> {
+        if let Some(layout_file_path) = layout_file_path {
+            Layout::from_layout_json_file(base_path, layout_file_path).or_fail()
+        } else {
+            Layout::from_layout_json_str(base_path, default_layout_json).or_fail()
+        }
+    }
+
     /// recording.report から合成レイアウトを作成する
     pub fn from_recording_report(
         report_file_path: &Path,

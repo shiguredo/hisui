@@ -1,7 +1,4 @@
-use std::{
-    num::NonZeroUsize,
-    path::{Path, PathBuf},
-};
+use std::{num::NonZeroUsize, path::PathBuf};
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -107,7 +104,12 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // レイアウトを準備
-    let layout = create_layout(&args.root_dir, args.layout_file_path.as_deref()).or_fail()?;
+    let layout = Layout::from_layout_json_file_or_default(
+        args.root_dir.clone(),
+        args.layout_file_path.as_deref(),
+        DEFAULT_LAYOUT_JSON,
+    )
+    .or_fail()?;
     log::debug!("layout: {layout:?}");
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
@@ -136,14 +138,4 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     Ok(())
-}
-
-fn create_layout(root_dir: &PathBuf, layout_file_path: Option<&Path>) -> orfail::Result<Layout> {
-    if let Some(layout_file_path) = layout_file_path {
-        // レイアウトファイルが指定された場合
-        Layout::from_layout_json_file(root_dir.clone(), layout_file_path).or_fail()
-    } else {
-        // デフォルトレイアウトを作成
-        Layout::from_layout_json_str(root_dir.clone(), DEFAULT_LAYOUT_JSON).or_fail()
-    }
 }
