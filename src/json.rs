@@ -242,11 +242,19 @@ fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> o
     } else {
         text.lines().nth(line_num.get() - 2)
     };
+
+    // 長い行を省略する
+    let (display_line, display_column) = truncate_line_for_display(line, column_num.get());
+    let prev_display_line = prev_line.map(|prev| {
+        let (truncated, _) = truncate_line_for_display(prev, 0);
+        truncated
+    });
+
     orfail::Failure::new(format!(
         r#"{e}
 
 INPUT:{}{}{}
-{:4} |{line}
+{:4} |{display_line}
      |{:>column$} error
 
 BACKTRACE:"#,
@@ -256,14 +264,14 @@ BACKTRACE:"#,
             " "
         },
         path.display(),
-        if let Some(prev) = prev_line {
+        if let Some(prev) = prev_display_line {
             format!("\n     |{prev}")
         } else {
             "".to_owned()
         },
         line_num,
         "^",
-        column = column_num.get()
+        column = display_column
     ))
 }
 
@@ -283,11 +291,25 @@ fn invalid_json_error(
     let value = json
         .get_value_by_position(e.position())
         .expect("infallible");
+
+    // 長い行を省略する
+    let (display_line, display_column) = truncate_line_for_display(line, column_num.get());
+    let prev_display_line = prev_line.map(|prev| {
+        let (truncated, _) = truncate_line_for_display(prev, 0);
+        truncated
+    });
+
+    // エラー箇所のハイライト長も調整
+    let highlight_length = std::cmp::min(
+        value.as_raw_str().chars().count() - 1,
+        display_line.chars().count() - display_column,
+    );
+
     orfail::Failure::new(format!(
         r#"{e}
 
 INPUT:{}{}{}
-{:4} |{line}
+{:4} |{display_line}
      |{:>column$}{} {}
 
 BACKTRACE:"#,
@@ -297,21 +319,58 @@ BACKTRACE:"#,
             " "
         },
         path.display(),
-        if let Some(prev) = prev_line {
+        if let Some(prev) = prev_display_line {
             format!("\n     |{prev}")
         } else {
             "".to_owned()
         },
         line_num,
         "^",
-        std::iter::repeat_n('^', value.as_raw_str().len() - 1).collect::<String>(),
+        std::iter::repeat_n('^', highlight_length).collect::<String>(),
         if let Some(reason) = e.source() {
             format!("{reason}")
         } else {
             "error".to_owned()
         },
-        column = column_num.get()
+        column = display_column
     ))
+}
+
+fn truncate_line_for_display(line: &str, column_pos: usize) -> (String, usize) {
+    let max_length = 80;
+    if line.chars().count() <= max_length {
+        return (line.to_string(), column_pos);
+    }
+
+    let half_max = max_length / 2;
+    let chars: Vec<char> = line.chars().collect();
+
+    // エラー位置を中心に表示範囲を決定
+    let start_pos = if column_pos <= half_max {
+        0
+    } else if column_pos + half_max >= chars.len() {
+        chars.len().saturating_sub(max_length)
+    } else {
+        column_pos.saturating_sub(half_max)
+    };
+
+    let end_pos = std::cmp::min(start_pos + max_length, chars.len());
+
+    let mut result = String::new();
+    let mut new_column_pos = column_pos - start_pos;
+
+    if start_pos > 0 {
+        result.push_str("...");
+        new_column_pos += 3;
+    }
+
+    result.push_str(&chars[start_pos..end_pos].iter().collect::<String>());
+
+    if end_pos < chars.len() {
+        result.push_str("...");
+    }
+
+    (result, new_column_pos)
 }
 
 #[cfg(test)]
@@ -356,6 +415,31 @@ INPUT:
      |        "another": 123
    4 |        "missing_comma": true
      |        ^ error
+
+BACKTRACE:
+"#;
+        assert_eq!(error.to_string(), expected);
+    }
+
+    #[test]
+    fn test_parse_long_single_line_malfomed_json() {
+        // 200 文字を超える長い行で JSON が不正なケース
+        let long_value = "a".repeat(150);
+        let invalid_json = format!(
+            r#"{{"key": "value", "foo": "bar", "very_long_key" "{}", "number": "not_a_number"}}"#,
+            long_value
+        );
+
+        let mut error = parse_str::<()>(&invalid_json).err().expect("bug");
+        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        eprintln!("{}", error.to_string());
+
+        // エラーメッセージの行が 80 文字に収まるように切りつめられる
+        let expected = r#"unexpected char while parsing Object at byte position 47
+
+INPUT:
+   1 |..."value", "foo": "bar", "very_long_key" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
+     |                                          ^ error
 
 BACKTRACE:
 "#;
