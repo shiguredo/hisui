@@ -3,6 +3,10 @@ use std::{borrow::Cow, collections::BTreeMap, error::Error, num::NonZeroUsize, p
 
 use orfail::OrFail;
 
+// エラーメッセージに、入力 JSON の問題となっている行を表示する際の文字数の最大値。
+// これを超える場合には超過分の前後が ... で置換される。
+const MAX_ERROR_LINE_CHARS: usize = 80;
+
 pub fn parse_file<P: AsRef<Path>, T>(path: P) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
@@ -339,7 +343,7 @@ BACKTRACE:"#,
 // エラー開始地点を起点にして、前後 50 文字まで含めるように切り詰める
 fn truncate_line_for_display(line: &str, column_pos: usize) -> (String, usize) {
     let chars: Vec<char> = line.chars().collect();
-    let max_context = 40;
+    let max_context = MAX_ERROR_LINE_CHARS / 2;
 
     // column_pos は 1-based なので、0-based に変換
     let error_pos = column_pos.saturating_sub(1);
