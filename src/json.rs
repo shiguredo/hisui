@@ -1,5 +1,7 @@
 //! JSON 関連のユーティリティモジュール
-use std::{borrow::Cow, collections::BTreeMap, error::Error, num::NonZeroUsize, path::Path};
+use std::{
+    borrow::Cow, collections::BTreeMap, error::Error, io::Write, num::NonZeroUsize, path::Path,
+};
 
 use orfail::OrFail;
 
@@ -43,6 +45,27 @@ pub fn to_pretty_string<T: nojson::DisplayJson>(value: T) -> String {
         f.value(&value)
     })
     .to_string()
+}
+
+pub fn pretty_print<T: nojson::DisplayJson>(value: T) -> orfail::Result<()> {
+    let stdout = std::io::stdout();
+    let result = writeln!(
+        stdout.lock(),
+        "{}",
+        nojson::json(|f| {
+            f.set_indent_size(2);
+            f.set_spacing(true);
+            f.value(&value)
+        })
+    );
+    match result {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+            // 出力先のパイプが途中閉じられた場合はエラーにしない
+            Ok(())
+        }
+        Err(e) => Err(e).or_fail(),
+        Ok(()) => Ok(()),
+    }
 }
 
 #[derive(Debug)]

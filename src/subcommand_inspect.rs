@@ -150,22 +150,15 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // 入力ファイルから取得した情報を出力する
-    let info = FileInfo {
+    crate::json::pretty_print(FileInfo {
         path: input_file_path.to_path_buf(),
         format,
         audio_codec,
         audio_samples,
         video_codec,
         video_samples,
-    };
-    println!(
-        "{}",
-        nojson::json(|f| {
-            f.set_indent_size(2);
-            f.set_spacing(true);
-            f.value(&info)
-        })
-    );
+    })
+    .or_fail()?;
 
     Ok(())
 }
