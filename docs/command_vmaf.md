@@ -40,7 +40,6 @@ Options:
       --distorted-yuv-file <PATH> 歪み映像（合成後）のYUVファイルの出力先を指定します [default: distorted.yuv]
       --vmaf-output-file <PATH>   vmaf コマンドの実行結果ファイルの出力先を指定します [default: vmaf-output.json]
       --openh264 <PATH>           OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
-  -P, --no-progress-bar           指定された場合は、合成の進捗を非表示にします
   -c, --max-cpu-cores <INTEGER>   合成処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
   -f, --frame-count <FRAMES>      変換するフレーム数を指定します [default: 1000]
 ```

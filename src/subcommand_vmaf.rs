@@ -31,7 +31,6 @@ struct Args {
     distorted_yuv_file_path: PathBuf,
     vmaf_output_file_path: PathBuf,
     openh264: Option<PathBuf>,
-    no_progress_bar: bool,
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
     root_dir: PathBuf,
@@ -88,11 +87,6 @@ impl Args {
                 .doc("OpenH264 の共有ライブラリのパスを指定します")
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
-            no_progress_bar: noargs::flag("no-progress-bar")
-                .short('P')
-                .doc("指定された場合は、合成の進捗を非表示にします")
-                .take(raw_args)
-                .is_present(),
             max_cpu_cores: noargs::opt("max-cpu-cores")
                 .short('c')
                 .ty("INTEGER")
@@ -176,8 +170,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
 
     // プログレスバーを準備
-    let progress_bar =
-        crate::arg_utils::create_frame_progress_bar(!args.no_progress_bar, args.frame_count as u64);
+    let progress_bar = crate::arg_utils::create_frame_progress_bar(true, args.frame_count as u64);
 
     // ミキサースレッドを起動
     let mut mixed_video_rx = VideoMixerThread::start(
