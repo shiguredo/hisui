@@ -1,4 +1,4 @@
-# `hisui vmaf` コマンド（開発者向け）
+# `hisui vmaf` コマンド
 
 `hisui vmaf` コマンドは、録画ファイルの品質評価を行うためのコマンドです。
 
@@ -47,7 +47,7 @@ Options:
 ## 実行例
 
 ```console
-$ hisui vmaf /path/to/録画ディレクトリ/
+$ hisui vmaf /path/to/archive/RECORDING_ID/
 # Compose for VMAF
   [00:00:09] [########################################] 1000/1000 (0s)
 => done
@@ -59,9 +59,9 @@ vmaf_v0.6.1: 96.361266
 => done
 
 {
-  "reference_yuv_file_path": "/path/to/録画ディレクトリ/reference.yuv",
-  "distorted_yuv_file_path": "/path/to/録画ディレクトリ/distorted.yuv",
-  "vmaf_output_file_path": "/path/to/録画ディレクトリ/vmaf-output.json",
+  "reference_yuv_file_path": "/path/to/archive/RECORDING_ID/reference.yuv",
+  "distorted_yuv_file_path": "/path/to/archive/RECORDING_ID/distorted.yuv",
+  "vmaf_output_file_path": "/path/to/archive/RECORDING_ID/vmaf-output.json",
   "encoder_name": "libvpx",
   "width": 642,
   "height": 240,
