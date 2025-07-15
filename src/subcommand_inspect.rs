@@ -16,7 +16,7 @@ use shiguredo_openh264::Openh264Library;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
-        .doc("指定された場合にはデコードまで行う")
+        .doc("指定された場合にはデコードまで行います")
         .take(&mut args)
         .is_present();
     let openh264: Option<PathBuf> = noargs::opt("openh264")
