@@ -29,7 +29,7 @@ Options:
 
 録画ファイルを指定して実行すると、ファイルのパース結果が JSON 形式で出力されます。
 
-```
+```console
 $ hisui inspect /path/to/archive.mp4 | head
 {
   "path": "/path/to/archive.mp4",
