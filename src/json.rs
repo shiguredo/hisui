@@ -1,7 +1,5 @@
 //! JSON 関連のユーティリティモジュール
-use std::{
-    borrow::Cow, collections::BTreeMap, error::Error, io::Write, num::NonZeroUsize, path::Path,
-};
+use std::{borrow::Cow, collections::BTreeMap, error::Error, io::Write, path::Path};
 
 use orfail::OrFail;
 
@@ -250,19 +248,7 @@ impl std::fmt::Display for JsonObjectMemberPath {
 }
 
 fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> orfail::Failure {
-    let (line_num, column_num) = if e.position() == text.len() {
-        // TODO(sile): nojson がこのケースを扱えるようになったら削除する
-        (
-            NonZeroUsize::new(text.lines().count()).unwrap_or(NonZeroUsize::MIN),
-            text.lines()
-                .last()
-                .map(|line| line.chars().count() + 1)
-                .and_then(NonZeroUsize::new)
-                .unwrap_or(NonZeroUsize::MIN),
-        )
-    } else {
-        e.get_line_and_column_numbers(text).expect("infallible")
-    };
+    let (line_num, column_num) = e.get_line_and_column_numbers(text).expect("infallible");
     let line = e.get_line(text).expect("infallible");
     let prev_line = if line_num.get() == 1 {
         None
