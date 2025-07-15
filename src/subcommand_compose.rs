@@ -137,5 +137,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         std::process::exit(1);
     }
 
+    crate::json::pretty_print(nojson::json(|f| f.object(|f| Ok(())))).or_fail()?;
+
     Ok(())
 }
