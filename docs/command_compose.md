@@ -1,1 +1,1 @@
-# `compose` コマンドについて
+# `hisui compose` コマンドについて
