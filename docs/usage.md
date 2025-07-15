@@ -10,7 +10,7 @@
 
 ビルド済みのバイナリを使用する場合は [Releases](https://github.com/shiguredo/hisui/releases) より環境に応じた最新のバイナリをダウンロードしてください。
 
-```sh
+```console
 $ curl -L https://github.com/shiguredo/hisui/releases/download/{ VERSION }/{ BINARY_NAME } -o hisui
 $ chmod +x hisui
 ```
@@ -18,18 +18,18 @@ $ chmod +x hisui
 Hisui には録画ファイルの合成を行うための [compose](command_compose.md) コマンドがあります。
 Sora が録画ファイルを保存したディレクトリを指定して、このコマンドを実行すると合成が始まります。
 
-```sh
-// 録画ディレクトリを確認
+```console
+# 録画ディレクトリを確認
 $ ls 録画ファイルの配置ディレクトリ/
 report-{ RECORDING_ID }.json
 archive-{ CONNECTION_ID }.json
 archive-{ CONNECTION_ID }.mp4
 ...
 
-// 合成を実行
+# 合成を実行
 $ ./hisui compose 録画ファイルの配置ディレクトリ/
 
-// 合成結果ファイルを確認
+# 合成結果ファイルを確認
 $ ls 録画ファイルの配置ディレクトリ/output.mp4
 ```
 
