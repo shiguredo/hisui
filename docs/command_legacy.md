@@ -14,7 +14,7 @@
 `hisui legacy` コマンドも [レガシー版 Hisui] と 100% の互換性がある訳ではありません。
 詳しい差異については [hisui_legacy\.md](hisui_legacy.md) をご確認ください。
 
-また `hisui legacy` コマンドは、将来的に削除される可能性があるため、 [`hisui compose`](command_compose.md) への移行を推奨しています。
+また `hisui legacy` コマンドは将来的に削除される可能性があるため、 [`hisui compose`](command_compose.md) への移行を推奨しています。
 
 ## 使用方法
 
