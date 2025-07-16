@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{Stats, WriterStats},
+    stats::{EncoderStats, MixerStats, ReaderStats, Stats, WriterStats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -143,12 +143,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     crate::json::pretty_print(nojson::json(|f| {
         f.object(|f| {
+            if let Some(path) = &args.layout_file_path {
+                f.member("layout_file_path", path)?;
+            }
+            f.member("input_root_dir", &args.root_dir)?;
             f.member("output_file_path", &output_file_path)?;
             if let Some(path) = &composer.stats_file_path {
                 f.member("stats_file_path", path)?;
             }
             if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
-                print_output_summary(f, &stats)?;
+                print_stats_summary(f, &stats)?;
             }
             Ok(())
         })
@@ -158,21 +162,66 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     Ok(())
 }
 
-fn print_output_summary(
+fn print_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
     stats: &Stats,
 ) -> std::fmt::Result {
-    let Some(WriterStats::Mp4(writer_stats)) = stats.writers.get(0) else {
-        return Ok(());
-    };
+    // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
+    //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
+    f.member(
+        "input_audio_file_count",
+        stats
+            .readers
+            .iter()
+            .filter(|s| matches!(s, ReaderStats::WebmAudio(_) | ReaderStats::Mp4Audio(_)))
+            .count(),
+    )?;
+    f.member(
+        "input_video_file_count",
+        stats
+            .readers
+            .iter()
+            .filter(|s| matches!(s, ReaderStats::WebmVideo(_) | ReaderStats::Mp4Video(_)))
+            .count(),
+    )?;
 
-    if let Some(codec) = &writer_stats.audio_codec {
-        f.member("output_audio_codec", codec)?;
+    if let Some(WriterStats::Mp4(writer)) = stats.writers.get(0) {
+        if let Some(codec) = &writer.audio_codec {
+            f.member("output_audio_codec", codec)?;
+        }
+        if let Some(codec) = &writer.video_codec {
+            f.member("output_video_codec", codec)?;
+        }
     }
 
-    if let Some(codec) = &writer_stats.video_codec {
-        f.member("output_video_codec", codec)?;
+    for mixer in &stats.mixers {
+        match mixer {
+            MixerStats::Audio(_mixer) => {}
+            MixerStats::Video(mixer) => {
+                f.member("output_video_width", mixer.output_video_resolution.width)?;
+                f.member("output_video_height", mixer.output_video_resolution.height)?;
+            }
+        }
     }
+
+    for encoder in &stats.encoders {
+        match encoder {
+            EncoderStats::Audio(audio_encoder) => {
+                if let Some(engine) = &audio_encoder.engine {
+                    f.member("audio_encoder_name", engine)?;
+                }
+            }
+            EncoderStats::Video(video_encoder) => {
+                if let Some(engine) = &video_encoder.engine {
+                    f.member("video_encoder_name", engine)?;
+                }
+            }
+        }
+    }
+
+    // TODO: add output_{audio,video}_bitrate, output_{audio,video}_duraiton
+
+    f.member("elapsed_seconds", stats.elapsed_seconds)?;
 
     Ok(())
 }

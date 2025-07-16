@@ -13,7 +13,7 @@ use crate::{
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},
-    stats::{SharedStats, WriterStats},
+    stats::{Seconds, SharedStats, WriterStats},
     types::CodecName,
     video::VideoFrameReceiver,
     writer_mp4::Mp4Writer,
@@ -182,10 +182,12 @@ impl Composer {
                 .writers
                 .push(WriterStats::Mp4(mp4_writer.stats().clone()));
             log::debug!("stats: {}", nojson::Json(&stats));
+
+            stats.elapsed_seconds = Seconds::new(start_time.elapsed());
         });
 
         if let Some(path) = &self.stats_file_path {
-            stats.finish(start_time, path);
+            stats.save(path);
         }
     }
 }

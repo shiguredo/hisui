@@ -42,10 +42,8 @@ impl SharedStats {
         }
     }
 
-    pub fn finish(&self, start_time: Instant, output_file_path: &Path) {
+    pub fn save(&self, output_file_path: &Path) {
         self.with_lock(|stats| {
-            stats.elapsed_seconds = Seconds::new(start_time.elapsed());
-
             let json = nojson::json(|f| {
                 f.set_indent_size(2);
                 f.set_spacing(true);
