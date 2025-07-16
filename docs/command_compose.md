@@ -1,8 +1,11 @@
 # `hisui compose` コマンド
 
-`hisui compose` コマンドは、録画ファイルを合成して最終的な動画ファイルを生成するためのコマンドです。
+`hisui compose` コマンドは、Sora が保存した録画ファイルを合成するためのコマンドです。
 
 このコマンドは、録画されたメディアファイルを指定されたレイアウトに従って合成し、単一の動画ファイルとして出力します。
+
+どのようなレイアウトが指定可能かについては [レイアウト機能](layout.md) のドキュメントをご参照ください。
+デフォルトでは [layout-examples/compose-default.json](../layout-examples/compose-default.json) のレイアウトが使用されます。
 
 ## 使用方法
 
@@ -81,16 +84,3 @@ $ hisui compose -l layout-examples/compose-default.json /path/to/archive/RECORDI
 }
 ...
 ```
-
-## 主要オプション
-
-- `--layout-file` (`-l`): 合成に使用するレイアウトファイルを指定します。指定しない場合は、デフォルトのレイアウトが使用されます。
-- `--output-file` (`-o`): 合成結果の出力ファイル名を指定します。デフォルトは `output.mp4` です。
-- `--stats-file` (`-s`): 合成処理の統計情報を JSON 形式で保存するファイルを指定します。
-- `--max-cpu-cores` (`-c`): 合成処理で使用するCPUコア数の上限を指定します。
-- `--no-progress-bar` (`-P`): 進捗バーを非表示にします。
-
-## 関連コマンド
-
-- [`hisui vmaf`](command_vmaf.md): 合成後の映像品質評価を行う際に使用
-- [`hisui tune`](command_tune.md): エンコードパラメーターの調整に使用
