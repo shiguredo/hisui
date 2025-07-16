@@ -82,7 +82,9 @@ Optuna による最適化は、以下のような流れとなります:
 
 ### デフォルト設定での実行
 
-Opusyon wo sitei_ sinakatta baai_ niha, ika_ no Deforuto settei_ de saitekika_
+オプションを指定しなかった場合には、以下のデフォルト設定で最適化が実行されます:
+- レイアウトファイル: [layout-examples/tune-libvpx-vp8.json](../layout-examples/tune-libvpx-vp8.json)
+- 探索空間定義ファイル: [search-space-examples/full.json](../search-space-examples/full.json)
 
 ```console
 $ hisui tune /path/to/archive/RECORDING_ID/
@@ -143,17 +145,23 @@ Trial #0
 ...
 ```
 
+`hisui tune` コマンドの出力には、以下のような情報が含まれています:
+- `====== INFO ======`
+  - 探索（最適化）の基本情報が表示されます
+- `====== OPTUNA TRIAL ({I}/{N}) ======`
+  - Optuna の各トライアルの情報が表示されます
+- `====== BEST TRIALS (sorted by execution time) ======`
+  - 探索によって見つかった最適解の集合が表示されます
+  - 表示タイミングは以下の通りです:
+    - `hisui tune` コマンドを実行して、最初のトライアルの完了後
+    - 新しい最適解が発見されて、最適解集合が更新された後
+    - `hisui tune` コマンドが指定のトライアル回数の実行を完了して終了する時
 
-## 出力ファイル
+最適解集合の表示には、
+そのパラメーターセットを使って合成を行うコマンドの例（`$ hisui compose -l ...`）も含まれているので、
+見つかった最適解を簡単に試すことができます。
 
-実行時に以下のファイルが作成されます：
-
-- `hisui-tune/optuna.db` - Optuna の実行履歴データベース
-- `hisui-tune/hisui-tune/trial-N/layout.json` - 各試行で使用されたレイアウトファイル
-- `hisui-tune/hisui-tune/trial-N/metrics.json` - 各試行の評価結果
-- `hisui-tune/hisui-tune/trial-N/reference.yuv` - 参照映像（合成前）
-- `hisui-tune/hisui-tune/trial-N/distorted.yuv` - 歪み映像（合成後）
-- `hisui-tune/hisui-tune/trial-N/vmaf-output.json` - VMAF評価結果
+なお `[I 2025-07-16 12:35:43,172] ...` という形式のログ出力は Optuna によるものです。
 
 ## 実用的な使用方法
 
@@ -176,3 +184,5 @@ TODO:
 - clear sqlite file or change study name
 - trial count
 - ocasional failed evaluation
+- oputna visualization or dashboard
+- disk cleanup after optimization
