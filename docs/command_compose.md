@@ -35,7 +35,7 @@ Options:
 
 ## 実行例
 
-### 基本的な実行
+### デフォルトレイアウトでの合成
 
 ```console
 $ hisui compose /path/to/archive/RECORDING_ID/
@@ -59,7 +59,7 @@ $ hisui compose /path/to/archive/RECORDING_ID/
 }
 ```
 
-### レイアウトファイルを指定した実行
+### レイアウトファイルを指定しての合成
 
 ```console
 $ hisui compose -l layout-examples/compose-default.json /path/to/archive/RECORDING_ID/
