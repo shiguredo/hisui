@@ -171,22 +171,23 @@ fn print_input_stats_summary(
 ) -> std::fmt::Result {
     // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
     //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
-    f.member(
-        "input_audio_file_count",
-        stats
-            .readers
-            .iter()
-            .filter(|s| matches!(s, ReaderStats::WebmAudio(_) | ReaderStats::Mp4Audio(_)))
-            .count(),
-    )?;
-    f.member(
-        "input_video_file_count",
-        stats
-            .readers
-            .iter()
-            .filter(|s| matches!(s, ReaderStats::WebmVideo(_) | ReaderStats::Mp4Video(_)))
-            .count(),
-    )?;
+    let count = stats
+        .readers
+        .iter()
+        .filter(|s| matches!(s, ReaderStats::WebmAudio(_) | ReaderStats::Mp4Audio(_)))
+        .count();
+    if count > 0 {
+        f.member("input_audio_file_count", count)?;
+    }
+
+    let count = stats
+        .readers
+        .iter()
+        .filter(|s| matches!(s, ReaderStats::WebmVideo(_) | ReaderStats::Mp4Video(_)))
+        .count();
+    if count > 0 {
+        f.member("input_video_file_count", count)?;
+    }
 
     Ok(())
 }
