@@ -15,7 +15,7 @@ macOS の場合には以下のようにして、依存パッケージがイン�
 
 ```console
 $ brew install vmaf
-$ pip install optuna
+$ uv tool install optuna
 ```
 
 ## 使用方法
