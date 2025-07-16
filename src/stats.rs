@@ -28,17 +28,16 @@ impl SharedStats {
         Self { inner }
     }
 
-    pub fn with_lock<F>(&self, f: F)
+    pub fn with_lock<F, T>(&self, f: F) -> Option<T>
     where
-        F: FnOnce(&mut Stats),
+        F: FnOnce(&mut Stats) -> T,
     {
         match self.inner.lock() {
-            Ok(mut stats) => {
-                f(&mut stats);
-            }
+            Ok(mut stats) => Some(f(&mut stats)),
             Err(e) => {
                 // 統計情報の更新ができなくても致命的ではないので警告に止める
                 log::warn!("failed to acqure stats lock: {e}");
+                None
             }
         }
     }

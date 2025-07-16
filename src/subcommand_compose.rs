@@ -3,7 +3,11 @@ use std::{num::NonZeroUsize, path::PathBuf};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::{composer::Composer, layout::Layout};
+use crate::{
+    composer::Composer,
+    layout::Layout,
+    stats::{Stats, WriterStats},
+};
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
 
@@ -120,7 +124,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // 出力ファイルパスを決定
-    let out_file_path = args.root_dir.join(args.output_file_path);
+    let output_file_path = args.root_dir.join(args.output_file_path);
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
@@ -130,14 +134,45 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     composer.stats_file_path = args.stats_file_path.map(|path| args.root_dir.join(path));
 
     // 合成を実行
-    let result = composer.compose(&out_file_path).or_fail()?;
+    let result = composer.compose(&output_file_path).or_fail()?;
 
     if !result.success {
         // エラー発生時は終了コードを変える
         std::process::exit(1);
     }
 
-    crate::json::pretty_print(nojson::json(|f| f.object(|f| Ok(())))).or_fail()?;
+    crate::json::pretty_print(nojson::json(|f| {
+        f.object(|f| {
+            f.member("output_file_path", &output_file_path)?;
+            if let Some(path) = &composer.stats_file_path {
+                f.member("stats_file_path", path)?;
+            }
+            if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
+                print_output_summary(f, &stats)?;
+            }
+            Ok(())
+        })
+    }))
+    .or_fail()?;
+
+    Ok(())
+}
+
+fn print_output_summary(
+    f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
+    stats: &Stats,
+) -> std::fmt::Result {
+    let Some(WriterStats::Mp4(writer_stats)) = stats.writers.get(0) else {
+        return Ok(());
+    };
+
+    if let Some(codec) = &writer_stats.audio_codec {
+        f.member("output_audio_codec", codec)?;
+    }
+
+    if let Some(codec) = &writer_stats.video_codec {
+        f.member("output_video_codec", codec)?;
+    }
 
     Ok(())
 }
