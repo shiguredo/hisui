@@ -37,6 +37,23 @@ Options:
 ```console
 $ hisui compose /path/to/archive/RECORDING_ID/
   [00:00:09] [########################################] 27/27s (0s)
+{
+  "input_root_dir": "/path/to/archive/RECORDING_ID/",
+  "output_file_path": "/path/to/archive/RECORDING_ID/output.mp4",
+  "input_audio_file_count": 2,
+  "input_video_file_count": 2,
+  "output_audio_codec": "OPUS",
+  "output_audio_duration_seconds": 26.96,
+  "output_audio_bitrate": 58566,
+  "output_video_codec": "VP8",
+  "output_video_duration_seconds": 27,
+  "output_video_bitrate": 375525,
+  "output_video_width": 642,
+  "output_video_height": 240,
+  "video_encoder_name": "libvpx",
+  "audio_encoder_name": "opus",
+  "elapsed_seconds": 9.098501
+}
 ```
 
 ### レイアウトファイルを指定した実行
@@ -44,6 +61,25 @@ $ hisui compose /path/to/archive/RECORDING_ID/
 ```console
 $ hisui compose -l layout-examples/compose-default.json /path/to/archive/RECORDING_ID/
   [00:00:09] [########################################] 27/27s (0s)
+{
+  "layout_file_path": "layout-examples/compose-default.json",
+  "input_root_dir": "/path/to/archive/RECORDING_ID/",
+  "output_file_path": "/path/to/archive/RECORDING_ID/output.mp4",
+  "input_audio_file_count": 2,
+  "input_video_file_count": 2,
+  "output_audio_codec": "OPUS",
+  "output_audio_duration_seconds": 26.96,
+  "output_audio_bitrate": 58566,
+  "output_video_codec": "VP8",
+  "output_video_duration_seconds": 27,
+  "output_video_bitrate": 375525,
+  "output_video_width": 642,
+  "output_video_height": 240,
+  "video_encoder_name": "libvpx",
+  "audio_encoder_name": "opus",
+  "elapsed_seconds": 9.098501
+}
+...
 ```
 
 ## 主要オプション
