@@ -48,3 +48,12 @@ Hisui では合成時に使用するエンコードコーデックやエンコ�
 指定方法の詳細は [エンコードコーデックやパラメーターの指定](encode.md) のドキュメントをご参照ください。
 
 また [tune](command_tune.md) コマンドを利用することで、エンコードパラメーターの自動調整を行うことができます。
+
+## 利用可能なコマンド一覧
+
+- [`compose`](command_compose.md) - Sora が保存した録画ファイルを合成するためのコマンド
+- [`legacy`](command_legacy.md) - レガシー版 Hisui との互換性維持用コマンド
+- [`list-codecs`](command_list_codecs.md) - 利用可能なコーデックの一覧を表示するコマンド
+- [`tune`](command_tune.md) - 映像エンコードパラメーターの最適化を行うコマンド
+- [`vmaf`](command_vmaf.md) - 録画ファイルの品質評価（VMAF スコア計算）を行うコマンド
+- [`inspect`](command_inspect.md) - 録画ファイルの詳細情報を取得するコマンド

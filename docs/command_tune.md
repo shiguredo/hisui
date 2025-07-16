@@ -154,3 +154,4 @@ TODO:
 - frame count
 - エンコーダー毎の実行時間の比較についての注意
 - 探索結果をつかって合成を行う方法
+- output bitrate
