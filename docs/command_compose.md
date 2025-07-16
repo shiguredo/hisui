@@ -84,3 +84,9 @@ $ hisui compose -l layout-examples/compose-default.json /path/to/archive/RECORDI
 }
 ...
 ```
+
+## Tips
+
+- TODO: `--max-cpu-cores` について
+- TODO: `hisui list-codecs` について
+- TODO: `hisui tune` について
