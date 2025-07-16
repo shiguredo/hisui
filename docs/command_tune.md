@@ -47,7 +47,25 @@ Options:
   -f, --frame-count <FRAMES>     調整用にエンコードする映像フレームの数を指定します [default: 300]
 ```
 
-## 最適化メトリクス
+## Optuna による最適化の概要
+
+### 最適化の流れ
+
+Optuna による最適化は、以下のような流れとなります:
+1. ユーザーがパラメーターの探索空間を指定する
+   - `hisui tune` コマンドの `--layout-file` および `--search-space-file` の指定がこれに該当
+2. Optuna は、探索空間の中から次に探索するパラメーターセットをサンプリングする
+3. Hisui はサンプリングされたパラメーターセットを `hisui vmaf` コマンドを使って評価する
+   - Optunaの用語では「パラメーターセットのサンプリングと評価」をまとめたものを「トライアル」と呼称
+4. Hisui は評価結果を Optuna にフィードバックする
+5. Optuna は次のトライアルでのサンプリングの参考にするために、フィードバック結果を探索履歴に反映する
+   - Optuna の探索履歴は SQLite のデータベースファイルに格納されている
+6. 2 に戻って、次のトライアルを開始する
+   - これを`--trial-count`で指定の回数に達するまで繰り返す
+
+なおこの一連の流れは `hisui tune` によってラップされているため、ユーザーが細かく意識する必要はありません。
+
+### 最適化メトリクス
 
 `hisui tune` コマンドは以下の2つの指標を同時に最適化します：
 
@@ -56,10 +74,15 @@ Options:
 
 これらは多目的最適化問題として扱われ、Optuna のパレートフロント探索によって、両方の目的を考慮した最適解の集合（パレート解）が見つけられます。
 
+多目的最適化の場合には単一の最適解は定まらないので、
+トレードオフを含んだ最適解の集合の中から最終的に使用する解（パラメーターセット）を選択するのは
+ユーザーの責務となります。
+
 ## 実行例
 
-
 ### デフォルト設定での実行
+
+Opusyon wo sitei_ sinakatta baai_ niha, ika_ no Deforuto settei_ de saitekika_
 
 ```console
 $ hisui tune /path/to/archive/RECORDING_ID/
@@ -120,11 +143,6 @@ Trial #0
 ...
 ```
 
-### カスタムレイアウトファイルを使用した実行
-
-```console
-$ hisui tune -l layout-examples/tune-video-toolbox-h265.json /path/to/archive/RECORDING_ID/ -f 10
-```
 
 ## 出力ファイル
 
@@ -155,3 +173,6 @@ TODO:
 - エンコーダー毎の実行時間の比較についての注意
 - 探索結果をつかって合成を行う方法
 - output bitrate
+- clear sqlite file or change study name
+- trial count
+- ocasional failed evaluation
