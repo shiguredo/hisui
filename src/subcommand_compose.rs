@@ -146,13 +146,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             if let Some(path) = &args.layout_file_path {
                 f.member("layout_file_path", path)?;
             }
-            f.member("input_root_dir", &args.root_dir)?;
-            f.member("output_file_path", &output_file_path)?;
             if let Some(path) = &composer.stats_file_path {
                 f.member("stats_file_path", path)?;
             }
+            f.member("input_root_dir", &args.root_dir)?;
             if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
-                print_stats_summary(f, &stats)?;
+                print_input_stats_summary(f, &stats)?;
+            }
+            f.member("output_file_path", &output_file_path)?;
+            if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
+                print_output_stats_summary(f, &stats)?;
             }
             Ok(())
         })
@@ -162,7 +165,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     Ok(())
 }
 
-fn print_stats_summary(
+fn print_input_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
     stats: &Stats,
 ) -> std::fmt::Result {
@@ -185,34 +188,69 @@ fn print_stats_summary(
             .count(),
     )?;
 
-    if let Some(WriterStats::Mp4(writer)) = stats.writers.get(0) {
-        if let Some(codec) = &writer.audio_codec {
-            f.member("output_audio_codec", codec)?;
-            f.member(
-                "output_audio_duration_seconds",
-                writer.total_audio_track_seconds,
-            )?;
+    Ok(())
+}
 
-            let duration = writer.total_audio_track_seconds.get();
-            if !duration.is_zero() {
-                let bitrate = (writer.total_audio_sample_data_byte_size as f32 * 8.0)
-                    / duration.as_secs_f32();
-                f.member("output_audio_bitrate", bitrate as u64)?;
+fn print_output_stats_summary(
+    f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
+    stats: &Stats,
+) -> std::fmt::Result {
+    let Some(WriterStats::Mp4(writer)) = stats.writers.get(0) else {
+        return Ok(());
+    };
+
+    if let Some(codec) = &writer.audio_codec {
+        f.member("output_audio_codec", codec)?;
+
+        for encoder in &stats.encoders {
+            match encoder {
+                EncoderStats::Audio(encoder) => {
+                    if let Some(engine) = &encoder.engine {
+                        f.member("output_audio_encoder_name", engine)?;
+                        break;
+                    }
+                }
+                _ => {}
             }
         }
-        if let Some(codec) = &writer.video_codec {
-            f.member("output_video_codec", codec)?;
-            f.member(
-                "output_video_duration_seconds",
-                writer.total_video_track_seconds,
-            )?;
 
-            let duration = writer.total_video_track_seconds.get();
-            if !duration.is_zero() {
-                let bitrate = (writer.total_video_sample_data_byte_size as f32 * 8.0)
-                    / duration.as_secs_f32();
-                f.member("output_video_bitrate", bitrate as u64)?;
+        f.member(
+            "output_audio_duration_seconds",
+            writer.total_audio_track_seconds,
+        )?;
+
+        let duration = writer.total_audio_track_seconds.get();
+        if !duration.is_zero() {
+            let bitrate =
+                (writer.total_audio_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            f.member("output_audio_bitrate", bitrate as u64)?;
+        }
+    }
+    if let Some(codec) = &writer.video_codec {
+        f.member("output_video_codec", codec)?;
+
+        for encoder in &stats.encoders {
+            match encoder {
+                EncoderStats::Video(encoder) => {
+                    if let Some(engine) = &encoder.engine {
+                        f.member("output_video_encoder_name", engine)?;
+                        break;
+                    }
+                }
+                _ => {}
             }
+        }
+
+        f.member(
+            "output_video_duration_seconds",
+            writer.total_video_track_seconds,
+        )?;
+
+        let duration = writer.total_video_track_seconds.get();
+        if !duration.is_zero() {
+            let bitrate =
+                (writer.total_video_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            f.member("output_video_bitrate", bitrate as u64)?;
         }
     }
 
@@ -222,21 +260,6 @@ fn print_stats_summary(
             MixerStats::Video(mixer) => {
                 f.member("output_video_width", mixer.output_video_resolution.width)?;
                 f.member("output_video_height", mixer.output_video_resolution.height)?;
-            }
-        }
-    }
-
-    for encoder in &stats.encoders {
-        match encoder {
-            EncoderStats::Audio(audio_encoder) => {
-                if let Some(engine) = &audio_encoder.engine {
-                    f.member("audio_encoder_name", engine)?;
-                }
-            }
-            EncoderStats::Video(video_encoder) => {
-                if let Some(engine) = &video_encoder.engine {
-                    f.member("video_encoder_name", engine)?;
-                }
             }
         }
     }
