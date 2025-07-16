@@ -710,6 +710,12 @@ pub struct Mp4WriterStats {
     /// 出力ファイルに含まれる映像サンプルの数
     pub total_video_sample_count: u64,
 
+    /// 出力ファイルに含まれる音声データのバイト数
+    pub total_audio_sample_data_byte_size: u64,
+
+    /// 出力ファイルに含まれる映像データのバイト数
+    pub total_video_sample_data_byte_size: u64,
+
     /// 出力ファイルに含まれる音声トラックの尺
     pub total_audio_track_seconds: Seconds,
 
@@ -732,6 +738,14 @@ impl nojson::DisplayJson for Mp4WriterStats {
             f.member("total_video_chunk_count", self.total_video_chunk_count)?;
             f.member("total_audio_sample_count", self.total_audio_sample_count)?;
             f.member("total_video_sample_count", self.total_video_sample_count)?;
+            f.member(
+                "total_audio_sample_data_byte_size",
+                self.total_audio_sample_data_byte_size,
+            )?;
+            f.member(
+                "total_video_sample_data_byte_size",
+                self.total_video_sample_data_byte_size,
+            )?;
             f.member("total_audio_track_seconds", self.total_audio_track_seconds)?;
             f.member("total_video_track_seconds", self.total_video_track_seconds)?;
             f.member("total_processing_seconds", self.total_processing_seconds)?;

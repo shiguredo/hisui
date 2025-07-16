@@ -188,9 +188,31 @@ fn print_stats_summary(
     if let Some(WriterStats::Mp4(writer)) = stats.writers.get(0) {
         if let Some(codec) = &writer.audio_codec {
             f.member("output_audio_codec", codec)?;
+            f.member(
+                "output_audio_duration_seconds",
+                writer.total_audio_track_seconds,
+            )?;
+
+            let duration = writer.total_audio_track_seconds.get();
+            if !duration.is_zero() {
+                let bitrate = (writer.total_audio_sample_data_byte_size as f32 * 8.0)
+                    / duration.as_secs_f32();
+                f.member("output_audio_bitrate", bitrate as u64)?;
+            }
         }
         if let Some(codec) = &writer.video_codec {
             f.member("output_video_codec", codec)?;
+            f.member(
+                "output_video_duration_seconds",
+                writer.total_video_track_seconds,
+            )?;
+
+            let duration = writer.total_video_track_seconds.get();
+            if !duration.is_zero() {
+                let bitrate = (writer.total_video_sample_data_byte_size as f32 * 8.0)
+                    / duration.as_secs_f32();
+                f.member("output_video_bitrate", bitrate as u64)?;
+            }
         }
     }
 
@@ -218,8 +240,6 @@ fn print_stats_summary(
             }
         }
     }
-
-    // TODO: add output_{audio,video}_bitrate, output_{audio,video}_duraiton
 
     f.member("elapsed_seconds", stats.elapsed_seconds)?;
 
