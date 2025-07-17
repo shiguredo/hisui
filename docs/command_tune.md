@@ -173,13 +173,49 @@ Trial #0
 
 なお `[I 2025-07-16 12:35:43,172] ...` という形式のログ出力は Optuna によるものです。
 
-## 探索に使用するレイアウトファイルの形式
+## 探索用のレイアウトファイル
 
-TODO
+`hisui tune` コマンドで使用するレイアウトファイルは基本的には通常のものと同様です。
+ただし、JSON オブjエクトのメンバーの値が `null` の場合には、
+それが Optuna によって提案された値に置換された上で `hisui vmaf` コマンドに渡される点が異なります。
 
-## 探索空間ファイルの形式
+例えば以下は、デフォルトで使われる [tune-libvpx-vp8.json](../layout-examples/tune-libvpx-vp8.json) の内容を一部抜粋したものです:
 
-TODO
+```json
+{
+  "resolution": "1280x720",
+  "video_codec": "VP8",
+  "video_bitrate": 1000000,
+  "frame_rate": 30,
+  ...
+  "libvpx_vp8_encode_params": {
+    "threads": 1,
+    "keyframe_interval": 300,
+    "min_quantizer": null,
+    "max_quantizer": null,
+    "cq_level": null,
+    "deadline": null,
+    ...
+  }
+}
+```
+
+この中の
+
+
+## 探索空間ファイル
+
+```
+  "libvpx_vp8_encode_params.cq_level": {
+    "min": 0,
+    "max": 63
+  },
+  "libvpx_vp8_encode_params.deadline": [
+    "best",
+    "good",
+    "realtime"
+  ],
+```
 
 ## Tips
 
