@@ -242,9 +242,19 @@ Trial #0
 
 ## Tips
 
-### 探索に使用するレイアウトファイルをどうするか
+### 探索に使用するレイアウトファイルの作成方法
 
-TODO
+`hisui` リポジトリには各コーデック・エンコーダー毎に参考にできるレイアウトファイルが用意されています:
+- VP8 (libvpx): [tune-libvpx-vp8.json](../layout-examples/tune-libvpx-vp8.json)
+- VP9 (libvpx): [tune-libvpx-vp9.json](../layout-examples/tune-libvpx-vp9.json)
+- AV1 (SVT-AV1): [tune-svt-av1.json](../layout-examples/tune-svt-av1.json)
+- H.264 (OpenH264): [tune-openh264.json](../layout-examples/tune-openh264.json)
+- H.264 (Video Toolbox): [tune-video-toolbox-h264.json](../layout-examples/tune-video-toolbox-h264.json)
+- H.265 (Video Toolbox): [tune-video-toolbox-h265.json](../layout-examples/tune-video-toolbox-h265.json)
+
+これらをベースにした上で、`video_layout` や `resolution` などの項目を各自のユースケースに合わせて修正するのが簡単です。
+
+なお、`hisui tune` では音声の合成は行われないので、音声関連の項目がレイアウトファイルに含まれていても、単に無視されます。
 
 ### デフォルト以外の探索空間を使った方がいい場合
 
