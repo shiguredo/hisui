@@ -200,8 +200,13 @@ Trial #0
 }
 ```
 
-この中の
+この中の `resolution` や `libvpx_vp8_encode_params.threads` などには `null` ではない値が指定されているので、
+各トライアルで固定の値が使われます。
 
+一方、`libvpx_vp8_encode_params.min_quantizer` や `libvpx_vp8_encode_params.cq_level` には `null` が指定されているので、
+各トライアルで別々の、Optuna が提案した値が使われることになります。
+
+つまり、「探索したいパラメーターには `null` を指定する」という点が通常のレイアウトファイルとの差異となります。
 
 ## 探索空間ファイル
 
