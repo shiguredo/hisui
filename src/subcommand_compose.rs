@@ -196,7 +196,11 @@ fn print_output_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
     stats: &Stats,
 ) -> std::fmt::Result {
-    let Some(WriterStats::Mp4(writer)) = stats.writers.get(0) else {
+    let Some(WriterStats::Mp4(writer)) = stats
+        .writers
+        .iter()
+        .find(|x| matches!(x, WriterStats::Mp4(_)))
+    else {
         return Ok(());
     };
 
