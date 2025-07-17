@@ -16,7 +16,7 @@ use shiguredo_openh264::Openh264Library;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
-        .doc("指定された場合にはデコードまで行う")
+        .doc("指定された場合にはデコードまで行います")
         .take(&mut args)
         .is_present();
     let openh264: Option<PathBuf> = noargs::opt("openh264")
@@ -150,22 +150,15 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // 入力ファイルから取得した情報を出力する
-    let info = FileInfo {
+    crate::json::pretty_print(FileInfo {
         path: input_file_path.to_path_buf(),
         format,
         audio_codec,
         audio_samples,
         video_codec,
         video_samples,
-    };
-    println!(
-        "{}",
-        nojson::json(|f| {
-            f.set_indent_size(2);
-            f.set_spacing(true);
-            f.value(&info)
-        })
-    );
+    })
+    .or_fail()?;
 
     Ok(())
 }

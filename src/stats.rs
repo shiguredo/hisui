@@ -28,25 +28,22 @@ impl SharedStats {
         Self { inner }
     }
 
-    pub fn with_lock<F>(&self, f: F)
+    pub fn with_lock<F, T>(&self, f: F) -> Option<T>
     where
-        F: FnOnce(&mut Stats),
+        F: FnOnce(&mut Stats) -> T,
     {
         match self.inner.lock() {
-            Ok(mut stats) => {
-                f(&mut stats);
-            }
+            Ok(mut stats) => Some(f(&mut stats)),
             Err(e) => {
                 // 統計情報の更新ができなくても致命的ではないので警告に止める
                 log::warn!("failed to acqure stats lock: {e}");
+                None
             }
         }
     }
 
-    pub fn finish(&self, start_time: Instant, output_file_path: &Path) {
+    pub fn save(&self, output_file_path: &Path) {
         self.with_lock(|stats| {
-            stats.elapsed_seconds = Seconds::new(start_time.elapsed());
-
             let json = nojson::json(|f| {
                 f.set_indent_size(2);
                 f.set_spacing(true);
@@ -713,6 +710,12 @@ pub struct Mp4WriterStats {
     /// 出力ファイルに含まれる映像サンプルの数
     pub total_video_sample_count: u64,
 
+    /// 出力ファイルに含まれる音声データのバイト数
+    pub total_audio_sample_data_byte_size: u64,
+
+    /// 出力ファイルに含まれる映像データのバイト数
+    pub total_video_sample_data_byte_size: u64,
+
     /// 出力ファイルに含まれる音声トラックの尺
     pub total_audio_track_seconds: Seconds,
 
@@ -735,6 +738,14 @@ impl nojson::DisplayJson for Mp4WriterStats {
             f.member("total_video_chunk_count", self.total_video_chunk_count)?;
             f.member("total_audio_sample_count", self.total_audio_sample_count)?;
             f.member("total_video_sample_count", self.total_video_sample_count)?;
+            f.member(
+                "total_audio_sample_data_byte_size",
+                self.total_audio_sample_data_byte_size,
+            )?;
+            f.member(
+                "total_video_sample_data_byte_size",
+                self.total_video_sample_data_byte_size,
+            )?;
             f.member("total_audio_track_seconds", self.total_audio_track_seconds)?;
             f.member("total_video_track_seconds", self.total_video_track_seconds)?;
             f.member("total_processing_seconds", self.total_processing_seconds)?;

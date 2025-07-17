@@ -208,6 +208,7 @@ impl Mp4Writer {
         // mdat ボックスにデータを追記する
         self.file.write_all(&frame.data).or_fail()?;
         self.file_size += frame.data.len() as u64;
+        self.stats.total_video_sample_data_byte_size += frame.data.len() as u64;
 
         self.stats.total_video_track_seconds += frame.duration;
         self.appending_video_chunk = true;
@@ -256,6 +257,7 @@ impl Mp4Writer {
         // mdat ボックスにデータを追記する
         self.file.write_all(&data.data).or_fail()?;
         self.file_size += data.data.len() as u64;
+        self.stats.total_audio_sample_data_byte_size += data.data.len() as u64;
 
         self.stats.total_audio_track_seconds += data.duration;
         self.appending_video_chunk = false;

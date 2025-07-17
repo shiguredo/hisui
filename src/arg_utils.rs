@@ -69,8 +69,10 @@ fn create_progress_bar(
 }
 
 #[cfg(target_os = "macos")]
-pub fn maybe_limit_cpu_cores(_cores: Option<NonZeroUsize>) -> orfail::Result<()> {
-    log::warn!("`--cpu-cores` option is ignored on MacOS");
+pub fn maybe_limit_cpu_cores(cores: Option<NonZeroUsize>) -> orfail::Result<()> {
+    if cores.is_some() {
+        log::warn!("`--cpu-cores` option is ignored on MacOS");
+    }
     Ok(())
 }
 

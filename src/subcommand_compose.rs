@@ -3,7 +3,11 @@ use std::{num::NonZeroUsize, path::PathBuf};
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::{composer::Composer, layout::Layout};
+use crate::{
+    composer::Composer,
+    layout::Layout,
+    stats::{EncoderStats, MixerStats, ReaderStats, Stats, WriterStats},
+};
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
 
@@ -120,7 +124,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // 出力ファイルパスを決定
-    let out_file_path = args.root_dir.join(args.output_file_path);
+    let output_file_path = args.root_dir.join(args.output_file_path);
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
@@ -130,12 +134,142 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     composer.stats_file_path = args.stats_file_path.map(|path| args.root_dir.join(path));
 
     // 合成を実行
-    let result = composer.compose(&out_file_path).or_fail()?;
+    let result = composer.compose(&output_file_path).or_fail()?;
 
     if !result.success {
         // エラー発生時は終了コードを変える
         std::process::exit(1);
     }
+
+    crate::json::pretty_print(nojson::json(|f| {
+        f.object(|f| {
+            if let Some(path) = &args.layout_file_path {
+                f.member("layout_file_path", path)?;
+            }
+            if let Some(path) = &composer.stats_file_path {
+                f.member("stats_file_path", path)?;
+            }
+            f.member("input_root_dir", &args.root_dir)?;
+            if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
+                print_input_stats_summary(f, &stats)?;
+            }
+            f.member("output_file_path", &output_file_path)?;
+            if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
+                print_output_stats_summary(f, &stats)?;
+            }
+            Ok(())
+        })
+    }))
+    .or_fail()?;
+
+    Ok(())
+}
+
+fn print_input_stats_summary(
+    f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
+    stats: &Stats,
+) -> std::fmt::Result {
+    // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
+    //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
+    let count = stats
+        .readers
+        .iter()
+        .filter(|s| matches!(s, ReaderStats::WebmAudio(_) | ReaderStats::Mp4Audio(_)))
+        .count();
+    if count > 0 {
+        f.member("input_audio_file_count", count)?;
+    }
+
+    let count = stats
+        .readers
+        .iter()
+        .filter(|s| matches!(s, ReaderStats::WebmVideo(_) | ReaderStats::Mp4Video(_)))
+        .count();
+    if count > 0 {
+        f.member("input_video_file_count", count)?;
+    }
+
+    Ok(())
+}
+
+fn print_output_stats_summary(
+    f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
+    stats: &Stats,
+) -> std::fmt::Result {
+    let Some(WriterStats::Mp4(writer)) = stats
+        .writers
+        .iter()
+        .find(|x| matches!(x, WriterStats::Mp4(_)))
+    else {
+        return Ok(());
+    };
+
+    if let Some(codec) = &writer.audio_codec {
+        f.member("output_audio_codec", codec)?;
+
+        for encoder in &stats.encoders {
+            match encoder {
+                EncoderStats::Audio(encoder) => {
+                    if let Some(engine) = &encoder.engine {
+                        f.member("output_audio_encoder_name", engine)?;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        f.member(
+            "output_audio_duration_seconds",
+            writer.total_audio_track_seconds,
+        )?;
+
+        let duration = writer.total_audio_track_seconds.get();
+        if !duration.is_zero() {
+            let bitrate =
+                (writer.total_audio_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            f.member("output_audio_bitrate", bitrate as u64)?;
+        }
+    }
+    if let Some(codec) = &writer.video_codec {
+        f.member("output_video_codec", codec)?;
+
+        for encoder in &stats.encoders {
+            match encoder {
+                EncoderStats::Video(encoder) => {
+                    if let Some(engine) = &encoder.engine {
+                        f.member("output_video_encoder_name", engine)?;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        f.member(
+            "output_video_duration_seconds",
+            writer.total_video_track_seconds,
+        )?;
+
+        let duration = writer.total_video_track_seconds.get();
+        if !duration.is_zero() {
+            let bitrate =
+                (writer.total_video_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            f.member("output_video_bitrate", bitrate as u64)?;
+        }
+    }
+
+    for mixer in &stats.mixers {
+        match mixer {
+            MixerStats::Audio(_mixer) => {}
+            MixerStats::Video(mixer) => {
+                f.member("output_video_width", mixer.output_video_resolution.width)?;
+                f.member("output_video_height", mixer.output_video_resolution.height)?;
+            }
+        }
+    }
+
+    f.member("elapsed_seconds", stats.elapsed_seconds)?;
 
     Ok(())
 }
