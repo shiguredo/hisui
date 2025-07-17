@@ -171,6 +171,11 @@ Trial #0
 そのパラメーターセットを使って合成を行うコマンドの例（`$ hisui compose -l ...`）も含まれているので、
 見つかった最適解を簡単に試すことができます。
 
+`hisui tune` コマンドの探索結果についての出力は必要最低限のものとなっていますが、
+Optuna の可視化機能やダッシュボードを活用することで、より詳細な確認や分析が可能となります。
+- 可視化機能: [Optuna Documentation - Visualization](https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/005_visualization.html)
+- ダッシュボード: [Optuna Dashboard](https://github.com/optuna/optuna-dashboard)
+
 なお `[I 2025-07-16 12:35:43,172] ...` という形式のログ出力は Optuna によるものです。
 
 ## 探索用のレイアウトファイル
@@ -361,10 +366,6 @@ Hisui や依存ライブラリー（例えば OpenH264 の動的ライブラリ�
 VMAF スコア計算用の YUV ファイルが配置されていますが、これは映像の無圧縮データなので、サイズが大きいです。
 
 これらのファイルはトライアルの評価後は使用されないので、削除してしまっても問題ありません。
-
-### Optuna の可視化機能や optuna dashboard について
-
-TODO
 
 
 
