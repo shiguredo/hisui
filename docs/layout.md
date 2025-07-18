@@ -73,6 +73,132 @@
 }
 ```
 
+### 各項目の詳細
+
+#### `audio_codec: $AUDIO_CODEC_NAME`
+
+合成後の音声のエンコードに使用するコーデックを指定します。
+
+`$AUDIO_CODEC_NAME` に指定可能な値：
+- `"OPUS"` （デフォルト）
+- `"AAC"`
+
+`"AAC"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です:
+- MacOS 用にビルドされた Hisui（Apple Audio Toolboxの AAC エンコーダーが使用されます）
+- FDK-AAC を有効にしてビルドされた Hisui（参考: [build.md](build.md)）
+
+#### `audio_bitrate: $BITRATE`
+
+合成後の音声のビットレートを指定します（bps単位）。
+
+#### `audio_sources: [ $SOURCE_FILE_NAME ]`
+
+音声合成に使用するソースファイルのパスを配列で指定します。
+
+#### `audio_source_excluded: [ $SOURCE_FILE_NAME ]`
+
+音声合成から除外するソースファイルのパスを配列で指定します。
+
+#### `video_codec: $VIDEO_CODEC_NAME`
+
+合成後の映像のエンコードに使用するコーデックを指定します。
+
+#### `video_bitrate: $BITRATE`
+
+合成後の映像のビットレートを指定します（bps単位）。
+
+#### `video_layout.$REGION_NAME.video_sources: [ $SOURCE_FILE_NAME ]`
+
+指定されたリージョンの映像合成に使用するソースファイルのパスを配列で指定します。
+
+#### `video_layout.$REGION_NAME.video_sources_excluded: [ $SOURCE_FILE_NAME ]`
+
+指定されたリージョンの映像合成から除外するソースファイルのパスを配列で指定します。
+
+#### `video_layout.$REGION_NAME.cells_excluded: [ $CELL_INDEX ]`
+
+指定されたリージョンで除外するセルのインデックスを配列で指定します。
+
+#### `video_layout.$REGION_NAME.width: $INTEGER`
+
+指定されたリージョンの幅をピクセル単位で指定します。
+
+#### `video_layout.$REGION_NAME.height: $INTEGER`
+
+指定されたリージョンの高さをピクセル単位で指定します。
+
+#### `video_layout.$REGION_NAME.cell_width: $INTEGER`
+
+指定されたリージョンのセルの幅をピクセル単位で指定します。
+
+#### `video_layout.$REGION_NAME.cell_height: $INTEGER`
+
+指定されたリージョンのセルの高さをピクセル単位で指定します。
+
+#### `video_layout.$REGION_NAME.max_columns: $INTEGER`
+
+指定されたリージョンのグリッドの最大列数を指定します。
+
+#### `video_layout.$REGION_NAME.max_rows: $INTEGER`
+
+指定されたリージョンのグリッドの最大行数を指定します。
+
+#### `video_layout.$REGION_NAME.reuse: $REUSE_KIND`
+
+指定されたリージョンでのセル再利用方法を指定します。
+
+#### `video_layout.$REGION_NAME.x_pos: $INTEGER`
+
+指定されたリージョンのX座標をピクセル単位で指定します。
+
+#### `video_layout.$REGION_NAME.y_pos: $INTEGER`
+
+指定されたリージョンのY座標をピクセル単位で指定します。
+
+#### `video_layout.$REGION_NAME.z_pos: $INTEGER`
+
+指定されたリージョンのZ座標を指定します。
+
+#### `resolution: $RESOLUTION`
+
+出力映像の解像度を指定します。
+
+#### `frame_rate: $FRAME_RATE`
+
+出力映像のフレームレートを指定します。
+
+#### `bitrate: $BITRATE_KBPS`
+
+出力映像のビットレートをkbps単位で指定します。
+
+#### `libvpx_vp8_encode_params: $PARAMS`
+
+VP8エンコーダーの追加パラメータを指定します。
+
+#### `libvpx_vp9_encode_params: $PARAMS`
+
+VP9エンコーダーの追加パラメータを指定します。
+
+#### `openh264_encode_params: $PARAMS`
+
+OpenH264エンコーダーの追加パラメータを指定します。
+
+#### `svt_av1_encode_params: $PARAMS`
+
+SVT-AV1エンコーダーの追加パラメータを指定します。
+
+#### `video_toolbox_h264_encode_params: $PARAMS`
+
+VideoToolbox H.264エンコーダーの追加パラメータを指定します（macOSのみ）。
+
+#### `video_toolbox_h265_encode_params: $PARAMS`
+
+VideoToolbox H.265エンコーダーの追加パラメータを指定します（macOSのみ）。
+
+#### `trim: $BOOLEAN`
+
+無音部分の自動トリミングを有効にするかどうかを指定します。
+
 ### 基本構造
 
 ```json
