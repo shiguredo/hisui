@@ -194,45 +194,93 @@ TODO: 解像度周りは複雑なところなので、専用のセクション�
 
 指定されたリージョンで除外するセルのインデックスを配列で指定します。
 
+TODO
+
 #### `video_layout.$REGION_NAME.width: $INTEGER`
 
 指定されたリージョンの幅をピクセル単位で指定します。
+
+TODO
 
 #### `video_layout.$REGION_NAME.height: $INTEGER`
 
 指定されたリージョンの高さをピクセル単位で指定します。
 
+TODO
+
 #### `video_layout.$REGION_NAME.cell_width: $INTEGER`
 
 指定されたリージョンのセルの幅をピクセル単位で指定します。
+
+TODO
 
 #### `video_layout.$REGION_NAME.cell_height: $INTEGER`
 
 指定されたリージョンのセルの高さをピクセル単位で指定します。
 
+TODO
+
 #### `video_layout.$REGION_NAME.max_columns: $INTEGER`
 
 指定されたリージョンのグリッドの最大列数を指定します。
+
+TODO
 
 #### `video_layout.$REGION_NAME.max_rows: $INTEGER`
 
 指定されたリージョンのグリッドの最大行数を指定します。
 
+TODO
+
 #### `video_layout.$REGION_NAME.reuse: $REUSE_KIND`
 
 指定されたリージョンでのセル再利用方法を指定します。
+
+TODO
 
 #### `video_layout.$REGION_NAME.x_pos: $INTEGER`
 
 指定されたリージョンのX座標をピクセル単位で指定します。
 
+TODO
+
 #### `video_layout.$REGION_NAME.y_pos: $INTEGER`
 
 指定されたリージョンのY座標をピクセル単位で指定します。
 
+TODO
+
 #### `video_layout.$REGION_NAME.z_pos: $INTEGER`
 
-指定されたリージョンのZ座標を指定します。
+指定されたリージョンの Z 座標（重ね合わせ順序）を指定します。
+
+Z 座標は、複数のリージョンが重なり合う場合の描画順序を決定します。値が小さいリージョンほど奥（背景側）に、値が大きいリージョンほど手前（前景側）に描画されます。
+
+指定可能な値の範囲は -99 から 99 までの整数で、デフォルト値は 0 です。
+
+なお、同じ Z 座標を持つリージョン同士の描画順序は未定義です。
+
+**使用例:**
+```json
+{
+  "video_layout": {
+    "background": {
+      "video_sources": [...],
+      "z_pos": -10
+    },
+    "main": {
+      "video_sources": [...],
+      "z_pos": 0
+    },
+    "overlay": {
+      "video_sources": [...],
+      "z_pos": 10
+    }
+  }
+}
+```
+
+上記の例では、`background` リージョンが最も奥に、`overlay` リージョンが最も手前に描画されます。
 
 #### `frame_rate: $FRAME_RATE`
 
