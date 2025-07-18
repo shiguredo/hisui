@@ -2,6 +2,34 @@
 
 レイアウト JSON は、複数の映像・音声ソースを合成する際の配置や設定を定義するための設定ファイルです。
 
+## 表記法について
+
+このドキュメントでは、JSON 構造を説明する際に以下の表記法を使用します。
+
+### ネストした JSON オブジェクトのメンバー表記
+
+`root_name.child_name` の形式で、ネストしたオブジェクトのメンバーを示します。
+
+例えば、以下のような JSON の場合、`video_layout.main.max_columns` という表記で、
+一番内側の `max_columns` メンバーを参照しているものとします。
+
+```json
+{
+  "video_layout": {
+    "main": {
+      "max_columns": 2
+    }
+  }
+}
+```
+
+また、オブジェクトのメンバーの名前が可変の場合には、
+そこで任意の文字列を取りえることを示すために `$NAME` という形式で記載することがあります。
+
+上の `max_columns` の例の場合には、
+具体的な JSON オブジェクトでの `max_columns` の値に言及する時には `video_layout.main.main_max_columns` と記載しますが、
+そうではなく、一般的な仕様の説明の際には `video_layout.$REGION_NAME.max_columns` と記載します。
+
 ## レイアウト JSONの 仕様
 
 TODO: Add content
