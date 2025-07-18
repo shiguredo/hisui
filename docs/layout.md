@@ -175,11 +175,20 @@ TODO: 解像度周りは複雑なところなので、専用のセクション�
 
 #### `video_layout.$REGION_NAME.video_sources: [ $SOURCE_FILE_NAME ]`
 
-指定されたリージョンの映像合成に使用するソースファイルのパスを配列で指定します。
+指定されたリージョンの映像合成のソースとなるファイル（JSON）のパスを配列で指定します。
+
+この項目は各リージョンで必須です。
+映像合成を行う場合、少なくとも一つのリージョンで `video_sources` を指定する必要があります。
+
+`$SOURCE_FILE_NAME` の詳細については `audio_sources` の説明を参照してください。
 
 #### `video_layout.$REGION_NAME.video_sources_excluded: [ $SOURCE_FILE_NAME ]`
 
 指定されたリージョンの映像合成から除外するソースファイルのパスを配列で指定します。
+
+デフォルト値は `[]` です。
+
+`$SOURCE_FILE_NAME` の詳細については `audio_sources` の説明を参照してください。
 
 #### `video_layout.$REGION_NAME.cells_excluded: [ $CELL_INDEX ]`
 
