@@ -6,6 +6,18 @@
 
 このドキュメントでは、JSON 構造を説明する際に以下の表記法を使用します。
 
+### `$VARIABLE` 表記について
+
+このドキュメントでは、JSON の値として任意の値を取りうる箇所を `$VARIABLE` という形式で表記しています。
+これらは実際の JSON では具体的な値に置き換える必要があります。
+
+例：
+- `$AUDIO_CODEC_NAME` → `"OPUS"` や `"AAC"` などの文字列
+- `$BITRATE` → `65536` などの数値
+- `$SOURCE_FILE_NAME` → `"archive.json"` などのファイルパス
+- `$INTEGER` → `640` などの整数値
+- `$BOOLEAN` → `true` または `false`
+
 ### ネストした JSON オブジェクトのメンバー表記
 
 `root_name.child_name` の形式で、ネストしたオブジェクトのメンバーを示します。
