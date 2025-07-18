@@ -45,6 +45,7 @@
   "audio_source_excluded": [ $SOURCE_FILE_NAME ],
   "video_codec": $VIDEO_CODEC_NAME,
   "video_bitrate": $BITRATE,
+  "resolution": $RESOLUTION,
   "video_layout": { $REGION_NAME: {
     "video_sources": [ $SOURCE_FILE_NAME ],
     "video_sources_excluded": [ $SOURCE_FILE_NAME ],
@@ -60,7 +61,6 @@
     "y_pos": $INTEGER,
     "z_pos": $INTEGER
   },
-  "resolution": $RESOLUTION,
   "frame_rate": $FRAME_RATE,
   "bitrate": $BITRATE_KBPS,
   "libvpx_vp8_encode_params": $PARAMS,
@@ -73,13 +73,16 @@
 }
 ```
 
+この中で必須項目は `video_sources` のみで、それ以外は省略された場合にはデフォルト値が使用されます。
+なお `video_sources` を包含する `video_layout` 自体を省略することは可能です（その場合は映像ストリームが合成対象から外されます）。
+
 ### 各項目の詳細
 
 #### `audio_codec: $AUDIO_CODEC_NAME`
 
 合成後の音声のエンコードに使用するコーデックを指定します。
 
-`$AUDIO_CODEC_NAME` に指定可能な値：
+`$AUDIO_CODEC_NAME` に指定可能な値は以下の通りです：
 - `"OPUS"` （デフォルト）
 - `"AAC"`
 
@@ -89,7 +92,9 @@
 
 #### `audio_bitrate: $BITRATE`
 
-合成後の音声のビットレートを指定します（bps単位）。
+合成後の音声のエンコードビットレートを指定します（bps 単位）。
+
+デフォルト値は `65536` です。
 
 #### `audio_sources: [ $SOURCE_FILE_NAME ]`
 
@@ -106,6 +111,10 @@
 #### `video_bitrate: $BITRATE`
 
 合成後の映像のビットレートを指定します（bps単位）。
+
+#### `resolution: $RESOLUTION`
+
+出力映像の解像度を指定します。
 
 #### `video_layout.$REGION_NAME.video_sources: [ $SOURCE_FILE_NAME ]`
 
@@ -158,10 +167,6 @@
 #### `video_layout.$REGION_NAME.z_pos: $INTEGER`
 
 指定されたリージョンのZ座標を指定します。
-
-#### `resolution: $RESOLUTION`
-
-出力映像の解像度を指定します。
 
 #### `frame_rate: $FRAME_RATE`
 
