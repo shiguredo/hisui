@@ -110,15 +110,44 @@
 
 #### `audio_sources: [ $SOURCE_FILE_NAME ]`
 
-音声合成に使用するソースファイルのパスを配列で指定します。
+音声合成のソースとなるファイル（JSON）のパスを配列で指定します。
+
+デフォルト値は `[]` で、音声なしの合成を意味します。
+
+TODO:
+- glob パターン
+- ROOT_DIR との関係
+- ソースファイルの詳細について書く
+  - Sora の録画との関係
+  - どういった内容のファイルか
+  - メディアファイルとの関係
 
 #### `audio_source_excluded: [ $SOURCE_FILE_NAME ]`
 
 音声合成から除外するソースファイルのパスを配列で指定します。
 
+デフォルト値は `[]` です。
+
+`$SOURCE_FILE_NAME` の詳細については `audio_sources` の説明を参照してください。
+
 #### `video_codec: $VIDEO_CODEC_NAME`
 
 合成後の映像のエンコードに使用するコーデックを指定します。
+
+`$VIDEO_CODEC_NAME` に指定可能な値は以下の通りです：
+
+- `"VP8"` （デフォルト）
+- `"VP9"`
+- `"H264"`
+- `"H265"`
+- `"AV1"`
+
+`"H264"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です:
+- MacOS 用にビルドされた Hisui（Apple Video Toolboxのエンコーダーが使用されます）
+- [`hisui compose`](command_compose.md)  などのコマンドの引数で `--openh264` オプションが指定された場合
+
+`"H265"` は、以下の条件を満たしている場合にのみ指定可能です:
+- MacOS 用にビルドされた Hisui（Apple Video Toolboxのエンコーダーが使用されます）
 
 #### `video_bitrate: $BITRATE`
 
@@ -343,3 +372,7 @@ VideoToolbox H.265エンコーダーの追加パラメータを指定します�
   "resolution": "1920x1080"
 }
 ```
+
+### TODO
+
+- 分割録画の扱い
