@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, path::PathBuf};
+use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{EncoderStats, MixerStats, ReaderStats, Stats, WriterStats},
+    stats::{DecoderStats, EncoderStats, MixerStats, ReaderStats, Stats, WriterStats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -156,7 +156,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             f.member("output_file_path", &output_file_path)?;
             if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
                 print_output_stats_summary(f, &stats)?;
+                print_time_stats_summary(f, &stats)?;
             }
+
             Ok(())
         })
     }))
@@ -267,6 +269,111 @@ fn print_output_stats_summary(
                 f.member("output_video_height", mixer.output_video_resolution.height)?;
             }
         }
+    }
+
+    Ok(())
+}
+
+fn print_time_stats_summary(
+    f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
+    stats: &Stats,
+) -> std::fmt::Result {
+    let total_audio_decoder_processing_seconds = stats
+        .decoders
+        .iter()
+        .filter_map(|decoder| match decoder {
+            DecoderStats::Audio(audio_decoder) => {
+                Some(audio_decoder.total_processing_seconds.get())
+            }
+            _ => None,
+        })
+        .sum::<Duration>();
+    if !total_audio_decoder_processing_seconds.is_zero() {
+        f.member(
+            "total_audio_decoder_processing_seconds",
+            total_audio_decoder_processing_seconds.as_secs_f64(),
+        )?;
+    }
+
+    let total_video_decoder_processing_seconds = stats
+        .decoders
+        .iter()
+        .filter_map(|decoder| match decoder {
+            DecoderStats::Video(video_decoder) => {
+                Some(video_decoder.total_processing_seconds.get())
+            }
+            _ => None,
+        })
+        .sum::<Duration>();
+    if !total_video_decoder_processing_seconds.is_zero() {
+        f.member(
+            "total_video_decoder_processing_seconds",
+            total_video_decoder_processing_seconds.as_secs_f64(),
+        )?;
+    }
+
+    let total_audio_encoder_processing_seconds = stats
+        .encoders
+        .iter()
+        .filter_map(|encoder| match encoder {
+            EncoderStats::Audio(audio_encoder) => {
+                Some(audio_encoder.total_processing_seconds.get())
+            }
+            _ => None,
+        })
+        .sum::<Duration>();
+    if !total_audio_encoder_processing_seconds.is_zero() {
+        f.member(
+            "total_audio_encoder_processing_seconds",
+            total_audio_encoder_processing_seconds.as_secs_f64(),
+        )?;
+    }
+
+    let total_video_encoder_processing_seconds = stats
+        .encoders
+        .iter()
+        .filter_map(|encoder| match encoder {
+            EncoderStats::Video(video_encoder) => {
+                Some(video_encoder.total_processing_seconds.get())
+            }
+            _ => None,
+        })
+        .sum::<Duration>();
+    if !total_video_encoder_processing_seconds.is_zero() {
+        f.member(
+            "total_video_encoder_processing_seconds",
+            total_video_encoder_processing_seconds.as_secs_f64(),
+        )?;
+    }
+
+    let total_audio_mixer_processing_seconds = stats
+        .mixers
+        .iter()
+        .filter_map(|mixer| match mixer {
+            MixerStats::Audio(audio_mixer) => Some(audio_mixer.total_processing_seconds.get()),
+            _ => None,
+        })
+        .sum::<Duration>();
+    if !total_audio_mixer_processing_seconds.is_zero() {
+        f.member(
+            "total_audio_mixer_processing_seconds",
+            total_audio_mixer_processing_seconds.as_secs_f64(),
+        )?;
+    }
+
+    let total_video_mixer_processing_seconds = stats
+        .mixers
+        .iter()
+        .filter_map(|mixer| match mixer {
+            MixerStats::Video(video_mixer) => Some(video_mixer.total_processing_seconds.get()),
+            _ => None,
+        })
+        .sum::<Duration>();
+    if !total_video_mixer_processing_seconds.is_zero() {
+        f.member(
+            "total_video_mixer_processing_seconds",
+            total_video_mixer_processing_seconds.as_secs_f64(),
+        )?;
     }
 
     f.member("elapsed_seconds", stats.elapsed_seconds)?;
