@@ -30,12 +30,46 @@
 具体的な JSON オブジェクトでの `max_columns` の値に言及する時には `video_layout.main.main_max_columns` と記載しますが、
 そうではなく、一般的な仕様の説明の際には `video_layout.$REGION_NAME.max_columns` と記載します。
 
-## レイアウト JSONの 仕様
+## レイアウト JSON の 仕様
 
-TODO: Add content
+### 指定可能な項目一覧
+
+以下はレイアウトで指定可能な項目を全て記載した JSON です。
+各項目の詳細については以降で説明します。
 
 ```json
 {
+  "audio_codec": $AUDIO_CODEC_NAME,
+  "audio_bitrate": $BITRATE,
+  "audio_sources": [ $SOURCE_FILE_NAME ],
+  "audio_source_excluded": [ $SOURCE_FILE_NAME ],
+  "video_codec": $VIDEO_CODEC_NAME,
+  "video_bitrate": $BITRATE,
+  "video_layout": { $REGION_NAME: {
+    "video_sources": [ $SOURCE_FILE_NAME ],
+    "video_sources_excluded": [ $SOURCE_FILE_NAME ],
+    "cells_excluded": [ $CELL_INDEX ],
+    "width": $INTEGER,
+    "height": $INTEGER,
+    "cell_width": $INTEGER,
+    "cell_height": $INTEGER,
+    "max_columns": $INTEGER,
+    "max_rows": $INTEGER,
+    "reuse": $REUSE_KIND,
+    "x_pos": $INTEGER,
+    "y_pos": $INTEGER,
+    "z_pos": $INTEGER
+  },
+  "resolution": $RESOLUTION,
+  "frame_rate": $FRAME_RATE,
+  "bitrate": $BITRATE_KBPS,
+  "libvpx_vp8_encode_params": $PARAMS,
+  "libvpx_vp9_encode_params": $PARAMS,
+  "openh264_encode_params": $PARAMS,
+  "svt_av1_encode_params": $PARAMS,
+  "video_toolbox_h264_encode_params": $PARAMS,
+  "video_toolbox_h265_encode_params": $PARAMS,
+  "trim": $BOOLEAN
 }
 ```
 
