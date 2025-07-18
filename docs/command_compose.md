@@ -55,7 +55,12 @@ $ hisui compose /path/to/archive/RECORDING_ID/
   "output_video_bitrate": 375525,
   "output_video_width": 642,
   "output_video_height": 240,
-  "elapsed_seconds": 9.098501
+  "total_audio_decoder_processing_seconds": 0.064662641,
+  "total_video_decoder_processing_seconds": 0.100056614,
+  "total_audio_encoder_processing_seconds": 0.130539243,
+  "total_video_encoder_processing_seconds": 8.984610705,
+  "total_audio_mixer_processing_seconds": 0.007026693,
+  "total_video_mixer_processing_seconds": 0.017125167,
 }
 ```
 
@@ -80,6 +85,12 @@ $ hisui compose -l layout-examples/compose-default.json /path/to/archive/RECORDI
   "output_video_bitrate": 375525,
   "output_video_width": 642,
   "output_video_height": 240,
+  "total_audio_decoder_processing_seconds": 0.064662641,
+  "total_video_decoder_processing_seconds": 0.100056614,
+  "total_audio_encoder_processing_seconds": 0.130539243,
+  "total_video_encoder_processing_seconds": 8.984610705,
+  "total_audio_mixer_processing_seconds": 0.007026693,
+  "total_video_mixer_processing_seconds": 0.017125167,
   "elapsed_seconds": 9.098501
 }
 ...
