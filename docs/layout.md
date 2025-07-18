@@ -229,7 +229,13 @@ TODO: 解像度周りは複雑なところなので、専用のセクション�
 
 #### `bitrate: $BITRATE_KBPS`
 
-出力映像のビットレートをkbps単位で指定します。
+**非推奨**: この項目はレガシー版の Hisui との互換性維持のために残されています。新しい Hisui では `video_bitrate` の使用を推奨します。
+
+合成後の映像のエンコードビットレートを kbps 単位で指定します。
+
+デフォルト値は `映像ソースの数 * 200` です。
+
+`video_bitrate` フィールドと `bitrate` フィールドの両方が指定された場合、`video_bitrate` が優先されます。
 
 #### `libvpx_vp8_encode_params: $PARAMS`
 
