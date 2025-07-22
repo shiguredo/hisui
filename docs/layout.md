@@ -192,21 +192,45 @@ TODO: 解像度周りは複雑なところなので、専用のセクション�
 
 #### `video_layout.$REGION_NAME.cells_excluded: [ $CELL_INDEX ]`
 
-指定されたリージョンで除外するセルのインデックスを配列で指定します。
+指定されたリージョンで、映像ソースの割り当てを除外するセルのインデックスを配列で指定します。
 
-TODO
+リージョンやセルなどの詳細については [layout_region.md](./layout_region.md) を参照してください。
 
 #### `video_layout.$REGION_NAME.width: $INTEGER`
 
 指定されたリージョンの幅をピクセル単位で指定します。
 
-TODO
+指定可能な値の範囲は以下の通りです：
+- 16 ピクセル以上、`x_pos + width` の値が合成後の映像の全体解像度の幅以下
+- 偶数値（奇数が指定された場合は自動的に偶数に丸められます）
+
+省略された場合には、以下のようにして自動で計算されます。
+- `video_layout.$REGION_NAME.cell_width` が指定されている場合:
+  - おおまかには `セルの幅 * グリッドの列数` となります
+- `resolution` が指定されている場合:
+  - おおまかには `全体の解像度 / グリッドの列数` となります
+
+なお `width` と `cell_width` を同時に指定することはできません。
+
+リージョンの幅の計算方法の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
 #### `video_layout.$REGION_NAME.height: $INTEGER`
 
 指定されたリージョンの高さをピクセル単位で指定します。
 
-TODO
+指定可能な値の範囲は以下の通りです：
+- 16 ピクセル以上、`y_pos + height` の値が合成後の映像の全体解像度の高さ以下
+- 偶数値（奇数が指定された場合は自動的に偶数に丸められます）
+
+省略された場合には、以下のようにして自動で計算されます。
+- `video_layout.$REGION_NAME.cell_height` が指定されている場合:
+  - おおまかには `セルの高さ * グリッドの行数` となります
+- `resolution` が指定されている場合:
+  - おおまかには `全体の解像度 / グリッドの行数` となります
+
+なお `height` と `cell_height` を同時に指定することはできません。
+
+リージョンの高さの計算方法の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
 #### `video_layout.$REGION_NAME.cell_width: $INTEGER`
 
