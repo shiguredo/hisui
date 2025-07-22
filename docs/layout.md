@@ -350,15 +350,67 @@ TODO: 解像度周りは複雑なところなので、専用のセクション�
 
 #### `video_layout.$REGION_NAME.x_pos: $INTEGER`
 
-指定されたリージョンのX座標をピクセル単位で指定します。
+指定されたリージョンを配置する X 座標をピクセル単位で指定します。
 
-TODO
+指定可能な値の範囲は以下の通りです：
+- 0 以上、合成後の映像の全体解像度の幅未満の値
+- 偶数値（奇数が指定された場合は自動的に偶数に丸められます）
+
+デフォルト値は `0` で、この場合リージョンは左端に配置されます。
+
+**使用例:**
+```json
+{
+  "video_layout": {
+    "main": {
+      "video_sources": ["*.json"],
+      "x_pos": 100,
+      "width": 640
+    },
+    "sidebar": {
+      "video_sources": ["sidebar.json"],
+      "x_pos": 740,
+      "width": 200
+    }
+  }
+}
+```
+
+上記の例では `main` リージョンが X 座標 100 の位置に、`sidebar` リージョンが X 座標 740 の位置に配置されます。
+
+リージョンの位置とサイズの詳細については [layout_region.md](./layout_region.md) を参照してください。
 
 #### `video_layout.$REGION_NAME.y_pos: $INTEGER`
 
-指定されたリージョンのY座標をピクセル単位で指定します。
+指定されたリージョンを配置する Y 座標をピクセル単位で指定します。
 
-TODO
+指定可能な値の範囲は以下の通りです：
+- 0 以上、合成後の映像の全体解像度の高さ未満の値
+- 偶数値（奇数が指定された場合は自動的に偶数に丸められます）
+
+デフォルト値は `0` で、この場合リージョンは上端に配置されます。
+
+**使用例:**
+```json
+{
+  "video_layout": {
+    "main": {
+      "video_sources": ["*.json"],
+      "y_pos": 50,
+      "height": 480
+    },
+    "bottom_bar": {
+      "video_sources": ["bottom.json"],
+      "y_pos": 530,
+      "height": 100
+    }
+  }
+}
+```
+
+上記の例では `main` リージョンが Y 座標 50 の位置に、`bottom_bar` リージョンが Y 座標 530 の位置に配置されます。
+
+リージョンの位置とサイズの詳細については [layout_region.md](./layout_region.md) を参照してください。
 
 #### `video_layout.$REGION_NAME.z_pos: $INTEGER`
 
