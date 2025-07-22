@@ -116,13 +116,51 @@
 
 デフォルト値は `[]` で、音声なしの合成を意味します。
 
-TODO:
-- glob (wildcard) パターン
-- ROOT_DIR との関係
-- ソースファイルの詳細について書く
-  - Sora の録画との関係
-  - どういった内容のファイルか
-  - メディアファイルとの関係
+** ソース JSON ファイルについて **
+
+通常、ソース JSON ファイルには、
+Sora が録画時に配信者毎に生成する `archive-{ CONNECTION_ID }.json` ファイルを指定します。
+
+Hisui は、この `archive.json` ファイルの中の以下の情報を参照します:
+```json
+{
+  "connection_id": "コネクション ID",
+  "format": "webm" | "mp4",
+  "audio": true | false,
+  "video": true | false,
+  "start_time_offset": 開始時刻（秒）,
+  "stop_time_offset": 終了時刻（秒）
+}
+```
+
+また、ソース JSON ファイルに対応するメディアファイルが、
+ソース JSON ファイルの拡張子を `.mp4` ないし `.webm` に変えたパスに存在する、と想定しています。
+
+** ソース JSON ファイルのパス指定について **
+
+ソース JSON ファイルのパスが相対パスの場合には、
+[`hisui compose`](./command_compose.md) コマンドなどの `ROOT_DIR` 引数で指定した値がベースパスとして扱われます。
+
+なお、`ROOT_DIR` の外のパスが指定された場合にはエラーとなります。
+
+** ワイルドカードパターンについて **
+
+ソース JSON ファイルのパス指定では、ファイル名部分でワイルドカード（`*`）を使用できます。
+
+通常の合成では、以下のようにワイルドカードを使って、一括で合成対象を指定するのが便利です:
+
+```json
+{
+  "audio_sources": ["archive-*.json"],
+  "video_layout": {
+    "main": {
+      "video_sources": ["archive-*.json"],
+      "max_columns": 3
+    }
+  },
+  "resolution": "1920x1080"
+}
+```
 
 #### `audio_source_excluded: [ $SOURCE_FILE_NAME ]`
 
