@@ -88,7 +88,7 @@
 この中で必須項目は `video_sources` のみで、それ以外は省略された場合にはデフォルト値が使用されます。
 なお `video_sources` を包含する `video_layout` 自体を省略することは可能です（その場合は映像ストリームが合成対象から外されます）。
 
-TODO: リージョンについてはこっちを見てね、というリンクをはる
+`video_layout` 以下の項目の扱いについては [layout_region.md](./layout_region.md) も参照してください。
 
 ### 各項目の詳細
 
@@ -171,7 +171,7 @@ TODO:
 
 この項目が省略された場合には、`video_layout` で定義されたリージョンのサイズと位置から自動的に全体の解像度が計算されます。
 
-TODO: 解像度周りは複雑なところなので、専用のセクションを用意する（or 別のドキュメントを参照する）
+詳細については [layout_region.md](./layout_region.md) を参照してください。
 
 #### `video_layout.$REGION_NAME.video_sources: [ $SOURCE_FILE_NAME ]`
 
