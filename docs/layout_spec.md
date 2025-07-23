@@ -504,32 +504,32 @@ Z 座標は、複数のリージョンが重なり合う場合の描画順序を
 ### `libvpx_vp8_encode_params: $PARAMS`
 
 libvpx で VP8 エンコードを行う際のエンコードパラメーターを指定します。
-詳細は [encode.md](./encode.md) を参照してください。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
 ### `libvpx_vp9_encode_params: $PARAMS`
 
 libvpx で VP9 エンコードを行う際のエンコードパラメーターを指定します。
-詳細は [encode.md](./encode.md) を参照してください。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
 ### `openh264_encode_params: $PARAMS`
 
 OpenH264 で H.264 エンコードを行う際のエンコードパラメーターを指定します。
-詳細は [encode.md](./encode.md) を参照してください。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
 ### `svt_av1_encode_params: $PARAMS`
 
 SVT-AV1 で AV1 エンコードを行う際のエンコードパラメーターを指定します。
-詳細は [encode.md](./encode.md) を参照してください。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
 ### `video_toolbox_h264_encode_params: $PARAMS`
 
 Apple Video Toolbox で H.264 エンコードを行う際のエンコードパラメーターを指定します。
-詳細は [encode.md](./encode.md) を参照してください。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
 ### `video_toolbox_h265_encode_params: $PARAMS`
 
 Apple Video Toolbox で H.265 エンコードを行う際のエンコードパラメーターを指定します。
-詳細は [encode.md](./encode.md) を参照してください。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
 ### `trim: $BOOLEAN`
 
