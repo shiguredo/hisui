@@ -147,6 +147,8 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 
 TODO: デフォルトおよび範囲の記述は暫定なので後でちゃんとする
 
+TODO: 各項目の詳細については本家ドキュメントやソースコードを参照してください、と書く（リンクつきで）
+
 #### 基本的なエンコーダーパラメーター
 
 - `min_quantizer` (整数値): 最小量子化パラメーター値
@@ -247,6 +249,8 @@ TODO: デフォルトおよび範囲の記述は暫定なので後でちゃん�
 
 TODO: デフォルトおよび範囲の記述は暫定なので後でちゃんとする
 
+TODO: 各項目の詳細については本家ドキュメントやソースコードを参照してください、と書く（リンクつきで）
+
 ## 基本的なエンコーダーパラメーター
 
 - `min_quantizer` (整数値): 最小量子化パラメーター値
@@ -346,3 +350,429 @@ TODO: デフォルトおよび範囲の記述は暫定なので後でちゃん�
   }
 }
 ```
+
+### `openh264_encode_params` で指定可能なパラメーターセット
+
+`openh264` で H.264 エンコードを行う際に指定可能なパラメーターは以下の通りです。
+
+TODO: デフォルトおよび範囲の記述は暫定なので後でちゃんとする
+
+TODO: 各項目の詳細については本家ドキュメントやソースコードを参照してください、と書く（リンクつきで）
+
+#### 基本的なエンコーダーパラメーター
+
+- `thread_count` (整数値): エンコードに使用するスレッド数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 16
+
+- `intra_period` (整数値): Intraフレーム間隔
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 1000
+
+#### 品質制御パラメーター
+
+- `max_qp` (整数値): 最大量子化パラメーター値
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 30 〜 51
+
+- `min_qp` (整数値): 最小量子化パラメーター値
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 28
+
+- `complexity_mode` (文字列): エンコード複雑度モード
+  - デフォルト値: なし（省略可能）
+  - 指定可能な値: `"low"`, `"medium"`, `"high"`
+
+#### エンコード制御パラメーター
+
+- `entropy_coding` (真偽値): エントロピー符号化の有効化
+  - デフォルト値: `false`
+
+- `ref_frame_count` (整数値): 参照フレーム数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 16
+
+- `spatial_layers` (整数値): 空間レイヤー数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 4
+
+- `temporal_layers` (整数値): 時間レイヤー数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 4
+
+#### レート制御パラメーター
+
+- `rate_control_mode` (文字列): レート制御モード
+  - デフォルト値: なし（省略可能）
+  - 指定可能な値: `"off"`, `"quality"`, `"bitrate"`, `"timestamp"`
+
+#### 前処理機能パラメーター
+
+- `denoise` (真偽値): ノイズ除去の有効化
+  - デフォルト値: `false`
+
+- `background_detection` (真偽値): 背景検出の有効化
+  - デフォルト値: `false`
+
+- `adaptive_quantization` (真偽値): 適応量子化の有効化
+  - デフォルト値: `false`
+
+- `scene_change_detection` (真偽値): シーンチェンジ検出の有効化
+  - デフォルト値: `false`
+
+- `deblocking_filter` (真偽値): デブロッキングフィルターの有効化
+  - デフォルト値: `false`
+
+- `long_term_reference` (真偽値): 長期参照フレームの有効化
+  - デフォルト値: `false`
+
+#### スライスモード設定
+
+- `slice_mode` (オブジェクト): スライス分割方法の設定
+  - `type` (文字列): スライスモードのタイプ（必須）
+    - `"single"`: 単一スライス
+    - `"fixed_count"`: 固定スライス数
+    - `"size_constrained"`: サイズ制限
+  - `count` (整数値): `"fixed_count"` モード時のスライス数
+  - `size` (整数値): `"size_constrained"` モード時の最大サイズ
+
+#### 指定例
+
+```json
+{
+  "video_codec": "H264",
+  "openh264_encode_params": {
+    "thread_count": 4,
+    "intra_period": 120,
+    "complexity_mode": "medium",
+    "entropy_coding": true,
+    "ref_frame_count": 4,
+    "spatial_layers": 1,
+    "temporal_layers": 1,
+    "rate_control_mode": "bitrate",
+    "max_qp": 45,
+    "min_qp": 10,
+    "denoise": true,
+    "background_detection": false,
+    "adaptive_quantization": true,
+    "scene_change_detection": true,
+    "deblocking_filter": true,
+    "long_term_reference": false,
+    "slice_mode": {
+      "type": "fixed_count",
+      "count": 4
+    }
+  }
+}
+```
+
+## `svt_av1_encode_params` で指定可能なパラメーターセット
+
+`SVT-AV1` で AV1 エンコードを行う際に指定可能なパラメーターは以下の通りです。
+
+TODO: デフォルトおよび範囲の記述は暫定なので後でちゃんとする
+
+TODO: 各項目の詳細については本家ドキュメントやソースコードを参照してください、と書く（リンクつきで）
+
+### 品質・速度制御パラメーター
+
+- `enc_mode` (整数値): エンコード速度と品質のバランス調整
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 13
+  - 値が小さいほど高品質だが低速、値が大きいほど高速だが品質が低下
+
+- `qp` (整数値): 量子化パラメーター値
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 63
+
+- `min_qp_allowed` (整数値): 最小量子化パラメーター値
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 20
+
+- `max_qp_allowed` (整数値): 最大量子化パラメーター値
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 35 〜 63
+
+### レート制御パラメーター
+
+- `rate_control_mode` (文字列): レート制御モード
+  - デフォルト値: なし（省略可能）
+  - 指定可能な値: `"vbr"`, `"cbr"`
+
+- `over_shoot_pct` (整数値): ビットレート超過許可率（%）
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 100
+
+- `under_shoot_pct` (整数値): ビットレート不足許可率（%）
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 100
+
+### GOP・フレーム構造パラメーター
+
+- `intra_period_length` (整数値): イントラフレーム間隔
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: -1 〜 1000
+  - -1 を指定するとイントラフレームが最初のフレームのみになります
+
+- `hierarchical_levels` (整数値): 階層レベル数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 2 〜 5
+
+- `pred_structure` (整数値): 予測構造
+  - デフォルト値: なし（省略可能）
+  - 指定可能な値: 1, 2
+
+- `scene_change_detection` (真偽値): シーンチェンジ検出の有効化
+  - デフォルト値: なし（省略可能）
+
+- `look_ahead_distance` (整数値): 先読みフレーム数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 120
+
+### 並列処理パラメーター
+
+- `pin_threads` (整数値): スレッドピニング設定
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 128
+
+- `tile_columns` (整数値): タイル分割の列数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 6
+
+- `tile_rows` (整数値): タイル分割の行数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 6
+
+- `target_socket` (整数値): ターゲットソケット設定
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: -1 〜 1
+
+### フィルタリングパラメーター
+
+- `enable_dlf_flag` (真偽値): デブロッキングループフィルターの有効化
+  - デフォルト値: なし（省略可能）
+
+- `cdef_level` (整数値): CDEF（Constrained Directional Enhancement Filter）レベル
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: -1 〜 4
+
+- `enable_restoration_filtering` (真偽値): 復元フィルタリングの有効化
+  - デフォルト値: なし（省略可能）
+
+### 高度な設定パラメーター
+
+- `enable_tf` (真偽値): Temporal Filtering の有効化
+  - デフォルト値: なし（省略可能）
+
+- `enable_overlays` (真偽値): オーバーレイの有効化
+  - デフォルト値: なし（省略可能）
+
+- `film_grain_denoise_strength` (整数値): フィルムグレインノイズ除去強度
+  - デフォルト値: 0
+  - 指定可能な範囲: 0 〜 50
+
+- `enable_tpl_la` (真偽値): TPL Look Ahead の有効化
+  - デフォルト値: なし（省略可能）
+
+- `force_key_frames` (真偽値): キーフレーム強制挿入の有効化
+  - デフォルト値: なし（省略可能）
+
+- `stat_report` (真偽値): 統計レポート出力の有効化
+  - デフォルト値: なし（省略可能）
+
+- `recon_enabled` (真偽値): 再構成フレーム出力の有効化
+  - デフォルト値: なし（省略可能）
+
+### エンコーダー固有設定パラメーター
+
+- `tier` (整数値): エンコーダーティア設定
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 1
+
+- `fast_decode` (真偽値): 高速デコードモードの有効化
+  - デフォルト値: なし（省略可能）
+
+### 指定例
+
+```json
+{
+  "video_codec": "AV1",
+  "svt_av1_encode_params": {
+    "enc_mode": 8,
+    "qp": 35,
+    "min_qp_allowed": 10,
+    "max_qp_allowed": 50,
+    "rate_control_mode": "vbr",
+    "over_shoot_pct": 25,
+    "under_shoot_pct": 25,
+    "intra_period_length": 120,
+    "hierarchical_levels": 4,
+    "pred_structure": 2,
+    "scene_change_detection": true,
+    "look_ahead_distance": 60,
+    "tile_columns": 2,
+    "tile_rows": 1,
+    "enable_dlf_flag": true,
+    "cdef_level": 1,
+    "enable_restoration_filtering": true,
+    "enable_tf": true,
+    "film_grain_denoise_strength": 10,
+    "enable_tpl_la": true,
+    "tier": 0,
+    "fast_decode": false
+  }
+}
+```
+
+## `video_toolbox_h264_encode_params` で指定可能なパラメーターセット
+
+`Apple Video Toolbox` で H.264 エンコードを行う際に指定可能なパラメーターは以下の通りです。
+
+TODO: デフォルトおよび範囲の記述は暫定なので後でちゃんとする
+
+TODO: 各項目の詳細については本家ドキュメントやソースコードを参照してください、と書く（リンクつきで）
+
+### 基本的なエンコーダーパラメーター
+
+- `max_key_frame_interval` (整数値): キーフレーム間隔の最大値（フレーム数）
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 600
+
+### 速度と品質のバランス設定
+
+- `prioritize_speed_over_quality` (真偽値): 品質よりも速度を優先するモード
+  - デフォルト値: `false`
+
+- `real_time` (真偽値): リアルタイムエンコードモード
+  - デフォルト値: `false`
+
+- `maximize_power_efficiency` (真偽値): 電力効率最大化モード
+  - デフォルト値: `false`
+
+### フレーム構造設定
+
+- `allow_frame_reordering` (真偽値): フレーム並び替えの許可
+  - デフォルト値: `true`
+
+- `allow_temporal_compression` (真偽値): 時間圧縮の許可
+  - デフォルト値: `true`
+
+### プロファイル・レベル設定
+
+- `profile_level` (文字列): H.264プロファイル・レベル
+  - デフォルト値: `"baseline"`
+  - 指定可能な値: `"baseline"`, `"main"`, `"high"`
+
+- `h264_entropy_mode` (文字列): H.264エントロピー符号化モード
+  - デフォルト値: システムデフォルト
+  - 指定可能な値: `"cavlc"`, `"cabac"`
+
+### 並列処理・遅延制御設定
+
+- `max_frame_delay_count` (整数値): 最大フレーム遅延数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 16
+
+- `use_parallelization` (真偽値): 並列処理の使用
+  - デフォルト値: `false`
+
+### 指定例
+
+```json
+{
+  "video_codec": "H264",
+  "video_toolbox_h264_encode_params": {
+    "max_key_frame_interval": 120,
+    "prioritize_speed_over_quality": false,
+    "real_time": false,
+    "maximize_power_efficiency": true,
+    "allow_frame_reordering": true,
+    "allow_temporal_compression": true,
+    "profile_level": "high",
+    "h264_entropy_mode": "cabac",
+    "max_frame_delay_count": 8,
+    "use_parallelization": true
+  }
+}
+```
+
+## `video_toolbox_h265_encode_params` で指定可能なパラメーターセット
+
+`Apple Video Toolbox` で H.265 エンコードを行う際に指定可能なパラメーターは以下の通りです。
+
+H.265 エンコーダーは H.264 と多くの共通点がありますが、いくつかの相違点があります。
+
+TODO: デフォルトおよび範囲の記述は暫定なので後でちゃんとする
+
+TODO: 各項目の詳細については本家ドキュメントやソースコードを参照してください、と書く（リンクつきで）
+
+### 基本的なエンコーダーパラメーター
+
+- `max_key_frame_interval` (整数値): キーフレーム間隔の最大値（フレーム数）
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 600
+
+### 速度と品質のバランス設定
+
+- `real_time` (真偽値): リアルタイムエンコードモード
+  - デフォルト値: `false`
+
+- `maximize_power_efficiency` (真偽値): 電力効率最大化モード
+  - デフォルト値: `false`
+
+**注意**: H.265 エンコーダーでは `prioritize_speed_over_quality` は内部的に `true` に固定されており、設定することはできません。
+
+### フレーム構造設定
+
+- `allow_frame_reordering` (真偽値): フレーム並び替えの許可
+  - デフォルト値: `true`
+
+- `allow_temporal_compression` (真偽値): 時間圧縮の許可
+  - デフォルト値: `true`
+
+- `allow_open_gop` (真偽値): Open GOP の許可
+  - デフォルト値: `false`
+  - H.265 では H.264 と異なり、この設定が利用可能です
+
+### プロファイル・レベル設定
+
+- `profile_level` (文字列): H.265プロファイル・レベル
+  - デフォルト値: `"main"`
+  - 指定可能な値: `"main"`, `"main10"`
+
+### 並列処理・遅延制御設定
+
+- `max_frame_delay_count` (整数値): 最大フレーム遅延数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 16
+
+- `use_parallelization` (真偽値): 並列処理の使用
+  - デフォルト値: `false`
+
+### 指定例
+
+```json
+{
+  "video_codec": "H265",
+  "video_toolbox_h265_encode_params": {
+    "max_key_frame_interval": 120,
+    "real_time": false,
+    "maximize_power_efficiency": true,
+    "allow_frame_reordering": true,
+    "allow_temporal_compression": true,
+    "allow_open_gop": false,
+    "profile_level": "main",
+    "max_frame_delay_count": 8,
+    "use_parallelization": true
+  }
+}
+```
+
+### H.264 との主な違い
+
+H.265 エンコーダーは H.264 エンコーダーと以下の点で異なります：
+
+1. **`prioritize_speed_over_quality`**: この設定は H.265 では利用できません（内部的に `true` に固定）
+2. **`allow_open_gop`**: H.265 でのみ利用可能な設定です
+3. **`profile_level`**: H.265 用の値（`"main"`, `"main10"`）を指定する必要があります
+4. **`h264_entropy_mode`**: H.265 では利用できません（H.264 専用の設定）
