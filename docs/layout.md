@@ -120,6 +120,7 @@ JSON の各項目の概要は以下の通りです:
         "archive-presenter.json"
       ],
       "max_columns": 6,
+      "max_rows": 1,
       "width": 480,
       "height": 180,
       "x_pos": 780,
@@ -144,7 +145,8 @@ JSON の各項目の概要は以下の通りです:
   - `pip`: Picture-in-Picture リージョン（聴衆の映像）
     - `video_sources`: `archive-*.json` で全ての映像ファイルにマッチ
     - `video_sources_excluded`: 発表者の映像を除外
-    - `max_columns`: グリッドの最大列数（6列まで表示）
+    - `max_columns`: グリッドの最大列数（6 列まで表示）
+    - `max_rows`: グリッドの最大行数（1 列まで表示）
     - `width`, `height`: 小さなリージョンのサイズ（480x180）
     - `x_pos`, `y_pos`: 右下に配置する位置座標
     - `z_pos`: 重ね合わせ順序（10 なのでメインより前面）
