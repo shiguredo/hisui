@@ -3,7 +3,7 @@
 Hisui では、レイアウトを定義した JSON ファイルを使うことで、複数映像ソースを合成する際の配置を細かく指定できます。
 また、レイアウト JSON では、映像ソースの配置以外に、映像や音声のエンコード設定も指定できます。
 
-[`hisui compose`](./compose_command.md) コマンドの場合は、以下のように `-l` オプションでレイアウトファイルを指定できます：
+[`hisui compose`](./command_compose.md) コマンドの場合は、以下のように `-l` オプションでレイアウトファイルを指定できます：
 
 ```console
 $ hisui compose -l /path/to/layout.json /path/to/archive/RECORDING_ID/
