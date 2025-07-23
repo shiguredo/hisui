@@ -141,7 +141,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `video_toolbox_h265_encode_params`: Apple Video Toolbox で H.265 エンコードを行う際のパラメーターセット
 
 
-### `libvpx_vp8_encode_params` で指定可能なパラメーター
+### `libvpx_vp8_encode_params` で指定可能なパラメーターセット
 
 `libvpx` で VP8 エンコードを行う際に指定可能なパラメーターは以下の通りです.
 
@@ -237,6 +237,112 @@ TODO: デフォルトおよび範囲の記述は暫定なので後でちゃん�
       "strength": 5,
       "filter_type": 1
     }
+  }
+}
+```
+
+### `libvpx_vp9_encode_params` で指定可能なパラメーターセット
+
+`libvpx_vp9_encode_params` で指定可能なパラメーターセットは以下の通りです。
+
+TODO: デフォルトおよび範囲の記述は暫定なので後でちゃんとする
+
+## 基本的なエンコーダーパラメーター
+
+- `min_quantizer` (整数値): 最小量子化パラメーター値
+  - デフォルト値: 10
+  - 指定可能な範囲: 4 〜 29
+
+- `max_quantizer` (整数値): 最大量子化パラメーター値
+  - デフォルト値: 50
+  - 指定可能な範囲: 30 〜 58
+
+- `cq_level` (整数値): 固定品質エンコード時の品質レベル
+  - デフォルト値: 30
+  - 指定可能な範囲: 0 〜 63
+
+- `cpu_used` (整数値): エンコード速度と品質のバランス調整
+  - デフォルト値: なし（必須項目）
+  - 指定可能な範囲: 0 〜 9
+  - 値が大きいほど高速だが品質が低下
+
+## エンコード制御パラメーター
+
+- `deadline` (文字列): エンコード期限設定
+  - デフォルト値: `"good"`
+  - 指定可能な値: `"best"`, `"good"`, `"realtime"`
+
+- `rate_control` (文字列): レート制御モード
+  - デフォルト値: `"vbr"`
+  - 指定可能な値: `"vbr"`, `"cbr"`, `"cq"`
+
+- `lag_in_frames` (整数値): 先読みフレーム数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 25
+
+- `threads` (整数値): エンコードに使用するスレッド数
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 16
+
+- `error_resilient` (真偽値): エラー耐性モードの有効化
+  - デフォルト値: `false`
+
+- `keyframe_interval` (整数値): キーフレーム間隔
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 1 〜 600
+
+- `frame_drop_threshold` (整数値): フレームドロップ閾値
+  - デフォルト値: なし（省略可能）
+
+## VP9 固有のパラメーター
+
+- `aq_mode` (整数値): 適応量子化モード
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 3
+
+- `noise_sensitivity` (整数値): ノイズ感度設定
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 6
+
+- `tile_columns` (整数値): タイル分割の列数（log2値）
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 6
+
+- `tile_rows` (整数値): タイル分割の行数（log2値）
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 0 〜 2
+
+- `row_mt` (真偽値): 行単位マルチスレッドの有効化
+  - デフォルト値: `false`
+
+- `frame_parallel_decoding` (真偽値): フレーム並列デコーディングの有効化
+  - デフォルト値: `false`
+
+- `tune_content` (文字列): コンテンツタイプ最適化設定
+  - デフォルト値: なし（省略可能）
+  - 指定可能な値: `"default"`, `"screen"`
+
+## 指定例
+
+```json
+{
+  "video_codec": "VP9",
+  "libvpx_vp9_encode_params": {
+    "cpu_used": 2,
+    "min_quantizer": 4,
+    "max_quantizer": 56,
+    "cq_level": 30,
+    "deadline": "good",
+    "rate_control": "vbr",
+    "threads": 8,
+    "keyframe_interval": 120,
+    "aq_mode": 3,
+    "noise_sensitivity": 1,
+    "tile_columns": 1,
+    "tile_rows": 0,
+    "row_mt": true,
+    "frame_parallel_decoding": false,
+    "tune_content": "default"
   }
 }
 ```
