@@ -25,7 +25,7 @@ macOS の場合には以下のようにして、依存パッケージがイン�
 （[uv](https://docs.astral.sh/uv/) はPython用のパッケージマネージャーです）：
 
 ```console
-$ brew install vmaf
+$ brew install libvmaf
 $ uv tool install optuna
 ```
 
