@@ -36,20 +36,12 @@ TOC:
       "height": 480,
       "max_columns": 3,
       "max_rows": 2
-    },
-    "pip": {
-      "video_sources": ["presenter.json"],
-      "width": 200,
-      "height": 150,
-      "x_pos": 400,
-      "y_pos": 300,
-      "z_pos": 10
     }
   }
 }
 ```
 
-この例では `main` と `pip` という2つのリージョンが定義されています。
+この例では `main` というリージョンが定義されています。
 
 以降では、リージョンの基礎概念や詳細の仕様について記述しています。
 
