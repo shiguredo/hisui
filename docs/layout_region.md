@@ -95,32 +95,15 @@ Hisui はその中の、以下の情報を参照しています:
 
 ## 1. `video_sources` のワイルドカード解決
 
-レイアウトJSON の `video_layout.$REGION_NAME.video_sources` で指定されたパスパターンを解決します。
+まず、レイアウトJSON の `video_sources` で指定されたパスパターンが解決されます。
 
 ### ワイルドカードパターンの展開
 
 - ファイル名部分に `*` を含むパスは、マッチする全てのファイルに展開されます
-- 例：`archive-*.json` は `archive-user1.json`, `archive-user2.json` 等にマッチします
+  - 例：`archive-*.json` は `archive-connection-id1.json`, `archive-connection-id2.json` 等にマッチします
 - ワイルドカードを含まないパスは、そのままのパスとして扱われます
 
-### パス解決の例
-
-```json
-{
-  "video_sources": ["archive-*.json"]
-}
-```
-
-上記の設定では、録画ディレクトリ内の以下のようなファイルが全て対象となります：
-
-```
-archive-user1.json
-archive-user2.json
-archive-presenter.json
-archive-guest.json
-```
-
-重複するパスは自動的に除去され、結果はファイル名順でソートされて安定した順序で処理されます。
+なお、重複するパスは自動的に除去されます。
 
 ## 2. `video_sources_excluded` のワイルドカード解決と除外処理
 
@@ -137,25 +120,10 @@ archive-guest.json
 
 この設定では、全ての `archive-*.json` ファイルから `archive-presenter.json` を除いたファイルが対象となります。
 
-Picture-in-Picture レイアウトで「全ての参加者から発表者を除く」といった指定に便利です：
-
-```json
-{
-  "video_layout": {
-    "main": {
-      "video_sources": ["archive-presenter.json"]
-    },
-    "pip": {
-      "video_sources": ["archive-*.json"],
-      "video_sources_excluded": ["archive-presenter.json"]
-    }
-  }
-}
-```
-
 ## 3. 分割録画の考慮
 
-同じ `connection_id` を持つ複数のアーカイブファイルは、一つのソースとして自動的に統合されます。
+`video_sources` や `video_sources_excluded` に、同じ `connection_id` を持つ複数のメタデータファイルが存在する場合には、
+一つのソースに属するものとして扱われます。
 
 ### 統合の例
 
@@ -167,9 +135,10 @@ archive-user1-002.json (connection_id: USER1, 300-600秒)
 archive-user1-003.json (connection_id: USER1, 600-900秒)
 ```
 
-これらは同じ `connection_id` を持つため、一つのソース（0-900秒の連続した映像）として扱われます。
+`video_sources` で `["archive-user1-*.json"]` と指定されていたら、
+これらは同じ `connection_id` を持つため、一つのソース（0-900 秒の連続した映像）として扱われます。
 
-## 4. 表示開始時刻と終了時刻の決定
+## ソースの表示開始時刻と終了時刻の決定方法
 
 各ソースの表示時間範囲は、以下のように決定されます：
 
@@ -184,10 +153,6 @@ archive-user1-003.json (connection_id: USER1, 600-900秒)
 上記の例では：
 - 開始時刻：0秒（最小値）
 - 終了時刻：900秒（最大値）
-
-## 処理結果
-
-最終的に決定された映像ソース一覧は、各リージョンのグリッド構成やセルへの割り当て処理で使用されます。分割録画も連続した一つのソースとして扱われるため、グリッドレイアウトでの表示や時間的な重複判定が適切に動作します。
 
 ## グリッドの行列サイズの決定方法
 
