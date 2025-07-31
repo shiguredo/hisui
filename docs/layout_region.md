@@ -655,17 +655,17 @@ Hisui の映像合成において、最終的な出力映像の解像度は複�
 
 #### 3. 全体解像度からの自動計算
 
-リージョンサイズが未指定の場合、全体解像度とリージョンの位置から自動計算されます：
+リージョンサイズやセルサイズが未指定の場合、全体解像度とリージョンの位置から自動計算されます：
 
 ```json
 {
   "resolution": "1920x1080",
   "video_layout": {
     "main": {
-      "video_sources": ["*.json"],
+      "video_sources": ["archive-*.json"],
       "x_pos": 100,
       "y_pos": 50
-      // width, height は未指定
+      // width, height ないし cell_width, cell_height は未指定
     }
   }
 }
