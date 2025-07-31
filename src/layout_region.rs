@@ -139,7 +139,7 @@ impl RawRegion {
         let mut grid_sources = sources.clone();
         grid_sources.retain(|id, _| source_ids.contains(id));
 
-        let max_sources = decide_max_simultaneous_sources(&grid_sources, &self.cells_excluded);
+        let max_sources = decide_required_cells(&grid_sources, self.reuse, &self.cells_excluded);
         let (rows, columns) = decide_grid_dimensions(self.max_rows, self.max_columns, max_sources);
         let assigned = assign_sources(
             self.reuse,
@@ -436,22 +436,32 @@ pub fn decide_grid_dimensions(
     (rows, columns)
 }
 
-/// 最大同時ソース数を求める
-pub fn decide_max_simultaneous_sources(
+/// 全てのソースを表示するために必要なセルの数を求める
+pub fn decide_required_cells(
     sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
+    reuse: ReuseKind,
     cells_excluded: &[usize],
 ) -> usize {
-    // ソース数はどんなに多くても数十オーダーだと思うので非効率だけど分かりやすい実装にしている
-    let mut max = sources
-        .values()
-        .map(|s0| {
-            sources
-                .values()
-                .filter(|s1| s0.is_overlapped_with(s1))
-                .count()
-        })
-        .max()
-        .unwrap_or_default();
+    let mut max = if reuse == ReuseKind::None {
+        // セルの再利用をしない場合は、各ソースにつき一つのセルが消費されるため、
+        // ソースと同じ数だけのセルが必要となる
+        sources.len()
+    } else {
+        // セルを再利用する場合には、同時に表示されるソースの数だけのセルがあればいい
+        // （各時刻で重複するソースの最大数を計算）
+        //
+        // なお、ソース数はどんなに多くても数十オーダーだと思うので非効率だけど分かりやすい実装にしている
+        sources
+            .values()
+            .map(|s0| {
+                sources
+                    .values()
+                    .filter(|s1| s0.is_overlapped_with(s1))
+                    .count()
+            })
+            .max()
+            .unwrap_or_default()
+    };
 
     // 除外セルの分を考慮する
     for cell_index in BTreeSet::from_iter(cells_excluded.iter().copied()) {

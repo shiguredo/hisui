@@ -6,9 +6,7 @@ use std::{
 
 use hisui::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
-    layout_region::{
-        ReuseKind, assign_sources, decide_grid_dimensions, decide_max_simultaneous_sources,
-    },
+    layout_region::{assign_sources, decide_grid_dimensions, decide_required_cells, ReuseKind},
     metadata::{SourceId, SourceInfo},
 };
 use orfail::OrFail;
@@ -89,7 +87,7 @@ fn decide_grid_dimensions_works() {
 }
 
 #[test]
-fn decide_max_simultaneous_sources_works() {
+fn decide_required_cells_works() {
     // https://s3.amazonaws.com/com.twilio.prod.twilio-docs/images/composer_understanding_trim.original.png
     let source0 = source(0, 2);
     let source1 = source(1, 1);
@@ -114,39 +112,58 @@ fn decide_max_simultaneous_sources_works() {
         })
         .collect();
 
-    // 除外セルなし
+    // [再利用あり] 除外セルなし
+    let kind = ReuseKind::ShowOldest;
     let cells_excluded = [];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 3);
     assert_eq!(
-        decide_max_simultaneous_sources(&sources, &cells_excluded),
-        3
-    );
-    assert_eq!(
-        decide_max_simultaneous_sources(
+        decide_required_cells(
             &sources.clone().into_iter().take(2).collect(),
+            kind,
             &cells_excluded
         ),
         2
     );
 
-    // 除外セルあり
+    // [再利用あり] 除外セルあり
     let cells_excluded = [1, 3];
-    assert_eq!(
-        decide_max_simultaneous_sources(&sources, &cells_excluded),
-        5
-    );
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 5);
 
     let cells_excluded = [2];
-    assert_eq!(
-        decide_max_simultaneous_sources(&sources, &cells_excluded),
-        4
-    );
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 4);
 
-    // 除外セルがあるけど、範囲外なので考慮されない
+    // [再利用あり] 除外セルがあるけど、範囲外なので考慮されない
     let cells_excluded = [3];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 3);
+
+    // [再利用なし] 除外セルなし
+    let kind = ReuseKind::None;
+    let cells_excluded = [];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 5); // ソース数と同じ
     assert_eq!(
-        decide_max_simultaneous_sources(&sources, &cells_excluded),
-        3
-    );
+        decide_required_cells(
+            &sources.clone().into_iter().take(2).collect(),
+            kind,
+            &cells_excluded
+        ),
+        2
+    ); // ソース数と同じ
+
+    // [再利用なし] 除外セルあり
+    let cells_excluded = [1, 3];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 7); // ソース数 + 除外セル数（範囲内）
+
+    let cells_excluded = [2];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 6); // ソース数 + 除外セル数（範囲内）
+
+    // [再利用なし] 除外セルがあるけど、範囲外なので考慮されない
+    let cells_excluded = [5, 10];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 5); // ソース数と同じ（除外セルは範囲外）
+
+    // [再利用なし] 空のソース
+    let empty_sources = BTreeMap::new();
+    assert_eq!(decide_required_cells(&empty_sources, kind, &[]), 0);
+    assert_eq!(decide_required_cells(&empty_sources, kind, &[1, 2]), 0); // 除外セルがあっても0
 }
 
 #[test]
