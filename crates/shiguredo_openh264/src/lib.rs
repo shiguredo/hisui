@@ -122,23 +122,15 @@ impl Openh264Library {
     }
 
     fn get_runtime_version(&self) -> Result<String, Error> {
-        let get_version_fn = unsafe {
-            self.0
-                .get::<unsafe extern "C" fn() -> *const std::ffi::c_char>(b"WelsGetCodecVersion")?
-        };
-
         unsafe {
-            let version_ptr = get_version_fn();
-            if version_ptr.is_null() {
-                return Err(Error::UnavailableMethod("WelsGetCodecVersion"));
-            }
-
-            let version_cstr = std::ffi::CStr::from_ptr(version_ptr);
-            let version_str = version_cstr
-                .to_str()
-                .map_err(|_| Error::UnavailableMethod("WelsGetCodecVersion - invalid UTF-8"))?;
-
-            Ok(version_str.to_string())
+            let version_fn = self
+                .0
+                .get::<unsafe extern "C" fn() -> sys::OpenH264Version>(b"WelsGetCodecVersion")?;
+            let version = version_fn();
+            Ok(format!(
+                "v{}.{}.{}",
+                version.uMajor, version.uMinor, version.uRevision
+            ))
         }
     }
 
