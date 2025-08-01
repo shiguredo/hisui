@@ -50,6 +50,7 @@ fn main() {
                 "pub struct ELevelIdc;",
                 "pub struct EVideoFormatType;",
                 "pub struct EProfileIdc;",
+                "pub struct OpenH264Version;",
                 "pub const EProfileIdc_PRO_BASELINE: EProfileIdc = EProfileIdc;",
                 "pub const ELevelIdc_LEVEL_3_1: ELevelIdc = ELevelIdc;",
             ),
