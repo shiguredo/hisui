@@ -88,7 +88,7 @@ pub struct EncoderConfig {
     /// イントラフレーム間隔 (-1=無制限, 0=イントラオンリー, 1以上=間隔)
     pub intra_period_length: isize,
 
-    /// 階層レベル数 (0=自動設定, 1-5=指定値)
+    /// 階層レベル数 (2-5=指定値)
     pub hierarchical_levels: u8,
 
     /// 予測構造 (1=低遅延, 2=ランダムアクセス)
@@ -206,7 +206,7 @@ impl Default for EncoderConfig {
             over_shoot_pct: 25,       // SVT-AV1のデフォルト値
             under_shoot_pct: 25,      // SVT-AV1のデフォルト値
             intra_period_length: 120, // 4秒間隔（30fps想定）
-            hierarchical_levels: 0,   // 自動設定
+            hierarchical_levels: 5,   // 最大の階層レベル
             pred_structure: 2,        // ランダムアクセス
             scene_change_detection: true,
             look_ahead_distance: 32,
