@@ -18,6 +18,12 @@ use libloading::{Library, Symbol};
 
 mod sys;
 
+/// ビルド時に参照した OpenH264 のバージョン（タグ）
+pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
+
+/// ビルド時に参照した OpenH264 のリポジトリ URL
+pub const BUILD_REPOSITORY: &str = sys::BUILD_METADATA_REPOSITORY;
+
 // Hisui でのエンコード時のレベル
 const LEVEL: sys::ELevelIdc = sys::ELevelIdc_LEVEL_3_1;
 
