@@ -300,6 +300,14 @@ fn run_trial_evaluation(
         .success()
         .or_fail_with(|()| "`$ hisui vmaf` command failed".to_owned())?;
 
+    // YUV ファイルはサイズが大きいので不要になったら削除する
+    for name in ["reference.yuv", "distorted.yuv"] {
+        let path = trial_dir.join(name);
+        if let Err(e) = std::fs::remove_file(&path) {
+            eprintln!("[WARN] failed to remove file {}: {e}", path.display());
+        }
+    }
+
     // 出力結果をパース
     let stdout = String::from_utf8(output.stdout).or_fail()?;
     let result = nojson::RawJson::parse(&stdout).or_fail()?;
