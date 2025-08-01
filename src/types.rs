@@ -124,19 +124,11 @@ impl EvenUsize {
     pub const MIN_CELL_SIZE: Self = Self(16);
 
     pub const fn new(n: usize) -> Option<Self> {
-        if n % 2 == 0 {
-            Some(Self(n))
-        } else {
-            None
-        }
+        if n % 2 == 0 { Some(Self(n)) } else { None }
     }
 
     pub const fn truncating_new(n: usize) -> Self {
-        if n % 2 == 0 {
-            Self(n)
-        } else {
-            Self(n - 1)
-        }
+        if n % 2 == 0 { Self(n) } else { Self(n - 1) }
     }
 
     pub const fn get(self) -> usize {
