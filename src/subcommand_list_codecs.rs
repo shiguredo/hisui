@@ -20,7 +20,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    let is_openh264_available = openh264.is_some_and(|path| Openh264Library::load(path).is_ok());
+    let openh264_lib = openh264
+        .as_ref()
+        .and_then(|path| Openh264Library::load(path).ok());
+    let is_openh264_available = openh264_lib.is_some();
 
     let mut codecs = Vec::new();
 
@@ -52,6 +55,46 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         build_version: Some(shiguredo_opus::BUILD_VERSION),
         ..EngineInfo::new(EngineName::Opus)
     });
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_libvpx::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::Libvpx)
+    });
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_dav1d::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_dav1d::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::Dav1d)
+    });
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_svt_av1::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_svt_av1::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::SvtAv1)
+    });
+    #[cfg(feature = "fdk-aac")]
+    {
+        engines.push(EngineInfo {
+            ..EngineInfo::new(EngineName::FdkAac)
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        engines.push(EngineInfo {
+            ..EngineInfo::new(EngineName::AudioToobox)
+        });
+        engines.push(EngineInfo {
+            ..EngineInfo::new(EngineName::VideoToolbox)
+        });
+    }
+    if let Some(lib) = openh264_lib {
+        engines.push(EngineInfo {
+            repository: Some(shiguredo_openh264::BUILD_REPOSITORY),
+            shared_library_path: Some(lib.path().to_path_buf()),
+            build_version: Some(shiguredo_openh264::BUILD_VERSION),
+            runtime_version: Some(lib.runtime_version()),
+            ..EngineInfo::new(EngineName::Openh264)
+        });
+    }
+    engines.sort_by_key(|x| x.name);
 
     println!(
         "{}",
