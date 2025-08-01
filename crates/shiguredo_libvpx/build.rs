@@ -18,9 +18,24 @@ fn main() {
     let src_dir = out_build_dir.join(LIB_NAME);
     let input_header_dir = src_dir.join("include/vpx/");
     let output_lib_dir = src_dir.join("lib/");
+    let output_metadata_path = out_dir.join("metadata.rs");
     let output_bindings_path = out_dir.join("bindings.rs");
     let _ = std::fs::remove_dir_all(&out_build_dir);
     std::fs::create_dir(&out_build_dir).expect("failed to create build directory");
+
+    // 各種メタデータを書き込む
+    let (git_url, version) = get_git_url_and_version();
+    std::fs::write(
+        output_metadata_path,
+        format!(
+            concat!(
+                "pub const BUILD_METADATA_REPOSITORY: &str={:?};\n",
+                "pub const BUILD_METADATA_VERSION: &str={:?};\n",
+            ),
+            git_url, version
+        ),
+    )
+    .expect("failed to write metadata file");
 
     if std::env::var("DOCS_RS").is_ok() {
         // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップして、

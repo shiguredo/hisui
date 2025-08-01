@@ -6,4 +6,5 @@
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
 
+include!(concat!(env!("OUT_DIR"), "/metadata.rs"));
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

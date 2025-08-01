@@ -6,7 +6,7 @@ use std::{
 
 use hisui::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
-    layout_region::{assign_sources, decide_grid_dimensions, decide_required_cells, ReuseKind},
+    layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
     metadata::{SourceId, SourceInfo},
 };
 use orfail::OrFail;

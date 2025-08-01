@@ -20,7 +20,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    let is_openh264_available = openh264.is_some_and(|path| Openh264Library::load(path).is_ok());
+    let openh264_lib = openh264
+        .as_ref()
+        .and_then(|path| Openh264Library::load(path).ok());
+    let is_openh264_available = openh264_lib.is_some();
 
     let mut codecs = Vec::new();
 
@@ -46,16 +49,108 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         });
     }
 
+    let mut engines = Vec::new();
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_opus::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_opus::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::Opus)
+    });
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_libvpx::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::Libvpx)
+    });
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_dav1d::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_dav1d::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::Dav1d)
+    });
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_svt_av1::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_svt_av1::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::SvtAv1)
+    });
+    #[cfg(feature = "fdk-aac")]
+    {
+        engines.push(EngineInfo {
+            ..EngineInfo::new(EngineName::FdkAac)
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        engines.push(EngineInfo {
+            ..EngineInfo::new(EngineName::AudioToolbox)
+        });
+        engines.push(EngineInfo {
+            ..EngineInfo::new(EngineName::VideoToolbox)
+        });
+    }
+    if let Some(lib) = openh264_lib {
+        engines.push(EngineInfo {
+            repository: Some(shiguredo_openh264::BUILD_REPOSITORY),
+            shared_library_path: Some(lib.path().to_path_buf()),
+            build_version: Some(shiguredo_openh264::BUILD_VERSION),
+            runtime_version: Some(lib.runtime_version()),
+            ..EngineInfo::new(EngineName::Openh264)
+        });
+    }
+    engines.sort_by_key(|x| x.name);
+
     println!(
         "{}",
         nojson::json(|f| {
             f.set_indent_size(2);
             f.set_spacing(true);
-            f.value(&codecs)
+            f.object(|f| {
+                f.member("codecs", &codecs)?;
+                f.member("engines", &engines)
+            })
         })
     );
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct EngineInfo {
+    name: EngineName,
+    repository: Option<&'static str>,
+    shared_library_path: Option<PathBuf>,
+    build_version: Option<&'static str>,
+    runtime_version: Option<String>,
+}
+
+impl EngineInfo {
+    fn new(name: EngineName) -> Self {
+        Self {
+            name,
+            repository: None,
+            shared_library_path: None,
+            build_version: None,
+            runtime_version: None,
+        }
+    }
+}
+
+impl nojson::DisplayJson for EngineInfo {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("name", self.name)?;
+            if let Some(v) = self.repository {
+                f.member("repository", v)?;
+            }
+            if let Some(v) = &self.shared_library_path {
+                f.member("shared_library_path", v)?;
+            }
+            if let Some(v) = self.build_version {
+                f.member("build_version", v)?;
+            }
+            if let Some(v) = &self.runtime_version {
+                f.member("runtime_version", v)?;
+            }
+            Ok(())
+        })
+    }
 }
 
 #[derive(Debug)]

@@ -76,7 +76,7 @@ impl FromStr for CodecName {
 /// エンジン名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EngineName {
-    AudioToobox,
+    AudioToolbox,
     Dav1d,
     FdkAac,
     Libvpx,
@@ -95,7 +95,7 @@ impl nojson::DisplayJson for EngineName {
 impl EngineName {
     pub fn as_str(self) -> &'static str {
         match self {
-            EngineName::AudioToobox => "audio_toolbox",
+            EngineName::AudioToolbox => "audio_toolbox",
             EngineName::Dav1d => "dav1d",
             EngineName::FdkAac => "fdk_aac",
             EngineName::Libvpx => "libvpx",
