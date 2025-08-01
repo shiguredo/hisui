@@ -9,7 +9,7 @@ use std::{
     marker::PhantomData,
     mem::MaybeUninit,
     num::NonZeroUsize,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -92,21 +92,45 @@ impl From<libloading::Error> for Error {
 
 /// openh264 用の共有ライブラリを管理するための構造体
 #[derive(Debug, Clone)]
-pub struct Openh264Library(Arc<Library>);
+pub struct Openh264Library {
+    lib: Arc<Library>,
+    path: PathBuf,
+    version: sys::OpenH264Version,
+}
 
 impl Openh264Library {
     /// 指定のパスにある動的ライブラリをロードする
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         unsafe {
             let lib = Library::new(path.as_ref().as_os_str())?;
-            let this = Self(Arc::new(lib));
-            this.check_version()?;
+            let version = lib
+                .get::<unsafe extern "C" fn() -> sys::OpenH264Version>(b"WelsGetCodecVersion")?(
+            );
+            let this = Self {
+                lib: Arc::new(lib),
+                path: path.as_ref().to_path_buf(),
+                version,
+            };
+            this.check_version();
             Ok(this)
         }
     }
 
-    fn check_version(&self) -> Result<(), Error> {
-        let runtime_version = self.get_runtime_version()?;
+    /// 共有ライブラリのパスを取得する
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// 共有ライブラリのバージョンを取得する
+    pub fn runtime_version(&self) -> String {
+        format!(
+            "v{}.{}.{}",
+            self.version.uMajor, self.version.uMinor, self.version.uRevision
+        )
+    }
+
+    fn check_version(&self) {
+        let runtime_version = self.runtime_version();
         if runtime_version != BUILD_VERSION {
             // バージョンが不一致になったからといって、必ずしも利用可能とは限らないので、
             // とりあえずは警告ログを出しておくに留めて、処理自体は継続する
@@ -120,27 +144,13 @@ impl Openh264Library {
                 runtime_version
             );
         }
-        Ok(())
-    }
-
-    fn get_runtime_version(&self) -> Result<String, Error> {
-        unsafe {
-            let version_fn = self
-                .0
-                .get::<unsafe extern "C" fn() -> sys::OpenH264Version>(b"WelsGetCodecVersion")?;
-            let version = version_fn();
-            Ok(format!(
-                "v{}.{}.{}",
-                version.uMajor, version.uMinor, version.uRevision
-            ))
-        }
     }
 
     fn call<F, T, U>(&self, symbol: &str, f: F) -> Result<U, Error>
     where
         F: FnOnce(Symbol<T>) -> U,
     {
-        let external_function = unsafe { self.0.get(symbol.as_bytes())? };
+        let external_function = unsafe { self.lib.get(symbol.as_bytes())? };
         Ok(f(external_function))
     }
 }
