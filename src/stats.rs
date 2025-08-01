@@ -86,11 +86,27 @@ impl nojson::DisplayJson for Stats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("elapsed_seconds", self.elapsed_seconds)?;
-            f.member("readers", &self.readers)?;
-            f.member("decoders", &self.decoders)?;
-            f.member("mixers", &self.mixers)?;
-            f.member("encoders", &self.encoders)?;
-            f.member("writers", &self.writers)?;
+            f.member(
+                "processors",
+                nojson::array(|f| {
+                    for processor in &self.readers {
+                        f.element(processor)?;
+                    }
+                    for processor in &self.decoders {
+                        f.element(processor)?;
+                    }
+                    for processor in &self.mixers {
+                        f.element(processor)?;
+                    }
+                    for processor in &self.encoders {
+                        f.element(processor)?;
+                    }
+                    for processor in &self.writers {
+                        f.element(processor)?;
+                    }
+                    Ok(())
+                }),
+            )?;
             Ok(())
         })
     }
