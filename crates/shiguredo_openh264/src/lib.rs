@@ -108,6 +108,8 @@ impl Openh264Library {
     fn check_version(&self) -> Result<(), Error> {
         let runtime_version = self.get_runtime_version()?;
         if runtime_version != BUILD_VERSION {
+            // バージョンが不一致になったからといって、必ずしも利用可能とは限らないので、
+            // とりあえずは警告ログを出しておくに留めて、処理自体は継続する
             log::warn!(
                 concat!(
                     "OpenH264 version mismatch: build-time version is '{}', ",
