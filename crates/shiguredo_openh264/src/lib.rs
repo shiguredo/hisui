@@ -18,6 +18,12 @@ use libloading::{Library, Symbol};
 
 mod sys;
 
+/// ビルド時に参照した OpenH264 のバージョン（タグ）
+pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
+
+/// ビルド時に参照した OpenH264 のリポジトリ URL
+pub const BUILD_REPOSITORY: &str = sys::BUILD_METADATA_REPOSITORY;
+
 // Hisui でのエンコード時のレベル
 const LEVEL: sys::ELevelIdc = sys::ELevelIdc_LEVEL_3_1;
 
@@ -93,7 +99,40 @@ impl Openh264Library {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         unsafe {
             let lib = Library::new(path.as_ref().as_os_str())?;
-            Ok(Self(Arc::new(lib)))
+            let this = Self(Arc::new(lib));
+            this.check_version()?;
+            Ok(this)
+        }
+    }
+
+    fn check_version(&self) -> Result<(), Error> {
+        let runtime_version = self.get_runtime_version()?;
+        if runtime_version != BUILD_VERSION {
+            // バージョンが不一致になったからといって、必ずしも利用可能とは限らないので、
+            // とりあえずは警告ログを出しておくに留めて、処理自体は継続する
+            log::warn!(
+                concat!(
+                    "OpenH264 version mismatch: build-time version is '{}', ",
+                    "but runtime version is '{}'. ",
+                    "This may cause compatibility issues."
+                ),
+                BUILD_VERSION,
+                runtime_version
+            );
+        }
+        Ok(())
+    }
+
+    fn get_runtime_version(&self) -> Result<String, Error> {
+        unsafe {
+            let version_fn = self
+                .0
+                .get::<unsafe extern "C" fn() -> sys::OpenH264Version>(b"WelsGetCodecVersion")?;
+            let version = version_fn();
+            Ok(format!(
+                "v{}.{}.{}",
+                version.uMajor, version.uMinor, version.uRevision
+            ))
         }
     }
 
