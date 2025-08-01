@@ -79,7 +79,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     #[cfg(target_os = "macos")]
     {
         engines.push(EngineInfo {
-            ..EngineInfo::new(EngineName::AudioToobox)
+            ..EngineInfo::new(EngineName::AudioToolbox)
         });
         engines.push(EngineInfo {
             ..EngineInfo::new(EngineName::VideoToolbox)

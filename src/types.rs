@@ -76,7 +76,7 @@ impl FromStr for CodecName {
 /// エンジン名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EngineName {
-    AudioToobox,
+    AudioToolbox,
     Dav1d,
     FdkAac,
     Libvpx,
@@ -95,7 +95,7 @@ impl nojson::DisplayJson for EngineName {
 impl EngineName {
     pub fn as_str(self) -> &'static str {
         match self {
-            EngineName::AudioToobox => "audio_toolbox",
+            EngineName::AudioToolbox => "audio_toolbox",
             EngineName::Dav1d => "dav1d",
             EngineName::FdkAac => "fdk_aac",
             EngineName::Libvpx => "libvpx",
@@ -124,11 +124,19 @@ impl EvenUsize {
     pub const MIN_CELL_SIZE: Self = Self(16);
 
     pub const fn new(n: usize) -> Option<Self> {
-        if n % 2 == 0 { Some(Self(n)) } else { None }
+        if n % 2 == 0 {
+            Some(Self(n))
+        } else {
+            None
+        }
     }
 
     pub const fn truncating_new(n: usize) -> Self {
-        if n % 2 == 0 { Self(n) } else { Self(n - 1) }
+        if n % 2 == 0 {
+            Self(n)
+        } else {
+            Self(n - 1)
+        }
     }
 
     pub const fn get(self) -> usize {

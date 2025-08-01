@@ -73,7 +73,7 @@ impl AudioEncoder {
             #[cfg(feature = "fdk-aac")]
             AudioEncoder::FdkAac(_) => EngineName::FdkAac,
             #[cfg(target_os = "macos")]
-            AudioEncoder::AudioToolbox(_) => EngineName::AudioToobox,
+            AudioEncoder::AudioToolbox(_) => EngineName::AudioToolbox,
             AudioEncoder::Opus(_) => EngineName::Opus,
         }
     }
@@ -98,7 +98,7 @@ impl AudioEncoder {
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    engines.push(EngineName::AudioToobox);
+                    engines.push(EngineName::AudioToolbox);
                 }
             }
             CodecName::Opus => engines.push(EngineName::Opus),
