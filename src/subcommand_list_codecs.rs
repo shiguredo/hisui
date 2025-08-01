@@ -51,7 +51,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         nojson::json(|f| {
             f.set_indent_size(2);
             f.set_spacing(true);
-            f.value(&codecs)
+            f.object(|f| {
+                f.member("codecs", &codecs)?;
+                f.member("engines", [()])
+            })
         })
     );
 

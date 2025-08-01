@@ -43,7 +43,7 @@ fn main() {
         // See also: https://docs.rs/about/builds
         std::fs::write(
             output_bindings_path,
-            "pub struct OpusEncoder; pub struct OpusDecoder;",
+            "pub struct OpusEncoder; pub struct OpusDecoder; pub struct OpenH264Version;",
         )
         .expect("write file error");
         return;
