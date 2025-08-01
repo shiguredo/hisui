@@ -46,6 +46,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         });
     }
 
+    let mut engines = Vec::new();
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_opus::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_opus::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::Opus)
+    });
+
     println!(
         "{}",
         nojson::json(|f| {
@@ -53,12 +60,54 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             f.set_spacing(true);
             f.object(|f| {
                 f.member("codecs", &codecs)?;
-                f.member("engines", [()])
+                f.member("engines", &engines)
             })
         })
     );
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct EngineInfo {
+    name: EngineName,
+    repository: Option<&'static str>,
+    shared_library_path: Option<PathBuf>,
+    build_version: Option<&'static str>,
+    runtime_version: Option<String>,
+}
+
+impl EngineInfo {
+    fn new(name: EngineName) -> Self {
+        Self {
+            name,
+            repository: None,
+            shared_library_path: None,
+            build_version: None,
+            runtime_version: None,
+        }
+    }
+}
+
+impl nojson::DisplayJson for EngineInfo {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("name", self.name)?;
+            if let Some(v) = self.repository {
+                f.member("repository", v)?;
+            }
+            if let Some(v) = &self.shared_library_path {
+                f.member("shared_library_path", v)?;
+            }
+            if let Some(v) = self.build_version {
+                f.member("build_version", v)?;
+            }
+            if let Some(v) = &self.runtime_version {
+                f.member("runtime_version", v)?;
+            }
+            Ok(())
+        })
+    }
 }
 
 #[derive(Debug)]
