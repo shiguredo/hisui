@@ -213,7 +213,7 @@ pub struct AudioMixerStats {
 impl nojson::DisplayJson for AudioMixerStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "audio")?;
+            f.member("type", "audio_mixer")?;
             f.member(
                 "total_input_audio_data_count",
                 self.total_input_audio_data_count,
@@ -273,7 +273,7 @@ pub struct VideoMixerStats {
 impl nojson::DisplayJson for VideoMixerStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "video")?;
+            f.member("type", "video_mixer")?;
             f.member("output_video_resolution", self.output_video_resolution)?;
             f.member(
                 "total_input_video_frame_count",
@@ -340,7 +340,7 @@ pub struct AudioEncoderStats {
 impl nojson::DisplayJson for AudioEncoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "audio")?;
+            f.member("type", "audio_encoder")?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
             f.member("total_audio_data_count", self.total_audio_data_count)?;
@@ -376,7 +376,7 @@ pub struct VideoEncoderStats {
 impl nojson::DisplayJson for VideoEncoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "video")?;
+            f.member("type", "video_encoder")?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
             f.member(
@@ -435,7 +435,7 @@ pub struct AudioDecoderStats {
 impl nojson::DisplayJson for AudioDecoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "audio")?;
+            f.member("type", "audio_decoder")?;
             f.member("source_id", &self.source_id)?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
@@ -478,7 +478,7 @@ pub struct VideoDecoderStats {
 impl nojson::DisplayJson for VideoDecoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "video")?;
+            f.member("type", "video_decoder")?;
             f.member("source_id", &self.source_id)?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
@@ -543,7 +543,7 @@ pub struct Mp4AudioReaderStats {
 impl nojson::DisplayJson for Mp4AudioReaderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "mp4_audio")?;
+            f.member("type", "mp4_audio_reader")?;
             f.member("input_file", &self.input_file)?;
             f.member("codec", self.codec)?;
             f.member("total_sample_count", self.total_sample_count)?;
@@ -583,7 +583,7 @@ pub struct Mp4VideoReaderStats {
 impl nojson::DisplayJson for Mp4VideoReaderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "mp4_video")?;
+            f.member("type", "mp4_video_reader")?;
             f.member("input_file", &self.input_file)?;
             f.member("codec", self.codec)?;
             f.member(
@@ -631,7 +631,7 @@ pub struct WebmAudioReaderStats {
 impl nojson::DisplayJson for WebmAudioReaderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "webm_audio")?;
+            f.member("type", "webm_audio_reader")?;
             f.member("input_file", &self.input_file)?;
             f.member("codec", self.codec)?;
             f.member("total_cluster_count", self.total_cluster_count)?;
@@ -672,7 +672,7 @@ pub struct WebmVideoReaderStats {
 impl nojson::DisplayJson for WebmVideoReaderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "webm_video")?;
+            f.member("type", "webm_video_reader")?;
             f.member("input_file", &self.input_file)?;
             f.member("codec", self.codec)?;
             f.member("total_cluster_count", self.total_cluster_count)?;
@@ -745,7 +745,7 @@ pub struct Mp4WriterStats {
 impl nojson::DisplayJson for Mp4WriterStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("kind", "mp4")?;
+            f.member("type", "mp4_writer")?;
             f.member("audio_codec", self.audio_codec)?;
             f.member("video_codec", self.video_codec)?;
             f.member("reserved_moov_box_size", self.reserved_moov_box_size)?;
