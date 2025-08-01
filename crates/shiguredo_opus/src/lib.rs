@@ -4,9 +4,15 @@
 //! [Opus]: https://github.com/xiph/opus
 #![warn(missing_docs)]
 
-use std::ffi::{CStr, c_int};
+use std::ffi::{c_int, CStr};
 
 mod sys;
+
+/// ビルド時に参照したリポジトリ URL
+pub const BUILD_REPOSITORY: &str = sys::BUILD_METADATA_REPOSITORY;
+
+/// ビルド時に参照したリポジトリのバージョン（タグ）
+pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
 /// エラー
 #[derive(Debug)]

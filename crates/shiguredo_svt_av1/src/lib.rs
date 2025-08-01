@@ -8,6 +8,12 @@ use std::{mem::MaybeUninit, num::NonZeroUsize, sync::Mutex};
 
 mod sys;
 
+/// ビルド時に参照したリポジトリ URL
+pub const BUILD_REPOSITORY: &str = sys::BUILD_METADATA_REPOSITORY;
+
+/// ビルド時に参照したリポジトリのバージョン（タグ）
+pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
+
 const ENV_KEY_SVT_LOG: &'static str = "SVT_LOG";
 const ENV_VALUE_SVT_LOG_LEVEL: &'static str = "1"; // 1 は error (必要に応じて調整する）
 
