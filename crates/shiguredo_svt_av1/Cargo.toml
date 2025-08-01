@@ -2,6 +2,7 @@
 name = "shiguredo_svt_av1"
 version = "2025.1.0-canary.2"
 edition = "2024"
+rust-version = "1.88"
 authors = ["Shiguredo Inc."]
 license = "Apache-2.0"
 description = "SVT-AV1 AV1 encoder for Hisui"

@@ -2,6 +2,7 @@
 name = "shiguredo_video_toolbox"
 version = "2025.1.0-canary.2"
 edition = "2024"
+rust-version = "1.88"
 authors = ["Shiguredo Inc."]
 license = "Apache-2.0"
 description = "Apple Vision Toolbox H.264 / H.265 decoders and encoders for Hisui"

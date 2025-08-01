@@ -2,6 +2,7 @@
 name = "shiguredo_libvpx"
 version = "2025.1.0-canary.3"
 edition = "2024"
+rust-version = "1.88"
 authors = ["Shiguredo Inc."]
 license = "Apache-2.0"
 description = "libvpx VP8 / VP9 decoders and encoders for Hisui"
