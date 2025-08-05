@@ -2,9 +2,10 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    Uint,
     boxes::{Avc1Box, AvccBox, Hev1Box, HvccBox, HvccNalUintArray, SampleEntry},
+    Uint,
 };
+use shiguredo_video_toolbox::{EncoderConfig, ProfileLevel};
 
 use crate::{
     layout::Layout,
@@ -60,6 +61,8 @@ impl VideoToolboxEncoder {
     pub fn new_h265(layout: &Layout) -> orfail::Result<Self> {
         let width = layout.resolution.width();
         let height = layout.resolution.height();
+        let mut default = EncoderConfig::default();
+        default.profile_level = ProfileLevel::H265Main;
         let config = shiguredo_video_toolbox::EncoderConfig {
             width: width.get(),
             height: height.get(),
@@ -70,7 +73,7 @@ impl VideoToolboxEncoder {
                 .encode_params
                 .video_toolbox_h265
                 .clone()
-                .unwrap_or_default()
+                .unwrap_or(default)
         };
         let inner = shiguredo_video_toolbox::Encoder::new_h265(&config).or_fail()?;
         Ok(Self {
