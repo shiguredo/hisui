@@ -382,7 +382,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Resolution {
     }
 }
 
-// TODO: base_path の範囲外を参照していたらエラーにする
 pub fn resolve_source_and_media_path_pairs(
     base_path: &Path,
     sources: &[PathBuf],
@@ -413,6 +412,16 @@ pub fn resolve_source_paths(
     let mut paths = Vec::new();
     for source in sources {
         let path = std::path::absolute(base_path.join(source)).or_fail()?;
+
+        // base_path の範囲外を参照しているパスがあったらエラー
+        path.starts_with(base_path).or_fail_with(|()| {
+            format!(
+                "source path '{}' is outside the base dir '{}'",
+                path.display(),
+                base_path.display()
+            )
+        })?;
+
         paths.extend(glob(path).or_fail()?);
     }
 
