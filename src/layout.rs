@@ -232,6 +232,13 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
 
 impl RawLayout {
     fn into_layout(self, base_path: PathBuf) -> orfail::Result<Layout> {
+        let base_path = base_path.canonicalize().or_fail_with(|e| {
+            format!(
+                "failed to canonicalize base dir {}: {e}",
+                base_path.display()
+            )
+        })?;
+
         // 利用するソース一覧を確定して、情報を読み込む
         let mut audio_source_ids = BTreeSet::new();
         let mut sources = BTreeMap::<SourceId, AggregatedSourceInfo>::new();
@@ -382,7 +389,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Resolution {
     }
 }
 
-// TODO: base_path の範囲外を参照していたらエラーにする
 pub fn resolve_source_and_media_path_pairs(
     base_path: &Path,
     sources: &[PathBuf],
@@ -412,8 +418,26 @@ pub fn resolve_source_paths(
 ) -> orfail::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for source in sources {
-        let path = std::path::absolute(base_path.join(source)).or_fail()?;
-        paths.extend(glob(path).or_fail()?);
+        for path in glob(base_path.join(source)).or_fail()? {
+            // 後段のチェックなどを簡単にするためにパスを正規化する
+            let path = path.canonicalize().or_fail_with(|e| {
+                format!(
+                    "failed to canonicalize source file path {}: {e}",
+                    path.display()
+                )
+            })?;
+
+            // base_path の範囲外を参照しているパスがあったらエラー
+            path.starts_with(base_path).or_fail_with(|()| {
+                format!(
+                    "source path '{}' is outside the base dir '{}'",
+                    path.display(),
+                    base_path.display()
+                )
+            })?;
+
+            paths.push(path);
+        }
     }
 
     // 重複エントリは除去する
@@ -448,6 +472,16 @@ pub fn resolve_source_paths(
     Ok(paths)
 }
 
+fn media_file_exists<P: AsRef<Path>>(source_file_path: P) -> bool {
+    let mut source_file_path = source_file_path.as_ref().to_path_buf();
+    for ext in ["webm", "mp4"] {
+        if source_file_path.set_extension(ext) && source_file_path.exists() {
+            return true;
+        }
+    }
+    false
+}
+
 fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
     if !path
         .file_name()
@@ -456,7 +490,9 @@ fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
     {
         // 名前部分にワイルドカードを含んでいないなら通常のパスとして扱う
         path.exists()
-            .or_fail_with(|()| format!("No such source file: {}", path.display()))?;
+            .or_fail_with(|()| format!("no such source file: {}", path.display()))?;
+        media_file_exists(&path)
+            .or_fail_with(|()| format!("no media file for the source: {}", path.display()))?;
         return Ok(vec![path]);
     }
 
@@ -466,19 +502,33 @@ fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
     let parent = path.parent().or_fail()?;
     parent
         .exists()
-        .or_fail_with(|()| format!("No such source file directory: {}", parent.display()))?;
+        .or_fail_with(|()| format!("no such source file directory: {}", parent.display()))?;
 
     let mut paths = Vec::new();
     for entry in path.parent().or_fail()?.read_dir().or_fail()? {
         let entry = entry.or_fail()?;
-        if entry
+        if !entry
             .path()
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| is_wildcard_name_matched(wildcard_name, name))
         {
-            paths.push(entry.path());
+            continue;
         }
+        if !media_file_exists(entry.path()) {
+            // 対応するメディアファイルが存在しない場合には、ワイルドカードの展開結果には含めない
+            //
+            // これは典型的には分割録画で `split-archive-*.json` と指定したら
+            // `split-archive-end-*.json` ファイルも展開結果に含まれてしまうのを防止するための処理
+            //
+            // 分割録画では普通に発生する状況なので、警告ではなくデバッグでログを出すに留めている
+            log::debug!(
+                "skipping source file '{}' as no corresponding media file exists",
+                entry.path().display()
+            );
+            continue;
+        }
+        paths.push(entry.path());
     }
 
     // read_dir() の結果の順番は環境によって変わるかもしれないので、

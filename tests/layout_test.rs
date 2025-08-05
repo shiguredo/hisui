@@ -6,7 +6,7 @@ use std::{
 
 use hisui::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
-    layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
+    layout_region::{assign_sources, decide_grid_dimensions, decide_required_cells, ReuseKind},
     metadata::{SourceId, SourceInfo},
 };
 use orfail::OrFail;
@@ -535,7 +535,7 @@ fn source(start: u64, end: u64) -> SourceInfo {
 
 #[test]
 fn source_wildcard() -> orfail::Result<()> {
-    let base_path = PathBuf::from("testdata/files/");
+    let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
     let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
 
     // ソースパスを明示的に指定
@@ -577,7 +577,7 @@ fn source_wildcard() -> orfail::Result<()> {
     // ソースパスと除外パスをワイルドカードで指定
     let resolved = layout::resolve_source_paths(
         &base_path,
-        &[PathBuf::from("*")],
+        &[PathBuf::from("*.json")],
         &[PathBuf::from("*-1.json")],
     )
     .or_fail()?;
@@ -612,6 +612,55 @@ fn source_wildcard() -> orfail::Result<()> {
             to_absolute("bar-1.json")?,
         ]
     );
+
+    Ok(())
+}
+
+#[test]
+fn source_path_outside_base_dir_error() -> orfail::Result<()> {
+    // ベースディレクトリの外をレイアウトの中で参照した場合にはエラーになる
+    let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
+
+    let result =
+        layout::resolve_source_paths(&base_path, &[PathBuf::from("../files2/foo-0.json")], &[]);
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("outside the base dir"));
+
+    Ok(())
+}
+
+#[test]
+fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
+    // files2/ ディレクトリには以下のファイルがある：
+    // - foo-0.json + foo-0.mp4 (メディアファイルあり)
+    // - source-without-media.json (メディアファイルなし)
+    let base_path = PathBuf::from("testdata/files2/").canonicalize().or_fail()?;
+    let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
+
+    // ワイルドカードで全 JSON ファイルを指定
+    let resolved =
+        layout::resolve_source_paths(&base_path, &[PathBuf::from("*.json")], &[]).or_fail()?;
+
+    // メディアファイルが存在するソースのみが含まれることを確認
+    // source-without-media.json は対応するメディアファイル（.webm または .mp4）が
+    // 存在しないため、展開結果から除外される
+    assert_eq!(resolved, &[to_absolute("foo-0.json")?]);
+
+    // [おまけ]
+    // source-without-media.json をワイルドカードではなく直接指定した場合にはエラーになる
+    let result = layout::resolve_source_paths(
+        &base_path,
+        &[PathBuf::from("source-without-media.json")],
+        &[],
+    );
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("no media file for the source"));
 
     Ok(())
 }
