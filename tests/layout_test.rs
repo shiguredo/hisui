@@ -577,7 +577,7 @@ fn source_wildcard() -> orfail::Result<()> {
     // ソースパスと除外パスをワイルドカードで指定
     let resolved = layout::resolve_source_paths(
         &base_path,
-        &[PathBuf::from("*")],
+        &[PathBuf::from("*.json")],
         &[PathBuf::from("*-1.json")],
     )
     .or_fail()?;
