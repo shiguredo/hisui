@@ -649,5 +649,18 @@ fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
     // 存在しないため、展開結果から除外される
     assert_eq!(resolved, &[to_absolute("foo-0.json")?]);
 
+    // [おまけ]
+    // source-without-media.json をワイルドカードではなく直接指定した場合にはエラーになる
+    let result = layout::resolve_source_paths(
+        &base_path,
+        &[PathBuf::from("source-without-media.json")],
+        &[],
+    );
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("no media file for the source"));
+
     Ok(())
 }
