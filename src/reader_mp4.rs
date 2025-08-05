@@ -8,9 +8,9 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    Decode, Either,
     aux::SampleTableAccessor,
     boxes::{FtypBox, HdlrBox, IgnoredBox, MoovBox, SampleEntry, StblBox, TrakBox},
+    Decode, Either,
 };
 
 use crate::{
@@ -33,7 +33,12 @@ pub struct Mp4VideoReader {
 impl Mp4VideoReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
         let mut default_stats = Mp4VideoReaderStats::default();
-        default_stats.input_file = path.as_ref().canonicalize().or_fail()?;
+        default_stats.input_file = path.as_ref().canonicalize().or_fail_with(|e| {
+            format!(
+                "failed to canonicalize path {}: {e}",
+                path.as_ref().display()
+            )
+        })?;
 
         let inner = Mp4VideoReaderInner::new(source_id, path).or_fail()?;
 
@@ -83,7 +88,12 @@ impl Mp4VideoReaderInner {
         file.seek(SeekFrom::Start(0)).or_fail()?;
 
         let stats = Mp4VideoReaderStats {
-            input_file: path.as_ref().canonicalize().or_fail()?,
+            input_file: path.as_ref().canonicalize().or_fail_with(|e| {
+                format!(
+                    "failed to canonicalize path {}: {e}",
+                    path.as_ref().display()
+                )
+            })?,
             total_processing_seconds: Seconds::new(start_time.elapsed()),
             ..Default::default()
         };

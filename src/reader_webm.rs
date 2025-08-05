@@ -347,7 +347,12 @@ impl WebmAudioReader {
         reader.skip_until(ID_CLUSTER).or_fail()?;
 
         let stats = WebmAudioReaderStats {
-            input_file: path.as_ref().canonicalize().or_fail()?,
+            input_file: path.as_ref().canonicalize().or_fail_with(|e| {
+                format!(
+                    "failed to canonicalize path {}: {e}",
+                    path.as_ref().display()
+                )
+            })?,
             codec: Some(CodecName::Opus),
             total_processing_seconds: Seconds::new(start_time.elapsed()),
             ..Default::default()
@@ -485,7 +490,12 @@ impl WebmVideoReader {
         reader.skip_until(ID_CLUSTER).or_fail()?;
 
         let stats = WebmVideoReaderStats {
-            input_file: path.as_ref().canonicalize().or_fail()?,
+            input_file: path.as_ref().canonicalize().or_fail_with(|e| {
+                format!(
+                    "failed to canonicalize path {}: {e}",
+                    path.as_ref().display()
+                )
+            })?,
             total_processing_seconds: Seconds::new(start_time.elapsed()),
             ..Default::default()
         };
