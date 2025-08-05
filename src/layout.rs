@@ -418,18 +418,26 @@ pub fn resolve_source_paths(
 ) -> orfail::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for source in sources {
-        let path = std::path::absolute(base_path.join(source)).or_fail()?;
+        for path in glob(base_path.join(source)).or_fail()? {
+            // 後段のチェックなどを簡単にするためにパスを正規化する
+            let path = path.canonicalize().or_fail_with(|e| {
+                format!(
+                    "failed to canonicalize source file path {}: {e}",
+                    path.display()
+                )
+            })?;
 
-        // base_path の範囲外を参照しているパスがあったらエラー
-        path.starts_with(base_path).or_fail_with(|()| {
-            format!(
-                "source path '{}' is outside the base dir '{}'",
-                path.display(),
-                base_path.display()
-            )
-        })?;
+            // base_path の範囲外を参照しているパスがあったらエラー
+            path.starts_with(base_path).or_fail_with(|()| {
+                format!(
+                    "source path '{}' is outside the base dir '{}'",
+                    path.display(),
+                    base_path.display()
+                )
+            })?;
 
-        paths.extend(glob(path).or_fail()?);
+            paths.push(path);
+        }
     }
 
     // 重複エントリは除去する
