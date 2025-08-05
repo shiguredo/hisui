@@ -472,6 +472,16 @@ pub fn resolve_source_paths(
     Ok(paths)
 }
 
+fn media_file_exists<P: AsRef<Path>>(source_file_path: P) -> bool {
+    let mut source_file_path = source_file_path.as_ref().to_path_buf();
+    for ext in ["webm", "mp4"] {
+        if source_file_path.set_extension(ext) && source_file_path.exists() {
+            return true;
+        }
+    }
+    false
+}
+
 fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
     if !path
         .file_name()
@@ -480,7 +490,9 @@ fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
     {
         // 名前部分にワイルドカードを含んでいないなら通常のパスとして扱う
         path.exists()
-            .or_fail_with(|()| format!("No such source file: {}", path.display()))?;
+            .or_fail_with(|()| format!("no such source file: {}", path.display()))?;
+        media_file_exists(&path)
+            .or_fail_with(|()| format!("no media file for the source: {}", path.display()))?;
         return Ok(vec![path]);
     }
 
@@ -490,19 +502,33 @@ fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
     let parent = path.parent().or_fail()?;
     parent
         .exists()
-        .or_fail_with(|()| format!("No such source file directory: {}", parent.display()))?;
+        .or_fail_with(|()| format!("no such source file directory: {}", parent.display()))?;
 
     let mut paths = Vec::new();
     for entry in path.parent().or_fail()?.read_dir().or_fail()? {
         let entry = entry.or_fail()?;
-        if entry
+        if !entry
             .path()
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| is_wildcard_name_matched(wildcard_name, name))
         {
-            paths.push(entry.path());
+            continue;
         }
+        if !media_file_exists(entry.path()) {
+            // 対応するメディアファイルが存在しない場合には、ワイルドカードの展開結果には含めない
+            //
+            // これは典型的には分割録画で `split-archive-*.json` と指定したら
+            // `split-archive-end-*.json` ファイルも展開結果に含まれてしまうのを防止するための処理
+            //
+            // 分割録画では普通に発生する状況なので、警告ではなくデバッグでログを出すに留めている
+            log::debug!(
+                "skipping source file '{}' as no corresponding media file exists",
+                entry.path().display()
+            );
+            continue;
+        }
+        paths.push(entry.path());
     }
 
     // read_dir() の結果の順番は環境によって変わるかもしれないので、

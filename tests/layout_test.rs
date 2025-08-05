@@ -618,12 +618,11 @@ fn source_wildcard() -> orfail::Result<()> {
 
 #[test]
 fn source_path_outside_base_dir_error() -> orfail::Result<()> {
-    // ベースディレクトリの外をレイアウトの中で参照した場合にはエラーにする
+    // ベースディレクトリの外をレイアウトの中で参照した場合にはエラーになる
     let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
 
     let result =
         layout::resolve_source_paths(&base_path, &[PathBuf::from("../layouts/layout0.json")], &[]);
-    dbg!(&result);
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
