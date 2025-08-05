@@ -631,3 +631,23 @@ fn source_path_outside_base_dir_error() -> orfail::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
+    // files2/ ディレクトリには以下のファイルがある：
+    // - foo-0.json + foo-0.mp4 (メディアファイルあり)
+    // - source-without-media.json (メディアファイルなし)
+    let base_path = PathBuf::from("testdata/files2/").canonicalize().or_fail()?;
+    let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
+
+    // ワイルドカードで全 JSON ファイルを指定
+    let resolved =
+        layout::resolve_source_paths(&base_path, &[PathBuf::from("*.json")], &[]).or_fail()?;
+
+    // メディアファイルが存在するソースのみが含まれることを確認
+    // source-without-media.json は対応するメディアファイル（.webm または .mp4）が
+    // 存在しないため、展開結果から除外される
+    assert_eq!(resolved, &[to_absolute("foo-0.json")?]);
+
+    Ok(())
+}
