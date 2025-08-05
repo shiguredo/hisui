@@ -6,7 +6,7 @@ use std::{
 
 use hisui::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
-    layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
+    layout_region::{assign_sources, decide_grid_dimensions, decide_required_cells, ReuseKind},
     metadata::{SourceId, SourceInfo},
 };
 use orfail::OrFail;
@@ -535,7 +535,7 @@ fn source(start: u64, end: u64) -> SourceInfo {
 
 #[test]
 fn source_wildcard() -> orfail::Result<()> {
-    let base_path = PathBuf::from("testdata/files/");
+    let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
     let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
 
     // ソースパスを明示的に指定

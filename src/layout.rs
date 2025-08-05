@@ -232,6 +232,13 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
 
 impl RawLayout {
     fn into_layout(self, base_path: PathBuf) -> orfail::Result<Layout> {
+        let base_path = base_path.canonicalize().or_fail_with(|e| {
+            format!(
+                "failed to canonicalize base dir {}: {e}",
+                base_path.display()
+            )
+        })?;
+
         // 利用するソース一覧を確定して、情報を読み込む
         let mut audio_source_ids = BTreeSet::new();
         let mut sources = BTreeMap::<SourceId, AggregatedSourceInfo>::new();
