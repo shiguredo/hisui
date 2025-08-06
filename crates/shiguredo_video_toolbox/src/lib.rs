@@ -163,6 +163,7 @@ impl EncoderConfig {
             target_bitrate: 2_000_000,
             fps_numerator: 30,
             fps_denominator: 1,
+            allow_frame_reordering: false,
 
             // 最高速設定
             prioritize_speed_over_quality: true,
@@ -187,6 +188,7 @@ impl EncoderConfig {
             target_bitrate: 2_000_000,
             fps_numerator: 30,
             fps_denominator: 1,
+            allow_frame_reordering: false,
 
             // 高速設定
             prioritize_speed_over_quality: true,
@@ -221,6 +223,7 @@ impl EncoderConfig {
             target_bitrate: 2_000_000,
             fps_numerator: 30,
             fps_denominator: 1,
+            allow_frame_reordering: false,
 
             // 品質重視設定
             prioritize_speed_over_quality: false,
