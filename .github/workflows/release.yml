@@ -92,6 +92,8 @@ jobs:
     name: 'Build and Push Docker Image'
     runs-on: ubuntu-24.04
     needs: [github-release-draft, ubuntu-binary]
+    permissions:
+      packages: write
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
