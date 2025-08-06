@@ -58,7 +58,7 @@ jobs:
         if: matrix.platform.name == 'ubuntu-24.04_x86_64'
         uses: actions/upload-artifact@v4
         with:
-          name: hisui-binary-x86_64
+          name: hisui-binary-ubuntu-x86_64
           path: hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
       - name: Upload Release Asset
         env:
@@ -97,10 +97,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Download x86_64 binary
+      - name: Download Ubuntu x86_64 binary
         uses: actions/download-artifact@v4
         with:
-          name: hisui-binary-x86_64
+          name: hisui-binary-ubuntu-x86_64
 
       - name: Prepare binary
         run: |
