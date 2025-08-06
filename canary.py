@@ -63,13 +63,22 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
     return new_version
 
 
+# cargo update hisui を実行
+def run_cargo_update(dry_run: bool) -> None:
+    if dry_run:
+        print("Dry-run: Would run 'cargo update hisui'")
+    else:
+        subprocess.run(["cargo", "update", "hisui"], check=True)
+        print("cargo update hisui executed")
+
+
 # git コミット、タグ、プッシュを実行
 def git_commit_version(new_version: str, dry_run: bool) -> None:
     if dry_run:
-        print("Dry-run: Would run 'git add Cargo.toml'")
+        print("Dry-run: Would run 'git add Cargo.toml Cargo.lock'")
         print(f"Dry-run: Would run '[canary] Bump version to {new_version}'")
     else:
-        subprocess.run(["git", "add", "Cargo.toml"], check=True)
+        subprocess.run(["git", "add", "Cargo.toml", "Cargo.lock"], check=True)
         subprocess.run(
             ["git", "commit", "-m", f"[canary] Bump version to {new_version}"],
             check=True,
@@ -109,7 +118,10 @@ def main() -> None:
     if not new_version:
         return  # ユーザーが確認をキャンセルした場合、処理を中断
 
-    # バージョン更新後にまず git commit
+    # cargo update hisui を実行
+    run_cargo_update(args.dry_run)
+
+    # バージョン更新後に git commit
     git_commit_version(new_version, args.dry_run)
 
     # git タグ付け、プッシュ
