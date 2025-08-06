@@ -1,6 +1,6 @@
 [package]
 name = "hisui"
-version = "2025.1.0-canary.6"
+version = "2025.1.0-canary.8"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Shiguredo Inc."]

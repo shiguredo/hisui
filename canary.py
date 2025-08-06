@@ -9,37 +9,63 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
     with open(file_path, "r", encoding="utf-8") as f:
         content: str = f.read()
 
-    # 現在のバージョンを取得
-    current_version_match = re.search(r'version\s*=\s*"([\d\.\w-]+)"', content)
-    if not current_version_match:
-        raise ValueError("Version not found or incorrect format in Cargo.toml")
+    # [package] セクション内のバージョンのみを取得
+    package_section_match = re.search(
+        r'\[package\].*?version\s*=\s*"([\d\.\w-]+)"',
+        content,
+        re.DOTALL
+    )
+    if not package_section_match:
+        raise ValueError("Version not found in [package] section of Cargo.toml")
 
-    current_version: str = current_version_match.group(1)
+    current_version: str = package_section_match.group(1)
 
-    # バージョンが -canary.X を持っている場合の更新
+    # [package] セクションの開始位置を見つける
+    package_start = content.find('[package]')
+    # 次のセクション ([dependencies] など) の開始位置を見つける
+    next_section = re.search(r'\n\[(?!package)', content[package_start:])
+    if next_section:
+        package_end = package_start + next_section.start()
+        package_content = content[package_start:package_end]
+    else:
+        package_content = content[package_start:]
+
+    # [package] セクション内のバージョンを更新
     if "-canary." in current_version:
-        new_content, count = re.subn(
+        updated_package, count = re.subn(
             r'(version\s*=\s*")(\d+\.\d+\.\d+-canary\.)(\d+)',
             lambda m: f"{m.group(1)}{m.group(2)}{int(m.group(3)) + 1}",
-            content,
+            package_content,
+            count=1  # 最初の1つだけを更新
         )
     else:
         # -canary.X がない場合、次のマイナーバージョンにして -canary.0 を追加
-        new_content, count = re.subn(
+        updated_package, count = re.subn(
             r'(version\s*=\s*")(\d+)\.(\d+)\.(\d+)',
             lambda m: f"{m.group(1)}{m.group(2)}.{int(m.group(3)) + 1}.0-canary.0",
-            content,
+            package_content,
+            count=1  # 最初の1つだけを更新
         )
 
     if count == 0:
-        raise ValueError("Version not found or incorrect format in Cargo.toml")
+        raise ValueError("Version not found or incorrect format in [package] section")
 
-    # 新しいバージョンを確認
-    new_version_match = re.search(r'version\s*=\s*"([\d\.\w-]+)"', new_content)
-    if not new_version_match:
+    # 元のコンテンツの [package] セクション部分を更新後の内容に置き換える
+    if next_section:
+        new_content = content[:package_start] + updated_package + content[package_end:]
+    else:
+        new_content = content[:package_start] + updated_package
+
+    # 新しいバージョンを確認 ([package] セクションから)
+    new_package_version_match = re.search(
+        r'\[package\].*?version\s*=\s*"([\d\.\w-]+)"',
+        new_content,
+        re.DOTALL
+    )
+    if not new_package_version_match:
         raise ValueError("Failed to extract the new version after the update.")
 
-    new_version: str = new_version_match.group(1)
+    new_version: str = new_package_version_match.group(1)
 
     print(f"Current version: {current_version}")
     print(f"New version: {new_version}")
