@@ -54,6 +54,11 @@ jobs:
       - run: rustup update stable
       - run: cargo build --release
       - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
+      - name: Upload artifact for Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: hisui-binary-${{ matrix.platform.name }}
+          path: hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,8 +88,64 @@ jobs:
           gh release upload ${{ needs.github-release-draft.outputs.version }} \
             hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
 
+  docker-image:
+    name: 'Build and Push Docker Image'
+    runs-on: ubuntu-24.04
+    needs: [github-release-draft, ubuntu-binary]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Download Ubuntu x86_64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: hisui-binary-ubuntu-24.04_x86_64
+
+      - name: Download Ubuntu arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: hisui-binary-ubuntu-24.04_arm64
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare binaries
+        run: |
+          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64 hisui.amd64
+          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64 hisui.arm64
+          chmod +x hisui.*
+
+      - name: Build and push multi-arch image (canary)
+        if: contains(github.ref_name, 'canary')
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --tag ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            .
+
+      - name: Build and push multi-arch image (release)
+        if: ${{ !contains(github.ref_name, 'canary') }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --tag ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            --tag ghcr.io/${{ github.repository }}:latest \
+            .
+
   slack_notify_failed:
-    needs: [github-release-draft, ubuntu-binary, macos-binary]
+    needs: [github-release-draft, ubuntu-binary, macos-binary, docker-image]
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     if: failure()
