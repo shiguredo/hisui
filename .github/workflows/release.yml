@@ -54,6 +54,12 @@ jobs:
       - run: rustup update stable
       - run: cargo build --release
       - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
+      - name: Upload artifact for Docker image
+        if: matrix.platform.name == 'ubuntu-24.04_x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hisui-binary-x86_64
+          path: hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -92,12 +98,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download x86_64 binary
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/download-artifact@v4
+        with:
+          name: hisui-binary-x86_64
+
+      - name: Prepare binary
         run: |
-          gh release download ${{ needs.github-release-draft.outputs.version }} \
-            --pattern "hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64"
           mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64 hisui
+          chmod +x hisui
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
