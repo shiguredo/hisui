@@ -55,10 +55,9 @@ jobs:
       - run: cargo build --release
       - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
       - name: Upload artifact for Docker image
-        if: matrix.platform.name == 'ubuntu-24.04_x86_64'
         uses: actions/upload-artifact@v4
         with:
-          name: hisui-binary-ubuntu-x86_64
+          name: hisui-binary-${{ matrix.platform.name }}
           path: hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
       - name: Upload Release Asset
         env:
@@ -100,12 +99,15 @@ jobs:
       - name: Download Ubuntu x86_64 binary
         uses: actions/download-artifact@v4
         with:
-          name: hisui-binary-ubuntu-x86_64
+          name: hisui-binary-ubuntu-24.04_x86_64
 
-      - name: Prepare binary
-        run: |
-          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64 hisui
-          chmod +x hisui
+      - name: Download Ubuntu arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: hisui-binary-ubuntu-24.04_arm64
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -117,14 +119,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push amd64 image
         run: |
+          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64 hisui
+          chmod +x hisui
           docker buildx build \
             --platform linux/amd64 \
             --push \
+            --tag ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-amd64 \
+            .
+          rm hisui
+
+      - name: Build and push arm64 image
+        run: |
+          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64 hisui
+          chmod +x hisui
+          docker buildx build \
+            --platform linux/arm64 \
+            --push \
+            --tag ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-arm64 \
+            .
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create \
             --tag ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }} \
             --tag ghcr.io/${{ github.repository }}:latest \
-            .
+            ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-amd64 \
+            ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-arm64
 
   slack_notify_failed:
     needs: [github-release-draft, ubuntu-binary, macos-binary, docker-image]
