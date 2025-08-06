@@ -125,12 +125,22 @@ jobs:
           mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64 hisui.arm64
           chmod +x hisui.*
 
-      - name: Build and push multi-arch image
+      - name: Build and push multi-arch image (canary)
+        if: contains(github.ref_name, 'canary')
         run: |
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --push \
-            --tag ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }} \
+            --tag ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            .
+
+      - name: Build and push multi-arch image (release)
+        if: ${{ !contains(github.ref_name, 'canary') }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --tag ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
             --tag ghcr.io/${{ github.repository }}:latest \
             .
 
