@@ -5,7 +5,8 @@ FROM ubuntu:24.04
 COPY hisui /usr/local/bin/hisui
 RUN chmod +x /usr/local/bin/hisui
 
-# 実行ユーザーを作成
+# セキュリティのため非 root ユーザーで実行
+# UID 1000 は一般的なユーザー ID で、ホストとの権限マッピングに便利
 RUN useradd -m -u 1000 hisui
 USER hisui
 
