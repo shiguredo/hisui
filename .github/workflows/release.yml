@@ -119,34 +119,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push amd64 image
+      - name: Prepare binaries
         run: |
-          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64 hisui
-          chmod +x hisui
-          docker buildx build \
-            --platform linux/amd64 \
-            --push \
-            --tag ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-amd64 \
-            .
-          rm hisui
+          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64 hisui.amd64
+          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64 hisui.arm64
+          chmod +x hisui.*
 
-      - name: Build and push arm64 image
+      - name: Build and push multi-arch image
         run: |
-          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64 hisui
-          chmod +x hisui
           docker buildx build \
-            --platform linux/arm64 \
+            --platform linux/amd64,linux/arm64 \
             --push \
-            --tag ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-arm64 \
-            .
-
-      - name: Create and push multi-arch manifest
-        run: |
-          docker buildx imagetools create \
             --tag ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }} \
             --tag ghcr.io/${{ github.repository }}:latest \
-            ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-amd64 \
-            ghcr.io/${{ github.repository }}:${{ needs.github-release-draft.outputs.version }}-arm64
+            .
 
   slack_notify_failed:
     needs: [github-release-draft, ubuntu-binary, macos-binary, docker-image]
