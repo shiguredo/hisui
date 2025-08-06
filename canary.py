@@ -63,15 +63,6 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
     return new_version
 
 
-# cargo build 実行
-def run_cargo_operations(dry_run: bool) -> None:
-    if dry_run:
-        print("Dry-run: Would run 'cargo build --release'")
-    else:
-        subprocess.run(["cargo", "build", "--release"], check=True)
-        print("cargo build --release executed")
-
-
 # git コミット、タグ、プッシュを実行
 def git_commit_version(new_version: str, dry_run: bool) -> None:
     if dry_run:
@@ -101,7 +92,7 @@ def git_operations_after_build(new_version: str, dry_run: bool) -> None:
 # メイン処理
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Update Cargo.toml version, run cargo build, and commit changes."
+        description="Update Cargo.toml version and commit changes."
     )
     parser.add_argument(
         "--dry-run",
@@ -121,10 +112,7 @@ def main() -> None:
     # バージョン更新後にまず git commit
     git_commit_version(new_version, args.dry_run)
 
-    # cargo build 実行
-    run_cargo_operations(args.dry_run)
-
-    # ビルド後のファイルを git commit, タグ付け、プッシュ
+    # git タグ付け、プッシュ
     git_operations_after_build(new_version, args.dry_run)
 
 
