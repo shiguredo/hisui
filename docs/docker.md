@@ -106,20 +106,6 @@ $ docker run --rm \
 
 ## 注意事項
 
-### ファイルの権限
-
-Docker コンテナ内では `hisui` ユーザー（UID 1000）で実行されるため、出力ファイルの所有者は UID 1000 になります。
-必要に応じて、ホスト側でファイルの権限を調整してください。
-
-```console
-# 出力ファイルの権限を確認
-$ ls -l recordings/RECORDING_ID/output.mp4
--rw-r--r-- 1 1000 1000 12345678 Jan 1 00:00 recordings/RECORDING_ID/output.mp4
-
-# 必要に応じて権限を変更
-$ sudo chown $(id -u):$(id -g) recordings/RECORDING_ID/output.mp4
-```
-
 ### マルチアーキテクチャ対応
 
 Docker イメージは amd64（Intel/AMD）と arm64（Apple Silicon など）の両方に対応しています。
