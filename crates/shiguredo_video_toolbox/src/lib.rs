@@ -135,11 +135,13 @@ impl Default for EncoderConfig {
             fps_numerator: 30,
             fps_denominator: 1,
 
+            // B フレームは基本無効
+            allow_frame_reordering: false,
+
             // デフォルトはバランス設定
             prioritize_speed_over_quality: false,
             real_time: false,
             maximize_power_efficiency: false,
-            allow_frame_reordering: true,
             allow_open_gop: true,
             allow_temporal_compression: true,
             max_key_frame_interval: None,
@@ -166,7 +168,6 @@ impl EncoderConfig {
             prioritize_speed_over_quality: true,
             real_time: false,
             maximize_power_efficiency: false,
-            allow_frame_reordering: false, // B-frame無効
             allow_open_gop: false,
             allow_temporal_compression: true,
             max_key_frame_interval: Some(NonZeroUsize::MIN.saturating_add(29)), // 短い間隔
@@ -191,7 +192,6 @@ impl EncoderConfig {
             prioritize_speed_over_quality: true,
             real_time: false,
             maximize_power_efficiency: false,
-            allow_frame_reordering: false, // B-frame無効
             allow_open_gop: false,
             allow_temporal_compression: true,
             max_key_frame_interval: Some(NonZeroUsize::MIN.saturating_add(59)),
@@ -226,7 +226,6 @@ impl EncoderConfig {
             prioritize_speed_over_quality: false,
             real_time: false,
             maximize_power_efficiency: false,
-            allow_frame_reordering: true, // B-frame有効
             allow_open_gop: true,
             allow_temporal_compression: true,
             max_key_frame_interval: Some(NonZeroUsize::MIN.saturating_add(119)), // 長い間隔

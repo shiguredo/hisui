@@ -26,15 +26,16 @@ pub fn parse_h264_encode_params(
     }
 
     // フレーム構造設定
-    if let Some(allow_reordering) = params.get("allow_frame_reordering")? {
-        config.allow_frame_reordering = allow_reordering;
-    }
     if let Some(allow_open_gop) = params.get("allow_open_gop")? {
         config.allow_open_gop = allow_open_gop;
     }
     if let Some(allow_temporal) = params.get("allow_temporal_compression")? {
         config.allow_temporal_compression = allow_temporal;
     }
+    // Hisui が B に対応するまでは指定できないようにする
+    // if let Some(allow_reordering) = params.get("allow_frame_reordering")? {
+    //     config.allow_frame_reordering = allow_reordering;
+    // }
 
     // キーフレーム間隔設定（フレーム数）
     config.max_key_frame_interval = params.get("max_key_frame_interval")?;
@@ -114,15 +115,16 @@ pub fn parse_h265_encode_params(
     config.prioritize_speed_over_quality = true; // H.265 ではこれが false だとエラーになる
 
     // フレーム構造設定
-    if let Some(allow_reordering) = params.get("allow_frame_reordering")? {
-        config.allow_frame_reordering = allow_reordering;
-    }
     if let Some(allow_open_gop) = params.get("allow_open_gop")? {
         config.allow_open_gop = allow_open_gop;
     }
     if let Some(allow_temporal) = params.get("allow_temporal_compression")? {
         config.allow_temporal_compression = allow_temporal;
     }
+    // Hisui が B に対応するまでは指定できないようにする
+    // if let Some(allow_reordering) = params.get("allow_frame_reordering")? {
+    //     config.allow_frame_reordering = allow_reordering;
+    // }
 
     // キーフレーム間隔設定（フレーム数）
     config.max_key_frame_interval = params.get("max_key_frame_interval")?;

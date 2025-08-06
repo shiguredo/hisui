@@ -651,9 +651,6 @@ TODO: 各項目の詳細については本家ドキュメントやソースコ�
 
 ### フレーム構造設定
 
-- `allow_frame_reordering` (真偽値): フレーム並び替えの許可
-  - デフォルト値: `true`
-
 - `allow_temporal_compression` (真偽値): 時間圧縮の許可
   - デフォルト値: `true`
 
@@ -686,7 +683,6 @@ TODO: 各項目の詳細については本家ドキュメントやソースコ�
     "prioritize_speed_over_quality": false,
     "real_time": false,
     "maximize_power_efficiency": true,
-    "allow_frame_reordering": true,
     "allow_temporal_compression": true,
     "profile_level": "high",
     "h264_entropy_mode": "cabac",
@@ -724,9 +720,6 @@ TODO: 各項目の詳細については本家ドキュメントやソースコ�
 
 ### フレーム構造設定
 
-- `allow_frame_reordering` (真偽値): フレーム並び替えの許可
-  - デフォルト値: `true`
-
 - `allow_temporal_compression` (真偽値): 時間圧縮の許可
   - デフォルト値: `true`
 
@@ -758,7 +751,6 @@ TODO: 各項目の詳細については本家ドキュメントやソースコ�
     "max_key_frame_interval": 120,
     "real_time": false,
     "maximize_power_efficiency": true,
-    "allow_frame_reordering": true,
     "allow_temporal_compression": true,
     "allow_open_gop": false,
     "profile_level": "main",

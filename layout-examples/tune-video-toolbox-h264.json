@@ -13,7 +13,6 @@
   },
   "video_toolbox_h264_encode_params": {
     "max_key_frame_interval": 300,
-    "allow_frame_reordering": false,
     "prioritize_speed_over_quality": null,
     "real_time": null,
     "maximize_power_efficiency": null,

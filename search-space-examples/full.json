@@ -335,10 +335,6 @@
     true,
     false
   ],
-  "video_toolbox_h264_encode_params.allow_frame_reordering": [
-    true,
-    false
-  ],
   "video_toolbox_h264_encode_params.allow_temporal_compression": [
     true,
     false
@@ -373,10 +369,6 @@
     false
   ],
   "video_toolbox_h265_encode_params.maximize_power_efficiency": [
-    true,
-    false
-  ],
-  "video_toolbox_h265_encode_params.allow_frame_reordering": [
     true,
     false
   ],
