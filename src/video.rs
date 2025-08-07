@@ -86,12 +86,12 @@ impl VideoFrame {
             return Self::black(width, height);
         }
 
-        // Convert RGB to YUV
+        // RGB から YUV に変換
         let r = rgb[0] as f32;
         let g = rgb[1] as f32;
         let b = rgb[2] as f32;
 
-        // RGB to YUV conversion using ITU-R BT.601 standard
+        // ITU-R BT.601 標準を使用した RGB から YUV への変換
         let y = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
         let u = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
         let v = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
@@ -103,13 +103,13 @@ impl VideoFrame {
 
         let mut data = Vec::with_capacity(total_size);
 
-        // Fill Y plane
+        // Y プレーンを埋める
         data.resize(y_plane_size, y);
 
-        // Fill U plane
+        // U プレーンを埋める
         data.resize(y_plane_size + u_plane_size, u);
 
-        // Fill V plane
+        // V プレーンを埋める
         data.resize(total_size, v);
 
         Self {

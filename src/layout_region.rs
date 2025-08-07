@@ -77,7 +77,7 @@ pub struct RawRegion {
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
-    //以降は開発者向けの undoc 項目
+    // 以降は開発者向けの undoc 項目
     background_color: [u8; 3], // RGB
 }
 
