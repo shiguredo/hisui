@@ -6,7 +6,7 @@ use std::{
 
 use hisui::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
-    layout_region::{assign_sources, decide_grid_dimensions, decide_required_cells, ReuseKind},
+    layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
     metadata::{SourceId, SourceInfo},
 };
 use orfail::OrFail;
@@ -624,10 +624,12 @@ fn source_path_outside_base_dir_error() -> orfail::Result<()> {
     let result =
         layout::resolve_source_paths(&base_path, &[PathBuf::from("../files2/foo-0.json")], &[]);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("outside the base dir"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("outside the base dir")
+    );
 
     Ok(())
 }
@@ -657,10 +659,12 @@ fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
         &[],
     );
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("no media file for the source"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("no media file for the source")
+    );
 
     Ok(())
 }

@@ -815,6 +815,7 @@ fn region(region_size: Size, cell_size: Size) -> Region {
         position: PixelPosition::default(),
         top_border_pixels: EvenUsize::default(),
         left_border_pixels: EvenUsize::default(),
+        background_color: [0, 0, 0],
 
         // 以下のフィールドは VideoMixer では使われないので何でもいい
         // (Layout::video_regions の並びが z_pos を反映していることが前提）

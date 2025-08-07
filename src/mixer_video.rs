@@ -277,7 +277,8 @@ impl VideoMixerThread {
     ) -> orfail::Result<()> {
         // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
         //        (必要に応じて最適化する)
-        let background_frame = VideoFrame::black(region.width, region.height);
+        let background_frame =
+            VideoFrame::mono_color(region.background_color, region.width, region.height);
         canvas
             .draw_frame(region.position, &background_frame)
             .or_fail()?;
