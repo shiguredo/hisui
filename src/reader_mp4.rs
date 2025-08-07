@@ -8,9 +8,9 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
+    Decode, Either,
     aux::SampleTableAccessor,
     boxes::{FtypBox, HdlrBox, IgnoredBox, MoovBox, SampleEntry, StblBox, TrakBox},
-    Decode, Either,
 };
 
 use crate::{

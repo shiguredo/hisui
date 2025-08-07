@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    boxes::{Avc1Box, AvccBox, Hev1Box, HvccBox, HvccNalUintArray, SampleEntry},
     Uint,
+    boxes::{Avc1Box, AvccBox, Hev1Box, HvccBox, HvccNalUintArray, SampleEntry},
 };
 use shiguredo_video_toolbox::{EncoderConfig, ProfileLevel};
 

@@ -819,6 +819,8 @@ fn region(region_size: Size, cell_size: Size) -> Region {
         // 以下のフィールドは VideoMixer では使われないので何でもいい
         // (Layout::video_regions の並びが z_pos を反映していることが前提）
         z_pos: 0,
+
+        background_color: [0, 0, 0],
     }
 }
 
