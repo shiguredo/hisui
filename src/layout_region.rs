@@ -29,6 +29,7 @@ pub struct Region {
     pub z_pos: isize,
     pub top_border_pixels: EvenUsize,
     pub left_border_pixels: EvenUsize,
+    pub background_color: [u8; 3], // RGB
 }
 
 impl Region {
@@ -76,6 +77,8 @@ pub struct RawRegion {
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
+    //以降は開発者向けの undoc 項目
+    background_color: [u8; 3], // RGB
 }
 
 impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawRegion {
@@ -97,6 +100,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawRegion {
             x_pos: object.get("x_pos")?.unwrap_or_default(),
             y_pos: object.get("y_pos")?.unwrap_or_default(),
             z_pos: object.get("z_pos")?.unwrap_or_default(),
+            background_color: object.get("background_color")?.unwrap_or_default(),
         })
     }
 }
@@ -266,6 +270,7 @@ impl RawRegion {
             z_pos: self.z_pos,
             top_border_pixels,
             left_border_pixels,
+            background_color: self.background_color,
         })
     }
 
