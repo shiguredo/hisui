@@ -109,6 +109,7 @@ impl Layout {
                     nojson::json(|f| {
                         f.object(|f| {
                             f.member("video_sources", &source_paths)?;
+                            f.member("border_pixels", 0)?;
                             f.member("max_columns", max_columns)
                         })
                     }),
