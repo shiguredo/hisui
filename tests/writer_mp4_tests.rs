@@ -222,6 +222,7 @@ fn region(video_sources: &[SourceInfo]) -> Region {
         position: PixelPosition::default(),
         top_border_pixels: EvenUsize::default(),
         left_border_pixels: EvenUsize::default(),
+        inner_border_pixels: EvenUsize::truncating_new(2),
         z_pos: 0,
         background_color: [0, 0, 0],
     }
