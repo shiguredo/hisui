@@ -14,9 +14,9 @@ use crate::{
     video::VideoFrame,
 };
 
-// セルの枠線のピクセル数
+// セルの枠線のデフォルトのピクセル数
 // なお外枠のピクセル数は、解像度やその他の要因によって、これより大きくなったり小さくなったりすることがある
-const BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
+const DEFAULT_BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
 
 /// 映像リージョン
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +77,8 @@ pub struct RawRegion {
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
+    border_pixels: EvenUsize,
+
     // 以降は開発者向けの undoc 項目
     background_color: [u8; 3], // RGB (デフォルトは `[0, 0, 0]`）
 }
@@ -100,6 +102,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawRegion {
             x_pos: object.get("x_pos")?.unwrap_or_default(),
             y_pos: object.get("y_pos")?.unwrap_or_default(),
             z_pos: object.get("z_pos")?.unwrap_or_default(),
+            border_pixels: object
+                .get("border_pixels")?
+                .unwrap_or(DEFAULT_BORDER_PIXELS),
             background_color: object.get("background_color")?.unwrap_or_default(),
         })
     }

@@ -136,6 +136,21 @@ impl EvenUsize {
     }
 }
 
+impl nojson::DisplayJson for EvenUsize {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.0)
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for EvenUsize {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let n = value.try_into()?;
+        Self::new(n).ok_or_else(|| value.invalid(format!("expected even number, got {n}")))
+    }
+}
+
 impl std::ops::Add for EvenUsize {
     type Output = Self;
 
