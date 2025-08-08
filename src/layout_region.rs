@@ -29,6 +29,7 @@ pub struct Region {
     pub z_pos: isize,
     pub top_border_pixels: EvenUsize,
     pub left_border_pixels: EvenUsize,
+    pub inner_border_pixels: EvenUsize,
     pub background_color: [u8; 3], // RGB
 }
 
@@ -54,8 +55,8 @@ impl Region {
         let mut x = self.position.x + self.left_border_pixels;
         let mut y = self.position.y + self.top_border_pixels;
 
-        x += self.grid.cell_width * cell.column + BORDER_PIXELS * cell.column;
-        y += self.grid.cell_height * cell.row + BORDER_PIXELS * cell.row;
+        x += self.grid.cell_width * cell.column + self.inner_border_pixels * cell.column;
+        y += self.grid.cell_height * cell.row + self.inner_border_pixels * cell.row;
 
         PixelPosition { x, y }
     }
@@ -158,28 +159,28 @@ impl RawRegion {
         );
 
         if self.cell_width != 0 {
-            let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
+            let horizontal_inner_borders = self.border_pixels.get() * (columns - 1);
             let grid_width = self.cell_width * columns + horizontal_inner_borders;
 
             // 外枠を考慮
             self.width = if resolution
-                .is_some_and(|r| grid_width + BORDER_PIXELS.get() * 2 <= r.width.get())
+                .is_some_and(|r| grid_width + self.border_pixels.get() * 2 <= r.width.get())
             {
-                grid_width + BORDER_PIXELS.get() * 2
+                grid_width + self.border_pixels.get() * 2
             } else {
                 grid_width
             };
         }
 
         if self.cell_height != 0 {
-            let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
+            let vertical_inner_borders = self.border_pixels.get() * (rows - 1);
             let grid_height = self.cell_height * rows + vertical_inner_borders;
 
             // 外枠を考慮
             self.height = if resolution
-                .is_some_and(|r| grid_height + BORDER_PIXELS.get() * 2 <= r.height.get())
+                .is_some_and(|r| grid_height + self.border_pixels.get() * 2 <= r.height.get())
             {
-                grid_height + BORDER_PIXELS.get() * 2
+                grid_height + self.border_pixels.get() * 2
             } else {
                 grid_height
             };
@@ -275,6 +276,7 @@ impl RawRegion {
             z_pos: self.z_pos,
             top_border_pixels,
             left_border_pixels,
+            inner_border_pixels: self.border_pixels,
             background_color: self.background_color,
         })
     }
@@ -288,18 +290,22 @@ impl RawRegion {
         let mut grid_width = self.width;
         let mut grid_height = self.height;
         if grid_width != resolution.width.get() {
-            grid_width = grid_width.checked_sub(BORDER_PIXELS.get() * 2).or_fail()?;
+            grid_width = grid_width
+                .checked_sub(self.border_pixels.get() * 2)
+                .or_fail()?;
         }
         if grid_height != resolution.height.get() {
-            grid_height = grid_height.checked_sub(BORDER_PIXELS.get() * 2).or_fail()?;
+            grid_height = grid_height
+                .checked_sub(self.border_pixels.get() * 2)
+                .or_fail()?;
         }
 
-        let horizontal_inner_borders = BORDER_PIXELS.get() * (columns - 1);
+        let horizontal_inner_borders = self.border_pixels.get() * (columns - 1);
         let grid_width_without_inner_borders = grid_width.saturating_sub(horizontal_inner_borders);
 
         let cell_width = EvenUsize::truncating_new(grid_width_without_inner_borders / columns);
 
-        let vertical_inner_borders = BORDER_PIXELS.get() * (rows - 1);
+        let vertical_inner_borders = self.border_pixels.get() * (rows - 1);
         let grid_height_without_inner_borders = grid_height.saturating_sub(vertical_inner_borders);
 
         let cell_height = EvenUsize::truncating_new(grid_height_without_inner_borders / rows);
