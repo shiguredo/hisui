@@ -701,6 +701,203 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     Ok(())
 }
 
+/// 枠線なしで複数セルがある場合のテスト
+#[test]
+fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
+    let error_flag = ErrorFlag::new();
+    let stats = SharedStats::new();
+    let (input_tx0, input_rx0) = channel::sync_channel_with_bound(1000);
+    let (input_tx1, input_rx1) = channel::sync_channel_with_bound(1000);
+    let (input_tx2, input_rx2) = channel::sync_channel_with_bound(1000);
+    let (input_tx3, input_rx3) = channel::sync_channel_with_bound(1000);
+
+    // ソースを用意する
+    let source0 = source(0, ms(0), ms(1000)); // 0 ms ~ 1000 ms (全期間)
+    let source1 = source(1, ms(400), ms(800)); // 400 ms ~ 800 ms (source0 と同じセルに割り当てる）
+    let source2 = source(2, ms(200), ms(1000)); // 200 ms ~ 1000 ms
+    let source3 = source(3, ms(0), ms(600)); // 0 ms ~ 600 ms
+
+    // セルが四つ(2x2)あるリージョンを用意する
+    // セルの枠線は 0 pixel
+    let region_size = size(MIN_OUTPUT_WIDTH, MIN_OUTPUT_HEIGHT);
+    let cell_size = size(8, 8);
+    let mut region = region(region_size, cell_size);
+
+    region.source_ids = [
+        source0.id.clone(),
+        source1.id.clone(),
+        source2.id.clone(),
+        source3.id.clone(),
+    ]
+    .into_iter()
+    .collect();
+    region.grid.rows = 2;
+    region.grid.columns = 2;
+    region.grid.assign_source(source0.id.clone(), 0, 1);
+    region.grid.assign_source(source1.id.clone(), 0, 0); // 優先順位が source_cell0_0 よりも高い
+    region.grid.assign_source(source2.id.clone(), 1, 0);
+    region.grid.assign_source(source3.id.clone(), 2, 0);
+    region.top_border_pixels = EvenUsize::truncating_new(0); // 枠線なし
+    region.left_border_pixels = EvenUsize::truncating_new(0); // 枠線なし
+    region.inner_border_pixels = EvenUsize::truncating_new(0); // 枠線なし
+
+    let mut output_rx = VideoMixerThread::start(
+        error_flag.clone(),
+        layout(
+            &[region],
+            &[&source0, &source1, &source2, &source3],
+            region_size,
+            None,
+        ),
+        vec![input_rx0, input_rx1, input_rx2, input_rx3],
+        stats.clone(),
+    );
+
+    // それぞれのソースで一つずつ入力映像フレームを送信する
+    let input_frame0 = video_frame(&source0, region_size, ms(0), ms(1000), 1);
+    let input_frame1 = video_frame(&source1, region_size, ms(400), ms(400), 2);
+    let input_frame2 = video_frame(&source2, region_size, ms(200), ms(800), 3);
+    let input_frame3 = video_frame(&source3, region_size, ms(0), ms(600), 4);
+    input_tx0.send(input_frame0);
+    input_tx1.send(input_frame1);
+    input_tx2.send(input_frame2);
+    input_tx3.send(input_frame3);
+    std::mem::drop(input_tx0);
+    std::mem::drop(input_tx1);
+    std::mem::drop(input_tx2);
+    std::mem::drop(input_tx3);
+
+    // 合成結果を取得する
+    // 0 ms ~ 200 ms の期間は source0 と source3 だけ
+    let frame = output_rx.recv().expect("failed to receive output frame");
+    let expected = grayscale_image([
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]);
+    assert_eq!(frame.data, expected);
+
+    // 200 ms ~ 400 ms の期間は source0, source2, source3
+    let frame = output_rx.recv().expect("failed to receive output frame");
+    let expected = grayscale_image([
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]);
+    assert_eq!(frame.data, expected);
+
+    // 400 ms ~ 600 msの期間は source1, source2, source3
+    let frame = output_rx.recv().expect("failed to receive output frame");
+    let expected = grayscale_image([
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]);
+    assert_eq!(frame.data, expected);
+
+    // 600 ms ~ 800 msの期間は source1, source2
+    let frame = output_rx.recv().expect("failed to receive output frame");
+    let expected = grayscale_image([
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]);
+    assert_eq!(frame.data, expected);
+
+    // 800 ms ~ 1000 msの期間は source0, source2
+    let frame = output_rx.recv().expect("failed to receive output frame");
+    let expected = grayscale_image([
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]);
+    assert_eq!(frame.data, expected);
+
+    // 全ての出力を取得した
+    assert!(output_rx.recv().is_none());
+
+    // エラーは発生していない
+    assert!(!error_flag.get());
+
+    // 統計情報を確認する
+    stats.with_lock(|stats| {
+        let stats = video_mixer_stats(stats);
+
+        assert!(!stats.error);
+        assert_eq!(stats.total_input_video_frame_count, 4);
+        assert_eq!(stats.total_output_video_frame_count, 5);
+        assert_eq!(stats.total_trimmed_video_frame_count, 0);
+        assert_eq!(stats.total_output_video_frame_seconds.get(), ms(1000));
+    });
+
+    Ok(())
+}
+
 /// 不正なフォーマットの映像フレームを送るテスト
 #[test]
 fn non_rgb_video_input_error() -> orfail::Result<()> {
