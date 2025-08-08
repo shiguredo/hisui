@@ -67,7 +67,8 @@
     "reuse": $REUSE_KIND,
     "x_pos": $INTEGER,
     "y_pos": $INTEGER,
-    "z_pos": $INTEGER
+    "z_pos": $INTEGER,
+    "border_pixels": $INTEGER
   },
   "frame_rate": $FRAME_RATE,
   "bitrate": $BITRATE_KBPS,
