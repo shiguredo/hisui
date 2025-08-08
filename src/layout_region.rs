@@ -430,7 +430,7 @@ pub fn decide_grid_dimensions(
         // - `max_sources` を保持可能なサイズを確保する
         // - できるだけ正方形に近くなるようにする:
         //   - ただし、列は行よりも一つ値が大きくてもいい
-        let mut columns = (max_sources as f32).sqrt().ceil().max(1.0) as usize;
+        let columns = (max_sources as f32).sqrt().ceil().max(1.0) as usize;
         let mut rows = (columns - 1).max(1);
         if rows * columns < max_sources {
             // 正方形にしないと `max_sources` を保持できない

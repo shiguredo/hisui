@@ -193,9 +193,9 @@ fn simple_multi_sources() -> noargs::Result<()> {
     assert_eq!(video_stats.codec, Some(CodecName::Vp9));
 
     // レイアウトファイル未指定の場合には、一つのセルの解像度は 320x240 で、
-    // 今回はソースが三つなのでグリッドは 2x2 となり、
+    // 今回はソースが三つなのでグリッドは 3x1 となり、
     // 以下の解像度になる
-    assert_eq!(video_stats.resolutions, [(320 * 2, 240 * 2)]);
+    assert_eq!(video_stats.resolutions, [(320 * 3, 240 * 1)]);
 
     // 一秒分 + 一サンプル (25 fps = 40 ms)
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
