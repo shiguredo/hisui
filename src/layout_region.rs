@@ -15,7 +15,6 @@ use crate::{
 };
 
 // セルの枠線のデフォルトのピクセル数
-// なお外枠のピクセル数は、解像度やその他の要因によって、これより大きくなったり小さくなったりすることがある
 const DEFAULT_BORDER_PIXELS: EvenUsize = EvenUsize::truncating_new(2);
 
 /// 映像リージョン
@@ -78,6 +77,8 @@ pub struct RawRegion {
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
+    // セルの枠線のピクセル数
+    // なお外枠のピクセル数は、解像度やその他の要因によって、これより大きくなったり小さくなったりすることがある
     border_pixels: EvenUsize,
 
     // 以降は開発者向けの undoc 項目
@@ -292,12 +293,22 @@ impl RawRegion {
         if grid_width != resolution.width.get() {
             grid_width = grid_width
                 .checked_sub(self.border_pixels.get() * 2)
-                .or_fail()?;
+                .or_fail_with(|()| {
+                    format!(
+                        "vertical outer border size ({}*2) are larger than grid width {grid_width}",
+                        self.border_pixels.get(),
+                    )
+                })?;
         }
         if grid_height != resolution.height.get() {
             grid_height = grid_height
                 .checked_sub(self.border_pixels.get() * 2)
-                .or_fail()?;
+                .or_fail_with(|()| {
+                    format!(
+                        "horizontal outer border size ({}*2) are larger than grid height {grid_height}",
+                        self.border_pixels.get(),
+                    )
+                })?;
         }
 
         let horizontal_inner_borders = self.border_pixels.get() * (columns - 1);
