@@ -49,27 +49,28 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         });
     }
 
-    let mut engines = Vec::new();
-    engines.push(EngineInfo {
-        repository: Some(shiguredo_opus::BUILD_REPOSITORY),
-        build_version: Some(shiguredo_opus::BUILD_VERSION),
-        ..EngineInfo::new(EngineName::Opus)
-    });
-    engines.push(EngineInfo {
-        repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
-        build_version: Some(shiguredo_libvpx::BUILD_VERSION),
-        ..EngineInfo::new(EngineName::Libvpx)
-    });
-    engines.push(EngineInfo {
-        repository: Some(shiguredo_dav1d::BUILD_REPOSITORY),
-        build_version: Some(shiguredo_dav1d::BUILD_VERSION),
-        ..EngineInfo::new(EngineName::Dav1d)
-    });
-    engines.push(EngineInfo {
-        repository: Some(shiguredo_svt_av1::BUILD_REPOSITORY),
-        build_version: Some(shiguredo_svt_av1::BUILD_VERSION),
-        ..EngineInfo::new(EngineName::SvtAv1)
-    });
+    let mut engines = vec![
+        EngineInfo {
+            repository: Some(shiguredo_opus::BUILD_REPOSITORY),
+            build_version: Some(shiguredo_opus::BUILD_VERSION),
+            ..EngineInfo::new(EngineName::Opus)
+        },
+        EngineInfo {
+            repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
+            build_version: Some(shiguredo_libvpx::BUILD_VERSION),
+            ..EngineInfo::new(EngineName::Libvpx)
+        },
+        EngineInfo {
+            repository: Some(shiguredo_dav1d::BUILD_REPOSITORY),
+            build_version: Some(shiguredo_dav1d::BUILD_VERSION),
+            ..EngineInfo::new(EngineName::Dav1d)
+        },
+        EngineInfo {
+            repository: Some(shiguredo_svt_av1::BUILD_REPOSITORY),
+            build_version: Some(shiguredo_svt_av1::BUILD_VERSION),
+            ..EngineInfo::new(EngineName::SvtAv1)
+        },
+    ];
     #[cfg(feature = "fdk-aac")]
     {
         engines.push(EngineInfo {

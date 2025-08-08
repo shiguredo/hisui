@@ -9,7 +9,6 @@ use crate::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
-    metadata::ContainerFormat,
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},
@@ -205,13 +204,9 @@ pub fn create_audio_and_video_sources(
     let mut video_source_rxs = Vec::new();
     for (source_id, source_info) in &layout.sources {
         if audio_source_ids.contains(source_id) && source_info.audio {
-            let source_rx = if source_info.format == ContainerFormat::Webm {
+            let source_rx =
                 AudioSourceThread::start(error_flag.clone(), source_info, stats.clone())
-                    .or_fail()?
-            } else {
-                AudioSourceThread::start(error_flag.clone(), source_info, stats.clone())
-                    .or_fail()?
-            };
+                    .or_fail()?;
             audio_source_rxs.push(source_rx);
         }
         if video_source_ids.contains(source_id) && source_info.video {
@@ -219,13 +214,9 @@ pub fn create_audio_and_video_sources(
                 openh264_lib: openh264_lib.clone(),
             };
             let decoder = VideoDecoder::new(options);
-            let source_rx = if source_info.format == ContainerFormat::Webm {
+            let source_rx =
                 VideoSourceThread::start(error_flag.clone(), source_info, decoder, stats.clone())
-                    .or_fail()?
-            } else {
-                VideoSourceThread::start(error_flag.clone(), source_info, decoder, stats.clone())
-                    .or_fail()?
-            };
+                    .or_fail()?;
             video_source_rxs.push(source_rx);
         }
     }

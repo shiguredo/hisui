@@ -178,7 +178,7 @@ impl Decoder {
     ///
     /// [`Decoder::decode()`] や [`Decoder::finish()`] の後には、
     /// このメソッドを、結果が `None` になるまで呼び出し続ける必要がある
-    pub fn next_frame(&mut self) -> Option<DecodedFrame> {
+    pub fn next_frame(&mut self) -> Option<DecodedFrame<'_>> {
         unsafe {
             let image = sys::vpx_codec_get_frame(&mut self.ctx, &mut self.iter);
             if image.is_null() {
@@ -925,7 +925,7 @@ impl Encoder {
     ///
     /// [`Encoder::encode()`] や [`Encoder::finish()`] の後には、
     /// このメソッドを、結果が `None` になるまで呼び出し続ける必要がある
-    pub fn next_frame(&mut self) -> Option<EncodedFrame> {
+    pub fn next_frame(&mut self) -> Option<EncodedFrame<'_>> {
         unsafe {
             loop {
                 let pkt = sys::vpx_codec_get_cx_data(&mut self.ctx, &mut self.iter);
