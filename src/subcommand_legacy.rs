@@ -59,7 +59,8 @@ impl Args {
   "audio_sources": [ ${ 録画メタデータ内の全てのソース } ],
   "video_layout": {"main": {
     "max_columns": [ ${ `--max-columns` 引数の値 } ],
-    "video_sources": [ ${ 録画メタデータ内の全てのソース } ]
+    "video_sources": [ ${ 録画メタデータ内の全てのソース } ],
+    "border_pixels": 0
   }}
 }
 

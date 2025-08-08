@@ -67,7 +67,8 @@
     "reuse": $REUSE_KIND,
     "x_pos": $INTEGER,
     "y_pos": $INTEGER,
-    "z_pos": $INTEGER
+    "z_pos": $INTEGER,
+    "border_pixels": $INTEGER
   },
   "frame_rate": $FRAME_RATE,
   "bitrate": $BITRATE_KBPS,
@@ -487,6 +488,39 @@ Z 座標は、複数のリージョンが重なり合う場合の描画順序を
 ```
 
 上記の例では、`background` リージョンが最も奥に、`overlay` リージョンが最も手前に描画されます。
+
+### `video_layout.$REGION_NAME.border_pixels: $INTEGER`
+
+指定されたリージョンのセル間および外周の枠線の幅をピクセル単位で指定します。
+
+指定可能な値の範囲は以下の通りです：
+- 0 ピクセル以上
+- 偶数値（奇数が指定された場合はエラーになります）
+
+デフォルト値は `2` ピクセルです。
+
+この設定は以下の枠線に影響します：
+- **内側の枠線**: セル間に挿入される枠線
+- **外側の枠線**: リージョンの外周に挿入される枠線（ただし、リージョンが全体解像度と同じサイズの場合は挿入されません）
+
+**使用例:**
+```json
+{
+  "video_layout": {
+    "main": {
+      "video_sources": ["archive-*.json"],
+      "border_pixels": 4,
+      "max_columns": 2,
+      "max_rows": 2
+    }
+  }
+}
+```
+
+上記の例では、セル間および外周に 4 ピクセルの枠線が挿入されます。
+
+なお、外周については、リージョンやセルのサイズ関連の関係で
+枠線のサイズが指定値からわずかに変わることがあります。
 
 ### `frame_rate: $FRAME_RATE`
 
