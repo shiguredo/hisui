@@ -65,6 +65,9 @@ fn decide_grid_dimensions_works() {
     assert_eq!(decide_grid_dimensions(2, 0, 12), (2, 6));
     assert_eq!(decide_grid_dimensions(0, 2, 12), (6, 2));
 
+    assert_eq!(decide_grid_dimensions(0, 4, 5), (2, 4));
+    assert_eq!(decide_grid_dimensions(4, 0, 5), (4, 2));
+
     // max_rows / max_columns の両方が指定されている場合
     assert_eq!(decide_grid_dimensions(1, 1, 1), (1, 1));
     assert_eq!(decide_grid_dimensions(1, 2, 1), (1, 1));
@@ -84,6 +87,10 @@ fn decide_grid_dimensions_works() {
     assert_eq!(decide_grid_dimensions(1, 7, 9), (1, 7));
     assert_eq!(decide_grid_dimensions(2, 7, 9), (2, 5));
     assert_eq!(decide_grid_dimensions(3, 7, 9), (3, 3));
+
+    assert_eq!(decide_grid_dimensions(10, 10, 5), (1, 5));
+    assert_eq!(decide_grid_dimensions(10, 9, 5), (1, 5));
+    assert_eq!(decide_grid_dimensions(9, 10, 5), (5, 1));
 }
 
 #[test]
