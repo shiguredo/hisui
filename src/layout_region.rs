@@ -413,6 +413,8 @@ enum Cell {
 /// 行列の最大値指定と最大同時ソース数をもとに、実際に使用するグリッドの行数と列数を求める
 ///
 /// なお max_rows ないし max_columns で 0 が指定されたら未指定扱いとなる
+///
+/// また、`max_rows * max_columns < max_sources` となる場合には `(max_rows, max_columns)` が結果として返さえる
 pub fn decide_grid_dimensions(
     mut max_rows: usize,
     mut max_columns: usize,
