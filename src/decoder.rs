@@ -45,6 +45,7 @@ pub struct VideoDecoderOptions {
 }
 
 #[derive(Debug)]
+#[expect(clippy::large_enum_variant)]
 pub enum VideoDecoder {
     Initial {
         options: VideoDecoderOptions,

@@ -61,8 +61,10 @@ impl VideoToolboxEncoder {
     pub fn new_h265(layout: &Layout) -> orfail::Result<Self> {
         let width = layout.resolution.width();
         let height = layout.resolution.height();
-        let mut default = EncoderConfig::default();
-        default.profile_level = ProfileLevel::H265Main;
+        let default = EncoderConfig {
+            profile_level: ProfileLevel::H265Main,
+            ..Default::default()
+        };
         let config = shiguredo_video_toolbox::EncoderConfig {
             width: width.get(),
             height: height.get(),

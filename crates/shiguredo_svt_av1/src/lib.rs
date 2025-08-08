@@ -14,8 +14,8 @@ pub const BUILD_REPOSITORY: &str = sys::BUILD_METADATA_REPOSITORY;
 /// ビルド時に参照したリポジトリのバージョン（タグ）
 pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
-const ENV_KEY_SVT_LOG: &'static str = "SVT_LOG";
-const ENV_VALUE_SVT_LOG_LEVEL: &'static str = "1"; // 1 は error (必要に応じて調整する）
+const ENV_KEY_SVT_LOG: &str = "SVT_LOG";
+const ENV_VALUE_SVT_LOG_LEVEL: &str = "1"; // 1 は error (必要に応じて調整する）
 
 // SVT-AV1 のエンコーダー初期化処理を複数スレッドで同時に実行すると
 // 大量のエラーログが出力されることがあるのでロックを使用している
@@ -329,7 +329,7 @@ impl Encoder {
 
             // SVT-AV1 は環境変数経由でログレベルを指定するので、まず最初に設定しておく
             // この設定ができなくても致命的な問題は発生しないので、結果は単に無視する
-            let _ = std::env::set_var(ENV_KEY_SVT_LOG, log_level);
+            std::env::set_var(ENV_KEY_SVT_LOG, log_level);
 
             let code = sys::svt_av1_enc_init_handle(&mut handle, svt_config.as_mut_ptr());
             Error::check(code, "svt_av1_enc_init_handle")?;
@@ -533,7 +533,7 @@ impl Encoder {
     ///
     /// [`Encoder::encode()`] や [`Encoder::finish()`] の後には、
     /// このメソッドを、結果が `None` になるまで呼び出し続ける必要がある
-    pub fn next_frame(&mut self) -> Result<Option<EncodedFrame>, Error> {
+    pub fn next_frame(&mut self) -> Result<Option<EncodedFrame<'_>>, Error> {
         let mut output = std::ptr::null_mut();
         let pic_send_done = self.eos as u8;
         let code =

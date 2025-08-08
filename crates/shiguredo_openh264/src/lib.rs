@@ -197,7 +197,7 @@ impl Decoder {
     /// 圧縮された映像フレーム（Annex.B 形式）をデコードする
     ///
     /// B フレームは存在しない前提（つまり入力と出力の順番が一致する）
-    pub fn decode(&mut self, data: &[u8]) -> Result<Option<DecodedFrame>, Error> {
+    pub fn decode(&mut self, data: &[u8]) -> Result<Option<DecodedFrame<'_>>, Error> {
         let mut info = MaybeUninit::<sys::SBufferInfo>::zeroed();
         unsafe {
             let mut yuv = [std::ptr::null_mut(); 3];
@@ -237,7 +237,7 @@ impl Decoder {
     }
 
     /// これ以上データが来ないことをデコーダーに伝えて残りの結果を取得する
-    pub fn finish(&mut self) -> Result<Option<DecodedFrame>, Error> {
+    pub fn finish(&mut self) -> Result<Option<DecodedFrame<'_>>, Error> {
         let mut info = MaybeUninit::<sys::SBufferInfo>::zeroed();
         unsafe {
             let mut yuv = [std::ptr::null_mut(); 3];

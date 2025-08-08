@@ -32,13 +32,15 @@ pub struct Mp4VideoReader {
 
 impl Mp4VideoReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let mut default_stats = Mp4VideoReaderStats::default();
-        default_stats.input_file = path.as_ref().canonicalize().or_fail_with(|e| {
-            format!(
-                "failed to canonicalize path {}: {e}",
-                path.as_ref().display()
-            )
-        })?;
+        let default_stats = Mp4VideoReaderStats {
+            input_file: path.as_ref().canonicalize().or_fail_with(|e| {
+                format!(
+                    "failed to canonicalize path {}: {e}",
+                    path.as_ref().display()
+                )
+            })?,
+            ..Default::default()
+        };
 
         let inner = Mp4VideoReaderInner::new(source_id, path).or_fail()?;
 
@@ -231,8 +233,10 @@ pub struct Mp4AudioReader {
 
 impl Mp4AudioReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let mut default_stats = Mp4AudioReaderStats::default();
-        default_stats.input_file = path.as_ref().to_path_buf();
+        let default_stats = Mp4AudioReaderStats {
+            input_file: path.as_ref().to_path_buf(),
+            ..Default::default()
+        };
 
         let inner = Mp4AudioReaderInner::new(source_id, path).or_fail()?;
 

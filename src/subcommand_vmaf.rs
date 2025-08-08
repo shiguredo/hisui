@@ -187,12 +187,11 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     std::thread::spawn(move || {
         let mut count = 0;
         while let Some(frame) = mixed_video_rx.recv() {
-            if count < args.frame_count {
-                if let Err(e) = reference_yuv_writer.append(&frame).or_fail() {
+            if count < args.frame_count
+                && let Err(e) = reference_yuv_writer.append(&frame).or_fail() {
                     log::error!("failed to write reference YUV frame: {e}");
                     break;
                 }
-            }
             if !mixed_video_temp_tx.send(frame) {
                 break;
             }
@@ -416,10 +415,10 @@ impl nojson::DisplayJson for Output {
             f.member("encoded_byte_size", self.encoded_byte_size)?;
             f.member("encoded_duration_seconds", self.encoded_duration_seconds)?;
             f.member("elapsed_seconds", self.elapsed_seconds)?;
-            f.member("vmaf_min", &self.vmaf.min)?;
-            f.member("vmaf_max", &self.vmaf.max)?;
-            f.member("vmaf_mean", &self.vmaf.mean)?;
-            f.member("vmaf_harmonic_mean", &self.vmaf.harmonic_mean)?;
+            f.member("vmaf_min", self.vmaf.min)?;
+            f.member("vmaf_max", self.vmaf.max)?;
+            f.member("vmaf_mean", self.vmaf.mean)?;
+            f.member("vmaf_harmonic_mean", self.vmaf.harmonic_mean)?;
 
             Ok(())
         })

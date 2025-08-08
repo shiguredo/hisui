@@ -33,6 +33,7 @@ impl Iterator for AudioReader {
 }
 
 #[derive(Debug)]
+#[expect(clippy::large_enum_variant)]
 pub enum VideoReader {
     Mp4(Mp4VideoReader),
     Webm(WebmVideoReader),

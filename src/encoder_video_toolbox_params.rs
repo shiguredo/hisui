@@ -88,10 +88,11 @@ pub fn parse_h265_encode_params(
     // - fps_denominator
     // - target_bitrate
     let params = JsonObject::new(value)?;
-    let mut config = EncoderConfig::default();
-
-    // H.265用のデフォルト設定
-    config.profile_level = ProfileLevel::H265Main;
+    let mut config = EncoderConfig {
+        // H.265用のデフォルト設定
+        profile_level: ProfileLevel::H265Main,
+        ..Default::default()
+    };
 
     // 基本的なエンコーダーパラメーター
     if let Some(bitrate) = params.get("target_bitrate")? {

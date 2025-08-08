@@ -25,6 +25,7 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    #[expect(clippy::too_many_arguments)]
     pub fn new_i420(
         input_frame: Self,
         width: EvenUsize,
@@ -132,8 +133,8 @@ impl VideoFrame {
         let total_size = y_plane_size + u_plane_size + v_plane_size;
 
         let mut data = vec![0; total_size];
-        for i in y_plane_size..total_size {
-            data[i] = 128;
+        for b in data.iter_mut().take(total_size).skip(y_plane_size) {
+            *b = 128;
         }
 
         Self {

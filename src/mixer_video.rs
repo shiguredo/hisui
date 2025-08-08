@@ -103,11 +103,10 @@ impl VideoMixerThread {
         }
 
         // バッファに残っていた最後のフレームを送る
-        if let Some(last_frame) = self.last_mixed_frame.take() {
-            if !self.output_tx.send(last_frame) {
+        if let Some(last_frame) = self.last_mixed_frame.take()
+            && !self.output_tx.send(last_frame) {
                 log::info!("receiver of mixed video stream has been closed");
             }
-        }
 
         Ok(())
     }
