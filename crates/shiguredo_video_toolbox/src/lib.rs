@@ -950,7 +950,7 @@ impl Decoder {
     }
 
     /// 圧縮された映像フレーム（AVCC 形式）をデコードする
-    pub fn decode(&mut self, data: &[u8]) -> Result<Option<DecodedFrame>, Error> {
+    pub fn decode(&mut self, data: &[u8]) -> Result<Option<DecodedFrame<'_>>, Error> {
         unsafe {
             let mut block_buffer = std::ptr::null_mut();
             let status = sys::CMBlockBufferCreateWithMemoryBlock(

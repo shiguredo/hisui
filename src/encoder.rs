@@ -308,11 +308,10 @@ impl AudioEncoderThread {
             }
         }
 
-        if let Some(encoded) = self.encoder.finish().or_fail()? {
-            if !self.output_tx.send(encoded) {
+        if let Some(encoded) = self.encoder.finish().or_fail()?
+            && !self.output_tx.send(encoded) {
                 log::info!("receiver of encoded audio stream has been closed");
             }
-        }
 
         Ok(())
     }

@@ -77,9 +77,9 @@ pub fn parse_vp8_encode_params(
     vp8_config.arnr_config = params.get_with("arnr_config", |v| {
         let arnr_obj = JsonObject::new(v)?;
         Ok(shiguredo_libvpx::ArnrConfig {
-            max_frames: arnr_obj.get("max_frames")?.unwrap_or(0) as i32,
-            strength: arnr_obj.get("strength")?.unwrap_or(3) as i32,
-            filter_type: arnr_obj.get("filter_type")?.unwrap_or(1) as i32,
+            max_frames: arnr_obj.get("max_frames")?.unwrap_or(0),
+            strength: arnr_obj.get("strength")?.unwrap_or(3),
+            filter_type: arnr_obj.get("filter_type")?.unwrap_or(1),
         })
     })?;
 

@@ -533,7 +533,7 @@ impl Encoder {
     ///
     /// [`Encoder::encode()`] や [`Encoder::finish()`] の後には、
     /// このメソッドを、結果が `None` になるまで呼び出し続ける必要がある
-    pub fn next_frame(&mut self) -> Result<Option<EncodedFrame>, Error> {
+    pub fn next_frame(&mut self) -> Result<Option<EncodedFrame<'_>>, Error> {
         let mut output = std::ptr::null_mut();
         let pic_send_done = self.eos as u8;
         let code =

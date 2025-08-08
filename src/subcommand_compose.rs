@@ -210,14 +210,11 @@ fn print_output_stats_summary(
         f.member("output_audio_codec", codec)?;
 
         for encoder in &stats.encoders {
-            match encoder {
-                EncoderStats::Audio(encoder) => {
-                    if let Some(engine) = &encoder.engine {
-                        f.member("output_audio_encoder_name", engine)?;
-                        break;
-                    }
+            if let EncoderStats::Audio(encoder) = encoder {
+                if let Some(engine) = &encoder.engine {
+                    f.member("output_audio_encoder_name", engine)?;
+                    break;
                 }
-                _ => {}
             }
         }
 
@@ -237,14 +234,11 @@ fn print_output_stats_summary(
         f.member("output_video_codec", codec)?;
 
         for encoder in &stats.encoders {
-            match encoder {
-                EncoderStats::Video(encoder) => {
-                    if let Some(engine) = &encoder.engine {
-                        f.member("output_video_encoder_name", engine)?;
-                        break;
-                    }
+            if let EncoderStats::Video(encoder) = encoder {
+                if let Some(engine) = &encoder.engine {
+                    f.member("output_video_encoder_name", engine)?;
+                    break;
                 }
-                _ => {}
             }
         }
 
