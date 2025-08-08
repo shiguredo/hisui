@@ -413,25 +413,13 @@ enum Cell {
 /// 行列の最大値指定と最大同時ソース数をもとに、実際に使用するグリッドの行数と列数を求める
 ///
 /// なお max_rows ないし max_columns で 0 が指定されたら未指定扱いとなる
+///
+/// また、`max_rows * max_columns < max_sources` となる場合には `(max_rows, max_columns)` が結果として返される
 pub fn decide_grid_dimensions(
     mut max_rows: usize,
     mut max_columns: usize,
     max_sources: usize,
 ) -> (usize, usize) {
-    // まずは以下の方針で制約がない場合の行列数を求める:
-    // - `max_sources` を保持可能なサイズを確保する
-    // - できるだけ正方形に近くなるようにする:
-    //   - ただし、列は行よりも一つ値が大きくてもいい
-    let mut columns = (max_sources as f32).sqrt().ceil().max(1.0) as usize;
-    let mut rows = (columns - 1).max(1);
-    if rows * columns < max_sources {
-        // 正方形にしないと `max_sources` を保持できない
-        rows += 1;
-    }
-
-    // 以降では `max_rows` と `max_columns` を考慮した調整を行う
-
-    // コードを単純にするために、未指定は `usize::MAX` 扱いにする
     if max_rows == 0 {
         max_rows = usize::MAX;
     }
@@ -439,28 +427,29 @@ pub fn decide_grid_dimensions(
         max_columns = usize::MAX;
     }
 
-    // 行と列のどちらを基準にして調整を行うかを決める
-    let row_based_adjustment = match (rows <= max_rows, columns <= max_columns) {
-        (true, true) => return (rows, columns), // 制約を破っていないならここで終わり
-        (false, true) => true,                  // 行の制約が破れているので行基準
-        (true, false) => false,                 // 列の制約が破れているので列基準
-        (false, false) => {
-            // 両方ダメなら正方形に近くなるように最大値が小さい方を基準とする
-            // (max_rows == max_columns の場合はどっちが基準となってもいい)
-            max_rows < max_columns
+    if max_rows == usize::MAX && max_columns == usize::MAX {
+        // 以下の方針で制約がない場合の行列数を求める:
+        // - `max_sources` を保持可能なサイズを確保する
+        // - できるだけ正方形に近くなるようにする:
+        //   - ただし、列は行よりも一つ値が大きくてもいい
+        let columns = (max_sources as f32).sqrt().ceil().max(1.0) as usize;
+        let mut rows = (columns - 1).max(1);
+        if rows * columns < max_sources {
+            // 正方形にしないと `max_sources` を保持できない
+            rows += 1;
         }
-    };
-
-    // 基準となった方に従い調整を行う
-    if row_based_adjustment {
-        rows = max_rows;
-        columns = ((max_sources as f32 / rows as f32).ceil() as usize).clamp(1, max_columns);
+        (rows, columns)
+    } else if max_columns <= max_rows {
+        // 列を先に埋める
+        let columns = max_sources.min(max_columns).max(1);
+        let rows = max_sources.div_ceil(max_columns).min(max_rows).max(1);
+        (rows, columns)
     } else {
-        columns = max_columns;
-        rows = ((max_sources as f32 / columns as f32).ceil() as usize).clamp(1, max_rows);
+        // 行を先に埋める
+        let rows = max_sources.min(max_rows).max(1);
+        let columns = max_sources.div_ceil(max_rows).min(max_columns).max(1);
+        (rows, columns)
     }
-
-    (rows, columns)
 }
 
 /// 全てのソースを表示するために必要なセルの数を求める
