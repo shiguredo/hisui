@@ -713,7 +713,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
 
     // ソースを用意する
     let source0 = source(0, ms(0), ms(1000)); // 0 ms ~ 1000 ms (全期間)
-    let source1 = source(1, ms(400), ms(800)); // 400 ms ~ 800 ms (source0 と同じセルに割り当てる）
+    let source1 = source(1, ms(400), ms(800)); // 400 ms ~ 800 ms (source0 と同じセルに割り当てる)
     let source2 = source(2, ms(200), ms(1000)); // 200 ms ~ 1000 ms
     let source3 = source(3, ms(0), ms(600)); // 0 ms ~ 600 ms
 
