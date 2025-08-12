@@ -583,7 +583,7 @@ fn decide_trim_spans(
     trim_spans
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggregatedSourceInfo {
     // 以下のフィールド群は全ての分割ファイルで値が同じになる
     pub id: SourceId,
@@ -619,6 +619,20 @@ impl AggregatedSourceInfo {
             other.start_timestamp <= self.stop_timestamp
         } else {
             self.start_timestamp <= other.stop_timestamp
+        }
+    }
+}
+
+impl Default for AggregatedSourceInfo {
+    fn default() -> Self {
+        Self {
+            id: SourceId::default(),
+            format: ContainerFormat::default(),
+            audio: false,
+            video: false,
+            start_timestamp: Duration::MAX,
+            stop_timestamp: Duration::ZERO,
+            media_paths: BTreeMap::default(),
         }
     }
 }
