@@ -683,7 +683,17 @@ fn invalid_layouts() {
     let base_path = PathBuf::from(".");
 
     // x_pos + width が範囲外
-    let json = include_str!("../testdata/invalid-layouts/region-right-pos-out-of-range.json");
+    let json = r#"{
+  "resolution": "720x480",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 700,
+      "height": 400,
+      "x_pos": 50
+    }
+  }
+}"#;
     let result = Layout::from_layout_json_str(base_path.clone(), json);
     assert!(result.is_err());
 
@@ -692,7 +702,17 @@ fn invalid_layouts() {
     assert!(error_message.contains("exceeds resolution width"));
 
     // y_pos + height が範囲外
-    let json = include_str!("../testdata/invalid-layouts/region-bottom-pos-out-of-range.json");
+    let json = r#"{
+  "resolution": "720x480",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 700,
+      "height": 400,
+      "y_pos": 100
+    }
+  }
+}"#;
     let result = Layout::from_layout_json_str(base_path.clone(), json);
     assert!(result.is_err());
 
