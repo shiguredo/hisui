@@ -353,13 +353,16 @@ fn single_source_multiple_regions_with_resize() {
     // 各種サイズ
     let output_size = size(MIN_OUTPUT_WIDTH, MIN_OUTPUT_HEIGHT);
     let region_size = size(12, 12);
-    let cell_size = size(12, 10);
+
+    // 複数リージョンでリサイズ結果が変わるようにセルサイズを変える
+    let cell_size0 = size(12, 10);
+    let cell_size1 = size(8, 8);
 
     // ソースは一つだけ
     let source = source(0, ms(0), total_duration); // 1000 ms 分のソース
 
     // ソースを共有する二つのリージョン設定
-    let mut region0 = region(region_size, cell_size);
+    let mut region0 = region(region_size, cell_size0);
     region0.source_ids.insert(source.id.clone());
     region0.position.x = EvenUsize::truncating_new(2); // 一つ目のリージョンの描画位置は端から 2 pixel 分ずらす
     region0.position.y = EvenUsize::truncating_new(2);
@@ -368,7 +371,7 @@ fn single_source_multiple_regions_with_resize() {
     region0.grid.columns = 1;
     region0.grid.assign_source(source.id.clone(), 0, 0);
 
-    let mut region1 = region(region_size, cell_size);
+    let mut region1 = region(region_size, cell_size1);
     region1.source_ids.insert(source.id.clone());
     region1.position.x = EvenUsize::truncating_new(4); // 二つ目のリージョンの描画位置は端から 4 pixel 分ずらす
     region1.position.y = EvenUsize::truncating_new(4);
@@ -384,9 +387,9 @@ fn single_source_multiple_regions_with_resize() {
         stats.clone(),
     );
 
-    // 入力映像フレームを送信する: 500 ms のフレームを二つ
+    // 入力映像フレームを送信する
     // リサイズを発生させるために cell_size よりもサイズを大きくする and アスペクト比を変える
-    let frame_size = size(cell_size.width * 3, cell_size.height * 2);
+    let frame_size = cell_size0;
     let input_frame = video_frame(&source, frame_size, ms(0), ms(1000), 2);
     input_tx.send(input_frame);
     std::mem::drop(input_tx);
