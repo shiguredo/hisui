@@ -790,3 +790,63 @@ fn source_timestamps() -> orfail::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn trim() -> orfail::Result<()> {
+    // trim 指定が適切に反映されているかどうかのテスト
+    let base_path = PathBuf::from("./testdata/trim/");
+
+    // trim:true の場合は、ソースが存在しない全ての期間がトリム対象となる
+    let layout_path = base_path.join("layout-trim-true.json");
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 3);
+
+    // ソースの時刻情報を確認
+    for (start, stop) in [(5, 15), (10, 20), (25, 30)] {
+        let id = SourceId::new(&format!("{start}-{stop}"));
+        let source = layout.sources.get(&id).or_fail()?;
+        assert_eq!(source.start_timestamp.as_secs(), start);
+        assert_eq!(source.stop_timestamp.as_secs(), stop);
+    }
+
+    // トリム判定が期待通りかを確認
+    for (time, should_trim) in [
+        (0, true),
+        (5, false),
+        (10, false),
+        (15, false),
+        (20, true),
+        (25, false),
+    ] {
+        assert_eq!(
+            layout.is_in_trim_span(Duration::from_secs(time)),
+            should_trim,
+            "{time}: {should_trim}"
+        );
+    }
+
+    // trim:false の場合は、ソースが存在しない冒頭期間のみがトリム対象となる
+    let layout_path = base_path.join("layout-trim-false.json");
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 3);
+
+    // [NOTE] ソースの時刻情報は上と同様
+
+    // トリム判定が期待通りかを確認
+    for (time, should_trim) in [
+        (0, true),
+        (5, false),
+        (10, false),
+        (15, false),
+        (20, false), // <- ここが `trim:true` の場合と異なる
+        (25, false),
+    ] {
+        assert_eq!(
+            layout.is_in_trim_span(Duration::from_secs(time)),
+            should_trim,
+            "{time}: {should_trim}"
+        );
+    }
+
+    Ok(())
+}

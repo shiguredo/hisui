@@ -1,0 +1,18 @@
+{
+  "audio_sources": [
+    "archive-*.json"
+  ],
+  "video_layout": {
+    "main": {
+      "video_sources": [
+        "archive-*.json"
+      ],
+      "max_rows": 2,
+      "max_columns": 2,
+      "reuse": "none"
+    }
+  },
+  "trim": false,
+  "resolution": "720x480",
+  "frame_rate": 20
+}
