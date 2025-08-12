@@ -732,3 +732,61 @@ fn invalid_layouts() {
     let result = Layout::from_layout_json_str(base_path.clone(), &valid_json);
     assert!(result.is_ok());
 }
+
+#[test]
+fn source_timestamps() -> orfail::Result<()> {
+    // ソースのタイムスタンプ情報が適切に反映されているかどうかのテスト
+    let base_path = PathBuf::from("./testdata/source_timestamps/");
+
+    // 一括録画の場合
+    let layout_path = base_path.join("layout.json");
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 4);
+
+    let id = SourceId::new("0TFGTG90RS5J55VGR0D7Z5QKJC");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 0);
+    assert_eq!(source.stop_timestamp.as_secs(), 31);
+
+    let id = SourceId::new("EVYCT2Q86H6ZDCD08JV3YTXCDR");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 22);
+    assert_eq!(source.stop_timestamp.as_secs(), 61);
+
+    let id = SourceId::new("SBRZKAAYF526HCRFGPB5VXCX78");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 41);
+    assert_eq!(source.stop_timestamp.as_secs(), 73);
+
+    let id = SourceId::new("Z2EDY12WX13QK8X8JDZK81MM0G");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 11);
+    assert_eq!(source.stop_timestamp.as_secs(), 51);
+
+    // 分割録画の場合
+    let layout_path = base_path.join("split-layout.json");
+    let layout = Layout::from_layout_json_file(base_path, &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 4);
+
+    let id = SourceId::new("0TFGTG90RS5J55VGR0D7Z5QKJC");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 0);
+    assert_eq!(source.stop_timestamp.as_secs(), 31);
+
+    let id = SourceId::new("EVYCT2Q86H6ZDCD08JV3YTXCDR");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 22);
+    assert_eq!(source.stop_timestamp.as_secs(), 61);
+
+    let id = SourceId::new("SBRZKAAYF526HCRFGPB5VXCX78");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 41);
+    assert_eq!(source.stop_timestamp.as_secs(), 73);
+
+    let id = SourceId::new("Z2EDY12WX13QK8X8JDZK81MM0G");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 11);
+    assert_eq!(source.stop_timestamp.as_secs(), 51);
+
+    Ok(())
+}
