@@ -386,7 +386,7 @@ fn single_source_multiple_regions_with_resize() {
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
     // リサイズを発生させるために cell_size よりもサイズを大きくする
-    let frame_size = size(14, 12); // 2 pixel ずつ大きい
+    let frame_size = size(cell_size.width * 2, cell_size.height * 2);
     let input_frame0 = video_frame(&source, frame_size, ms(0), ms(500), 2);
     let input_frame1 = video_frame(&source, frame_size, ms(500), ms(500), 4);
     input_tx.send(input_frame0.clone());
