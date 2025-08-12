@@ -687,8 +687,16 @@ fn invalid_layouts() {
     let result = Layout::from_layout_json_str(base_path.clone(), json);
     assert!(result.is_err());
 
+    let error_message = result.unwrap_err().message;
+    assert!(error_message.contains("x_pos + width"));
+    assert!(error_message.contains("exceeds resolution width"));
+
     // y_pos + height が範囲外
     let json = include_str!("../testdata/invalid-layouts/region-bottom-pos-out-of-range.json");
     let result = Layout::from_layout_json_str(base_path.clone(), json);
     assert!(result.is_err());
+
+    let error_message = result.unwrap_err().message;
+    assert!(error_message.contains("y_pos + height"));
+    assert!(error_message.contains("exceeds resolution height"));
 }
