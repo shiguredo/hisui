@@ -23,6 +23,7 @@ MEMO:
   - width / height の制限が「4 の倍数」から「2 の倍数」と緩くなった (後方互換)
   - cell_width / cell_height の追加 (後方互換)
     - モチベーション: レガシー hisui で report.json を指定した場合の挙動に近いものを、レイアウトで表現できるようにするため
+    - 同じ理由で new hisui では `resolution` の指定がオプショナルになっている
   - `format` がなくなった（出力が mp4 のみのため）
   - `reuse: Cell へのソースの配置の仕方を指定します。 video_sources での指定の最初から順に配置していきます。`
     - new hisui だと開始時刻順で配置している
