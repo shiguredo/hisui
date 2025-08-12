@@ -342,6 +342,90 @@ fn single_source_multiple_regions() {
     });
 }
 
+/// 一つのソースを複数のリージョンで使用するテストのリサイズあり版
+#[test]
+fn single_source_multiple_regions_with_resize() {
+    let error_flag = ErrorFlag::new();
+    let stats = SharedStats::new();
+    let (input_tx, input_rx) = channel::sync_channel_with_bound(1000);
+    let total_duration = ms(1000);
+
+    // 各種サイズ
+    let output_size = size(MIN_OUTPUT_WIDTH, MIN_OUTPUT_HEIGHT);
+    let region_size = size(12, 12);
+
+    // 複数リージョンでリサイズ結果が変わるようにセルサイズを変える
+    let cell_size0 = size(12, 10);
+    let cell_size1 = size(8, 8);
+
+    // ソースは一つだけ
+    let source = source(0, ms(0), total_duration); // 1000 ms 分のソース
+
+    // ソースを共有する二つのリージョン設定
+    let mut region0 = region(region_size, cell_size0);
+    region0.source_ids.insert(source.id.clone());
+    region0.position.x = EvenUsize::truncating_new(2); // 一つ目のリージョンの描画位置は端から 2 pixel 分ずらす
+    region0.position.y = EvenUsize::truncating_new(2);
+    region0.top_border_pixels = EvenUsize::truncating_new(0); // こっちは上限の枠線はなし
+    region0.grid.rows = 1;
+    region0.grid.columns = 1;
+    region0.grid.assign_source(source.id.clone(), 0, 0);
+
+    let mut region1 = region(region_size, cell_size1);
+    region1.source_ids.insert(source.id.clone());
+    region1.position.x = EvenUsize::truncating_new(4); // 二つ目のリージョンの描画位置は端から 4 pixel 分ずらす
+    region1.position.y = EvenUsize::truncating_new(4);
+    region1.top_border_pixels = EvenUsize::truncating_new(2);
+    region1.grid.rows = 1;
+    region1.grid.columns = 1;
+    region1.grid.assign_source(source.id.clone(), 0, 0);
+
+    let mut output_rx = VideoMixerThread::start(
+        error_flag.clone(),
+        layout(&[region0, region1], &[&source], output_size, None),
+        vec![input_rx],
+        stats.clone(),
+    );
+
+    // 入力映像フレームを送信する
+    // サイズは cell_size0 に合わせているので region1 での合成の際にはリサイズが発生する
+    let input_frame = video_frame(&source, cell_size0, ms(0), ms(1000), 2);
+    input_tx.send(input_frame);
+    std::mem::drop(input_tx);
+
+    // 比較用に最初の合成フレームを覚えておく
+    let first_frame = output_rx.recv().expect("failed to receive output frame");
+
+    // 残りの合成結果を取得する
+    for i in 1..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
+        let frame = output_rx.recv().expect("failed to receive output frame");
+        assert_eq!(frame.width.get(), output_size.width);
+        assert_eq!(frame.height.get(), output_size.height);
+        assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
+        assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
+
+        // 共有ソースのリサイズによって想定外の影響で合成結果が変わっていないかを確認
+        assert_eq!(frame.data, first_frame.data);
+    }
+
+    // 全ての出力を取得した
+    assert!(output_rx.recv().is_none());
+
+    // エラーは発生していない
+    assert!(!error_flag.get());
+
+    // 統計情報を確認する
+    stats.with_lock(|stats| {
+        let stats = video_mixer_stats(stats);
+
+        assert!(!stats.error);
+        assert_eq!(stats.total_input_video_frame_count, 1);
+        assert_eq!(stats.total_output_video_frame_count, 5);
+        assert_eq!(stats.total_output_video_frame_seconds.get(), ms(1000));
+        assert_eq!(stats.total_trimmed_video_frame_count, 0);
+    });
+}
+
 /// トリム期間（入力ソースが存在しなくて合成結果から除去される期間）がある場合のテスト
 #[test]
 fn mix_with_trim() -> orfail::Result<()> {
