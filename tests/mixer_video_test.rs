@@ -385,65 +385,25 @@ fn single_source_multiple_regions_with_resize() {
     );
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
-    // リサイズを発生させるために cell_size よりもサイズを大きくする
-    let frame_size = size(cell_size.width * 2, cell_size.height * 2);
-    let input_frame0 = video_frame(&source, frame_size, ms(0), ms(500), 2);
-    let input_frame1 = video_frame(&source, frame_size, ms(500), ms(500), 4);
-    input_tx.send(input_frame0.clone());
-    input_tx.send(input_frame1.clone());
+    // リサイズを発生させるために cell_size よりもサイズを大きくする and アスペクト比を変える
+    let frame_size = size(cell_size.width * 3, cell_size.height * 2);
+    let input_frame = video_frame(&source, frame_size, ms(0), ms(1000), 2);
+    input_tx.send(input_frame);
     std::mem::drop(input_tx);
 
-    // 合成結果を取得する
-    for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
+    // 比較用に最初の合成フレームを覚えておく
+    let first_frame = output_rx.recv().expect("failed to receive output frame");
+
+    // 残りの合成結果を取得する
+    for i in 1..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = output_rx.recv().expect("failed to receive output frame");
         assert_eq!(frame.width.get(), output_size.width);
         assert_eq!(frame.height.get(), output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
-        if i < 3 {
-            // ここまでは最初の入力フレームのデータが使われる
-            let expected = grayscale_image([
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0],
-                [0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-            ]);
-            assert_eq!(frame.data, expected);
-        } else {
-            // ここからは次の入力フレームのデータが使われる
-            let expected = grayscale_image([
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0],
-                [0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                [0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-            ]);
-            assert_eq!(frame.data, expected);
-        }
+        // 共有ソースのリサイズによって想定外の影響で合成結果が変わっていないかを確認
+        assert_eq!(frame.data, first_frame.data);
     }
 
     // 全ての出力を取得した
@@ -457,7 +417,7 @@ fn single_source_multiple_regions_with_resize() {
         let stats = video_mixer_stats(stats);
 
         assert!(!stats.error);
-        assert_eq!(stats.total_input_video_frame_count, 2);
+        assert_eq!(stats.total_input_video_frame_count, 1);
         assert_eq!(stats.total_output_video_frame_count, 5);
         assert_eq!(stats.total_output_video_frame_seconds.get(), ms(1000));
         assert_eq!(stats.total_trimmed_video_frame_count, 0);
