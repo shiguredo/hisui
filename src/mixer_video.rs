@@ -32,7 +32,7 @@ pub struct VideoMixerThread {
     inputs: Vec<Input>,
     layout: Layout,
     output_tx: VideoFrameSyncSender,
-    current_frames: HashMap<SourceId, VideoFrame>,
+    current_frames: HashMap<SourceId, ResizeCachedVideoFrame>,
     eos_source_ids: HashSet<SourceId>,
     last_mixed_frame: Option<VideoFrame>,
     last_input_update_time: Duration,
@@ -104,9 +104,10 @@ impl VideoMixerThread {
 
         // バッファに残っていた最後のフレームを送る
         if let Some(last_frame) = self.last_mixed_frame.take()
-            && !self.output_tx.send(last_frame) {
-                log::info!("receiver of mixed video stream has been closed");
-            }
+            && !self.output_tx.send(last_frame)
+        {
+            log::info!("receiver of mixed video stream has been closed");
+        }
 
         Ok(())
     }
@@ -157,7 +158,8 @@ impl VideoMixerThread {
             if input.source_id.is_none() {
                 input.source_id = Some(source_id.clone());
             }
-            self.current_frames.insert(source_id, frame);
+            self.current_frames
+                .insert(source_id, ResizeCachedVideoFrame::new(frame));
             self.last_input_update_time = now;
             self.stats.total_input_video_frame_count += 1;
         }
@@ -272,7 +274,7 @@ impl VideoMixerThread {
     fn mix_region(
         canvas: &mut Canvas,
         region: &Region,
-        current_frames: &mut HashMap<SourceId, VideoFrame>,
+        current_frames: &mut HashMap<SourceId, ResizeCachedVideoFrame>,
     ) -> orfail::Result<()> {
         // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
         //        (必要に応じて最適化する)
@@ -298,17 +300,62 @@ impl VideoMixerThread {
 
         for (source, frame) in frames {
             let mut position = region.cell_position(source.cell_index);
-            let (frame_width, frame_height) = region.decide_frame_size(frame);
+            let (frame_width, frame_height) = region.decide_frame_size(&frame.original);
             position.x +=
                 EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
             position.y +=
                 EvenUsize::truncating_new((region.grid.cell_height - frame_height).get() / 2);
-            frame.resize(frame_width, frame_height).or_fail()?;
-
-            canvas.draw_frame(position, frame).or_fail()?;
+            let resized_frame = frame.resize(frame_width, frame_height).or_fail()?;
+            canvas.draw_frame(position, resized_frame).or_fail()?;
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ResizeCachedVideoFrame {
+    original: VideoFrame,
+    resized: Vec<(EvenUsize, EvenUsize, VideoFrame)>, // width, height, resized frame
+}
+
+impl ResizeCachedVideoFrame {
+    fn new(original: VideoFrame) -> Self {
+        Self {
+            original,
+            resized: Vec::new(),
+        }
+    }
+
+    fn end_timestamp(&self) -> Duration {
+        self.original.end_timestamp()
+    }
+
+    fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> orfail::Result<&VideoFrame> {
+        if self.original.width == width && self.original.height == height {
+            // リサイズ不要
+            return Ok(&self.original);
+        }
+
+        if self
+            .resized
+            .iter()
+            .find(|x| (x.0, x.1) == (width, height))
+            .is_none()
+        {
+            // キャッシュにないので新規リサイズが必要
+            let mut frame = self.original.clone();
+            frame.resize(width, height).or_fail()?;
+            self.resized.push((width, height, frame));
+        }
+
+        // キャッシュから対応するサイズのフレームを取得する
+        let cached = self
+            .resized
+            .iter()
+            .find_map(|x| ((x.0, x.1) == (width, height)).then_some(&x.2))
+            .expect("infallible");
+        Ok(cached)
     }
 }
 
