@@ -388,9 +388,8 @@ fn single_source_multiple_regions_with_resize() {
     );
 
     // 入力映像フレームを送信する
-    // リサイズを発生させるために cell_size よりもサイズを大きくする and アスペクト比を変える
-    let frame_size = cell_size0;
-    let input_frame = video_frame(&source, frame_size, ms(0), ms(1000), 2);
+    // サイズは cell_size0 に合わせているので region1 での合成の際にはリサイズが発生する
+    let input_frame = video_frame(&source, cell_size0, ms(0), ms(1000), 2);
     input_tx.send(input_frame);
     std::mem::drop(input_tx);
 
