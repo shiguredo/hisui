@@ -625,6 +625,7 @@ impl AggregatedSourceInfo {
 
 impl Default for AggregatedSourceInfo {
     fn default() -> Self {
+        // [NOTE] デフォルトでのインスタンス生成後に、最低でも一回は `update()` が呼びだされる前提
         Self {
             id: SourceId::default(),
             format: ContainerFormat::default(),
