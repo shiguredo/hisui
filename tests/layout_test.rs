@@ -732,3 +732,10 @@ fn invalid_layouts() {
     let result = Layout::from_layout_json_str(base_path.clone(), &valid_json);
     assert!(result.is_ok());
 }
+
+#[test]
+fn source_timestamps() -> orfail::Result<()> {
+    // ソースのタイムスタンプ情報が適切に反映されているかどうか
+    // todo!()
+    Ok(())
+}
