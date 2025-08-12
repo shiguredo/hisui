@@ -630,8 +630,8 @@ impl Default for AggregatedSourceInfo {
             format: ContainerFormat::default(),
             audio: false,
             video: false,
-            start_timestamp: Duration::MAX,
-            stop_timestamp: Duration::ZERO,
+            start_timestamp: Duration::MAX, // 後で `min` を取るので最初は最大値
+            stop_timestamp: Duration::ZERO, // 後で `max` を取るので最初は最小値
             media_paths: BTreeMap::default(),
         }
     }
