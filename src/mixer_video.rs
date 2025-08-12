@@ -316,7 +316,7 @@ impl VideoMixerThread {
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
     original: VideoFrame,
-    resized: Vec<(EvenUsize, EvenUsize, VideoFrame)>, // width, height, resized frame
+    resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
 }
 
 impl ResizeCachedVideoFrame {
@@ -337,23 +337,25 @@ impl ResizeCachedVideoFrame {
             return Ok(&self.original);
         }
 
+        // [NOTE]
+        // resized の要素数は、通常は 1 で多くても 2~3 である想定なので線形探索で十分
         if self
             .resized
             .iter()
-            .find(|x| (x.0, x.1) == (width, height))
+            .find(|x| x.0 == (width, height))
             .is_none()
         {
             // キャッシュにないので新規リサイズが必要
             let mut frame = self.original.clone();
             frame.resize(width, height).or_fail()?;
-            self.resized.push((width, height, frame));
+            self.resized.push(((width, height), frame));
         }
 
         // キャッシュから対応するサイズのフレームを取得する
         let cached = self
             .resized
             .iter()
-            .find_map(|x| ((x.0, x.1) == (width, height)).then_some(&x.2))
+            .find_map(|x| (x.0 == (width, height)).then_some(&x.1))
             .expect("infallible");
         Ok(cached)
     }
