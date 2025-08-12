@@ -5,7 +5,7 @@ use std::{
 };
 
 use hisui::{
-    layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
+    layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
     metadata::{SourceId, SourceInfo},
 };
@@ -674,4 +674,61 @@ fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
     );
 
     Ok(())
+}
+
+#[test]
+fn invalid_layouts() {
+    // バリデーションで弾かれるべきなレイアウト群
+
+    let base_path = PathBuf::from(".");
+
+    // x_pos + width が範囲外
+    let invalid_json = r#"
+{
+  "resolution": "720x480",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 700,
+      "height": 400,
+      "x_pos": 50
+    }
+  }
+}"#;
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
+    assert!(result.is_err());
+
+    let error_message = result.unwrap_err().message;
+    assert!(error_message.contains("x_pos + width"));
+    assert!(error_message.contains("exceeds resolution width"));
+
+    // x_pos + width == resolution.width なら大丈夫
+    let valid_json = invalid_json.replace(r#"x_pos": 50"#, r#"x_pos": 20"#);
+    let result = Layout::from_layout_json_str(base_path.clone(), &valid_json);
+    assert!(result.is_ok());
+
+    // y_pos + height が範囲外
+    let invalid_json = r#"
+{
+  "resolution": "720x480",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 700,
+      "height": 400,
+      "y_pos": 100
+    }
+  }
+}"#;
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
+    assert!(result.is_err());
+
+    let error_message = result.unwrap_err().message;
+    assert!(error_message.contains("y_pos + height"));
+    assert!(error_message.contains("exceeds resolution height"));
+
+    // y_pos + height == resolution.height なら大丈夫
+    let valid_json = invalid_json.replace(r#"y_pos": 100"#, r#"y_pos": 80"#);
+    let result = Layout::from_layout_json_str(base_path.clone(), &valid_json);
+    assert!(result.is_ok());
 }

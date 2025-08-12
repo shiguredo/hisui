@@ -235,18 +235,22 @@ impl RawRegion {
         }
 
         // y_pos の確認
-        (0..resolution.height.get())
-            .contains(&self.y_pos)
-            .or_fail_with(|()| {
-                format!("video_layout region y_pos is out of range: {}", self.y_pos)
-            })?;
+        (self.y_pos + self.height <= resolution.height.get()).or_fail_with(|()| {
+            format!(
+                "video_layout region y_pos + height ({}) exceeds resolution height ({})",
+                self.y_pos + self.height,
+                resolution.height.get()
+            )
+        })?;
 
         // x_pos の確認
-        (0..resolution.width.get())
-            .contains(&self.x_pos)
-            .or_fail_with(|()| {
-                format!("video_layout region x_pos is out of range: {}", self.x_pos)
-            })?;
+        (self.x_pos + self.width <= resolution.width.get()).or_fail_with(|()| {
+            format!(
+                "video_layout region x_pos + width ({}) exceeds resolution width ({})",
+                self.x_pos + self.width,
+                resolution.width.get()
+            )
+        })?;
 
         // z_pos の確認
         (-99..=99).contains(&self.z_pos).or_fail_with(|()| {
