@@ -1,0 +1,11 @@
+{
+  "resolution": "720x480",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 700,
+      "height": 400,
+      "x_pos": 30
+    }
+  }
+}

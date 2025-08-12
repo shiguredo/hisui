@@ -5,7 +5,7 @@ use std::{
 };
 
 use hisui::{
-    layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
+    layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
     metadata::{SourceId, SourceInfo},
 };
@@ -674,4 +674,21 @@ fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
     );
 
     Ok(())
+}
+
+#[test]
+fn invalid_layouts() {
+    // バリデーションで弾かれるべきなレイアウト群
+
+    let base_path = PathBuf::from(".");
+
+    // x_pos + width が範囲外
+    let json = include_str!("../testdata/invalid-layouts/region-right-pos-out-of-range.json");
+    let result = Layout::from_layout_json_str(base_path.clone(), json);
+    assert!(result.is_err());
+
+    // y_pos + height が範囲外
+    let json = include_str!("../testdata/invalid-layouts/region-bottom-pos-out-of-range.json");
+    let result = Layout::from_layout_json_str(base_path.clone(), json);
+    assert!(result.is_err());
 }
