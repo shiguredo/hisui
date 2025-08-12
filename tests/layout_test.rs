@@ -735,12 +735,12 @@ fn invalid_layouts() {
 
 #[test]
 fn source_timestamps() -> orfail::Result<()> {
-    // ソースのタイムスタンプ情報が適切に反映されているかどうか
+    // ソースのタイムスタンプ情報が適切に反映されているかどうかのテスト
+    let base_path = PathBuf::from("./testdata/source_timestamps/");
 
     // 一括録画の場合
-    let base_path = PathBuf::from("./testdata/source_timestamps/");
     let layout_path = base_path.join("layout.json");
-    let layout = Layout::from_layout_json_file(base_path, &layout_path).or_fail()?;
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
     assert_eq!(layout.sources.len(), 4);
 
     let id = SourceId::new("0TFGTG90RS5J55VGR0D7Z5QKJC");
@@ -764,7 +764,6 @@ fn source_timestamps() -> orfail::Result<()> {
     assert_eq!(source.stop_timestamp.as_secs(), 51);
 
     // 分割録画の場合
-    let base_path = PathBuf::from("./testdata/source_timestamps/");
     let layout_path = base_path.join("split-layout.json");
     let layout = Layout::from_layout_json_file(base_path, &layout_path).or_fail()?;
     assert_eq!(layout.sources.len(), 4);
