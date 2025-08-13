@@ -65,7 +65,7 @@ impl Composer {
         // プログレスバーを準備
         let progress_bar = crate::arg_utils::create_time_progress_bar(
             self.show_progress_bar,
-            self.layout.duration(),
+            self.layout.output_duration(),
         );
 
         // 映像ミキサーとエンコーダーを準備

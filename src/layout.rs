@@ -164,6 +164,17 @@ impl Layout {
             .unwrap_or_default()
     }
 
+    fn trim_duration(&self) -> Duration {
+        self.trim_spans
+            .iter()
+            .map(|(start, end)| end.saturating_sub(*start))
+            .fold(Duration::ZERO, |acc, duration| acc.saturating_add(duration))
+    }
+
+    pub fn output_duration(&self) -> Duration {
+        self.duration().saturating_sub(self.trim_duration())
+    }
+
     pub fn is_in_trim_span(&self, timestamp: Duration) -> bool {
         if let Some((&start, &end)) = self.trim_spans.range(..=timestamp).next_back() {
             (start..end).contains(&timestamp)
