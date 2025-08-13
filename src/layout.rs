@@ -568,7 +568,7 @@ fn is_wildcard_name_matched(wildcard_name: &str, mut name: &str) -> bool {
 
 fn decide_trim_spans(
     sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
-    only_head: bool,
+    trim_first_gap_only: bool,
 ) -> BTreeMap<Duration, Duration> {
     // 時刻順でソートする
     let mut sources = sources
@@ -580,7 +580,7 @@ fn decide_trim_spans(
     let mut trim_spans = BTreeMap::new();
     let mut now = Duration::ZERO;
     for (start_timestamp, stop_timestamp) in sources {
-        if only_head && now != Duration::ZERO {
+        if trim_first_gap_only && now != Duration::ZERO {
             // レイアウト JSON で `trim: false` が指定された場合にはここにくる
             //
             // なお `trim` の値に関わらず冒頭部分のトリムは常に行われる
