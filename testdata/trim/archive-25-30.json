@@ -1,0 +1,9 @@
+{
+  "connection_id": "25-30",
+  "format": "webm",
+  "audio": true,
+  "video": true,
+  "start_time_offset": 25,
+  "stop_time_offset": 30
+}
+

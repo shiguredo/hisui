@@ -164,6 +164,17 @@ impl Layout {
             .unwrap_or_default()
     }
 
+    fn trim_duration(&self) -> Duration {
+        self.trim_spans
+            .iter()
+            .map(|(start, end)| end.saturating_sub(*start))
+            .fold(Duration::ZERO, |acc, duration| acc.saturating_add(duration))
+    }
+
+    pub fn output_duration(&self) -> Duration {
+        self.duration().saturating_sub(self.trim_duration())
+    }
+
     pub fn is_in_trim_span(&self, timestamp: Duration) -> bool {
         if let Some((&start, &end)) = self.trim_spans.range(..=timestamp).next_back() {
             (start..end).contains(&timestamp)
@@ -282,10 +293,7 @@ impl RawLayout {
             resolution
         };
 
-        let mut trim_spans = BTreeMap::new();
-        if self.trim {
-            trim_spans = decide_trim_spans(&sources);
-        }
+        let trim_spans = decide_trim_spans(&sources, !self.trim);
 
         Ok(Layout {
             base_path,
@@ -560,6 +568,7 @@ fn is_wildcard_name_matched(wildcard_name: &str, mut name: &str) -> bool {
 
 fn decide_trim_spans(
     sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
+    trim_first_gap_only: bool,
 ) -> BTreeMap<Duration, Duration> {
     // 時刻順でソートする
     let mut sources = sources
@@ -571,6 +580,13 @@ fn decide_trim_spans(
     let mut trim_spans = BTreeMap::new();
     let mut now = Duration::ZERO;
     for (start_timestamp, stop_timestamp) in sources {
+        if trim_first_gap_only && now != Duration::ZERO {
+            // レイアウト JSON で `trim: false` が指定された場合にはここにくる
+            //
+            // なお `trim` の値に関わらず冒頭部分のトリムは常に行われる
+            break;
+        }
+
         if now < start_timestamp {
             // 次のソースの開始時刻との間にギャップがあるのでトリムする
             trim_spans.insert(now, start_timestamp);
