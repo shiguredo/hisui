@@ -581,6 +581,9 @@ fn decide_trim_spans(
     let mut now = Duration::ZERO;
     for (start_timestamp, stop_timestamp) in sources {
         if only_head && now != Duration::ZERO {
+            // レイアウト JSON で `trim: false` が指定された場合にはここにくる
+            //
+            // なお `trim` の値に関わらず冒頭部分のトリムは常に行われる
             break;
         }
 
