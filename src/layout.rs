@@ -282,10 +282,7 @@ impl RawLayout {
             resolution
         };
 
-        let mut trim_spans = BTreeMap::new();
-        if self.trim {
-            trim_spans = decide_trim_spans(&sources);
-        }
+        let trim_spans = decide_trim_spans(&sources, !self.trim);
 
         Ok(Layout {
             base_path,
@@ -560,6 +557,7 @@ fn is_wildcard_name_matched(wildcard_name: &str, mut name: &str) -> bool {
 
 fn decide_trim_spans(
     sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
+    only_head: bool,
 ) -> BTreeMap<Duration, Duration> {
     // 時刻順でソートする
     let mut sources = sources
@@ -571,6 +569,10 @@ fn decide_trim_spans(
     let mut trim_spans = BTreeMap::new();
     let mut now = Duration::ZERO;
     for (start_timestamp, stop_timestamp) in sources {
+        if only_head && now != Duration::ZERO {
+            break;
+        }
+
         if now < start_timestamp {
             // 次のソースの開始時刻との間にギャップがあるのでトリムする
             trim_spans.insert(now, start_timestamp);
