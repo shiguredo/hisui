@@ -14,7 +14,7 @@ jobs:
       release-id: ${{ steps.create-release.outputs.release-id }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Get the version
         id: get_version
@@ -46,7 +46,7 @@ jobs:
     needs: github-release-draft
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -72,7 +72,7 @@ jobs:
     needs: github-release-draft
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - run: rustup update stable
       - name: Install packages to build external dependencies
@@ -94,7 +94,7 @@ jobs:
     needs: [github-release-draft, ubuntu-binary]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download Ubuntu x86_64 binary
         uses: actions/download-artifact@v4
