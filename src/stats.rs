@@ -403,25 +403,38 @@ impl nojson::DisplayJson for AudioEncoderStats {
 }
 
 /// 映像エンコーダー用の統計情報
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct VideoEncoderStats {
     /// エンコーダーの種類
-    pub engine: Option<EngineName>,
+    pub engine: EngineName,
 
     /// コーデック
-    pub codec: Option<CodecName>,
+    pub codec: CodecName,
 
     /// エンコード対象の `VideoFrame` の数
-    pub total_input_video_frame_count: u64,
+    pub total_input_video_frame_count: SharedAtomicCounter,
 
     /// 実際にエンコードされた `VideoFrame` の数
-    pub total_output_video_frame_count: u64,
+    pub total_output_video_frame_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
+}
+
+impl VideoEncoderStats {
+    pub fn new(engine: EngineName, codec: CodecName) -> Self {
+        Self {
+            engine,
+            codec,
+            total_input_video_frame_count: Default::default(),
+            total_output_video_frame_count: Default::default(),
+            total_processing_seconds: Default::default(),
+            error: Default::default(),
+        }
+    }
 }
 
 impl nojson::DisplayJson for VideoEncoderStats {
@@ -432,14 +445,17 @@ impl nojson::DisplayJson for VideoEncoderStats {
             f.member("codec", self.codec)?;
             f.member(
                 "total_input_video_frame_count",
-                self.total_input_video_frame_count,
+                self.total_input_video_frame_count.get(),
             )?;
             f.member(
                 "total_output_video_frame_count",
-                self.total_output_video_frame_count,
+                self.total_output_video_frame_count.get(),
             )?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("error", self.error)?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }

@@ -232,10 +232,8 @@ fn print_output_stats_summary(
         f.member("output_video_codec", codec)?;
 
         for encoder in &stats.encoders {
-            if let EncoderStats::Video(encoder) = encoder
-                && let Some(engine) = &encoder.engine
-            {
-                f.member("output_video_encoder_name", engine)?;
+            if let EncoderStats::Video(encoder) = encoder {
+                f.member("output_video_encoder_name", encoder.engine)?;
                 break;
             }
         }
@@ -326,7 +324,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|encoder| match encoder {
             EncoderStats::Video(video_encoder) => {
-                Some(video_encoder.total_processing_seconds.get())
+                Some(video_encoder.total_processing_seconds.get().get())
             }
             _ => None,
         })
