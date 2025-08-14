@@ -345,7 +345,7 @@ impl Mp4AudioReaderInner {
         let timestamp = Duration::from_secs(sample.timestamp()) / self.timescale.get();
         let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
 
-        self.stats.total_sample_count += 1;
+        self.stats.total_sample_count.increment();
         self.stats.total_track_seconds = Seconds::new(timestamp + duration);
 
         Some(Ok(AudioData {

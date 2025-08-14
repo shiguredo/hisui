@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -551,14 +551,30 @@ pub struct SharedAtomicFlag(Arc<AtomicBool>);
 
 impl SharedAtomicFlag {
     pub fn set(&self, v: bool) {
-        self.0.store(v, Ordering::SeqCst)
+        self.0.store(v, Ordering::Relaxed)
     }
 
     pub fn get(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.0.load(Ordering::Relaxed)
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct SharedAtomicCounter(Arc<AtomicU64>);
+
+impl SharedAtomicCounter {
+    pub fn add(&self, n: u64) {
+        self.0.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub fn increment(&self) {
+        self.add(1);
+    }
+
+    pub fn get(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
 /// `Mp4AudioReader` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct Mp4AudioReaderStats {
@@ -569,7 +585,7 @@ pub struct Mp4AudioReaderStats {
     pub codec: Option<CodecName>,
 
     /// Mp4 のサンプルの数
-    pub total_sample_count: u64,
+    pub total_sample_count: SharedAtomicCounter,
 
     /// 入力ファイルに含まれる音声トラックの尺
     pub total_track_seconds: Seconds,
@@ -587,7 +603,7 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             f.member("type", "mp4_audio_reader")?;
             f.member("input_file", &self.input_file)?;
             f.member("codec", self.codec)?;
-            f.member("total_sample_count", self.total_sample_count)?;
+            f.member("total_sample_count", self.total_sample_count.get())?;
             f.member("total_track_seconds", self.total_track_seconds)?;
             f.member("total_processing_seconds", self.total_processing_seconds)?;
             f.member("error", self.error.get())?;
