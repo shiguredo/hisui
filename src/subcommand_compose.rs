@@ -273,7 +273,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|decoder| match decoder {
             DecoderStats::Audio(audio_decoder) => {
-                Some(audio_decoder.total_processing_seconds.get())
+                Some(audio_decoder.total_processing_seconds.get().get())
             }
             _ => None,
         })

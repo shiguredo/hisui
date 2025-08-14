@@ -490,13 +490,13 @@ pub struct AudioDecoderStats {
     pub codec: Option<CodecName>,
 
     /// デコーダーで処理された `AudioData` の数
-    pub total_audio_data_count: u64,
+    pub total_audio_data_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for AudioDecoderStats {
@@ -506,9 +506,12 @@ impl nojson::DisplayJson for AudioDecoderStats {
             f.member("source_id", &self.source_id)?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
-            f.member("total_audio_data_count", self.total_audio_data_count)?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("error", self.error)?;
+            f.member("total_audio_data_count", self.total_audio_data_count.get())?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }

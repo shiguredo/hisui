@@ -57,7 +57,7 @@ impl AudioSourceThread {
         std::thread::spawn(move || {
             if let Err(e) = this.run(stats.clone()).or_fail() {
                 error_flag.set();
-                this.decoder_stats.error = true;
+                this.decoder_stats.error.set(true);
                 log::error!("failed to load audio source: {e}");
             }
 
@@ -79,8 +79,8 @@ impl AudioSourceThread {
 
                 let (decoded, elapsed) =
                     Seconds::try_elapsed(|| self.decoder.decode(&data).or_fail())?;
-                self.decoder_stats.total_audio_data_count += 1;
-                self.decoder_stats.total_processing_seconds += elapsed;
+                self.decoder_stats.total_audio_data_count.add(1);
+                self.decoder_stats.total_processing_seconds.add(elapsed);
                 self.decoder_stats.source_id = data.source_id;
                 if !self.tx.send(decoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
