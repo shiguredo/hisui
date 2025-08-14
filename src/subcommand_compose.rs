@@ -290,7 +290,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|decoder| match decoder {
             DecoderStats::Video(video_decoder) => {
-                Some(video_decoder.total_processing_seconds.get())
+                Some(video_decoder.total_processing_seconds.get().get())
             }
             _ => None,
         })

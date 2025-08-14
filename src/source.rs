@@ -139,7 +139,7 @@ impl VideoSourceThread {
         std::thread::spawn(move || {
             if let Err(e) = this.run(stats.clone()).or_fail() {
                 error_flag.set();
-                this.decoder_stats.error = true;
+                this.decoder_stats.error.set(true);
                 log::error!("failed to load video source: {e}");
             }
             stats.with_lock(|stats| {
@@ -173,7 +173,7 @@ impl VideoSourceThread {
         let mut next_timestamp = self.start_timestamp;
         loop {
             while let Some(frame) = self.decoder.next_decoded_frame() {
-                self.decoder_stats.total_output_video_frame_count += 1;
+                self.decoder_stats.total_output_video_frame_count.add(1);
                 self.decoder_stats
                     .resolutions
                     .insert(VideoResolution::new(&frame));
@@ -189,9 +189,11 @@ impl VideoSourceThread {
                 frame.timestamp += self.start_timestamp;
                 next_timestamp = frame.timestamp + frame.duration;
 
-                self.decoder_stats.total_input_video_frame_count += 1;
-                if self.decoder_stats.source_id.is_none() {
-                    self.decoder_stats.source_id = frame.source_id.clone();
+                self.decoder_stats.total_input_video_frame_count.add(1);
+                if let Some(id) = &frame.source_id
+                    && self.decoder_stats.source_id.get().is_none()
+                {
+                    self.decoder_stats.source_id.set(id.clone());
                 }
 
                 let (_, elapsed) = Seconds::try_elapsed(|| {
@@ -199,17 +201,17 @@ impl VideoSourceThread {
                         .decode(frame, &mut self.decoder_stats)
                         .or_fail()
                 })?;
-                self.decoder_stats.total_processing_seconds += elapsed;
+                self.decoder_stats.total_processing_seconds.add(elapsed);
             } else {
                 break;
             }
         }
 
         let (_, elapsed) = Seconds::try_elapsed(|| self.decoder.finish().or_fail())?;
-        self.decoder_stats.total_processing_seconds += elapsed;
+        self.decoder_stats.total_processing_seconds.add(elapsed);
 
         while let Some(frame) = self.decoder.next_decoded_frame() {
-            self.decoder_stats.total_output_video_frame_count += 1;
+            self.decoder_stats.total_output_video_frame_count.add(1);
             self.decoder_stats
                 .resolutions
                 .insert(VideoResolution::new(&frame));

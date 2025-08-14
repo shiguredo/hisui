@@ -521,48 +521,51 @@ impl nojson::DisplayJson for AudioDecoderStats {
 #[derive(Debug, Default, Clone)]
 pub struct VideoDecoderStats {
     /// 入力ソースの ID
-    pub source_id: Option<SourceId>,
+    pub source_id: SharedOption<SourceId>,
 
     /// デコーダーの種類
-    pub engine: Option<EngineName>,
+    pub engine: SharedOption<EngineName>,
 
     /// コーデック
-    pub codec: Option<CodecName>,
+    pub codec: SharedOption<CodecName>,
 
     /// デコード対象の `VideoFrame` の数
-    pub total_input_video_frame_count: u64,
+    pub total_input_video_frame_count: SharedAtomicCounter,
 
     /// デコードされた `VideoFrame` の数
-    pub total_output_video_frame_count: u64,
+    pub total_output_video_frame_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// 解像度リスト
-    pub resolutions: BTreeSet<VideoResolution>,
+    pub resolutions: SharedSet<VideoResolution>,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for VideoDecoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", "video_decoder")?;
-            f.member("source_id", &self.source_id)?;
-            f.member("engine", self.engine)?;
-            f.member("codec", self.codec)?;
+            f.member("source_id", self.source_id.get())?;
+            f.member("engine", self.engine.get())?;
+            f.member("codec", self.codec.get())?;
             f.member(
                 "total_input_video_frame_count",
-                self.total_input_video_frame_count,
+                self.total_input_video_frame_count.get(),
             )?;
             f.member(
                 "total_output_video_frame_count",
-                self.total_output_video_frame_count,
+                self.total_output_video_frame_count.get(),
             )?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("resolutions", &self.resolutions)?;
-            f.member("error", self.error)?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
+            f.member("resolutions", self.resolutions.get())?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }
@@ -661,16 +664,47 @@ impl<T> SharedOption<T> {
     }
 }
 
-impl<T: Copy> SharedOption<T> {
+impl<T: Clone> SharedOption<T> {
     pub fn get(&self) -> Option<T> {
         // TODO: comment
-        if let Ok(v) = self.0.lock() { *v } else { None }
+        if let Ok(v) = self.0.lock() {
+            v.clone()
+        } else {
+            None
+        }
     }
 }
 
 impl<T> Default for SharedOption<T> {
     fn default() -> Self {
         Self::new(None)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SharedSet<T>(Arc<Mutex<BTreeSet<T>>>);
+
+impl<T: Ord + Eq> SharedSet<T> {
+    pub fn insert(&self, value: T) {
+        if let Ok(mut v) = self.0.lock() {
+            v.insert(value);
+        }
+    }
+}
+
+impl<T: Clone> SharedSet<T> {
+    pub fn get(&self) -> BTreeSet<T> {
+        if let Ok(v) = self.0.lock() {
+            v.clone()
+        } else {
+            BTreeSet::default()
+        }
+    }
+}
+
+impl<T> Default for SharedSet<T> {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(BTreeSet::new())))
     }
 }
 
