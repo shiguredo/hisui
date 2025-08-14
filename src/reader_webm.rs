@@ -498,7 +498,7 @@ impl WebmVideoReader {
                     path.as_ref().display()
                 )
             })?,
-            total_processing_seconds: Seconds::new(start_time.elapsed()),
+            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
             ..Default::default()
         };
         Ok(Self {
@@ -527,7 +527,7 @@ impl WebmVideoReader {
 
                     let value = self.reader.read_u64(ID_TIMESTAMP).or_fail()?;
                     self.cluster_timestamp = Duration::from_millis(value);
-                    self.stats.total_cluster_count += 1;
+                    self.stats.total_cluster_count.add(1);
                 }
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block().or_fail()? {
@@ -576,10 +576,14 @@ impl WebmVideoReader {
         let keyframe = (flags >> 7) == 1;
         let data = reader.read_raw_data().or_fail()?;
 
-        self.stats.total_simple_block_count += 1;
-        self.stats.total_track_seconds = Seconds::new(timestamp + self.last_duration);
-        if self.stats.codec.is_none() {
-            self.stats.codec = self.header.codec.codec_name();
+        self.stats.total_simple_block_count.add(1);
+        self.stats
+            .total_track_seconds
+            .set(Seconds::new(timestamp + self.last_duration));
+        if self.stats.codec.get().is_none()
+            && let Some(name) = self.header.codec.codec_name()
+        {
+            self.stats.codec.set(name);
         }
 
         Ok(Some(VideoFrame {
@@ -606,9 +610,9 @@ impl Iterator for WebmVideoReader {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (result, elapsed) = Seconds::elapsed(|| self.read_video_frame().or_fail());
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
         if result.is_err() {
-            self.stats.error = true;
+            self.stats.error.set(true);
         }
         result.transpose()
     }

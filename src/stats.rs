@@ -858,22 +858,22 @@ pub struct WebmVideoReaderStats {
     pub input_file: PathBuf,
 
     /// 映像コーデック
-    pub codec: Option<CodecName>,
+    pub codec: SharedOption<CodecName>,
 
     /// WebM のクラスターの数
-    pub total_cluster_count: u64,
+    pub total_cluster_count: SharedAtomicCounter,
 
     /// WebM のシンプルブロックの数
-    pub total_simple_block_count: u64,
+    pub total_simple_block_count: SharedAtomicCounter,
 
     /// 入力ファイルに含まれる映像トラックの尺
-    pub total_track_seconds: Seconds,
+    pub total_track_seconds: SharedAtomicSeconds,
 
     /// 入力処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for WebmVideoReaderStats {
@@ -881,12 +881,18 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
         f.object(|f| {
             f.member("type", "webm_video_reader")?;
             f.member("input_file", &self.input_file)?;
-            f.member("codec", self.codec)?;
-            f.member("total_cluster_count", self.total_cluster_count)?;
-            f.member("total_simple_block_count", self.total_simple_block_count)?;
-            f.member("total_track_seconds", self.total_track_seconds)?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("error", self.error)?;
+            f.member("codec", self.codec.get())?;
+            f.member("total_cluster_count", self.total_cluster_count.get())?;
+            f.member(
+                "total_simple_block_count",
+                self.total_simple_block_count.get(),
+            )?;
+            f.member("total_track_seconds", self.total_track_seconds.get())?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }
