@@ -80,6 +80,9 @@ pub struct Stats {
 
     /// 出力関連の統計情報
     pub writers: Vec<WriterStats>,
+
+    /// TODO: doc
+    pub processors: Vec<ProcessorStats>,
 }
 
 impl nojson::DisplayJson for Stats {
@@ -89,6 +92,9 @@ impl nojson::DisplayJson for Stats {
             f.member(
                 "processors",
                 nojson::array(|f| {
+                    for processor in &self.processors {
+                        f.element(processor)?;
+                    }
                     for processor in &self.readers {
                         f.element(processor)?;
                     }
@@ -164,6 +170,25 @@ impl std::ops::AddAssign for Seconds {
 impl From<Seconds> for f32 {
     fn from(value: Seconds) -> Self {
         value.0.as_secs_f32()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ProcessorStats {
+    Mp4AudioReader(Mp4AudioReaderStats),
+    Mp4VideoReader(Mp4VideoReaderStats),
+    WebmAudioReader(WebmAudioReaderStats),
+    WebmVideoReader(WebmVideoReaderStats),
+}
+
+impl nojson::DisplayJson for ProcessorStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            ProcessorStats::Mp4AudioReader(stats) => stats.fmt(f),
+            ProcessorStats::Mp4VideoReader(stats) => stats.fmt(f),
+            ProcessorStats::WebmAudioReader(stats) => stats.fmt(f),
+            ProcessorStats::WebmVideoReader(stats) => stats.fmt(f),
+        }
     }
 }
 
