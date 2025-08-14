@@ -198,7 +198,6 @@ impl Mp4Writer {
 
         // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
         let sample = Sample {
-            number: NonZeroU32::MIN.saturating_add(self.stats.total_video_sample_count as u32),
             keyframe: frame.keyframe,
             size: frame.data.len() as u32,
             duration: frame.duration.as_micros() as u32,
@@ -248,7 +247,6 @@ impl Mp4Writer {
 
         // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
         let sample = Sample {
-            number: NonZeroU32::MIN.saturating_add(self.stats.total_audio_sample_count as u32),
             keyframe: true,
             size: data.data.len() as u32,
             duration: data.duration.as_micros() as u32,
@@ -473,18 +471,22 @@ impl Mp4Writer {
             })
         };
 
-        // TODO(sile): ここで連番を計算するようにすれば `Sample.number` は不要になる
-        let stss_box =
-            (chunks.iter().any(|c| c.samples.iter().any(|s| !s.keyframe))).then(|| StssBox {
+        let is_all_keyframe = chunks.iter().all(|c| c.samples.iter().all(|s| s.keyframe));
+        let stss_box = if is_all_keyframe {
+            None
+        } else {
+            Some(StssBox {
                 sample_numbers: chunks
                     .iter()
-                    .flat_map(|c| {
-                        c.samples
-                            .iter()
-                            .filter_map(|s| s.keyframe.then_some(s.number))
+                    .flat_map(|c| c.samples.iter())
+                    .enumerate()
+                    .filter_map(|(i, s)| {
+                        s.keyframe
+                            .then_some(NonZeroU32::MIN.saturating_add(i as u32))
                     })
                     .collect(),
-            });
+            })
+        };
 
         StblBox {
             stsd_box,
@@ -719,7 +721,6 @@ struct Chunk {
 
 #[derive(Debug)]
 struct Sample {
-    number: NonZeroU32,
     keyframe: bool,
     size: u32,
     duration: u32,
