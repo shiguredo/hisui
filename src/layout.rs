@@ -208,7 +208,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
             audio_sources: object.get("audio_sources")?.unwrap_or_default(),
             audio_sources_excluded: object.get("audio_sources_excluded")?.unwrap_or_default(),
             video_layout: object.get("video_layout")?.unwrap_or_default(),
-            trim: object.get("trim")?.unwrap_or_default(),
+            trim: object.get("trim")?.unwrap_or(true),
             resolution: object.get("resolution")?,
             audio_bitrate: object.get("audio_bitrate")?,
             video_bitrate: if let Some(bitrate) = object.get("video_bitrate")? {
