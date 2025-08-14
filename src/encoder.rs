@@ -271,16 +271,12 @@ impl AudioEncoderThread {
             let mut this = Self {
                 input_rx,
                 output_tx: tx,
-                stats: AudioEncoderStats {
-                    engine: Some(encoder.name()),
-                    codec: Some(encoder.codec()),
-                    ..Default::default()
-                },
+                stats: AudioEncoderStats::new(encoder.name(), encoder.codec()),
                 encoder,
             };
             if let Err(e) = this.run().or_fail() {
                 error_flag.set();
-                this.stats.error = true;
+                this.stats.error.set(true);
                 log::error!("failed to produce encoded audio stream: {e}");
             }
 
@@ -293,10 +289,10 @@ impl AudioEncoderThread {
 
     fn run(&mut self) -> orfail::Result<()> {
         while let Some(data) = self.input_rx.recv() {
-            self.stats.total_audio_data_count += 1;
+            self.stats.total_audio_data_count.add(1);
 
             let (encoded, elapsed) = Seconds::try_elapsed(|| self.encoder.encode(&data).or_fail())?;
-            self.stats.total_processing_seconds += elapsed;
+            self.stats.total_processing_seconds.add(elapsed);
             let Some(encoded) = encoded else {
                 continue;
             };
@@ -309,9 +305,10 @@ impl AudioEncoderThread {
         }
 
         if let Some(encoded) = self.encoder.finish().or_fail()?
-            && !self.output_tx.send(encoded) {
-                log::info!("receiver of encoded audio stream has been closed");
-            }
+            && !self.output_tx.send(encoded)
+        {
+            log::info!("receiver of encoded audio stream has been closed");
+        }
 
         Ok(())
     }

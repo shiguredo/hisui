@@ -330,14 +330,13 @@ impl nojson::DisplayJson for VideoMixerStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get()
+                self.total_processing_seconds.get(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
         })
     }
 }
-
 
 /// エンコーダー関連の統計情報
 #[derive(Debug, Clone)]
@@ -356,22 +355,34 @@ impl nojson::DisplayJson for EncoderStats {
 }
 
 /// 音声エンコーダー用の統計情報
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct AudioEncoderStats {
     /// エンコーダーの種類
-    pub engine: Option<EngineName>,
+    pub engine: EngineName,
 
     /// コーデック
-    pub codec: Option<CodecName>,
+    pub codec: CodecName,
 
     /// エンコーダーで処理された `AudioData` の数
-    pub total_audio_data_count: u64,
+    pub total_audio_data_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
+}
+
+impl AudioEncoderStats {
+    pub fn new(engine: EngineName, codec: CodecName) -> Self {
+        Self {
+            engine,
+            codec,
+            total_audio_data_count: Default::default(),
+            total_processing_seconds: Default::default(),
+            error: Default::default(),
+        }
+    }
 }
 
 impl nojson::DisplayJson for AudioEncoderStats {
@@ -380,9 +391,12 @@ impl nojson::DisplayJson for AudioEncoderStats {
             f.member("type", "audio_encoder")?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
-            f.member("total_audio_data_count", self.total_audio_data_count)?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("error", self.error)?;
+            f.member("total_audio_data_count", self.total_audio_data_count.get())?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }

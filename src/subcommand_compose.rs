@@ -210,10 +210,8 @@ fn print_output_stats_summary(
         f.member("output_audio_codec", codec)?;
 
         for encoder in &stats.encoders {
-            if let EncoderStats::Audio(encoder) = encoder
-                && let Some(engine) = &encoder.engine
-            {
-                f.member("output_audio_encoder_name", engine)?;
+            if let EncoderStats::Audio(encoder) = encoder {
+                f.member("output_audio_encoder_name", encoder.engine)?;
                 break;
             }
         }
@@ -311,7 +309,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|encoder| match encoder {
             EncoderStats::Audio(audio_encoder) => {
-                Some(audio_encoder.total_processing_seconds.get())
+                Some(audio_encoder.total_processing_seconds.get().get())
             }
             _ => None,
         })
