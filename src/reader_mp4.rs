@@ -374,7 +374,7 @@ impl Iterator for Mp4AudioReaderInner {
         let (result, elapsed) = Seconds::elapsed(|| self.next_audio_data());
         self.stats.total_processing_seconds += elapsed;
         if matches!(result, Some(Err(_))) {
-            self.stats.error = true;
+            self.stats.error.set(true);
         }
         result
     }

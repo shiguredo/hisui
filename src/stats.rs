@@ -1,7 +1,10 @@
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -543,6 +546,19 @@ impl nojson::DisplayJson for ReaderStats {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct SharedAtomicFlag(Arc<AtomicBool>);
+
+impl SharedAtomicFlag {
+    pub fn set(&self, v: bool) {
+        self.0.store(v, Ordering::SeqCst)
+    }
+
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
 /// `Mp4AudioReader` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct Mp4AudioReaderStats {
@@ -562,7 +578,7 @@ pub struct Mp4AudioReaderStats {
     pub total_processing_seconds: Seconds,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for Mp4AudioReaderStats {
@@ -574,7 +590,7 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             f.member("total_sample_count", self.total_sample_count)?;
             f.member("total_track_seconds", self.total_track_seconds)?;
             f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("error", self.error)?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }
