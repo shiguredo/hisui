@@ -198,6 +198,7 @@ impl Mp4Writer {
 
         // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
         let sample = Sample {
+            number: NonZeroU32::MIN.saturating_add(self.stats.total_video_sample_count as u32),
             keyframe: frame.keyframe,
             size: frame.data.len() as u32,
             duration: frame.duration.as_micros() as u32,
@@ -247,6 +248,7 @@ impl Mp4Writer {
 
         // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
         let sample = Sample {
+            number: NonZeroU32::MIN.saturating_add(self.stats.total_audio_sample_count as u32),
             keyframe: true,
             size: data.data.len() as u32,
             duration: data.duration.as_micros() as u32,
@@ -478,9 +480,7 @@ impl Mp4Writer {
                     .flat_map(|c| {
                         c.samples
                             .iter()
-                            .enumerate()
-                            .filter(|(_, s)| s.keyframe)
-                            .map(|(i, _)| NonZeroU32::MIN.saturating_add(i as u32))
+                            .filter_map(|s| s.keyframe.then_some(s.number))
                     })
                     .collect(),
             });
@@ -718,6 +718,7 @@ struct Chunk {
 
 #[derive(Debug)]
 struct Sample {
+    number: NonZeroU32,
     keyframe: bool,
     size: u32,
     duration: u32,
