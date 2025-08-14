@@ -101,14 +101,22 @@ fn simple_single_source() -> noargs::Result<()> {
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
-    assert_eq!(video_stats.resolutions, [(320, 240)]);
+    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(
+        video_stats
+            .resolutions
+            .get()
+            .into_iter()
+            .map(|r| (r.width, r.height))
+            .collect::<Vec<_>>(),
+        [(320, 240)]
+    );
 
     // 一秒分 + 一サンプル (25 fps = 40 ms)
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count, 26);
+    assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get(),
+        video_stats.total_track_seconds.get().get(),
         Duration::from_millis(1040)
     );
 
@@ -190,18 +198,26 @@ fn simple_multi_sources() -> noargs::Result<()> {
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
 
     // レイアウトファイル未指定の場合には、一つのセルの解像度は 320x240 で、
     // 今回はソースが三つなのでグリッドは 3x1 となり、
     // 以下の解像度になる
-    assert_eq!(video_stats.resolutions, [(320 * 3, 240 * 1)]);
+    assert_eq!(
+        video_stats
+            .resolutions
+            .get()
+            .into_iter()
+            .map(|r| (r.width, r.height))
+            .collect::<Vec<_>>(),
+        [(320 * 3, 240 * 1)]
+    );
 
     // 一秒分 + 一サンプル (25 fps = 40 ms)
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count, 26);
+    assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get(),
+        video_stats.total_track_seconds.get().get(),
         Duration::from_millis(1040)
     );
 
@@ -251,14 +267,22 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
-    assert_eq!(video_stats.resolutions, [(16, 52)]);
+    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(
+        video_stats
+            .resolutions
+            .get()
+            .into_iter()
+            .map(|r| (r.width, r.height))
+            .collect::<Vec<_>>(),
+        [(16, 52)]
+    );
 
     // 一秒分 + 一サンプル (25 fps = 40 ms)
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count, 26);
+    assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get(),
+        video_stats.total_track_seconds.get().get(),
         Duration::from_millis(1040)
     );
 
@@ -354,14 +378,22 @@ fn two_regions() -> noargs::Result<()> {
 
     // 統計値を確認
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
-    assert_eq!(video_stats.resolutions, [(16, 34)]);
+    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(
+        video_stats
+            .resolutions
+            .get()
+            .into_iter()
+            .map(|r| (r.width, r.height))
+            .collect::<Vec<_>>(),
+        [(16, 34)]
+    );
 
     // 一秒分 + 一サンプル (25 fps = 40 ms)
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count, 26);
+    assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get(),
+        video_stats.total_track_seconds.get().get(),
         Duration::from_millis(1040)
     );
 
