@@ -916,68 +916,89 @@ impl nojson::DisplayJson for WriterStats {
 #[derive(Debug, Default, Clone)]
 pub struct Mp4WriterStats {
     /// 音声コーデック
-    pub audio_codec: Option<CodecName>,
+    pub audio_codec: SharedOption<CodecName>,
 
     /// 映像コーデック
-    pub video_codec: Option<CodecName>,
+    pub video_codec: SharedOption<CodecName>,
 
     /// 出力ファイルの初期化時に moov ボックス用に事前に予約した領域のサイズ
-    pub reserved_moov_box_size: u64,
+    pub reserved_moov_box_size: SharedAtomicCounter,
 
     /// 出力ファイルの最終処理時に判明した moov ボックスの実際のサイズ
-    pub actual_moov_box_size: u64,
+    pub actual_moov_box_size: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる音声チャンクの数
-    pub total_audio_chunk_count: u64,
+    pub total_audio_chunk_count: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる映像チャンクの数
-    pub total_video_chunk_count: u64,
+    pub total_video_chunk_count: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる音声サンプルの数
-    pub total_audio_sample_count: u64,
+    pub total_audio_sample_count: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる映像サンプルの数
-    pub total_video_sample_count: u64,
+    pub total_video_sample_count: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる音声データのバイト数
-    pub total_audio_sample_data_byte_size: u64,
+    pub total_audio_sample_data_byte_size: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる映像データのバイト数
-    pub total_video_sample_data_byte_size: u64,
+    pub total_video_sample_data_byte_size: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる音声トラックの尺
-    pub total_audio_track_seconds: Seconds,
+    pub total_audio_track_seconds: SharedAtomicSeconds,
 
     /// 出力ファイルに含まれる映像トラックの尺
-    pub total_video_track_seconds: Seconds,
+    pub total_video_track_seconds: SharedAtomicSeconds,
 
     /// MP4 出力処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 }
 
 impl nojson::DisplayJson for Mp4WriterStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", "mp4_writer")?;
-            f.member("audio_codec", self.audio_codec)?;
-            f.member("video_codec", self.video_codec)?;
-            f.member("reserved_moov_box_size", self.reserved_moov_box_size)?;
-            f.member("actual_moov_box_size", self.actual_moov_box_size)?;
-            f.member("total_audio_chunk_count", self.total_audio_chunk_count)?;
-            f.member("total_video_chunk_count", self.total_video_chunk_count)?;
-            f.member("total_audio_sample_count", self.total_audio_sample_count)?;
-            f.member("total_video_sample_count", self.total_video_sample_count)?;
+            f.member("audio_codec", self.audio_codec.get())?;
+            f.member("video_codec", self.video_codec.get())?;
+            f.member("reserved_moov_box_size", self.reserved_moov_box_size.get())?;
+            f.member("actual_moov_box_size", self.actual_moov_box_size.get())?;
+            f.member(
+                "total_audio_chunk_count",
+                self.total_audio_chunk_count.get(),
+            )?;
+            f.member(
+                "total_video_chunk_count",
+                self.total_video_chunk_count.get(),
+            )?;
+            f.member(
+                "total_audio_sample_count",
+                self.total_audio_sample_count.get(),
+            )?;
+            f.member(
+                "total_video_sample_count",
+                self.total_video_sample_count.get(),
+            )?;
             f.member(
                 "total_audio_sample_data_byte_size",
-                self.total_audio_sample_data_byte_size,
+                self.total_audio_sample_data_byte_size.get(),
             )?;
             f.member(
                 "total_video_sample_data_byte_size",
-                self.total_video_sample_data_byte_size,
+                self.total_video_sample_data_byte_size.get(),
             )?;
-            f.member("total_audio_track_seconds", self.total_audio_track_seconds)?;
-            f.member("total_video_track_seconds", self.total_video_track_seconds)?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member(
+                "total_audio_track_seconds",
+                self.total_audio_track_seconds.get(),
+            )?;
+            f.member(
+                "total_video_track_seconds",
+                self.total_video_track_seconds.get(),
+            )?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
             Ok(())
         })
     }

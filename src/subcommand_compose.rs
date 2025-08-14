@@ -206,7 +206,7 @@ fn print_output_stats_summary(
         return Ok(());
     };
 
-    if let Some(codec) = &writer.audio_codec {
+    if let Some(codec) = writer.audio_codec.get() {
         f.member("output_audio_codec", codec)?;
 
         for encoder in &stats.encoders {
@@ -218,17 +218,17 @@ fn print_output_stats_summary(
 
         f.member(
             "output_audio_duration_seconds",
-            writer.total_audio_track_seconds,
+            writer.total_audio_track_seconds.get(),
         )?;
 
-        let duration = writer.total_audio_track_seconds.get();
+        let duration = writer.total_audio_track_seconds.get().get();
         if !duration.is_zero() {
-            let bitrate =
-                (writer.total_audio_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            let bitrate = (writer.total_audio_sample_data_byte_size.get() as f32 * 8.0)
+                / duration.as_secs_f32();
             f.member("output_audio_bitrate", bitrate as u64)?;
         }
     }
-    if let Some(codec) = &writer.video_codec {
+    if let Some(codec) = writer.video_codec.get() {
         f.member("output_video_codec", codec)?;
 
         for encoder in &stats.encoders {
@@ -240,13 +240,13 @@ fn print_output_stats_summary(
 
         f.member(
             "output_video_duration_seconds",
-            writer.total_video_track_seconds,
+            writer.total_video_track_seconds.get(),
         )?;
 
-        let duration = writer.total_video_track_seconds.get();
+        let duration = writer.total_video_track_seconds.get().get();
         if !duration.is_zero() {
-            let bitrate =
-                (writer.total_video_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            let bitrate = (writer.total_video_sample_data_byte_size.get() as f32 * 8.0)
+                / duration.as_secs_f32();
             f.member("output_video_bitrate", bitrate as u64)?;
         }
     }
