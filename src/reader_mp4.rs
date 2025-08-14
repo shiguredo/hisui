@@ -16,7 +16,10 @@ use shiguredo_mp4::{
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedAtomicSeconds, SharedOption},
+    stats::{
+        Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedAtomicSeconds, SharedOption,
+        VideoResolution,
+    },
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
@@ -96,7 +99,7 @@ impl Mp4VideoReaderInner {
                     path.as_ref().display()
                 )
             })?,
-            total_processing_seconds: Seconds::new(start_time.elapsed()),
+            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
             ..Default::default()
         };
         Ok(Some(Self {
@@ -160,19 +163,19 @@ impl Mp4VideoReaderInner {
         let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
         let resolution = (metadata.width, metadata.height);
 
-        self.stats.total_sample_count += 1;
-        self.stats.total_track_seconds = Seconds::new(timestamp + duration);
-        if self.stats.codec.is_none() {
-            self.stats.codec = format.codec_name();
-        }
-        if self
-            .stats
-            .resolutions
-            .last()
-            .is_none_or(|&r| r != resolution)
+        self.stats.total_sample_count.add(1);
+        self.stats
+            .total_track_seconds
+            .set(Seconds::new(timestamp + duration));
+        if self.stats.codec.get().is_none()
+            && let Some(name) = format.codec_name()
         {
-            self.stats.resolutions.push(resolution);
+            self.stats.codec.set(name);
         }
+        self.stats.resolutions.insert(VideoResolution {
+            width: resolution.0 as usize,
+            height: resolution.1 as usize,
+        });
 
         let (Some(width), Some(height)) = (
             EvenUsize::new(metadata.width as usize),
@@ -214,9 +217,9 @@ impl Iterator for Mp4VideoReaderInner {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (result, elapsed) = Seconds::elapsed(|| self.next_video_frame());
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
         if matches!(result, Some(Err(_))) {
-            self.stats.error = true;
+            self.stats.error.set(true);
         }
         result
     }
