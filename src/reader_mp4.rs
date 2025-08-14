@@ -16,7 +16,7 @@ use shiguredo_mp4::{
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds},
+    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedOption},
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
@@ -286,7 +286,7 @@ impl Mp4AudioReaderInner {
 
         let stats = Mp4AudioReaderStats {
             input_file: path.as_ref().canonicalize().or_fail()?,
-            codec: Some(CodecName::Opus),
+            codec: SharedOption::new(Some(CodecName::Opus)),
             total_processing_seconds: Seconds::new(start_time.elapsed()),
             ..Default::default()
         };

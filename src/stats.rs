@@ -575,6 +575,36 @@ impl SharedAtomicCounter {
         self.0.load(Ordering::Relaxed)
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct SharedOption<T>(Arc<Mutex<Option<T>>>);
+
+impl<T> SharedOption<T> {
+    pub fn new(value: Option<T>) -> Self {
+        Self(Arc::new(Mutex::new(value)))
+    }
+
+    // TODO: comment
+    pub fn set(&self, value: T) {
+        if let Ok(mut v) = self.0.lock() {
+            *v = Some(value);
+        }
+    }
+}
+
+impl<T: Copy> SharedOption<T> {
+    pub fn get(&self) -> Option<T> {
+        // TODO: comment
+        if let Ok(v) = self.0.lock() { *v } else { None }
+    }
+}
+
+impl<T> Default for SharedOption<T> {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
 /// `Mp4AudioReader` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct Mp4AudioReaderStats {
@@ -582,7 +612,7 @@ pub struct Mp4AudioReaderStats {
     pub input_file: PathBuf,
 
     /// 音声コーデック
-    pub codec: Option<CodecName>,
+    pub codec: SharedOption<CodecName>,
 
     /// Mp4 のサンプルの数
     pub total_sample_count: SharedAtomicCounter,
@@ -602,7 +632,7 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
         f.object(|f| {
             f.member("type", "mp4_audio_reader")?;
             f.member("input_file", &self.input_file)?;
-            f.member("codec", self.codec)?;
+            f.member("codec", self.codec.get())?;
             f.member("total_sample_count", self.total_sample_count.get())?;
             f.member("total_track_seconds", self.total_track_seconds)?;
             f.member("total_processing_seconds", self.total_processing_seconds)?;
