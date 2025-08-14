@@ -361,7 +361,9 @@ fn print_time_stats_summary(
         .mixers
         .iter()
         .filter_map(|mixer| match mixer {
-            MixerStats::Video(video_mixer) => Some(video_mixer.total_processing_seconds.get()),
+            MixerStats::Video(video_mixer) => {
+                Some(video_mixer.total_processing_seconds.get().get())
+            }
             _ => None,
         })
         .sum::<Duration>();

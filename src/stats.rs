@@ -276,32 +276,31 @@ impl nojson::DisplayJson for AudioMixerStats {
     }
 }
 
-/// `VideoMixer` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct VideoMixerStats {
     /// 合成後の映像の解像度
     pub output_video_resolution: VideoResolution,
 
     /// ミキサーの入力 `VideoFrame` の数
-    pub total_input_video_frame_count: u64,
+    pub total_input_video_frame_count: SharedAtomicCounter,
 
     /// ミキサーが生成した `VideoFrame` の数
-    pub total_output_video_frame_count: u64,
+    pub total_output_video_frame_count: SharedAtomicCounter,
 
     /// ミキサーが生成した `VideoFrame` の合計尺
-    pub total_output_video_frame_seconds: Seconds,
+    pub total_output_video_frame_seconds: SharedAtomicSeconds,
 
     /// 出力から除去された映像フレームの合計数
-    pub total_trimmed_video_frame_count: u64,
+    pub total_trimmed_video_frame_count: SharedAtomicCounter,
 
     /// 合成を省略して前フレームの尺を延長したフレームの数
-    pub total_extended_video_frame_count: u64,
+    pub total_extended_video_frame_count: SharedAtomicCounter,
 
     /// 合成処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for VideoMixerStats {
@@ -311,30 +310,34 @@ impl nojson::DisplayJson for VideoMixerStats {
             f.member("output_video_resolution", self.output_video_resolution)?;
             f.member(
                 "total_input_video_frame_count",
-                self.total_input_video_frame_count,
+                self.total_input_video_frame_count.get(),
             )?;
             f.member(
                 "total_output_video_frame_count",
-                self.total_output_video_frame_count,
+                self.total_output_video_frame_count.get(),
             )?;
             f.member(
                 "total_output_video_frame_seconds",
-                self.total_output_video_frame_seconds,
+                self.total_output_video_frame_seconds.get(),
             )?;
             f.member(
                 "total_trimmed_video_frame_count",
-                self.total_trimmed_video_frame_count,
+                self.total_trimmed_video_frame_count.get(),
             )?;
             f.member(
                 "total_extended_video_frame_count",
-                self.total_extended_video_frame_count,
+                self.total_extended_video_frame_count.get(),
             )?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("error", self.error)?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get()
+            )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }
 }
+
 
 /// エンコーダー関連の統計情報
 #[derive(Debug, Clone)]
