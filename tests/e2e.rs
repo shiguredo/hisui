@@ -90,13 +90,13 @@ fn simple_single_source() -> noargs::Result<()> {
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+    assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count, 51);
+    assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get(),
+        audio_stats.total_track_seconds.get().get(),
         Duration::from_millis(1020)
     );
 
@@ -179,13 +179,13 @@ fn simple_multi_sources() -> noargs::Result<()> {
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+    assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count, 51);
+    assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get(),
+        audio_stats.total_track_seconds.get().get(),
         Duration::from_millis(1020)
     );
 
@@ -240,13 +240,13 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+    assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count, 51);
+    assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get(),
+        audio_stats.total_track_seconds.get().get(),
         Duration::from_millis(1020)
     );
 

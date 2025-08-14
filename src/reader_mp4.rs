@@ -16,7 +16,7 @@ use shiguredo_mp4::{
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedOption, SharedAtomicSeconds},
+    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedAtomicSeconds, SharedOption},
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };

@@ -344,7 +344,9 @@ fn print_time_stats_summary(
         .mixers
         .iter()
         .filter_map(|mixer| match mixer {
-            MixerStats::Audio(audio_mixer) => Some(audio_mixer.total_processing_seconds.get()),
+            MixerStats::Audio(audio_mixer) => {
+                Some(audio_mixer.total_processing_seconds.get().get())
+            }
             _ => None,
         })
         .sum::<Duration>();

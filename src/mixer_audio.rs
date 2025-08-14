@@ -46,7 +46,7 @@ impl AudioMixerThread {
             log::debug!("audio mixer started");
             if let Err(e) = this.run().or_fail() {
                 error_flag.set();
-                this.stats.error = true;
+                this.stats.error.set(true);
                 log::error!("failed to mix audio sources: {e}");
             }
             log::debug!("audio mixer finished");
@@ -60,12 +60,13 @@ impl AudioMixerThread {
 
     fn next_input_timestamp(&self) -> Duration {
         Duration::from_secs(
-            self.stats.total_output_sample_count + self.stats.total_trimmed_sample_count,
+            self.stats.total_output_sample_count.get()
+                + self.stats.total_trimmed_sample_count.get(),
         ) / SAMPLE_RATE as u32
     }
 
     fn next_output_timestamp(&self) -> Duration {
-        Duration::from_secs(self.stats.total_output_sample_count) / SAMPLE_RATE as u32
+        Duration::from_secs(self.stats.total_output_sample_count.get()) / SAMPLE_RATE as u32
     }
 
     fn run(&mut self) -> orfail::Result<()> {
@@ -115,7 +116,7 @@ impl AudioMixerThread {
 
             // 処理した要素を取りだす
             let _ = input_rx.recv();
-            self.stats.total_input_audio_data_count += 1;
+            self.stats.total_input_audio_data_count.increment();
 
             if queue.len() >= MIXED_AUDIO_DATA_SAMPLES {
                 // 次の合成処理に必要な分のサンプルは溜った
@@ -128,7 +129,9 @@ impl AudioMixerThread {
     fn next_data(&mut self) -> orfail::Result<Option<AudioData>> {
         let mut now = self.next_input_timestamp();
         while self.layout.is_in_trim_span(now) {
-            self.stats.total_trimmed_sample_count += MIXED_AUDIO_DATA_SAMPLES as u64;
+            self.stats
+                .total_trimmed_sample_count
+                .add(MIXED_AUDIO_DATA_SAMPLES as u64);
             now = self.next_input_timestamp();
         }
 
@@ -145,7 +148,7 @@ impl AudioMixerThread {
         }
 
         let (result, elapsed) = Seconds::elapsed(|| self.mix_next_audio_data().or_fail().map(Some));
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
         result
     }
 
@@ -183,11 +186,17 @@ impl AudioMixerThread {
             mixed_samples.extend_from_slice(&right.to_be_bytes());
         }
 
-        self.stats.total_output_audio_data_count += 1;
-        self.stats.total_output_audio_data_seconds += MIXED_AUDIO_DATA_DURATION;
-        self.stats.total_output_sample_count += MIXED_AUDIO_DATA_SAMPLES as u64;
+        self.stats.total_output_audio_data_count.increment();
+        self.stats
+            .total_output_audio_data_seconds
+            .add(Seconds::new(MIXED_AUDIO_DATA_DURATION));
+        self.stats
+            .total_output_sample_count
+            .add(MIXED_AUDIO_DATA_SAMPLES as u64);
         if filled {
-            self.stats.total_output_filled_sample_count += MIXED_AUDIO_DATA_SAMPLES as u64;
+            self.stats
+                .total_output_filled_sample_count
+                .add(MIXED_AUDIO_DATA_SAMPLES as u64);
         }
 
         Ok(AudioData {

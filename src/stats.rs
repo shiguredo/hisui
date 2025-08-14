@@ -214,28 +214,28 @@ impl nojson::DisplayJson for MixerStats {
 #[derive(Debug, Default, Clone)]
 pub struct AudioMixerStats {
     /// ミキサーの入力 `AudioData` の数
-    pub total_input_audio_data_count: u64,
+    pub total_input_audio_data_count: SharedAtomicCounter,
 
     /// ミキサーが生成した `AudioData` の数
-    pub total_output_audio_data_count: u64,
+    pub total_output_audio_data_count: SharedAtomicCounter,
 
     /// ミキサーが生成した `AudioData` の合計尺
-    pub total_output_audio_data_seconds: Seconds,
+    pub total_output_audio_data_seconds: SharedAtomicSeconds,
 
     /// ミキサーが生成したサンプルの合計数
-    pub total_output_sample_count: u64,
+    pub total_output_sample_count: SharedAtomicCounter,
 
     /// ミキサーによって無音補完されたサンプルの合計数
-    pub total_output_filled_sample_count: u64,
+    pub total_output_filled_sample_count: SharedAtomicCounter,
 
     /// 出力から除去されたサンプルの合計数
-    pub total_trimmed_sample_count: u64,
+    pub total_trimmed_sample_count: SharedAtomicCounter,
 
     /// 合成処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// エラーで中断したかどうか
-    pub error: bool,
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for AudioMixerStats {
@@ -244,27 +244,33 @@ impl nojson::DisplayJson for AudioMixerStats {
             f.member("type", "audio_mixer")?;
             f.member(
                 "total_input_audio_data_count",
-                self.total_input_audio_data_count,
+                self.total_input_audio_data_count.get(),
             )?;
             f.member(
                 "total_output_audio_data_count",
-                self.total_output_audio_data_count,
+                self.total_output_audio_data_count.get(),
             )?;
             f.member(
                 "total_output_audio_data_seconds",
-                self.total_output_audio_data_seconds,
+                self.total_output_audio_data_seconds.get(),
             )?;
-            f.member("total_output_sample_count", self.total_output_sample_count)?;
+            f.member(
+                "total_output_sample_count",
+                self.total_output_sample_count.get(),
+            )?;
             f.member(
                 "total_output_filled_sample_count",
-                self.total_output_filled_sample_count,
+                self.total_output_filled_sample_count.get(),
             )?;
             f.member(
                 "total_trimmed_sample_count",
-                self.total_trimmed_sample_count,
+                self.total_trimmed_sample_count.get(),
             )?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("error", self.error)?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }
