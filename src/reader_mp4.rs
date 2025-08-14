@@ -16,7 +16,7 @@ use shiguredo_mp4::{
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedOption},
+    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedOption, SharedAtomicSeconds},
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
@@ -287,9 +287,10 @@ impl Mp4AudioReaderInner {
         let stats = Mp4AudioReaderStats {
             input_file: path.as_ref().canonicalize().or_fail()?,
             codec: SharedOption::new(Some(CodecName::Opus)),
-            total_processing_seconds: Seconds::new(start_time.elapsed()),
+            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
             ..Default::default()
         };
+
         Ok(Some(Self {
             source_id,
             file,
@@ -346,7 +347,9 @@ impl Mp4AudioReaderInner {
         let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
 
         self.stats.total_sample_count.increment();
-        self.stats.total_track_seconds = Seconds::new(timestamp + duration);
+        self.stats
+            .total_track_seconds
+            .set(Seconds::new(timestamp + duration));
 
         Some(Ok(AudioData {
             source_id: Some(self.source_id.clone()),
@@ -372,7 +375,7 @@ impl Iterator for Mp4AudioReaderInner {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (result, elapsed) = Seconds::elapsed(|| self.next_audio_data());
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
         if matches!(result, Some(Err(_))) {
             self.stats.error.set(true);
         }

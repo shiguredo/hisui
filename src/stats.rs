@@ -571,8 +571,35 @@ impl SharedAtomicCounter {
         self.add(1);
     }
 
+    pub fn set(&self, n: u64) {
+        self.0.store(n, Ordering::Relaxed);
+    }
+
     pub fn get(&self) -> u64 {
         self.0.load(Ordering::Relaxed)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SharedAtomicSeconds(SharedAtomicCounter);
+
+impl SharedAtomicSeconds {
+    pub fn new(n: Seconds) -> Self {
+        let v = Self::default();
+        v.set(n);
+        v
+    }
+
+    pub fn add(&self, n: Seconds) {
+        self.0.add(n.get().as_nanos() as u64);
+    }
+
+    pub fn set(&self, n: Seconds) {
+        self.0.set(n.get().as_nanos() as u64);
+    }
+
+    pub fn get(&self) -> Seconds {
+        Seconds(Duration::from_nanos(self.0.get()))
     }
 }
 
@@ -618,10 +645,10 @@ pub struct Mp4AudioReaderStats {
     pub total_sample_count: SharedAtomicCounter,
 
     /// 入力ファイルに含まれる音声トラックの尺
-    pub total_track_seconds: Seconds,
+    pub total_track_seconds: SharedAtomicSeconds,
 
     /// 入力処理部分に掛かった時間
-    pub total_processing_seconds: Seconds,
+    pub total_processing_seconds: SharedAtomicSeconds,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -634,8 +661,11 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             f.member("input_file", &self.input_file)?;
             f.member("codec", self.codec.get())?;
             f.member("total_sample_count", self.total_sample_count.get())?;
-            f.member("total_track_seconds", self.total_track_seconds)?;
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
+            f.member("total_track_seconds", self.total_track_seconds.get())?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get(),
+            )?;
             f.member("error", self.error.get())?;
             Ok(())
         })
