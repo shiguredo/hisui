@@ -116,7 +116,7 @@ impl AudioMixerThread {
 
             // 処理した要素を取りだす
             let _ = input_rx.recv();
-            self.stats.total_input_audio_data_count.increment();
+            self.stats.total_input_audio_data_count.add(1);
 
             if queue.len() >= MIXED_AUDIO_DATA_SAMPLES {
                 // 次の合成処理に必要な分のサンプルは溜った
@@ -186,7 +186,7 @@ impl AudioMixerThread {
             mixed_samples.extend_from_slice(&right.to_be_bytes());
         }
 
-        self.stats.total_output_audio_data_count.increment();
+        self.stats.total_output_audio_data_count.add(1);
         self.stats
             .total_output_audio_data_seconds
             .add(Seconds::new(MIXED_AUDIO_DATA_DURATION));

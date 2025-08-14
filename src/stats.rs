@@ -612,10 +612,6 @@ impl SharedAtomicCounter {
         self.0.fetch_add(n, Ordering::Relaxed);
     }
 
-    pub fn increment(&self) {
-        self.add(1);
-    }
-
     pub fn set(&self, n: u64) {
         self.0.store(n, Ordering::Relaxed);
     }

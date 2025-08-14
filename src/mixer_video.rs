@@ -162,7 +162,7 @@ impl VideoMixerThread {
             self.current_frames
                 .insert(source_id, ResizeCachedVideoFrame::new(frame));
             self.last_input_update_time = now;
-            self.stats.total_input_video_frame_count.increment();
+            self.stats.total_input_video_frame_count.add(1);
         }
         Ok(())
     }
