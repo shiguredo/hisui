@@ -473,6 +473,7 @@ impl Mp4Writer {
             })
         };
 
+        // TODO(sile): ここで連番を計算するようにすれば `Sample.number` は不要になる
         let stss_box =
             (chunks.iter().any(|c| c.samples.iter().any(|s| !s.keyframe))).then(|| StssBox {
                 sample_numbers: chunks
