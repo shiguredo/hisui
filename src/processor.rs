@@ -4,6 +4,8 @@ use crate::stats::ProcessorStats;
 pub trait MediaProcessor {
     fn process(&mut self, input: MediaProcessorInput) -> orfail::Result<()>;
     fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
+    fn input_stream_ids(&self) -> Vec<MediaStreamId>;
+    fn output_stream_ids(&self) -> Vec<MediaStreamId>;
     fn stats(&self) -> ProcessorStats;
 }
 
