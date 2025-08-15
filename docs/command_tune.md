@@ -29,6 +29,38 @@ $ brew install libvmaf
 $ uv tool install optuna
 ```
 
+### Ubuntu で利用する場合
+
+Ubuntu では依存パッケージをビルドする必要があります。
+
+#### vmaf のビルド
+
+1. 必要なパッケージをインストール
+
+```console
+$ sudo apt-get update
+$ sudo apt-get install ninja-build meson nasm
+```
+
+2. vmaf [ソースコード](https://github.com/Netflix/vmaf/releases) をダウンロード
+3. ソースコードを展開後、
+
+```
+# X.Y.Z はダウンロードした vmaf のバージョン
+$ cd vmaf-X.Y.Z/libvmaf
+$ meson build --buildtype release
+$ ninja -vC build
+$ ninja -vC build install
+```
+
+#### optuna のインストール
+
+macOS と同様に uv を利用してインストールします。
+
+```console
+$ uv tool install optuna
+```
+
 ## 使用方法
 
 ```console
