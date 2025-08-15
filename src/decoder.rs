@@ -104,8 +104,8 @@ impl VideoDecoder {
                     *self = VideoToolboxDecoder::new_h264(&frame)
                         .or_fail()
                         .map(Self::VideoToolbox)?;
-                    stats.engine = Some(EngineName::VideoToolbox);
-                    stats.codec = Some(CodecName::H264);
+                    stats.engine.set(EngineName::VideoToolbox);
+                    stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
                 }
                 VideoFormat::H264 | VideoFormat::H264AnnexB => {
