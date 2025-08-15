@@ -332,7 +332,11 @@ impl Runner {
         layout.audio_bitrate = Some(match layout.audio_codec {
             CodecName::Aac => self.args.out_aac_bit_rate,
             CodecName::Opus => self.args.out_opus_bit_rate,
-            _ => unreachable!(),
+            codec => {
+                return Err(orfail::Failure::new(format!(
+                    "unsupported audio codec: {codec:?}"
+                )));
+            }
         });
 
         // 引数のエンコードパラメータはレイアウトで未指定の場合にだけ反映する
