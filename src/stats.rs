@@ -69,9 +69,6 @@ pub struct Stats {
     /// 全体の合成に要した実時間
     pub elapsed_seconds: Seconds,
 
-    /// デコーダー関連の統計情報
-    pub decoders: Vec<DecoderStats>,
-
     /// 出力関連の統計情報
     pub writers: Vec<WriterStats>,
 
@@ -87,9 +84,6 @@ impl nojson::DisplayJson for Stats {
                 "processors",
                 nojson::array(|f| {
                     for processor in &self.processors {
-                        f.element(processor)?;
-                    }
-                    for processor in &self.decoders {
                         f.element(processor)?;
                     }
                     for processor in &self.writers {
@@ -164,6 +158,8 @@ pub enum ProcessorStats {
     Mp4VideoReader(Mp4VideoReaderStats),
     WebmAudioReader(WebmAudioReaderStats),
     WebmVideoReader(WebmVideoReaderStats),
+    AudioDecoder(AudioDecoderStats),
+    VideoDecoder(VideoDecoderStats),
     AudioMixer(AudioMixerStats),
     VideoMixer(VideoMixerStats),
     AudioEncoder(AudioEncoderStats),
@@ -177,6 +173,8 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::Mp4VideoReader(stats) => stats.fmt(f),
             ProcessorStats::WebmAudioReader(stats) => stats.fmt(f),
             ProcessorStats::WebmVideoReader(stats) => stats.fmt(f),
+            ProcessorStats::AudioDecoder(stats) => stats.fmt(f),
+            ProcessorStats::VideoDecoder(stats) => stats.fmt(f),
             ProcessorStats::AudioMixer(stats) => stats.fmt(f),
             ProcessorStats::VideoMixer(stats) => stats.fmt(f),
             ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
@@ -417,22 +415,6 @@ impl nojson::DisplayJson for VideoEncoderStats {
             f.member("error", self.error.get())?;
             Ok(())
         })
-    }
-}
-
-/// デコーダー関連の統計情報
-#[derive(Debug, Clone)]
-pub enum DecoderStats {
-    Audio(AudioDecoderStats),
-    Video(VideoDecoderStats),
-}
-
-impl nojson::DisplayJson for DecoderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            DecoderStats::Audio(stats) => stats.fmt(f),
-            DecoderStats::Video(stats) => stats.fmt(f),
-        }
     }
 }
 

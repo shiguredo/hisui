@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{DecoderStats, ProcessorStats, Stats, WriterStats},
+    stats::{ProcessorStats, Stats, WriterStats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -280,10 +280,10 @@ fn print_time_stats_summary(
     stats: &Stats,
 ) -> std::fmt::Result {
     let total_audio_decoder_processing_seconds = stats
-        .decoders
+        .processors
         .iter()
         .filter_map(|decoder| match decoder {
-            DecoderStats::Audio(audio_decoder) => {
+            ProcessorStats::AudioDecoder(audio_decoder) => {
                 Some(audio_decoder.total_processing_seconds.get().get())
             }
             _ => None,
@@ -297,10 +297,10 @@ fn print_time_stats_summary(
     }
 
     let total_video_decoder_processing_seconds = stats
-        .decoders
+        .processors
         .iter()
         .filter_map(|decoder| match decoder {
-            DecoderStats::Video(video_decoder) => {
+            ProcessorStats::VideoDecoder(video_decoder) => {
                 Some(video_decoder.total_processing_seconds.get().get())
             }
             _ => None,

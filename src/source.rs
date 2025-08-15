@@ -12,7 +12,7 @@ use crate::{
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     stats::{
-        AudioDecoderStats, DecoderStats, Seconds, SharedStats, VideoDecoderStats, VideoResolution,
+        AudioDecoderStats, ProcessorStats, Seconds, SharedStats, VideoDecoderStats, VideoResolution,
     },
     types::{CodecName, EngineName},
     video::VideoFrame,
@@ -63,7 +63,9 @@ impl AudioSourceThread {
 
             stats.with_lock(|stats| {
                 stats.processors.push(this.reader.stats());
-                stats.decoders.push(DecoderStats::Audio(this.decoder_stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::AudioDecoder(this.decoder_stats));
             });
         });
         Ok(rx)
@@ -144,7 +146,9 @@ impl VideoSourceThread {
             }
             stats.with_lock(|stats| {
                 stats.processors.push(this.reader.stats());
-                stats.decoders.push(DecoderStats::Video(this.decoder_stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::VideoDecoder(this.decoder_stats));
             });
         });
         Ok(rx)
