@@ -27,7 +27,7 @@ pub struct Args {
     pub help: Option<String>,
     pub in_metadata_file: Option<PathBuf>,
     pub out_video_codec: Option<CodecName>,
-    pub out_audio_codec: CodecName,
+    pub out_audio_codec: Option<CodecName>,
     pub out_video_frame_rate: FrameRate,
     pub out_file: Option<PathBuf>,
     pub out_stats_file: Option<PathBuf>,
@@ -96,16 +96,18 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .present_and_then(|a| CodecName::parse_video(a.value()))?;
         let out_audio_codec = noargs::opt("out-audio-codec")
             .ty("Opus|AAC")
-            .default("Opus")
             .doc(concat!(
-                "音声のエンコードコーデック\n\n",
-                "NOTE:\n",
-                "  AAC は以下の場合にのみ利用可能です:\n",
+                "音声のエンコードコーデック (default: Opus)\n",
+                "\n",
+                "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
+                "「`audio_codec` がレイアウトで指定されている」場合には、その値が使われます\n",
+                "\n",
+                "また AAC は以下の場合にのみ利用可能です:\n",
                 "  - macOS\n",
                 "  - FDK-AAC を有効にして自前ビルドした Hisui (`--feature fdk-aac`)\n",
             ))
             .take(&mut args)
-            .then(|a| CodecName::parse_audio(a.value()))?;
+            .present_and_then(|a| CodecName::parse_audio(a.value()))?;
         let out_video_frame_rate = noargs::opt("out-video-frame-rate")
             .ty("INTEGER|RATIONAL")
             .default("25")
@@ -304,7 +306,9 @@ impl Runner {
         if let Some(codec) = self.args.out_video_codec {
             layout.video_codec = codec;
         }
-        layout.audio_codec = self.args.out_audio_codec;
+        if let Some(codec) = self.args.out_audio_codec {
+            layout.audio_codec = codec;
+        }
         layout.frame_rate = self.args.out_video_frame_rate;
         layout.audio_bitrate = Some(match layout.audio_codec {
             CodecName::Aac => self.args.out_aac_bit_rate,
