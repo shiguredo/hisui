@@ -43,7 +43,7 @@ $ sudo apt-get install ninja-build meson nasm
 ```
 
 2. vmaf [ソースコード](https://github.com/Netflix/vmaf/releases) をダウンロード
-3. 
+3. ソースコードの展開とビルド
 
 ```console
 # X.Y.Z はダウンロードした vmaf のバージョン
