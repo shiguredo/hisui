@@ -157,6 +157,10 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "\n",
                 "`vpx_codec_control_(..., VP8E_SET_CQ_LEVEL, ...)` ",
                 "関数呼び出しの引数として渡されます\n",
+                "\n",
+                "なお「--layout 引数が指定されている」かつ",
+                "「`libvpx_vp{8,9}_encode_params` がレイアウトで指定されている」場合には、",
+                "この引数は無視されます"
             ))
             .take(&mut args)
             .then(|a| a.value().parse())?;
@@ -167,6 +171,10 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "libvpx のエンコードパラメータ\n",
                 "\n",
                 "`vpx_codec_enc_cfg` 構造体の `rc_min_quantizer` に設定されます\n",
+                "\n",
+                "なお「--layout 引数が指定されている」かつ",
+                "「`libvpx_vp{8,9}_encode_params` がレイアウトで指定されている」場合には、",
+                "この引数は無視されます"
             ))
             .take(&mut args)
             .then(|a| a.value().parse())?;
@@ -177,6 +185,10 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "libvpx のエンコードパラメータ\n",
                 "\n",
                 "`vpx_codec_enc_cfg` 構造体の `rc_max_quantizer` に設定されます\n",
+                "\n",
+                "なお「--layout 引数が指定されている」かつ",
+                "「`libvpx_vp{8,9}_encode_params` がレイアウトで指定されている」場合には、",
+                "この引数は無視されます"
             ))
             .take(&mut args)
             .then(|a| a.value().parse())?;
@@ -323,20 +335,23 @@ impl Runner {
             _ => unreachable!(),
         });
 
-        // レガシーではエンコードパラメータの JSON 経由での指定には非対応
-        layout.encode_params = Default::default();
-        layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
-            max_quantizer: self.args.libvpx_max_q,
-            min_quantizer: self.args.libvpx_min_q,
-            cq_level: self.args.libvpx_cq_level,
-            ..Default::default()
-        });
-        layout.encode_params.libvpx_vp9 = Some(shiguredo_libvpx::EncoderConfig {
-            max_quantizer: self.args.libvpx_max_q,
-            min_quantizer: self.args.libvpx_min_q,
-            cq_level: self.args.libvpx_cq_level,
-            ..Default::default()
-        });
+        // 引数のエンコードパラメータはレイアウトで未指定の場合にだけ反映する
+        if layout.encode_params.libvpx_vp8.is_none() {
+            layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
+                max_quantizer: self.args.libvpx_max_q,
+                min_quantizer: self.args.libvpx_min_q,
+                cq_level: self.args.libvpx_cq_level,
+                ..Default::default()
+            });
+        }
+        if layout.encode_params.libvpx_vp9.is_none() {
+            layout.encode_params.libvpx_vp9 = Some(shiguredo_libvpx::EncoderConfig {
+                max_quantizer: self.args.libvpx_max_q,
+                min_quantizer: self.args.libvpx_min_q,
+                cq_level: self.args.libvpx_cq_level,
+                ..Default::default()
+            });
+        }
 
         // 必要に応じて openh264 の共有ライブラリを読み込む
         let openh264_lib =
