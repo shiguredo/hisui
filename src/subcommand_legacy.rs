@@ -26,9 +26,9 @@ pub fn run(args: noargs::RawArgs) -> noargs::Result<()> {
 pub struct Args {
     pub help: Option<String>,
     pub in_metadata_file: Option<PathBuf>,
-    pub out_video_codec: CodecName,
-    pub out_audio_codec: CodecName,
-    pub out_video_frame_rate: FrameRate,
+    pub out_video_codec: Option<CodecName>,
+    pub out_audio_codec: Option<CodecName>,
+    pub out_video_frame_rate: Option<FrameRate>,
     pub out_file: Option<PathBuf>,
     pub out_stats_file: Option<PathBuf>,
     pub max_columns: NonZeroUsize,
@@ -86,28 +86,39 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .present_and_then(|a| a.value().parse())?;
         let out_video_codec = noargs::opt("out-video-codec")
             .ty("VP8|VP9|H264|H265|AV1")
-            .default("VP9")
-            .doc("映像のエンコードコーデック")
+            .doc(concat!(
+                "映像のエンコードコーデック (default: VP9)\n",
+                "\n",
+                "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
+                "「`video_codec` がレイアウトで指定されている」場合には、その値が使われます"
+            ))
             .take(&mut args)
-            .then(|a| CodecName::parse_video(a.value()))?;
+            .present_and_then(|a| CodecName::parse_video(a.value()))?;
         let out_audio_codec = noargs::opt("out-audio-codec")
             .ty("Opus|AAC")
-            .default("Opus")
             .doc(concat!(
-                "音声のエンコードコーデック\n\n",
-                "NOTE:\n",
-                "  AAC は以下の場合にのみ利用可能です:\n",
+                "音声のエンコードコーデック (default: Opus)\n",
+                "\n",
+                "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
+                "「`audio_codec` がレイアウトで指定されている」場合には、その値が使われます\n",
+                "\n",
+                "また AAC は以下の場合にのみ利用可能です:\n",
                 "  - macOS\n",
                 "  - FDK-AAC を有効にして自前ビルドした Hisui (`--feature fdk-aac`)\n",
             ))
             .take(&mut args)
-            .then(|a| CodecName::parse_audio(a.value()))?;
+            .present_and_then(|a| CodecName::parse_audio(a.value()))?;
+
         let out_video_frame_rate = noargs::opt("out-video-frame-rate")
             .ty("INTEGER|RATIONAL")
-            .default("25")
-            .doc("合成後の映像のフレームーレート")
+            .doc(concat!(
+                "合成後の映像のフレームーレート (default: 25)\n",
+                "\n",
+                "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
+                "「`frame_rate` がレイアウトで指定されている」場合には、その値が使われます"
+            ))
             .take(&mut args)
-            .then(|a| a.value().parse())?;
+            .present_and_then(|a| a.value().parse())?;
         let max_columns = noargs::opt("max-columns")
             .ty("POSITIVE_INTEGER")
             .default("3")
@@ -146,6 +157,10 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "\n",
                 "`vpx_codec_control_(..., VP8E_SET_CQ_LEVEL, ...)` ",
                 "関数呼び出しの引数として渡されます\n",
+                "\n",
+                "なお「--layout 引数が指定されている」かつ",
+                "「`libvpx_vp{8,9}_encode_params` がレイアウトで指定されている」場合には、",
+                "この引数は無視されます"
             ))
             .take(&mut args)
             .then(|a| a.value().parse())?;
@@ -156,6 +171,10 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "libvpx のエンコードパラメータ\n",
                 "\n",
                 "`vpx_codec_enc_cfg` 構造体の `rc_min_quantizer` に設定されます\n",
+                "\n",
+                "なお「--layout 引数が指定されている」かつ",
+                "「`libvpx_vp{8,9}_encode_params` がレイアウトで指定されている」場合には、",
+                "この引数は無視されます"
             ))
             .take(&mut args)
             .then(|a| a.value().parse())?;
@@ -166,6 +185,10 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
                 "libvpx のエンコードパラメータ\n",
                 "\n",
                 "`vpx_codec_enc_cfg` 構造体の `rc_max_quantizer` に設定されます\n",
+                "\n",
+                "なお「--layout 引数が指定されている」かつ",
+                "「`libvpx_vp{8,9}_encode_params` がレイアウトで指定されている」場合には、",
+                "この引数は無視されます"
             ))
             .take(&mut args)
             .then(|a| a.value().parse())?;
@@ -297,29 +320,42 @@ impl Runner {
         let mut layout = self.create_layout().or_fail()?;
         log::debug!("layout: {layout:?}");
 
-        layout.video_codec = self.args.out_video_codec;
-        layout.audio_codec = self.args.out_audio_codec;
-        layout.frame_rate = self.args.out_video_frame_rate;
+        if let Some(codec) = self.args.out_video_codec {
+            layout.video_codec = codec;
+        }
+        if let Some(codec) = self.args.out_audio_codec {
+            layout.audio_codec = codec;
+        }
+        if let Some(frame_rate) = self.args.out_video_frame_rate {
+            layout.frame_rate = frame_rate;
+        }
         layout.audio_bitrate = Some(match layout.audio_codec {
             CodecName::Aac => self.args.out_aac_bit_rate,
             CodecName::Opus => self.args.out_opus_bit_rate,
-            _ => unreachable!(),
+            codec => {
+                return Err(orfail::Failure::new(format!(
+                    "unsupported audio codec: {codec:?}"
+                )));
+            }
         });
 
-        // レガシーではエンコードパラメータの JSON 経由での指定には非対応
-        layout.encode_params = Default::default();
-        layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
-            max_quantizer: self.args.libvpx_max_q,
-            min_quantizer: self.args.libvpx_min_q,
-            cq_level: self.args.libvpx_cq_level,
-            ..Default::default()
-        });
-        layout.encode_params.libvpx_vp9 = Some(shiguredo_libvpx::EncoderConfig {
-            max_quantizer: self.args.libvpx_max_q,
-            min_quantizer: self.args.libvpx_min_q,
-            cq_level: self.args.libvpx_cq_level,
-            ..Default::default()
-        });
+        // 引数のエンコードパラメータはレイアウトで未指定の場合にだけ反映する
+        if layout.encode_params.libvpx_vp8.is_none() {
+            layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
+                max_quantizer: self.args.libvpx_max_q,
+                min_quantizer: self.args.libvpx_min_q,
+                cq_level: self.args.libvpx_cq_level,
+                ..Default::default()
+            });
+        }
+        if layout.encode_params.libvpx_vp9.is_none() {
+            layout.encode_params.libvpx_vp9 = Some(shiguredo_libvpx::EncoderConfig {
+                max_quantizer: self.args.libvpx_max_q,
+                min_quantizer: self.args.libvpx_min_q,
+                cq_level: self.args.libvpx_cq_level,
+                ..Default::default()
+            });
+        }
 
         // 必要に応じて openh264 の共有ライブラリを読み込む
         let openh264_lib =
