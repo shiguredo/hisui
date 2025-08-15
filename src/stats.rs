@@ -72,9 +72,6 @@ pub struct Stats {
     /// デコーダー関連の統計情報
     pub decoders: Vec<DecoderStats>,
 
-    /// エンコーダー関連の統計情報
-    pub encoders: Vec<EncoderStats>,
-
     /// 出力関連の統計情報
     pub writers: Vec<WriterStats>,
 
@@ -93,9 +90,6 @@ impl nojson::DisplayJson for Stats {
                         f.element(processor)?;
                     }
                     for processor in &self.decoders {
-                        f.element(processor)?;
-                    }
-                    for processor in &self.encoders {
                         f.element(processor)?;
                     }
                     for processor in &self.writers {
@@ -172,6 +166,8 @@ pub enum ProcessorStats {
     WebmVideoReader(WebmVideoReaderStats),
     AudioMixer(AudioMixerStats),
     VideoMixer(VideoMixerStats),
+    AudioEncoder(AudioEncoderStats),
+    VideoEncoder(VideoEncoderStats),
 }
 
 impl nojson::DisplayJson for ProcessorStats {
@@ -183,6 +179,8 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::WebmVideoReader(stats) => stats.fmt(f),
             ProcessorStats::AudioMixer(stats) => stats.fmt(f),
             ProcessorStats::VideoMixer(stats) => stats.fmt(f),
+            ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
+            ProcessorStats::VideoEncoder(stats) => stats.fmt(f),
         }
     }
 }
@@ -312,22 +310,6 @@ impl nojson::DisplayJson for VideoMixerStats {
             f.member("error", self.error.get())?;
             Ok(())
         })
-    }
-}
-
-/// エンコーダー関連の統計情報
-#[derive(Debug, Clone)]
-pub enum EncoderStats {
-    Audio(AudioEncoderStats),
-    Video(VideoEncoderStats),
-}
-
-impl nojson::DisplayJson for EncoderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            EncoderStats::Audio(stats) => stats.fmt(f),
-            EncoderStats::Video(stats) => stats.fmt(f),
-        }
     }
 }
 

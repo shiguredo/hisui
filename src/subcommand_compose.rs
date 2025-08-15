@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{DecoderStats, EncoderStats, ProcessorStats, Stats, WriterStats},
+    stats::{DecoderStats, ProcessorStats, Stats, WriterStats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -219,8 +219,8 @@ fn print_output_stats_summary(
     if let Some(codec) = writer.audio_codec.get() {
         f.member("output_audio_codec", codec)?;
 
-        for encoder in &stats.encoders {
-            if let EncoderStats::Audio(encoder) = encoder {
+        for processor in &stats.processors {
+            if let ProcessorStats::AudioEncoder(encoder) = processor {
                 f.member("output_audio_encoder_name", encoder.engine)?;
                 break;
             }
@@ -241,8 +241,8 @@ fn print_output_stats_summary(
     if let Some(codec) = writer.video_codec.get() {
         f.member("output_video_codec", codec)?;
 
-        for encoder in &stats.encoders {
-            if let EncoderStats::Video(encoder) = encoder {
+        for processor in &stats.processors {
+            if let ProcessorStats::VideoEncoder(encoder) = processor {
                 f.member("output_video_encoder_name", encoder.engine)?;
                 break;
             }
@@ -314,10 +314,10 @@ fn print_time_stats_summary(
     }
 
     let total_audio_encoder_processing_seconds = stats
-        .encoders
+        .processors
         .iter()
         .filter_map(|encoder| match encoder {
-            EncoderStats::Audio(audio_encoder) => {
+            ProcessorStats::AudioEncoder(audio_encoder) => {
                 Some(audio_encoder.total_processing_seconds.get().get())
             }
             _ => None,
@@ -331,10 +331,10 @@ fn print_time_stats_summary(
     }
 
     let total_video_encoder_processing_seconds = stats
-        .encoders
+        .processors
         .iter()
         .filter_map(|encoder| match encoder {
-            EncoderStats::Video(video_encoder) => {
+            ProcessorStats::VideoEncoder(video_encoder) => {
                 Some(video_encoder.total_processing_seconds.get().get())
             }
             _ => None,

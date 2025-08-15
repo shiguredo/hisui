@@ -17,7 +17,7 @@ use crate::{
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
-    stats::{AudioEncoderStats, EncoderStats, Seconds, SharedStats, VideoEncoderStats},
+    stats::{AudioEncoderStats, ProcessorStats, Seconds, SharedStats, VideoEncoderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -281,7 +281,9 @@ impl AudioEncoderThread {
             }
 
             stats.with_lock(|stats| {
-                stats.encoders.push(EncoderStats::Audio(this.stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::AudioEncoder(this.stats));
             });
         });
         rx
@@ -344,7 +346,9 @@ impl VideoEncoderThread {
             }
 
             stats.with_lock(|stats| {
-                stats.encoders.push(EncoderStats::Video(this.stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::VideoEncoder(this.stats));
             });
         });
         rx
