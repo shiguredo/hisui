@@ -569,8 +569,10 @@ impl<T> SharedOption<T> {
         Self(Arc::new(Mutex::new(value)))
     }
 
-    // TODO: comment
     pub fn set(&self, value: T) {
+        // [NOTE]
+        // ロック獲得に失敗することはまずないはずだし、
+        // 失敗しても統計が不正確になるだけで、全体の実行に影響はないので、単に無視している
         if let Ok(mut v) = self.0.lock() {
             *v = Some(value);
         }
@@ -579,10 +581,12 @@ impl<T> SharedOption<T> {
 
 impl<T: Clone> SharedOption<T> {
     pub fn get(&self) -> Option<T> {
-        // TODO: comment
         if let Ok(v) = self.0.lock() {
             v.clone()
         } else {
+            // [NOTE]
+            // ロック獲得に失敗することはまずないはずだし、
+            // 失敗しても統計が不正確になるだけで、全体の実行に影響はないので、単に None 扱いにしている
             None
         }
     }
