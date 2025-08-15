@@ -513,10 +513,12 @@ pub struct SharedAtomicFlag(Arc<AtomicBool>);
 
 impl SharedAtomicFlag {
     pub fn set(&self, v: bool) {
+        // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
         self.0.store(v, Ordering::Relaxed)
     }
 
     pub fn get(&self) -> bool {
+        // 取得結果が一時的に古くても問題はないので Relaxed で十分
         self.0.load(Ordering::Relaxed)
     }
 }
@@ -526,14 +528,17 @@ pub struct SharedAtomicCounter(Arc<AtomicU64>);
 
 impl SharedAtomicCounter {
     pub fn add(&self, n: u64) {
+        // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
         self.0.fetch_add(n, Ordering::Relaxed);
     }
 
     pub fn set(&self, n: u64) {
+        // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
         self.0.store(n, Ordering::Relaxed);
     }
 
     pub fn get(&self) -> u64 {
+        // 取得結果が一時的に古くても問題はないので Relaxed で十分
         self.0.load(Ordering::Relaxed)
     }
 }
@@ -573,6 +578,7 @@ impl<T> SharedOption<T> {
         // [NOTE]
         // ロック獲得に失敗することはまずないはずだし、
         // 失敗しても統計が不正確になるだけで、全体の実行に影響はないので、単に無視している
+        // （なおここで警告ログなどを出すと量が多くなりすぎる可能性があるのでやらない）
         if let Ok(mut v) = self.0.lock() {
             *v = Some(value);
         }
@@ -587,6 +593,7 @@ impl<T: Clone> SharedOption<T> {
             // [NOTE]
             // ロック獲得に失敗することはまずないはずだし、
             // 失敗しても統計が不正確になるだけで、全体の実行に影響はないので、単に None 扱いにしている
+            // （なおここで警告ログなどを出すと量が多くなりすぎる可能性があるのでやらない）
             None
         }
     }
