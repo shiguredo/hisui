@@ -5,6 +5,7 @@ use hisui::{
     decoder_opus::OpusDecoder,
     metadata::SourceId,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
+    stats::ProcessorStats,
     subcommand_legacy::{Args, Runner},
     types::CodecName,
 };
@@ -89,7 +90,9 @@ fn simple_single_source() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let audio_stats = audio_reader.stats();
+    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
+        unreachable!()
+    };
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -100,7 +103,9 @@ fn simple_single_source() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let video_stats = video_reader.stats();
+    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
+        unreachable!()
+    };
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
@@ -186,7 +191,9 @@ fn simple_multi_sources() -> noargs::Result<()> {
     let _video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let audio_stats = audio_reader.stats();
+    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
+        unreachable!()
+    };
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -197,7 +204,9 @@ fn simple_multi_sources() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let video_stats = video_reader.stats();
+    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
+        unreachable!()
+    };
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
 
     // レイアウトファイル未指定の場合には、一つのセルの解像度は 320x240 で、
@@ -255,7 +264,9 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let audio_stats = audio_reader.stats();
+    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
+        unreachable!()
+    };
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -266,7 +277,9 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let video_stats = video_reader.stats();
+    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
+        unreachable!()
+    };
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
@@ -377,7 +390,9 @@ fn two_regions() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let video_stats = video_reader.stats();
+    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
+        unreachable!()
+    };
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats

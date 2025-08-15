@@ -69,9 +69,6 @@ pub struct Stats {
     /// 全体の合成に要した実時間
     pub elapsed_seconds: Seconds,
 
-    /// 入力関連の統計情報
-    pub readers: Vec<ReaderStats>,
-
     /// デコーダー関連の統計情報
     pub decoders: Vec<DecoderStats>,
 
@@ -96,9 +93,6 @@ impl nojson::DisplayJson for Stats {
                 "processors",
                 nojson::array(|f| {
                     for processor in &self.processors {
-                        f.element(processor)?;
-                    }
-                    for processor in &self.readers {
                         f.element(processor)?;
                     }
                     for processor in &self.decoders {
@@ -568,26 +562,6 @@ impl nojson::DisplayJson for VideoDecoderStats {
             f.member("error", self.error.get())?;
             Ok(())
         })
-    }
-}
-
-/// 入力関連の統計情報
-#[derive(Debug, Clone)]
-pub enum ReaderStats {
-    WebmAudio(WebmAudioReaderStats),
-    WebmVideo(WebmVideoReaderStats),
-    Mp4Audio(Mp4AudioReaderStats),
-    Mp4Video(Mp4VideoReaderStats),
-}
-
-impl nojson::DisplayJson for ReaderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            ReaderStats::WebmAudio(stats) => stats.fmt(f),
-            ReaderStats::WebmVideo(stats) => stats.fmt(f),
-            ReaderStats::Mp4Audio(stats) => stats.fmt(f),
-            ReaderStats::Mp4Video(stats) => stats.fmt(f),
-        }
     }
 }
 

@@ -17,8 +17,8 @@ use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
     stats::{
-        Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, SharedAtomicSeconds, SharedOption,
-        VideoResolution,
+        Mp4AudioReaderStats, Mp4VideoReaderStats, ProcessorStats, Seconds, SharedAtomicSeconds,
+        SharedOption, VideoResolution,
     },
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
@@ -53,10 +53,13 @@ impl Mp4VideoReader {
         })
     }
 
-    pub fn stats(&self) -> &Mp4VideoReaderStats {
-        self.inner
-            .as_ref()
-            .map_or(&self.default_stats, |x| &x.stats)
+    pub fn stats(&self) -> ProcessorStats {
+        ProcessorStats::Mp4VideoReader(
+            self.inner
+                .as_ref()
+                .map_or(&self.default_stats, |x| &x.stats)
+                .clone(),
+        )
     }
 }
 
@@ -249,10 +252,13 @@ impl Mp4AudioReader {
         })
     }
 
-    pub fn stats(&self) -> &Mp4AudioReaderStats {
-        self.inner
-            .as_ref()
-            .map_or(&self.default_stats, |x| &x.stats)
+    pub fn stats(&self) -> ProcessorStats {
+        ProcessorStats::Mp4AudioReader(
+            self.inner
+                .as_ref()
+                .map_or(&self.default_stats, |x| &x.stats)
+                .clone(),
+        )
     }
 }
 

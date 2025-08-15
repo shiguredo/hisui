@@ -9,7 +9,9 @@ use orfail::OrFail;
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
-    stats::{Seconds, SharedAtomicSeconds, WebmAudioReaderStats, WebmVideoReaderStats},
+    stats::{
+        ProcessorStats, Seconds, SharedAtomicSeconds, WebmAudioReaderStats, WebmVideoReaderStats,
+    },
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
@@ -367,8 +369,8 @@ impl WebmAudioReader {
         })
     }
 
-    pub fn stats(&self) -> &WebmAudioReaderStats {
-        &self.stats
+    pub fn stats(&self) -> ProcessorStats {
+        ProcessorStats::WebmAudioReader(self.stats.clone())
     }
 
     fn read_simple_block(&mut self) -> orfail::Result<Option<AudioData>> {
@@ -512,8 +514,8 @@ impl WebmVideoReader {
         })
     }
 
-    pub fn stats(&self) -> &WebmVideoReaderStats {
-        &self.stats
+    pub fn stats(&self) -> ProcessorStats {
+        ProcessorStats::WebmVideoReader(self.stats.clone())
     }
 
     fn read_video_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {

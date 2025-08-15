@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{DecoderStats, EncoderStats, MixerStats, ReaderStats, Stats, WriterStats},
+    stats::{DecoderStats, EncoderStats, MixerStats, ProcessorStats, Stats, WriterStats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -174,18 +174,28 @@ fn print_input_stats_summary(
     // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
     //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
     let count = stats
-        .readers
+        .processors
         .iter()
-        .filter(|s| matches!(s, ReaderStats::WebmAudio(_) | ReaderStats::Mp4Audio(_)))
+        .filter(|s| {
+            matches!(
+                s,
+                ProcessorStats::WebmAudioReader(_) | ProcessorStats::Mp4AudioReader(_)
+            )
+        })
         .count();
     if count > 0 {
         f.member("input_audio_file_count", count)?;
     }
 
     let count = stats
-        .readers
+        .processors
         .iter()
-        .filter(|s| matches!(s, ReaderStats::WebmVideo(_) | ReaderStats::Mp4Video(_)))
+        .filter(|s| {
+            matches!(
+                s,
+                ProcessorStats::WebmVideoReader(_) | ProcessorStats::Mp4VideoReader(_)
+            )
+        })
         .count();
     if count > 0 {
         f.member("input_video_file_count", count)?;

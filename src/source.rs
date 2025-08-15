@@ -62,7 +62,7 @@ impl AudioSourceThread {
             }
 
             stats.with_lock(|stats| {
-                stats.readers.push(this.reader.stats());
+                stats.processors.push(this.reader.stats());
                 stats.decoders.push(DecoderStats::Audio(this.decoder_stats));
             });
         });
@@ -92,7 +92,7 @@ impl AudioSourceThread {
             if let Some(reader) = self.media_file_queue.next_audio_reader().or_fail()? {
                 // 次の分割録画ファイルがある
                 stats.with_lock(|stats| {
-                    stats.readers.push(self.reader.stats());
+                    stats.processors.push(self.reader.stats());
                 });
                 self.reader = reader;
 
@@ -143,7 +143,7 @@ impl VideoSourceThread {
                 log::error!("failed to load video source: {e}");
             }
             stats.with_lock(|stats| {
-                stats.readers.push(this.reader.stats());
+                stats.processors.push(this.reader.stats());
                 stats.decoders.push(DecoderStats::Video(this.decoder_stats));
             });
         });
@@ -157,7 +157,7 @@ impl VideoSourceThread {
             if let Some(reader) = self.media_file_queue.next_video_reader().or_fail()? {
                 // 次の分割録画ファイルがある
                 stats.with_lock(|stats| {
-                    stats.readers.push(self.reader.stats());
+                    stats.processors.push(self.reader.stats());
                 });
                 self.reader = reader;
 
