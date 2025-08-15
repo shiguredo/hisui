@@ -39,7 +39,7 @@ impl SharedStats {
             Ok(mut stats) => Some(f(&mut stats)),
             Err(e) => {
                 // 統計情報の更新ができなくても致命的ではないので警告に止める
-                log::warn!("failed to acqure stats lock: {e}");
+                log::warn!("failed to acquire stats lock: {e}");
                 None
             }
         }
