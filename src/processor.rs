@@ -1,4 +1,4 @@
-use crate::media::{MediaStreamId, SharedMediaSample};
+use crate::media::{MediaSample, MediaStreamId};
 use crate::stats::ProcessorStats;
 
 pub trait MediaProcessor {
@@ -17,14 +17,14 @@ pub struct MediaProcessorSpec {
 #[derive(Debug)]
 pub struct MediaProcessorInput {
     pub stream_id: MediaStreamId,
-    pub sample: Option<SharedMediaSample>,
+    pub sample: Option<MediaSample>,
 }
 
 #[derive(Debug)]
 pub enum MediaProcessorOutput {
     Processed {
         stream_id: MediaStreamId,
-        sample: SharedMediaSample,
+        sample: MediaSample,
     },
     Pending {
         awaiting_stream_id: MediaStreamId,

@@ -24,10 +24,9 @@ impl MediaStreamIdGenerator {
 
 #[derive(Debug, Clone)]
 pub enum MediaSample {
-    Audio(AudioData),
-    Video(VideoFrame),
+    Audio(Arc<AudioData>),
+    Video(Arc<VideoFrame>),
 }
 
-pub type SharedMediaSample = Arc<MediaSample>;
-pub type MediaStreamReceiver = Receiver<SharedMediaSample>;
-pub type MediaStreamSyncSender = SyncSender<SharedMediaSample>;
+pub type MediaStreamReceiver = Receiver<MediaSample>;
+pub type MediaStreamSyncSender = SyncSender<MediaSample>;
