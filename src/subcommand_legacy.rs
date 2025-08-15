@@ -358,7 +358,11 @@ impl Runner {
 
     fn create_layout(&self) -> orfail::Result<Layout> {
         if let Some(layout_file_path) = &self.args.layout {
-            let base_path = layout_file_path.parent().or_fail()?.to_path_buf();
+            let base_path = std::path::absolute(layout_file_path)
+                .or_fail()?
+                .parent()
+                .or_fail()?
+                .to_path_buf();
             Layout::from_layout_json_file(base_path, layout_file_path).or_fail()
         } else if let Some(report_file_path) = &self.args.in_metadata_file {
             let report = RecordingMetadata::from_file(report_file_path).or_fail()?;

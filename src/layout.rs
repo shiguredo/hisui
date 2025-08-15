@@ -76,7 +76,11 @@ impl Layout {
         audio_only: bool,
         max_columns: usize,
     ) -> orfail::Result<Self> {
-        let base_path = report_file_path.parent().or_fail()?.to_path_buf();
+        let base_path = std::path::absolute(report_file_path)
+            .or_fail()?
+            .parent()
+            .or_fail()?
+            .to_path_buf();
 
         // layout 未指定の場合にはセルの解像度は固定
         // （ただし内枠分が引かれるのでもう少し小さくなることがある）
