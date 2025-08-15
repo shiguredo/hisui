@@ -69,7 +69,7 @@ pub struct Stats {
     /// 全体の合成に要した実時間
     pub elapsed_seconds: Seconds,
 
-    /// TODO: doc
+    /// 各プロセッサの統計情報
     pub processors: Vec<ProcessorStats>,
 }
 
