@@ -43,14 +43,15 @@ $ sudo apt-get install ninja-build meson nasm
 ```
 
 2. vmaf [ソースコード](https://github.com/Netflix/vmaf/releases) をダウンロード
-3. ソースコードを展開後、
+3. 
 
-```
+```console
 # X.Y.Z はダウンロードした vmaf のバージョン
+$ tar -xzf vmaf-X.Y.Z.tar.gz
 $ cd vmaf-X.Y.Z/libvmaf
 $ meson build --buildtype release
 $ ninja -vC build
-$ ninja -vC build install
+$ sudo ninja -vC build install
 ```
 
 #### optuna のインストール
