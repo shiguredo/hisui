@@ -188,10 +188,11 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         let mut count = 0;
         while let Some(frame) = mixed_video_rx.recv() {
             if count < args.frame_count
-                && let Err(e) = reference_yuv_writer.append(&frame).or_fail() {
-                    log::error!("failed to write reference YUV frame: {e}");
-                    break;
-                }
+                && let Err(e) = reference_yuv_writer.append(&frame).or_fail()
+            {
+                log::error!("failed to write reference YUV frame: {e}");
+                break;
+            }
             if !mixed_video_temp_tx.send(frame) {
                 break;
             }
