@@ -221,7 +221,7 @@ impl nojson::DisplayJson for AudioMixerStats {
             )?;
             f.member(
                 "total_output_audio_data_seconds",
-                self.total_output_audio_data_seconds.get(),
+                self.total_output_audio_data_seconds.get_seconds(),
             )?;
             f.member(
                 "total_output_sample_count",
@@ -237,7 +237,7 @@ impl nojson::DisplayJson for AudioMixerStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -287,7 +287,7 @@ impl nojson::DisplayJson for VideoMixerStats {
             )?;
             f.member(
                 "total_output_video_frame_seconds",
-                self.total_output_video_frame_seconds.get(),
+                self.total_output_video_frame_seconds.get_seconds(),
             )?;
             f.member(
                 "total_trimmed_video_frame_count",
@@ -299,7 +299,7 @@ impl nojson::DisplayJson for VideoMixerStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -347,7 +347,7 @@ impl nojson::DisplayJson for AudioEncoderStats {
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -406,7 +406,7 @@ impl nojson::DisplayJson for VideoEncoderStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -446,7 +446,7 @@ impl nojson::DisplayJson for AudioDecoderStats {
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -499,7 +499,7 @@ impl nojson::DisplayJson for VideoDecoderStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("resolutions", self.resolutions.get())?;
             f.member("error", self.error.get())?;
@@ -561,8 +561,12 @@ impl SharedAtomicSeconds {
         self.0.set(n.get().as_nanos() as u64);
     }
 
-    pub fn get(&self) -> Seconds {
+    pub fn get_seconds(&self) -> Seconds {
         Seconds(Duration::from_nanos(self.0.get()))
+    }
+
+    pub fn get_duration(&self) -> Duration {
+        self.get_seconds().get()
     }
 }
 
@@ -661,10 +665,13 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             f.member("input_file", &self.input_file)?;
             f.member("codec", self.codec.get())?;
             f.member("total_sample_count", self.total_sample_count.get())?;
-            f.member("total_track_seconds", self.total_track_seconds.get())?;
+            f.member(
+                "total_track_seconds",
+                self.total_track_seconds.get_seconds(),
+            )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -717,10 +724,13 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
                 }),
             )?;
             f.member("total_sample_count", self.total_sample_count.get())?;
-            f.member("total_track_seconds", self.total_track_seconds.get())?;
+            f.member(
+                "total_track_seconds",
+                self.total_track_seconds.get_seconds(),
+            )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -764,10 +774,13 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
                 "total_simple_block_count",
                 self.total_simple_block_count.get(),
             )?;
-            f.member("total_track_seconds", self.total_track_seconds.get())?;
+            f.member(
+                "total_track_seconds",
+                self.total_track_seconds.get_seconds(),
+            )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -811,10 +824,13 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
                 "total_simple_block_count",
                 self.total_simple_block_count.get(),
             )?;
-            f.member("total_track_seconds", self.total_track_seconds.get())?;
+            f.member(
+                "total_track_seconds",
+                self.total_track_seconds.get_seconds(),
+            )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -899,15 +915,15 @@ impl nojson::DisplayJson for Mp4WriterStats {
             )?;
             f.member(
                 "total_audio_track_seconds",
-                self.total_audio_track_seconds.get(),
+                self.total_audio_track_seconds.get_seconds(),
             )?;
             f.member(
                 "total_video_track_seconds",
-                self.total_video_track_seconds.get(),
+                self.total_video_track_seconds.get_seconds(),
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get(),
+                self.total_processing_seconds.get_seconds(),
             )?;
             Ok(())
         })

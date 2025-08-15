@@ -156,9 +156,8 @@ impl Mp4Writer {
     fn current_duration(&self) -> Duration {
         self.stats
             .total_audio_track_seconds
-            .get()
-            .get()
-            .max(self.stats.total_video_track_seconds.get().get())
+            .get_duration()
+            .max(self.stats.total_video_track_seconds.get_duration())
     }
 
     fn peek_input_audio_and_video(&mut self) -> (Option<&AudioData>, Option<&VideoFrame>) {
@@ -351,7 +350,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             track_id,
-            duration: self.stats.total_audio_track_seconds.get().get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_audio_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             layer: TkhdBox::DEFAULT_LAYER,
             alternate_group: TkhdBox::DEFAULT_ALTERNATE_GROUP,
             volume: TkhdBox::DEFAULT_AUDIO_VOLUME,
@@ -376,7 +379,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             track_id,
-            duration: self.stats.total_video_track_seconds.get().get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_video_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             layer: TkhdBox::DEFAULT_LAYER,
             alternate_group: TkhdBox::DEFAULT_ALTERNATE_GROUP,
             volume: TkhdBox::DEFAULT_VIDEO_VOLUME,
@@ -398,7 +405,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             timescale: TIMESCALE,
-            duration: self.stats.total_audio_track_seconds.get().get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_audio_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             language: MdhdBox::LANGUAGE_UNDEFINED,
         };
         let hdlr_box = HdlrBox {
@@ -425,7 +436,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             timescale: TIMESCALE,
-            duration: self.stats.total_video_track_seconds.get().get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_video_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             language: MdhdBox::LANGUAGE_UNDEFINED,
         };
         let hdlr_box = HdlrBox {

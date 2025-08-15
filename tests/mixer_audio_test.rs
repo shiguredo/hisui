@@ -119,7 +119,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
         assert!(!stats.error.get());
         assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
         assert_eq!(stats.total_output_audio_data_count.get(), 15); // 300 ms 分
-        assert_eq!(stats.total_output_audio_data_seconds.get(), ms(300));
+        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(300));
         assert_eq!(
             stats.total_output_sample_count.get(),
             (SAMPLE_RATE as f64 * 0.3) as u64
@@ -222,7 +222,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
         assert!(!stats.error.get());
         assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
         assert_eq!(stats.total_output_audio_data_count.get(), 13); // 260 ms 分
-        assert_eq!(stats.total_output_audio_data_seconds.get(), ms(260));
+        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(260));
         assert_eq!(
             stats.total_output_sample_count.get(),
             (SAMPLE_RATE as f64 * 0.26) as u64
@@ -303,7 +303,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
         assert!(!stats.error.get());
         assert_eq!(stats.total_input_audio_data_count.get(), 10 + 4 + 50);
         assert_eq!(stats.total_output_audio_data_count.get(), 5); // 100 ms = 20 ms * 5
-        assert_eq!(stats.total_output_audio_data_seconds.get(), ms(100));
+        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(100));
         assert_eq!(
             stats.total_output_sample_count.get(),
             (SAMPLE_RATE as f64 * 0.1) as u64
@@ -350,7 +350,7 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
         assert!(stats.error.get());
         assert_eq!(stats.total_input_audio_data_count.get(), 0);
         assert_eq!(stats.total_output_audio_data_count.get(), 0);
-        assert_eq!(stats.total_output_audio_data_seconds.get(), ms(0));
+        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(0));
         assert_eq!(stats.total_output_sample_count.get(), 0);
         assert_eq!(stats.total_output_filled_sample_count.get(), 0);
         assert_eq!(stats.total_trimmed_sample_count.get(), 0);

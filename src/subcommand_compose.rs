@@ -228,10 +228,10 @@ fn print_output_stats_summary(
 
         f.member(
             "output_audio_duration_seconds",
-            writer.total_audio_track_seconds.get(),
+            writer.total_audio_track_seconds.get_seconds(),
         )?;
 
-        let duration = writer.total_audio_track_seconds.get().get();
+        let duration = writer.total_audio_track_seconds.get_duration();
         if !duration.is_zero() {
             let bitrate = (writer.total_audio_sample_data_byte_size.get() as f32 * 8.0)
                 / duration.as_secs_f32();
@@ -250,10 +250,10 @@ fn print_output_stats_summary(
 
         f.member(
             "output_video_duration_seconds",
-            writer.total_video_track_seconds.get(),
+            writer.total_video_track_seconds.get_seconds(),
         )?;
 
-        let duration = writer.total_video_track_seconds.get().get();
+        let duration = writer.total_video_track_seconds.get_duration();
         if !duration.is_zero() {
             let bitrate = (writer.total_video_sample_data_byte_size.get() as f32 * 8.0)
                 / duration.as_secs_f32();
@@ -284,7 +284,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|decoder| match decoder {
             ProcessorStats::AudioDecoder(audio_decoder) => {
-                Some(audio_decoder.total_processing_seconds.get().get())
+                Some(audio_decoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -301,7 +301,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|decoder| match decoder {
             ProcessorStats::VideoDecoder(video_decoder) => {
-                Some(video_decoder.total_processing_seconds.get().get())
+                Some(video_decoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -318,7 +318,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|encoder| match encoder {
             ProcessorStats::AudioEncoder(audio_encoder) => {
-                Some(audio_encoder.total_processing_seconds.get().get())
+                Some(audio_encoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -335,7 +335,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|encoder| match encoder {
             ProcessorStats::VideoEncoder(video_encoder) => {
-                Some(video_encoder.total_processing_seconds.get().get())
+                Some(video_encoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -352,7 +352,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|mixer| match mixer {
             ProcessorStats::AudioMixer(audio_mixer) => {
-                Some(audio_mixer.total_processing_seconds.get().get())
+                Some(audio_mixer.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -369,7 +369,7 @@ fn print_time_stats_summary(
         .iter()
         .filter_map(|mixer| match mixer {
             ProcessorStats::VideoMixer(video_mixer) => {
-                Some(video_mixer.total_processing_seconds.get().get())
+                Some(video_mixer.total_processing_seconds.get_duration())
             }
             _ => None,
         })

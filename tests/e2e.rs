@@ -99,7 +99,7 @@ fn simple_single_source() -> noargs::Result<()> {
     // => これは入力データのサンプル数と等しい
     assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get().get(),
+        audio_stats.total_track_seconds.get_duration(),
         Duration::from_millis(1020)
     );
 
@@ -121,7 +121,7 @@ fn simple_single_source() -> noargs::Result<()> {
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
     assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get().get(),
+        video_stats.total_track_seconds.get_duration(),
         Duration::from_millis(1040)
     );
 
@@ -200,7 +200,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // => これは入力データのサンプル数と等しい
     assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get().get(),
+        audio_stats.total_track_seconds.get_duration(),
         Duration::from_millis(1020)
     );
 
@@ -226,7 +226,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
     assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get().get(),
+        video_stats.total_track_seconds.get_duration(),
         Duration::from_millis(1040)
     );
 
@@ -273,7 +273,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     // => これは入力データのサンプル数と等しい
     assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get().get(),
+        audio_stats.total_track_seconds.get_duration(),
         Duration::from_millis(1020)
     );
 
@@ -295,7 +295,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
     assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get().get(),
+        video_stats.total_track_seconds.get_duration(),
         Duration::from_millis(1040)
     );
 
@@ -408,7 +408,7 @@ fn two_regions() -> noargs::Result<()> {
     // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
     assert_eq!(video_stats.total_sample_count.get(), 26);
     assert_eq!(
-        video_stats.total_track_seconds.get().get(),
+        video_stats.total_track_seconds.get_duration(),
         Duration::from_millis(1040)
     );
 

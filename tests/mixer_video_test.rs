@@ -107,7 +107,7 @@ fn mix_single_source() {
         assert!(!stats.error.get());
         assert_eq!(stats.total_input_video_frame_count.get(), 2);
         assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(1000));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(1000));
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
     });
 }
@@ -216,7 +216,7 @@ fn mix_single_source_with_offset() {
         assert!(!stats.error.get());
         assert_eq!(stats.total_input_video_frame_count.get(), 2);
         assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(1000));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(1000));
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
     });
 }
@@ -337,7 +337,7 @@ fn single_source_multiple_regions() {
         assert!(!stats.error.get());
         assert_eq!(stats.total_input_video_frame_count.get(), 2);
         assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(1000));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(1000));
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
     });
 }
@@ -421,7 +421,7 @@ fn single_source_multiple_regions_with_resize() {
         assert!(!stats.error.get());
         assert_eq!(stats.total_input_video_frame_count.get(), 1);
         assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(1000));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(1000));
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
     });
 }
@@ -492,7 +492,7 @@ fn mix_with_trim() -> orfail::Result<()> {
         assert_eq!(stats.total_input_video_frame_count.get(), 2);
         assert_eq!(stats.total_output_video_frame_count.get(), 3);
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 2);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(600));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(600));
     });
 
     Ok(())
@@ -576,7 +576,7 @@ fn mix_without_trim() -> orfail::Result<()> {
         assert_eq!(stats.total_input_video_frame_count.get(), 2);
         assert_eq!(stats.total_output_video_frame_count.get(), 5);
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(1000));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(1000));
     });
 
     Ok(())
@@ -779,7 +779,7 @@ fn mix_multiple_cells() -> orfail::Result<()> {
         assert_eq!(stats.total_input_video_frame_count.get(), 4);
         assert_eq!(stats.total_output_video_frame_count.get(), 5);
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(1000));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(1000));
     });
 
     Ok(())
@@ -976,7 +976,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
         assert_eq!(stats.total_input_video_frame_count.get(), 4);
         assert_eq!(stats.total_output_video_frame_count.get(), 5);
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(1000));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(1000));
     });
 
     Ok(())
@@ -1026,7 +1026,7 @@ fn non_rgb_video_input_error() -> orfail::Result<()> {
         assert!(stats.error.get());
         assert_eq!(stats.total_input_video_frame_count.get(), 1);
         assert_eq!(stats.total_output_video_frame_count.get(), 0);
-        assert_eq!(stats.total_output_video_frame_seconds.get().get(), ms(0));
+        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(0));
         assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
     });
 
