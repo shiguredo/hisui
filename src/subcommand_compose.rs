@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{ProcessorStats, Stats, WriterStats},
+    stats::{ProcessorStats, Stats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -208,10 +208,10 @@ fn print_output_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
     stats: &Stats,
 ) -> std::fmt::Result {
-    let Some(WriterStats::Mp4(writer)) = stats
-        .writers
+    let Some(ProcessorStats::Mp4Writer(writer)) = stats
+        .processors
         .iter()
-        .find(|x| matches!(x, WriterStats::Mp4(_)))
+        .find(|x| matches!(x, ProcessorStats::Mp4Writer(_)))
     else {
         return Ok(());
     };

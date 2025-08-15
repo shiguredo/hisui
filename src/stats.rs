@@ -69,9 +69,6 @@ pub struct Stats {
     /// 全体の合成に要した実時間
     pub elapsed_seconds: Seconds,
 
-    /// 出力関連の統計情報
-    pub writers: Vec<WriterStats>,
-
     /// TODO: doc
     pub processors: Vec<ProcessorStats>,
 }
@@ -84,9 +81,6 @@ impl nojson::DisplayJson for Stats {
                 "processors",
                 nojson::array(|f| {
                     for processor in &self.processors {
-                        f.element(processor)?;
-                    }
-                    for processor in &self.writers {
                         f.element(processor)?;
                     }
                     Ok(())
@@ -164,6 +158,7 @@ pub enum ProcessorStats {
     VideoMixer(VideoMixerStats),
     AudioEncoder(AudioEncoderStats),
     VideoEncoder(VideoEncoderStats),
+    Mp4Writer(Mp4WriterStats),
 }
 
 impl nojson::DisplayJson for ProcessorStats {
@@ -179,6 +174,7 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::VideoMixer(stats) => stats.fmt(f),
             ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
             ProcessorStats::VideoEncoder(stats) => stats.fmt(f),
+            ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
         }
     }
 }
@@ -812,20 +808,6 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
             f.member("error", self.error.get())?;
             Ok(())
         })
-    }
-}
-
-/// 出力用のの統計情報
-#[derive(Debug, Clone)]
-pub enum WriterStats {
-    Mp4(Mp4WriterStats),
-}
-
-impl nojson::DisplayJson for WriterStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            WriterStats::Mp4(stats) => stats.fmt(f),
-        }
     }
 }
 
