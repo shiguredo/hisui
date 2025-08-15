@@ -26,7 +26,7 @@ pub fn run(args: noargs::RawArgs) -> noargs::Result<()> {
 pub struct Args {
     pub help: Option<String>,
     pub in_metadata_file: Option<PathBuf>,
-    pub out_video_codec: CodecName,
+    pub out_video_codec: Option<CodecName>,
     pub out_audio_codec: CodecName,
     pub out_video_frame_rate: FrameRate,
     pub out_file: Option<PathBuf>,
@@ -86,10 +86,14 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .present_and_then(|a| a.value().parse())?;
         let out_video_codec = noargs::opt("out-video-codec")
             .ty("VP8|VP9|H264|H265|AV1")
-            .default("VP9")
-            .doc("映像のエンコードコーデック")
+            .doc(concat!(
+                "映像のエンコードコーデック (default: VP9)\n",
+                "\n",
+                "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
+                "「`video_codec` がレイアウトで指定されている」場合には、その値が使われます"
+            ))
             .take(&mut args)
-            .then(|a| CodecName::parse_video(a.value()))?;
+            .present_and_then(|a| CodecName::parse_video(a.value()))?;
         let out_audio_codec = noargs::opt("out-audio-codec")
             .ty("Opus|AAC")
             .default("Opus")
@@ -297,7 +301,9 @@ impl Runner {
         let mut layout = self.create_layout().or_fail()?;
         log::debug!("layout: {layout:?}");
 
-        layout.video_codec = self.args.out_video_codec;
+        if let Some(codec) = self.args.out_video_codec {
+            layout.video_codec = codec;
+        }
         layout.audio_codec = self.args.out_audio_codec;
         layout.frame_rate = self.args.out_video_frame_rate;
         layout.audio_bitrate = Some(match layout.audio_codec {
