@@ -16,7 +16,10 @@ use shiguredo_mp4::{
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds},
+    stats::{
+        Mp4AudioReaderStats, Mp4VideoReaderStats, ProcessorStats, Seconds, SharedAtomicSeconds,
+        SharedOption, VideoResolution,
+    },
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
@@ -50,10 +53,13 @@ impl Mp4VideoReader {
         })
     }
 
-    pub fn stats(&self) -> &Mp4VideoReaderStats {
-        self.inner
-            .as_ref()
-            .map_or(&self.default_stats, |x| &x.stats)
+    pub fn stats(&self) -> ProcessorStats {
+        ProcessorStats::Mp4VideoReader(
+            self.inner
+                .as_ref()
+                .map_or(&self.default_stats, |x| &x.stats)
+                .clone(),
+        )
     }
 }
 
@@ -96,7 +102,7 @@ impl Mp4VideoReaderInner {
                     path.as_ref().display()
                 )
             })?,
-            total_processing_seconds: Seconds::new(start_time.elapsed()),
+            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
             ..Default::default()
         };
         Ok(Some(Self {
@@ -160,19 +166,19 @@ impl Mp4VideoReaderInner {
         let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
         let resolution = (metadata.width, metadata.height);
 
-        self.stats.total_sample_count += 1;
-        self.stats.total_track_seconds = Seconds::new(timestamp + duration);
-        if self.stats.codec.is_none() {
-            self.stats.codec = format.codec_name();
-        }
-        if self
-            .stats
-            .resolutions
-            .last()
-            .is_none_or(|&r| r != resolution)
+        self.stats.total_sample_count.add(1);
+        self.stats
+            .total_track_seconds
+            .set(Seconds::new(timestamp + duration));
+        if self.stats.codec.get().is_none()
+            && let Some(name) = format.codec_name()
         {
-            self.stats.resolutions.push(resolution);
+            self.stats.codec.set(name);
         }
+        self.stats.resolutions.insert(VideoResolution {
+            width: resolution.0 as usize,
+            height: resolution.1 as usize,
+        });
 
         let (Some(width), Some(height)) = (
             EvenUsize::new(metadata.width as usize),
@@ -214,9 +220,9 @@ impl Iterator for Mp4VideoReaderInner {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (result, elapsed) = Seconds::elapsed(|| self.next_video_frame());
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
         if matches!(result, Some(Err(_))) {
-            self.stats.error = true;
+            self.stats.error.set(true);
         }
         result
     }
@@ -246,10 +252,13 @@ impl Mp4AudioReader {
         })
     }
 
-    pub fn stats(&self) -> &Mp4AudioReaderStats {
-        self.inner
-            .as_ref()
-            .map_or(&self.default_stats, |x| &x.stats)
+    pub fn stats(&self) -> ProcessorStats {
+        ProcessorStats::Mp4AudioReader(
+            self.inner
+                .as_ref()
+                .map_or(&self.default_stats, |x| &x.stats)
+                .clone(),
+        )
     }
 }
 
@@ -286,10 +295,11 @@ impl Mp4AudioReaderInner {
 
         let stats = Mp4AudioReaderStats {
             input_file: path.as_ref().canonicalize().or_fail()?,
-            codec: Some(CodecName::Opus),
-            total_processing_seconds: Seconds::new(start_time.elapsed()),
+            codec: SharedOption::new(Some(CodecName::Opus)),
+            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
             ..Default::default()
         };
+
         Ok(Some(Self {
             source_id,
             file,
@@ -345,8 +355,10 @@ impl Mp4AudioReaderInner {
         let timestamp = Duration::from_secs(sample.timestamp()) / self.timescale.get();
         let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
 
-        self.stats.total_sample_count += 1;
-        self.stats.total_track_seconds = Seconds::new(timestamp + duration);
+        self.stats.total_sample_count.add(1);
+        self.stats
+            .total_track_seconds
+            .set(Seconds::new(timestamp + duration));
 
         Some(Ok(AudioData {
             source_id: Some(self.source_id.clone()),
@@ -372,9 +384,9 @@ impl Iterator for Mp4AudioReaderInner {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (result, elapsed) = Seconds::elapsed(|| self.next_audio_data());
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
         if matches!(result, Some(Err(_))) {
-            self.stats.error = true;
+            self.stats.error.set(true);
         }
         result
     }

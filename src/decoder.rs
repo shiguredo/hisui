@@ -104,8 +104,8 @@ impl VideoDecoder {
                     *self = VideoToolboxDecoder::new_h264(&frame)
                         .or_fail()
                         .map(Self::VideoToolbox)?;
-                    stats.engine = Some(EngineName::VideoToolbox);
-                    stats.codec = Some(CodecName::H264);
+                    stats.engine.set(EngineName::VideoToolbox);
+                    stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
                 }
                 VideoFormat::H264 | VideoFormat::H264AnnexB => {
@@ -116,8 +116,8 @@ impl VideoDecoder {
                     *self = Openh264Decoder::new(lib.clone())
                         .or_fail()
                         .map(Self::Openh264)?;
-                    stats.engine = Some(EngineName::Openh264);
-                    stats.codec = Some(CodecName::H264);
+                    stats.engine.set(EngineName::Openh264);
+                    stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
                 }
                 #[cfg(target_os = "macos")]
@@ -125,28 +125,28 @@ impl VideoDecoder {
                     *self = VideoToolboxDecoder::new_h265(&frame)
                         .or_fail()
                         .map(Self::VideoToolbox)?;
-                    stats.engine = Some(EngineName::VideoToolbox);
-                    stats.codec = Some(CodecName::H265);
+                    stats.engine.set(EngineName::VideoToolbox);
+                    stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
                 }
                 #[cfg(not(target_os = "macos"))]
                 VideoFormat::H265 => Err(orfail::Failure::new("no available H.265 decoder")),
                 VideoFormat::Vp8 => {
                     *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
-                    stats.engine = Some(EngineName::Libvpx);
-                    stats.codec = Some(CodecName::Vp8);
+                    stats.engine.set(EngineName::Libvpx);
+                    stats.codec.set(CodecName::Vp8);
                     self.decode(frame, stats).or_fail()
                 }
                 VideoFormat::Vp9 => {
                     *self = LibvpxDecoder::new_vp9().or_fail().map(Self::Libvpx)?;
-                    stats.engine = Some(EngineName::Libvpx);
-                    stats.codec = Some(CodecName::Vp9);
+                    stats.engine.set(EngineName::Libvpx);
+                    stats.codec.set(CodecName::Vp9);
                     self.decode(frame, stats).or_fail()
                 }
                 VideoFormat::Av1 => {
                     *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
-                    stats.engine = Some(EngineName::Dav1d);
-                    stats.codec = Some(CodecName::Av1);
+                    stats.engine.set(EngineName::Dav1d);
+                    stats.codec.set(CodecName::Av1);
                     self.decode(frame, stats).or_fail()
                 }
                 VideoFormat::I420 => {

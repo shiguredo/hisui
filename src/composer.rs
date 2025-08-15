@@ -12,7 +12,7 @@ use crate::{
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},
-    stats::{Seconds, SharedStats, WriterStats},
+    stats::{ProcessorStats, Seconds, SharedStats},
     types::CodecName,
     video::VideoFrameReceiver,
     writer_mp4::Mp4Writer,
@@ -178,8 +178,8 @@ impl Composer {
     fn finish_stats(&self, stats: SharedStats, mp4_writer: &Mp4Writer, start_time: Instant) {
         stats.with_lock(|stats| {
             stats
-                .writers
-                .push(WriterStats::Mp4(mp4_writer.stats().clone()));
+                .processors
+                .push(ProcessorStats::Mp4Writer(mp4_writer.stats().clone()));
             log::debug!("stats: {}", nojson::Json(&stats));
 
             stats.elapsed_seconds = Seconds::new(start_time.elapsed());

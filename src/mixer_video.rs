@@ -10,7 +10,7 @@ use crate::{
     layout::Layout,
     layout_region::Region,
     metadata::SourceId,
-    stats::{MixerStats, Seconds, SharedStats, VideoMixerStats, VideoResolution},
+    stats::{ProcessorStats, Seconds, SharedStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
     video::{VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
 };
@@ -74,13 +74,15 @@ impl VideoMixerThread {
             log::debug!("video mixer started");
             if let Err(e) = this.run().or_fail() {
                 error_flag.set();
-                this.stats.error = true;
+                this.stats.error.set(true);
                 log::error!("failed to mix video sources: {e}");
             }
             log::debug!("video mixer finished");
 
             shared_stats.with_lock(|stats| {
-                stats.mixers.push(MixerStats::Video(this.stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::VideoMixer(this.stats));
             });
         });
         rx
@@ -120,23 +122,24 @@ impl VideoMixerThread {
 
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count
-                + self.stats.total_extended_video_frame_count
-                + self.stats.total_trimmed_video_frame_count,
+            self.stats.total_output_video_frame_count.get()
+                + self.stats.total_extended_video_frame_count.get()
+                + self.stats.total_trimmed_video_frame_count.get(),
         )
     }
 
     fn next_output_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count + self.stats.total_extended_video_frame_count,
+            self.stats.total_output_video_frame_count.get()
+                + self.stats.total_extended_video_frame_count.get(),
         )
     }
 
     fn next_output_duration(&self) -> Duration {
         // 丸め誤差が蓄積しないように次のフレームのタイスタンプとの差をとる
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count
-                + self.stats.total_extended_video_frame_count
+            self.stats.total_output_video_frame_count.get()
+                + self.stats.total_extended_video_frame_count.get()
                 + 1,
         ) - self.next_output_timestamp()
     }
@@ -161,7 +164,7 @@ impl VideoMixerThread {
             self.current_frames
                 .insert(source_id, ResizeCachedVideoFrame::new(frame));
             self.last_input_update_time = now;
-            self.stats.total_input_video_frame_count += 1;
+            self.stats.total_input_video_frame_count.add(1);
         }
         Ok(())
     }
@@ -172,7 +175,7 @@ impl VideoMixerThread {
 
             // トリム対象期間ならその分はスキップする
             while self.layout.is_in_trim_span(now) {
-                self.stats.total_trimmed_video_frame_count += 1;
+                self.stats.total_trimmed_video_frame_count.add(1);
                 now = self.next_input_timestamp();
             }
 
@@ -226,15 +229,17 @@ impl VideoMixerThread {
                 let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
 
                 last_frame.duration += duration;
-                self.stats.total_extended_video_frame_count += 1;
-                self.stats.total_output_video_frame_seconds += duration; // 出力フレーム数は増えないけど尺は伸びる
+                self.stats.total_extended_video_frame_count.add(1);
+                self.stats
+                    .total_output_video_frame_seconds
+                    .add(Seconds::new(duration)); // 出力フレーム数は増えないけど尺は伸びる
 
                 continue;
             }
 
             // 現在のフレームを合成する
             let (result, elapsed) = Seconds::elapsed(|| self.mix().or_fail());
-            self.stats.total_processing_seconds += elapsed;
+            self.stats.total_processing_seconds.add(elapsed);
             return result.map(Some);
         }
     }
@@ -252,8 +257,10 @@ impl VideoMixerThread {
             Self::mix_region(&mut canvas, region, &mut self.current_frames).or_fail()?;
         }
 
-        self.stats.total_output_video_frame_count += 1;
-        self.stats.total_output_video_frame_seconds += duration;
+        self.stats.total_output_video_frame_count.add(1);
+        self.stats
+            .total_output_video_frame_seconds
+            .add(Seconds::new(duration));
 
         Ok(VideoFrame {
             // 固定値

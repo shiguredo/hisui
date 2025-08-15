@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{DecoderStats, EncoderStats, MixerStats, ReaderStats, Stats, WriterStats},
+    stats::{ProcessorStats, Stats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -174,18 +174,28 @@ fn print_input_stats_summary(
     // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
     //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
     let count = stats
-        .readers
+        .processors
         .iter()
-        .filter(|s| matches!(s, ReaderStats::WebmAudio(_) | ReaderStats::Mp4Audio(_)))
+        .filter(|s| {
+            matches!(
+                s,
+                ProcessorStats::WebmAudioReader(_) | ProcessorStats::Mp4AudioReader(_)
+            )
+        })
         .count();
     if count > 0 {
         f.member("input_audio_file_count", count)?;
     }
 
     let count = stats
-        .readers
+        .processors
         .iter()
-        .filter(|s| matches!(s, ReaderStats::WebmVideo(_) | ReaderStats::Mp4Video(_)))
+        .filter(|s| {
+            matches!(
+                s,
+                ProcessorStats::WebmVideoReader(_) | ProcessorStats::Mp4VideoReader(_)
+            )
+        })
         .count();
     if count > 0 {
         f.member("input_video_file_count", count)?;
@@ -198,70 +208,67 @@ fn print_output_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
     stats: &Stats,
 ) -> std::fmt::Result {
-    let Some(WriterStats::Mp4(writer)) = stats
-        .writers
+    let Some(ProcessorStats::Mp4Writer(writer)) = stats
+        .processors
         .iter()
-        .find(|x| matches!(x, WriterStats::Mp4(_)))
+        .find(|x| matches!(x, ProcessorStats::Mp4Writer(_)))
     else {
         return Ok(());
     };
 
-    if let Some(codec) = &writer.audio_codec {
+    if let Some(codec) = writer.audio_codec.get() {
         f.member("output_audio_codec", codec)?;
 
-        for encoder in &stats.encoders {
-            if let EncoderStats::Audio(encoder) = encoder
-                && let Some(engine) = &encoder.engine
-            {
-                f.member("output_audio_encoder_name", engine)?;
+        for processor in &stats.processors {
+            if let ProcessorStats::AudioEncoder(encoder) = processor {
+                f.member("output_audio_encoder_name", encoder.engine)?;
                 break;
             }
         }
 
         f.member(
             "output_audio_duration_seconds",
-            writer.total_audio_track_seconds,
+            writer.total_audio_track_seconds.get_seconds(),
         )?;
 
-        let duration = writer.total_audio_track_seconds.get();
+        let duration = writer.total_audio_track_seconds.get_duration();
         if !duration.is_zero() {
-            let bitrate =
-                (writer.total_audio_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            let bitrate = (writer.total_audio_sample_data_byte_size.get() as f32 * 8.0)
+                / duration.as_secs_f32();
             f.member("output_audio_bitrate", bitrate as u64)?;
         }
     }
-    if let Some(codec) = &writer.video_codec {
+    if let Some(codec) = writer.video_codec.get() {
         f.member("output_video_codec", codec)?;
 
-        for encoder in &stats.encoders {
-            if let EncoderStats::Video(encoder) = encoder
-                && let Some(engine) = &encoder.engine
-            {
-                f.member("output_video_encoder_name", engine)?;
+        for processor in &stats.processors {
+            if let ProcessorStats::VideoEncoder(encoder) = processor {
+                f.member("output_video_encoder_name", encoder.engine)?;
                 break;
             }
         }
 
         f.member(
             "output_video_duration_seconds",
-            writer.total_video_track_seconds,
+            writer.total_video_track_seconds.get_seconds(),
         )?;
 
-        let duration = writer.total_video_track_seconds.get();
+        let duration = writer.total_video_track_seconds.get_duration();
         if !duration.is_zero() {
-            let bitrate =
-                (writer.total_video_sample_data_byte_size as f32 * 8.0) / duration.as_secs_f32();
+            let bitrate = (writer.total_video_sample_data_byte_size.get() as f32 * 8.0)
+                / duration.as_secs_f32();
             f.member("output_video_bitrate", bitrate as u64)?;
         }
     }
 
-    for mixer in &stats.mixers {
-        match mixer {
-            MixerStats::Audio(_mixer) => {}
-            MixerStats::Video(mixer) => {
+    for processor in &stats.processors {
+        match processor {
+            ProcessorStats::AudioMixer(_mixer) => {}
+            ProcessorStats::VideoMixer(mixer) => {
                 f.member("output_video_width", mixer.output_video_resolution.width)?;
                 f.member("output_video_height", mixer.output_video_resolution.height)?;
             }
+            _ => {}
         }
     }
 
@@ -273,11 +280,11 @@ fn print_time_stats_summary(
     stats: &Stats,
 ) -> std::fmt::Result {
     let total_audio_decoder_processing_seconds = stats
-        .decoders
+        .processors
         .iter()
         .filter_map(|decoder| match decoder {
-            DecoderStats::Audio(audio_decoder) => {
-                Some(audio_decoder.total_processing_seconds.get())
+            ProcessorStats::AudioDecoder(audio_decoder) => {
+                Some(audio_decoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -290,11 +297,11 @@ fn print_time_stats_summary(
     }
 
     let total_video_decoder_processing_seconds = stats
-        .decoders
+        .processors
         .iter()
         .filter_map(|decoder| match decoder {
-            DecoderStats::Video(video_decoder) => {
-                Some(video_decoder.total_processing_seconds.get())
+            ProcessorStats::VideoDecoder(video_decoder) => {
+                Some(video_decoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -307,11 +314,11 @@ fn print_time_stats_summary(
     }
 
     let total_audio_encoder_processing_seconds = stats
-        .encoders
+        .processors
         .iter()
         .filter_map(|encoder| match encoder {
-            EncoderStats::Audio(audio_encoder) => {
-                Some(audio_encoder.total_processing_seconds.get())
+            ProcessorStats::AudioEncoder(audio_encoder) => {
+                Some(audio_encoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -324,11 +331,11 @@ fn print_time_stats_summary(
     }
 
     let total_video_encoder_processing_seconds = stats
-        .encoders
+        .processors
         .iter()
         .filter_map(|encoder| match encoder {
-            EncoderStats::Video(video_encoder) => {
-                Some(video_encoder.total_processing_seconds.get())
+            ProcessorStats::VideoEncoder(video_encoder) => {
+                Some(video_encoder.total_processing_seconds.get_duration())
             }
             _ => None,
         })
@@ -341,10 +348,12 @@ fn print_time_stats_summary(
     }
 
     let total_audio_mixer_processing_seconds = stats
-        .mixers
+        .processors
         .iter()
         .filter_map(|mixer| match mixer {
-            MixerStats::Audio(audio_mixer) => Some(audio_mixer.total_processing_seconds.get()),
+            ProcessorStats::AudioMixer(audio_mixer) => {
+                Some(audio_mixer.total_processing_seconds.get_duration())
+            }
             _ => None,
         })
         .sum::<Duration>();
@@ -356,10 +365,12 @@ fn print_time_stats_summary(
     }
 
     let total_video_mixer_processing_seconds = stats
-        .mixers
+        .processors
         .iter()
         .filter_map(|mixer| match mixer {
-            MixerStats::Video(video_mixer) => Some(video_mixer.total_processing_seconds.get()),
+            ProcessorStats::VideoMixer(video_mixer) => {
+                Some(video_mixer.total_processing_seconds.get_duration())
+            }
             _ => None,
         })
         .sum::<Duration>();

@@ -2,7 +2,7 @@ use crate::{
     audio::AudioData,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::ReaderStats,
+    stats::ProcessorStats,
     video::VideoFrame,
 };
 
@@ -13,10 +13,10 @@ pub enum AudioReader {
 }
 
 impl AudioReader {
-    pub fn stats(&self) -> ReaderStats {
+    pub fn stats(&self) -> ProcessorStats {
         match self {
-            AudioReader::Mp4(r) => ReaderStats::Mp4Audio(r.stats().clone()),
-            AudioReader::Webm(r) => ReaderStats::WebmAudio(r.stats().clone()),
+            AudioReader::Mp4(r) => r.stats(),
+            AudioReader::Webm(r) => r.stats(),
         }
     }
 }
@@ -40,10 +40,10 @@ pub enum VideoReader {
 }
 
 impl VideoReader {
-    pub fn stats(&self) -> ReaderStats {
+    pub fn stats(&self) -> ProcessorStats {
         match self {
-            VideoReader::Mp4(r) => ReaderStats::Mp4Video(r.stats().clone()),
-            VideoReader::Webm(r) => ReaderStats::WebmVideo(r.stats().clone()),
+            VideoReader::Mp4(r) => r.stats(),
+            VideoReader::Webm(r) => r.stats(),
         }
     }
 }

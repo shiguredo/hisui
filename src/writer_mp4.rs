@@ -82,7 +82,7 @@ impl Mp4Writer {
 
         let (result, elapsed) = Seconds::elapsed(|| this.init(layout).or_fail());
         result?;
-        this.stats.total_processing_seconds = elapsed;
+        this.stats.total_processing_seconds.set(elapsed);
 
         Ok(this)
     }
@@ -104,7 +104,7 @@ impl Mp4Writer {
             self.handle_next_audio_and_video(audio_timestamp, video_timestamp)
                 .or_fail()
         });
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
 
         result
     }
@@ -156,8 +156,8 @@ impl Mp4Writer {
     fn current_duration(&self) -> Duration {
         self.stats
             .total_audio_track_seconds
-            .get()
-            .max(self.stats.total_video_track_seconds.get())
+            .get_duration()
+            .max(self.stats.total_video_track_seconds.get_duration())
     }
 
     fn peek_input_audio_and_video(&mut self) -> (Option<&AudioData>, Option<&VideoFrame>) {
@@ -174,8 +174,10 @@ impl Mp4Writer {
             .and_then(|rx| rx.recv())
             .or_fail()?;
 
-        if self.stats.video_codec.is_none() {
-            self.stats.video_codec = frame.format.codec_name();
+        if self.stats.video_codec.get().is_none()
+            && let Some(name) = frame.format.codec_name()
+        {
+            self.stats.video_codec.set(name);
         }
 
         // Hisui では途中でエンコード情報が変わることがないので、
@@ -193,25 +195,28 @@ impl Mp4Writer {
                 offset: self.file_size,
                 samples: Vec::new(),
             });
-            self.stats.total_video_chunk_count += 1;
+            self.stats.total_video_chunk_count.add(1);
         }
 
         // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
         let sample = Sample {
-            number: NonZeroU32::MIN.saturating_add(self.stats.total_video_sample_count as u32),
             keyframe: frame.keyframe,
             size: frame.data.len() as u32,
             duration: frame.duration.as_micros() as u32,
         };
         self.video_chunks.last_mut().or_fail()?.samples.push(sample);
-        self.stats.total_video_sample_count += 1;
+        self.stats.total_video_sample_count.add(1);
 
         // mdat ボックスにデータを追記する
         self.file.write_all(&frame.data).or_fail()?;
         self.file_size += frame.data.len() as u64;
-        self.stats.total_video_sample_data_byte_size += frame.data.len() as u64;
+        self.stats
+            .total_video_sample_data_byte_size
+            .add(frame.data.len() as u64);
 
-        self.stats.total_video_track_seconds += frame.duration;
+        self.stats
+            .total_video_track_seconds
+            .add(Seconds::new(frame.duration));
         self.appending_video_chunk = true;
         Ok(())
     }
@@ -224,8 +229,10 @@ impl Mp4Writer {
             .and_then(|rx| rx.recv())
             .or_fail()?;
 
-        if self.stats.audio_codec.is_none() {
-            self.stats.audio_codec = data.format.codec_name();
+        if self.stats.audio_codec.get().is_none()
+            && let Some(name) = data.format.codec_name()
+        {
+            self.stats.audio_codec.set(name);
         }
 
         // Hisui では途中でエンコード情報が変わることがないので、
@@ -243,25 +250,28 @@ impl Mp4Writer {
                 offset: self.file_size,
                 samples: Vec::new(),
             });
-            self.stats.total_audio_chunk_count += 1;
+            self.stats.total_audio_chunk_count.add(1);
         }
 
         // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
         let sample = Sample {
-            number: NonZeroU32::MIN.saturating_add(self.stats.total_audio_sample_count as u32),
             keyframe: true,
             size: data.data.len() as u32,
             duration: data.duration.as_micros() as u32,
         };
         self.audio_chunks.last_mut().or_fail()?.samples.push(sample);
-        self.stats.total_audio_sample_count += 1;
+        self.stats.total_audio_sample_count.add(1);
 
         // mdat ボックスにデータを追記する
         self.file.write_all(&data.data).or_fail()?;
         self.file_size += data.data.len() as u64;
-        self.stats.total_audio_sample_data_byte_size += data.data.len() as u64;
+        self.stats
+            .total_audio_sample_data_byte_size
+            .add(data.data.len() as u64);
 
-        self.stats.total_audio_track_seconds += data.duration;
+        self.stats
+            .total_audio_track_seconds
+            .add(Seconds::new(data.duration));
         self.appending_video_chunk = false;
         Ok(())
     }
@@ -277,7 +287,9 @@ impl Mp4Writer {
         let moov_box_size = moov_box.box_size().get();
         let free_box_min_size = 8;
         let reserved_size = self.mdat_box_offset - self.moov_box_offset;
-        self.stats.actual_moov_box_size = moov_box_size + free_box_min_size;
+        self.stats
+            .actual_moov_box_size
+            .set(moov_box_size + free_box_min_size);
         (moov_box_size + free_box_min_size < reserved_size).or_fail()?;
 
         self.file
@@ -338,7 +350,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             track_id,
-            duration: self.stats.total_audio_track_seconds.get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_audio_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             layer: TkhdBox::DEFAULT_LAYER,
             alternate_group: TkhdBox::DEFAULT_ALTERNATE_GROUP,
             volume: TkhdBox::DEFAULT_AUDIO_VOLUME,
@@ -363,7 +379,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             track_id,
-            duration: self.stats.total_video_track_seconds.get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_video_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             layer: TkhdBox::DEFAULT_LAYER,
             alternate_group: TkhdBox::DEFAULT_ALTERNATE_GROUP,
             volume: TkhdBox::DEFAULT_VIDEO_VOLUME,
@@ -385,7 +405,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             timescale: TIMESCALE,
-            duration: self.stats.total_audio_track_seconds.get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_audio_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             language: MdhdBox::LANGUAGE_UNDEFINED,
         };
         let hdlr_box = HdlrBox {
@@ -412,7 +436,11 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             timescale: TIMESCALE,
-            duration: self.stats.total_video_track_seconds.get().as_micros() as u64,
+            duration: self
+                .stats
+                .total_video_track_seconds
+                .get_duration()
+                .as_micros() as u64,
             language: MdhdBox::LANGUAGE_UNDEFINED,
         };
         let hdlr_box = HdlrBox {
@@ -473,18 +501,22 @@ impl Mp4Writer {
             })
         };
 
-        // TODO(sile): ここで連番を計算するようにすれば `Sample.number` は不要になる
-        let stss_box =
-            (chunks.iter().any(|c| c.samples.iter().any(|s| !s.keyframe))).then(|| StssBox {
+        let is_all_keyframe = chunks.iter().all(|c| c.samples.iter().all(|s| s.keyframe));
+        let stss_box = if is_all_keyframe {
+            None
+        } else {
+            Some(StssBox {
                 sample_numbers: chunks
                     .iter()
-                    .flat_map(|c| {
-                        c.samples
-                            .iter()
-                            .filter_map(|s| s.keyframe.then_some(s.number))
+                    .flat_map(|c| c.samples.iter())
+                    .enumerate()
+                    .filter_map(|(i, s)| {
+                        s.keyframe
+                            .then_some(NonZeroU32::MIN.saturating_add(i as u32))
                     })
                     .collect(),
-            });
+            })
+        };
 
         StblBox {
             stsd_box,
@@ -550,7 +582,7 @@ impl Mp4Writer {
         // かなり余裕をみた計算方法になっているので、これで足りないことはまずないはず
         let moov_box = self.build_dummy_moov_box(layout);
         let max_moov_box_size = moov_box.box_size().get();
-        self.stats.reserved_moov_box_size = max_moov_box_size;
+        self.stats.reserved_moov_box_size.set(max_moov_box_size);
         log::debug!("reserved moov box size: {max_moov_box_size}");
 
         // 初期化時点では free ボックスで領域だけ確保しておく
@@ -719,7 +751,6 @@ struct Chunk {
 
 #[derive(Debug)]
 struct Sample {
-    number: NonZeroU32,
     keyframe: bool,
     size: u32,
     duration: u32,

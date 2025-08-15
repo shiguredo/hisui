@@ -17,7 +17,7 @@ use crate::{
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
-    stats::{AudioEncoderStats, EncoderStats, Seconds, SharedStats, VideoEncoderStats},
+    stats::{AudioEncoderStats, ProcessorStats, Seconds, SharedStats, VideoEncoderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -271,21 +271,19 @@ impl AudioEncoderThread {
             let mut this = Self {
                 input_rx,
                 output_tx: tx,
-                stats: AudioEncoderStats {
-                    engine: Some(encoder.name()),
-                    codec: Some(encoder.codec()),
-                    ..Default::default()
-                },
+                stats: AudioEncoderStats::new(encoder.name(), encoder.codec()),
                 encoder,
             };
             if let Err(e) = this.run().or_fail() {
                 error_flag.set();
-                this.stats.error = true;
+                this.stats.error.set(true);
                 log::error!("failed to produce encoded audio stream: {e}");
             }
 
             stats.with_lock(|stats| {
-                stats.encoders.push(EncoderStats::Audio(this.stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::AudioEncoder(this.stats));
             });
         });
         rx
@@ -293,10 +291,10 @@ impl AudioEncoderThread {
 
     fn run(&mut self) -> orfail::Result<()> {
         while let Some(data) = self.input_rx.recv() {
-            self.stats.total_audio_data_count += 1;
+            self.stats.total_audio_data_count.add(1);
 
             let (encoded, elapsed) = Seconds::try_elapsed(|| self.encoder.encode(&data).or_fail())?;
-            self.stats.total_processing_seconds += elapsed;
+            self.stats.total_processing_seconds.add(elapsed);
             let Some(encoded) = encoded else {
                 continue;
             };
@@ -309,9 +307,10 @@ impl AudioEncoderThread {
         }
 
         if let Some(encoded) = self.encoder.finish().or_fail()?
-            && !self.output_tx.send(encoded) {
-                log::info!("receiver of encoded audio stream has been closed");
-            }
+            && !self.output_tx.send(encoded)
+        {
+            log::info!("receiver of encoded audio stream has been closed");
+        }
 
         Ok(())
     }
@@ -336,22 +335,20 @@ impl VideoEncoderThread {
         let mut this = Self {
             input_rx,
             output_tx: tx,
-            stats: VideoEncoderStats {
-                engine: Some(encoder.name()),
-                codec: Some(encoder.codec()),
-                ..Default::default()
-            },
+            stats: VideoEncoderStats::new(encoder.name(), encoder.codec()),
             encoder,
         };
         std::thread::spawn(move || {
             if let Err(e) = this.run().or_fail() {
                 error_flag.set();
-                this.stats.error = true;
+                this.stats.error.set(true);
                 log::error!("failed to produce encoded video stream: {e}");
             }
 
             stats.with_lock(|stats| {
-                stats.encoders.push(EncoderStats::Video(this.stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::VideoEncoder(this.stats));
             });
         });
         rx
@@ -359,12 +356,12 @@ impl VideoEncoderThread {
 
     fn run(&mut self) -> orfail::Result<()> {
         while let Some(frame) = self.input_rx.recv() {
-            self.stats.total_input_video_frame_count += 1;
+            self.stats.total_input_video_frame_count.add(1);
             let ((), elapsed) = Seconds::try_elapsed(|| self.encoder.encode(frame).or_fail())?;
-            self.stats.total_processing_seconds += elapsed;
+            self.stats.total_processing_seconds.add(elapsed);
 
             while let Some(encoded) = self.encoder.next_encoded_frame() {
-                self.stats.total_output_video_frame_count += 1;
+                self.stats.total_output_video_frame_count.add(1);
                 if !self.output_tx.send(encoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                     log::info!("receiver of encoded video stream has been closed");
@@ -374,10 +371,10 @@ impl VideoEncoderThread {
         }
 
         let ((), elapsed) = Seconds::try_elapsed(|| self.encoder.finish().or_fail())?;
-        self.stats.total_processing_seconds += elapsed;
+        self.stats.total_processing_seconds.add(elapsed);
 
         while let Some(encoded) = self.encoder.next_encoded_frame() {
-            self.stats.total_output_video_frame_count += 1;
+            self.stats.total_output_video_frame_count.add(1);
             if !self.output_tx.send(encoded) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                 log::info!("receiver of encoded video stream has been closed");
