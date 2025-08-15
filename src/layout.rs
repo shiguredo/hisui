@@ -227,7 +227,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                     v.to_unquoted_string_str()
                         .and_then(|s| CodecName::parse_video(&s).map_err(|e| v.invalid(e)))
                 })?
-                .unwrap_or(CodecName::Vp8),
+                .unwrap_or(CodecName::Vp9),
             audio_codec: object
                 .get_with("audio_codec", |v| {
                     v.to_unquoted_string_str()
