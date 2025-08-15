@@ -28,7 +28,7 @@ pub struct Args {
     pub in_metadata_file: Option<PathBuf>,
     pub out_video_codec: Option<CodecName>,
     pub out_audio_codec: Option<CodecName>,
-    pub out_video_frame_rate: FrameRate,
+    pub out_video_frame_rate: Option<FrameRate>,
     pub out_file: Option<PathBuf>,
     pub out_stats_file: Option<PathBuf>,
     pub max_columns: NonZeroUsize,
@@ -108,12 +108,17 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             ))
             .take(&mut args)
             .present_and_then(|a| CodecName::parse_audio(a.value()))?;
+
         let out_video_frame_rate = noargs::opt("out-video-frame-rate")
             .ty("INTEGER|RATIONAL")
-            .default("25")
-            .doc("合成後の映像のフレームーレート")
+            .doc(concat!(
+                "合成後の映像のフレームーレート (default: 25)\n",
+                "\n",
+                "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
+                "「`frame_rate` がレイアウトで指定されている」場合には、その値が使われます"
+            ))
             .take(&mut args)
-            .then(|a| a.value().parse())?;
+            .present_and_then(|a| a.value().parse())?;
         let max_columns = noargs::opt("max-columns")
             .ty("POSITIVE_INTEGER")
             .default("3")
@@ -309,7 +314,9 @@ impl Runner {
         if let Some(codec) = self.args.out_audio_codec {
             layout.audio_codec = codec;
         }
-        layout.frame_rate = self.args.out_video_frame_rate;
+        if let Some(frame_rate) = self.args.out_video_frame_rate {
+            layout.frame_rate = frame_rate;
+        }
         layout.audio_bitrate = Some(match layout.audio_codec {
             CodecName::Aac => self.args.out_aac_bit_rate,
             CodecName::Opus => self.args.out_opus_bit_rate,
