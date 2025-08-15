@@ -8,7 +8,7 @@ use hisui::{
     layout::{AggregatedSourceInfo, Layout, Resolution},
     metadata::{SourceId, SourceInfo},
     mixer_audio::AudioMixerThread,
-    stats::{AudioMixerStats, MixerStats, Seconds, SharedStats, Stats},
+    stats::{AudioMixerStats, ProcessorStats, Seconds, SharedStats, Stats},
     types::CodecName,
     video::FrameRate,
 };
@@ -441,10 +441,10 @@ fn ms(value: u64) -> Seconds {
 
 fn audio_mixer_stats(stats: &Stats) -> &AudioMixerStats {
     stats
-        .mixers
+        .processors
         .iter()
         .find_map(|x| {
-            if let MixerStats::Audio(x) = x {
+            if let ProcessorStats::AudioMixer(x) = x {
                 Some(x)
             } else {
                 None

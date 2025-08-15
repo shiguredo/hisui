@@ -12,7 +12,7 @@ use crate::{
     channel::{self, ErrorFlag},
     layout::Layout,
     metadata::SourceId,
-    stats::{AudioMixerStats, MixerStats, Seconds, SharedStats},
+    stats::{AudioMixerStats, ProcessorStats, Seconds, SharedStats},
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);
@@ -52,7 +52,9 @@ impl AudioMixerThread {
             log::debug!("audio mixer finished");
 
             shared_stats.with_lock(|stats| {
-                stats.mixers.push(MixerStats::Audio(this.stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::AudioMixer(this.stats));
             });
         });
         rx

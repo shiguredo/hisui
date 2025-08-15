@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::Layout,
-    stats::{DecoderStats, EncoderStats, MixerStats, ProcessorStats, Stats, WriterStats},
+    stats::{DecoderStats, EncoderStats, ProcessorStats, Stats, WriterStats},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
@@ -261,13 +261,14 @@ fn print_output_stats_summary(
         }
     }
 
-    for mixer in &stats.mixers {
-        match mixer {
-            MixerStats::Audio(_mixer) => {}
-            MixerStats::Video(mixer) => {
+    for processor in &stats.processors {
+        match processor {
+            ProcessorStats::AudioMixer(_mixer) => {}
+            ProcessorStats::VideoMixer(mixer) => {
                 f.member("output_video_width", mixer.output_video_resolution.width)?;
                 f.member("output_video_height", mixer.output_video_resolution.height)?;
             }
+            _ => {}
         }
     }
 
@@ -347,10 +348,10 @@ fn print_time_stats_summary(
     }
 
     let total_audio_mixer_processing_seconds = stats
-        .mixers
+        .processors
         .iter()
         .filter_map(|mixer| match mixer {
-            MixerStats::Audio(audio_mixer) => {
+            ProcessorStats::AudioMixer(audio_mixer) => {
                 Some(audio_mixer.total_processing_seconds.get().get())
             }
             _ => None,
@@ -364,10 +365,10 @@ fn print_time_stats_summary(
     }
 
     let total_video_mixer_processing_seconds = stats
-        .mixers
+        .processors
         .iter()
         .filter_map(|mixer| match mixer {
-            MixerStats::Video(video_mixer) => {
+            ProcessorStats::VideoMixer(video_mixer) => {
                 Some(video_mixer.total_processing_seconds.get().get())
             }
             _ => None,

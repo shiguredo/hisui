@@ -10,7 +10,7 @@ use crate::{
     layout::Layout,
     layout_region::Region,
     metadata::SourceId,
-    stats::{MixerStats, Seconds, SharedStats, VideoMixerStats, VideoResolution},
+    stats::{ProcessorStats, Seconds, SharedStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
     video::{VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
 };
@@ -80,7 +80,9 @@ impl VideoMixerThread {
             log::debug!("video mixer finished");
 
             shared_stats.with_lock(|stats| {
-                stats.mixers.push(MixerStats::Video(this.stats));
+                stats
+                    .processors
+                    .push(ProcessorStats::VideoMixer(this.stats));
             });
         });
         rx

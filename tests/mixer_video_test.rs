@@ -11,7 +11,7 @@ use hisui::{
     layout_region::{Grid, Region},
     metadata::{SourceId, SourceInfo},
     mixer_video::VideoMixerThread,
-    stats::{MixerStats, SharedStats, Stats, VideoMixerStats},
+    stats::{ProcessorStats, SharedStats, Stats, VideoMixerStats},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -1166,10 +1166,10 @@ fn grayscale_image<const W: usize, const H: usize>(image: [[u8; W]; H]) -> Vec<u
 
 fn video_mixer_stats(stats: &Stats) -> &VideoMixerStats {
     stats
-        .mixers
+        .processors
         .iter()
         .find_map(|x| {
-            if let MixerStats::Video(x) = x {
+            if let ProcessorStats::VideoMixer(x) = x {
                 Some(x)
             } else {
                 None
