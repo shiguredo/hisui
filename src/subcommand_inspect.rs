@@ -89,6 +89,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             }
         };
 
+    let decoded_audio_stream_id = MediaStreamId::new(2);
     let mut audio_codec = None;
     let mut audio_samples = Vec::new();
     let mut audio_decoder = None;
@@ -97,7 +98,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         if audio_codec.is_none() {
             audio_codec = sample.format.codec_name();
             if decode {
-                audio_decoder = Some(AudioDecoder::new_opus().or_fail()?);
+                audio_decoder = Some(
+                    AudioDecoder::new_opus(audio_stream_id, decoded_audio_stream_id).or_fail()?,
+                );
             }
         }
 

@@ -29,13 +29,10 @@ pub struct AudioDecoder {
 }
 
 impl AudioDecoder {
-    pub fn new_opus(/*
-         input_stream_id: MediaStreamId,
+    pub fn new_opus(
+        input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
-*/) -> orfail::Result<Self> {
-        let input_stream_id = MediaStreamId::new(0); // TODO
-        let output_stream_id = MediaStreamId::new(1); // TODO
-
+    ) -> orfail::Result<Self> {
         let stats = AudioDecoderStats::default();
         Ok(Self {
             input_stream_id,

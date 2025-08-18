@@ -25,7 +25,7 @@ pub struct AudioSourceThread {
     decoder: AudioDecoder,
     decoder_stats: AudioDecoderStats,
     tx: channel::SyncSender<AudioData>,
-    output_stream_id: MediaStreamId,
+    read_stream_id: MediaStreamId,
     start_timestamp: Duration,
     media_file_queue: MediaFileQueue,
 }
@@ -37,13 +37,15 @@ impl AudioSourceThread {
         stream_id_gen: &mut MediaStreamIdGenerator,
         stats: SharedStats,
     ) -> orfail::Result<channel::Receiver<AudioData>> {
-        // 音声入力は Opus 前提
-        let decoder = AudioDecoder::new_opus().or_fail()?;
+        let read_stream_id = stream_id_gen.next_id();
+        let decoded_stream_id = stream_id_gen.next_id();
 
-        let output_stream_id = stream_id_gen.next_id();
+        // 音声入力は Opus 前提
+        let decoder = AudioDecoder::new_opus(read_stream_id, decoded_stream_id).or_fail()?;
+
         let mut media_file_queue = MediaFileQueue::new(source_info);
         let reader = media_file_queue
-            .next_audio_reader(output_stream_id)
+            .next_audio_reader(read_stream_id)
             .or_fail()?
             .or_fail()?;
         let start_timestamp = source_info.start_timestamp;
@@ -58,7 +60,7 @@ impl AudioSourceThread {
                 ..Default::default()
             },
             tx,
-            output_stream_id,
+            read_stream_id,
             start_timestamp,
             media_file_queue,
         };
@@ -101,7 +103,7 @@ impl AudioSourceThread {
 
             if let Some(reader) = self
                 .media_file_queue
-                .next_audio_reader(self.output_stream_id)
+                .next_audio_reader(self.read_stream_id)
                 .or_fail()?
             {
                 // 次の分割録画ファイルがある
@@ -122,7 +124,7 @@ impl AudioSourceThread {
 #[derive(Debug)]
 pub struct VideoSourceThread {
     reader: VideoReader,
-    output_stream_id: MediaStreamId,
+    read_stream_id: MediaStreamId,
     tx: channel::SyncSender<VideoFrame>,
     start_timestamp: Duration,
     decoder: VideoDecoder,
@@ -140,17 +142,17 @@ impl VideoSourceThread {
     ) -> orfail::Result<channel::Receiver<VideoFrame>> {
         let start_timestamp = source_info.start_timestamp;
 
-        let output_stream_id = stream_id_gen.next_id();
+        let read_stream_id = stream_id_gen.next_id();
         let mut media_file_queue = MediaFileQueue::new(source_info);
         let reader = media_file_queue
-            .next_video_reader(output_stream_id)
+            .next_video_reader(read_stream_id)
             .or_fail()?
             .or_fail()?;
 
         let (tx, rx) = channel::sync_channel();
         let mut this = Self {
             reader,
-            output_stream_id,
+            read_stream_id,
             tx,
             start_timestamp,
             decoder,
@@ -179,7 +181,7 @@ impl VideoSourceThread {
 
             if let Some(reader) = self
                 .media_file_queue
-                .next_video_reader(self.output_stream_id)
+                .next_video_reader(self.read_stream_id)
                 .or_fail()?
             {
                 // 次の分割録画ファイルがある
@@ -286,7 +288,7 @@ impl MediaFileQueue {
 
     fn next_audio_reader(
         &mut self,
-        output_stream_id: MediaStreamId,
+        read_stream_id: MediaStreamId,
     ) -> orfail::Result<Option<AudioReader>> {
         let Some(info) = self.reverse_queue.pop() else {
             return Ok(None);
@@ -294,13 +296,12 @@ impl MediaFileQueue {
 
         let reader = if self.format == ContainerFormat::Webm {
             AudioReader::Webm(
-                WebmAudioReader::new(self.source_id.clone(), output_stream_id, info.path)
+                WebmAudioReader::new(self.source_id.clone(), read_stream_id, info.path)
                     .or_fail()?,
             )
         } else {
             AudioReader::Mp4(
-                Mp4AudioReader::new(self.source_id.clone(), output_stream_id, info.path)
-                    .or_fail()?,
+                Mp4AudioReader::new(self.source_id.clone(), read_stream_id, info.path).or_fail()?,
             )
         };
         Ok(Some(reader))
@@ -308,7 +309,7 @@ impl MediaFileQueue {
 
     fn next_video_reader(
         &mut self,
-        output_stream_id: MediaStreamId,
+        read_stream_id: MediaStreamId,
     ) -> orfail::Result<Option<VideoReader>> {
         let Some(info) = self.reverse_queue.pop() else {
             return Ok(None);
@@ -316,13 +317,12 @@ impl MediaFileQueue {
 
         let reader = if self.format == ContainerFormat::Webm {
             VideoReader::Webm(
-                WebmVideoReader::new(self.source_id.clone(), output_stream_id, info.path)
+                WebmVideoReader::new(self.source_id.clone(), read_stream_id, info.path)
                     .or_fail()?,
             )
         } else {
             VideoReader::Mp4(
-                Mp4VideoReader::new(self.source_id.clone(), output_stream_id, info.path)
-                    .or_fail()?,
+                Mp4VideoReader::new(self.source_id.clone(), read_stream_id, info.path).or_fail()?,
             )
         };
         Ok(Some(reader))
