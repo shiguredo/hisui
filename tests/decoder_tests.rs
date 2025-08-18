@@ -1,5 +1,6 @@
 use hisui::{
     decoder::{VideoDecoder, VideoDecoderOptions},
+    media::MediaStreamId,
     metadata::SourceId,
     reader_mp4::Mp4VideoReader,
     stats::VideoDecoderStats,
@@ -9,14 +10,25 @@ use orfail::OrFail;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
 
+// 実質的には使われないので値はなんでもいい
+const DUMMY_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+
 #[test]
 fn h264_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h264");
     let source_id1 = SourceId::new("archive-blue-640x480-h264");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h264.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h264.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        DUMMY_STREAM_ID,
+        "testdata/archive-blue-640x480-h264.mp4",
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        DUMMY_STREAM_ID,
+        "tstdata/archive-red-320x320-h264.mp4",
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -26,10 +38,18 @@ fn h264_multi_resolutions() -> orfail::Result<()> {
 fn h265_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h265");
     let source_id1 = SourceId::new("archive-red-320x320-h265");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h265.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h265.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        DUMMY_STREAM_ID,
+        "tstdata/archive-blue-640x480-h265.mp4",
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        DUMMY_STREAM_ID,
+        "tstdata/archive-red-320x320-h265.mp4",
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -38,10 +58,18 @@ fn h265_multi_resolutions() -> orfail::Result<()> {
 fn vp9_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-vp9");
     let source_id1 = SourceId::new("archive-red-320x320-vp9");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-vp9.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-vp9.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        DUMMY_STREAM_ID,
+        "tstdata/archive-blue-640x480-vp9.mp4",
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        DUMMY_STREAM_ID,
+        "tstdata/archive-red-320x320-vp9.mp4",
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -50,10 +78,18 @@ fn vp9_multi_resolutions() -> orfail::Result<()> {
 fn av1_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-av1");
     let source_id1 = SourceId::new("archive-red-320x320-av1");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-av1.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-av1.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        DUMMY_STREAM_ID,
+        "tstdata/archive-blue-640x480-av1.mp4",
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        DUMMY_STREAM_ID,
+        "tstdata/archive-red-320x320-av1.mp4",
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }

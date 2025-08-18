@@ -1,13 +1,21 @@
 use hisui::{
+    media::MediaStreamId,
     metadata::SourceId,
     reader_webm::{WebmAudioReader, WebmVideoReader},
 };
 use orfail::OrFail;
 
+// 実質的には使われないので値はなんでもいい
+const DUMMY_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+
 #[test]
 fn webm_audio_reader_test() -> orfail::Result<()> {
-    let reader = WebmAudioReader::new(SourceId::new("dummy"), "testdata/archive-black-silent.webm")
-        .or_fail()?;
+    let reader = WebmAudioReader::new(
+        SourceId::new("dummy"),
+        DUMMY_STREAM_ID,
+        "testdata/archive-black-silent.webm",
+    )
+    .or_fail()?;
     for audio_data in reader {
         audio_data.or_fail()?;
     }
@@ -16,8 +24,12 @@ fn webm_audio_reader_test() -> orfail::Result<()> {
 
 #[test]
 fn webm_video_reader_test() -> orfail::Result<()> {
-    let reader = WebmVideoReader::new(SourceId::new("dummy"), "testdata/archive-black-silent.webm")
-        .or_fail()?;
+    let reader = WebmVideoReader::new(
+        SourceId::new("dummy"),
+        DUMMY_STREAM_ID,
+        "testdata/archive-black-silent.webm",
+    )
+    .or_fail()?;
     for video_frame in reader {
         video_frame.or_fail()?;
     }
