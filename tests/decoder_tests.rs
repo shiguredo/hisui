@@ -1,5 +1,6 @@
 use hisui::{
     decoder::{VideoDecoder, VideoDecoderOptions},
+    media::MediaStreamId,
     metadata::SourceId,
     reader_mp4::Mp4VideoReader,
     stats::VideoDecoderStats,
@@ -76,7 +77,9 @@ where
     };
 
     // デコードする
-    let mut decoder = VideoDecoder::new(options);
+    let input_stream_id = MediaStreamId::new(0);
+    let output_stream_id = MediaStreamId::new(0);
+    let mut decoder = VideoDecoder::new(input_stream_id, output_stream_id, options);
     let mut output_frames = Vec::new();
     let mut blue_count = 0;
     let mut red_count = 0;

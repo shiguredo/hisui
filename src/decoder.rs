@@ -185,7 +185,7 @@ impl VideoDecoder {
     }
 
     // TODO: delete
-    pub(crate) fn decode(
+    pub fn decode(
         &mut self,
         frame: VideoFrame,
         stats: &mut VideoDecoderStats,
@@ -194,12 +194,12 @@ impl VideoDecoder {
     }
 
     // TODO: delete
-    pub(crate) fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> orfail::Result<()> {
         self.inner.finish()
     }
 
     // TODO: delete
-    pub(crate) fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
+    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
         self.inner.next_decoded_frame()
     }
 }

@@ -143,7 +143,7 @@ fn simple_single_source() -> noargs::Result<()> {
 
     let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
     for frame in video_samples {
-        decoder.decode(frame).or_fail()?;
+        decoder.decode(&frame).or_fail()?;
         check_decoded_frames(&mut decoder).or_fail()?;
     }
     decoder.finish().or_fail()?;
@@ -328,7 +328,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 
     let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
     for frame in video_samples {
-        decoder.decode(frame).or_fail()?;
+        decoder.decode(&frame).or_fail()?;
         check_decoded_frames(&mut decoder).or_fail()?;
     }
     decoder.finish().or_fail()?;
@@ -430,7 +430,7 @@ fn two_regions() -> noargs::Result<()> {
 
     let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
     for frame in video_samples {
-        decoder.decode(frame).or_fail()?;
+        decoder.decode(&frame).or_fail()?;
         check_decoded_frames(&mut decoder).or_fail()?;
     }
     decoder.finish().or_fail()?;
