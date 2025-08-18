@@ -78,7 +78,7 @@ enum AudioReaderInner {
 impl AudioReaderInner {
     fn stats(&self) -> ProcessorStats {
         match self {
-            Self::Mp4(r) => r.stats(),
+            Self::Mp4(r) => ProcessorStats::Mp4AudioReader(r.stats().clone()),
             Self::Webm(r) => r.stats(),
         }
     }

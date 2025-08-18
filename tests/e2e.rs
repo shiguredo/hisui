@@ -37,7 +37,7 @@ fn empty_source() -> noargs::Result<()> {
     // 結果ファイルを確認（映像・音声トラックが存在しない）
     assert!(out_file.path().exists());
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path())
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0
@@ -85,7 +85,7 @@ fn simple_single_source() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
         Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
 
@@ -94,9 +94,7 @@ fn simple_single_source() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
-        unreachable!()
-    };
+    let audio_stats = audio_reader.stats();
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -183,7 +181,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
         Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
 
@@ -195,9 +193,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     let _video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
-        unreachable!()
-    };
+    let audio_stats = audio_reader.stats();
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -259,7 +255,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
         Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
 
@@ -268,9 +264,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
-        unreachable!()
-    };
+    let audio_stats = audio_reader.stats();
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -384,7 +378,7 @@ fn two_regions() -> noargs::Result<()> {
 
     // 音声はなし
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path())
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0

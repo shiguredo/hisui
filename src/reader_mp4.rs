@@ -19,7 +19,7 @@ use crate::{
     metadata::SourceId,
     stats::{
         Mp4AudioReaderStats, Mp4VideoReaderStats, ProcessorStats, Seconds, SharedAtomicSeconds,
-        SharedOption, VideoResolution,
+        VideoResolution,
     },
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
@@ -231,6 +231,7 @@ impl Iterator for Mp4VideoReaderInner {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: refactor
         let (result, elapsed) = Seconds::elapsed(|| self.next_video_frame());
         self.stats.total_processing_seconds.add(elapsed);
         if matches!(result, Some(Err(_))) {
@@ -244,33 +245,21 @@ impl Iterator for Mp4VideoReaderInner {
 pub struct Mp4AudioReader {
     // 音声トラックが存在しない場合は None になる
     inner: Option<Mp4AudioReaderInner>,
-
-    // 音声トラックが存在しない時の統計値
-    default_stats: Mp4AudioReaderStats,
+    stats: Mp4AudioReaderStats,
 }
 
 impl Mp4AudioReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let default_stats = Mp4AudioReaderStats {
+        let stats = Mp4AudioReaderStats {
             input_file: path.as_ref().to_path_buf(),
             ..Default::default()
         };
-
-        let inner = Mp4AudioReaderInner::new(source_id, path).or_fail()?;
-
-        Ok(Self {
-            inner,
-            default_stats,
-        })
+        let inner = Mp4AudioReaderInner::new(source_id, path, stats.clone()).or_fail()?;
+        Ok(Self { inner, stats })
     }
 
-    pub fn stats(&self) -> ProcessorStats {
-        ProcessorStats::Mp4AudioReader(
-            self.inner
-                .as_ref()
-                .map_or(&self.default_stats, |x| &x.stats)
-                .clone(),
-        )
+    pub fn stats(&self) -> &Mp4AudioReaderStats {
+        &self.stats
     }
 }
 
@@ -293,7 +282,11 @@ pub struct Mp4AudioReaderInner {
 }
 
 impl Mp4AudioReaderInner {
-    fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Option<Self>> {
+    fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: Mp4AudioReaderStats,
+    ) -> orfail::Result<Option<Self>> {
         let start_time = Instant::now();
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
@@ -305,12 +298,10 @@ impl Mp4AudioReaderInner {
 
         file.seek(SeekFrom::Start(0)).or_fail()?;
 
-        let stats = Mp4AudioReaderStats {
-            input_file: path.as_ref().canonicalize().or_fail()?,
-            codec: SharedOption::new(Some(CodecName::Opus)),
-            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
-            ..Default::default()
-        };
+        stats.codec.set(CodecName::Opus);
+        stats
+            .total_processing_seconds
+            .add(Seconds::new(start_time.elapsed()));
 
         Ok(Some(Self {
             source_id,
