@@ -6,7 +6,6 @@ use crate::{
     metadata::{ContainerFormat, SourceId},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::VideoDecoderStats,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
@@ -111,7 +110,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut video_codec = None;
     let mut video_samples = Vec::new();
     let mut video_decoder = None;
-    let mut video_decoder_stats = VideoDecoderStats::default();
     let mut decoded_count = 0;
     for sample in video_reader {
         let sample = sample.or_fail()?;
@@ -145,7 +143,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         });
 
         if let Some(decoder) = &mut video_decoder {
-            decoder.decode(sample, &mut video_decoder_stats).or_fail()?;
+            decoder.decode(sample).or_fail()?;
             while let Some(decoded) = decoder.next_decoded_frame() {
                 video_samples[decoded_count].update(&decoded);
                 decoded_count += 1;

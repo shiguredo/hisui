@@ -3,7 +3,6 @@ use hisui::{
     media::MediaStreamId,
     metadata::SourceId,
     reader_mp4::Mp4VideoReader,
-    stats::VideoDecoderStats,
     video::VideoFrame,
 };
 use orfail::OrFail;
@@ -63,7 +62,6 @@ fn multi_resolutions_test<I>(reader0: I, reader1: I) -> orfail::Result<()>
 where
     I: Iterator<Item = orfail::Result<VideoFrame>>,
 {
-    let mut stats = VideoDecoderStats::default();
     let options = VideoDecoderOptions {
         openh264_lib: if let Ok(path) = std::env::var("OPENH264_PATH") {
             Some(Openh264Library::load(path).or_fail()?)
@@ -86,7 +84,7 @@ where
 
     for input_frame in reader0 {
         let input_frame = prepend_h264_sps_pps(input_frame.or_fail()?);
-        decoder.decode(input_frame, &mut stats).or_fail()?;
+        decoder.decode(input_frame).or_fail()?;
         blue_count += 1;
         while let Some(output_frame) = decoder.next_decoded_frame() {
             output_frames.push(output_frame);
@@ -96,7 +94,7 @@ where
     // このタイミングで解像度などが切り替わる
     for input_frame in reader1 {
         let input_frame = prepend_h264_sps_pps(input_frame.or_fail()?);
-        decoder.decode(input_frame, &mut stats).or_fail()?;
+        decoder.decode(input_frame).or_fail()?;
         red_count += 1;
         while let Some(output_frame) = decoder.next_decoded_frame() {
             output_frames.push(output_frame);

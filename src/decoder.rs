@@ -185,12 +185,8 @@ impl VideoDecoder {
     }
 
     // TODO: delete
-    pub fn decode(
-        &mut self,
-        frame: VideoFrame,
-        stats: &mut VideoDecoderStats,
-    ) -> orfail::Result<()> {
-        self.inner.decode(&frame, stats)
+    pub fn decode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+        self.inner.decode(&frame, &mut self.stats)
     }
 
     // TODO: delete
@@ -217,6 +213,12 @@ impl MediaProcessor for VideoDecoder {
         // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
+
+            self.stats.total_input_video_frame_count.add(1);
+            if let Some(id) = &frame.source_id {
+                self.stats.source_id.set_once(|| id.clone());
+            }
+
             let (_, elapsed) =
                 Seconds::try_elapsed(|| self.inner.decode(&frame, &mut self.stats).or_fail())?;
             self.stats.total_processing_seconds.add(elapsed);

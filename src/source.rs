@@ -13,7 +13,7 @@ use crate::{
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::{ProcessorStats, Seconds, SharedStats, VideoDecoderStats, VideoResolution},
+    stats::SharedStats,
     video::VideoFrame,
 };
 
@@ -115,7 +115,6 @@ pub struct VideoSourceThread {
     tx: channel::SyncSender<VideoFrame>,
     start_timestamp: Duration,
     decoder: VideoDecoder,
-    decoder_stats: VideoDecoderStats,
     media_file_queue: MediaFileQueue,
 }
 
@@ -146,20 +145,17 @@ impl VideoSourceThread {
             tx,
             start_timestamp,
             decoder,
-            decoder_stats: VideoDecoderStats::default(),
             media_file_queue,
         };
         std::thread::spawn(move || {
             if let Err(e) = this.run(stats.clone()).or_fail() {
                 error_flag.set();
-                this.decoder_stats.error.set(true);
+                this.decoder.set_error();
                 log::error!("failed to load video source: {e}");
             }
             stats.with_lock(|stats| {
                 stats.processors.push(this.reader.spec().stats);
-                stats
-                    .processors
-                    .push(ProcessorStats::VideoDecoder(this.decoder_stats));
+                stats.processors.push(this.decoder.spec().stats);
             });
         });
         Ok(rx)
@@ -192,10 +188,6 @@ impl VideoSourceThread {
         let mut next_timestamp = self.start_timestamp;
         loop {
             while let Some(frame) = self.decoder.next_decoded_frame() {
-                self.decoder_stats.total_output_video_frame_count.add(1);
-                self.decoder_stats
-                    .resolutions
-                    .insert(VideoResolution::new(&frame));
                 if !self.tx.send(frame) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                     log::info!("receiver of video source has been closed");
@@ -208,32 +200,15 @@ impl VideoSourceThread {
                 frame.timestamp += self.start_timestamp;
                 next_timestamp = frame.timestamp + frame.duration;
 
-                self.decoder_stats.total_input_video_frame_count.add(1);
-                if let Some(id) = &frame.source_id
-                    && self.decoder_stats.source_id.get().is_none()
-                {
-                    self.decoder_stats.source_id.set(id.clone());
-                }
-
-                let (_, elapsed) = Seconds::try_elapsed(|| {
-                    self.decoder
-                        .decode(frame, &mut self.decoder_stats)
-                        .or_fail()
-                })?;
-                self.decoder_stats.total_processing_seconds.add(elapsed);
+                self.decoder.decode(frame).or_fail()?;
             } else {
                 break;
             }
         }
 
-        let (_, elapsed) = Seconds::try_elapsed(|| self.decoder.finish().or_fail())?;
-        self.decoder_stats.total_processing_seconds.add(elapsed);
+        self.decoder.finish().or_fail()?;
 
         while let Some(frame) = self.decoder.next_decoded_frame() {
-            self.decoder_stats.total_output_video_frame_count.add(1);
-            self.decoder_stats
-                .resolutions
-                .insert(VideoResolution::new(&frame));
             if !self.tx.send(frame) {
                 // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                 log::info!("receiver of video source has been closed");
