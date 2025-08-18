@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     audio::AudioDataReceiver,
     channel::{self, ErrorFlag},
-    decoder::{VideoDecoder, VideoDecoderOptions},
+    decoder::VideoDecoderOptions,
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
     media::MediaStreamIdGenerator,
@@ -220,11 +220,10 @@ pub fn create_audio_and_video_sources(
             let options = VideoDecoderOptions {
                 openh264_lib: openh264_lib.clone(),
             };
-            let decoder = VideoDecoder::new(options);
             let source_rx = VideoSourceThread::start(
                 error_flag.clone(),
                 source_info,
-                decoder,
+                options,
                 &mut stream_id_gen,
                 stats.clone(),
             )

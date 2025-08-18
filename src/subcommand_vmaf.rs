@@ -15,6 +15,7 @@ use crate::{
     encoder::{VideoEncoder, VideoEncoderThread},
     json::JsonObject,
     layout::Layout,
+    media::MediaStreamId,
     mixer_video::VideoMixerThread,
     stats::{Seconds, SharedStats, VideoDecoderStats},
     types::EngineName,
@@ -214,7 +215,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
     };
-    let mut decoder = VideoDecoder::new(options);
+    let dummy_stream_id = MediaStreamId::new(0);
+    let mut decoder = VideoDecoder::new(dummy_stream_id, dummy_stream_id, options);
     let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
     let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
 

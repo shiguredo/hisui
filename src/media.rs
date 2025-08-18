@@ -45,6 +45,16 @@ impl MediaSample {
         }
     }
 
+    pub fn expect_video_frame(self) -> orfail::Result<Arc<VideoFrame>> {
+        if let Self::Video(frame) = self {
+            Ok(frame)
+        } else {
+            Err(orfail::Failure::new(
+                "expected a video sample, but got an audio sample",
+            ))
+        }
+    }
+
     pub fn audio_data(data: AudioData) -> Self {
         Self::Audio(Arc::new(data))
     }

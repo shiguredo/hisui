@@ -54,7 +54,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
     let audio_stream_id = MediaStreamId::new(0);
-    let _video_stream_id = MediaStreamId::new(1);
+    let video_stream_id = MediaStreamId::new(1);
     let (audio_reader, video_reader): (Box<dyn Iterator<Item = _>>, Box<dyn Iterator<Item = _>>) =
         match format {
             ContainerFormat::Webm => {
@@ -107,6 +107,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         audio_samples.push(info);
     }
 
+    let decoded_video_stream_id = MediaStreamId::new(3);
     let mut video_codec = None;
     let mut video_samples = Vec::new();
     let mut video_decoder = None;
@@ -124,7 +125,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                         .transpose()
                         .or_fail()?,
                 };
-                video_decoder = Some(VideoDecoder::new(options));
+                video_decoder = Some(VideoDecoder::new(
+                    video_stream_id,
+                    decoded_video_stream_id,
+                    options,
+                ));
             }
         }
 

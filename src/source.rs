@@ -5,7 +5,7 @@ use orfail::OrFail;
 use crate::{
     audio::AudioData,
     channel::{self, ErrorFlag},
-    decoder::{AudioDecoder, VideoDecoder},
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     layout::AggregatedSourceInfo,
     media::{MediaStreamId, MediaStreamIdGenerator},
     metadata::{ContainerFormat, SourceId},
@@ -123,13 +123,16 @@ impl VideoSourceThread {
     pub fn start(
         error_flag: ErrorFlag,
         source_info: &AggregatedSourceInfo,
-        decoder: VideoDecoder,
+        options: VideoDecoderOptions,
         stream_id_gen: &mut MediaStreamIdGenerator,
         stats: SharedStats,
     ) -> orfail::Result<channel::Receiver<VideoFrame>> {
         let start_timestamp = source_info.start_timestamp;
 
         let read_stream_id = stream_id_gen.next_id();
+        let decoded_stream_id = stream_id_gen.next_id();
+        let decoder = VideoDecoder::new(read_stream_id, decoded_stream_id, options);
+
         let mut media_file_queue = MediaFileQueue::new(source_info);
         let reader = media_file_queue
             .next_video_reader(read_stream_id)
