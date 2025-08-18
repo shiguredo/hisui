@@ -8,6 +8,7 @@ use crate::{
     video::VideoFrame,
 };
 
+// TODO: 最終的にはこの enum はなくして直接 Processor に追加する
 #[derive(Debug)]
 pub enum AudioReader {
     Mp4(Mp4AudioReader),
@@ -23,7 +24,10 @@ impl AudioReader {
     }
 
     pub fn output_stream_id(&self) -> MediaStreamId {
-        todo!()
+        match self {
+            AudioReader::Mp4(r) => r.output_stream_id(),
+            AudioReader::Webm(r) => r.output_stream_id(),
+        }
     }
 }
 
@@ -65,6 +69,7 @@ impl MediaProcessor for AudioReader {
     }
 }
 
+// TODO: 最終的にはこの enum はなくして直接 Processor に追加する
 #[derive(Debug)]
 #[expect(clippy::large_enum_variant)]
 pub enum VideoReader {
