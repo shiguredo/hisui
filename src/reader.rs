@@ -10,23 +10,23 @@ use crate::{
 
 // TODO: 最終的にはこの enum はなくして直接 Processor に追加する
 #[derive(Debug)]
-pub enum AudioReader {
-    Mp4(Mp4AudioReader),
-    Webm(WebmAudioReader),
+pub struct AudioReader {
+    output_stream_id: MediaStreamId,
+    inner: AudioReaderInner,
 }
 
 impl AudioReader {
-    pub fn stats(&self) -> ProcessorStats {
-        match self {
-            AudioReader::Mp4(r) => r.stats(),
-            AudioReader::Webm(r) => r.stats(),
+    pub fn new_mp4(output_stream_id: MediaStreamId, reader: Mp4AudioReader) -> Self {
+        Self {
+            output_stream_id,
+            inner: AudioReaderInner::Mp4(reader),
         }
     }
 
-    pub fn output_stream_id(&self) -> MediaStreamId {
-        match self {
-            AudioReader::Mp4(r) => r.output_stream_id(),
-            AudioReader::Webm(r) => r.output_stream_id(),
+    pub fn new_webm(output_stream_id: MediaStreamId, reader: WebmAudioReader) -> Self {
+        Self {
+            output_stream_id,
+            inner: AudioReaderInner::Webm(reader),
         }
     }
 }
@@ -35,9 +35,9 @@ impl Iterator for AudioReader {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            AudioReader::Mp4(r) => r.next(),
-            AudioReader::Webm(r) => r.next(),
+        match &mut self.inner {
+            AudioReaderInner::Mp4(r) => r.next(),
+            AudioReaderInner::Webm(r) => r.next(),
         }
     }
 }
@@ -46,8 +46,8 @@ impl MediaProcessor for AudioReader {
     fn spec(&self) -> MediaProcessorSpec {
         MediaProcessorSpec {
             input_stream_ids: Vec::new(),
-            output_stream_ids: vec![self.output_stream_id()],
-            stats: self.stats(),
+            output_stream_ids: vec![self.output_stream_id],
+            stats: self.inner.stats(),
         }
     }
 
@@ -62,9 +62,24 @@ impl MediaProcessor for AudioReader {
             None => Ok(MediaProcessorOutput::Finished),
             Some(Err(e)) => Err(e),
             Some(Ok(data)) => Ok(MediaProcessorOutput::audio_data(
-                self.output_stream_id(),
+                self.output_stream_id,
                 data,
             )),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum AudioReaderInner {
+    Mp4(Mp4AudioReader),
+    Webm(WebmAudioReader),
+}
+
+impl AudioReaderInner {
+    fn stats(&self) -> ProcessorStats {
+        match self {
+            Self::Mp4(r) => r.stats(),
+            Self::Webm(r) => r.stats(),
         }
     }
 }

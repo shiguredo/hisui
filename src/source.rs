@@ -59,6 +59,7 @@ impl AudioSourceThread {
         std::thread::spawn(move || {
             if let Err(e) = this.run(stats.clone()).or_fail() {
                 error_flag.set();
+                this.reader.set_error();
                 this.decoder.set_error();
                 log::error!("failed to load audio source: {e}");
             }
@@ -94,7 +95,7 @@ impl AudioSourceThread {
             {
                 // 次の分割録画ファイルがある
                 stats.with_lock(|stats| {
-                    stats.processors.push(self.reader.stats());
+                    stats.processors.push(self.reader.spec().stats);
                 });
                 self.reader = reader;
 
@@ -281,13 +282,14 @@ impl MediaFileQueue {
         };
 
         let reader = if self.format == ContainerFormat::Webm {
-            AudioReader::Webm(
-                WebmAudioReader::new(self.source_id.clone(), read_stream_id, info.path)
-                    .or_fail()?,
+            AudioReader::new_webm(
+                read_stream_id,
+                WebmAudioReader::new(self.source_id.clone(), info.path).or_fail()?,
             )
         } else {
-            AudioReader::Mp4(
-                Mp4AudioReader::new(self.source_id.clone(), read_stream_id, info.path).or_fail()?,
+            AudioReader::new_mp4(
+                read_stream_id,
+                Mp4AudioReader::new(self.source_id.clone(), info.path).or_fail()?,
             )
         };
         Ok(Some(reader))

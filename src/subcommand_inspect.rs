@@ -59,12 +59,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         match format {
             ContainerFormat::Webm => {
                 let audio = Box::new(
-                    WebmAudioReader::new(
-                        dummy_source_id.clone(),
-                        audio_stream_id,
-                        &input_file_path,
-                    )
-                    .or_fail()?,
+                    WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
                 );
                 let video = Box::new(
                     WebmVideoReader::new(
@@ -78,8 +73,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             }
             ContainerFormat::Mp4 => {
                 let audio = Box::new(
-                    Mp4AudioReader::new(dummy_source_id.clone(), audio_stream_id, &input_file_path)
-                        .or_fail()?,
+                    Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
                 );
                 let video = Box::new(
                     Mp4VideoReader::new(dummy_source_id.clone(), video_stream_id, &input_file_path)

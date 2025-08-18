@@ -242,8 +242,6 @@ impl Iterator for Mp4VideoReaderInner {
 
 #[derive(Debug)]
 pub struct Mp4AudioReader {
-    output_stream_id: MediaStreamId,
-
     // 音声トラックが存在しない場合は None になる
     inner: Option<Mp4AudioReaderInner>,
 
@@ -252,11 +250,7 @@ pub struct Mp4AudioReader {
 }
 
 impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        output_stream_id: MediaStreamId,
-        path: P,
-    ) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
         let default_stats = Mp4AudioReaderStats {
             input_file: path.as_ref().to_path_buf(),
             ..Default::default()
@@ -265,14 +259,9 @@ impl Mp4AudioReader {
         let inner = Mp4AudioReaderInner::new(source_id, path).or_fail()?;
 
         Ok(Self {
-            output_stream_id,
             inner,
             default_stats,
         })
-    }
-
-    pub fn output_stream_id(&self) -> MediaStreamId {
-        self.output_stream_id
     }
 
     pub fn stats(&self) -> ProcessorStats {
