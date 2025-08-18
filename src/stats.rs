@@ -161,6 +161,24 @@ pub enum ProcessorStats {
     Mp4Writer(Mp4WriterStats),
 }
 
+impl ProcessorStats {
+    pub fn set_error(&self) {
+        match self {
+            ProcessorStats::Mp4AudioReader(stats) => stats.error.set(true),
+            ProcessorStats::Mp4VideoReader(stats) => stats.error.set(true),
+            ProcessorStats::WebmAudioReader(stats) => stats.error.set(true),
+            ProcessorStats::WebmVideoReader(stats) => stats.error.set(true),
+            ProcessorStats::AudioDecoder(stats) => stats.error.set(true),
+            ProcessorStats::VideoDecoder(stats) => stats.error.set(true),
+            ProcessorStats::AudioMixer(stats) => stats.error.set(true),
+            ProcessorStats::VideoMixer(stats) => stats.error.set(true),
+            ProcessorStats::AudioEncoder(stats) => stats.error.set(true),
+            ProcessorStats::VideoEncoder(stats) => stats.error.set(true),
+            ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
+        }
+    }
+}
+
 impl nojson::DisplayJson for ProcessorStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
@@ -891,6 +909,9 @@ pub struct Mp4WriterStats {
 
     /// MP4 出力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
+
+    /// エラーで中断したかどうか
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for Mp4WriterStats {
@@ -937,6 +958,7 @@ impl nojson::DisplayJson for Mp4WriterStats {
                 "total_processing_seconds",
                 self.total_processing_seconds.get_seconds(),
             )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }

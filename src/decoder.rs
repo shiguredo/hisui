@@ -49,7 +49,7 @@ impl AudioDecoder {
     }
 
     // TODO: remove
-    pub fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
+    pub(crate) fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
         // TODO: stats handling
         self.inner.decode(data).or_fail()
     }
