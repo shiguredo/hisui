@@ -78,7 +78,7 @@ impl AudioReaderInner {
     fn stats(&self) -> ProcessorStats {
         match self {
             Self::Mp4(r) => ProcessorStats::Mp4AudioReader(r.stats().clone()),
-            Self::Webm(r) => r.stats(),
+            Self::Webm(r) => ProcessorStats::WebmAudioReader(r.stats().clone()),
         }
     }
 }
@@ -154,7 +154,7 @@ impl VideoReaderInner {
     fn stats(&self) -> ProcessorStats {
         match self {
             Self::Mp4(r) => ProcessorStats::Mp4VideoReader(r.stats().clone()),
-            Self::Webm(r) => r.stats(),
+            Self::Webm(r) => ProcessorStats::WebmVideoReader(r.stats().clone()),
         }
     }
 }
