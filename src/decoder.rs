@@ -195,19 +195,33 @@ impl VideoDecoder {
         engines
     }
 
-    // TODO: delete
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
     pub fn decode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
-        self.inner.decode(&frame, &mut self.stats)
+        let input = MediaProcessorInput {
+            stream_id: self.input_stream_id,
+            sample: Some(MediaSample::video_frame(frame)),
+        };
+        self.process(input).or_fail()?;
+        Ok(())
     }
 
-    // TODO: delete
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
     pub fn finish(&mut self) -> orfail::Result<()> {
-        self.inner.finish()
+        let input = MediaProcessorInput {
+            stream_id: self.input_stream_id,
+            sample: None,
+        };
+        self.process(input).or_fail()?;
+        Ok(())
     }
 
-    // TODO: delete
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
     pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        self.inner.next_decoded_frame()
+        let Ok(MediaProcessorOutput::Processed { sample, .. }) = self.poll_output() else {
+            return None;
+        };
+        let decoded = sample.expect_video_frame().ok()?;
+        Arc::into_inner(decoded)
     }
 }
 
