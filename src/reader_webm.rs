@@ -460,6 +460,7 @@ impl Iterator for WebmAudioReader {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         let (result, elapsed) = Seconds::elapsed(|| self.read_audio_data().or_fail());
         self.stats.total_processing_seconds.add(elapsed);
         if result.is_err() {
@@ -622,6 +623,7 @@ impl Iterator for WebmVideoReader {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         let (result, elapsed) = Seconds::elapsed(|| self.read_video_frame().or_fail());
         self.stats.total_processing_seconds.add(elapsed);
         if result.is_err() {

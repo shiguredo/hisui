@@ -231,7 +231,7 @@ impl Iterator for Mp4VideoReaderInner {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: refactor
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         let (result, elapsed) = Seconds::elapsed(|| self.next_video_frame());
         self.stats.total_processing_seconds.add(elapsed);
         if matches!(result, Some(Err(_))) {
@@ -386,6 +386,7 @@ impl Iterator for Mp4AudioReaderInner {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         let (result, elapsed) = Seconds::elapsed(|| self.next_audio_data());
         self.stats.total_processing_seconds.add(elapsed);
         if matches!(result, Some(Err(_))) {

@@ -79,10 +79,12 @@ impl MediaProcessor for AudioDecoder {
 
         let (decoded, elapsed) = Seconds::try_elapsed(|| self.inner.decode(&data).or_fail())?;
         self.stats.total_audio_data_count.add(1);
-        self.stats.total_processing_seconds.add(elapsed);
         if let Some(id) = &data.source_id {
             self.stats.source_id.set_once(|| id.clone());
         }
+
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
+        self.stats.total_processing_seconds.add(elapsed);
 
         self.decoded.push_back(decoded);
         Ok(())
