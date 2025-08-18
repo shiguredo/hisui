@@ -54,7 +54,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
     let audio_stream_id = MediaStreamId::new(0);
-    let video_stream_id = MediaStreamId::new(1);
+    let _video_stream_id = MediaStreamId::new(1);
     let (audio_reader, video_reader): (Box<dyn Iterator<Item = _>>, Box<dyn Iterator<Item = _>>) =
         match format {
             ContainerFormat::Webm => {
@@ -62,12 +62,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                     WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
                 );
                 let video = Box::new(
-                    WebmVideoReader::new(
-                        dummy_source_id.clone(),
-                        video_stream_id,
-                        &input_file_path,
-                    )
-                    .or_fail()?,
+                    WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
                 );
                 (audio, video)
             }
@@ -76,8 +71,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                     Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
                 );
                 let video = Box::new(
-                    Mp4VideoReader::new(dummy_source_id.clone(), video_stream_id, &input_file_path)
-                        .or_fail()?,
+                    Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
                 );
                 (audio, video)
             }

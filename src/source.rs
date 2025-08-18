@@ -153,7 +153,7 @@ impl VideoSourceThread {
                 log::error!("failed to load video source: {e}");
             }
             stats.with_lock(|stats| {
-                stats.processors.push(this.reader.stats());
+                stats.processors.push(this.reader.spec().stats);
                 stats
                     .processors
                     .push(ProcessorStats::VideoDecoder(this.decoder_stats));
@@ -173,7 +173,7 @@ impl VideoSourceThread {
             {
                 // 次の分割録画ファイルがある
                 stats.with_lock(|stats| {
-                    stats.processors.push(self.reader.stats());
+                    stats.processors.push(self.reader.spec().stats);
                 });
                 self.reader = reader;
 
@@ -304,13 +304,14 @@ impl MediaFileQueue {
         };
 
         let reader = if self.format == ContainerFormat::Webm {
-            VideoReader::Webm(
-                WebmVideoReader::new(self.source_id.clone(), read_stream_id, info.path)
-                    .or_fail()?,
+            VideoReader::new_webm(
+                read_stream_id,
+                WebmVideoReader::new(self.source_id.clone(), info.path).or_fail()?,
             )
         } else {
-            VideoReader::Mp4(
-                Mp4VideoReader::new(self.source_id.clone(), read_stream_id, info.path).or_fail()?,
+            VideoReader::new_mp4(
+                read_stream_id,
+                Mp4VideoReader::new(self.source_id.clone(), info.path).or_fail()?,
             )
         };
         Ok(Some(reader))

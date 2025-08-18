@@ -8,7 +8,6 @@ use orfail::OrFail;
 
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
-    media::MediaStreamId,
     metadata::SourceId,
     stats::{
         ProcessorStats, Seconds, SharedAtomicSeconds, WebmAudioReaderStats, WebmVideoReaderStats,
@@ -473,7 +472,6 @@ impl Iterator for WebmAudioReader {
 #[derive(Debug)]
 pub struct WebmVideoReader {
     source_id: SourceId,
-    output_stream_id: MediaStreamId,
     header: VideoTrackHeader,
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
@@ -483,11 +481,7 @@ pub struct WebmVideoReader {
 }
 
 impl WebmVideoReader {
-    pub fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        output_stream_id: MediaStreamId,
-        path: P,
-    ) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
         let start_time = Instant::now();
         let file = std::fs::File::open(&path).or_fail()?;
         let mut reader = ElementReader::new(BufReader::new(file));
@@ -511,7 +505,6 @@ impl WebmVideoReader {
             ..Default::default()
         };
         Ok(Self {
-            output_stream_id,
             source_id,
             header,
             reader,
@@ -520,10 +513,6 @@ impl WebmVideoReader {
             prev_video_frame: None,
             stats,
         })
-    }
-
-    pub fn output_stream_id(&self) -> MediaStreamId {
-        self.output_stream_id
     }
 
     pub fn stats(&self) -> ProcessorStats {

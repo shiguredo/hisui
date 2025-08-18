@@ -8,7 +8,6 @@ use crate::{
     video::VideoFrame,
 };
 
-// TODO: 最終的にはこの enum はなくして直接 Processor に追加する
 #[derive(Debug)]
 pub struct AudioReader {
     output_stream_id: MediaStreamId,
@@ -84,26 +83,24 @@ impl AudioReaderInner {
     }
 }
 
-// TODO: 最終的にはこの enum はなくして直接 Processor に追加する
 #[derive(Debug)]
-#[expect(clippy::large_enum_variant)]
-pub enum VideoReader {
-    Mp4(Mp4VideoReader),
-    Webm(WebmVideoReader),
+pub struct VideoReader {
+    output_stream_id: MediaStreamId,
+    inner: VideoReaderInner,
 }
 
 impl VideoReader {
-    pub fn stats(&self) -> ProcessorStats {
-        match self {
-            VideoReader::Mp4(r) => r.stats(),
-            VideoReader::Webm(r) => r.stats(),
+    pub fn new_mp4(output_stream_id: MediaStreamId, reader: Mp4VideoReader) -> Self {
+        Self {
+            output_stream_id,
+            inner: VideoReaderInner::Mp4(reader),
         }
     }
 
-    pub fn output_stream_id(&self) -> MediaStreamId {
-        match self {
-            VideoReader::Mp4(r) => r.output_stream_id(),
-            VideoReader::Webm(r) => r.output_stream_id(),
+    pub fn new_webm(output_stream_id: MediaStreamId, reader: WebmVideoReader) -> Self {
+        Self {
+            output_stream_id,
+            inner: VideoReaderInner::Webm(reader),
         }
     }
 }
@@ -112,9 +109,9 @@ impl Iterator for VideoReader {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            VideoReader::Mp4(r) => r.next(),
-            VideoReader::Webm(r) => r.next(),
+        match &mut self.inner {
+            VideoReaderInner::Mp4(r) => r.next(),
+            VideoReaderInner::Webm(r) => r.next(),
         }
     }
 }
@@ -123,8 +120,8 @@ impl MediaProcessor for VideoReader {
     fn spec(&self) -> MediaProcessorSpec {
         MediaProcessorSpec {
             input_stream_ids: Vec::new(),
-            output_stream_ids: vec![self.output_stream_id()],
-            stats: self.stats(),
+            output_stream_ids: vec![self.output_stream_id],
+            stats: self.inner.stats(),
         }
     }
 
@@ -139,9 +136,25 @@ impl MediaProcessor for VideoReader {
             None => Ok(MediaProcessorOutput::Finished),
             Some(Err(e)) => Err(e),
             Some(Ok(frame)) => Ok(MediaProcessorOutput::video_frame(
-                self.output_stream_id(),
+                self.output_stream_id,
                 frame,
             )),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[expect(clippy::large_enum_variant)]
+enum VideoReaderInner {
+    Mp4(Mp4VideoReader),
+    Webm(WebmVideoReader),
+}
+
+impl VideoReaderInner {
+    fn stats(&self) -> ProcessorStats {
+        match self {
+            Self::Mp4(r) => ProcessorStats::Mp4VideoReader(r.stats().clone()),
+            Self::Webm(r) => r.stats(),
         }
     }
 }

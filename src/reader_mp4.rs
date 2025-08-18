@@ -15,34 +15,22 @@ use shiguredo_mp4::{
 
 use crate::{
     audio::{AudioData, AudioFormat},
-    media::MediaStreamId,
     metadata::SourceId,
-    stats::{
-        Mp4AudioReaderStats, Mp4VideoReaderStats, ProcessorStats, Seconds, SharedAtomicSeconds,
-        VideoResolution,
-    },
+    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, VideoResolution},
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
-    output_stream_id: MediaStreamId,
-
     // ビデオトラックが存在しない場合は None になる
     inner: Option<Mp4VideoReaderInner>,
-
-    // ビデオトラックが存在しない時の統計値
-    default_stats: Mp4VideoReaderStats,
+    stats: Mp4VideoReaderStats,
 }
 
 impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        output_stream_id: MediaStreamId,
-        path: P,
-    ) -> orfail::Result<Self> {
-        let default_stats = Mp4VideoReaderStats {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+        let stats = Mp4VideoReaderStats {
             input_file: path.as_ref().canonicalize().or_fail_with(|e| {
                 format!(
                     "failed to canonicalize path {}: {e}",
@@ -51,27 +39,12 @@ impl Mp4VideoReader {
             })?,
             ..Default::default()
         };
-
-        let inner = Mp4VideoReaderInner::new(source_id, path).or_fail()?;
-
-        Ok(Self {
-            output_stream_id,
-            inner,
-            default_stats,
-        })
+        let inner = Mp4VideoReaderInner::new(source_id, path, stats.clone()).or_fail()?;
+        Ok(Self { inner, stats })
     }
 
-    pub fn output_stream_id(&self) -> MediaStreamId {
-        self.output_stream_id
-    }
-
-    pub fn stats(&self) -> ProcessorStats {
-        ProcessorStats::Mp4VideoReader(
-            self.inner
-                .as_ref()
-                .map_or(&self.default_stats, |x| &x.stats)
-                .clone(),
-        )
+    pub fn stats(&self) -> &Mp4VideoReaderStats {
+        &self.stats
     }
 }
 
@@ -95,7 +68,11 @@ pub struct Mp4VideoReaderInner {
 }
 
 impl Mp4VideoReaderInner {
-    fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Option<Self>> {
+    fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: Mp4VideoReaderStats,
+    ) -> orfail::Result<Option<Self>> {
         let start_time = Instant::now();
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
@@ -107,16 +84,10 @@ impl Mp4VideoReaderInner {
 
         file.seek(SeekFrom::Start(0)).or_fail()?;
 
-        let stats = Mp4VideoReaderStats {
-            input_file: path.as_ref().canonicalize().or_fail_with(|e| {
-                format!(
-                    "failed to canonicalize path {}: {e}",
-                    path.as_ref().display()
-                )
-            })?,
-            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
-            ..Default::default()
-        };
+        stats
+            .total_processing_seconds
+            .add(Seconds::new(start_time.elapsed()));
+
         Ok(Some(Self {
             file,
             source_id,
