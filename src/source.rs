@@ -9,13 +9,11 @@ use crate::{
     layout::AggregatedSourceInfo,
     media::{MediaStreamId, MediaStreamIdGenerator},
     metadata::{ContainerFormat, SourceId},
+    processor::MediaProcessor,
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::{
-        AudioDecoderStats, ProcessorStats, Seconds, SharedStats, VideoDecoderStats, VideoResolution,
-    },
-    types::{CodecName, EngineName},
+    stats::{ProcessorStats, Seconds, SharedStats, VideoDecoderStats, VideoResolution},
     video::VideoFrame,
 };
 
@@ -23,7 +21,6 @@ use crate::{
 pub struct AudioSourceThread {
     reader: AudioReader,
     decoder: AudioDecoder,
-    decoder_stats: AudioDecoderStats,
     tx: channel::SyncSender<AudioData>,
     read_stream_id: MediaStreamId,
     start_timestamp: Duration,
@@ -54,11 +51,6 @@ impl AudioSourceThread {
         let mut this = Self {
             reader,
             decoder,
-            decoder_stats: AudioDecoderStats {
-                engine: Some(EngineName::Opus),
-                codec: Some(CodecName::Opus),
-                ..Default::default()
-            },
             tx,
             read_stream_id,
             start_timestamp,
@@ -67,15 +59,13 @@ impl AudioSourceThread {
         std::thread::spawn(move || {
             if let Err(e) = this.run(stats.clone()).or_fail() {
                 error_flag.set();
-                this.decoder_stats.error.set(true);
+                this.decoder.set_error();
                 log::error!("failed to load audio source: {e}");
             }
 
             stats.with_lock(|stats| {
-                stats.processors.push(this.reader.stats());
-                stats
-                    .processors
-                    .push(ProcessorStats::AudioDecoder(this.decoder_stats));
+                stats.processors.push(this.reader.spec().stats);
+                stats.processors.push(this.decoder.spec().stats);
             });
         });
         Ok(rx)
@@ -89,11 +79,7 @@ impl AudioSourceThread {
                 data.timestamp += self.start_timestamp;
                 next_timestamp = data.timestamp + data.duration;
 
-                let (decoded, elapsed) =
-                    Seconds::try_elapsed(|| self.decoder.decode(&data).or_fail())?;
-                self.decoder_stats.total_audio_data_count.add(1);
-                self.decoder_stats.total_processing_seconds.add(elapsed);
-                // TODO: self.decoder_stats.source_id = data.source_id;
+                let decoded = self.decoder.decode(&data).or_fail()?;
                 if !self.tx.send(decoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                     log::info!("receiver of audio source has been closed");
