@@ -7,6 +7,12 @@ use crate::video::VideoFrame;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MediaStreamId(u64);
 
+impl MediaStreamId {
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+}
+
 #[derive(Debug)]
 pub struct MediaStreamIdGenerator(MediaStreamId);
 
@@ -15,7 +21,7 @@ impl MediaStreamIdGenerator {
         Self(MediaStreamId(0))
     }
 
-    pub fn next_media_stream_id(&mut self) -> MediaStreamId {
+    pub fn next_id(&mut self) -> MediaStreamId {
         let id = self.0;
         self.0.0 += 1;
         id

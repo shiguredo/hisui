@@ -2,6 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
@@ -52,11 +53,17 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
+    let audio_stream_id = MediaStreamId::new(0);
     let (audio_reader, video_reader): (Box<dyn Iterator<Item = _>>, Box<dyn Iterator<Item = _>>) =
         match format {
             ContainerFormat::Webm => {
                 let audio = Box::new(
-                    WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                    WebmAudioReader::new(
+                        dummy_source_id.clone(),
+                        audio_stream_id,
+                        &input_file_path,
+                    )
+                    .or_fail()?,
                 );
                 let video = Box::new(
                     WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
@@ -65,7 +72,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             }
             ContainerFormat::Mp4 => {
                 let audio = Box::new(
-                    Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
+                    Mp4AudioReader::new(dummy_source_id.clone(), audio_stream_id, &input_file_path)
+                        .or_fail()?,
                 );
                 let video = Box::new(
                     Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,

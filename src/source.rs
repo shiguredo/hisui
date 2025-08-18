@@ -7,6 +7,7 @@ use crate::{
     channel::{self, ErrorFlag},
     decoder::{AudioDecoder, VideoDecoder},
     layout::AggregatedSourceInfo,
+    media::{MediaStreamId, MediaStreamIdGenerator},
     metadata::{ContainerFormat, SourceId},
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
@@ -24,6 +25,7 @@ pub struct AudioSourceThread {
     decoder: AudioDecoder,
     decoder_stats: AudioDecoderStats,
     tx: channel::SyncSender<AudioData>,
+    output_stream_id: MediaStreamId,
     start_timestamp: Duration,
     media_file_queue: MediaFileQueue,
 }
@@ -32,13 +34,18 @@ impl AudioSourceThread {
     pub fn start(
         error_flag: ErrorFlag,
         source_info: &AggregatedSourceInfo,
+        stream_id_gen: &mut MediaStreamIdGenerator,
         stats: SharedStats,
     ) -> orfail::Result<channel::Receiver<AudioData>> {
         // 音声入力は Opus 前提
         let decoder = AudioDecoder::new_opus().or_fail()?;
 
+        let output_stream_id = stream_id_gen.next_id();
         let mut media_file_queue = MediaFileQueue::new(source_info);
-        let reader = media_file_queue.next_audio_reader().or_fail()?.or_fail()?;
+        let reader = media_file_queue
+            .next_audio_reader(output_stream_id)
+            .or_fail()?
+            .or_fail()?;
         let start_timestamp = source_info.start_timestamp;
 
         let (tx, rx) = channel::sync_channel();
@@ -51,6 +58,7 @@ impl AudioSourceThread {
                 ..Default::default()
             },
             tx,
+            output_stream_id,
             start_timestamp,
             media_file_queue,
         };
@@ -91,7 +99,11 @@ impl AudioSourceThread {
                 }
             }
 
-            if let Some(reader) = self.media_file_queue.next_audio_reader().or_fail()? {
+            if let Some(reader) = self
+                .media_file_queue
+                .next_audio_reader(self.output_stream_id)
+                .or_fail()?
+            {
                 // 次の分割録画ファイルがある
                 stats.with_lock(|stats| {
                     stats.processors.push(self.reader.stats());
@@ -261,15 +273,24 @@ impl MediaFileQueue {
         }
     }
 
-    fn next_audio_reader(&mut self) -> orfail::Result<Option<AudioReader>> {
+    fn next_audio_reader(
+        &mut self,
+        output_stream_id: MediaStreamId,
+    ) -> orfail::Result<Option<AudioReader>> {
         let Some(info) = self.reverse_queue.pop() else {
             return Ok(None);
         };
 
         let reader = if self.format == ContainerFormat::Webm {
-            AudioReader::Webm(WebmAudioReader::new(self.source_id.clone(), info.path).or_fail()?)
+            AudioReader::Webm(
+                WebmAudioReader::new(self.source_id.clone(), output_stream_id, info.path)
+                    .or_fail()?,
+            )
         } else {
-            AudioReader::Mp4(Mp4AudioReader::new(self.source_id.clone(), info.path).or_fail()?)
+            AudioReader::Mp4(
+                Mp4AudioReader::new(self.source_id.clone(), output_stream_id, info.path)
+                    .or_fail()?,
+            )
         };
         Ok(Some(reader))
     }

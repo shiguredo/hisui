@@ -9,6 +9,7 @@ use crate::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
+    media::MediaStreamIdGenerator,
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},
@@ -197,6 +198,8 @@ pub fn create_audio_and_video_sources(
     stats: SharedStats,
     openh264_lib: Option<Openh264Library>,
 ) -> orfail::Result<(Vec<AudioDataReceiver>, Vec<VideoFrameReceiver>)> {
+    let mut stream_id_gen = MediaStreamIdGenerator::new();
+
     let audio_source_ids = layout.audio_source_ids().collect::<HashSet<_>>();
     let video_source_ids = layout.video_source_ids().collect::<HashSet<_>>();
 
@@ -204,9 +207,13 @@ pub fn create_audio_and_video_sources(
     let mut video_source_rxs = Vec::new();
     for (source_id, source_info) in &layout.sources {
         if audio_source_ids.contains(source_id) && source_info.audio {
-            let source_rx =
-                AudioSourceThread::start(error_flag.clone(), source_info, stats.clone())
-                    .or_fail()?;
+            let source_rx = AudioSourceThread::start(
+                error_flag.clone(),
+                source_info,
+                &mut stream_id_gen,
+                stats.clone(),
+            )
+            .or_fail()?;
             audio_source_rxs.push(source_rx);
         }
         if video_source_ids.contains(source_id) && source_info.video {
