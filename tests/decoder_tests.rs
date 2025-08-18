@@ -26,7 +26,7 @@ fn h264_multi_resolutions() -> orfail::Result<()> {
     let reader1 = Mp4VideoReader::new(
         source_id1,
         DUMMY_STREAM_ID,
-        "tstdata/archive-red-320x320-h264.mp4",
+        "testdata/archive-red-320x320-h264.mp4",
     )
     .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
@@ -41,13 +41,13 @@ fn h265_multi_resolutions() -> orfail::Result<()> {
     let reader0 = Mp4VideoReader::new(
         source_id0,
         DUMMY_STREAM_ID,
-        "tstdata/archive-blue-640x480-h265.mp4",
+        "testdata/archive-blue-640x480-h265.mp4",
     )
     .or_fail()?;
     let reader1 = Mp4VideoReader::new(
         source_id1,
         DUMMY_STREAM_ID,
-        "tstdata/archive-red-320x320-h265.mp4",
+        "testdata/archive-red-320x320-h265.mp4",
     )
     .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
@@ -61,13 +61,13 @@ fn vp9_multi_resolutions() -> orfail::Result<()> {
     let reader0 = Mp4VideoReader::new(
         source_id0,
         DUMMY_STREAM_ID,
-        "tstdata/archive-blue-640x480-vp9.mp4",
+        "testdata/archive-blue-640x480-vp9.mp4",
     )
     .or_fail()?;
     let reader1 = Mp4VideoReader::new(
         source_id1,
         DUMMY_STREAM_ID,
-        "tstdata/archive-red-320x320-vp9.mp4",
+        "testdata/archive-red-320x320-vp9.mp4",
     )
     .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
@@ -81,13 +81,13 @@ fn av1_multi_resolutions() -> orfail::Result<()> {
     let reader0 = Mp4VideoReader::new(
         source_id0,
         DUMMY_STREAM_ID,
-        "tstdata/archive-blue-640x480-av1.mp4",
+        "testdata/archive-blue-640x480-av1.mp4",
     )
     .or_fail()?;
     let reader1 = Mp4VideoReader::new(
         source_id1,
         DUMMY_STREAM_ID,
-        "tstdata/archive-red-320x320-av1.mp4",
+        "testdata/archive-red-320x320-av1.mp4",
     )
     .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
