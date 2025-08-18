@@ -13,7 +13,7 @@ use crate::{
     decoder_opus::OpusDecoder,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats},
+    stats::{AudioDecoderStats, ProcessorStats, Seconds, VideoDecoderStats},
     types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
 };
@@ -33,7 +33,11 @@ impl AudioDecoder {
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
     ) -> orfail::Result<Self> {
-        let stats = AudioDecoderStats::default();
+        let stats = AudioDecoderStats {
+            engine: Some(EngineName::Opus),
+            codec: Some(CodecName::Opus),
+            ..Default::default()
+        };
         Ok(Self {
             input_stream_id,
             output_stream_id,
@@ -74,7 +78,14 @@ impl MediaProcessor for AudioDecoder {
             return Ok(());
         };
         let data = sample.expect_audio_data().or_fail()?;
-        let decoded = self.decode(&data).or_fail()?;
+
+        let (decoded, elapsed) = Seconds::try_elapsed(|| self.inner.decode(&data).or_fail())?;
+        self.stats.total_audio_data_count.add(1);
+        self.stats.total_processing_seconds.add(elapsed);
+        if let Some(id) = &data.source_id {
+            self.stats.source_id.set_once(|| id.clone());
+        }
+
         self.decoded.push_back(decoded);
         Ok(())
     }

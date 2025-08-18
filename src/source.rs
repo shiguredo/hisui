@@ -93,7 +93,7 @@ impl AudioSourceThread {
                     Seconds::try_elapsed(|| self.decoder.decode(&data).or_fail())?;
                 self.decoder_stats.total_audio_data_count.add(1);
                 self.decoder_stats.total_processing_seconds.add(elapsed);
-                self.decoder_stats.source_id = data.source_id;
+                // TODO: self.decoder_stats.source_id = data.source_id;
                 if !self.tx.send(decoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                     log::info!("receiver of audio source has been closed");

@@ -418,7 +418,7 @@ impl nojson::DisplayJson for VideoEncoderStats {
 #[derive(Debug, Default, Clone)]
 pub struct AudioDecoderStats {
     /// 入力ソースの ID
-    pub source_id: Option<SourceId>,
+    pub source_id: SharedOption<SourceId>,
 
     /// デコーダーの種類
     pub engine: Option<EngineName>,
@@ -440,7 +440,7 @@ impl nojson::DisplayJson for AudioDecoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", "audio_decoder")?;
-            f.member("source_id", &self.source_id)?;
+            f.member("source_id", self.source_id.get())?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
@@ -585,6 +585,18 @@ impl<T> SharedOption<T> {
         // （なおここで警告ログなどを出すと量が多くなりすぎる可能性があるのでやらない）
         if let Ok(mut v) = self.0.lock() {
             *v = Some(value);
+        }
+    }
+
+    pub fn set_once<F>(&self, f: F)
+    where
+        F: FnOnce() -> T,
+    {
+        // [NOTE] 同上
+        if let Ok(mut v) = self.0.lock()
+            && v.is_none()
+        {
+            *v = Some(f());
         }
     }
 }
