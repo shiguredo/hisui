@@ -13,7 +13,7 @@ use crate::{
     decoder_opus::OpusDecoder,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioDecoderStats, ProcessorStats, Seconds, VideoDecoderStats},
+    stats::{AudioDecoderStats, ProcessorStats, Seconds, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
 };
@@ -190,7 +190,7 @@ impl VideoDecoder {
         frame: VideoFrame,
         stats: &mut VideoDecoderStats,
     ) -> orfail::Result<()> {
-        self.inner.decode(frame, stats)
+        self.inner.decode(&frame, stats)
     }
 
     // TODO: delete
@@ -214,26 +214,25 @@ impl MediaProcessor for VideoDecoder {
     }
 
     fn process(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let Some(sample) = input.sample else {
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
+        if let Some(sample) = input.sample {
+            let frame = sample.expect_video_frame().or_fail()?;
+            let (_, elapsed) =
+                Seconds::try_elapsed(|| self.inner.decode(&frame, &mut self.stats).or_fail())?;
+            self.stats.total_processing_seconds.add(elapsed);
+        } else {
             self.eos = true;
-            return Ok(());
+            let (_, elapsed) = Seconds::try_elapsed(|| self.inner.finish().or_fail())?;
+            self.stats.total_processing_seconds.add(elapsed);
         };
-        let frame = sample.expect_video_frame().or_fail()?;
 
-        todo!()
-        /*
-                let (decoded, elapsed) = Seconds::try_elapsed(|| self.inner.decode(&data).or_fail())?;
-                self.stats.total_video_frame_count.add(1);
-                if let Some(id) = &data.source_id {
-                    self.stats.source_id.set_once(|| id.clone());
-                }
+        while let Some(frame) = self.inner.next_decoded_frame() {
+            self.stats.total_output_video_frame_count.add(1);
+            self.stats.resolutions.insert(VideoResolution::new(&frame));
+            self.decoded.push_back(frame);
+        }
 
-                // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-                self.stats.total_processing_seconds.add(elapsed);
-
-                self.decoded.push_back(decoded);
-                Ok(())
-        */
+        Ok(())
     }
 
     fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
@@ -271,7 +270,7 @@ impl VideoDecoderInner {
         Self::Initial { options }
     }
 
-    fn decode(&mut self, frame: VideoFrame, stats: &mut VideoDecoderStats) -> orfail::Result<()> {
+    fn decode(&mut self, frame: &VideoFrame, stats: &mut VideoDecoderStats) -> orfail::Result<()> {
         match self {
             Self::Initial { options } => match frame.format {
                 #[cfg(target_os = "macos")]

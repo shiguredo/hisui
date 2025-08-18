@@ -24,7 +24,7 @@ impl Openh264Decoder {
         })
     }
 
-    pub fn decode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
         matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB).or_fail()?;
 
         if frame.keyframe {
@@ -54,7 +54,7 @@ impl Openh264Decoder {
         } else {
             self.inner.decode(&frame.data).or_fail()?
         };
-        self.input_queue.push_back(frame);
+        self.input_queue.push_back(frame.to_stripped());
 
         let Some(decoded) = decoded else {
             // まだデコーダーのバッファ内にある

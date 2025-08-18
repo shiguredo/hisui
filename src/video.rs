@@ -25,6 +25,20 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    pub fn to_stripped(&self) -> Self {
+        Self {
+            source_id: self.source_id.clone(),
+            data: Vec::new(),
+            format: self.format,
+            keyframe: self.keyframe,
+            width: self.width,
+            height: self.height,
+            timestamp: self.timestamp,
+            duration: self.duration,
+            sample_entry: None,
+        }
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub fn new_i420(
         input_frame: Self,
