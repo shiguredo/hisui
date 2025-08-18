@@ -11,7 +11,7 @@ use crate::{
     decoder_libvpx::LibvpxDecoder,
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
-    media::MediaStreamId,
+    media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats},
     types::{CodecName, EngineName},
@@ -20,12 +20,11 @@ use crate::{
 
 #[derive(Debug)]
 pub struct AudioDecoder {
-    /*
-        spec: MediaProcessorSpec,
-        stats: AudioDecoderStats,
-        decoded: VecDeque<AudioData>,
-        eos: bool,
-    */
+    input_stream_id: MediaStreamId,
+    output_stream_id: MediaStreamId,
+    stats: AudioDecoderStats,
+    decoded: VecDeque<AudioData>,
+    eos: bool,
     inner: AudioDecoderInner,
 }
 
@@ -34,22 +33,16 @@ impl AudioDecoder {
          input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
 */) -> orfail::Result<Self> {
-        /*
-                let stats = AudioDecoderStats::default();
-                let inner = OpusDecoder::new().or_fail()?;
-                let spec = MediaProcessorSpec {
-                    input_stream_ids: vec![input_stream_id],
-                    output_stream_ids: vec![output_stream_id],
-                    stats: ProcessorStats::AudioDecoder(stats.clone()),
-                };
-        */
-        Ok(Self::Opus {
-            /*
-                        spec,
-                        stats,
-                        decoded: VecDeque::new(),
-                        eos: false,
-            */
+        let input_stream_id = MediaStreamId::new(0); // TODO
+        let output_stream_id = MediaStreamId::new(1); // TODO
+
+        let stats = AudioDecoderStats::default();
+        Ok(Self {
+            input_stream_id,
+            output_stream_id,
+            stats,
+            decoded: VecDeque::new(),
+            eos: false,
             inner: AudioDecoderInner::new_opus().or_fail()?,
         })
     }
@@ -71,34 +64,37 @@ impl AudioDecoder {
 
 impl MediaProcessor for AudioDecoder {
     fn spec(&self) -> MediaProcessorSpec {
-        //self.spec.clone()
-        todo!()
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: vec![self.output_stream_id],
+            stats: ProcessorStats::AudioDecoder(self.stats.clone()),
+        }
     }
 
     fn process(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        /*
-                let Some(sample) = input.sample else {
-                    self.eos = true;
-                    return OK(());
-                };
-                let data = sample.expect_audio_data().or_fail()?;
-                let decoded = self.decode(&data).or_fail()?;
-        */
-        todo!()
+        let Some(sample) = input.sample else {
+            self.eos = true;
+            return Ok(());
+        };
+        let data = sample.expect_audio_data().or_fail()?;
+        let decoded = self.decode(&data).or_fail()?;
+        self.decoded.push_back(decoded);
+        Ok(())
     }
 
     fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        /*
-                match self.next() {
-                    None => Ok(MediaProcessorOutput::Finished),
-                    Some(Err(e)) => Err(e),
-                    Some(Ok(data)) => Ok(MediaProcessorOutput::audio_data(
-                        self.output_stream_id(),
-                        data,
-                    )),
-                }
-        */
-        todo!()
+        if let Some(data) = self.decoded.pop_back() {
+            Ok(MediaProcessorOutput::Processed {
+                stream_id: self.output_stream_id,
+                sample: MediaSample::audio_data(data),
+            })
+        } else if self.eos {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::Pending {
+                awaiting_stream_id: self.input_stream_id,
+            })
+        }
     }
 }
 
