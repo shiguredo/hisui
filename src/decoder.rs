@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
@@ -9,25 +11,53 @@ use crate::{
     decoder_libvpx::LibvpxDecoder,
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
-    stats::VideoDecoderStats,
+    media::MediaStreamId,
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats},
     types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
 };
 
 #[derive(Debug)]
-pub enum AudioDecoder {
-    Opus(OpusDecoder),
+pub struct AudioDecoder {
+    /*
+        spec: MediaProcessorSpec,
+        stats: AudioDecoderStats,
+        decoded: VecDeque<AudioData>,
+        eos: bool,
+    */
+    inner: AudioDecoderInner,
 }
 
 impl AudioDecoder {
-    pub fn new_opus() -> orfail::Result<Self> {
-        OpusDecoder::new().or_fail().map(Self::Opus)
+    pub fn new_opus(/*
+         input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+*/) -> orfail::Result<Self> {
+        /*
+                let stats = AudioDecoderStats::default();
+                let inner = OpusDecoder::new().or_fail()?;
+                let spec = MediaProcessorSpec {
+                    input_stream_ids: vec![input_stream_id],
+                    output_stream_ids: vec![output_stream_id],
+                    stats: ProcessorStats::AudioDecoder(stats.clone()),
+                };
+        */
+        Ok(Self::Opus {
+            /*
+                        spec,
+                        stats,
+                        decoded: VecDeque::new(),
+                        eos: false,
+            */
+            inner: AudioDecoderInner::new_opus().or_fail()?,
+        })
     }
 
+    // TODO: remove
     pub fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
-        match self {
-            AudioDecoder::Opus(decoder) => decoder.decode(data).or_fail(),
-        }
+        // TODO: stats handling
+        self.inner.decode(data).or_fail()
     }
 
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
@@ -35,6 +65,56 @@ impl AudioDecoder {
             CodecName::Aac => vec![],
             CodecName::Opus => vec![EngineName::Opus],
             _ => unreachable!(),
+        }
+    }
+}
+
+impl MediaProcessor for AudioDecoder {
+    fn spec(&self) -> MediaProcessorSpec {
+        //self.spec.clone()
+        todo!()
+    }
+
+    fn process(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        /*
+                let Some(sample) = input.sample else {
+                    self.eos = true;
+                    return OK(());
+                };
+                let data = sample.expect_audio_data().or_fail()?;
+                let decoded = self.decode(&data).or_fail()?;
+        */
+        todo!()
+    }
+
+    fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        /*
+                match self.next() {
+                    None => Ok(MediaProcessorOutput::Finished),
+                    Some(Err(e)) => Err(e),
+                    Some(Ok(data)) => Ok(MediaProcessorOutput::audio_data(
+                        self.output_stream_id(),
+                        data,
+                    )),
+                }
+        */
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+enum AudioDecoderInner {
+    Opus(OpusDecoder),
+}
+
+impl AudioDecoderInner {
+    fn new_opus() -> orfail::Result<Self> {
+        OpusDecoder::new().or_fail().map(Self::Opus)
+    }
+
+    fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
+        match self {
+            Self::Opus(decoder) => decoder.decode(data).or_fail(),
         }
     }
 }

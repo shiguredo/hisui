@@ -35,6 +35,16 @@ pub enum MediaSample {
 }
 
 impl MediaSample {
+    pub fn expect_audio_data(self) -> orfail::Result<Arc<AudioData>> {
+        if let Self::Audio(sample) = self {
+            Ok(sample)
+        } else {
+            Err(orfail::Failure::new(
+                "expected an audio sample, but got a video sample",
+            ))
+        }
+    }
+
     pub fn audio_data(data: AudioData) -> Self {
         Self::Audio(Arc::new(data))
     }
