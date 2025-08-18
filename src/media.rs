@@ -28,5 +28,15 @@ pub enum MediaSample {
     Video(Arc<VideoFrame>),
 }
 
+impl MediaSample {
+    pub fn audio_data(data: AudioData) -> Self {
+        Self::Audio(Arc::new(data))
+    }
+
+    pub fn video_frame(frame: VideoFrame) -> Self {
+        Self::Video(Arc::new(frame))
+    }
+}
+
 pub type MediaStreamReceiver = Receiver<MediaSample>;
 pub type MediaStreamSyncSender = SyncSender<MediaSample>;

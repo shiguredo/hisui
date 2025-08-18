@@ -1,3 +1,4 @@
+use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::stats::ProcessorStats;
 
@@ -17,7 +18,7 @@ pub struct MediaProcessorSpec {
 #[derive(Debug)]
 pub struct MediaProcessorInput {
     pub stream_id: MediaStreamId,
-    pub sample: Option<MediaSample>,
+    pub sample: Option<MediaSample>, // None なら EOS を表す
 }
 
 #[derive(Debug)]
@@ -30,4 +31,13 @@ pub enum MediaProcessorOutput {
         awaiting_stream_id: MediaStreamId,
     },
     Finished,
+}
+
+impl MediaProcessorOutput {
+    pub fn audio_data(stream_id: MediaStreamId, data: AudioData) -> Self {
+        Self::Processed {
+            stream_id,
+            sample: MediaSample::audio_data(data),
+        }
+    }
 }
