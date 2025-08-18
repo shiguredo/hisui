@@ -80,7 +80,7 @@ impl AudioSourceThread {
                 data.timestamp += self.start_timestamp;
                 next_timestamp = data.timestamp + data.duration;
 
-                let decoded = self.decoder.decode(&data).or_fail()?;
+                let decoded = self.decoder.decode(data).or_fail()?;
                 if !self.tx.send(decoded) {
                     // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
                     log::info!("receiver of audio source has been closed");

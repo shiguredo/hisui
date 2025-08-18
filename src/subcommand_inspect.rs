@@ -99,7 +99,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         };
 
         if let Some(decoder) = &mut audio_decoder {
-            let decoded = decoder.decode(&sample).or_fail()?;
+            let decoded = decoder.decode(sample).or_fail()?;
             info.decoded_data_size = Some(decoded.data.len());
         }
 

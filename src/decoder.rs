@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -48,8 +49,18 @@ impl AudioDecoder {
         })
     }
 
-    pub(crate) fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
-        self.inner.decode(data).or_fail()
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
+    pub(crate) fn decode(&mut self, data: AudioData) -> orfail::Result<AudioData> {
+        let input = MediaProcessorInput {
+            stream_id: self.input_stream_id,
+            sample: Some(MediaSample::audio_data(data)),
+        };
+        self.process(input).or_fail()?;
+        let MediaProcessorOutput::Processed { sample, .. } = self.poll_output().or_fail()? else {
+            return Err(orfail::Failure::new("bug"));
+        };
+        let decoded = sample.expect_audio_data().or_fail()?;
+        Ok(Arc::into_inner(decoded).or_fail()?)
     }
 
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
