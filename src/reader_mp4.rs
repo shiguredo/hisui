@@ -27,6 +27,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
+    output_stream_id: MediaStreamId,
+
     // ビデオトラックが存在しない場合は None になる
     inner: Option<Mp4VideoReaderInner>,
 
@@ -35,7 +37,11 @@ pub struct Mp4VideoReader {
 }
 
 impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        output_stream_id: MediaStreamId,
+        path: P,
+    ) -> orfail::Result<Self> {
         let default_stats = Mp4VideoReaderStats {
             input_file: path.as_ref().canonicalize().or_fail_with(|e| {
                 format!(
@@ -49,9 +55,14 @@ impl Mp4VideoReader {
         let inner = Mp4VideoReaderInner::new(source_id, path).or_fail()?;
 
         Ok(Self {
+            output_stream_id,
             inner,
             default_stats,
         })
+    }
+
+    pub fn output_stream_id(&self) -> MediaStreamId {
+        self.output_stream_id
     }
 
     pub fn stats(&self) -> ProcessorStats {

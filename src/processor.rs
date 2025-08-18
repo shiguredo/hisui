@@ -1,6 +1,7 @@
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::stats::ProcessorStats;
+use crate::video::VideoFrame;
 
 pub trait MediaProcessor {
     fn spec(&self) -> MediaProcessorSpec;
@@ -38,6 +39,13 @@ impl MediaProcessorOutput {
         Self::Processed {
             stream_id,
             sample: MediaSample::audio_data(data),
+        }
+    }
+
+    pub fn video_frame(stream_id: MediaStreamId, frame: VideoFrame) -> Self {
+        Self::Processed {
+            stream_id,
+            sample: MediaSample::video_frame(frame),
         }
     }
 }

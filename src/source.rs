@@ -122,6 +122,7 @@ impl AudioSourceThread {
 #[derive(Debug)]
 pub struct VideoSourceThread {
     reader: VideoReader,
+    output_stream_id: MediaStreamId,
     tx: channel::SyncSender<VideoFrame>,
     start_timestamp: Duration,
     decoder: VideoDecoder,
@@ -134,16 +135,22 @@ impl VideoSourceThread {
         error_flag: ErrorFlag,
         source_info: &AggregatedSourceInfo,
         decoder: VideoDecoder,
+        stream_id_gen: &mut MediaStreamIdGenerator,
         stats: SharedStats,
     ) -> orfail::Result<channel::Receiver<VideoFrame>> {
         let start_timestamp = source_info.start_timestamp;
 
+        let output_stream_id = stream_id_gen.next_id();
         let mut media_file_queue = MediaFileQueue::new(source_info);
-        let reader = media_file_queue.next_video_reader().or_fail()?.or_fail()?;
+        let reader = media_file_queue
+            .next_video_reader(output_stream_id)
+            .or_fail()?
+            .or_fail()?;
 
         let (tx, rx) = channel::sync_channel();
         let mut this = Self {
             reader,
+            output_stream_id,
             tx,
             start_timestamp,
             decoder,
@@ -170,7 +177,11 @@ impl VideoSourceThread {
         loop {
             let next_timestamp = self.run_one_reader().or_fail()?;
 
-            if let Some(reader) = self.media_file_queue.next_video_reader().or_fail()? {
+            if let Some(reader) = self
+                .media_file_queue
+                .next_video_reader(self.output_stream_id)
+                .or_fail()?
+            {
                 // 次の分割録画ファイルがある
                 stats.with_lock(|stats| {
                     stats.processors.push(self.reader.stats());
@@ -295,15 +306,24 @@ impl MediaFileQueue {
         Ok(Some(reader))
     }
 
-    fn next_video_reader(&mut self) -> orfail::Result<Option<VideoReader>> {
+    fn next_video_reader(
+        &mut self,
+        output_stream_id: MediaStreamId,
+    ) -> orfail::Result<Option<VideoReader>> {
         let Some(info) = self.reverse_queue.pop() else {
             return Ok(None);
         };
 
         let reader = if self.format == ContainerFormat::Webm {
-            VideoReader::Webm(WebmVideoReader::new(self.source_id.clone(), info.path).or_fail()?)
+            VideoReader::Webm(
+                WebmVideoReader::new(self.source_id.clone(), output_stream_id, info.path)
+                    .or_fail()?,
+            )
         } else {
-            VideoReader::Mp4(Mp4VideoReader::new(self.source_id.clone(), info.path).or_fail()?)
+            VideoReader::Mp4(
+                Mp4VideoReader::new(self.source_id.clone(), output_stream_id, info.path)
+                    .or_fail()?,
+            )
         };
         Ok(Some(reader))
     }

@@ -84,6 +84,13 @@ impl VideoReader {
             VideoReader::Webm(r) => r.stats(),
         }
     }
+
+    pub fn output_stream_id(&self) -> MediaStreamId {
+        match self {
+            VideoReader::Mp4(r) => r.output_stream_id(),
+            VideoReader::Webm(r) => r.output_stream_id(),
+        }
+    }
 }
 
 impl Iterator for VideoReader {
@@ -93,6 +100,33 @@ impl Iterator for VideoReader {
         match self {
             VideoReader::Mp4(r) => r.next(),
             VideoReader::Webm(r) => r.next(),
+        }
+    }
+}
+
+impl MediaProcessor for VideoReader {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: Vec::new(),
+            output_stream_ids: vec![self.output_stream_id()],
+            stats: self.stats(),
+        }
+    }
+
+    fn process(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
+        Err(orfail::Failure::new(
+            "BUG: reader does not require any input streams",
+        ))
+    }
+
+    fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        match self.next() {
+            None => Ok(MediaProcessorOutput::Finished),
+            Some(Err(e)) => Err(e),
+            Some(Ok(frame)) => Ok(MediaProcessorOutput::video_frame(
+                self.output_stream_id(),
+                frame,
+            )),
         }
     }
 }

@@ -221,9 +221,14 @@ pub fn create_audio_and_video_sources(
                 openh264_lib: openh264_lib.clone(),
             };
             let decoder = VideoDecoder::new(options);
-            let source_rx =
-                VideoSourceThread::start(error_flag.clone(), source_info, decoder, stats.clone())
-                    .or_fail()?;
+            let source_rx = VideoSourceThread::start(
+                error_flag.clone(),
+                source_info,
+                decoder,
+                &mut stream_id_gen,
+                stats.clone(),
+            )
+            .or_fail()?;
             video_source_rxs.push(source_rx);
         }
     }
