@@ -3,17 +3,12 @@ use std::time::Duration;
 use hisui::{
     decoder_libvpx::LibvpxDecoder,
     decoder_opus::OpusDecoder,
-    media::MediaStreamId,
     metadata::SourceId,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    stats::ProcessorStats,
     subcommand_legacy::{Args, Runner},
     types::CodecName,
 };
 use orfail::OrFail;
-
-// 実質的には使われないので値はなんでもいい
-const DUMMY_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 
 /// ソースが空の場合
 #[test]
@@ -43,7 +38,7 @@ fn empty_source() -> noargs::Result<()> {
         0
     );
     assert_eq!(
-        Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path())
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0
@@ -87,7 +82,7 @@ fn simple_single_source() -> noargs::Result<()> {
     let mut audio_reader =
         Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -105,9 +100,7 @@ fn simple_single_source() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
@@ -183,7 +176,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     let mut audio_reader =
         Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // [NOTE]
     // レイアウトファイル未指定だと映像の解像度が大きめになって
@@ -204,9 +197,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
 
     // レイアウトファイル未指定の場合には、一つのセルの解像度は 320x240 で、
@@ -257,7 +248,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     let mut audio_reader =
         Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -275,9 +266,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
@@ -374,7 +363,7 @@ fn two_regions() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), DUMMY_STREAM_ID, out_file.path()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 音声はなし
     assert_eq!(
@@ -388,9 +377,7 @@ fn two_regions() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
