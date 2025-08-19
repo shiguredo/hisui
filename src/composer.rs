@@ -4,12 +4,13 @@ use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
+
     audio::AudioDataReceiver,
     channel::{self, ErrorFlag},
     decoder::VideoDecoderOptions,
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
-    media::MediaStreamIdGenerator,
+    media::{MediaStreamIdGenerator,MediaStreamId }
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},
@@ -80,11 +81,18 @@ impl Composer {
             .or_fail()?;
 
         // 合成後の映像と音声への MP4 への書き出しを行う（この処理は現在のスレッドで行う）
+        let writer_input_audio_stream_id = MediaStreamId::new(1000); // audio / video で値が異なっていればなんでもいい
+        let writer_input_video_stream_id = MediaStreamId::new(1001);
+
         let mut mp4_writer = Mp4Writer::new(
             out_file_path,
             &self.layout,
-            encoded_audio_rx,
-            encoded_video_rx,
+            self.layout
+                .has_audio()
+                .then_some(writer_input_audio_stream_id),
+            self.layout
+                .has_video()
+                .then_some(writer_input_video_stream_id),
         )
         .or_fail()?;
 

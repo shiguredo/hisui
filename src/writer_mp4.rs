@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     fs::File,
     io::{BufWriter, Seek, SeekFrom, Write},
     num::NonZeroU32,
@@ -17,11 +18,12 @@ use shiguredo_mp4::{
 };
 
 use crate::{
-    audio::{AudioData, AudioDataReceiver},
+    audio::AudioData,
     layout::{Layout, Resolution},
+    media::MediaStreamId,
     mixer_audio::MIXED_AUDIO_DATA_DURATION,
     stats::{Mp4WriterStats, Seconds},
-    video::{VideoFrame, VideoFrameReceiver},
+    video::VideoFrame,
 };
 
 // Hisui では出力 MP4 のタイムスケールはマイクロ秒固定にする
@@ -42,8 +44,10 @@ pub struct Mp4Writer {
     video_chunks: Vec<Chunk>,
     audio_sample_entry: Option<SampleEntry>,
     video_sample_entry: Option<SampleEntry>,
-    input_audio_rx: Option<AudioDataReceiver>,
-    input_video_rx: Option<VideoFrameReceiver>,
+    input_audio_stream_id: Option<MediaStreamId>,
+    input_video_stream_id: Option<MediaStreamId>,
+    input_audio_queue: VecDeque<AudioData>,
+    input_video_queue: VecDeque<VideoFrame>,
     finalize_time: Mp4FileTime,
     appending_video_chunk: bool,
     stats: Mp4WriterStats,
@@ -54,8 +58,8 @@ impl Mp4Writer {
     pub fn new<P: AsRef<Path>>(
         path: P,
         layout: &Layout,
-        input_audio_rx: AudioDataReceiver,
-        input_video_rx: VideoFrameReceiver,
+        input_audio_stream_id: Option<MediaStreamId>,
+        input_video_stream_id: Option<MediaStreamId>,
     ) -> orfail::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -74,8 +78,10 @@ impl Mp4Writer {
             audio_sample_entry: None,
             video_sample_entry: None,
             finalize_time: Mp4FileTime::from_unix_time(Duration::ZERO),
-            input_audio_rx: layout.has_audio().then_some(input_audio_rx),
-            input_video_rx: layout.has_video().then_some(input_video_rx),
+            input_audio_stream_id,
+            input_video_stream_id,
+            input_audio_queue: VecDeque::new(),
+            input_video_queeu: VecDeque::new(),
             appending_video_chunk: true,
             stats: Mp4WriterStats::default(),
         };
