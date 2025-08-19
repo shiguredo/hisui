@@ -50,13 +50,13 @@ impl MediaProcessor for AudioReader {
         }
     }
 
-    fn process(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
         Err(orfail::Failure::new(
             "BUG: reader does not require any input streams",
         ))
     }
 
-    fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         match self.next() {
             None => Ok(MediaProcessorOutput::Finished),
             Some(Err(e)) => Err(e),
@@ -125,13 +125,13 @@ impl MediaProcessor for VideoReader {
         }
     }
 
-    fn process(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
         Err(orfail::Failure::new(
             "BUG: reader does not require any input streams",
         ))
     }
 
-    fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         match self.next() {
             None => Ok(MediaProcessorOutput::Finished),
             Some(Err(e)) => Err(e),

@@ -5,8 +5,9 @@ use crate::video::VideoFrame;
 
 pub trait MediaProcessor {
     fn spec(&self) -> MediaProcessorSpec;
-    fn process(&mut self, input: MediaProcessorInput) -> orfail::Result<()>;
-    fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()>;
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
 
     fn set_error(&self) {
         self.spec().stats.set_error();

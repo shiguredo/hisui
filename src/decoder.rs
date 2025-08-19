@@ -55,8 +55,8 @@ impl AudioDecoder {
             stream_id: self.input_stream_id,
             sample: Some(MediaSample::audio_data(data)),
         };
-        self.process(input).or_fail()?;
-        let MediaProcessorOutput::Processed { sample, .. } = self.poll_output().or_fail()? else {
+        self.process_input(input).or_fail()?;
+        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()? else {
             return Err(orfail::Failure::new("bug"));
         };
         let decoded = sample.expect_audio_data().or_fail()?;
@@ -81,7 +81,7 @@ impl MediaProcessor for AudioDecoder {
         }
     }
 
-    fn process(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         let Some(sample) = input.sample else {
             self.eos = true;
             return Ok(());
@@ -101,7 +101,7 @@ impl MediaProcessor for AudioDecoder {
         Ok(())
     }
 
-    fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         if let Some(data) = self.decoded.pop_back() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
@@ -201,7 +201,7 @@ impl VideoDecoder {
             stream_id: self.input_stream_id,
             sample: Some(MediaSample::video_frame(frame)),
         };
-        self.process(input).or_fail()?;
+        self.process_input(input).or_fail()?;
         Ok(())
     }
 
@@ -211,13 +211,13 @@ impl VideoDecoder {
             stream_id: self.input_stream_id,
             sample: None,
         };
-        self.process(input).or_fail()?;
+        self.process_input(input).or_fail()?;
         Ok(())
     }
 
     // TODO: スケジューリングスレッドの導入タイミングで削除する
     pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        let Ok(MediaProcessorOutput::Processed { sample, .. }) = self.poll_output() else {
+        let Ok(MediaProcessorOutput::Processed { sample, .. }) = self.process_output() else {
             return None;
         };
         let decoded = sample.expect_video_frame().ok()?;
@@ -234,7 +234,7 @@ impl MediaProcessor for VideoDecoder {
         }
     }
 
-    fn process(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
@@ -262,7 +262,7 @@ impl MediaProcessor for VideoDecoder {
         Ok(())
     }
 
-    fn poll_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         if let Some(frame) = self.decoded.pop_back() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
