@@ -397,3 +397,68 @@ impl AudioMixer {
         }
     */
 }
+
+impl MediaProcessor for AudioMixer {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.input_streams.keys().copied().collect(),
+            output_stream_ids: vec![self.output_stream_id],
+            stats: ProcessorStats::AudioMixer(self.stats.clone()),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let input_stream = self
+            .input_streams
+            .iter_mut()
+            .find_map(|(&id, v)| (id == input.stream_id).then_some(v))
+            .or_fail()?;
+        if let Some(sample) = input.sample {
+            let data = sample.expect_audio_data().or_fail()?;
+
+            if input_stream.start_timestamp.is_none() {
+                // 合成開始時刻の判断用に最初のタイムスタンプを覚えておく
+                //
+                // なお開始時刻に達した後は、データのタイムスタンプにギャップがあったとしても
+                // 連続しているものとして扱う。
+                //
+                // これは Chrome を含む多くのブラウザがこの挙動なのと、
+                // ギャップ部分のハンドリングは Sora 側の責務であるため。
+                // 下手に Hisui 側でハンドリングしてしまうと、ギャップが
+                // 極端に大きいためにあえて Sora がそのまま放置した区間を
+                // 埋めようとしてディスクやメモリを食いつぶしてしまう恐れがある。
+                input_stream.start_timestamp = Some(data.timestamp);
+            }
+
+            // サンプルキューに要素を追加する
+            //
+            // 想定外の入力が来ていないかを念のためにチェックする
+            // (format と stereo については stereo_samples() の中でチェックしている)
+            (data.sample_rate == SAMPLE_RATE).or_fail()?;
+            input_stream
+                .sample_queue
+                .extend(data.stereo_samples().or_fail()?);
+        } else {
+            input_stream.eos = true;
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        /*
+                if let Some(data) = self.encoded.pop_front() {
+                    Ok(MediaProcessorOutput::Processed {
+                        stream_id: self.output_stream_id,
+                        sample: MediaSample::audio_data(data),
+                    })
+                } else if self.eos {
+                    Ok(MediaProcessorOutput::Finished)
+                } else {
+                    Ok(MediaProcessorOutput::Pending {
+                        awaiting_stream_id: self.input_stream_id,
+                    })
+                }
+        */
+        todo!()
+    }
+}
