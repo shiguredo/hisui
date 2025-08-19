@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
 use orfail::OrFail;
@@ -17,74 +18,129 @@ use crate::{
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
+    media::{MediaSample, MediaStreamId},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     stats::{AudioEncoderStats, ProcessorStats, Seconds, SharedStats, VideoEncoderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
 
 #[derive(Debug)]
-pub enum AudioEncoder {
-    #[cfg(feature = "fdk-aac")]
-    FdkAac(FdkAacEncoder),
-    #[cfg(target_os = "macos")]
-    AudioToolbox(AudioToolboxEncoder),
-    Opus(OpusEncoder),
+pub struct AudioEncoder {
+    input_stream_id: MediaStreamId,
+    output_stream_id: MediaStreamId,
+    stats: AudioEncoderStats,
+    encoded: VecDeque<AudioData>,
+    eos: bool,
+    inner: AudioEncoderInner,
 }
 
 impl AudioEncoder {
     pub fn new_opus(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        OpusEncoder::new(bitrate).map(Self::Opus).or_fail()
+        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
+        let input_stream_id = MediaStreamId::new(0);
+        let output_stream_id = MediaStreamId::new(1);
+
+        let stats = AudioEncoderStats::new(EngineName::Opus, CodecName::Opus);
+        Ok(Self {
+            input_stream_id,
+            output_stream_id,
+            stats,
+            encoded: VecDeque::new(),
+            eos: false,
+            inner: AudioEncoderInner::new_opus(bitrate).or_fail()?,
+        })
     }
 
     #[cfg(feature = "fdk-aac")]
     pub fn new_fdk_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        FdkAacEncoder::new(bitrate).map(Self::FdkAac).or_fail()
+        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
+        let input_stream_id = MediaStreamId::new(0);
+        let output_stream_id = MediaStreamId::new(1);
+
+        let stats = AudioEncoderStats {
+            engine: Some(EngineName::FdkAac),
+            codec: Some(CodecName::Aac),
+            ..Default::default()
+        };
+        Ok(Self {
+            input_stream_id,
+            output_stream_id,
+            stats,
+            encoded: VecDeque::new(),
+            eos: false,
+            inner: AudioEncoderInner::new_fdk_aac(bitrate).or_fail()?,
+        })
     }
 
     #[cfg(target_os = "macos")]
     pub fn new_audio_toolbox_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        AudioToolboxEncoder::new(bitrate)
-            .map(Self::AudioToolbox)
-            .or_fail()
+        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
+        let input_stream_id = MediaStreamId::new(0);
+        let output_stream_id = MediaStreamId::new(1);
+
+        let stats = AudioEncoderStats {
+            engine: Some(EngineName::AudioToolbox),
+            codec: Some(CodecName::Aac),
+            ..Default::default()
+        };
+        Ok(Self {
+            input_stream_id,
+            output_stream_id,
+            stats,
+            encoded: VecDeque::new(),
+            eos: false,
+            inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate).or_fail()?,
+        })
     }
 
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
     pub fn encode(&mut self, data: &AudioData) -> orfail::Result<Option<AudioData>> {
-        match self {
-            #[cfg(feature = "fdk-aac")]
-            AudioEncoder::FdkAac(encoder) => encoder.encode(data).or_fail(),
-            #[cfg(target_os = "macos")]
-            AudioEncoder::AudioToolbox(encoder) => encoder.encode(data).or_fail(),
-            AudioEncoder::Opus(encoder) => encoder.encode(data).map(Some).or_fail(),
-        }
+        let input = MediaProcessorInput {
+            stream_id: self.input_stream_id,
+            sample: Some(MediaSample::audio_data(data.clone())),
+        };
+        self.process_input(input).or_fail()?;
+        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
+        else {
+            return Ok(None);
+        };
+        let encoded = sample.expect_audio_data().or_fail()?;
+        Ok(Some(std::sync::Arc::into_inner(encoded).or_fail()?))
     }
 
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
     pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
-        match self {
+        let input = MediaProcessorInput {
+            stream_id: self.input_stream_id,
+            sample: None,
+        };
+        self.process_input(input).or_fail()?;
+        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
+        else {
+            return Ok(None);
+        };
+        let encoded = sample.expect_audio_data().or_fail()?;
+        Ok(Some(std::sync::Arc::into_inner(encoded).or_fail()?))
+    }
+
+    pub fn name(&self) -> EngineName {
+        match &self.inner {
             #[cfg(feature = "fdk-aac")]
-            AudioEncoder::FdkAac(encoder) => encoder.finish().or_fail(),
+            AudioEncoderInner::FdkAac(_) => EngineName::FdkAac,
             #[cfg(target_os = "macos")]
-            AudioEncoder::AudioToolbox(encoder) => encoder.finish().or_fail(),
-            AudioEncoder::Opus(_encoder) => Ok(None),
+            AudioEncoderInner::AudioToolbox(_) => EngineName::AudioToolbox,
+            AudioEncoderInner::Opus(_) => EngineName::Opus,
         }
     }
 
-    fn name(&self) -> EngineName {
-        match self {
+    pub fn codec(&self) -> CodecName {
+        match &self.inner {
             #[cfg(feature = "fdk-aac")]
-            AudioEncoder::FdkAac(_) => EngineName::FdkAac,
+            AudioEncoderInner::FdkAac(_) => CodecName::Aac,
             #[cfg(target_os = "macos")]
-            AudioEncoder::AudioToolbox(_) => EngineName::AudioToolbox,
-            AudioEncoder::Opus(_) => EngineName::Opus,
-        }
-    }
-
-    fn codec(&self) -> CodecName {
-        match self {
-            #[cfg(feature = "fdk-aac")]
-            AudioEncoder::FdkAac(_) => CodecName::Aac,
-            #[cfg(target_os = "macos")]
-            AudioEncoder::AudioToolbox(_) => CodecName::Aac,
-            AudioEncoder::Opus(_) => CodecName::Opus,
+            AudioEncoderInner::AudioToolbox(_) => CodecName::Aac,
+            AudioEncoderInner::Opus(_) => CodecName::Opus,
         }
     }
 
@@ -105,6 +161,97 @@ impl AudioEncoder {
             _ => unreachable!(),
         }
         engines
+    }
+}
+
+impl MediaProcessor for AudioEncoder {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: vec![self.output_stream_id],
+            stats: ProcessorStats::AudioEncoder(self.stats.clone()),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let (encoded, elapsed) = if let Some(sample) = input.sample {
+            let data = sample.expect_audio_data().or_fail()?;
+            Seconds::try_elapsed(|| self.inner.encode(&data).or_fail())
+        } else {
+            self.eos = true;
+            Seconds::try_elapsed(|| self.inner.finish().or_fail())
+        }?;
+
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
+        self.stats.total_processing_seconds.add(elapsed);
+
+        if let Some(encoded) = encoded {
+            self.stats.total_audio_data_count.add(1);
+            self.encoded.push_back(encoded);
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if let Some(data) = self.encoded.pop_front() {
+            Ok(MediaProcessorOutput::Processed {
+                stream_id: self.output_stream_id,
+                sample: MediaSample::audio_data(data),
+            })
+        } else if self.eos {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::Pending {
+                awaiting_stream_id: self.input_stream_id,
+            })
+        }
+    }
+}
+
+#[derive(Debug)]
+enum AudioEncoderInner {
+    #[cfg(feature = "fdk-aac")]
+    FdkAac(FdkAacEncoder),
+    #[cfg(target_os = "macos")]
+    AudioToolbox(AudioToolboxEncoder),
+    Opus(OpusEncoder),
+}
+
+impl AudioEncoderInner {
+    fn new_opus(bitrate: NonZeroUsize) -> orfail::Result<Self> {
+        OpusEncoder::new(bitrate).map(Self::Opus).or_fail()
+    }
+
+    #[cfg(feature = "fdk-aac")]
+    fn new_fdk_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
+        FdkAacEncoder::new(bitrate).map(Self::FdkAac).or_fail()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn new_audio_toolbox_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
+        AudioToolboxEncoder::new(bitrate)
+            .map(Self::AudioToolbox)
+            .or_fail()
+    }
+
+    fn encode(&mut self, data: &AudioData) -> orfail::Result<Option<AudioData>> {
+        match self {
+            #[cfg(feature = "fdk-aac")]
+            Self::FdkAac(encoder) => encoder.encode(data).or_fail(),
+            #[cfg(target_os = "macos")]
+            Self::AudioToolbox(encoder) => encoder.encode(data).or_fail(),
+            Self::Opus(encoder) => encoder.encode(data).map(Some).or_fail(),
+        }
+    }
+
+    fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
+        match self {
+            #[cfg(feature = "fdk-aac")]
+            Self::FdkAac(encoder) => encoder.finish().or_fail(),
+            #[cfg(target_os = "macos")]
+            Self::AudioToolbox(encoder) => encoder.finish().or_fail(),
+            Self::Opus(_encoder) => Ok(None),
+        }
     }
 }
 
