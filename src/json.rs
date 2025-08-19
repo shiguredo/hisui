@@ -11,25 +11,30 @@ pub fn parse_file<P: AsRef<Path>, T>(path: P) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
+    let enable_jsonc = path.as_ref().extension().is_some_and(|e| e == "jsonc");
     let json = std::fs::read_to_string(&path)
         .or_fail_with(|e| format!("failed to read file {}: {e}", path.as_ref().display()))?;
-    parse(&json, path.as_ref()).or_fail()
+    parse(&json, path.as_ref(), enable_jsonc).or_fail()
 }
 
 pub fn parse_str<T>(json: &str) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
-    parse(json, Path::new("")).or_fail()
+    parse(json, Path::new(""), false).or_fail()
 }
 
-fn parse<T>(text: &str, path: &Path) -> orfail::Result<T>
+fn parse<T>(text: &str, path: &Path, enable_jsonc: bool) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
-    let json = nojson::RawJson::parse(text)
-        .map_err(|e| malformed_json_error(path, text, e))
-        .or_fail()?;
+    let json = if enable_jsonc {
+        nojson::RawJson::parse_jsonc(text).map(|(json, _comments)| json)
+    } else {
+        nojson::RawJson::parse(text)
+    }
+    .map_err(|e| malformed_json_error(path, text, e))
+    .or_fail()?;
     json.value()
         .try_into()
         .map_err(|e| invalid_json_error(path, &json, e))
