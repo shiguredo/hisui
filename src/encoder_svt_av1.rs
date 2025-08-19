@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
@@ -15,7 +16,7 @@ use crate::{
 #[derive(Debug)]
 pub struct SvtAv1Encoder {
     inner: shiguredo_svt_av1::Encoder,
-    input_queue: VecDeque<VideoFrame>,
+    input_queue: VecDeque<Arc<VideoFrame>>,
     output_queue: VecDeque<VideoFrame>,
     sample_entry: Option<SampleEntry>,
     width: EvenUsize,
@@ -47,7 +48,7 @@ impl SvtAv1Encoder {
         })
     }
 
-    pub fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
 
         let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;

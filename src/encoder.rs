@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -372,10 +373,6 @@ impl MediaProcessor for VideoEncoder {
         let ((), elapsed) = if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
             self.stats.total_input_video_frame_count.add(1);
-
-            // TODO:
-            let frame = std::sync::Arc::into_inner(frame).or_fail()?;
-
             Seconds::try_elapsed(|| self.inner.encode(frame).or_fail())
         } else {
             self.eos = true;
@@ -450,7 +447,7 @@ impl VideoEncoderInner {
         Ok(Self::VideoToolbox(encoder))
     }
 
-    fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
         match self {
             Self::Libvpx(encoder) => encoder.encode(frame).or_fail(),
             Self::Openh264(encoder) => encoder.encode(frame).or_fail(),
