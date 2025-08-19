@@ -4,13 +4,12 @@ use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-
     audio::AudioDataReceiver,
     channel::{self, ErrorFlag},
     decoder::VideoDecoderOptions,
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
-    media::{MediaStreamIdGenerator,MediaStreamId }
+    media::{MediaStreamId, MediaStreamIdGenerator},
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     source::{AudioSourceThread, VideoSourceThread},

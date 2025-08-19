@@ -81,7 +81,7 @@ impl Mp4Writer {
             input_audio_stream_id,
             input_video_stream_id,
             input_audio_queue: VecDeque::new(),
-            input_video_queeu: VecDeque::new(),
+            input_video_queue: VecDeque::new(),
             appending_video_chunk: true,
             stats: Mp4WriterStats::default(),
         };
@@ -98,22 +98,24 @@ impl Mp4Writer {
         &self.stats
     }
 
-    /// 新しい入力（合成後の映像と音声）を待機して、それの出力ファイルへの書き込みを行う
-    ///
-    /// 結果は現在の書き込み位置を示すタイムスタンプで、全ての書き込みが完了した場合には `Ok(None)` が返される。
-    pub fn poll(&mut self) -> orfail::Result<Option<Duration>> {
-        let (audio, video) = self.peek_input_audio_and_video();
-        let audio_timestamp = audio.map(|x| x.timestamp);
-        let video_timestamp = video.map(|x| x.timestamp);
+    /* TODO: delete
+        /// 新しい入力（合成後の映像と音声）を待機して、それの出力ファイルへの書き込みを行う
+        ///
+        /// 結果は現在の書き込み位置を示すタイムスタンプで、全ての書き込みが完了した場合には `Ok(None)` が返される。
+        pub fn poll(&mut self) -> orfail::Result<Option<Duration>> {
+            let (audio, video) = self.peek_input_audio_and_video();
+            let audio_timestamp = audio.map(|x| x.timestamp);
+            let video_timestamp = video.map(|x| x.timestamp);
 
-        let (result, elapsed) = Seconds::elapsed(|| {
-            self.handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                .or_fail()
-        });
-        self.stats.total_processing_seconds.add(elapsed);
+            let (result, elapsed) = Seconds::elapsed(|| {
+                self.handle_next_audio_and_video(audio_timestamp, video_timestamp)
+                    .or_fail()
+            });
+            self.stats.total_processing_seconds.add(elapsed);
 
-        result
-    }
+            result
+        }
+    */
 
     fn handle_next_audio_and_video(
         &mut self,
@@ -166,19 +168,17 @@ impl Mp4Writer {
             .max(self.stats.total_video_track_seconds.get_duration())
     }
 
-    fn peek_input_audio_and_video(&mut self) -> (Option<&AudioData>, Option<&VideoFrame>) {
-        let audio = self.input_audio_rx.as_mut().and_then(|rx| rx.peek());
-        let video = self.input_video_rx.as_mut().and_then(|rx| rx.peek());
-        (audio, video)
-    }
+    /* TODO: peek
+        fn peek_input_audio_and_video(&mut self) -> (Option<&AudioData>, Option<&VideoFrame>) {
+            let audio = self.input_audio_rx.as_mut().and_then(|rx| rx.peek());
+            let video = self.input_video_rx.as_mut().and_then(|rx| rx.peek());
+            (audio, video)
+        }
+    */
 
     fn append_video_frame(&mut self, new_chunk: bool) -> orfail::Result<()> {
         // 次の入力を取り出す（これは常に成功する）
-        let frame = self
-            .input_video_rx
-            .as_mut()
-            .and_then(|rx| rx.recv())
-            .or_fail()?;
+        let frame = self.input_video_queue.pop_front().or_fail()?;
 
         if self.stats.video_codec.get().is_none()
             && let Some(name) = frame.format.codec_name()
@@ -229,11 +229,7 @@ impl Mp4Writer {
 
     fn append_audio_data(&mut self, new_chunk: bool) -> orfail::Result<()> {
         // 次の入力を取り出す（これは常に成功する）
-        let data = self
-            .input_audio_rx
-            .as_mut()
-            .and_then(|rx| rx.recv())
-            .or_fail()?;
+        let data = self.input_audio_queue.pop_front().or_fail()?;
 
         if self.stats.audio_codec.get().is_none()
             && let Some(name) = data.format.codec_name()
