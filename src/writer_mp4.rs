@@ -4,6 +4,7 @@ use std::{
     io::{BufWriter, Seek, SeekFrom, Write},
     num::NonZeroU32,
     path::Path,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -20,9 +21,10 @@ use shiguredo_mp4::{
 use crate::{
     audio::AudioData,
     layout::{Layout, Resolution},
-    media::MediaStreamId,
+    media::{MediaSample, MediaStreamId},
     mixer_audio::MIXED_AUDIO_DATA_DURATION,
-    stats::{Mp4WriterStats, Seconds},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    stats::{Mp4WriterStats, ProcessorStats, Seconds},
     video::VideoFrame,
 };
 
@@ -46,8 +48,8 @@ pub struct Mp4Writer {
     video_sample_entry: Option<SampleEntry>,
     input_audio_stream_id: Option<MediaStreamId>,
     input_video_stream_id: Option<MediaStreamId>,
-    input_audio_queue: VecDeque<AudioData>,
-    input_video_queue: VecDeque<VideoFrame>,
+    input_audio_queue: VecDeque<Arc<AudioData>>,
+    input_video_queue: VecDeque<Arc<VideoFrame>>,
     finalize_time: Mp4FileTime,
     appending_video_chunk: bool,
     stats: Mp4WriterStats,
@@ -98,35 +100,16 @@ impl Mp4Writer {
         &self.stats
     }
 
-    /* TODO: delete
-        /// 新しい入力（合成後の映像と音声）を待機して、それの出力ファイルへの書き込みを行う
-        ///
-        /// 結果は現在の書き込み位置を示すタイムスタンプで、全ての書き込みが完了した場合には `Ok(None)` が返される。
-        pub fn poll(&mut self) -> orfail::Result<Option<Duration>> {
-            let (audio, video) = self.peek_input_audio_and_video();
-            let audio_timestamp = audio.map(|x| x.timestamp);
-            let video_timestamp = video.map(|x| x.timestamp);
-
-            let (result, elapsed) = Seconds::elapsed(|| {
-                self.handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                    .or_fail()
-            });
-            self.stats.total_processing_seconds.add(elapsed);
-
-            result
-        }
-    */
-
     fn handle_next_audio_and_video(
         &mut self,
         audio_timestamp: Option<Duration>,
         video_timestamp: Option<Duration>,
-    ) -> orfail::Result<Option<Duration>> {
-        match (audio_timestamp,video_timestamp){
+    ) -> orfail::Result<bool> {
+        match (audio_timestamp, video_timestamp){
               (None, None) => {
                 // 全部の入力の処理が完了した
                 self.finalize().or_fail()?;
-                return Ok(None);
+                return Ok(false);
             }
             (None, Some(_)) => {
                 // 残りは映像のみ
@@ -157,24 +140,15 @@ impl Mp4Writer {
             }
         }
 
-        // 進捗（現在のタイムスタンプ）を呼び出し元に返す
-        Ok(Some(self.current_duration()))
+        Ok(true)
     }
 
-    fn current_duration(&self) -> Duration {
+    pub fn current_duration(&self) -> Duration {
         self.stats
             .total_audio_track_seconds
             .get_duration()
             .max(self.stats.total_video_track_seconds.get_duration())
     }
-
-    /* TODO: peek
-        fn peek_input_audio_and_video(&mut self) -> (Option<&AudioData>, Option<&VideoFrame>) {
-            let audio = self.input_audio_rx.as_mut().and_then(|rx| rx.peek());
-            let video = self.input_video_rx.as_mut().and_then(|rx| rx.peek());
-            (audio, video)
-        }
-    */
 
     fn append_video_frame(&mut self, new_chunk: bool) -> orfail::Result<()> {
         // 次の入力を取り出す（これは常に成功する）
@@ -190,7 +164,7 @@ impl Mp4Writer {
         // サンプルエントリーは最初に一回だけ存在する
         if self.video_sample_entry.is_none() {
             frame.sample_entry.is_some().or_fail()?;
-            self.video_sample_entry = frame.sample_entry;
+            self.video_sample_entry = frame.sample_entry.clone();
         } else {
             frame.sample_entry.is_none().or_fail()?;
         }
@@ -241,7 +215,7 @@ impl Mp4Writer {
         // サンプルエントリーは最初に一回だけ存在する
         if self.audio_sample_entry.is_none() {
             data.sample_entry.is_some().or_fail()?;
-            self.audio_sample_entry = data.sample_entry;
+            self.audio_sample_entry = data.sample_entry.clone();
         } else {
             data.sample_entry.is_none().or_fail()?;
         }
@@ -741,6 +715,75 @@ impl Mp4Writer {
             stco_or_co64_box: Either::B(co64_box),
             stss_box: Some(stss_box),
             unknown_boxes: Vec::new(),
+        }
+    }
+}
+
+impl MediaProcessor for Mp4Writer {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self
+                .input_audio_stream_id
+                .into_iter()
+                .chain(self.input_video_stream_id)
+                .collect(),
+            output_stream_ids: Vec::new(),
+            stats: ProcessorStats::Mp4Writer(self.stats.clone()),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        match input.sample {
+            Some(MediaSample::Audio(sample))
+                if Some(input.stream_id) == self.input_audio_stream_id =>
+            {
+                self.input_audio_queue.push_back(sample);
+            }
+            None if Some(input.stream_id) == self.input_audio_stream_id => {
+                self.input_audio_stream_id = None;
+            }
+            Some(MediaSample::Video(sample))
+                if Some(input.stream_id) == self.input_video_stream_id =>
+            {
+                self.input_video_queue.push_back(sample);
+            }
+            None if Some(input.stream_id) == self.input_video_stream_id => {
+                self.input_video_stream_id = None;
+            }
+            _ => return Err(orfail::Failure::new("BUG: unexpected input stream")),
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        loop {
+            if let Some(id) = self.input_video_stream_id
+                && self.input_video_queue.is_empty()
+            {
+                return Ok(MediaProcessorOutput::Pending {
+                    awaiting_stream_id: id,
+                });
+            } else if let Some(id) = self.input_audio_stream_id
+                && self.input_audio_queue.is_empty()
+            {
+                return Ok(MediaProcessorOutput::Pending {
+                    awaiting_stream_id: id,
+                });
+            }
+
+            let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
+            let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
+
+            let (result, elapsed) = Seconds::elapsed(|| {
+                self.handle_next_audio_and_video(audio_timestamp, video_timestamp)
+                    .or_fail()
+            });
+
+            self.stats.total_processing_seconds.add(elapsed);
+
+            if !result? {
+                return Ok(MediaProcessorOutput::Finished);
+            }
         }
     }
 }
