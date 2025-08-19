@@ -56,7 +56,8 @@ impl AudioDecoder {
             sample: Some(MediaSample::audio_data(data)),
         };
         self.process_input(input).or_fail()?;
-        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()? else {
+        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
+        else {
             return Err(orfail::Failure::new("bug"));
         };
         let decoded = sample.expect_audio_data().or_fail()?;
@@ -102,7 +103,7 @@ impl MediaProcessor for AudioDecoder {
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        if let Some(data) = self.decoded.pop_back() {
+        if let Some(data) = self.decoded.pop_front() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
                 sample: MediaSample::audio_data(data),
@@ -263,7 +264,7 @@ impl MediaProcessor for VideoDecoder {
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        if let Some(frame) = self.decoded.pop_back() {
+        if let Some(frame) = self.decoded.pop_front() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
                 sample: MediaSample::video_frame(frame),
