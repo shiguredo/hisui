@@ -1,15 +1,14 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
-    audio::{AudioData, AudioDataReceiver, AudioDataSyncSender, AudioFormat, SAMPLE_RATE},
-    channel,
+    audio::{AudioData, AudioFormat, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{Grid, Region},
     media::{MediaSample, MediaStreamId},
     metadata::{SourceId, SourceInfo},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
-    video::{FrameRate, VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
+    video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::Mp4Writer,
 };
 use orfail::OrFail;
@@ -326,16 +325,6 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
         video: true,
         format: Default::default(),
     }
-}
-
-fn channels() -> (
-    (AudioDataSyncSender, AudioDataReceiver),
-    (VideoFrameSyncSender, VideoFrameReceiver),
-) {
-    (
-        channel::sync_channel_with_bound(1000),
-        channel::sync_channel_with_bound(1000),
-    )
 }
 
 fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioData {
