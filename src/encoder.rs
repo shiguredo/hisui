@@ -58,11 +58,7 @@ impl AudioEncoder {
         let input_stream_id = MediaStreamId::new(0);
         let output_stream_id = MediaStreamId::new(1);
 
-        let stats = AudioEncoderStats {
-            engine: Some(EngineName::FdkAac),
-            codec: Some(CodecName::Aac),
-            ..Default::default()
-        };
+        let stats = AudioEncoderStats::new(EngineName::FdkAac, CodecName::Aac);
         Ok(Self {
             input_stream_id,
             output_stream_id,
@@ -79,11 +75,7 @@ impl AudioEncoder {
         let input_stream_id = MediaStreamId::new(0);
         let output_stream_id = MediaStreamId::new(1);
 
-        let stats = AudioEncoderStats {
-            engine: Some(EngineName::AudioToolbox),
-            codec: Some(CodecName::Aac),
-            ..Default::default()
-        };
+        let stats = AudioEncoderStats::new(EngineName::AudioToolbox, CodecName::Aac);
         Ok(Self {
             input_stream_id,
             output_stream_id,
@@ -255,6 +247,7 @@ impl AudioEncoderInner {
     }
 }
 
+// TODO: Update VideoEncoder as AudioEncoder did
 #[derive(Debug)]
 pub enum VideoEncoder {
     Libvpx(LibvpxEncoder),
