@@ -90,7 +90,7 @@ impl VideoToolboxDecoder {
         Ok(())
     }
 
-    pub fn decode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
         matches!(
             frame.format,
             VideoFormat::H264 | VideoFormat::H264AnnexB | VideoFormat::H265
@@ -116,7 +116,7 @@ impl VideoToolboxDecoder {
         };
 
         self.decoded = Some(VideoFrame::new_i420(
-            frame,
+            frame.to_stripped(),
             EvenUsize::new(decoded.width()).or_fail()?,
             EvenUsize::new(decoded.height()).or_fail()?,
             decoded.y_plane(),
