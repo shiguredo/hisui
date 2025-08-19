@@ -5,7 +5,9 @@ use hisui::{
     channel,
     layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{Grid, Region},
+    media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
     writer_mp4::Mp4Writer,
@@ -16,25 +18,37 @@ use shiguredo_mp4::{
     boxes::{SampleEntry, UnknownBox},
 };
 
+const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+
 #[test]
 fn write_audio_only_mp4() -> orfail::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(&[source.clone()], &[]);
-    let ((audio_tx, audio_rx), (_video_tx, video_rx)) = channels();
 
     // ライターを作成する
-    let mut writer =
-        Mp4Writer::new(output_file_path.path(), &layout, audio_rx, video_rx).or_fail()?;
+    let mut writer = Mp4Writer::new(
+        output_file_path.path(),
+        &layout,
+        Some(AUDIO_STREAM_ID),
+        None,
+    )
+    .or_fail()?;
 
     // 1 秒尺の音声データを供給する
     for i in 0..60 {
-        let _ = audio_tx.send(audio_data(&source, i, secs(1)));
+        let input =
+            MediaProcessorInput::audio_data(AUDIO_STREAM_ID, audio_data(&source, i, secs(1)));
+        writer.process_input(input).or_fail()?;
     }
     std::mem::drop(audio_tx);
 
     // 最後まで書き込む
-    while writer.poll().or_fail()?.is_some() {}
+    while !matches!(
+        writer.process_output().or_fail()?,
+        MediaProcessorOutput::Finished
+    ) {}
 
     // 統計値を確認する
     let stats = writer.stats();
