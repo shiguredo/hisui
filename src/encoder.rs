@@ -247,9 +247,169 @@ impl AudioEncoderInner {
     }
 }
 
-// TODO: Update VideoEncoder as AudioEncoder did
 #[derive(Debug)]
-pub enum VideoEncoder {
+pub struct VideoEncoder {
+    input_stream_id: MediaStreamId,
+    output_stream_id: MediaStreamId,
+    stats: VideoEncoderStats,
+    encoded: VecDeque<VideoFrame>,
+    eos: bool,
+    inner: VideoEncoderInner,
+}
+
+impl VideoEncoder {
+    pub fn new(layout: &Layout, openh264_lib: Option<Openh264Library>) -> orfail::Result<Self> {
+        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
+        let input_stream_id = MediaStreamId::new(0);
+        let output_stream_id = MediaStreamId::new(1);
+
+        let inner = match layout.video_codec {
+            CodecName::Vp8 => VideoEncoderInner::new_vp8(layout).or_fail()?,
+            CodecName::Vp9 => VideoEncoderInner::new_vp9(layout).or_fail()?,
+            #[cfg(target_os = "macos")]
+            CodecName::H264 if openh264_lib.is_none() => {
+                VideoEncoderInner::new_video_toolbox_h264(layout).or_fail()?
+            }
+            CodecName::H264 => {
+                let lib = openh264_lib.or_fail()?;
+                VideoEncoderInner::new_openh264(lib, layout).or_fail()?
+            }
+            #[cfg(target_os = "macos")]
+            CodecName::H265 => VideoEncoderInner::new_video_toolbox_h265(layout).or_fail()?,
+            #[cfg(not(target_os = "macos"))]
+            CodecName::H265 => return Err(orfail::Failure::new("no available H.265 encoder")),
+            CodecName::Av1 => VideoEncoderInner::new_svt_av1(layout).or_fail()?,
+            _ => unreachable!(),
+        };
+
+        let stats = VideoEncoderStats::new(inner.name(), inner.codec());
+
+        Ok(Self {
+            input_stream_id,
+            output_stream_id,
+            stats,
+            encoded: VecDeque::new(),
+            eos: false,
+            inner,
+        })
+    }
+
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
+    pub fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+        let input = MediaProcessorInput {
+            stream_id: self.input_stream_id,
+            sample: Some(MediaSample::video_frame(frame)),
+        };
+        self.process_input(input).or_fail()
+    }
+
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
+    pub fn finish(&mut self) -> orfail::Result<()> {
+        let input = MediaProcessorInput {
+            stream_id: self.input_stream_id,
+            sample: None,
+        };
+        self.process_input(input).or_fail()
+    }
+
+    // TODO: スケジューリングスレッドの導入タイミングで削除する
+    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
+        let Ok(MediaProcessorOutput::Processed { sample, .. }) = self.process_output() else {
+            return None;
+        };
+        let encoded = sample.expect_video_frame().ok()?;
+        std::sync::Arc::into_inner(encoded)
+    }
+
+    pub fn name(&self) -> EngineName {
+        self.inner.name()
+    }
+
+    pub fn codec(&self) -> CodecName {
+        self.inner.codec()
+    }
+
+    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
+        let mut engines = Vec::new();
+        match codec {
+            CodecName::Vp8 | CodecName::Vp9 => {
+                engines.push(EngineName::Libvpx);
+            }
+            CodecName::H264 => {
+                if is_openh264_available {
+                    engines.push(EngineName::Openh264);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::H265 => {
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
+                }
+            }
+            CodecName::Av1 => {
+                engines.push(EngineName::SvtAv1);
+            }
+            _ => unreachable!(),
+        }
+        engines
+    }
+}
+
+impl MediaProcessor for VideoEncoder {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: vec![self.output_stream_id],
+            stats: ProcessorStats::VideoEncoder(self.stats.clone()),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let ((), elapsed) = if let Some(sample) = input.sample {
+            let frame = sample.expect_video_frame().or_fail()?;
+            self.stats.total_input_video_frame_count.add(1);
+
+            // TODO:
+            let frame = std::sync::Arc::into_inner(frame).or_fail()?;
+
+            Seconds::try_elapsed(|| self.inner.encode(frame).or_fail())
+        } else {
+            self.eos = true;
+            Seconds::try_elapsed(|| self.inner.finish().or_fail())
+        }?;
+
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
+        self.stats.total_processing_seconds.add(elapsed);
+
+        while let Some(encoded) = self.inner.next_encoded_frame() {
+            self.stats.total_output_video_frame_count.add(1);
+            self.encoded.push_back(encoded);
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if let Some(frame) = self.encoded.pop_front() {
+            Ok(MediaProcessorOutput::Processed {
+                stream_id: self.output_stream_id,
+                sample: MediaSample::video_frame(frame),
+            })
+        } else if self.eos {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::Pending {
+                awaiting_stream_id: self.input_stream_id,
+            })
+        }
+    }
+}
+
+#[derive(Debug)]
+enum VideoEncoderInner {
     Libvpx(LibvpxEncoder),
     Openh264(Openh264Encoder),
     SvtAv1(SvtAv1Encoder),
@@ -257,28 +417,7 @@ pub enum VideoEncoder {
     VideoToolbox(VideoToolboxEncoder),
 }
 
-impl VideoEncoder {
-    pub fn new(layout: &Layout, openh264_lib: Option<Openh264Library>) -> orfail::Result<Self> {
-        match layout.video_codec {
-            CodecName::Vp8 => VideoEncoder::new_vp8(layout).or_fail(),
-            CodecName::Vp9 => VideoEncoder::new_vp9(layout).or_fail(),
-            #[cfg(target_os = "macos")]
-            CodecName::H264 if openh264_lib.is_none() => {
-                VideoEncoder::new_video_toolbox_h264(layout).or_fail()
-            }
-            CodecName::H264 => {
-                let lib = openh264_lib.or_fail()?;
-                VideoEncoder::new_openh264(lib, layout).or_fail()
-            }
-            #[cfg(target_os = "macos")]
-            CodecName::H265 => VideoEncoder::new_video_toolbox_h265(layout).or_fail(),
-            #[cfg(not(target_os = "macos"))]
-            CodecName::H265 => Err(orfail::Failure::new("no available H.265 encoder")),
-            CodecName::Av1 => VideoEncoder::new_svt_av1(layout).or_fail(),
-            _ => unreachable!(),
-        }
-    }
-
+impl VideoEncoderInner {
     fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
         let encoder = LibvpxEncoder::new_vp8(layout).or_fail()?;
         Ok(Self::Libvpx(encoder))
@@ -311,7 +450,7 @@ impl VideoEncoder {
         Ok(Self::VideoToolbox(encoder))
     }
 
-    pub fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
         match self {
             Self::Libvpx(encoder) => encoder.encode(frame).or_fail(),
             Self::Openh264(encoder) => encoder.encode(frame).or_fail(),
@@ -321,7 +460,7 @@ impl VideoEncoder {
         }
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    fn finish(&mut self) -> orfail::Result<()> {
         match self {
             Self::Libvpx(encoder) => encoder.finish().or_fail(),
             Self::Openh264(encoder) => encoder.finish().or_fail(),
@@ -331,7 +470,7 @@ impl VideoEncoder {
         }
     }
 
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
+    fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         match self {
             Self::Libvpx(encoder) => encoder.next_encoded_frame(),
             Self::Openh264(encoder) => encoder.next_encoded_frame(),
@@ -341,7 +480,7 @@ impl VideoEncoder {
         }
     }
 
-    pub fn name(&self) -> EngineName {
+    fn name(&self) -> EngineName {
         match self {
             Self::Libvpx(_) => EngineName::Libvpx,
             Self::Openh264(_) => EngineName::Openh264,
@@ -359,35 +498,6 @@ impl VideoEncoder {
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.codec(),
         }
-    }
-
-    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
-        let mut engines = Vec::new();
-        match codec {
-            CodecName::Vp8 | CodecName::Vp9 => {
-                engines.push(EngineName::Libvpx);
-            }
-            CodecName::H264 => {
-                if is_openh264_available {
-                    engines.push(EngineName::Openh264);
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    engines.push(EngineName::VideoToolbox);
-                }
-            }
-            CodecName::H265 => {
-                #[cfg(target_os = "macos")]
-                {
-                    engines.push(EngineName::VideoToolbox);
-                }
-            }
-            CodecName::Av1 => {
-                engines.push(EngineName::SvtAv1);
-            }
-            _ => unreachable!(),
-        }
-        engines
     }
 }
 
