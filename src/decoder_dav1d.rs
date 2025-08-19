@@ -23,11 +23,11 @@ impl Dav1dDecoder {
         })
     }
 
-    pub fn decode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
         (frame.format == VideoFormat::Av1).or_fail()?;
 
         self.inner.decode(&frame.data).or_fail()?;
-        self.input_queue.push_back(frame);
+        self.input_queue.push_back(frame.to_stripped());
         self.handle_decoded_frames().or_fail()?;
         Ok(())
     }

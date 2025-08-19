@@ -9,9 +9,7 @@ use orfail::OrFail;
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
-    stats::{
-        ProcessorStats, Seconds, SharedAtomicSeconds, WebmAudioReaderStats, WebmVideoReaderStats,
-    },
+    stats::{Seconds, SharedAtomicSeconds, WebmAudioReaderStats, WebmVideoReaderStats},
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
@@ -369,8 +367,8 @@ impl WebmAudioReader {
         })
     }
 
-    pub fn stats(&self) -> ProcessorStats {
-        ProcessorStats::WebmAudioReader(self.stats.clone())
+    pub fn stats(&self) -> &WebmAudioReaderStats {
+        &self.stats
     }
 
     fn read_simple_block(&mut self) -> orfail::Result<Option<AudioData>> {
@@ -459,6 +457,7 @@ impl Iterator for WebmAudioReader {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         let (result, elapsed) = Seconds::elapsed(|| self.read_audio_data().or_fail());
         self.stats.total_processing_seconds.add(elapsed);
         if result.is_err() {
@@ -514,8 +513,8 @@ impl WebmVideoReader {
         })
     }
 
-    pub fn stats(&self) -> ProcessorStats {
-        ProcessorStats::WebmVideoReader(self.stats.clone())
+    pub fn stats(&self) -> &WebmVideoReaderStats {
+        &self.stats
     }
 
     fn read_video_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
@@ -611,6 +610,7 @@ impl Iterator for WebmVideoReader {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         let (result, elapsed) = Seconds::elapsed(|| self.read_video_frame().or_fail());
         self.stats.total_processing_seconds.add(elapsed);
         if result.is_err() {

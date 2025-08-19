@@ -15,8 +15,9 @@ use crate::{
     encoder::{VideoEncoder, VideoEncoderThread},
     json::JsonObject,
     layout::Layout,
+    media::MediaStreamId,
     mixer_video::VideoMixerThread,
-    stats::{Seconds, SharedStats, VideoDecoderStats},
+    stats::{Seconds, SharedStats},
     types::EngineName,
     video::FrameRate,
     writer_yuv::YuvWriter,
@@ -214,13 +215,13 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
     };
-    let mut decoder = VideoDecoder::new(options);
+    let dummy_stream_id = MediaStreamId::new(0);
+    let mut decoder = VideoDecoder::new(dummy_stream_id, dummy_stream_id, options);
     let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
     let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
     eprintln!("# Compose for VMAF");
-    let mut dummy_video_decoder_stats = VideoDecoderStats::default();
     let mut encoded_byte_size = 0;
     let mut encoded_duration = Duration::ZERO;
     let mut encoded_frame_count = 0;
@@ -240,9 +241,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         };
         encoded_byte_size += encoded_frame.data.len() as u64;
         encoded_duration += encoded_frame.duration;
-        decoder
-            .decode(encoded_frame, &mut dummy_video_decoder_stats)
-            .or_fail()?;
+        decoder.decode(encoded_frame).or_fail()?;
         while let Some(decoded_frame) = decoder.next_decoded_frame() {
             distorted_yuv_writer.append(&decoded_frame).or_fail()?;
             progress_bar.inc(1);

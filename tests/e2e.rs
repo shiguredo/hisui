@@ -5,7 +5,6 @@ use hisui::{
     decoder_opus::OpusDecoder,
     metadata::SourceId,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    stats::ProcessorStats,
     subcommand_legacy::{Args, Runner},
     types::CodecName,
 };
@@ -90,9 +89,7 @@ fn simple_single_source() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
-        unreachable!()
-    };
+    let audio_stats = audio_reader.stats();
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -103,9 +100,7 @@ fn simple_single_source() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
@@ -148,7 +143,7 @@ fn simple_single_source() -> noargs::Result<()> {
 
     let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
     for frame in video_samples {
-        decoder.decode(frame).or_fail()?;
+        decoder.decode(&frame).or_fail()?;
         check_decoded_frames(&mut decoder).or_fail()?;
     }
     decoder.finish().or_fail()?;
@@ -191,9 +186,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     let _video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
-        unreachable!()
-    };
+    let audio_stats = audio_reader.stats();
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -204,9 +197,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
 
     // レイアウトファイル未指定の場合には、一つのセルの解像度は 320x240 で、
@@ -264,9 +255,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4AudioReader(audio_stats) = audio_reader.stats() else {
-        unreachable!()
-    };
+    let audio_stats = audio_reader.stats();
     assert_eq!(audio_stats.codec.get(), Some(CodecName::Opus));
 
     // 一秒分 + 一サンプル (25 ms)
@@ -277,9 +266,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         Duration::from_millis(1020)
     );
 
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
@@ -341,7 +328,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 
     let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
     for frame in video_samples {
-        decoder.decode(frame).or_fail()?;
+        decoder.decode(&frame).or_fail()?;
         check_decoded_frames(&mut decoder).or_fail()?;
     }
     decoder.finish().or_fail()?;
@@ -390,9 +377,7 @@ fn two_regions() -> noargs::Result<()> {
     let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
 
     // 統計値を確認
-    let ProcessorStats::Mp4VideoReader(video_stats) = video_reader.stats() else {
-        unreachable!()
-    };
+    let video_stats = video_reader.stats();
     assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
     assert_eq!(
         video_stats
@@ -445,7 +430,7 @@ fn two_regions() -> noargs::Result<()> {
 
     let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
     for frame in video_samples {
-        decoder.decode(frame).or_fail()?;
+        decoder.decode(&frame).or_fail()?;
         check_decoded_frames(&mut decoder).or_fail()?;
     }
     decoder.finish().or_fail()?;

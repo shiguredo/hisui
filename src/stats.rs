@@ -161,6 +161,24 @@ pub enum ProcessorStats {
     Mp4Writer(Mp4WriterStats),
 }
 
+impl ProcessorStats {
+    pub fn set_error(&self) {
+        match self {
+            ProcessorStats::Mp4AudioReader(stats) => stats.error.set(true),
+            ProcessorStats::Mp4VideoReader(stats) => stats.error.set(true),
+            ProcessorStats::WebmAudioReader(stats) => stats.error.set(true),
+            ProcessorStats::WebmVideoReader(stats) => stats.error.set(true),
+            ProcessorStats::AudioDecoder(stats) => stats.error.set(true),
+            ProcessorStats::VideoDecoder(stats) => stats.error.set(true),
+            ProcessorStats::AudioMixer(stats) => stats.error.set(true),
+            ProcessorStats::VideoMixer(stats) => stats.error.set(true),
+            ProcessorStats::AudioEncoder(stats) => stats.error.set(true),
+            ProcessorStats::VideoEncoder(stats) => stats.error.set(true),
+            ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
+        }
+    }
+}
+
 impl nojson::DisplayJson for ProcessorStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
@@ -418,7 +436,7 @@ impl nojson::DisplayJson for VideoEncoderStats {
 #[derive(Debug, Default, Clone)]
 pub struct AudioDecoderStats {
     /// 入力ソースの ID
-    pub source_id: Option<SourceId>,
+    pub source_id: SharedOption<SourceId>,
 
     /// デコーダーの種類
     pub engine: Option<EngineName>,
@@ -440,7 +458,7 @@ impl nojson::DisplayJson for AudioDecoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", "audio_decoder")?;
-            f.member("source_id", &self.source_id)?;
+            f.member("source_id", self.source_id.get())?;
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
@@ -585,6 +603,18 @@ impl<T> SharedOption<T> {
         // （なおここで警告ログなどを出すと量が多くなりすぎる可能性があるのでやらない）
         if let Ok(mut v) = self.0.lock() {
             *v = Some(value);
+        }
+    }
+
+    pub fn set_once<F>(&self, f: F)
+    where
+        F: FnOnce() -> T,
+    {
+        // [NOTE] 同上
+        if let Ok(mut v) = self.0.lock()
+            && v.is_none()
+        {
+            *v = Some(f());
         }
     }
 }
@@ -879,6 +909,9 @@ pub struct Mp4WriterStats {
 
     /// MP4 出力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
+
+    /// エラーで中断したかどうか
+    pub error: SharedAtomicFlag,
 }
 
 impl nojson::DisplayJson for Mp4WriterStats {
@@ -925,6 +958,7 @@ impl nojson::DisplayJson for Mp4WriterStats {
                 "total_processing_seconds",
                 self.total_processing_seconds.get_seconds(),
             )?;
+            f.member("error", self.error.get())?;
             Ok(())
         })
     }

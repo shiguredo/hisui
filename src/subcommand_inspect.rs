@@ -2,10 +2,10 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::VideoDecoderStats,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
@@ -52,6 +52,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
+    let audio_stream_id = MediaStreamId::new(0);
+    let video_stream_id = MediaStreamId::new(1);
     let (audio_reader, video_reader): (Box<dyn Iterator<Item = _>>, Box<dyn Iterator<Item = _>>) =
         match format {
             ContainerFormat::Webm => {
@@ -74,6 +76,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             }
         };
 
+    let decoded_audio_stream_id = MediaStreamId::new(2);
     let mut audio_codec = None;
     let mut audio_samples = Vec::new();
     let mut audio_decoder = None;
@@ -82,7 +85,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         if audio_codec.is_none() {
             audio_codec = sample.format.codec_name();
             if decode {
-                audio_decoder = Some(AudioDecoder::new_opus().or_fail()?);
+                audio_decoder = Some(
+                    AudioDecoder::new_opus(audio_stream_id, decoded_audio_stream_id).or_fail()?,
+                );
             }
         }
 
@@ -94,17 +99,17 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         };
 
         if let Some(decoder) = &mut audio_decoder {
-            let decoded = decoder.decode(&sample).or_fail()?;
+            let decoded = decoder.decode(sample).or_fail()?;
             info.decoded_data_size = Some(decoded.data.len());
         }
 
         audio_samples.push(info);
     }
 
+    let decoded_video_stream_id = MediaStreamId::new(3);
     let mut video_codec = None;
     let mut video_samples = Vec::new();
     let mut video_decoder = None;
-    let mut video_decoder_stats = VideoDecoderStats::default();
     let mut decoded_count = 0;
     for sample in video_reader {
         let sample = sample.or_fail()?;
@@ -118,7 +123,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                         .transpose()
                         .or_fail()?,
                 };
-                video_decoder = Some(VideoDecoder::new(options));
+                video_decoder = Some(VideoDecoder::new(
+                    video_stream_id,
+                    decoded_video_stream_id,
+                    options,
+                ));
             }
         }
 
@@ -134,7 +143,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         });
 
         if let Some(decoder) = &mut video_decoder {
-            decoder.decode(sample, &mut video_decoder_stats).or_fail()?;
+            decoder.decode(sample).or_fail()?;
             while let Some(decoded) = decoder.next_decoded_frame() {
                 video_samples[decoded_count].update(&decoded);
                 decoded_count += 1;
