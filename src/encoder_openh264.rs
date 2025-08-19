@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use orfail::OrFail;
 use shiguredo_mp4::{
     Uint,
@@ -41,7 +43,7 @@ impl Openh264Encoder {
         })
     }
 
-    pub fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
 
         let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
