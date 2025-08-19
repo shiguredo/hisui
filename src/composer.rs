@@ -9,9 +9,10 @@ use crate::{
     decoder::VideoDecoderOptions,
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
-    media::MediaStreamIdGenerator,
+    media::{MediaSample, MediaStreamId, MediaStreamIdGenerator},
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     source::{AudioSourceThread, VideoSourceThread},
     stats::{ProcessorStats, Seconds, SharedStats},
     types::CodecName,
@@ -70,25 +71,54 @@ impl Composer {
         );
 
         // 映像ミキサーとエンコーダーを準備
-        let encoded_video_rx = self
+        let mut encoded_video_rx = self
             .create_video_mixer_and_encoder(error_flag.clone(), stats.clone(), video_source_rxs)
             .or_fail()?;
 
         // 音声ミキサーとエンコーダーを準備
-        let encoded_audio_rx = self
+        let mut encoded_audio_rx = self
             .create_audio_mixer_and_encoder(error_flag.clone(), stats.clone(), audio_source_rxs)
             .or_fail()?;
 
         // 合成後の映像と音声への MP4 への書き出しを行う（この処理は現在のスレッドで行う）
+        let writer_input_audio_stream_id = MediaStreamId::new(1000); // audio / video で値が異なっていればなんでもいい
+        let writer_input_video_stream_id = MediaStreamId::new(1001);
+
         let mut mp4_writer = Mp4Writer::new(
             out_file_path,
             &self.layout,
-            encoded_audio_rx,
-            encoded_video_rx,
+            self.layout
+                .has_audio()
+                .then_some(writer_input_audio_stream_id),
+            self.layout
+                .has_video()
+                .then_some(writer_input_video_stream_id),
         )
         .or_fail()?;
 
-        while let Some(timestamp) = mp4_writer.poll().or_fail()? {
+        loop {
+            match mp4_writer.process_output().or_fail()? {
+                MediaProcessorOutput::Finished => break,
+                MediaProcessorOutput::Pending { awaiting_stream_id }
+                    if awaiting_stream_id == writer_input_audio_stream_id =>
+                {
+                    let input = MediaProcessorInput {
+                        stream_id: awaiting_stream_id,
+                        sample: encoded_audio_rx.recv().map(MediaSample::audio_data),
+                    };
+                    mp4_writer.process_input(input).or_fail()?;
+                }
+                MediaProcessorOutput::Pending { awaiting_stream_id } => {
+                    let input = MediaProcessorInput {
+                        stream_id: awaiting_stream_id,
+                        sample: encoded_video_rx.recv().map(MediaSample::video_frame),
+                    };
+                    mp4_writer.process_input(input).or_fail()?;
+                }
+                MediaProcessorOutput::Processed { .. } => unreachable!(),
+            }
+
+            let timestamp = mp4_writer.current_duration();
             progress_bar.set_position(timestamp.as_secs());
             if error_flag.get() {
                 // ファイル読み込み、デコード、合成、エンコード、のいずれかで失敗したものがあるとここに来る

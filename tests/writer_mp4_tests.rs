@@ -1,13 +1,14 @@
-use std::{collections::BTreeMap, path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
-    audio::{AudioData, AudioDataReceiver, AudioDataSyncSender, AudioFormat, SAMPLE_RATE},
-    channel,
+    audio::{AudioData, AudioFormat, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{Grid, Region},
+    media::{MediaSample, MediaStreamId},
     metadata::{SourceId, SourceInfo},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
-    video::{FrameRate, VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
+    video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::Mp4Writer,
 };
 use orfail::OrFail;
@@ -16,25 +17,49 @@ use shiguredo_mp4::{
     boxes::{SampleEntry, UnknownBox},
 };
 
+const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+
 #[test]
 fn write_audio_only_mp4() -> orfail::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(&[source.clone()], &[]);
-    let ((audio_tx, audio_rx), (_video_tx, video_rx)) = channels();
 
     // ライターを作成する
-    let mut writer =
-        Mp4Writer::new(output_file_path.path(), &layout, audio_rx, video_rx).or_fail()?;
+    let mut writer = Mp4Writer::new(
+        output_file_path.path(),
+        &layout,
+        Some(AUDIO_STREAM_ID),
+        None,
+    )
+    .or_fail()?;
 
     // 1 秒尺の音声データを供給する
     for i in 0..60 {
-        let _ = audio_tx.send(audio_data(&source, i, secs(1)));
+        let input = MediaProcessorInput {
+            stream_id: AUDIO_STREAM_ID,
+            sample: Some(MediaSample::Audio(Arc::new(audio_data(
+                &source,
+                i,
+                secs(1),
+            )))),
+        };
+        writer.process_input(input).or_fail()?;
     }
-    std::mem::drop(audio_tx);
+
+    // 音声入力の終了を通知
+    let input = MediaProcessorInput {
+        stream_id: AUDIO_STREAM_ID,
+        sample: None,
+    };
+    writer.process_input(input).or_fail()?;
 
     // 最後まで書き込む
-    while writer.poll().or_fail()?.is_some() {}
+    while !matches!(
+        writer.process_output().or_fail()?,
+        MediaProcessorOutput::Finished
+    ) {}
 
     // 統計値を確認する
     let stats = writer.stats();
@@ -57,20 +82,41 @@ fn write_video_only_mp4() -> orfail::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(&[], &[source.clone()]);
-    let ((_audio_tx, audio_rx), (video_tx, video_rx)) = channels();
 
     // ライターを作成する
-    let mut writer =
-        Mp4Writer::new(output_file_path.path(), &layout, audio_rx, video_rx).or_fail()?;
+    let mut writer = Mp4Writer::new(
+        output_file_path.path(),
+        &layout,
+        None,
+        Some(VIDEO_STREAM_ID),
+    )
+    .or_fail()?;
 
     // 1 秒尺の映像フレームを供給する
     for i in 0..60 {
-        let _ = video_tx.send(video_frame(&source, i, secs(1)));
+        let input = MediaProcessorInput {
+            stream_id: VIDEO_STREAM_ID,
+            sample: Some(MediaSample::Video(Arc::new(video_frame(
+                &source,
+                i,
+                secs(1),
+            )))),
+        };
+        writer.process_input(input).or_fail()?;
     }
-    std::mem::drop(video_tx);
+
+    // 映像入力の終了を通知
+    let input = MediaProcessorInput {
+        stream_id: VIDEO_STREAM_ID,
+        sample: None,
+    };
+    writer.process_input(input).or_fail()?;
 
     // 最後まで書き込む
-    while writer.poll().or_fail()?.is_some() {}
+    while !matches!(
+        writer.process_output().or_fail()?,
+        MediaProcessorOutput::Finished
+    ) {}
 
     // 統計値を確認する
     let stats = writer.stats();
@@ -94,22 +140,57 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
     let audio_source = source(0, secs(0), secs(60));
     let video_source = source(1, secs(0), secs(60));
     let layout = layout(&[audio_source.clone()], &[video_source.clone()]);
-    let ((audio_tx, audio_rx), (video_tx, video_rx)) = channels();
 
     // ライターを作成する
-    let mut writer =
-        Mp4Writer::new(output_file_path.path(), &layout, audio_rx, video_rx).or_fail()?;
+    let mut writer = Mp4Writer::new(
+        output_file_path.path(),
+        &layout,
+        Some(AUDIO_STREAM_ID),
+        Some(VIDEO_STREAM_ID),
+    )
+    .or_fail()?;
 
     // 1 秒尺の音声データ・映像フレームを供給する
     for i in 0..60 {
-        let _ = audio_tx.send(audio_data(&audio_source, i, secs(1)));
-        let _ = video_tx.send(video_frame(&video_source, i, secs(1)));
+        let audio_input = MediaProcessorInput {
+            stream_id: AUDIO_STREAM_ID,
+            sample: Some(MediaSample::Audio(Arc::new(audio_data(
+                &audio_source,
+                i,
+                secs(1),
+            )))),
+        };
+        writer.process_input(audio_input).or_fail()?;
+
+        let video_input = MediaProcessorInput {
+            stream_id: VIDEO_STREAM_ID,
+            sample: Some(MediaSample::Video(Arc::new(video_frame(
+                &video_source,
+                i,
+                secs(1),
+            )))),
+        };
+        writer.process_input(video_input).or_fail()?;
     }
-    std::mem::drop(audio_tx);
-    std::mem::drop(video_tx);
+
+    // 入力の終了を通知
+    let audio_end_input = MediaProcessorInput {
+        stream_id: AUDIO_STREAM_ID,
+        sample: None,
+    };
+    writer.process_input(audio_end_input).or_fail()?;
+
+    let video_end_input = MediaProcessorInput {
+        stream_id: VIDEO_STREAM_ID,
+        sample: None,
+    };
+    writer.process_input(video_end_input).or_fail()?;
 
     // 最後まで書き込む
-    while writer.poll().or_fail()?.is_some() {}
+    while !matches!(
+        writer.process_output().or_fail()?,
+        MediaProcessorOutput::Finished
+    ) {}
 
     // 統計値を確認する
     let stats = writer.stats();
@@ -131,14 +212,15 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
 fn no_video_and_audio_mp4() -> orfail::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let layout = layout(&[], &[]);
-    let ((_audio_tx, audio_rx), (_video_tx, video_rx)) = channels();
 
     // ライターを作成する
-    let mut writer =
-        Mp4Writer::new(output_file_path.path(), &layout, audio_rx, video_rx).or_fail()?;
+    let mut writer = Mp4Writer::new(output_file_path.path(), &layout, None, None).or_fail()?;
 
     // 最後まで書き込む
-    while writer.poll().or_fail()?.is_some() {}
+    while !matches!(
+        writer.process_output().or_fail()?,
+        MediaProcessorOutput::Finished
+    ) {}
 
     // 統計値を確認する
     let stats = writer.stats();
@@ -243,16 +325,6 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
         video: true,
         format: Default::default(),
     }
-}
-
-fn channels() -> (
-    (AudioDataSyncSender, AudioDataReceiver),
-    (VideoFrameSyncSender, VideoFrameReceiver),
-) {
-    (
-        channel::sync_channel_with_bound(1000),
-        channel::sync_channel_with_bound(1000),
-    )
 }
 
 fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioData {
