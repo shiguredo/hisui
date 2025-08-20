@@ -272,7 +272,12 @@ impl VideoEncoder {
                 VideoEncoderInner::new_video_toolbox_h264(layout).or_fail()?
             }
             CodecName::H264 => {
-                let lib = openh264_lib.or_fail()?;
+                let lib = openh264_lib.or_fail_with(|()| {
+                    concat!(
+                        "OpenH264 library is required for H.264 encoding. ",
+                        "Please specify the library path using --openh264 command line argument or ",
+                        "HISUI_OPENH264_PATH environment variable.").to_owned()
+                })?;
                 VideoEncoderInner::new_openh264(lib, layout).or_fail()?
             }
             #[cfg(target_os = "macos")]
