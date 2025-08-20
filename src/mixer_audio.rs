@@ -211,7 +211,6 @@ impl MediaProcessor for AudioMixer {
             .or_fail()?;
         if let Some(sample) = input.sample {
             let data = sample.expect_audio_data().or_fail()?;
-            self.stats.total_output_audio_data_count.add(1);
 
             if input_stream.start_timestamp.is_none() {
                 // 合成開始時刻の判断用に最初のタイムスタンプを覚えておく
@@ -235,6 +234,8 @@ impl MediaProcessor for AudioMixer {
             input_stream
                 .sample_queue
                 .extend(data.stereo_samples().or_fail()?);
+
+            self.stats.total_input_audio_data_count.add(1);
         } else {
             input_stream.eos = true;
         }
