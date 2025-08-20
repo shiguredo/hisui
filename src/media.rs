@@ -11,6 +11,10 @@ impl MediaStreamId {
     pub const fn new(id: u64) -> Self {
         Self(id)
     }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
 }
 
 #[derive(Debug)]

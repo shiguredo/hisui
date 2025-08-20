@@ -27,6 +27,29 @@ pub struct MediaProcessorInput {
     pub sample: Option<MediaSample>, // None なら EOS を表す
 }
 
+impl MediaProcessorInput {
+    pub fn eos(stream_id: MediaStreamId) -> Self {
+        Self {
+            stream_id,
+            sample: None,
+        }
+    }
+
+    pub fn audio_data(stream_id: MediaStreamId, data: AudioData) -> Self {
+        Self {
+            stream_id,
+            sample: Some(MediaSample::audio_data(data)),
+        }
+    }
+
+    pub fn video_frame(stream_id: MediaStreamId, frame: VideoFrame) -> Self {
+        Self {
+            stream_id,
+            sample: Some(MediaSample::video_frame(frame)),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum MediaProcessorOutput {
     Processed {
