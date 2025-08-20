@@ -146,7 +146,7 @@ impl AudioMixer {
             let mut acc_left = 0;
             let mut acc_right = 0;
             for stream in self.input_streams.values_mut() {
-                if stream.start_timestamp.is_none_or(|t| t < now) {
+                if stream.start_timestamp.is_none_or(|t| now < t) {
                     // 開始時刻に達していない
                     continue;
                 }
@@ -255,13 +255,7 @@ impl MediaProcessor for AudioMixer {
                 // これ以上新しい入力は来ないので待たない
                 continue;
             }
-            if input_stream.start_timestamp.is_some_and(|t| t < now) {
-                // 開始時刻に達していない
-                continue;
-            }
-            if input_stream.start_timestamp.is_none()
-                || input_stream.sample_queue.len() < MIXED_AUDIO_DATA_SAMPLES
-            {
+            if input_stream.sample_queue.len() < MIXED_AUDIO_DATA_SAMPLES {
                 // 次の合成に必要なサンプル数が足りないので待つ
                 return Ok(MediaProcessorOutput::Pending {
                     awaiting_stream_id: *input_stream_id,
