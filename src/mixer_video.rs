@@ -753,21 +753,36 @@ impl MediaProcessor for VideoMixer {
         // 破棄はせずに連続しているものとして扱う
         // (入力ファイル作成時の数値計算誤差などで、僅かなギャップが生じたとしても、
         //  その部分を黒塗りにしたくはないため)
-        /*
-                self.current_frames.retain(|source_id, f| {
-                    if !self.eos_source_ids.contains(source_id) {
-                        // まだ EOS に達していない
-                        return true;
-                    }
-                    if now < f.end_timestamp() {
-                        // まだ表示時刻に収まっている
-                        return true;
-                    }
+        for input_stream in self.input_streams.values_mut() {
+            if !input_stream.eos {
+                // まだ EOS に達していない
+                continue;
+            }
+            let Some(last_frame) = input_stream.frame_queue.back() else {
+                // もうフレームがない
+                continue;
+            };
+            if now < last_frame.end_timestamp() {
+                // まだ表示時刻に収まっている
+                continue;
+            }
 
-                    self.last_input_update_time = now;
-                    false
-                });
-        */
+            // EOS に到達し、表示時刻も超過した
+            input_stream.frame_queue.clear();
+            self.last_input_update_time = now;
+        }
+
+        // 表示対象のフレームを更新する
+        for (&input_stream_id, input_stream) in &mut self.input_streams {
+            if input_stream.frame_queue.len() < 2 {
+                if input_stream.eos {
+                    continue;
+                }
+
+                // 「現在のフレームをいつまで使うか」を判断するための情報が揃っていない
+            }
+        }
+
         todo!()
     }
 }
