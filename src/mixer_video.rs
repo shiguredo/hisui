@@ -468,12 +468,6 @@ impl Canvas {
     }
 }
 
-#[derive(Debug, Default)]
-struct InputStream {
-    eos: bool,
-    frame_queue: VecDeque<ResizeCachedVideoFrame>,
-}
-
 #[derive(Debug)]
 pub struct VideoMixer {
     layout: Layout,
@@ -752,45 +746,79 @@ impl MediaProcessor for VideoMixer {
         }
 
         // 表示対象のフレームを更新する
-
-        // EOS に到達したソースの最後のフレームは、その表示時刻を過ぎたら破棄する
-        //
-        // なお、EOS ではないソースの場合は、仮に途中のフレーム間のギャップがあったとしても、
-        // 破棄はせずに連続しているものとして扱う
-        // (入力ファイル作成時の数値計算誤差などで、僅かなギャップが生じたとしても、
-        //  その部分を黒塗りにしたくはないため)
         for (input_stream_id, input_stream) in &mut self.input_streams {
-            let Some(current_frame) = input_stream.frame_queue.front() else {
-                if !input_stream.eos {
-                    return Ok(MediaProcessorOutput::pending(*input_stream_id));
-                }
-                continue;
-            };
-            if now < current_frame.end_timestamp() {
-                // まだ現在のフレームの表示時刻範囲内
-                continue;
-            }
-
-            // TODO: loop
-
-            let Some(next_frame) = input_stream.frame_queue.get(1) else {
-                if !input_stream.eos {
-                    return Ok(MediaProcessorOutput::pending(*input_stream_id));
-                } else {
-                    // EOS に到達し、表示時刻も超過した
-                    input_stream.frame_queue.clear();
+            match input_stream.pop_outdated_frame(now) {
+                PopOutdatedFrameResult::Noop => {}
+                PopOutdatedFrameResult::Popped => {
                     self.last_input_update_time = now;
                 }
-                continue;
-            };
-            if now < next_frame.start_timestamp() {
-                continue;
+                PopOutdatedFrameResult::MoreInputNeeded => {
+                    return Ok(MediaProcessorOutput::pending(*input_stream_id));
+                }
             }
-
-            input_stream.frame_queue.pop_front();
-            self.last_input_update_time = now;
         }
 
         todo!()
     }
+}
+
+#[derive(Debug, Default)]
+struct InputStream {
+    eos: bool,
+    frame_queue: VecDeque<ResizeCachedVideoFrame>,
+}
+
+impl InputStream {
+    fn pop_outdated_frame(&mut self, now: Duration) -> PopOutdatedFrameResult {
+        loop {
+            let Some(current_frame) = self.frame_queue.front() else {
+                if self.eos {
+                    // EOS & キューにフレームが残っていない
+                    return PopOutdatedFrameResult::Noop;
+                } else {
+                    // EOS ではないけどキューが空なので入力待ち
+                    return PopOutdatedFrameResult::MoreInputNeeded;
+                }
+            };
+            if now < current_frame.end_timestamp() {
+                // まだ現在のフレームの表示時刻範囲内
+                return PopOutdatedFrameResult::Noop;
+            }
+
+            let Some(next_frame) = self.frame_queue.get(1) else {
+                if self.eos {
+                    // EOS に到達し、表示時刻も超過した
+                    self.frame_queue.clear();
+                    return PopOutdatedFrameResult::Popped;
+                } else {
+                    // EOS ではないなら、現在のフレームの破棄タイミングを判断するために次の入力を待つ
+                    return PopOutdatedFrameResult::MoreInputNeeded;
+                }
+            };
+            if now < next_frame.start_timestamp() {
+                // まだ現在のフレームの表示時刻範囲内
+                //
+                // [NOTE]
+                // 前のフレームの表示時刻を過ぎていても、
+                // 次のフレームの表示時刻に到達するまでは前のフレームを使い続ける
+                //
+                // これは、入力ファイル作成時の数値計算誤差などで、
+                // 僅かなギャップが生じたとしても、その部分を黒塗りにしたくはないため
+                return PopOutdatedFrameResult::Noop;
+            }
+
+            // 次のフレームの表示時刻になった
+            //
+            // なお、入力 FPS よりも出力 FPS の方が小さい場合には、
+            // 次のフレームがすぐに破棄される可能性もあるので、
+            // ここで終わりにしないで、ループしている
+            self.frame_queue.pop_front();
+        }
+    }
+}
+
+enum PopOutdatedFrameResult {
+    Noop,
+    Popped,
+    MoreInputNeeded,
 }
