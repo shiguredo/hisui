@@ -460,7 +460,6 @@ impl Canvas {
 #[derive(Debug, Default)]
 struct InputStream {
     eos: bool,
-    start_timestamp: Option<Duration>,
     current_frame: Option<ResizeCachedVideoFrame>,
     frame_queue: VecDeque<Arc<VideoFrame>>,
 }
@@ -792,45 +791,16 @@ impl MediaProcessor for VideoMixer {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let input_stream = self
-            .input_streams
-            .iter_mut()
-            .find_map(|(&id, v)| (id == input.stream_id).then_some(v))
-            .or_fail()?;
-        todo!()
-        /*
-                if let Some(sample) = input.sample {
-                    let data = sample.expect_audio_data().or_fail()?;
-
-                    if input_stream.start_timestamp.is_none() {
-                        // 合成開始時刻の判断用に最初のタイムスタンプを覚えておく
-                        //
-                        // なお開始時刻に達した後は、データのタイムスタンプにギャップがあったとしても
-                        // 連続しているものとして扱う。
-                        //
-                        // これは Chrome を含む多くのブラウザがこの挙動なのと、
-                        // ギャップ部分のハンドリングは Sora 側の責務であるため。
-                        // 下手に Hisui 側でハンドリングしてしまうと、ギャップが
-                        // 極端に大きいためにあえて Sora がそのまま放置した区間を
-                        // 埋めようとしてディスクやメモリを食いつぶしてしまう恐れがある。
-                        input_stream.start_timestamp = Some(data.timestamp);
-                    }
-
-                    // サンプルキューに要素を追加する
-                    //
-                    // 想定外の入力が来ていないかを念のためにチェックする
-                    // (format と stereo については stereo_samples() の中でチェックしている)
-                    (data.sample_rate == SAMPLE_RATE).or_fail()?;
-                    input_stream
-                        .sample_queue
-                        .extend(data.stereo_samples().or_fail()?);
-
-                    self.stats.total_input_audio_data_count.add(1);
-                } else {
-                    input_stream.eos = true;
-                }
-                Ok(())
-        */
+        let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
+        if let Some(sample) = input.sample {
+            // キューに要素を追加する
+            let frame = sample.expect_video_frame().or_fail()?;
+            input_stream.frame_queue.push_back(frame);
+            self.stats.total_input_video_frame_count.add(1);
+        } else {
+            input_stream.eos = true;
+        }
+        Ok(())
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {

@@ -204,11 +204,7 @@ impl MediaProcessor for AudioMixer {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let input_stream = self
-            .input_streams
-            .iter_mut()
-            .find_map(|(&id, v)| (id == input.stream_id).then_some(v))
-            .or_fail()?;
+        let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
         if let Some(sample) = input.sample {
             let data = sample.expect_audio_data().or_fail()?;
 
