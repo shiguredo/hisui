@@ -457,11 +457,11 @@ impl Canvas {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct InputStream {
     eos: bool,
     start_timestamp: Option<Duration>,
-    current_frame: ResizeCachedVideoFrame,
+    current_frame: Option<ResizeCachedVideoFrame>,
     frame_queue: VecDeque<Arc<VideoFrame>>,
 }
 
@@ -476,6 +476,30 @@ pub struct VideoMixer {
 }
 
 impl VideoMixer {
+    pub fn new(
+        layout: Layout,
+        input_stream_ids: Vec<MediaStreamId>,
+        output_stream_id: MediaStreamId,
+    ) -> Self {
+        let resolution = layout.resolution;
+        Self {
+            layout,
+            input_streams: input_stream_ids
+                .into_iter()
+                .map(|id| (id, InputStream::default()))
+                .collect(),
+            output_stream_id,
+            last_mixed_frame: None,
+            last_input_update_time: Duration::ZERO,
+            stats: VideoMixerStats {
+                output_video_resolution: VideoResolution {
+                    width: resolution.width().get(),
+                    height: resolution.height().get(),
+                },
+                ..Default::default()
+            },
+        }
+    }
     /*
         pub fn start(
             error_flag: ErrorFlag,
@@ -756,4 +780,104 @@ impl VideoMixer {
             Ok(())
         }
     */
+}
+
+impl MediaProcessor for VideoMixer {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.input_streams.keys().copied().collect(),
+            output_stream_ids: vec![self.output_stream_id],
+            stats: ProcessorStats::VideoMixer(self.stats.clone()),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let input_stream = self
+            .input_streams
+            .iter_mut()
+            .find_map(|(&id, v)| (id == input.stream_id).then_some(v))
+            .or_fail()?;
+        todo!()
+        /*
+                if let Some(sample) = input.sample {
+                    let data = sample.expect_audio_data().or_fail()?;
+
+                    if input_stream.start_timestamp.is_none() {
+                        // 合成開始時刻の判断用に最初のタイムスタンプを覚えておく
+                        //
+                        // なお開始時刻に達した後は、データのタイムスタンプにギャップがあったとしても
+                        // 連続しているものとして扱う。
+                        //
+                        // これは Chrome を含む多くのブラウザがこの挙動なのと、
+                        // ギャップ部分のハンドリングは Sora 側の責務であるため。
+                        // 下手に Hisui 側でハンドリングしてしまうと、ギャップが
+                        // 極端に大きいためにあえて Sora がそのまま放置した区間を
+                        // 埋めようとしてディスクやメモリを食いつぶしてしまう恐れがある。
+                        input_stream.start_timestamp = Some(data.timestamp);
+                    }
+
+                    // サンプルキューに要素を追加する
+                    //
+                    // 想定外の入力が来ていないかを念のためにチェックする
+                    // (format と stereo については stereo_samples() の中でチェックしている)
+                    (data.sample_rate == SAMPLE_RATE).or_fail()?;
+                    input_stream
+                        .sample_queue
+                        .extend(data.stereo_samples().or_fail()?);
+
+                    self.stats.total_input_audio_data_count.add(1);
+                } else {
+                    input_stream.eos = true;
+                }
+                Ok(())
+        */
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        todo!()
+        /*
+                let mut now = self.next_input_timestamp();
+                while self.layout.is_in_trim_span(now) {
+                    self.stats
+                        .total_trimmed_sample_count
+                        .add(MIXED_AUDIO_DATA_SAMPLES as u64);
+                    now = self.next_input_timestamp();
+                }
+
+                // 入力が不足しているソースがないかをチェックする
+                for (input_stream_id, input_stream) in &self.input_streams {
+                    if input_stream.eos {
+                        // これ以上新しい入力は来ないので待たない
+                        continue;
+                    }
+                    if input_stream.sample_queue.len() < MIXED_AUDIO_DATA_SAMPLES {
+                        // 次の合成に必要なサンプル数が足りないので待つ
+                        return Ok(MediaProcessorOutput::Pending {
+                            awaiting_stream_id: *input_stream_id,
+                        });
+                    }
+                }
+
+                // EOS 判定
+                let eos = self
+                    .input_streams
+                    .values()
+                    .all(|s| s.eos && s.sample_queue.is_empty());
+                if eos {
+                    return Ok(MediaProcessorOutput::Finished);
+                }
+
+                // 合成
+                let (result, elapsed) = Seconds::elapsed(|| self.mix_next_audio_data(now).or_fail());
+
+                // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
+                self.stats.total_processing_seconds.add(elapsed);
+
+                let mixed_data = result?;
+                Ok(MediaProcessorOutput::Processed {
+                    stream_id: self.output_stream_id,
+                    sample: MediaSample::audio_data(mixed_data),
+                })
+        */
+    }
 }
