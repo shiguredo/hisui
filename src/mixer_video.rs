@@ -245,7 +245,6 @@ pub struct VideoMixer {
     input_streams: HashMap<MediaStreamId, InputStream>,
     output_stream_id: MediaStreamId,
     last_mixed_frame: Option<VideoFrame>,
-    last_input_update_time: Duration,
     stats: VideoMixerStats,
 }
 
@@ -264,7 +263,6 @@ impl VideoMixer {
                 .collect(),
             output_stream_id,
             last_mixed_frame: None,
-            last_input_update_time: Duration::ZERO,
             stats: VideoMixerStats {
                 output_video_resolution: VideoResolution {
                     width: resolution.width().get(),
@@ -389,6 +387,28 @@ impl VideoMixer {
 
         Ok(())
     }
+
+    fn gap_until_next_frame_change(&self, now: Duration) -> Duration {
+        let mut next_start_timestamp = Duration::MAX;
+        for input_stream in self.input_streams.values() {
+            let Some((current, next)) = input_stream
+                .frame_queue
+                .front()
+                .zip(input_stream.frame_queue.get(1))
+            else {
+                continue;
+            };
+            if now < current.start_timestamp() {
+                continue;
+            }
+            next_start_timestamp = next_start_timestamp.min(next.start_timestamp());
+        }
+        if next_start_timestamp == Duration::MAX {
+            Duration::ZERO
+        } else {
+            next_start_timestamp.saturating_sub(now)
+        }
+    }
 }
 
 impl MediaProcessor for VideoMixer {
@@ -450,9 +470,9 @@ impl MediaProcessor for VideoMixer {
             }
 
             // 入力のタイムスタンプに極端なギャップがある場合の対応
-            let elapsed_since_last_input = now.saturating_sub(self.last_input_update_time);
-            if elapsed_since_last_input > TIMESTAMP_GAP_THRESHOLD {
-                (elapsed_since_last_input <= TIMESTAMP_GAP_ERROR_THRESHOLD)
+            let gap = self.gap_until_next_frame_change(now);
+            if gap > TIMESTAMP_GAP_THRESHOLD {
+                (gap <= TIMESTAMP_GAP_ERROR_THRESHOLD)
                     .or_fail_with(|()| "too large timestamp gap".to_owned())?;
 
                 // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
@@ -504,7 +524,7 @@ impl InputStream {
             };
             if now < current_frame.end_timestamp() {
                 // まだ現在のフレームの表示時刻範囲内
-                return PopOutdatedFrameResult::Noop;
+                return true;
             }
 
             let Some(next_frame) = self.frame_queue.get(1) else {
