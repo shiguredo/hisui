@@ -112,12 +112,11 @@ fn simple_single_source() -> noargs::Result<()> {
         [(320, 240)]
     );
 
-    // 一秒分 + 一サンプル (25 fps = 40 ms)
-    // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count.get(), 26);
+    // 一秒分 (25 fps = 40 ms)
+    assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
         video_stats.total_track_seconds.get_duration(),
-        Duration::from_millis(1040)
+        Duration::from_secs(1)
     );
 
     // 音声をデコードをして中身を確認する
@@ -213,12 +212,11 @@ fn simple_multi_sources() -> noargs::Result<()> {
         [(320 * 3, 240 * 1)]
     );
 
-    // 一秒分 + 一サンプル (25 fps = 40 ms)
-    // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count.get(), 26);
+    // 一秒分 (25 fps = 40 ms)
+    assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
         video_stats.total_track_seconds.get_duration(),
-        Duration::from_millis(1040)
+        Duration::from_secs(1)
     );
 
     Ok(())
@@ -278,12 +276,11 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         [(16, 52)]
     );
 
-    // 一秒分 + 一サンプル (25 fps = 40 ms)
-    // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count.get(), 26);
+    // 一秒分 (25 fps = 40 ms)
+    assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
         video_stats.total_track_seconds.get_duration(),
-        Duration::from_millis(1040)
+        Duration::from_secs(1)
     );
 
     // 音声をデコードをして中身を確認する
@@ -389,12 +386,11 @@ fn two_regions() -> noargs::Result<()> {
         [(16, 34)]
     );
 
-    // 一秒分 + 一サンプル (25 fps = 40 ms)
-    // => 入力が 30 fps で出力が 25 fps なので、その変換時の端数分だけ尺が伸びている
-    assert_eq!(video_stats.total_sample_count.get(), 26);
+    // 一秒分 (25 fps = 40 ms)
+    assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
         video_stats.total_track_seconds.get_duration(),
-        Duration::from_millis(1040)
+        Duration::from_secs(1)
     );
 
     // 映像をデコードをして中身を確認する

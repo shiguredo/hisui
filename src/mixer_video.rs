@@ -305,7 +305,7 @@ impl VideoMixer {
         ) - self.next_output_timestamp()
     }
 
-    fn mix(&mut self) -> orfail::Result<VideoFrame> {
+    fn mix(&mut self, now: Duration) -> orfail::Result<VideoFrame> {
         let timestamp = self.next_output_timestamp();
         let duration = self.next_output_duration();
 
@@ -315,7 +315,7 @@ impl VideoMixer {
         );
 
         for region in &self.layout.video_regions {
-            Self::mix_region(&mut canvas, region, &mut self.input_streams).or_fail()?;
+            Self::mix_region(&mut canvas, region, &mut self.input_streams, now).or_fail()?;
         }
 
         self.stats.total_output_video_frame_count.add(1);
@@ -343,6 +343,7 @@ impl VideoMixer {
         canvas: &mut Canvas,
         region: &Region,
         input_streams: &mut HashMap<MediaStreamId, InputStream>,
+        now: Duration,
     ) -> orfail::Result<()> {
         // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
         //        (必要に応じて最適化する)
@@ -357,6 +358,9 @@ impl VideoMixer {
             let Some(frame) = input_stream.frame_queue.front_mut() else {
                 continue;
             };
+            if now < frame.start_timestamp() {
+                continue;
+            }
             let Some(source_id) = frame.source_id() else {
                 continue;
             };
@@ -472,7 +476,7 @@ impl MediaProcessor for VideoMixer {
             // 現在のフレームを合成する
             //
             // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-            let (result, elapsed) = Seconds::elapsed(|| self.mix().or_fail());
+            let (result, elapsed) = Seconds::elapsed(|| self.mix(now).or_fail());
             self.stats.total_processing_seconds.add(elapsed);
 
             if let Some(frame) = self.last_mixed_frame.replace(result?) {
