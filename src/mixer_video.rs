@@ -325,12 +325,19 @@ impl VideoMixerThread {
 
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
-    original: VideoFrame,
+    original: Arc<VideoFrame>,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
 }
 
 impl ResizeCachedVideoFrame {
     fn new(original: VideoFrame) -> Self {
+        Self {
+            original: Arc::new(original),
+            resized: Vec::new(),
+        }
+    }
+
+    fn new2(original: Arc<VideoFrame>) -> Self {
         Self {
             original,
             resized: Vec::new(),
@@ -356,7 +363,7 @@ impl ResizeCachedVideoFrame {
             .is_none()
         {
             // キャッシュにないので新規リサイズが必要
-            let mut frame = self.original.clone();
+            let mut frame = (*self.original).clone(); // TODO: remove clone() (make resize() return the new instance)
             frame.resize(width, height).or_fail()?;
             self.resized.push(((width, height), frame));
         }
@@ -460,8 +467,7 @@ impl Canvas {
 #[derive(Debug, Default)]
 struct InputStream {
     eos: bool,
-    current_frame: Option<ResizeCachedVideoFrame>,
-    frame_queue: VecDeque<Arc<VideoFrame>>,
+    frame_queue: VecDeque<ResizeCachedVideoFrame>,
 }
 
 #[derive(Debug)]
@@ -499,95 +505,22 @@ impl VideoMixer {
             },
         }
     }
+
+    fn next_input_timestamp(&self) -> Duration {
+        self.frames_to_timestamp(
+            self.stats.total_output_video_frame_count.get()
+                + self.stats.total_extended_video_frame_count.get()
+                + self.stats.total_trimmed_video_frame_count.get(),
+        )
+    }
+
+    // フレーム数に対応するタイムスタンプを求める
+    fn frames_to_timestamp(&self, frames: u64) -> Duration {
+        Duration::from_secs(frames * self.layout.frame_rate.denumerator.get() as u64)
+            / self.layout.frame_rate.numerator.get() as u32
+    }
+
     /*
-        pub fn start(
-            error_flag: ErrorFlag,
-            layout: Layout,
-            input_rxs: Vec<VideoFrameReceiver>,
-            shared_stats: SharedStats,
-        ) -> VideoFrameReceiver {
-            let (tx, rx) = channel::sync_channel();
-            let resolution = layout.resolution;
-            let mut this = Self {
-                inputs: input_rxs
-                    .into_iter()
-                    .map(|rx| Input {
-                        source_id: None,
-                        rx,
-                    })
-                    .collect(),
-                layout,
-                output_tx: tx,
-                current_frames: HashMap::new(),
-                eos_source_ids: HashSet::new(),
-                last_mixed_frame: None,
-                last_input_update_time: Duration::ZERO,
-                stats: VideoMixerStats {
-                    output_video_resolution: VideoResolution {
-                        width: resolution.width().get(),
-                        height: resolution.height().get(),
-                    },
-                    ..Default::default()
-                },
-            };
-            std::thread::spawn(move || {
-                log::debug!("video mixer started");
-                if let Err(e) = this.run().or_fail() {
-                    error_flag.set();
-                    this.stats.error.set(true);
-                    log::error!("failed to mix video sources: {e}");
-                }
-                log::debug!("video mixer finished");
-
-                shared_stats.with_lock(|stats| {
-                    stats
-                        .processors
-                        .push(ProcessorStats::VideoMixer(this.stats));
-                });
-            });
-            rx
-        }
-
-        fn run(&mut self) -> orfail::Result<()> {
-            while let Some(frame) = self.next_output_frame().or_fail()? {
-                let Some(last_frame) = self.last_mixed_frame.take() else {
-                    // 最初のフレームの場合はバッファに溜めて次に進む
-                    self.last_mixed_frame = Some(frame);
-                    continue;
-                };
-                self.last_mixed_frame = Some(frame);
-
-                if !self.output_tx.send(last_frame) {
-                    // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::info!("receiver of mixed video stream has been closed");
-                    return Ok(());
-                }
-            }
-
-            // バッファに残っていた最後のフレームを送る
-            if let Some(last_frame) = self.last_mixed_frame.take()
-                && !self.output_tx.send(last_frame)
-            {
-                log::info!("receiver of mixed video stream has been closed");
-            }
-
-            Ok(())
-        }
-
-        // フレーム数に対応するタイムスタンプを求める
-        fn frames_to_timestamp(&self, frames: u64) -> Duration {
-            Duration::from_secs(frames * self.layout.frame_rate.denumerator.get() as u64)
-                / self.layout.frame_rate.numerator.get() as u32
-        }
-
-        fn next_input_timestamp(&self) -> Duration {
-            self.frames_to_timestamp(
-                self.stats.total_output_video_frame_count.get()
-                    + self.stats.total_extended_video_frame_count.get()
-                    + self.stats.total_trimmed_video_frame_count.get(),
-            )
-        }
-
         fn next_output_timestamp(&self) -> Duration {
             self.frames_to_timestamp(
                 self.stats.total_output_video_frame_count.get()
@@ -795,7 +728,9 @@ impl MediaProcessor for VideoMixer {
         if let Some(sample) = input.sample {
             // キューに要素を追加する
             let frame = sample.expect_video_frame().or_fail()?;
-            input_stream.frame_queue.push_back(frame);
+            input_stream
+                .frame_queue
+                .push_back(ResizeCachedVideoFrame::new2(frame));
             self.stats.total_input_video_frame_count.add(1);
         } else {
             input_stream.eos = true;
@@ -804,50 +739,35 @@ impl MediaProcessor for VideoMixer {
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        todo!()
+        let mut now = self.next_input_timestamp();
+
+        // トリム対象期間ならその分はスキップする
+        while self.layout.is_in_trim_span(now) {
+            self.stats.total_trimmed_video_frame_count.add(1);
+            now = self.next_input_timestamp();
+        }
+
+        // EOS に到達したソースの最後のフレームは、その表示時刻を過ぎたら破棄する
+        //
+        // なお、EOS ではないソースの場合は、仮に途中のフレーム間のギャップがあったとしても、
+        // 破棄はせずに連続しているものとして扱う
+        // (入力ファイル作成時の数値計算誤差などで、僅かなギャップが生じたとしても、
+        //  その部分を黒塗りにしたくはないため)
         /*
-                let mut now = self.next_input_timestamp();
-                while self.layout.is_in_trim_span(now) {
-                    self.stats
-                        .total_trimmed_sample_count
-                        .add(MIXED_AUDIO_DATA_SAMPLES as u64);
-                    now = self.next_input_timestamp();
-                }
-
-                // 入力が不足しているソースがないかをチェックする
-                for (input_stream_id, input_stream) in &self.input_streams {
-                    if input_stream.eos {
-                        // これ以上新しい入力は来ないので待たない
-                        continue;
+                self.current_frames.retain(|source_id, f| {
+                    if !self.eos_source_ids.contains(source_id) {
+                        // まだ EOS に達していない
+                        return true;
                     }
-                    if input_stream.sample_queue.len() < MIXED_AUDIO_DATA_SAMPLES {
-                        // 次の合成に必要なサンプル数が足りないので待つ
-                        return Ok(MediaProcessorOutput::Pending {
-                            awaiting_stream_id: *input_stream_id,
-                        });
+                    if now < f.end_timestamp() {
+                        // まだ表示時刻に収まっている
+                        return true;
                     }
-                }
 
-                // EOS 判定
-                let eos = self
-                    .input_streams
-                    .values()
-                    .all(|s| s.eos && s.sample_queue.is_empty());
-                if eos {
-                    return Ok(MediaProcessorOutput::Finished);
-                }
-
-                // 合成
-                let (result, elapsed) = Seconds::elapsed(|| self.mix_next_audio_data(now).or_fail());
-
-                // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-                self.stats.total_processing_seconds.add(elapsed);
-
-                let mixed_data = result?;
-                Ok(MediaProcessorOutput::Processed {
-                    stream_id: self.output_stream_id,
-                    sample: MediaSample::audio_data(mixed_data),
-                })
+                    self.last_input_update_time = now;
+                    false
+                });
         */
+        todo!()
     }
 }
