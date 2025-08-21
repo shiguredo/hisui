@@ -344,6 +344,10 @@ impl ResizeCachedVideoFrame {
         }
     }
 
+    fn start_timestamp(&self) -> Duration {
+        self.original.timestamp
+    }
+
     fn end_timestamp(&self) -> Duration {
         self.original.end_timestamp()
     }
@@ -747,40 +751,44 @@ impl MediaProcessor for VideoMixer {
             now = self.next_input_timestamp();
         }
 
+        // 表示対象のフレームを更新する
+
         // EOS に到達したソースの最後のフレームは、その表示時刻を過ぎたら破棄する
         //
         // なお、EOS ではないソースの場合は、仮に途中のフレーム間のギャップがあったとしても、
         // 破棄はせずに連続しているものとして扱う
         // (入力ファイル作成時の数値計算誤差などで、僅かなギャップが生じたとしても、
         //  その部分を黒塗りにしたくはないため)
-        for input_stream in self.input_streams.values_mut() {
-            if !input_stream.eos {
-                // まだ EOS に達していない
-                continue;
-            }
-            let Some(last_frame) = input_stream.frame_queue.back() else {
-                // もうフレームがない
+        for (input_stream_id, input_stream) in &mut self.input_streams {
+            let Some(current_frame) = input_stream.frame_queue.front() else {
+                if !input_stream.eos {
+                    return Ok(MediaProcessorOutput::pending(*input_stream_id));
+                }
                 continue;
             };
-            if now < last_frame.end_timestamp() {
-                // まだ表示時刻に収まっている
+            if now < current_frame.end_timestamp() {
+                // まだ現在のフレームの表示時刻範囲内
                 continue;
             }
 
-            // EOS に到達し、表示時刻も超過した
-            input_stream.frame_queue.clear();
-            self.last_input_update_time = now;
-        }
+            // TODO: loop
 
-        // 表示対象のフレームを更新する
-        for (&input_stream_id, input_stream) in &mut self.input_streams {
-            if input_stream.frame_queue.len() < 2 {
-                if input_stream.eos {
-                    continue;
+            let Some(next_frame) = input_stream.frame_queue.get(1) else {
+                if !input_stream.eos {
+                    return Ok(MediaProcessorOutput::pending(*input_stream_id));
+                } else {
+                    // EOS に到達し、表示時刻も超過した
+                    input_stream.frame_queue.clear();
+                    self.last_input_update_time = now;
                 }
-
-                // 「現在のフレームをいつまで使うか」を判断するための情報が揃っていない
+                continue;
+            };
+            if now < next_frame.start_timestamp() {
+                continue;
             }
+
+            input_stream.frame_queue.pop_front();
+            self.last_input_update_time = now;
         }
 
         todo!()
