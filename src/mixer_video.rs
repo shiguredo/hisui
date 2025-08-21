@@ -427,14 +427,9 @@ impl MediaProcessor for VideoMixer {
 
             // 表示対象のフレームを更新する
             for (input_stream_id, input_stream) in &mut self.input_streams {
-                match input_stream.pop_outdated_frame(now) {
-                    PopOutdatedFrameResult::Noop => {}
-                    PopOutdatedFrameResult::Popped => {
-                        self.last_input_update_time = now;
-                    }
-                    PopOutdatedFrameResult::MoreInputNeeded => {
-                        return Ok(MediaProcessorOutput::pending(*input_stream_id));
-                    }
+                if !input_stream.pop_outdated_frame(now) {
+                    // 十分な数のフレームが溜まっていないので入力を待つ
+                    return Ok(MediaProcessorOutput::pending(*input_stream_id));
                 }
             }
 
@@ -496,15 +491,15 @@ struct InputStream {
 }
 
 impl InputStream {
-    fn pop_outdated_frame(&mut self, now: Duration) -> PopOutdatedFrameResult {
+    fn pop_outdated_frame(&mut self, now: Duration) -> bool {
         loop {
             let Some(current_frame) = self.frame_queue.front() else {
                 if self.eos {
                     // EOS & キューにフレームが残っていない
-                    return PopOutdatedFrameResult::Noop;
+                    return true;
                 } else {
                     // EOS ではないけどキューが空なので入力待ち
-                    return PopOutdatedFrameResult::MoreInputNeeded;
+                    return false;
                 }
             };
             if now < current_frame.end_timestamp() {
@@ -516,10 +511,10 @@ impl InputStream {
                 if self.eos {
                     // EOS に到達し、表示時刻も超過した
                     self.frame_queue.clear();
-                    return PopOutdatedFrameResult::Popped;
+                    return true;
                 } else {
                     // EOS ではないなら、現在のフレームの破棄タイミングを判断するために次の入力を待つ
-                    return PopOutdatedFrameResult::MoreInputNeeded;
+                    return false;
                 }
             };
             if now < next_frame.start_timestamp() {
@@ -531,7 +526,7 @@ impl InputStream {
                 //
                 // これは、入力ファイル作成時の数値計算誤差などで、
                 // 僅かなギャップが生じたとしても、その部分を黒塗りにしたくはないため
-                return PopOutdatedFrameResult::Noop;
+                return true;
             }
 
             // 次のフレームの表示時刻になった
@@ -542,10 +537,4 @@ impl InputStream {
             self.frame_queue.pop_front();
         }
     }
-}
-
-enum PopOutdatedFrameResult {
-    Noop,
-    Popped,
-    MoreInputNeeded,
 }
