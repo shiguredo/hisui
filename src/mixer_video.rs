@@ -352,6 +352,10 @@ impl ResizeCachedVideoFrame {
         self.original.end_timestamp()
     }
 
+    fn source_id(&self) -> Option<&SourceId> {
+        self.original.source_id.as_ref()
+    }
+
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> orfail::Result<&VideoFrame> {
         if self.original.width == width && self.original.height == height {
             // リサイズ不要
@@ -535,83 +539,85 @@ impl VideoMixer {
     }
 
     fn mix(&mut self) -> orfail::Result<VideoFrame> {
-        todo!()
-        /*
-                    let timestamp = self.next_output_timestamp();
-                    let duration = self.next_output_duration();
+        let timestamp = self.next_output_timestamp();
+        let duration = self.next_output_duration();
 
-                    let mut canvas = Canvas::new(
-                        self.layout.resolution.width(),
-                        self.layout.resolution.height(),
-                    );
+        let mut canvas = Canvas::new(
+            self.layout.resolution.width(),
+            self.layout.resolution.height(),
+        );
 
-                    for region in &self.layout.video_regions {
-                        Self::mix_region(&mut canvas, region, &mut self.current_frames).or_fail()?;
-                    }
-
-                    self.stats.total_output_video_frame_count.add(1);
-                    self.stats
-                        .total_output_video_frame_seconds
-                        .add(Seconds::new(duration));
-
-                    Ok(VideoFrame {
-                        // 固定値
-                        source_id: None,    // 合成後は常に None となる
-                        sample_entry: None, // 生データにはエンプルエントリーは存在しない
-                        keyframe: true,     // 生データはすべてキーフレーム扱い
-                        format: VideoFormat::I420,
-
-                        // 可変値
-                        timestamp,
-                        duration,
-                        width: self.layout.resolution.width(),
-                        height: self.layout.resolution.height(),
-                        data: canvas.data,
-                    })
-        */
-    }
-    /*
-        fn mix_region(
-            canvas: &mut Canvas,
-            region: &Region,
-            current_frames: &mut HashMap<SourceId, ResizeCachedVideoFrame>,
-        ) -> orfail::Result<()> {
-            // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
-            //        (必要に応じて最適化する)
-            let background_frame =
-                VideoFrame::mono_color(region.background_color, region.width, region.height);
-            canvas
-                .draw_frame(region.position, &background_frame)
-                .or_fail()?;
-
-            let mut frames = Vec::new();
-            for (source_id, frame) in current_frames {
-                let Some(source) = region.grid.assigned_sources.get(source_id) else {
-                    // このグリッドには含まれないソースなので飛ばす
-                    continue;
-                };
-                frames.push((source, frame));
-            }
-
-            // 同じセルに割りあてられたソースが複数ある場合には
-            // 一番優先度が高いものを採用する
-            frames.sort_by_key(|(s, _)| (s.cell_index, s.priority));
-            frames.dedup_by_key(|(s, _)| s.cell_index);
-
-            for (source, frame) in frames {
-                let mut position = region.cell_position(source.cell_index);
-                let (frame_width, frame_height) = region.decide_frame_size(&frame.original);
-                position.x +=
-                    EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
-                position.y +=
-                    EvenUsize::truncating_new((region.grid.cell_height - frame_height).get() / 2);
-                let resized_frame = frame.resize(frame_width, frame_height).or_fail()?;
-                canvas.draw_frame(position, resized_frame).or_fail()?;
-            }
-
-            Ok(())
+        for region in &self.layout.video_regions {
+            Self::mix_region(&mut canvas, region, &mut self.input_streams).or_fail()?;
         }
-    */
+
+        self.stats.total_output_video_frame_count.add(1);
+        self.stats
+            .total_output_video_frame_seconds
+            .add(Seconds::new(duration));
+
+        Ok(VideoFrame {
+            // 固定値
+            source_id: None,    // 合成後は常に None となる
+            sample_entry: None, // 生データにはエンプルエントリーは存在しない
+            keyframe: true,     // 生データはすべてキーフレーム扱い
+            format: VideoFormat::I420,
+
+            // 可変値
+            timestamp,
+            duration,
+            width: self.layout.resolution.width(),
+            height: self.layout.resolution.height(),
+            data: canvas.data,
+        })
+    }
+
+    fn mix_region(
+        canvas: &mut Canvas,
+        region: &Region,
+        input_streams: &mut HashMap<MediaStreamId, InputStream>,
+    ) -> orfail::Result<()> {
+        // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
+        //        (必要に応じて最適化する)
+        let background_frame =
+            VideoFrame::mono_color(region.background_color, region.width, region.height);
+        canvas
+            .draw_frame(region.position, &background_frame)
+            .or_fail()?;
+
+        let mut frames = Vec::new();
+        for input_stream in input_streams.values_mut() {
+            let Some(frame) = input_stream.frame_queue.front_mut() else {
+                continue;
+            };
+            let Some(source_id) = frame.source_id() else {
+                continue;
+            };
+            let Some(source) = region.grid.assigned_sources.get(source_id) else {
+                // このグリッドには含まれないソースなので飛ばす
+                continue;
+            };
+            frames.push((source, frame));
+        }
+
+        // 同じセルに割りあてられたソースが複数ある場合には
+        // 一番優先度が高いものを採用する
+        frames.sort_by_key(|(s, _)| (s.cell_index, s.priority));
+        frames.dedup_by_key(|(s, _)| s.cell_index);
+
+        for (source, frame) in frames {
+            let mut position = region.cell_position(source.cell_index);
+            let (frame_width, frame_height) = region.decide_frame_size(&frame.original);
+            position.x +=
+                EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
+            position.y +=
+                EvenUsize::truncating_new((region.grid.cell_height - frame_height).get() / 2);
+            let resized_frame = frame.resize(frame_width, frame_height).or_fail()?;
+            canvas.draw_frame(position, resized_frame).or_fail()?;
+        }
+
+        Ok(())
+    }
 }
 
 impl MediaProcessor for VideoMixer {
