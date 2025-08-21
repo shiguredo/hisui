@@ -440,6 +440,13 @@ impl MediaProcessor for VideoMixer {
                 .values()
                 .all(|s| s.eos && s.frame_queue.is_empty())
             {
+                if let Some(frame) = self.last_mixed_frame.take() {
+                    // バッファにフレームが残っていたらそれを返す
+                    return Ok(MediaProcessorOutput::video_frame(
+                        self.output_stream_id,
+                        frame,
+                    ));
+                }
                 return Ok(MediaProcessorOutput::Finished);
             }
 
@@ -467,34 +474,13 @@ impl MediaProcessor for VideoMixer {
             // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
             let (result, elapsed) = Seconds::elapsed(|| self.mix().or_fail());
             self.stats.total_processing_seconds.add(elapsed);
-            return Ok(MediaProcessorOutput::video_frame(
-                self.output_stream_id,
-                result?,
-            ));
 
-            /*TODO
-                    while let Some(frame) = self.next_output_frame().or_fail()? {
-                        let Some(last_frame) = self.last_mixed_frame.take() else {
-                            // 最初のフレームの場合はバッファに溜めて次に進む
-                            self.last_mixed_frame = Some(frame);
-                            continue;
-                        };
-                        self.last_mixed_frame = Some(frame);
-
-                        if !self.output_tx.send(last_frame) {
-                            // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                            log::info!("receiver of mixed video stream has been closed");
-                            return Ok(());
-                        }
-                    }
-
-                    // バッファに残っていた最後のフレームを送る
-                    if let Some(last_frame) = self.last_mixed_frame.take()
-                        && !self.output_tx.send(last_frame)
-                    {
-                        log::info!("receiver of mixed video stream has been closed");
-                    }
-            */
+            if let Some(frame) = self.last_mixed_frame.replace(result?) {
+                return Ok(MediaProcessorOutput::video_frame(
+                    self.output_stream_id,
+                    frame,
+                ));
+            }
         }
     }
 }
