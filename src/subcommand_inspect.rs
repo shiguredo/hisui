@@ -4,8 +4,10 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
+    reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    scheduler::Scheduler,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
@@ -50,7 +52,42 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         }
     };
 
+    let mut scheduler = Scheduler::new();
+
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
+
+    let audio_encoded_stream_id = MediaStreamId::new(0);
+    let reader = match format {
+        ContainerFormat::Mp4 => {
+            let reader =
+                Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            AudioReader::new_mp4(audio_encoded_stream_id, reader)
+        }
+        ContainerFormat::Webm => {
+            let reader =
+                WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            AudioReader::new_webm(audio_encoded_stream_id, reader)
+        }
+    };
+    scheduler.register(reader).or_fail()?;
+
+    let video_encoded_stream_id = MediaStreamId::new(1);
+    let reader = match format {
+        ContainerFormat::Mp4 => {
+            let reader =
+                Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            VideoReader::new_mp4(video_encoded_stream_id, reader)
+        }
+        ContainerFormat::Webm => {
+            let reader =
+                WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            VideoReader::new_webm(video_encoded_stream_id, reader)
+        }
+    };
+    scheduler.register(reader).or_fail()?;
+
+    let audio_decoded_stream_id = MediaStreamId::new(2);
+    let video_decoded_stream_id = MediaStreamId::new(3);
 
     let audio_stream_id = MediaStreamId::new(0);
     let video_stream_id = MediaStreamId::new(1);
