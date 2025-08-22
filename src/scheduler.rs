@@ -9,34 +9,36 @@ use crate::processor::{BoxedMediaProcessor, MediaProcessor};
 
 const CHANNEL_SIZE_LIMIT: usize = 5; // TODO:
 
+type MediaSampleReceiver = mpsc::Receiver<MediaSample>;
+type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;
+
 #[derive(Debug)]
 pub struct Task {
     processor: BoxedMediaProcessor,
-    input_stream_rxs: HashMap<MediaStreamId, mpsc::Receiver<MediaSample>>,
-    input_stream_txs: HashMap<MediaStreamId, mpsc::SyncSender<MediaSample>>,
-    output_stream_txs: HashMap<MediaStreamId, mpsc::SyncSender<MediaSample>>,
+    input_stream_rxs: HashMap<MediaStreamId, MediaSampleReceiver>,
+    output_stream_txs: HashMap<MediaStreamId, MediaSampleSyncSender>,
 }
 
 impl Task {
-    fn new<P>(processor: P) -> Self
+    fn new<P>(processor: P) -> (Self, Vec<(MediaStreamId, MediaSampleSyncSender)>)
     where
         P: 'static + Send + MediaProcessor,
     {
         let mut input_stream_rxs = HashMap::new();
-        let mut input_stream_txs = HashMap::new();
+        let mut input_stream_txs = Vec::new();
 
         for input_stream_id in processor.spec().input_stream_ids {
             let (tx, rx) = mpsc::sync_channel(CHANNEL_SIZE_LIMIT);
             input_stream_rxs.insert(input_stream_id, rx);
-            input_stream_txs.insert(input_stream_id, tx);
+            input_stream_txs.push((input_stream_id, tx));
         }
 
-        Self {
+        let task = Self {
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
-            input_stream_txs,
             output_stream_txs: HashMap::new(),
-        }
+        };
+        (task, input_stream_txs)
     }
 }
 
@@ -44,6 +46,7 @@ impl Task {
 pub struct Scheduler {
     tasks: Vec<Task>,
     thread_count: NonZeroUsize,
+    stream_txs: HashMap<MediaStreamId, MediaSampleSyncSender>,
 }
 
 impl Scheduler {
@@ -51,14 +54,25 @@ impl Scheduler {
         Self {
             tasks: Vec::new(),
             thread_count: NonZeroUsize::MIN,
+            stream_txs: HashMap::new(),
         }
     }
 
-    pub fn register<P>(&mut self, processor: P)
+    pub fn register<P>(&mut self, processor: P) -> orfail::Result<()>
     where
         P: 'static + Send + MediaProcessor,
     {
-        self.tasks.push(Task::new(processor));
+        let (task, input_stream_txs) = Task::new(processor);
+        self.tasks.push(task);
+
+        for (id, tx) in input_stream_txs {
+            self.stream_txs
+                .insert(id, tx)
+                .is_none()
+                .or_fail_with(|()| format!("BUG: conflicting processor ID: {id:?}"))?;
+        }
+
+        Ok(())
     }
 
     pub fn run(mut self) -> orfail::Result<()> {
@@ -67,6 +81,16 @@ impl Scheduler {
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
+        for task in &mut self.tasks {
+            for id in task.processor.spec().output_stream_ids {
+                let tx = self
+                    .stream_txs
+                    .get(&id)
+                    .cloned()
+                    .or_fail_with(|()| format!("BUG: missing output stream ID: {id:?}"))?;
+                task.output_stream_txs.insert(id, tx);
+            }
+        }
         Ok(())
     }
 }
