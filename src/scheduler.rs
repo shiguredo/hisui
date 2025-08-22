@@ -75,9 +75,28 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn run(mut self) -> orfail::Result<()> {
+    pub fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
         self.update_output_stream_txs().or_fail()?;
-        Ok(())
+
+        let mut tasks = self.tasks.into_iter().map(Some).collect::<Vec<_>>();
+
+        // TODO(atode): スレッドへの割り当て方法は後で改善する
+        // TODO(atode): スレッド単位の統計を追加する
+        let mut handles = Vec::new();
+        for i in 0..self.thread_count.get() {
+            let mut thread_tasks = Vec::new();
+            for (j, task) in tasks.iter_mut().enumerate() {
+                if j % self.thread_count.get() != i {
+                    continue;
+                }
+                thread_tasks.push(task.take().or_fail()?);
+            }
+            let runner = TaskRunner::new(thread_tasks);
+            let handle = std::thread::spawn(|| runner.run().or_fail());
+            handles.push(handle);
+        }
+
+        Ok(SchedulerHandle { handles })
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
@@ -91,6 +110,26 @@ impl Scheduler {
                 task.output_stream_txs.insert(id, tx);
             }
         }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct SchedulerHandle {
+    handles: Vec<std::thread::JoinHandle<orfail::Result<()>>>,
+}
+
+#[derive(Debug)]
+pub struct TaskRunner {
+    tasks: Vec<Task>,
+}
+
+impl TaskRunner {
+    fn new(tasks: Vec<Task>) -> Self {
+        Self { tasks }
+    }
+
+    fn run(self) -> orfail::Result<()> {
         Ok(())
     }
 }

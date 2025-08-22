@@ -31,15 +31,15 @@ impl std::fmt::Debug for BoxedMediaProcessor {
 
 impl MediaProcessor for BoxedMediaProcessor {
     fn spec(&self) -> MediaProcessorSpec {
-        (*self).spec()
+        self.0.spec()
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        (*self).process_input(input)
+        self.0.process_input(input)
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        (*self).process_output()
+        self.0.process_output()
     }
 }
 
