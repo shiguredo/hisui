@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::mpsc;
+
+use orfail::OrFail;
 
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{BoxedMediaProcessor, MediaProcessor};
@@ -11,6 +14,7 @@ pub struct Task {
     processor: BoxedMediaProcessor,
     input_stream_rxs: HashMap<MediaStreamId, mpsc::Receiver<MediaSample>>,
     input_stream_txs: HashMap<MediaStreamId, mpsc::SyncSender<MediaSample>>,
+    output_stream_txs: HashMap<MediaStreamId, mpsc::SyncSender<MediaSample>>,
 }
 
 impl Task {
@@ -31,18 +35,23 @@ impl Task {
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             input_stream_txs,
+            output_stream_txs: HashMap::new(),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct SchedulerBuilder {
+pub struct Scheduler {
     tasks: Vec<Task>,
+    thread_count: NonZeroUsize,
 }
 
-impl SchedulerBuilder {
+impl Scheduler {
     pub fn new() -> Self {
-        Self { tasks: Vec::new() }
+        Self {
+            tasks: Vec::new(),
+            thread_count: NonZeroUsize::MIN,
+        }
     }
 
     pub fn register<P>(&mut self, processor: P)
@@ -51,9 +60,13 @@ impl SchedulerBuilder {
     {
         self.tasks.push(Task::new(processor));
     }
+
+    pub fn run(mut self) -> orfail::Result<()> {
+        self.update_output_stream_txs().or_fail()?;
+        Ok(())
+    }
+
+    fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
+        Ok(())
+    }
 }
-
-#[derive(Debug)]
-pub struct Scheduler {}
-
-impl Scheduler {}
