@@ -14,6 +14,21 @@ pub trait MediaProcessor {
     }
 }
 
+pub struct BoxedMediaProcessor(Box<dyn 'static + Send + MediaProcessor>);
+
+impl BoxedMediaProcessor {
+    pub fn new<P: 'static + Send + MediaProcessor>(processor: P) -> Self {
+        Self(Box::new(processor))
+    }
+}
+
+impl std::fmt::Debug for BoxedMediaProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoxedMediaProcessor")
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
