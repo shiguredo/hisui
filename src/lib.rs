@@ -1,6 +1,6 @@
 pub mod arg_utils;
 pub mod audio;
-pub mod channel;
+pub mod channel; // TODO: remove
 pub mod composer;
 pub mod decoder;
 pub mod decoder_dav1d;

@@ -8,6 +8,7 @@ use shiguredo_mp4::{
 
 use crate::{metadata::SourceId, types::CodecName};
 
+// TODO: remove
 pub type AudioDataSyncSender = crate::channel::SyncSender<AudioData>;
 pub type AudioDataReceiver = crate::channel::Receiver<AudioData>;
 
