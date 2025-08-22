@@ -2,13 +2,17 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    media::MediaStreamId,
+    media::{MediaSample, MediaStreamId},
     metadata::{ContainerFormat, SourceId},
-    processor::NullProcessor,
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        NullProcessor,
+    },
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     scheduler::Scheduler,
+    stats::ProcessorStats,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
@@ -16,6 +20,11 @@ use crate::{
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
+
+const AUDIO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+const VIDEO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+const AUDIO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(2);
+const VIDEO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(3);
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
@@ -54,50 +63,45 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     let mut scheduler = Scheduler::new();
-
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
-    let audio_encoded_stream_id = MediaStreamId::new(0);
     let reader = match format {
         ContainerFormat::Mp4 => {
             let reader =
                 Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            AudioReader::new_mp4(audio_encoded_stream_id, reader)
+            AudioReader::new_mp4(AUDIO_ENCODED_STREAM_ID, reader)
         }
         ContainerFormat::Webm => {
             let reader =
                 WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            AudioReader::new_webm(audio_encoded_stream_id, reader)
+            AudioReader::new_webm(AUDIO_ENCODED_STREAM_ID, reader)
         }
     };
     scheduler.register(reader).or_fail()?;
 
-    let video_encoded_stream_id = MediaStreamId::new(1);
     let reader = match format {
         ContainerFormat::Mp4 => {
             let reader =
                 Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            VideoReader::new_mp4(video_encoded_stream_id, reader)
+            VideoReader::new_mp4(VIDEO_ENCODED_STREAM_ID, reader)
         }
         ContainerFormat::Webm => {
             let reader =
                 WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            VideoReader::new_webm(video_encoded_stream_id, reader)
+            VideoReader::new_webm(VIDEO_ENCODED_STREAM_ID, reader)
         }
     };
     scheduler.register(reader).or_fail()?;
 
-    let audio_decoded_stream_id = MediaStreamId::new(2);
     if decode {
         let decoder =
-            AudioDecoder::new_opus(audio_encoded_stream_id, audio_decoded_stream_id).or_fail()?;
+            AudioDecoder::new_opus(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
         scheduler.register(decoder).or_fail()?;
     } else {
-        let null = NullProcessor::new(vec![audio_encoded_stream_id], vec![audio_decoded_stream_id]);
+        let null = NullProcessor::new(vec![AUDIO_ENCODED_STREAM_ID], vec![AUDIO_DECODED_STREAM_ID]);
         scheduler.register(null).or_fail()?;
     }
 
-    let video_decoded_stream_id = MediaStreamId::new(3);
     if decode {
         let options = VideoDecoderOptions {
             openh264_lib: openh264
@@ -106,10 +110,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 .transpose()
                 .or_fail()?,
         };
-        let decoder = VideoDecoder::new(video_encoded_stream_id, video_decoded_stream_id, options);
+        let decoder = VideoDecoder::new(VIDEO_ENCODED_STREAM_ID, VIDEO_DECODED_STREAM_ID, options);
         scheduler.register(decoder).or_fail()?;
     } else {
-        let null = NullProcessor::new(vec![video_encoded_stream_id], vec![video_decoded_stream_id]);
+        let null = NullProcessor::new(vec![VIDEO_ENCODED_STREAM_ID], vec![VIDEO_DECODED_STREAM_ID]);
         scheduler.register(null).or_fail()?;
     }
 
@@ -422,5 +426,36 @@ impl VideoCodecSpecificInfo {
             }
             _ => None,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct OutputPrinter {
+    spec: MediaProcessorSpec,
+}
+
+impl OutputPrinter {
+    fn new(input_stream_ids: Vec<MediaStreamId>, output_stream_ids: Vec<MediaStreamId>) -> Self {
+        Self {
+            spec: MediaProcessorSpec {
+                input_stream_ids,
+                output_stream_ids,
+                stats: ProcessorStats::other("output-printer"),
+            },
+        }
+    }
+}
+
+impl MediaProcessor for OutputPrinter {
+    fn spec(&self) -> MediaProcessorSpec {
+        self.spec.clone()
+    }
+
+    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        Ok(MediaProcessorOutput::Finished)
     }
 }
