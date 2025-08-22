@@ -159,9 +159,22 @@ pub enum ProcessorStats {
     AudioEncoder(AudioEncoderStats),
     VideoEncoder(VideoEncoderStats),
     Mp4Writer(Mp4WriterStats),
+    Other {
+        processor_type: String,
+        total_processing_seconds: SharedAtomicSeconds,
+        error: SharedAtomicFlag,
+    },
 }
 
 impl ProcessorStats {
+    pub fn other(processor_type: &str) -> Self {
+        Self::Other {
+            processor_type: processor_type.to_owned(),
+            total_processing_seconds: Default::default(),
+            error: Default::default(),
+        }
+    }
+
     pub fn set_error(&self) {
         match self {
             ProcessorStats::Mp4AudioReader(stats) => stats.error.set(true),
@@ -175,6 +188,7 @@ impl ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.error.set(true),
             ProcessorStats::VideoEncoder(stats) => stats.error.set(true),
             ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
+            ProcessorStats::Other { error, .. } => error.set(true),
         }
     }
 }
@@ -193,6 +207,18 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
             ProcessorStats::VideoEncoder(stats) => stats.fmt(f),
             ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
+            ProcessorStats::Other {
+                processor_type,
+                total_processing_seconds,
+                error,
+            } => f.object(|f| {
+                f.member("type", processor_type)?;
+                f.member(
+                    "total_processing_seconds",
+                    total_processing_seconds.get_seconds(),
+                )?;
+                f.member("error", error.get())
+            }),
         }
     }
 }
