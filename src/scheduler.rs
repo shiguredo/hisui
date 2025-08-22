@@ -178,11 +178,21 @@ impl Scheduler {
                 thread_tasks.push(task.take().or_fail()?);
             }
             let runner = TaskRunner::new(thread_tasks);
-            let handle = std::thread::spawn(|| runner.run().or_fail());
+            let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
         }
 
         Ok(SchedulerHandle { handles })
+    }
+
+    pub fn run(self) -> orfail::Result<()> {
+        let handle = self.spawn().or_fail()?;
+        for handle in handle.handles {
+            if let Err(e) = handle.join() {
+                std::panic::resume_unwind(e);
+            }
+        }
+        Ok(())
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
@@ -202,7 +212,7 @@ impl Scheduler {
 
 #[derive(Debug)]
 pub struct SchedulerHandle {
-    handles: Vec<std::thread::JoinHandle<orfail::Result<()>>>,
+    handles: Vec<std::thread::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
@@ -215,14 +225,13 @@ impl TaskRunner {
         Self { tasks }
     }
 
-    fn run(mut self) -> orfail::Result<()> {
+    fn run(mut self) {
         while !self.tasks.is_empty() {
-            self.run_one().or_fail()?;
+            self.run_one();
         }
-        Ok(())
     }
 
-    fn run_one(&mut self) -> orfail::Result<()> {
+    fn run_one(&mut self) {
         let mut i = 0;
         while i < self.tasks.len() {
             // TODO: 時間計測
@@ -245,7 +254,6 @@ impl TaskRunner {
             let duration = std::time::Duration::from_millis(10); // TODO
             std::thread::sleep(duration);
         }
-        Ok(())
     }
 
     fn is_awaiting(&self) -> bool {

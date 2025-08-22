@@ -117,6 +117,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         scheduler.register(null).or_fail()?;
     }
 
+    scheduler.register(OutputPrinter::new()).or_fail()?;
+    scheduler.run().or_fail()?;
+
     let audio_stream_id = MediaStreamId::new(0);
     let video_stream_id = MediaStreamId::new(1);
     let (audio_reader, video_reader): (Box<dyn Iterator<Item = _>>, Box<dyn Iterator<Item = _>>) =
@@ -430,25 +433,26 @@ impl VideoCodecSpecificInfo {
 }
 
 #[derive(Debug)]
-pub struct OutputPrinter {
-    spec: MediaProcessorSpec,
-}
+pub struct OutputPrinter {}
 
 impl OutputPrinter {
-    fn new(input_stream_ids: Vec<MediaStreamId>, output_stream_ids: Vec<MediaStreamId>) -> Self {
-        Self {
-            spec: MediaProcessorSpec {
-                input_stream_ids,
-                output_stream_ids,
-                stats: ProcessorStats::other("output-printer"),
-            },
-        }
+    fn new() -> Self {
+        Self {}
     }
 }
 
 impl MediaProcessor for OutputPrinter {
     fn spec(&self) -> MediaProcessorSpec {
-        self.spec.clone()
+        MediaProcessorSpec {
+            input_stream_ids: vec![
+                AUDIO_ENCODED_STREAM_ID,
+                VIDEO_ENCODED_STREAM_ID,
+                AUDIO_DECODED_STREAM_ID,
+                VIDEO_DECODED_STREAM_ID,
+            ],
+            output_stream_ids: Vec::new(),
+            stats: ProcessorStats::other("output-printer"),
+        }
     }
 
     fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
