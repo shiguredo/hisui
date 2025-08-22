@@ -64,6 +64,13 @@ impl MediaProcessorInput {
         }
     }
 
+    pub fn sample(stream_id: MediaStreamId, sample: MediaSample) -> Self {
+        Self {
+            stream_id,
+            sample: Some(sample),
+        }
+    }
+
     pub fn audio_data(stream_id: MediaStreamId, data: AudioData) -> Self {
         Self {
             stream_id,

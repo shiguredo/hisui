@@ -5,7 +5,10 @@ use std::sync::mpsc;
 use orfail::OrFail;
 
 use crate::media::{MediaSample, MediaStreamId};
-use crate::processor::{BoxedMediaProcessor, MediaProcessor};
+use crate::processor::{
+    BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
+};
+use crate::stats::ProcessorStats;
 
 const CHANNEL_SIZE_LIMIT: usize = 5; // TODO:
 
@@ -17,6 +20,9 @@ pub struct Task {
     processor: BoxedMediaProcessor,
     input_stream_rxs: HashMap<MediaStreamId, MediaSampleReceiver>,
     output_stream_txs: HashMap<MediaStreamId, MediaSampleSyncSender>,
+    awaiting_input_stream_id: Option<MediaStreamId>,
+    awaiting_output_sample: Option<(MediaStreamId, MediaSample)>,
+    stats: ProcessorStats,
 }
 
 impl Task {
@@ -33,10 +39,14 @@ impl Task {
             input_stream_txs.push((input_stream_id, tx));
         }
 
+        let stats = processor.spec().stats;
         let task = Self {
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             output_stream_txs: HashMap::new(),
+            awaiting_input_stream_id: None,
+            awaiting_output_sample: None,
+            stats,
         };
         (task, input_stream_txs)
     }
@@ -129,7 +139,87 @@ impl TaskRunner {
         Self { tasks }
     }
 
-    fn run(self) -> orfail::Result<()> {
+    fn run(mut self) -> orfail::Result<()> {
+        while !self.tasks.is_empty() {
+            self.run_one().or_fail()?;
+        }
         Ok(())
+    }
+
+    fn run_one(&mut self) -> orfail::Result<()> {
+        let mut i = 0;
+        while i < self.tasks.len() {
+            // TODO: 時間計測
+            match self.run_task(i).or_fail() {
+                Err(e) => {
+                    log::error!("{e}");
+                    self.tasks[i].stats.set_error();
+                    self.tasks.swap_remove(i);
+                }
+                Ok(true) => {
+                    self.tasks.swap_remove(i);
+                }
+                Ok(false) => {
+                    i += 1;
+                }
+            }
+        }
+
+        if self.is_awaiting() {
+            let duration = std::time::Duration::from_millis(10); // TODO
+            std::thread::sleep(duration);
+        }
+        Ok(())
+    }
+
+    fn is_awaiting(&self) -> bool {
+        self.tasks
+            .iter()
+            .all(|t| t.awaiting_input_stream_id.is_some() || t.awaiting_output_sample.is_some())
+    }
+
+    fn run_task(&mut self, i: usize) -> orfail::Result<bool> {
+        let task = &mut self.tasks[i];
+        loop {
+            // TODO: handle awaiting_output_sample
+            if let Some(stream_id) = task.awaiting_input_stream_id.take() {
+                let rx = task.input_stream_rxs.get(&stream_id).or_fail()?;
+                match rx.try_recv() {
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        let input = MediaProcessorInput::eos(stream_id);
+                        task.processor.process_input(input).or_fail()?;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        task.awaiting_input_stream_id = Some(stream_id);
+                        break;
+                    }
+                    Ok(sample) => {
+                        let input = MediaProcessorInput::sample(stream_id, sample);
+                        task.processor.process_input(input).or_fail()?;
+                    }
+                }
+            } else {
+                match task.processor.process_output().or_fail()? {
+                    MediaProcessorOutput::Finished => return Ok(true),
+                    MediaProcessorOutput::Pending { awaiting_stream_id } => {
+                        task.awaiting_input_stream_id = Some(awaiting_stream_id);
+                    }
+                    MediaProcessorOutput::Processed { stream_id, sample } => {
+                        let tx = task.output_stream_txs.get(&stream_id).or_fail()?;
+                        match tx.try_send(sample) {
+                            Ok(()) => {}
+                            Err(mpsc::TrySendError::Full(sample)) => {
+                                task.awaiting_output_sample = Some((stream_id, sample));
+                                break;
+                            }
+                            Err(mpsc::TrySendError::Disconnected(_)) => {
+                                todo!();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 }
