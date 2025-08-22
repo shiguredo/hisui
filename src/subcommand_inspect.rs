@@ -433,33 +433,153 @@ impl VideoCodecSpecificInfo {
 }
 
 #[derive(Debug)]
-pub struct OutputPrinter {}
+pub struct OutputPrinter {
+    audio_codec: Option<CodecName>,
+    video_codec: Option<CodecName>,
+    audio_samples: Vec<AudioSampleInfo>,
+    video_samples: Vec<VideoSampleInfo>,
+    input_stream_ids: Vec<MediaStreamId>,
+    next_input_stream_index: usize,
+}
 
 impl OutputPrinter {
     fn new() -> Self {
-        Self {}
-    }
-}
-
-impl MediaProcessor for OutputPrinter {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
+        Self {
+            audio_codec: None,
+            video_codec: None,
+            audio_samples: Vec::new(),
+            video_samples: Vec::new(),
             input_stream_ids: vec![
                 AUDIO_ENCODED_STREAM_ID,
                 VIDEO_ENCODED_STREAM_ID,
                 AUDIO_DECODED_STREAM_ID,
                 VIDEO_DECODED_STREAM_ID,
             ],
+            next_input_stream_index: 0,
+        }
+    }
+}
+
+impl MediaProcessor for OutputPrinter {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
             stats: ProcessorStats::other("output-printer"),
         }
     }
 
-    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let Some(sample) = input.sample else {
+            self.input_stream_ids.retain(|id| *id != input.stream_id);
+            self.next_input_stream_index = 0;
+            return Ok(());
+        };
         Ok(())
+        /*
+            let decoded_audio_stream_id = MediaStreamId::new(2);
+            let mut audio_codec = None;
+            let mut audio_samples = Vec::new();
+            let mut audio_decoder = None;
+            for sample in audio_reader {
+                let sample = sample.or_fail()?;
+                if audio_codec.is_none() {
+                    audio_codec = sample.format.codec_name();
+                    if decode {
+                        audio_decoder = Some(
+                            AudioDecoder::new_opus(audio_stream_id, decoded_audio_stream_id).or_fail()?,
+                        );
+                    }
+                }
+
+                let mut info = AudioSampleInfo {
+                    timestamp: sample.timestamp,
+                    duration: sample.duration,
+                    data_size: sample.data.len(),
+                    decoded_data_size: None,
+                };
+
+                if let Some(decoder) = &mut audio_decoder {
+                    let decoded = decoder.decode(sample).or_fail()?;
+                    info.decoded_data_size = Some(decoded.data.len());
+                }
+
+                audio_samples.push(info);
+            }
+
+            let decoded_video_stream_id = MediaStreamId::new(3);
+            let mut video_codec = None;
+            let mut video_samples = Vec::new();
+            let mut video_decoder = None;
+            let mut decoded_count = 0;
+            for sample in video_reader {
+                let sample = sample.or_fail()?;
+                if video_codec.is_none() {
+                    video_codec = sample.format.codec_name();
+                    if decode {
+                        let options = VideoDecoderOptions {
+                            openh264_lib: openh264
+                                .clone()
+                                .map(Openh264Library::load)
+                                .transpose()
+                                .or_fail()?,
+                        };
+                        video_decoder = Some(VideoDecoder::new(
+                            video_stream_id,
+                            decoded_video_stream_id,
+                            options,
+                        ));
+                    }
+                }
+
+                video_samples.push(VideoSampleInfo {
+                    timestamp: sample.timestamp,
+                    duration: sample.duration,
+                    data_size: sample.data.len(),
+                    keyframe: sample.keyframe,
+                    codec_specific_info: VideoCodecSpecificInfo::new(&sample),
+                    decoded_data_size: None,
+                    width: None,
+                    height: None,
+                });
+
+                if let Some(decoder) = &mut video_decoder {
+                    decoder.decode(sample).or_fail()?;
+                    while let Some(decoded) = decoder.next_decoded_frame() {
+                        video_samples[decoded_count].update(&decoded);
+                        decoded_count += 1;
+                    }
+                }
+            }
+            if let Some(decoder) = &mut video_decoder {
+                decoder.finish().or_fail()?;
+                while let Some(decoded) = decoder.next_decoded_frame() {
+                    video_samples[decoded_count].update(&decoded);
+                    decoded_count += 1;
+                }
+            }
+
+            // 入力ファイルから取得した情報を出力する
+            crate::json::pretty_print(FileInfo {
+                path: input_file_path.to_path_buf(),
+                format,
+                audio_codec,
+                audio_samples,
+                video_codec,
+                video_samples,
+            })
+            .or_fail()?;
+        */
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        Ok(MediaProcessorOutput::Finished)
+        if self.input_stream_ids.is_empty() {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            let awaiting_stream_id = self.input_stream_ids[self.next_input_stream_index];
+            self.next_input_stream_index =
+                (self.next_input_stream_index + 1) % self.input_stream_ids.len();
+            Ok(MediaProcessorOutput::Pending { awaiting_stream_id })
+        }
     }
 }
