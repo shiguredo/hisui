@@ -43,7 +43,7 @@ impl MediaProcessor for BoxedMediaProcessor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
@@ -115,5 +115,39 @@ impl MediaProcessorOutput {
             stream_id,
             sample: MediaSample::video_frame(frame),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct NullProcessor {
+    spec: MediaProcessorSpec,
+}
+
+impl NullProcessor {
+    pub fn new(
+        input_stream_ids: Vec<MediaStreamId>,
+        output_stream_ids: Vec<MediaStreamId>,
+    ) -> Self {
+        Self {
+            spec: MediaProcessorSpec {
+                input_stream_ids,
+                output_stream_ids,
+                stats: ProcessorStats::other("null"),
+            },
+        }
+    }
+}
+
+impl MediaProcessor for NullProcessor {
+    fn spec(&self) -> MediaProcessorSpec {
+        self.spec.clone()
+    }
+
+    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        Ok(MediaProcessorOutput::Finished)
     }
 }
