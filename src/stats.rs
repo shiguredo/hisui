@@ -839,8 +839,10 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
 /// `WebmAudioReader` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct WebmAudioReaderStats {
-    /// 入力ファイルのパス
-    pub input_file: PathBuf,
+    /// 入力ファイルのパスのリスト
+    ///
+    /// 分割録画の場合には要素の数が複数になる
+    pub input_files: Vec<PathBuf>,
 
     /// 音声コーデック
     pub codec: Option<CodecName>,
@@ -857,6 +859,12 @@ pub struct WebmAudioReaderStats {
     /// 入力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 
+    /// メタデータファイルに記載されている開始時刻（オフセッット）
+    pub start_time: Duration,
+
+    /// メタデータファイルに記載されている終了時刻（オフセッット）
+    pub end_time: Duration,
+
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -865,7 +873,7 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", "webm_audio_reader")?;
-            f.member("input_file", &self.input_file)?;
+            f.member("input_files", &self.input_files)?;
             f.member("codec", self.codec)?;
             f.member("total_cluster_count", self.total_cluster_count.get())?;
             f.member(
@@ -880,6 +888,8 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
                 "total_processing_seconds",
                 self.total_processing_seconds.get_seconds(),
             )?;
+            f.member("start_time_seconds", self.start_time.as_secs_f32())?;
+            f.member("end_time_seconds", self.end_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -889,8 +899,10 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
 /// `WebmVideoReader` 用の統計情報
 #[derive(Debug, Default, Clone)]
 pub struct WebmVideoReaderStats {
-    /// 入力ファイルのパス
-    pub input_file: PathBuf,
+    /// 入力ファイルのパスのリスト
+    ///
+    /// 分割録画の場合には要素の数が複数になる
+    pub input_files: Vec<PathBuf>,
 
     /// 映像コーデック
     pub codec: SharedOption<CodecName>,
@@ -907,6 +919,12 @@ pub struct WebmVideoReaderStats {
     /// 入力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 
+    /// メタデータファイルに記載されている開始時刻（オフセッット）
+    pub start_time: Duration,
+
+    /// メタデータファイルに記載されている終了時刻（オフセッット）
+    pub end_time: Duration,
+
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -915,7 +933,7 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", "webm_video_reader")?;
-            f.member("input_file", &self.input_file)?;
+            f.member("input_files", &self.input_files)?;
             f.member("codec", self.codec.get())?;
             f.member("total_cluster_count", self.total_cluster_count.get())?;
             f.member(
@@ -930,6 +948,8 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
                 "total_processing_seconds",
                 self.total_processing_seconds.get_seconds(),
             )?;
+            f.member("start_time_seconds", self.start_time.as_secs_f32())?;
+            f.member("end_time_seconds", self.end_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
             Ok(())
         })
