@@ -3,7 +3,7 @@ use std::{
     io::{BufReader, Read, Seek, SeekFrom},
     num::NonZeroU32,
     path::Path,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use orfail::OrFail;
@@ -73,7 +73,6 @@ impl Mp4VideoReaderInner {
         path: P,
         stats: Mp4VideoReaderStats,
     ) -> orfail::Result<Option<Self>> {
-        let start_time = Instant::now();
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut file = BufReader::new(file);
@@ -83,10 +82,6 @@ impl Mp4VideoReaderInner {
         let table = SampleTableAccessor::new(trak.mdia_box.minf_box.stbl_box.clone()).or_fail()?;
 
         file.seek(SeekFrom::Start(0)).or_fail()?;
-
-        stats
-            .total_processing_seconds
-            .add(Seconds::new(start_time.elapsed()));
 
         Ok(Some(Self {
             file,
@@ -202,13 +197,7 @@ impl Iterator for Mp4VideoReaderInner {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        let (result, elapsed) = Seconds::elapsed(|| self.next_video_frame());
-        self.stats.total_processing_seconds.add(elapsed);
-        if matches!(result, Some(Err(_))) {
-            self.stats.error.set(true);
-        }
-        result
+        self.next_video_frame()
     }
 }
 
@@ -258,7 +247,6 @@ impl Mp4AudioReaderInner {
         path: P,
         stats: Mp4AudioReaderStats,
     ) -> orfail::Result<Option<Self>> {
-        let start_time = Instant::now();
         let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut file = BufReader::new(file);
@@ -270,9 +258,6 @@ impl Mp4AudioReaderInner {
         file.seek(SeekFrom::Start(0)).or_fail()?;
 
         stats.codec.set(CodecName::Opus);
-        stats
-            .total_processing_seconds
-            .add(Seconds::new(start_time.elapsed()));
 
         Ok(Some(Self {
             source_id,
@@ -357,12 +342,6 @@ impl Iterator for Mp4AudioReaderInner {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        let (result, elapsed) = Seconds::elapsed(|| self.next_audio_data());
-        self.stats.total_processing_seconds.add(elapsed);
-        if matches!(result, Some(Err(_))) {
-            self.stats.error.set(true);
-        }
-        result
+        self.next_audio_data()
     }
 }

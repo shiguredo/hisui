@@ -1,7 +1,7 @@
 use std::{
     io::{BufReader, Read},
     path::Path,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use orfail::OrFail;
@@ -9,7 +9,7 @@ use orfail::OrFail;
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
-    stats::{Seconds, SharedAtomicSeconds, WebmAudioReaderStats, WebmVideoReaderStats},
+    stats::{Seconds, WebmAudioReaderStats, WebmVideoReaderStats},
     types::{CodecName, EvenUsize},
     video::{VideoFormat, VideoFrame},
 };
@@ -335,7 +335,6 @@ pub struct WebmAudioReader {
 
 impl WebmAudioReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let start_time = Instant::now();
         let file = std::fs::File::open(&path)
             .or_fail_with(|e| format!("failed to open {}: {e}", path.as_ref().display()))?;
         let mut reader = ElementReader::new(BufReader::new(file));
@@ -354,7 +353,6 @@ impl WebmAudioReader {
                 )
             })?,
             codec: Some(CodecName::Opus),
-            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
             ..Default::default()
         };
         Ok(Self {
@@ -457,13 +455,7 @@ impl Iterator for WebmAudioReader {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        let (result, elapsed) = Seconds::elapsed(|| self.read_audio_data().or_fail());
-        self.stats.total_processing_seconds.add(elapsed);
-        if result.is_err() {
-            self.stats.error.set(true);
-        }
-        result.transpose()
+        self.read_audio_data().transpose()
     }
 }
 
@@ -480,7 +472,6 @@ pub struct WebmVideoReader {
 
 impl WebmVideoReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let start_time = Instant::now();
         let file = std::fs::File::open(&path).or_fail()?;
         let mut reader = ElementReader::new(BufReader::new(file));
         check_ebml_header_element(&mut reader).or_fail()?;
@@ -499,7 +490,6 @@ impl WebmVideoReader {
                     path.as_ref().display()
                 )
             })?,
-            total_processing_seconds: SharedAtomicSeconds::new(Seconds::new(start_time.elapsed())),
             ..Default::default()
         };
         Ok(Self {
@@ -610,12 +600,6 @@ impl Iterator for WebmVideoReader {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        let (result, elapsed) = Seconds::elapsed(|| self.read_video_frame().or_fail());
-        self.stats.total_processing_seconds.add(elapsed);
-        if result.is_err() {
-            self.stats.error.set(true);
-        }
-        result.transpose()
+        self.read_video_frame().transpose()
     }
 }

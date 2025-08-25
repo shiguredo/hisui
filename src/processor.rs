@@ -14,7 +14,36 @@ pub trait MediaProcessor {
     }
 }
 
-#[derive(Debug)]
+pub struct BoxedMediaProcessor(Box<dyn 'static + Send + MediaProcessor>);
+
+impl BoxedMediaProcessor {
+    pub fn new<P: 'static + Send + MediaProcessor>(processor: P) -> Self {
+        Self(Box::new(processor))
+    }
+}
+
+impl std::fmt::Debug for BoxedMediaProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoxedMediaProcessor")
+            .finish_non_exhaustive()
+    }
+}
+
+impl MediaProcessor for BoxedMediaProcessor {
+    fn spec(&self) -> MediaProcessorSpec {
+        self.0.spec()
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        self.0.process_input(input)
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        self.0.process_output()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
@@ -32,6 +61,13 @@ impl MediaProcessorInput {
         Self {
             stream_id,
             sample: None,
+        }
+    }
+
+    pub fn sample(stream_id: MediaStreamId, sample: MediaSample) -> Self {
+        Self {
+            stream_id,
+            sample: Some(sample),
         }
     }
 
@@ -57,6 +93,17 @@ pub enum MediaProcessorOutput {
         sample: MediaSample,
     },
     Pending {
+        // [NOTE]
+        // `Mp4Writer` のように複数の入力をとるプロセッサーが
+        // 複数いた場合にデッドロックが発生する可能性がある
+        // （たとえば、片方が音声ストリームを、もう片方が映像ストリームを優先して処理するような場合）
+        //
+        // ただし、通常はそういったプロセッサーは、
+        // 一番最後のフェーズにひとつだけ存在することが多いはずなので
+        // これが実際に問題となることはほぼないはず
+        //
+        // もし発生した場合には `SyncSender` のバッファサイズを増やすか、
+        // 問題となっているプロセッサーの実装を見直す必要がある
         awaiting_stream_id: MediaStreamId,
     },
     Finished,

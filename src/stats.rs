@@ -14,6 +14,7 @@ use crate::{
     video::VideoFrame,
 };
 
+// TODO(atode): remove
 #[derive(Debug, Clone)]
 pub struct SharedStats {
     inner: Arc<Mutex<Stats>>,
@@ -69,28 +70,29 @@ pub struct Stats {
     /// 全体の合成に要した実時間
     pub elapsed_seconds: Seconds,
 
+    /// 全体でひとつでもエラーが発生したら true になる
+    pub error: SharedAtomicFlag,
+
     /// 各プロセッサの統計情報
     pub processors: Vec<ProcessorStats>,
+
+    /// プロセッサを実行するワーカースレッドの統計情報
+    pub worker_threads: Vec<WorkerThreadStats>,
 }
 
 impl nojson::DisplayJson for Stats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("elapsed_seconds", self.elapsed_seconds)?;
-            f.member(
-                "processors",
-                nojson::array(|f| {
-                    for processor in &self.processors {
-                        f.element(processor)?;
-                    }
-                    Ok(())
-                }),
-            )?;
+            f.member("error", self.error.get())?;
+            f.member("processors", &self.processors)?;
+            f.member("worker_threads", &self.worker_threads)?;
             Ok(())
         })
     }
 }
 
+// TODO(atode): remove
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Seconds(Duration);
 
@@ -159,9 +161,42 @@ pub enum ProcessorStats {
     AudioEncoder(AudioEncoderStats),
     VideoEncoder(VideoEncoderStats),
     Mp4Writer(Mp4WriterStats),
+    Other {
+        processor_type: String,
+        total_processing_seconds: SharedAtomicSeconds,
+        error: SharedAtomicFlag,
+    },
 }
 
 impl ProcessorStats {
+    pub fn other(processor_type: &str) -> Self {
+        Self::Other {
+            processor_type: processor_type.to_owned(),
+            total_processing_seconds: Default::default(),
+            error: Default::default(),
+        }
+    }
+
+    pub fn total_processing_seconds(&self) -> SharedAtomicSeconds {
+        match self {
+            ProcessorStats::Mp4AudioReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::Mp4VideoReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::WebmAudioReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::WebmVideoReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::AudioDecoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::VideoDecoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::AudioMixer(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::VideoMixer(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::AudioEncoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::VideoEncoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::Mp4Writer(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::Other {
+                total_processing_seconds,
+                ..
+            } => total_processing_seconds.clone(),
+        }
+    }
+
     pub fn set_error(&self) {
         match self {
             ProcessorStats::Mp4AudioReader(stats) => stats.error.set(true),
@@ -175,6 +210,7 @@ impl ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.error.set(true),
             ProcessorStats::VideoEncoder(stats) => stats.error.set(true),
             ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
+            ProcessorStats::Other { error, .. } => error.set(true),
         }
     }
 }
@@ -193,6 +229,18 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
             ProcessorStats::VideoEncoder(stats) => stats.fmt(f),
             ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
+            ProcessorStats::Other {
+                processor_type,
+                total_processing_seconds,
+                error,
+            } => f.object(|f| {
+                f.member("type", processor_type)?;
+                f.member(
+                    "total_processing_seconds",
+                    total_processing_seconds.get_seconds(),
+                )?;
+                f.member("error", error.get())
+            }),
         }
     }
 }
@@ -959,6 +1007,36 @@ impl nojson::DisplayJson for Mp4WriterStats {
                 self.total_processing_seconds.get_seconds(),
             )?;
             f.member("error", self.error.get())?;
+            Ok(())
+        })
+    }
+}
+
+/// `Mp4Writer` 用の統計情報
+#[derive(Debug, Default, Clone)]
+pub struct WorkerThreadStats {
+    /// 担当しているプロセッサの番号（インデックス）リスト
+    pub processors: Vec<usize>,
+
+    /// 処理部分に掛かった時間
+    pub total_processing_seconds: SharedAtomicSeconds,
+
+    /// 入出力の待機時間
+    pub total_waiting_seconds: SharedAtomicSeconds,
+}
+
+impl nojson::DisplayJson for WorkerThreadStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("processors", &self.processors)?;
+            f.member(
+                "total_processing_seconds",
+                self.total_processing_seconds.get_seconds(),
+            )?;
+            f.member(
+                "total_waiting_seconds",
+                self.total_waiting_seconds.get_seconds(),
+            )?;
             Ok(())
         })
     }

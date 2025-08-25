@@ -1,6 +1,6 @@
 pub mod arg_utils;
 pub mod audio;
-pub mod channel;
+pub mod channel; // TODO(atode): remove
 pub mod composer;
 pub mod decoder;
 pub mod decoder_dav1d;
@@ -39,6 +39,7 @@ pub mod processor;
 pub mod reader;
 pub mod reader_mp4;
 pub mod reader_webm;
+pub mod scheduler;
 pub mod source;
 pub mod stats;
 pub mod subcommand_compose;

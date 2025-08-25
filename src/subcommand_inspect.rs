@@ -4,8 +4,12 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    scheduler::Scheduler,
+    stats::ProcessorStats,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
@@ -13,6 +17,11 @@ use crate::{
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
+
+const AUDIO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+const VIDEO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+const AUDIO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(2);
+const VIDEO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(3);
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
@@ -50,176 +59,61 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         }
     };
 
+    let mut scheduler = Scheduler::new();
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
-    let audio_stream_id = MediaStreamId::new(0);
-    let video_stream_id = MediaStreamId::new(1);
-    let (audio_reader, video_reader): (Box<dyn Iterator<Item = _>>, Box<dyn Iterator<Item = _>>) =
-        match format {
-            ContainerFormat::Webm => {
-                let audio = Box::new(
-                    WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-                );
-                let video = Box::new(
-                    WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-                );
-                (audio, video)
-            }
-            ContainerFormat::Mp4 => {
-                let audio = Box::new(
-                    Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-                );
-                let video = Box::new(
-                    Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?,
-                );
-                (audio, video)
-            }
+    let reader = match format {
+        ContainerFormat::Mp4 => {
+            let reader =
+                Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            AudioReader::new_mp4(AUDIO_ENCODED_STREAM_ID, reader)
+        }
+        ContainerFormat::Webm => {
+            let reader =
+                WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            AudioReader::new_webm(AUDIO_ENCODED_STREAM_ID, reader)
+        }
+    };
+    scheduler.register(reader).or_fail()?;
+
+    let reader = match format {
+        ContainerFormat::Mp4 => {
+            let reader =
+                Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            VideoReader::new_mp4(VIDEO_ENCODED_STREAM_ID, reader)
+        }
+        ContainerFormat::Webm => {
+            let reader =
+                WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
+            VideoReader::new_webm(VIDEO_ENCODED_STREAM_ID, reader)
+        }
+    };
+    scheduler.register(reader).or_fail()?;
+
+    if decode {
+        let decoder =
+            AudioDecoder::new_opus(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
+        scheduler.register(decoder).or_fail()?;
+    }
+
+    if decode {
+        let options = VideoDecoderOptions {
+            openh264_lib: openh264
+                .clone()
+                .map(Openh264Library::load)
+                .transpose()
+                .or_fail()?,
         };
-
-    let decoded_audio_stream_id = MediaStreamId::new(2);
-    let mut audio_codec = None;
-    let mut audio_samples = Vec::new();
-    let mut audio_decoder = None;
-    for sample in audio_reader {
-        let sample = sample.or_fail()?;
-        if audio_codec.is_none() {
-            audio_codec = sample.format.codec_name();
-            if decode {
-                audio_decoder = Some(
-                    AudioDecoder::new_opus(audio_stream_id, decoded_audio_stream_id).or_fail()?,
-                );
-            }
-        }
-
-        let mut info = AudioSampleInfo {
-            timestamp: sample.timestamp,
-            duration: sample.duration,
-            data_size: sample.data.len(),
-            decoded_data_size: None,
-        };
-
-        if let Some(decoder) = &mut audio_decoder {
-            let decoded = decoder.decode(sample).or_fail()?;
-            info.decoded_data_size = Some(decoded.data.len());
-        }
-
-        audio_samples.push(info);
+        let decoder = VideoDecoder::new(VIDEO_ENCODED_STREAM_ID, VIDEO_DECODED_STREAM_ID, options);
+        scheduler.register(decoder).or_fail()?;
     }
 
-    let decoded_video_stream_id = MediaStreamId::new(3);
-    let mut video_codec = None;
-    let mut video_samples = Vec::new();
-    let mut video_decoder = None;
-    let mut decoded_count = 0;
-    for sample in video_reader {
-        let sample = sample.or_fail()?;
-        if video_codec.is_none() {
-            video_codec = sample.format.codec_name();
-            if decode {
-                let options = VideoDecoderOptions {
-                    openh264_lib: openh264
-                        .clone()
-                        .map(Openh264Library::load)
-                        .transpose()
-                        .or_fail()?,
-                };
-                video_decoder = Some(VideoDecoder::new(
-                    video_stream_id,
-                    decoded_video_stream_id,
-                    options,
-                ));
-            }
-        }
-
-        video_samples.push(VideoSampleInfo {
-            timestamp: sample.timestamp,
-            duration: sample.duration,
-            data_size: sample.data.len(),
-            keyframe: sample.keyframe,
-            codec_specific_info: VideoCodecSpecificInfo::new(&sample),
-            decoded_data_size: None,
-            width: None,
-            height: None,
-        });
-
-        if let Some(decoder) = &mut video_decoder {
-            decoder.decode(sample).or_fail()?;
-            while let Some(decoded) = decoder.next_decoded_frame() {
-                video_samples[decoded_count].update(&decoded);
-                decoded_count += 1;
-            }
-        }
-    }
-    if let Some(decoder) = &mut video_decoder {
-        decoder.finish().or_fail()?;
-        while let Some(decoded) = decoder.next_decoded_frame() {
-            video_samples[decoded_count].update(&decoded);
-            decoded_count += 1;
-        }
-    }
-
-    // 入力ファイルから取得した情報を出力する
-    crate::json::pretty_print(FileInfo {
-        path: input_file_path.to_path_buf(),
-        format,
-        audio_codec,
-        audio_samples,
-        video_codec,
-        video_samples,
-    })
-    .or_fail()?;
+    scheduler
+        .register(OutputPrinter::new(input_file_path.clone(), format, decode))
+        .or_fail()?;
+    scheduler.run().or_fail()?;
 
     Ok(())
-}
-
-#[derive(Debug)]
-struct FileInfo {
-    path: PathBuf,
-    format: ContainerFormat,
-    audio_codec: Option<CodecName>,
-    audio_samples: Vec<AudioSampleInfo>,
-    video_codec: Option<CodecName>,
-    video_samples: Vec<VideoSampleInfo>,
-}
-
-impl nojson::DisplayJson for FileInfo {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("path", &self.path)?;
-            f.member("format", self.format)?;
-            if let Some(c) = self.audio_codec {
-                f.member("audio_codec", c)?;
-                f.member(
-                    "audio_duration_us",
-                    self.audio_samples
-                        .iter()
-                        .map(|s| s.duration)
-                        .sum::<Duration>()
-                        .as_micros(),
-                )?;
-                f.member("audio_sample_count", self.audio_samples.len())?;
-                f.member("audio_samples", &self.audio_samples)?;
-            }
-            if let Some(c) = self.video_codec {
-                f.member("video_codec", c)?;
-                f.member(
-                    "video_duration_us",
-                    self.video_samples
-                        .iter()
-                        .map(|s| s.duration)
-                        .sum::<Duration>()
-                        .as_micros(),
-                )?;
-                f.member("video_sample_count", self.video_samples.len())?;
-                f.member(
-                    "video_keyframe_sample_count",
-                    self.video_samples.iter().filter(|s| s.keyframe).count(),
-                )?;
-                f.member("video_samples", &self.video_samples)?;
-            }
-            Ok(())
-        })
-    }
 }
 
 #[derive(Debug)]
@@ -361,5 +255,161 @@ impl VideoCodecSpecificInfo {
             }
             _ => None,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct OutputPrinter {
+    path: PathBuf,
+    format: ContainerFormat,
+    audio_codec: Option<CodecName>,
+    video_codec: Option<CodecName>,
+    audio_samples: Vec<AudioSampleInfo>,
+    video_samples: Vec<VideoSampleInfo>,
+    input_stream_ids: Vec<MediaStreamId>,
+    next_input_stream_index: usize,
+}
+
+impl OutputPrinter {
+    fn new(path: PathBuf, format: ContainerFormat, decode: bool) -> Self {
+        Self {
+            path,
+            format,
+            audio_codec: None,
+            video_codec: None,
+            audio_samples: Vec::new(),
+            video_samples: Vec::new(),
+            input_stream_ids: if decode {
+                vec![
+                    AUDIO_ENCODED_STREAM_ID,
+                    VIDEO_ENCODED_STREAM_ID,
+                    AUDIO_DECODED_STREAM_ID,
+                    VIDEO_DECODED_STREAM_ID,
+                ]
+            } else {
+                vec![AUDIO_ENCODED_STREAM_ID, VIDEO_ENCODED_STREAM_ID]
+            },
+            next_input_stream_index: 0,
+        }
+    }
+}
+
+impl MediaProcessor for OutputPrinter {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.input_stream_ids.clone(),
+            output_stream_ids: Vec::new(),
+            stats: ProcessorStats::other("output-printer"),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let Some(sample) = input.sample else {
+            self.input_stream_ids.retain(|id| *id != input.stream_id);
+            self.next_input_stream_index = 0;
+            return Ok(());
+        };
+        match input.stream_id {
+            AUDIO_ENCODED_STREAM_ID => {
+                let sample = sample.expect_audio_data().or_fail()?;
+                if self.audio_codec.is_none() {
+                    self.audio_codec = sample.format.codec_name();
+                }
+                self.audio_samples.push(AudioSampleInfo {
+                    timestamp: sample.timestamp,
+                    duration: sample.duration,
+                    data_size: sample.data.len(),
+                    decoded_data_size: None,
+                });
+            }
+            AUDIO_DECODED_STREAM_ID => {
+                let sample = sample.expect_audio_data().or_fail()?;
+                let info = self
+                    .audio_samples
+                    .iter_mut()
+                    .rfind(|s| s.decoded_data_size.is_none())
+                    .or_fail()?;
+                info.decoded_data_size = Some(sample.data.len());
+            }
+            VIDEO_ENCODED_STREAM_ID => {
+                let sample = sample.expect_video_frame().or_fail()?;
+                if self.video_codec.is_none() {
+                    self.video_codec = sample.format.codec_name();
+                }
+                self.video_samples.push(VideoSampleInfo {
+                    timestamp: sample.timestamp,
+                    duration: sample.duration,
+                    data_size: sample.data.len(),
+                    keyframe: sample.keyframe,
+                    codec_specific_info: VideoCodecSpecificInfo::new(&sample),
+                    decoded_data_size: None,
+                    width: None,
+                    height: None,
+                });
+            }
+            VIDEO_DECODED_STREAM_ID => {
+                let sample = sample.expect_video_frame().or_fail()?;
+                let info = self
+                    .video_samples
+                    .iter_mut()
+                    .rfind(|s| s.decoded_data_size.is_none())
+                    .or_fail()?;
+                info.update(&sample);
+            }
+            _ => return Err(orfail::Failure::new("BUG: unexpected stream ID")),
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if self.input_stream_ids.is_empty() {
+            crate::json::pretty_print(self).or_fail()?;
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            let awaiting_stream_id = self.input_stream_ids[self.next_input_stream_index];
+            self.next_input_stream_index =
+                (self.next_input_stream_index + 1) % self.input_stream_ids.len();
+            Ok(MediaProcessorOutput::Pending { awaiting_stream_id })
+        }
+    }
+}
+
+impl nojson::DisplayJson for OutputPrinter {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("path", &self.path)?;
+            f.member("format", self.format)?;
+            if let Some(c) = self.audio_codec {
+                f.member("audio_codec", c)?;
+                f.member(
+                    "audio_duration_us",
+                    self.audio_samples
+                        .iter()
+                        .map(|s| s.duration)
+                        .sum::<Duration>()
+                        .as_micros(),
+                )?;
+                f.member("audio_sample_count", self.audio_samples.len())?;
+                f.member("audio_samples", &self.audio_samples)?;
+            }
+            if let Some(c) = self.video_codec {
+                f.member("video_codec", c)?;
+                f.member(
+                    "video_duration_us",
+                    self.video_samples
+                        .iter()
+                        .map(|s| s.duration)
+                        .sum::<Duration>()
+                        .as_micros(),
+                )?;
+                f.member("video_sample_count", self.video_samples.len())?;
+                f.member(
+                    "video_keyframe_sample_count",
+                    self.video_samples.iter().filter(|s| s.keyframe).count(),
+                )?;
+                f.member("video_samples", &self.video_samples)?;
+            }
+            Ok(())
+        })
     }
 }
