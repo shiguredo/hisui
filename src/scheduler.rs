@@ -10,10 +10,21 @@ use crate::processor::{
 };
 use crate::stats::ProcessorStats;
 
-const CHANNEL_SIZE_LIMIT: usize = 5; // TODO:
-
 type MediaSampleReceiver = mpsc::Receiver<MediaSample>;
 type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;
+
+// 各プロセッサが `MediaSample` をやりとりするチャネルのサイズ上限。
+// 上限なしだと、プロデューサーのペースがコンシューマーよりも早い場合に、
+// メモリ消費量が増え続けてしまうので、それを防止するための制限。
+// 値の細かい調整は不要な想定だが、いちおう、隠し設定として HISUI_SYNC_CHANNEL_SIZE 環境変数で変更可能にしておく。
+fn sync_channel_size() -> usize {
+    let size = std::env::var("HISUI_SYNC_CHANNEL_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    log::debug!("SYNC_CHANNEL_SIZE={size}");
+    size
+}
 
 #[derive(Debug)]
 pub struct Task {
@@ -34,8 +45,9 @@ impl Task {
         let mut input_stream_rxs = HashMap::new();
         let mut input_stream_txs = Vec::new();
 
+        let channel_size = sync_channel_size();
         for input_stream_id in processor.spec().input_stream_ids {
-            let (tx, rx) = mpsc::sync_channel(CHANNEL_SIZE_LIMIT);
+            let (tx, rx) = mpsc::sync_channel(channel_size);
             input_stream_rxs.insert(input_stream_id, rx);
             input_stream_txs.push((input_stream_id, tx));
         }
