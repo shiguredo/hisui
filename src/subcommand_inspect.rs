@@ -6,8 +6,6 @@ use crate::{
     metadata::{ContainerFormat, SourceId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::{AudioReader, VideoReader},
-    reader_mp4::Mp4VideoReader,
-    reader_webm::WebmVideoReader,
     scheduler::Scheduler,
     stats::ProcessorStats,
     types::CodecName,
@@ -72,18 +70,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
     scheduler.register(reader).or_fail()?;
 
-    let reader = match format {
-        ContainerFormat::Mp4 => {
-            let reader =
-                Mp4VideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            VideoReader::new_mp4(VIDEO_ENCODED_STREAM_ID, reader)
-        }
-        ContainerFormat::Webm => {
-            let reader =
-                WebmVideoReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            VideoReader::new_webm(VIDEO_ENCODED_STREAM_ID, reader)
-        }
-    };
+    let reader = VideoReader::new(
+        VIDEO_ENCODED_STREAM_ID,
+        dummy_source_id.clone(),
+        format,
+        Duration::ZERO,
+        vec![input_file_path.clone()],
+    )
+    .or_fail()?;
     scheduler.register(reader).or_fail()?;
 
     if decode {

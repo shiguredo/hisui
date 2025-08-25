@@ -194,10 +194,10 @@ impl VideoDecoder {
     }
 
     // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn decode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
         let input = MediaProcessorInput {
             stream_id: self.input_stream_id,
-            sample: Some(MediaSample::video_frame(frame)),
+            sample: Some(MediaSample::Video(frame)),
         };
         self.process_input(input).or_fail()?;
         Ok(())

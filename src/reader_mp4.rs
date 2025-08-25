@@ -29,17 +29,11 @@ pub struct Mp4VideoReader {
 }
 
 impl Mp4VideoReader {
-    // TODO: remove
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let stats = Mp4VideoReaderStats {
-            input_files: vec![path.as_ref().canonicalize().or_fail_with(|e| {
-                format!(
-                    "failed to canonicalize path {}: {e}",
-                    path.as_ref().display()
-                )
-            })?],
-            ..Default::default()
-        };
+    pub fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: Mp4VideoReaderStats,
+    ) -> orfail::Result<Self> {
         let inner = Mp4VideoReaderInner::new(source_id, path, stats.clone()).or_fail()?;
         Ok(Self { inner, stats })
     }
