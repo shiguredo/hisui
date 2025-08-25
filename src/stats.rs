@@ -634,16 +634,6 @@ impl SharedAtomicSeconds {
     pub fn get_duration(&self) -> Duration {
         self.get_seconds().get()
     }
-
-    pub fn time<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce() -> T,
-    {
-        let start = Instant::now();
-        let value = f();
-        self.add(Seconds::new(start.elapsed()));
-        value
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -152,16 +152,7 @@ impl Task {
     }
 
     fn run_until_block(&mut self) -> orfail::Result<()> {
-        let mut did_something = true;
-        while did_something {
-            did_something = self
-                .stats
-                .total_processing_seconds()
-                .time(|| -> orfail::Result<bool> {
-                    Ok(self.process_input()? || self.process_output()?)
-                })
-                .or_fail()?;
-        }
+        while self.process_input().or_fail()? || self.process_output().or_fail()? {}
         Ok(())
     }
 }
@@ -295,8 +286,18 @@ impl TaskRunner {
     fn run_one(&mut self) {
         let mut i = 0;
         while i < self.tasks.len() {
-            // TODO: 時間計測
-            match self.tasks[i].run_until_block().or_fail() {
+            let start = Instant::now();
+            let result = self.tasks[i].run_until_block().or_fail();
+            let elapsed = start.elapsed();
+            self.tasks[i]
+                .stats
+                .total_processing_seconds()
+                .add(Seconds::new(elapsed));
+            self.stats
+                .total_processing_seconds
+                .add(Seconds::new(elapsed));
+
+            match result {
                 Err(e) => {
                     log::error!("{e}");
                     self.error_flag.set(true);
