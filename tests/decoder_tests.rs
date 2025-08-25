@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use hisui::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
@@ -13,10 +15,18 @@ use shiguredo_openh264::Openh264Library;
 fn h264_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h264");
     let source_id1 = SourceId::new("archive-blue-640x480-h264");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h264.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h264.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        "testdata/archive-blue-640x480-h264.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        "testdata/archive-red-320x320-h264.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -26,10 +36,18 @@ fn h264_multi_resolutions() -> orfail::Result<()> {
 fn h265_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h265");
     let source_id1 = SourceId::new("archive-red-320x320-h265");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h265.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h265.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        "testdata/archive-blue-640x480-h265.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        "testdata/archive-red-320x320-h265.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -38,10 +56,18 @@ fn h265_multi_resolutions() -> orfail::Result<()> {
 fn vp9_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-vp9");
     let source_id1 = SourceId::new("archive-red-320x320-vp9");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-vp9.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-vp9.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        "testdata/archive-blue-640x480-vp9.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        "testdata/archive-red-320x320-vp9.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -50,10 +76,18 @@ fn vp9_multi_resolutions() -> orfail::Result<()> {
 fn av1_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-av1");
     let source_id1 = SourceId::new("archive-red-320x320-av1");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-av1.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-av1.mp4").or_fail()?;
+    let reader0 = Mp4VideoReader::new(
+        source_id0,
+        "testdata/archive-blue-640x480-av1.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
+    let reader1 = Mp4VideoReader::new(
+        source_id1,
+        "testdata/archive-red-320x320-av1.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -136,7 +170,7 @@ where
     Ok(())
 }
 
-fn prepend_h264_sps_pps(mut frame: VideoFrame) -> VideoFrame {
+fn prepend_h264_sps_pps(mut frame: VideoFrame) -> Arc<VideoFrame> {
     if let Some(SampleEntry::Avc1(Avc1Box {
         avcc_box: AvccBox {
             sps_list, pps_list, ..
@@ -155,5 +189,5 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> VideoFrame {
     };
 
     // 対象外のフレームはそのまま返す
-    frame
+    Arc::new(frame)
 }
