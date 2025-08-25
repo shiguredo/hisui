@@ -4,7 +4,7 @@ use std::sync::mpsc::{Receiver, SyncSender};
 use crate::audio::AudioData;
 use crate::video::VideoFrame;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MediaStreamId(u64);
 
 impl MediaStreamId {
@@ -17,12 +17,13 @@ impl MediaStreamId {
     }
 }
 
-#[derive(Debug)]
+// TODO(atode): remove
+#[derive(Debug, Default)]
 pub struct MediaStreamIdGenerator(MediaStreamId);
 
 impl MediaStreamIdGenerator {
     pub fn new() -> Self {
-        Self(MediaStreamId(0))
+        Self::default()
     }
 
     pub fn next_id(&mut self) -> MediaStreamId {

@@ -252,6 +252,12 @@ impl Scheduler {
     }
 }
 
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct SchedulerHandle {
     handles: Vec<std::thread::JoinHandle<()>>,

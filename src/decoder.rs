@@ -61,7 +61,7 @@ impl AudioDecoder {
             return Err(orfail::Failure::new("bug"));
         };
         let decoded = sample.expect_audio_data().or_fail()?;
-        Ok(Arc::into_inner(decoded).or_fail()?)
+        Arc::into_inner(decoded).or_fail()
     }
 
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
@@ -273,7 +273,6 @@ impl MediaProcessor for VideoDecoder {
 }
 
 #[derive(Debug)]
-#[expect(clippy::large_enum_variant)]
 enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,

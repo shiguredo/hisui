@@ -137,12 +137,7 @@ impl ResizeCachedVideoFrame {
 
         // [NOTE]
         // resized の要素数は、通常は 1 で多くても 2~3 である想定なので線形探索で十分
-        if self
-            .resized
-            .iter()
-            .find(|x| x.0 == (width, height))
-            .is_none()
-        {
+        if !self.resized.iter().any(|x| x.0 == (width, height)) {
             // キャッシュにないので新規リサイズが必要
             let mut frame = (*self.original).clone(); // TODO: remove clone() (make resize() return the new instance)
             frame.resize(width, height).or_fail()?;
