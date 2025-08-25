@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::mpsc;
+use std::time::Duration;
 
 use orfail::OrFail;
 
@@ -16,7 +17,8 @@ type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;
 // 各プロセッサが `MediaSample` をやりとりするチャネルのサイズ上限。
 // 上限なしだと、プロデューサーのペースがコンシューマーよりも早い場合に、
 // メモリ消費量が増え続けてしまうので、それを防止するための制限。
-// 値の細かい調整は不要な想定だが、いちおう、隠し設定として HISUI_SYNC_CHANNEL_SIZE 環境変数で変更可能にしておく。
+//
+// 値の細かい調整は不要な想定だが、いちおう、隠し設定として環境変数経由で変更可能にしておく。
 fn sync_channel_size() -> usize {
     let size = std::env::var("HISUI_SYNC_CHANNEL_SIZE")
         .ok()
@@ -24,6 +26,18 @@ fn sync_channel_size() -> usize {
         .unwrap_or(10);
     log::debug!("SYNC_CHANNEL_SIZE={size}");
     size
+}
+
+// プロセッサーが入力ないし出力送信待ちでやることがない場合のスリープ時間。
+//
+// 値の細かい調整は不要な想定だが、いちおう、隠し設定として環境変数経由で変更可能にしておく。
+fn idle_thread_sleep_duration() -> Duration {
+    let ms = std::env::var("HISUI_IDLE_THREAD_SLEEP_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    log::debug!("IDLE_THREAD_SLEEP_MS={ms}");
+    Duration::from_millis(ms)
 }
 
 #[derive(Debug)]
@@ -230,11 +244,16 @@ pub struct SchedulerHandle {
 #[derive(Debug)]
 pub struct TaskRunner {
     tasks: Vec<Task>,
+    sleep_duration: Duration,
 }
 
 impl TaskRunner {
     fn new(tasks: Vec<Task>) -> Self {
-        Self { tasks }
+        let sleep_duration = idle_thread_sleep_duration();
+        Self {
+            tasks,
+            sleep_duration,
+        }
     }
 
     fn run(mut self) {
@@ -263,8 +282,7 @@ impl TaskRunner {
         }
 
         if self.is_awaiting() {
-            let duration = std::time::Duration::from_millis(10); // TODO
-            std::thread::sleep(duration);
+            std::thread::sleep(self.sleep_duration);
         }
     }
 
