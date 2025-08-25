@@ -1,7 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    channel::ErrorFlag,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
@@ -60,8 +59,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         }
     };
 
-    let error_flag = ErrorFlag::new();
-    let mut scheduler = Scheduler::new(error_flag);
+    let mut scheduler = Scheduler::new();
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
     let reader = match format {

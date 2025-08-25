@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use orfail::OrFail;
 
-use crate::channel::ErrorFlag;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
 };
-use crate::stats::ProcessorStats;
+use crate::stats::{ProcessorStats, Seconds, SharedAtomicFlag, Stats};
 
 type MediaSampleReceiver = mpsc::Receiver<MediaSample>;
 type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;
@@ -172,16 +171,16 @@ pub struct Scheduler {
     tasks: Vec<Task>,
     thread_count: NonZeroUsize,
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
-    error_flag: ErrorFlag,
+    stats: Stats,
 }
 
 impl Scheduler {
-    pub fn new(error_flag: ErrorFlag) -> Self {
+    pub fn new() -> Self {
         Self {
             tasks: Vec::new(),
             thread_count: NonZeroUsize::MIN,
             stream_txs: HashMap::new(),
-            error_flag,
+            stats: Stats::default(),
         }
     }
 
@@ -189,6 +188,8 @@ impl Scheduler {
     where
         P: 'static + Send + MediaProcessor,
     {
+        self.stats.processors.push(processor.spec().stats);
+
         let (task, input_stream_txs) = Task::new(processor);
         self.tasks.push(task);
 
@@ -215,22 +216,27 @@ impl Scheduler {
                 }
                 thread_tasks.push(task.take().or_fail()?);
             }
-            let runner = TaskRunner::new(thread_tasks, self.error_flag.clone());
+            let runner = TaskRunner::new(thread_tasks, self.stats.error.clone());
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
         }
 
-        Ok(SchedulerHandle { handles })
+        Ok(SchedulerHandle {
+            handles,
+            stats: self.stats,
+        })
     }
 
-    pub fn run(self) -> orfail::Result<()> {
-        let handle = self.spawn().or_fail()?;
+    pub fn run(self) -> orfail::Result<Stats> {
+        let start = Instant::now();
+        let mut handle = self.spawn().or_fail()?;
         for handle in handle.handles {
             if let Err(e) = handle.join() {
                 std::panic::resume_unwind(e);
             }
         }
-        Ok(())
+        handle.stats.elapsed_seconds = Seconds::new(start.elapsed());
+        Ok(handle.stats)
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
@@ -251,17 +257,18 @@ impl Scheduler {
 #[derive(Debug)]
 pub struct SchedulerHandle {
     handles: Vec<std::thread::JoinHandle<()>>,
+    stats: Stats,
 }
 
 #[derive(Debug)]
 pub struct TaskRunner {
     tasks: Vec<Task>,
     sleep_duration: Duration,
-    error_flag: ErrorFlag,
+    error_flag: SharedAtomicFlag,
 }
 
 impl TaskRunner {
-    fn new(tasks: Vec<Task>, error_flag: ErrorFlag) -> Self {
+    fn new(tasks: Vec<Task>, error_flag: SharedAtomicFlag) -> Self {
         let sleep_duration = idle_thread_sleep_duration();
         Self {
             tasks,
@@ -283,7 +290,7 @@ impl TaskRunner {
             match self.tasks[i].run_until_block().or_fail() {
                 Err(e) => {
                     log::error!("{e}");
-                    self.error_flag.set();
+                    self.error_flag.set(true);
                     self.tasks[i].stats.set_error();
                     self.tasks.swap_remove(i);
                 }

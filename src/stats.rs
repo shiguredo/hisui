@@ -69,6 +69,9 @@ pub struct Stats {
     /// 全体の合成に要した実時間
     pub elapsed_seconds: Seconds,
 
+    /// 全体でひとつでもエラーが発生したら true になる
+    pub error: SharedAtomicFlag,
+
     /// 各プロセッサの統計情報
     pub processors: Vec<ProcessorStats>,
 }
@@ -77,6 +80,7 @@ impl nojson::DisplayJson for Stats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("elapsed_seconds", self.elapsed_seconds)?;
+            f.member("error", self.error.get())?;
             f.member(
                 "processors",
                 nojson::array(|f| {
