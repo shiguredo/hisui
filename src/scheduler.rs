@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use orfail::OrFail;
 
+use crate::channel::ErrorFlag;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
@@ -162,14 +163,16 @@ pub struct Scheduler {
     tasks: Vec<Task>,
     thread_count: NonZeroUsize,
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
+    error_flag: ErrorFlag,
 }
 
 impl Scheduler {
-    pub fn new() -> Self {
+    pub fn new(error_flag: ErrorFlag) -> Self {
         Self {
             tasks: Vec::new(),
             thread_count: NonZeroUsize::MIN,
             stream_txs: HashMap::new(),
+            error_flag,
         }
     }
 
@@ -203,7 +206,7 @@ impl Scheduler {
                 }
                 thread_tasks.push(task.take().or_fail()?);
             }
-            let runner = TaskRunner::new(thread_tasks);
+            let runner = TaskRunner::new(thread_tasks, self.error_flag.clone());
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
         }
@@ -245,19 +248,21 @@ pub struct SchedulerHandle {
 pub struct TaskRunner {
     tasks: Vec<Task>,
     sleep_duration: Duration,
+    error_flag: ErrorFlag,
 }
 
 impl TaskRunner {
-    fn new(tasks: Vec<Task>) -> Self {
+    fn new(tasks: Vec<Task>, error_flag: ErrorFlag) -> Self {
         let sleep_duration = idle_thread_sleep_duration();
         Self {
             tasks,
             sleep_duration,
+            error_flag,
         }
     }
 
     fn run(mut self) {
-        while !self.tasks.is_empty() {
+        while !self.tasks.is_empty() && !self.error_flag.get() {
             self.run_one();
         }
     }
@@ -269,6 +274,7 @@ impl TaskRunner {
             match self.tasks[i].run_until_block().or_fail() {
                 Err(e) => {
                     log::error!("{e}");
+                    self.error_flag.set();
                     self.tasks[i].stats.set_error();
                     self.tasks.swap_remove(i);
                 }
