@@ -14,7 +14,7 @@ use crate::{
     decoder_opus::OpusDecoder,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioDecoderStats, ProcessorStats, Seconds, VideoDecoderStats, VideoResolution},
+    stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
 };
@@ -89,14 +89,11 @@ impl MediaProcessor for AudioDecoder {
         };
         let data = sample.expect_audio_data().or_fail()?;
 
-        let (decoded, elapsed) = Seconds::try_elapsed(|| self.inner.decode(&data).or_fail())?;
+        let decoded = self.inner.decode(&data).or_fail()?;
         self.stats.total_audio_data_count.add(1);
         if let Some(id) = &data.source_id {
             self.stats.source_id.set_once(|| id.clone());
         }
-
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        self.stats.total_processing_seconds.add(elapsed);
 
         self.decoded.push_back(decoded);
         Ok(())
@@ -236,7 +233,6 @@ impl MediaProcessor for VideoDecoder {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
 
@@ -245,13 +241,10 @@ impl MediaProcessor for VideoDecoder {
                 self.stats.source_id.set_once(|| id.clone());
             }
 
-            let (_, elapsed) =
-                Seconds::try_elapsed(|| self.inner.decode(&frame, &mut self.stats).or_fail())?;
-            self.stats.total_processing_seconds.add(elapsed);
+            self.inner.decode(&frame, &mut self.stats).or_fail()?;
         } else {
             self.eos = true;
-            let (_, elapsed) = Seconds::try_elapsed(|| self.inner.finish().or_fail())?;
-            self.stats.total_processing_seconds.add(elapsed);
+            self.inner.finish().or_fail()?;
         };
 
         while let Some(frame) = self.inner.next_decoded_frame() {
