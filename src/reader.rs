@@ -10,7 +10,7 @@ use crate::{
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::{Mp4AudioReaderStats, ProcessorStats},
+    stats::{Mp4AudioReaderStats, ProcessorStats, SharedOption},
     video::VideoFrame,
 };
 
@@ -39,6 +39,7 @@ impl AudioReader2 {
                 let stats = Mp4AudioReaderStats {
                     input_files,
                     start_time: start_time_offset,
+                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
                     ..Default::default()
                 };
                 AudioReaderInner::Mp4(
