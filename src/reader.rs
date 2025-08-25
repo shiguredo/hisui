@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct AudioReader2 {
+pub struct AudioReader {
     output_stream_id: MediaStreamId,
     source_id: SourceId,
     timestamp_offset: Duration,
@@ -25,7 +25,7 @@ pub struct AudioReader2 {
     inner: AudioReaderInner,
 }
 
-impl AudioReader2 {
+impl AudioReader {
     pub fn new(
         output_stream_id: MediaStreamId,
         source_id: SourceId,
@@ -114,7 +114,7 @@ impl AudioReader2 {
     }
 }
 
-impl MediaProcessor for AudioReader2 {
+impl MediaProcessor for AudioReader {
     fn spec(&self) -> MediaProcessorSpec {
         MediaProcessorSpec {
             input_stream_ids: Vec::new(),
@@ -147,66 +147,6 @@ impl MediaProcessor for AudioReader2 {
                     ));
                 }
             }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct AudioReader {
-    output_stream_id: MediaStreamId,
-    inner: AudioReaderInner,
-}
-
-impl AudioReader {
-    pub fn new_mp4(output_stream_id: MediaStreamId, reader: Mp4AudioReader) -> Self {
-        Self {
-            output_stream_id,
-            inner: AudioReaderInner::Mp4(reader),
-        }
-    }
-
-    pub fn new_webm(output_stream_id: MediaStreamId, reader: WebmAudioReader) -> Self {
-        Self {
-            output_stream_id,
-            inner: AudioReaderInner::Webm(reader),
-        }
-    }
-}
-
-impl Iterator for AudioReader {
-    type Item = orfail::Result<AudioData>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.inner {
-            AudioReaderInner::Mp4(r) => r.next(),
-            AudioReaderInner::Webm(r) => r.next(),
-        }
-    }
-}
-
-impl MediaProcessor for AudioReader {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: Vec::new(),
-            output_stream_ids: vec![self.output_stream_id],
-            stats: self.inner.stats(),
-        }
-    }
-
-    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
-        Err(orfail::Failure::new(
-            "BUG: reader does not require any input streams",
-        ))
-    }
-
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        match self.next() {
-            None => Ok(MediaProcessorOutput::Finished),
-            Some(Err(e)) => Err(e),
-            Some(Ok(data)) => Ok(MediaProcessorOutput::audio_data(
-                self.output_stream_id,
-                data,
-            )),
         }
     }
 }

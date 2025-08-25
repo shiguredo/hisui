@@ -9,10 +9,10 @@ use crate::{
     layout::AggregatedSourceInfo,
     media::{MediaStreamId, MediaStreamIdGenerator},
     metadata::{ContainerFormat, SourceId},
-    processor::MediaProcessor,
+    processor::{MediaProcessor, MediaProcessorOutput},
     reader::{AudioReader, VideoReader},
-    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    reader_webm::{WebmAudioReader, WebmVideoReader},
+    reader_mp4::Mp4VideoReader,
+    reader_webm::WebmVideoReader,
     stats::SharedStats,
     video::VideoFrame,
 };
@@ -22,9 +22,6 @@ pub struct AudioSourceThread {
     reader: AudioReader,
     decoder: AudioDecoder,
     tx: channel::SyncSender<AudioData>,
-    read_stream_id: MediaStreamId,
-    start_timestamp: Duration,
-    media_file_queue: MediaFileQueue,
 }
 
 impl AudioSourceThread {
@@ -40,26 +37,31 @@ impl AudioSourceThread {
         // 音声入力は Opus 前提
         let decoder = AudioDecoder::new_opus(read_stream_id, decoded_stream_id).or_fail()?;
 
-        let mut media_file_queue = MediaFileQueue::new(source_info);
-        let reader = media_file_queue
-            .next_audio_reader(read_stream_id)
-            .or_fail()?
-            .or_fail()?;
-        let start_timestamp = source_info.start_timestamp;
+        let mut input_files = source_info
+            .media_paths
+            .iter()
+            .map(|(path, source)| (source.start_timestamp, path.clone()))
+            .collect::<Vec<_>>();
+        input_files.sort();
+        let reader = AudioReader::new(
+            read_stream_id,
+            source_info.id.clone(),
+            source_info.format,
+            source_info.start_timestamp,
+            input_files.into_iter().map(|(_, path)| path).collect(),
+        )
+        .or_fail()?;
 
         let (tx, rx) = channel::sync_channel();
         let mut this = Self {
             reader,
             decoder,
             tx,
-            read_stream_id,
-            start_timestamp,
-            media_file_queue,
         };
         std::thread::spawn(move || {
-            if let Err(e) = this.run(stats.clone()).or_fail() {
+            if let Err(e) = this.run().or_fail() {
                 error_flag.set();
-                this.reader.set_error();
+                this.reader.spec().stats.set_error();
                 this.decoder.set_error();
                 log::error!("failed to load audio source: {e}");
             }
@@ -72,39 +74,19 @@ impl AudioSourceThread {
         Ok(rx)
     }
 
-    fn run(&mut self, stats: SharedStats) -> orfail::Result<()> {
-        loop {
-            let mut next_timestamp = self.start_timestamp;
-            while let Some(mut data) = self.reader.next().transpose().or_fail()? {
-                // コンテナ自体の開始タイムスタンプを考慮する
-                data.timestamp += self.start_timestamp;
-                next_timestamp = data.timestamp + data.duration;
-
-                let decoded = self.decoder.decode(data).or_fail()?;
-                if !self.tx.send(decoded) {
-                    // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::info!("receiver of audio source has been closed");
-                    return Ok(());
-                }
-            }
-
-            if let Some(reader) = self
-                .media_file_queue
-                .next_audio_reader(self.read_stream_id)
-                .or_fail()?
-            {
-                // 次の分割録画ファイルがある
-                stats.with_lock(|stats| {
-                    stats.processors.push(self.reader.spec().stats);
-                });
-                self.reader = reader;
-
-                // 分割録画ファイルのタイムスタンプは連続している前提
-                self.start_timestamp = next_timestamp;
-            } else {
+    fn run(&mut self) -> orfail::Result<()> {
+        while let MediaProcessorOutput::Processed { sample, .. } =
+            self.reader.process_output().or_fail()?
+        {
+            let data = sample.expect_audio_data().or_fail()?;
+            let decoded = self.decoder.decode(data).or_fail()?;
+            if !self.tx.send(decoded) {
+                // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
+                log::info!("receiver of audio source has been closed");
                 return Ok(());
             }
         }
+        Ok(())
     }
 }
 
@@ -249,28 +231,6 @@ impl MediaFileQueue {
             format: info.format,
             reverse_queue: queue,
         }
-    }
-
-    fn next_audio_reader(
-        &mut self,
-        read_stream_id: MediaStreamId,
-    ) -> orfail::Result<Option<AudioReader>> {
-        let Some(info) = self.reverse_queue.pop() else {
-            return Ok(None);
-        };
-
-        let reader = if self.format == ContainerFormat::Webm {
-            AudioReader::new_webm(
-                read_stream_id,
-                WebmAudioReader::new(self.source_id.clone(), info.path).or_fail()?,
-            )
-        } else {
-            AudioReader::new_mp4(
-                read_stream_id,
-                Mp4AudioReader::new(self.source_id.clone(), info.path).or_fail()?,
-            )
-        };
-        Ok(Some(reader))
     }
 
     fn next_video_reader(

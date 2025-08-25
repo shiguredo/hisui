@@ -6,8 +6,8 @@ use crate::{
     metadata::{ContainerFormat, SourceId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::{AudioReader, VideoReader},
-    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    reader_webm::{WebmAudioReader, WebmVideoReader},
+    reader_mp4::Mp4VideoReader,
+    reader_webm::WebmVideoReader,
     scheduler::Scheduler,
     stats::ProcessorStats,
     types::CodecName,
@@ -62,18 +62,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let mut scheduler = Scheduler::new();
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
-    let reader = match format {
-        ContainerFormat::Mp4 => {
-            let reader =
-                Mp4AudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            AudioReader::new_mp4(AUDIO_ENCODED_STREAM_ID, reader)
-        }
-        ContainerFormat::Webm => {
-            let reader =
-                WebmAudioReader::new(dummy_source_id.clone(), &input_file_path).or_fail()?;
-            AudioReader::new_webm(AUDIO_ENCODED_STREAM_ID, reader)
-        }
-    };
+    let reader = AudioReader::new(
+        AUDIO_ENCODED_STREAM_ID,
+        dummy_source_id.clone(),
+        format,
+        Duration::ZERO,
+        vec![input_file_path.clone()],
+    )
+    .or_fail()?;
     scheduler.register(reader).or_fail()?;
 
     let reader = match format {

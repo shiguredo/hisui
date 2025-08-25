@@ -50,10 +50,10 @@ impl AudioDecoder {
     }
 
     // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub(crate) fn decode(&mut self, data: AudioData) -> orfail::Result<AudioData> {
+    pub(crate) fn decode(&mut self, data: Arc<AudioData>) -> orfail::Result<AudioData> {
         let input = MediaProcessorInput {
             stream_id: self.input_stream_id,
-            sample: Some(MediaSample::audio_data(data)),
+            sample: Some(MediaSample::Audio(data)),
         };
         self.process_input(input).or_fail()?;
         let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
