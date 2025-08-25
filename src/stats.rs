@@ -665,6 +665,13 @@ impl<T> SharedOption<T> {
             *v = Some(f());
         }
     }
+
+    pub fn clear(&self) {
+        // [NOTE] 同上
+        if let Ok(mut v) = self.0.lock() {
+            *v = None;
+        }
+    }
 }
 
 impl<T: Clone> SharedOption<T> {

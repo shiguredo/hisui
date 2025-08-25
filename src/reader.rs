@@ -18,7 +18,8 @@ use crate::{
 pub struct AudioReader2 {
     output_stream_id: MediaStreamId,
     source_id: SourceId,
-    start_time_offset: Duration,
+    timestamp_offset: Duration,
+    next_timestamp_offset: Duration,
     remaining_input_files: Vec<PathBuf>,
     inner: AudioReaderInner,
 }
@@ -28,7 +29,7 @@ impl AudioReader2 {
         output_stream_id: MediaStreamId,
         source_id: SourceId,
         format: ContainerFormat,
-        start_time_offset: Duration,
+        timestamp_offset: Duration,
         input_files: Vec<PathBuf>,
     ) -> orfail::Result<Self> {
         let mut remaining_input_files = input_files.clone();
@@ -38,7 +39,7 @@ impl AudioReader2 {
             ContainerFormat::Mp4 => {
                 let stats = Mp4AudioReaderStats {
                     input_files,
-                    start_time: start_time_offset,
+                    start_time: timestamp_offset,
                     current_input_file: SharedOption::new(Some(first_input_file.clone())),
                     ..Default::default()
                 };
@@ -51,10 +52,72 @@ impl AudioReader2 {
         Ok(Self {
             output_stream_id,
             source_id,
-            start_time_offset,
+            timestamp_offset,
+            next_timestamp_offset: timestamp_offset,
             remaining_input_files,
             inner,
         })
+    }
+
+    fn start_next_input_file(&mut self) -> orfail::Result<bool> {
+        match &mut self.inner {
+            AudioReaderInner::Mp4(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    inner
+                        .stats()
+                        .current_input_file
+                        .set(next_input_file.clone());
+                    *inner = Mp4AudioReader::new2(
+                        self.source_id.clone(),
+                        next_input_file,
+                        inner.stats().clone(),
+                    )
+                    .or_fail()?;
+                    Ok(true)
+                } else {
+                    inner.stats().current_input_file.clear();
+                    Ok(false)
+                }
+            }
+            AudioReaderInner::Webm(_) => todo!(),
+        }
+    }
+}
+
+impl MediaProcessor for AudioReader2 {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: Vec::new(),
+            output_stream_ids: vec![self.output_stream_id],
+            stats: self.inner.stats(),
+        }
+    }
+
+    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
+        Err(orfail::Failure::new(
+            "BUG: reader does not require any input streams",
+        ))
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        loop {
+            match self.inner.next() {
+                None => {
+                    if !self.start_next_input_file().or_fail()? {
+                        return Ok(MediaProcessorOutput::Finished);
+                    }
+                }
+                Some(Err(e)) => return Err(e),
+                Some(Ok(mut data)) => {
+                    data.timestamp += self.timestamp_offset;
+                    self.next_timestamp_offset = data.timestamp + data.duration;
+                    return Ok(MediaProcessorOutput::audio_data(
+                        self.output_stream_id,
+                        data,
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -129,6 +192,17 @@ impl AudioReaderInner {
         match self {
             Self::Mp4(r) => ProcessorStats::Mp4AudioReader(r.stats().clone()),
             Self::Webm(r) => ProcessorStats::WebmAudioReader(r.stats().clone()),
+        }
+    }
+}
+
+impl Iterator for AudioReaderInner {
+    type Item = orfail::Result<AudioData>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Mp4(r) => r.next(),
+            Self::Webm(r) => r.next(),
         }
     }
 }
