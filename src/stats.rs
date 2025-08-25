@@ -14,6 +14,7 @@ use crate::{
     video::VideoFrame,
 };
 
+// TODO(atode): remove
 #[derive(Debug, Clone)]
 pub struct SharedStats {
     inner: Arc<Mutex<Stats>>,
