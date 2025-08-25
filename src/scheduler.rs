@@ -9,7 +9,7 @@ use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
 };
-use crate::stats::{ProcessorStats, Seconds, SharedAtomicFlag, Stats};
+use crate::stats::{ProcessorStats, Seconds, SharedAtomicFlag, Stats, WorkerThreadStats};
 
 type MediaSampleReceiver = mpsc::Receiver<MediaSample>;
 type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;
@@ -209,16 +209,23 @@ impl Scheduler {
         // TODO(atode): スレッド単位の統計を追加する
         let mut handles = Vec::new();
         for i in 0..self.thread_count.get() {
+            let mut worker_thread_stats = WorkerThreadStats::default();
             let mut thread_tasks = Vec::new();
             for (j, task) in tasks.iter_mut().enumerate() {
                 if j % self.thread_count.get() != i {
                     continue;
                 }
                 thread_tasks.push(task.take().or_fail()?);
+                worker_thread_stats.processors.push(j);
             }
-            let runner = TaskRunner::new(thread_tasks, self.stats.error.clone());
+            let runner = TaskRunner::new(
+                thread_tasks,
+                worker_thread_stats.clone(),
+                self.stats.error.clone(),
+            );
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
+            self.stats.worker_threads.push(worker_thread_stats);
         }
 
         Ok(SchedulerHandle {
@@ -264,15 +271,17 @@ pub struct SchedulerHandle {
 pub struct TaskRunner {
     tasks: Vec<Task>,
     sleep_duration: Duration,
+    stats: WorkerThreadStats,
     error_flag: SharedAtomicFlag,
 }
 
 impl TaskRunner {
-    fn new(tasks: Vec<Task>, error_flag: SharedAtomicFlag) -> Self {
+    fn new(tasks: Vec<Task>, stats: WorkerThreadStats, error_flag: SharedAtomicFlag) -> Self {
         let sleep_duration = idle_thread_sleep_duration();
         Self {
             tasks,
             sleep_duration,
+            stats,
             error_flag,
         }
     }
@@ -305,6 +314,9 @@ impl TaskRunner {
 
         if self.is_awaiting() {
             std::thread::sleep(self.sleep_duration);
+            self.stats
+                .total_waiting_seconds
+                .add(Seconds::new(self.sleep_duration));
         }
     }
 
