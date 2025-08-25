@@ -10,7 +10,7 @@ use crate::{
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::{Mp4AudioReaderStats, ProcessorStats, SharedOption},
+    stats::{Mp4AudioReaderStats, ProcessorStats, SharedOption, WebmAudioReaderStats},
     types::CodecName,
     video::VideoFrame,
 };
@@ -49,7 +49,18 @@ impl AudioReader2 {
                     Mp4AudioReader::new2(source_id.clone(), first_input_file, stats).or_fail()?,
                 )
             }
-            ContainerFormat::Webm => todo!(),
+            ContainerFormat::Webm => {
+                let stats = WebmAudioReaderStats {
+                    input_files,
+                    codec: Some(CodecName::Opus),
+                    start_time: timestamp_offset,
+                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
+                    ..Default::default()
+                };
+                AudioReaderInner::Webm(
+                    WebmAudioReader::new2(source_id.clone(), first_input_file, stats).or_fail()?,
+                )
+            }
         };
         Ok(Self {
             output_stream_id,
@@ -81,7 +92,24 @@ impl AudioReader2 {
                     Ok(false)
                 }
             }
-            AudioReaderInner::Webm(_) => todo!(),
+            AudioReaderInner::Webm(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    inner
+                        .stats()
+                        .current_input_file
+                        .set(next_input_file.clone());
+                    *inner = WebmAudioReader::new2(
+                        self.source_id.clone(),
+                        next_input_file,
+                        inner.stats().clone(),
+                    )
+                    .or_fail()?;
+                    Ok(true)
+                } else {
+                    inner.stats().current_input_file.clear();
+                    Ok(false)
+                }
+            }
         }
     }
 }

@@ -849,6 +849,9 @@ pub struct WebmAudioReaderStats {
     /// 分割録画の場合には要素の数が複数になる
     pub input_files: Vec<PathBuf>,
 
+    /// 現在処理中の入力ファイル
+    pub current_input_file: SharedOption<PathBuf>,
+
     /// 音声コーデック
     pub codec: Option<CodecName>,
 
@@ -876,6 +879,9 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
         f.object(|f| {
             f.member("type", "webm_audio_reader")?;
             f.member("input_files", &self.input_files)?;
+            if let Some(path) = self.current_input_file.get() {
+                f.member("current_input_file", path)?;
+            }
             f.member("codec", self.codec)?;
             f.member("total_cluster_count", self.total_cluster_count.get())?;
             f.member(
