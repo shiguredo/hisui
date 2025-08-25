@@ -153,7 +153,16 @@ impl Task {
     }
 
     fn run_until_block(&mut self) -> orfail::Result<()> {
-        while self.process_input().or_fail()? || self.process_output().or_fail()? {}
+        let mut did_something = true;
+        while did_something {
+            did_something = self
+                .stats
+                .total_processing_seconds()
+                .time(|| -> orfail::Result<bool> {
+                    Ok(self.process_input()? || self.process_output()?)
+                })
+                .or_fail()?;
+        }
         Ok(())
     }
 }

@@ -175,6 +175,26 @@ impl ProcessorStats {
         }
     }
 
+    pub fn total_processing_seconds(&self) -> SharedAtomicSeconds {
+        match self {
+            ProcessorStats::Mp4AudioReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::Mp4VideoReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::WebmAudioReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::WebmVideoReader(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::AudioDecoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::VideoDecoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::AudioMixer(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::VideoMixer(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::AudioEncoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::VideoEncoder(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::Mp4Writer(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::Other {
+                total_processing_seconds,
+                ..
+            } => total_processing_seconds.clone(),
+        }
+    }
+
     pub fn set_error(&self) {
         match self {
             ProcessorStats::Mp4AudioReader(stats) => stats.error.set(true),
@@ -611,6 +631,16 @@ impl SharedAtomicSeconds {
 
     pub fn get_duration(&self) -> Duration {
         self.get_seconds().get()
+    }
+
+    pub fn time<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let start = Instant::now();
+        let value = f();
+        self.add(Seconds::new(start.elapsed()));
+        value
     }
 }
 
