@@ -784,6 +784,9 @@ pub struct Mp4VideoReaderStats {
     /// 分割録画の場合には要素の数が複数になる
     pub input_files: Vec<PathBuf>,
 
+    /// 現在処理中の入力ファイル
+    pub current_input_file: SharedOption<PathBuf>,
+
     /// 映像コーデック
     pub codec: SharedOption<CodecName>,
 
@@ -811,6 +814,9 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
         f.object(|f| {
             f.member("type", "mp4_video_reader")?;
             f.member("input_files", &self.input_files)?;
+            if let Some(path) = self.current_input_file.get() {
+                f.member("current_input_file", path)?;
+            }
             f.member("codec", self.codec.get())?;
             f.member(
                 "resolutions",
@@ -911,6 +917,9 @@ pub struct WebmVideoReaderStats {
     /// 分割録画の場合には要素の数が複数になる
     pub input_files: Vec<PathBuf>,
 
+    /// 現在処理中の入力ファイル
+    pub current_input_file: SharedOption<PathBuf>,
+
     /// 映像コーデック
     pub codec: SharedOption<CodecName>,
 
@@ -938,6 +947,9 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
         f.object(|f| {
             f.member("type", "webm_video_reader")?;
             f.member("input_files", &self.input_files)?;
+            if let Some(path) = self.current_input_file.get() {
+                f.member("current_input_file", path)?;
+            }
             f.member("codec", self.codec.get())?;
             f.member("total_cluster_count", self.total_cluster_count.get())?;
             f.member(

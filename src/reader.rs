@@ -205,6 +205,7 @@ impl VideoReader {
             ContainerFormat::Mp4 => {
                 let stats = Mp4VideoReaderStats {
                     input_files,
+                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
                     start_time: timestamp_offset,
                     ..Default::default()
                 };
@@ -215,6 +216,7 @@ impl VideoReader {
             ContainerFormat::Webm => {
                 let stats = WebmVideoReaderStats {
                     input_files,
+                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
                     start_time: timestamp_offset,
                     ..Default::default()
                 };
@@ -237,6 +239,10 @@ impl VideoReader {
         match &mut self.inner {
             VideoReaderInner::Mp4(inner) => {
                 if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    inner
+                        .stats()
+                        .current_input_file
+                        .set(next_input_file.clone());
                     *inner = Mp4VideoReader::new(
                         self.source_id.clone(),
                         next_input_file,
@@ -245,11 +251,16 @@ impl VideoReader {
                     .or_fail()?;
                     Ok(true)
                 } else {
+                    inner.stats().current_input_file.clear();
                     Ok(false)
                 }
             }
             VideoReaderInner::Webm(inner) => {
                 if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    inner
+                        .stats()
+                        .current_input_file
+                        .set(next_input_file.clone());
                     *inner = WebmVideoReader::new(
                         self.source_id.clone(),
                         next_input_file,
@@ -258,6 +269,7 @@ impl VideoReader {
                     .or_fail()?;
                     Ok(true)
                 } else {
+                    inner.stats().current_input_file.clear();
                     Ok(false)
                 }
             }
