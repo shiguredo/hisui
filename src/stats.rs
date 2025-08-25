@@ -733,7 +733,7 @@ pub struct Mp4AudioReaderStats {
     pub current_input_file: SharedOption<PathBuf>,
 
     /// 音声コーデック
-    pub codec: SharedOption<CodecName>,
+    pub codec: Option<CodecName>,
 
     /// Mp4 のサンプルの数
     pub total_sample_count: SharedAtomicCounter,
@@ -759,7 +759,7 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             if let Some(path) = self.current_input_file.get() {
                 f.member("current_input_file", path)?;
             }
-            f.member("codec", self.codec.get())?;
+            f.member("codec", self.codec)?;
             f.member("total_sample_count", self.total_sample_count.get())?;
             f.member(
                 "total_track_seconds",

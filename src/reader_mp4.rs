@@ -17,7 +17,7 @@ use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, VideoResolution},
-    types::{CodecName, EvenUsize},
+    types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -267,8 +267,6 @@ impl Mp4AudioReaderInner {
         let table = SampleTableAccessor::new(trak.mdia_box.minf_box.stbl_box.clone()).or_fail()?;
 
         file.seek(SeekFrom::Start(0)).or_fail()?;
-
-        stats.codec.set(CodecName::Opus);
 
         Ok(Some(Self {
             source_id,
