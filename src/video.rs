@@ -8,7 +8,6 @@ use crate::{
     types::{CodecName, EvenUsize},
 };
 
-// TODO: remove
 pub type VideoFrameSyncSender = crate::channel::SyncSender<VideoFrame>;
 pub type VideoFrameReceiver = crate::channel::Receiver<VideoFrame>;
 
