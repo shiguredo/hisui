@@ -77,42 +77,24 @@ impl AudioReader {
 
     fn start_next_input_file(&mut self) -> orfail::Result<bool> {
         match &mut self.inner {
-            AudioReaderInner::Mp4(inner) => {
-                if let Some(next_input_file) = self.remaining_input_files.pop() {
-                    inner
-                        .stats()
-                        .current_input_file
-                        .set(next_input_file.clone());
-                    *inner = Mp4AudioReader::new(
-                        self.source_id.clone(),
-                        next_input_file,
-                        inner.stats().clone(),
-                    )
-                    .or_fail()?;
-                    Ok(true)
-                } else {
-                    inner.stats().current_input_file.clear();
-                    Ok(false)
-                }
-            }
-            AudioReaderInner::Webm(inner) => {
-                if let Some(next_input_file) = self.remaining_input_files.pop() {
-                    inner
-                        .stats()
-                        .current_input_file
-                        .set(next_input_file.clone());
-                    *inner = WebmAudioReader::new(
-                        self.source_id.clone(),
-                        next_input_file,
-                        inner.stats().clone(),
-                    )
-                    .or_fail()?;
-                    Ok(true)
-                } else {
-                    inner.stats().current_input_file.clear();
-                    Ok(false)
-                }
-            }
+            AudioReaderInner::Mp4(inner) => start_next_input_file(
+                &mut self.remaining_input_files,
+                self.source_id.clone(),
+                inner.stats().current_input_file.clone(),
+                inner.stats().clone(),
+                Mp4AudioReader::new,
+            )
+            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .or_fail(),
+            AudioReaderInner::Webm(inner) => start_next_input_file(
+                &mut self.remaining_input_files,
+                self.source_id.clone(),
+                inner.stats().current_input_file.clone(),
+                inner.stats().clone(),
+                WebmAudioReader::new,
+            )
+            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .or_fail(),
         }
     }
 }
@@ -237,42 +219,24 @@ impl VideoReader {
 
     fn start_next_input_file(&mut self) -> orfail::Result<bool> {
         match &mut self.inner {
-            VideoReaderInner::Mp4(inner) => {
-                if let Some(next_input_file) = self.remaining_input_files.pop() {
-                    inner
-                        .stats()
-                        .current_input_file
-                        .set(next_input_file.clone());
-                    *inner = Mp4VideoReader::new(
-                        self.source_id.clone(),
-                        next_input_file,
-                        inner.stats().clone(),
-                    )
-                    .or_fail()?;
-                    Ok(true)
-                } else {
-                    inner.stats().current_input_file.clear();
-                    Ok(false)
-                }
-            }
-            VideoReaderInner::Webm(inner) => {
-                if let Some(next_input_file) = self.remaining_input_files.pop() {
-                    inner
-                        .stats()
-                        .current_input_file
-                        .set(next_input_file.clone());
-                    *inner = WebmVideoReader::new(
-                        self.source_id.clone(),
-                        next_input_file,
-                        inner.stats().clone(),
-                    )
-                    .or_fail()?;
-                    Ok(true)
-                } else {
-                    inner.stats().current_input_file.clear();
-                    Ok(false)
-                }
-            }
+            VideoReaderInner::Mp4(inner) => start_next_input_file(
+                &mut self.remaining_input_files,
+                self.source_id.clone(),
+                inner.stats().current_input_file.clone(),
+                inner.stats().clone(),
+                Mp4VideoReader::new,
+            )
+            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .or_fail(),
+            VideoReaderInner::Webm(inner) => start_next_input_file(
+                &mut self.remaining_input_files,
+                self.source_id.clone(),
+                inner.stats().current_input_file.clone(),
+                inner.stats().clone(),
+                WebmVideoReader::new,
+            )
+            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .or_fail(),
         }
     }
 }
@@ -337,5 +301,25 @@ impl Iterator for VideoReaderInner {
             Self::Mp4(r) => r.next(),
             Self::Webm(r) => r.next(),
         }
+    }
+}
+
+fn start_next_input_file<F, S, R>(
+    remaining_input_files: &mut Vec<PathBuf>,
+    source_id: SourceId,
+    current_input_file: SharedOption<PathBuf>,
+    stats: S,
+    f: F,
+) -> orfail::Result<Option<R>>
+where
+    F: FnOnce(SourceId, PathBuf, S) -> orfail::Result<R>,
+{
+    if let Some(next_input_file) = remaining_input_files.pop() {
+        current_input_file.set(next_input_file.clone());
+        let reader = f(source_id, next_input_file, stats).or_fail()?;
+        Ok(Some(reader))
+    } else {
+        current_input_file.clear();
+        Ok(None)
     }
 }
