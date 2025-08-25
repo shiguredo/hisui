@@ -10,7 +10,7 @@ use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
     stats::{Seconds, WebmAudioReaderStats, WebmVideoReaderStats},
-    types::{CodecName, EvenUsize},
+    types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -334,7 +334,11 @@ pub struct WebmAudioReader {
 }
 
 impl WebmAudioReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: WebmAudioReaderStats,
+    ) -> orfail::Result<Self> {
         let file = std::fs::File::open(&path)
             .or_fail_with(|e| format!("failed to open {}: {e}", path.as_ref().display()))?;
         let mut reader = ElementReader::new(BufReader::new(file));
@@ -345,16 +349,6 @@ impl WebmAudioReader {
         check_info_element(&mut reader).or_fail()?;
         reader.skip_until(ID_CLUSTER).or_fail()?;
 
-        let stats = WebmAudioReaderStats {
-            input_file: path.as_ref().canonicalize().or_fail_with(|e| {
-                format!(
-                    "failed to canonicalize path {}: {e}",
-                    path.as_ref().display()
-                )
-            })?,
-            codec: Some(CodecName::Opus),
-            ..Default::default()
-        };
         Ok(Self {
             source_id,
             reader,
@@ -471,7 +465,11 @@ pub struct WebmVideoReader {
 }
 
 impl WebmVideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: WebmVideoReaderStats,
+    ) -> orfail::Result<Self> {
         let file = std::fs::File::open(&path).or_fail()?;
         let mut reader = ElementReader::new(BufReader::new(file));
         check_ebml_header_element(&mut reader).or_fail()?;
@@ -483,15 +481,6 @@ impl WebmVideoReader {
         let header = VideoTrackHeader::read(&mut reader).or_fail()?;
         reader.skip_until(ID_CLUSTER).or_fail()?;
 
-        let stats = WebmVideoReaderStats {
-            input_file: path.as_ref().canonicalize().or_fail_with(|e| {
-                format!(
-                    "failed to canonicalize path {}: {e}",
-                    path.as_ref().display()
-                )
-            })?,
-            ..Default::default()
-        };
         Ok(Self {
             source_id,
             header,

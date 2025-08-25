@@ -241,7 +241,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         };
         encoded_byte_size += encoded_frame.data.len() as u64;
         encoded_duration += encoded_frame.duration;
-        decoder.decode(encoded_frame).or_fail()?;
+        decoder
+            .decode(std::sync::Arc::new(encoded_frame))
+            .or_fail()?;
         while let Some(decoded_frame) = decoder.next_decoded_frame() {
             distorted_yuv_writer.append(&decoded_frame).or_fail()?;
             progress_bar.inc(1);
