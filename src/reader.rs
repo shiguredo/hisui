@@ -1,12 +1,61 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
+use orfail::OrFail;
+
 use crate::{
     audio::AudioData,
     media::MediaStreamId,
+    metadata::{ContainerFormat, SourceId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::ProcessorStats,
+    stats::{Mp4AudioReaderStats, ProcessorStats},
     video::VideoFrame,
 };
+
+#[derive(Debug)]
+pub struct AudioReader2 {
+    output_stream_id: MediaStreamId,
+    source_id: SourceId,
+    start_time_offset: Duration,
+    remaining_input_files: Vec<PathBuf>,
+    inner: AudioReaderInner,
+}
+
+impl AudioReader2 {
+    pub fn new(
+        output_stream_id: MediaStreamId,
+        source_id: SourceId,
+        format: ContainerFormat,
+        start_time_offset: Duration,
+        input_files: Vec<PathBuf>,
+    ) -> orfail::Result<Self> {
+        let mut remaining_input_files = input_files.clone();
+        remaining_input_files.reverse();
+        let first_input_file = remaining_input_files.pop().or_fail()?;
+        let inner = match format {
+            ContainerFormat::Mp4 => {
+                let stats = Mp4AudioReaderStats {
+                    input_files,
+                    start_time: start_time_offset,
+                    ..Default::default()
+                };
+                AudioReaderInner::Mp4(
+                    Mp4AudioReader::new2(source_id.clone(), first_input_file, stats).or_fail()?,
+                )
+            }
+            ContainerFormat::Webm => todo!(),
+        };
+        Ok(Self {
+            output_stream_id,
+            source_id,
+            start_time_offset,
+            remaining_input_files,
+            inner,
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct AudioReader {

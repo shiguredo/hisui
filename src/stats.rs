@@ -722,6 +722,7 @@ pub struct Mp4AudioReaderStats {
     /// 分割録画の場合には要素の数が複数になる
     pub input_files: Vec<PathBuf>,
 
+    // TODO: current_input_file: Option<PathBuf>,
     /// 音声コーデック
     pub codec: SharedOption<CodecName>,
 
@@ -734,11 +735,8 @@ pub struct Mp4AudioReaderStats {
     /// 入力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 
-    /// メタデータファイルに記載されている開始時刻（オフセッット）
+    /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
-
-    /// メタデータファイルに記載されている終了時刻（オフセッット）
-    pub end_time: Duration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -760,7 +758,6 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
                 self.total_processing_seconds.get_seconds(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("end_time_seconds", self.end_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -790,11 +787,8 @@ pub struct Mp4VideoReaderStats {
     /// 入力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 
-    /// メタデータファイルに記載されている開始時刻（オフセッット）
+    /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
-
-    /// メタデータファイルに記載されている終了時刻（オフセッット）
-    pub end_time: Duration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -829,7 +823,6 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
                 self.total_processing_seconds.get_seconds(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("end_time_seconds", self.end_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -859,11 +852,8 @@ pub struct WebmAudioReaderStats {
     /// 入力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 
-    /// メタデータファイルに記載されている開始時刻（オフセッット）
+    /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
-
-    /// メタデータファイルに記載されている終了時刻（オフセッット）
-    pub end_time: Duration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -889,7 +879,6 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
                 self.total_processing_seconds.get_seconds(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("end_time_seconds", self.end_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -919,11 +908,8 @@ pub struct WebmVideoReaderStats {
     /// 入力処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 
-    /// メタデータファイルに記載されている開始時刻（オフセッット）
+    /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
-
-    /// メタデータファイルに記載されている終了時刻（オフセッット）
-    pub end_time: Duration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -949,7 +935,6 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
                 self.total_processing_seconds.get_seconds(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("end_time_seconds", self.end_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
             Ok(())
         })
