@@ -4,10 +4,7 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        NullProcessor,
-    },
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::{AudioReader, VideoReader},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
@@ -97,9 +94,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         let decoder =
             AudioDecoder::new_opus(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
         scheduler.register(decoder).or_fail()?;
-    } else {
-        let null = NullProcessor::new(vec![AUDIO_ENCODED_STREAM_ID], vec![AUDIO_DECODED_STREAM_ID]);
-        scheduler.register(null).or_fail()?;
     }
 
     if decode {
@@ -112,13 +106,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         };
         let decoder = VideoDecoder::new(VIDEO_ENCODED_STREAM_ID, VIDEO_DECODED_STREAM_ID, options);
         scheduler.register(decoder).or_fail()?;
-    } else {
-        let null = NullProcessor::new(vec![VIDEO_ENCODED_STREAM_ID], vec![VIDEO_DECODED_STREAM_ID]);
-        scheduler.register(null).or_fail()?;
     }
 
     scheduler
-        .register(OutputPrinter::new(input_file_path.clone(), format))
+        .register(OutputPrinter::new(input_file_path.clone(), format, decode))
         .or_fail()?;
     scheduler.run().or_fail()?;
 
@@ -280,7 +271,7 @@ pub struct OutputPrinter {
 }
 
 impl OutputPrinter {
-    fn new(path: PathBuf, format: ContainerFormat) -> Self {
+    fn new(path: PathBuf, format: ContainerFormat, decode: bool) -> Self {
         Self {
             path,
             format,
@@ -288,12 +279,16 @@ impl OutputPrinter {
             video_codec: None,
             audio_samples: Vec::new(),
             video_samples: Vec::new(),
-            input_stream_ids: vec![
-                AUDIO_ENCODED_STREAM_ID,
-                VIDEO_ENCODED_STREAM_ID,
-                AUDIO_DECODED_STREAM_ID,
-                VIDEO_DECODED_STREAM_ID,
-            ],
+            input_stream_ids: if decode {
+                vec![
+                    AUDIO_ENCODED_STREAM_ID,
+                    VIDEO_ENCODED_STREAM_ID,
+                    AUDIO_DECODED_STREAM_ID,
+                    VIDEO_DECODED_STREAM_ID,
+                ]
+            } else {
+                vec![AUDIO_ENCODED_STREAM_ID, VIDEO_ENCODED_STREAM_ID]
+            },
             next_input_stream_index: 0,
         }
     }
