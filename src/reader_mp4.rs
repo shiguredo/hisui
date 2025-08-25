@@ -17,7 +17,7 @@ use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, VideoResolution},
-    types::{CodecName, EvenUsize},
+    types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -210,22 +210,11 @@ pub struct Mp4AudioReader {
 }
 
 impl Mp4AudioReader {
-    pub fn new2<P: AsRef<Path>>(
+    pub fn new<P: AsRef<Path>>(
         source_id: SourceId,
         path: P,
         stats: Mp4AudioReaderStats,
     ) -> orfail::Result<Self> {
-        let inner = Mp4AudioReaderInner::new(source_id, path, stats.clone()).or_fail()?;
-        Ok(Self { inner, stats })
-    }
-
-    // TODO: remove
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let stats = Mp4AudioReaderStats {
-            input_files: vec![path.as_ref().to_path_buf()],
-            codec: Some(CodecName::Opus),
-            ..Default::default()
-        };
         let inner = Mp4AudioReaderInner::new(source_id, path, stats.clone()).or_fail()?;
         Ok(Self { inner, stats })
     }

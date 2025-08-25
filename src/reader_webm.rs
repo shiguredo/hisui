@@ -10,7 +10,7 @@ use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
     stats::{Seconds, WebmAudioReaderStats, WebmVideoReaderStats},
-    types::{CodecName, EvenUsize},
+    types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -334,7 +334,7 @@ pub struct WebmAudioReader {
 }
 
 impl WebmAudioReader {
-    pub fn new2<P: AsRef<Path>>(
+    pub fn new<P: AsRef<Path>>(
         source_id: SourceId,
         path: P,
         stats: WebmAudioReaderStats,
@@ -349,38 +349,6 @@ impl WebmAudioReader {
         check_info_element(&mut reader).or_fail()?;
         reader.skip_until(ID_CLUSTER).or_fail()?;
 
-        Ok(Self {
-            source_id,
-            reader,
-            cluster_timestamp: Duration::ZERO,
-            last_duration: Duration::ZERO,
-            prev_audio_data: None,
-            stats,
-        })
-    }
-
-    // TODO: remove
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let file = std::fs::File::open(&path)
-            .or_fail_with(|e| format!("failed to open {}: {e}", path.as_ref().display()))?;
-        let mut reader = ElementReader::new(BufReader::new(file));
-        check_ebml_header_element(&mut reader).or_fail()?;
-
-        let mut reader = reader.read_master_owned(ID_SEGMENT).or_fail()?;
-        reader.skip_until(ID_INFO).or_fail()?;
-        check_info_element(&mut reader).or_fail()?;
-        reader.skip_until(ID_CLUSTER).or_fail()?;
-
-        let stats = WebmAudioReaderStats {
-            input_files: vec![path.as_ref().canonicalize().or_fail_with(|e| {
-                format!(
-                    "failed to canonicalize path {}: {e}",
-                    path.as_ref().display()
-                )
-            })?],
-            codec: Some(CodecName::Opus),
-            ..Default::default()
-        };
         Ok(Self {
             source_id,
             reader,

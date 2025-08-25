@@ -46,7 +46,7 @@ impl AudioReader {
                     ..Default::default()
                 };
                 AudioReaderInner::Mp4(
-                    Mp4AudioReader::new2(source_id.clone(), first_input_file, stats).or_fail()?,
+                    Mp4AudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
                 )
             }
             ContainerFormat::Webm => {
@@ -58,7 +58,7 @@ impl AudioReader {
                     ..Default::default()
                 };
                 AudioReaderInner::Webm(
-                    WebmAudioReader::new2(source_id.clone(), first_input_file, stats).or_fail()?,
+                    WebmAudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
                 )
             }
         };
@@ -80,7 +80,7 @@ impl AudioReader {
                         .stats()
                         .current_input_file
                         .set(next_input_file.clone());
-                    *inner = Mp4AudioReader::new2(
+                    *inner = Mp4AudioReader::new(
                         self.source_id.clone(),
                         next_input_file,
                         inner.stats().clone(),
@@ -98,7 +98,7 @@ impl AudioReader {
                         .stats()
                         .current_input_file
                         .set(next_input_file.clone());
-                    *inner = WebmAudioReader::new2(
+                    *inner = WebmAudioReader::new(
                         self.source_id.clone(),
                         next_input_file,
                         inner.stats().clone(),
