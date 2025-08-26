@@ -156,7 +156,13 @@ impl Composer {
             stats.clone(),
         );
 
-        let encoder = VideoEncoder::new(&self.layout, self.openh264_lib.clone()).or_fail()?;
+        let encoder = VideoEncoder::new(
+            &self.layout,
+            MediaStreamId::new(1000),
+            MediaStreamId::new(1001),
+            self.openh264_lib.clone(),
+        )
+        .or_fail()?;
         let encoded_video_rx =
             VideoEncoderThread::start(error_flag.clone(), mixed_video_rx, encoder, stats.clone());
         Ok(encoded_video_rx)

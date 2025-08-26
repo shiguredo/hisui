@@ -259,11 +259,12 @@ pub struct VideoEncoder {
 }
 
 impl VideoEncoder {
-    pub fn new(layout: &Layout, openh264_lib: Option<Openh264Library>) -> orfail::Result<Self> {
-        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
-        let input_stream_id = MediaStreamId::new(0);
-        let output_stream_id = MediaStreamId::new(1);
-
+    pub fn new(
+        layout: &Layout,
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        openh264_lib: Option<Openh264Library>,
+    ) -> orfail::Result<Self> {
         let inner = match layout.video_codec {
             CodecName::Vp8 => VideoEncoderInner::new_vp8(layout).or_fail()?,
             CodecName::Vp9 => VideoEncoderInner::new_vp9(layout).or_fail()?,

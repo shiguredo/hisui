@@ -195,7 +195,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // TODO: エンコード前の画像の YUV 書き込みを登録
 
-    // TODO: エンコーダーを登録
+    // エンコーダーを登録
+    let encoder_output_stream_id = next_stream_id.fetch_add(1);
+    let encoder = VideoEncoder::new(
+        &layout,
+        mixer_output_stream_id,
+        encoder_output_stream_id,
+        openh264_lib.clone(),
+    )
+    .or_fail()?;
+    scheduler.register(encoder).or_fail()?;
 
     // TDOO: エンコード後の画像の YUV 書き込みを登録
 
@@ -249,7 +258,13 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     });
 
     // 映像エンコードスレッドを起動
-    let encoder = VideoEncoder::new(&layout, openh264_lib.clone()).or_fail()?;
+    let encoder = VideoEncoder::new(
+        &layout,
+        MediaStreamId::new(1000),
+        MediaStreamId::new(1001),
+        openh264_lib.clone(),
+    )
+    .or_fail()?;
     let encoder_name = encoder.name();
     let mut encoded_video_rx = VideoEncoderThread::start(
         error_flag.clone(),
