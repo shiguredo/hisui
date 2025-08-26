@@ -6,13 +6,15 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     audio::AudioDataReceiver,
     channel::{self, ErrorFlag},
-    decoder::VideoDecoderOptions,
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
     media::{MediaSample, MediaStreamId, MediaStreamIdGenerator},
     mixer_audio::AudioMixerThread,
     mixer_video::VideoMixerThread,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
+    reader::{AudioReader, VideoReader},
+    scheduler::Scheduler,
     source::{AudioSourceThread, VideoSourceThread},
     stats::{ProcessorStats, Seconds, SharedStats},
     types::CodecName,
@@ -49,6 +51,49 @@ impl Composer {
     pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
         // 利用する CPU コア数を制限する
         crate::arg_utils::maybe_limit_cpu_cores(self.max_cpu_cores).or_fail()?;
+
+        // プロセッサを準備
+        let mut scheduler = Scheduler::new();
+        let mut next_stream_id = MediaStreamId::new(0);
+
+        // リーダーとデコーダーを登録
+        let mut audio_mixer_input_stream_ids = Vec::new();
+        for source_id in self.layout.audio_source_ids() {
+            let source_info = self.layout.sources.get(source_id).or_fail()?;
+            let reader_output_stream_id = next_stream_id.fetch_add(1);
+            let reader =
+                AudioReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+            scheduler.register(reader).or_fail()?;
+
+            let decoder_output_stream_id = next_stream_id.fetch_add(1);
+            let decoder = AudioDecoder::new_opus(reader_output_stream_id, decoder_output_stream_id)
+                .or_fail()?;
+            scheduler.register(decoder).or_fail()?;
+
+            audio_mixer_input_stream_ids.push(decoder_output_stream_id);
+        }
+
+        let mut video_mixer_input_stream_ids = Vec::new();
+        let video_decoder_options = VideoDecoderOptions {
+            openh264_lib: self.openh264_lib.clone(),
+        };
+        for source_id in self.layout.video_source_ids() {
+            let source_info = self.layout.sources.get(source_id).or_fail()?;
+            let reader_output_stream_id = next_stream_id.fetch_add(1);
+            let reader =
+                VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+            scheduler.register(reader).or_fail()?;
+
+            let decoder_output_stream_id = next_stream_id.fetch_add(1);
+            let decoder = VideoDecoder::new(
+                reader_output_stream_id,
+                decoder_output_stream_id,
+                video_decoder_options.clone(),
+            );
+            scheduler.register(decoder).or_fail()?;
+
+            video_mixer_input_stream_ids.push(decoder_output_stream_id);
+        }
 
         // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
         let stats = SharedStats::new();
