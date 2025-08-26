@@ -16,7 +16,7 @@ use crate::{
     json::JsonObject,
     layout::Layout,
     media::MediaStreamId,
-    mixer_video::VideoMixerThread,
+    mixer_video::{VideoMixer, VideoMixerThread},
     reader::VideoReader,
     scheduler::Scheduler,
     stats::{Seconds, SharedStats},
@@ -162,6 +162,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let mut scheduler = Scheduler::new();
     let mut next_stream_id = MediaStreamId::new(0);
 
+    // リーダーとデコーダーを登録
+    let mut mixer_input_stream_ids = Vec::new();
     for (source_id, source_info) in &layout.sources {
         if layout.video_source_ids().all(|id| id != source_id) {
             continue;
@@ -178,7 +180,28 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         let decoder_output_stream_id = next_stream_id.fetch_add(1);
         let decoder = VideoDecoder::new(reader_output_stream_id, decoder_output_stream_id, options);
         scheduler.register(decoder).or_fail()?;
+
+        mixer_input_stream_ids.push(decoder_output_stream_id);
     }
+
+    // ミキサーを登録
+    let mixer_output_stream_id = next_stream_id.fetch_add(1);
+    let mixer = VideoMixer::new(
+        layout.clone(),
+        mixer_input_stream_ids,
+        mixer_output_stream_id,
+    );
+    scheduler.register(mixer).or_fail()?;
+
+    // TODO: エンコード前の画像の YUV 書き込みを登録
+
+    // TODO: エンコーダーを登録
+
+    // TDOO: エンコード後の画像の YUV 書き込みを登録
+
+    // TODO: プログレスバーを準備
+
+    let _stats = scheduler.run().or_fail()?;
 
     // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
     let stats = SharedStats::new();
