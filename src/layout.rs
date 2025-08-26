@@ -641,6 +641,16 @@ impl AggregatedSourceInfo {
             self.start_timestamp <= other.stop_timestamp
         }
     }
+
+    pub fn timestamp_sorted_media_paths(&self) -> Vec<PathBuf> {
+        let mut paths = self
+            .media_paths
+            .iter()
+            .map(|(path, info)| (info.start_timestamp, path.clone()))
+            .collect::<Vec<_>>();
+        paths.sort_by_key(|x| x.0);
+        paths.into_iter().map(|x| x.1).collect()
+    }
 }
 
 impl Default for AggregatedSourceInfo {

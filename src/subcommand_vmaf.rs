@@ -17,6 +17,8 @@ use crate::{
     layout::Layout,
     media::MediaStreamId,
     mixer_video::VideoMixerThread,
+    reader::VideoReader,
+    scheduler::Scheduler,
     stats::{Seconds, SharedStats},
     types::EngineName,
     video::FrameRate,
@@ -155,6 +157,28 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // CPU コア数制限を適用
     crate::arg_utils::maybe_limit_cpu_cores(args.max_cpu_cores).or_fail()?;
+
+    // プロセッサを準備
+    let mut scheduler = Scheduler::new();
+    let mut next_stream_id = MediaStreamId::new(0);
+
+    for (source_id, source_info) in &layout.sources {
+        if layout.video_source_ids().all(|id| id != source_id) {
+            continue;
+        }
+
+        let reader_output_stream_id = next_stream_id.fetch_add(1);
+        let reader =
+            VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+        scheduler.register(reader).or_fail()?;
+
+        let options = VideoDecoderOptions {
+            openh264_lib: openh264_lib.clone(),
+        };
+        let decoder_output_stream_id = next_stream_id.fetch_add(1);
+        let decoder = VideoDecoder::new(reader_output_stream_id, decoder_output_stream_id, options);
+        scheduler.register(decoder).or_fail()?;
+    }
 
     // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
     let stats = SharedStats::new();

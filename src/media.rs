@@ -15,6 +15,12 @@ impl MediaStreamId {
     pub const fn get(self) -> u64 {
         self.0
     }
+
+    pub fn fetch_add(&mut self, n: u64) -> Self {
+        let id = *self;
+        self.0 += n;
+        id
+    }
 }
 
 // TODO(atode): remove

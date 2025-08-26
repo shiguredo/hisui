@@ -68,6 +68,7 @@ fn create_progress_bar(
     progress_bar
 }
 
+// TODO(atode): remove
 #[cfg(target_os = "macos")]
 pub fn maybe_limit_cpu_cores(cores: Option<NonZeroUsize>) -> orfail::Result<()> {
     if cores.is_some() {
