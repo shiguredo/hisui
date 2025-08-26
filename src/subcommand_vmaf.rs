@@ -484,7 +484,7 @@ impl ProgressBar {
         Self {
             input_stream_id,
             eos: false,
-            bar: crate::arg_utils::create_frame_progress_bar(true, total_frame_count),
+            bar: crate::arg_utils::create_frame_progress_bar(total_frame_count),
         }
     }
 }
