@@ -10,8 +10,8 @@ use crate::{
     encoder::{AudioEncoder, AudioEncoderThread, VideoEncoder, VideoEncoderThread},
     layout::Layout,
     media::{MediaSample, MediaStreamId, MediaStreamIdGenerator},
-    mixer_audio::AudioMixerThread,
-    mixer_video::VideoMixerThread,
+    mixer_audio::{AudioMixer, AudioMixerThread},
+    mixer_video::{VideoMixer, VideoMixerThread},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
@@ -94,6 +94,23 @@ impl Composer {
 
             video_mixer_input_stream_ids.push(decoder_output_stream_id);
         }
+
+        // ミキサーを登録
+        let audio_mixer_output_stream_id = next_stream_id.fetch_add(1);
+        let audio_mixer = AudioMixer::new(
+            self.layout.clone(),
+            audio_mixer_input_stream_ids,
+            audio_mixer_output_stream_id,
+        );
+        scheduler.register(audio_mixer).or_fail()?;
+
+        let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
+        let video_mixer = VideoMixer::new(
+            self.layout.clone(),
+            video_mixer_input_stream_ids,
+            video_mixer_output_stream_id,
+        );
+        scheduler.register(video_mixer).or_fail()?;
 
         // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
         let stats = SharedStats::new();
