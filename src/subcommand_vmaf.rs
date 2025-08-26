@@ -164,6 +164,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // リーダーとデコーダーを登録
     let mut mixer_input_stream_ids = Vec::new();
+    let decoder_options = VideoDecoderOptions {
+        openh264_lib: openh264_lib.clone(),
+    };
     for (source_id, source_info) in &layout.sources {
         if layout.video_source_ids().all(|id| id != source_id) {
             continue;
@@ -174,11 +177,12 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
         scheduler.register(reader).or_fail()?;
 
-        let options = VideoDecoderOptions {
-            openh264_lib: openh264_lib.clone(),
-        };
         let decoder_output_stream_id = next_stream_id.fetch_add(1);
-        let decoder = VideoDecoder::new(reader_output_stream_id, decoder_output_stream_id, options);
+        let decoder = VideoDecoder::new(
+            reader_output_stream_id,
+            decoder_output_stream_id,
+            decoder_options.clone(),
+        );
         scheduler.register(decoder).or_fail()?;
 
         mixer_input_stream_ids.push(decoder_output_stream_id);
@@ -193,7 +197,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     );
     scheduler.register(mixer).or_fail()?;
 
-    // TODO: エンコード前の画像の YUV 書き込みを登録
+    // エンコード前の画像の YUV 書き込みを登録
+    let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
+    let writer = YuvWriter::new(mixer_output_stream_id, &distorted_yuv_file_path).or_fail()?;
+    scheduler.register(writer).or_fail()?;
 
     // エンコーダーを登録
     let encoder_output_stream_id = next_stream_id.fetch_add(1);
@@ -206,11 +213,25 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
     scheduler.register(encoder).or_fail()?;
 
-    // TDOO: エンコード後の画像の YUV 書き込みを登録
+    // エンコード後の画像（のデコード結果）の YUV 書き込みを登録
+    let decoder_output_stream_id = next_stream_id.fetch_add(1);
+    let decoder = VideoDecoder::new(
+        encoder_output_stream_id,
+        decoder_output_stream_id,
+        decoder_options.clone(),
+    );
+    scheduler.register(decoder).or_fail()?;
+
+    let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
+    let writer = YuvWriter::new(decoder_output_stream_id, &reference_yuv_file_path).or_fail()?;
+    scheduler.register(writer).or_fail()?;
 
     // TODO: プログレスバーを準備
 
-    let _stats = scheduler.run().or_fail()?;
+    let stats = scheduler.run().or_fail()?;
+    if stats.error.get() {
+        return Err(orfail::Failure::new("video composition process failed"));
+    }
 
     // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
     let stats = SharedStats::new();
@@ -239,7 +260,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // エンコード前の画像の書き込みスレッドを起動
     let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
-    let mut reference_yuv_writer = YuvWriter::new(&reference_yuv_file_path).or_fail()?;
+    let mut reference_yuv_writer =
+        YuvWriter::new(MediaStreamId::new(999), &reference_yuv_file_path).or_fail()?;
     let (mixed_video_temp_tx, mixed_video_temp_rx) = crate::channel::sync_channel();
     std::thread::spawn(move || {
         let mut count = 0;
@@ -279,8 +301,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     };
     let dummy_stream_id = MediaStreamId::new(0);
     let mut decoder = VideoDecoder::new(dummy_stream_id, dummy_stream_id, options);
-    let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
-    let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
+    let mut distorted_yuv_writer =
+        YuvWriter::new(MediaStreamId::new(999), &distorted_yuv_file_path).or_fail()?;
 
     // 必要なフレームの処理が終わるまでループを回す
     eprintln!("# Compose for VMAF");
