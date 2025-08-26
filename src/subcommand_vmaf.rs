@@ -414,6 +414,7 @@ struct VmafScoreStats {
     harmonic_mean: f64,
 }
 
+// 処理対象のフレーム数を制限するためのプロセッサ
 #[derive(Debug)]
 struct FrameCountLimiter {
     input_stream_id: MediaStreamId,
@@ -453,6 +454,7 @@ impl MediaProcessor for FrameCountLimiter {
             self.queue.push_back(sample);
             self.remaining_frame_count = n;
         } else {
+            // 指定数フレームを処理した or 入力がEOSに達した
             self.remaining_frame_count = 0;
         };
         Ok(())
