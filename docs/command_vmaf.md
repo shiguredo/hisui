@@ -67,8 +67,6 @@ vmaf_v0.6.1: 96.361266
   "height": 240,
   "frame_rate": 25,
   "encoded_frame_count": 675,
-  "encoded_byte_size": 1267400,
-  "encoded_duration_seconds": 27,
   "elapsed_seconds": 12.4662,
   "vmaf_min": 82.988863,
   "vmaf_max": 100,

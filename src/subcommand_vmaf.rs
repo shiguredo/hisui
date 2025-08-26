@@ -3,26 +3,22 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::{Duration, Instant},
 };
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-    channel::ErrorFlag,
-    composer,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    encoder::{VideoEncoder, VideoEncoderThread},
+    encoder::VideoEncoder,
     json::JsonObject,
     layout::Layout,
     media::{MediaSample, MediaStreamId},
-    mixer_video::{VideoMixer, VideoMixerThread},
+    mixer_video::VideoMixer,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::VideoReader,
     scheduler::Scheduler,
-    stats::ProcessorStats,
-    stats::{Seconds, SharedStats},
+    stats::{ProcessorStats, Seconds},
     types::EngineName,
     video::FrameRate,
     writer_yuv::YuvWriter,
@@ -223,6 +219,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         openh264_lib.clone(),
     )
     .or_fail()?;
+    let encoder_name = encoder.name();
+    let encoder_stats = encoder.encoder_stats().clone();
     scheduler.register(encoder).or_fail()?;
 
     // エンコード後の画像（のデコード結果）の YUV 書き込みを登録
@@ -242,125 +240,14 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let progress = ProgressBar::new(decoder_output_stream_id, args.frame_count as u64);
     scheduler.register(progress).or_fail()?;
 
+    // 合成処理を実行
+    eprintln!("# Compose for VMAF");
     let stats = scheduler.run().or_fail()?;
     if stats.error.get() {
         return Err(orfail::Failure::new("video composition process failed").into());
     }
 
-    // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
-    let stats = SharedStats::new();
-    let start_time = Instant::now();
-
-    // 映像ソースの準備（音声の方は使わないので単に無視する）
-    let error_flag = ErrorFlag::new();
-    let (_audio_source_rxs, video_source_rxs) = composer::create_audio_and_video_sources(
-        &layout,
-        error_flag.clone(),
-        stats.clone(),
-        openh264_lib.clone(),
-    )
-    .or_fail()?;
-
-    // プログレスバーを準備
-    let progress_bar = crate::arg_utils::create_frame_progress_bar(true, args.frame_count as u64);
-
-    // ミキサースレッドを起動
-    let mut mixed_video_rx = VideoMixerThread::start(
-        error_flag.clone(),
-        layout.clone(),
-        video_source_rxs,
-        stats.clone(),
-    );
-
-    // エンコード前の画像の書き込みスレッドを起動
-    let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
-    let mut reference_yuv_writer =
-        YuvWriter::new(MediaStreamId::new(999), &reference_yuv_file_path).or_fail()?;
-    let (mixed_video_temp_tx, mixed_video_temp_rx) = crate::channel::sync_channel();
-    std::thread::spawn(move || {
-        let mut count = 0;
-        while let Some(frame) = mixed_video_rx.recv() {
-            if count < args.frame_count
-                && let Err(e) = reference_yuv_writer.append(&frame).or_fail()
-            {
-                log::error!("failed to write reference YUV frame: {e}");
-                break;
-            }
-            if !mixed_video_temp_tx.send(frame) {
-                break;
-            }
-            count += 1;
-        }
-    });
-
-    // 映像エンコードスレッドを起動
-    let encoder = VideoEncoder::new(
-        &layout,
-        MediaStreamId::new(1000),
-        MediaStreamId::new(1001),
-        openh264_lib.clone(),
-    )
-    .or_fail()?;
-    let encoder_name = encoder.name();
-    let mut encoded_video_rx = VideoEncoderThread::start(
-        error_flag.clone(),
-        mixed_video_temp_rx,
-        encoder,
-        stats.clone(),
-    );
-
-    // 最終的な映像のデコード＆ YUV 書き出しの準備
-    let options = VideoDecoderOptions {
-        openh264_lib: openh264_lib.clone(),
-    };
-    let dummy_stream_id = MediaStreamId::new(0);
-    let mut decoder = VideoDecoder::new(dummy_stream_id, dummy_stream_id, options);
-    let mut distorted_yuv_writer =
-        YuvWriter::new(MediaStreamId::new(999), &distorted_yuv_file_path).or_fail()?;
-
-    // 必要なフレームの処理が終わるまでループを回す
-    eprintln!("# Compose for VMAF");
-    let mut encoded_byte_size = 0;
-    let mut encoded_duration = Duration::ZERO;
-    let mut encoded_frame_count = 0;
-    while encoded_frame_count < args.frame_count {
-        let Some(encoded_frame) = encoded_video_rx.recv() else {
-            // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
-            decoder.finish().or_fail()?;
-            while let Some(decoded_frame) = decoder.next_decoded_frame() {
-                distorted_yuv_writer.append(&decoded_frame).or_fail()?;
-                progress_bar.inc(1);
-                encoded_frame_count += 1;
-                if encoded_frame_count >= args.frame_count {
-                    break;
-                }
-            }
-            break;
-        };
-        encoded_byte_size += encoded_frame.data.len() as u64;
-        encoded_duration += encoded_frame.duration;
-        decoder
-            .decode(std::sync::Arc::new(encoded_frame))
-            .or_fail()?;
-        while let Some(decoded_frame) = decoder.next_decoded_frame() {
-            distorted_yuv_writer.append(&decoded_frame).or_fail()?;
-            progress_bar.inc(1);
-            encoded_frame_count += 1;
-            if encoded_frame_count >= args.frame_count {
-                break;
-            }
-        }
-
-        if error_flag.get() {
-            // ファイル読み込み、デコード、合成、エンコード、のいずれかで失敗したものがあるとここに来る
-            log::error!("The composition process was aborted");
-            break;
-        }
-    }
-    (encoded_frame_count > 0).or_fail_with(|()| "failed to encode frames".to_owned())?;
-
     // VMAF の下準備としての処理は全て完了した
-    progress_bar.finish();
     eprintln!("=> done\n");
 
     // vmaf コマンドを実行
@@ -388,10 +275,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
-        encoded_frame_count,
-        encoded_byte_size,
-        encoded_duration_seconds: Seconds::new(encoded_duration),
-        elapsed_seconds: Seconds::new(start_time.elapsed()),
+        encoded_frame_count: encoder_stats.total_output_video_frame_count.get() as usize,
+        elapsed_seconds: stats.elapsed_seconds,
         vmaf,
     };
     println!(
@@ -492,8 +377,6 @@ struct Output {
     height: usize,
     frame_rate: FrameRate,
     encoded_frame_count: usize,
-    encoded_byte_size: u64,
-    encoded_duration_seconds: Seconds,
     elapsed_seconds: Seconds,
     vmaf: VmafScoreStats,
 }
@@ -512,8 +395,6 @@ impl nojson::DisplayJson for Output {
             f.member("height", self.height)?;
             f.member("frame_rate", self.frame_rate)?;
             f.member("encoded_frame_count", self.encoded_frame_count)?;
-            f.member("encoded_byte_size", self.encoded_byte_size)?;
-            f.member("encoded_duration_seconds", self.encoded_duration_seconds)?;
             f.member("elapsed_seconds", self.elapsed_seconds)?;
             f.member("vmaf_min", self.vmaf.min)?;
             f.member("vmaf_max", self.vmaf.max)?;

@@ -364,6 +364,10 @@ impl VideoEncoder {
         }
         engines
     }
+
+    pub fn encoder_stats(&self) -> &VideoEncoderStats {
+        &self.stats
+    }
 }
 
 impl MediaProcessor for VideoEncoder {
