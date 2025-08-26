@@ -195,12 +195,8 @@ impl MediaProcessor for AudioMixer {
         }
 
         // 合成
-        let (result, elapsed) = Seconds::elapsed(|| self.mix_next_audio_data(now).or_fail());
+        let mixed_data = self.mix_next_audio_data(now).or_fail()?;
 
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        self.stats.total_processing_seconds.add(elapsed);
-
-        let mixed_data = result?;
         Ok(MediaProcessorOutput::Processed {
             stream_id: self.output_stream_id,
             sample: MediaSample::audio_data(mixed_data),

@@ -410,12 +410,9 @@ impl MediaProcessor for VideoMixer {
             }
 
             // 現在のフレームを合成する
-            //
-            // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-            let (result, elapsed) = Seconds::elapsed(|| self.mix(now).or_fail());
-            self.stats.total_processing_seconds.add(elapsed);
+            let mixed_frame = self.mix(now).or_fail()?;
 
-            if let Some(frame) = self.last_mixed_frame.replace(result?) {
+            if let Some(frame) = self.last_mixed_frame.replace(mixed_frame) {
                 return Ok(MediaProcessorOutput::video_frame(
                     self.output_stream_id,
                     frame,

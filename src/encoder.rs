@@ -20,7 +20,7 @@ use crate::{
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioEncoderStats, ProcessorStats, Seconds, VideoEncoderStats},
+    stats::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -107,10 +107,6 @@ impl AudioEncoder {
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
     ) -> orfail::Result<Self> {
-        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
-        let input_stream_id = MediaStreamId::new(0);
-        let output_stream_id = MediaStreamId::new(1);
-
         let stats = AudioEncoderStats::new(EngineName::AudioToolbox, CodecName::Aac);
         Ok(Self {
             input_stream_id,
@@ -120,36 +116,6 @@ impl AudioEncoder {
             eos: false,
             inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate).or_fail()?,
         })
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn encode(&mut self, data: &AudioData) -> orfail::Result<Option<AudioData>> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: Some(MediaSample::audio_data(data.clone())),
-        };
-        self.process_input(input).or_fail()?;
-        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
-        else {
-            return Ok(None);
-        };
-        let encoded = sample.expect_audio_data().or_fail()?;
-        Ok(Some(std::sync::Arc::into_inner(encoded).or_fail()?))
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: None,
-        };
-        self.process_input(input).or_fail()?;
-        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
-        else {
-            return Ok(None);
-        };
-        let encoded = sample.expect_audio_data().or_fail()?;
-        Ok(Some(std::sync::Arc::into_inner(encoded).or_fail()?))
     }
 
     pub fn name(&self) -> EngineName {
@@ -202,16 +168,13 @@ impl MediaProcessor for AudioEncoder {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let (encoded, elapsed) = if let Some(sample) = input.sample {
+        let encoded = if let Some(sample) = input.sample {
             let data = sample.expect_audio_data().or_fail()?;
-            Seconds::try_elapsed(|| self.inner.encode(&data).or_fail())
+            self.inner.encode(&data).or_fail()?
         } else {
             self.eos = true;
-            Seconds::try_elapsed(|| self.inner.finish().or_fail())
-        }?;
-
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        self.stats.total_processing_seconds.add(elapsed);
+            self.inner.finish().or_fail()?
+        };
 
         if let Some(encoded) = encoded {
             self.stats.total_audio_data_count.add(1);
@@ -336,33 +299,6 @@ impl VideoEncoder {
         })
     }
 
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: Some(MediaSample::video_frame(frame)),
-        };
-        self.process_input(input).or_fail()
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn finish(&mut self) -> orfail::Result<()> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: None,
-        };
-        self.process_input(input).or_fail()
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        let Ok(MediaProcessorOutput::Processed { sample, .. }) = self.process_output() else {
-            return None;
-        };
-        let encoded = sample.expect_video_frame().ok()?;
-        std::sync::Arc::into_inner(encoded)
-    }
-
     pub fn name(&self) -> EngineName {
         self.inner.name()
     }
@@ -415,17 +351,14 @@ impl MediaProcessor for VideoEncoder {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let ((), elapsed) = if let Some(sample) = input.sample {
+        if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
             self.stats.total_input_video_frame_count.add(1);
-            Seconds::try_elapsed(|| self.inner.encode(frame).or_fail())
+            self.inner.encode(frame).or_fail()?;
         } else {
             self.eos = true;
-            Seconds::try_elapsed(|| self.inner.finish().or_fail())
-        }?;
-
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        self.stats.total_processing_seconds.add(elapsed);
+            self.inner.finish().or_fail()?;
+        }
 
         while let Some(encoded) = self.inner.next_encoded_frame() {
             self.stats.total_output_video_frame_count.add(1);
