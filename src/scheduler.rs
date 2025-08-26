@@ -151,9 +151,12 @@ impl Task {
         }
     }
 
-    fn run_until_block(&mut self) -> orfail::Result<()> {
-        while self.process_input().or_fail()? || self.process_output().or_fail()? {}
-        Ok(())
+    fn run_until_block(&mut self) -> orfail::Result<bool> {
+        let mut did_something = false;
+        while self.process_input().or_fail()? || self.process_output().or_fail()? {
+            did_something = true;
+        }
+        Ok(did_something)
     }
 }
 
@@ -291,6 +294,7 @@ impl TaskRunner {
 
     fn run_one(&mut self) {
         let mut i = 0;
+        let mut did_something = false;
         while i < self.tasks.len() {
             let start = Instant::now();
             let result = self.tasks[i].run_until_block().or_fail();
@@ -310,26 +314,22 @@ impl TaskRunner {
                     self.tasks[i].stats.set_error();
                     self.tasks.swap_remove(i);
                 }
-                Ok(()) if self.tasks[i].finished => {
+                Ok(task_did_something) if self.tasks[i].finished => {
                     self.tasks.swap_remove(i);
+                    did_something |= task_did_something;
                 }
-                Ok(()) => {
+                Ok(task_did_something) => {
                     i += 1;
+                    did_something |= task_did_something;
                 }
             }
         }
 
-        if self.is_awaiting() {
+        if !did_something {
             std::thread::sleep(self.sleep_duration);
             self.stats
                 .total_waiting_seconds
                 .add(Seconds::new(self.sleep_duration));
         }
-    }
-
-    fn is_awaiting(&self) -> bool {
-        self.tasks
-            .iter()
-            .all(|t| t.awaiting_input_stream_id.is_some() || t.output_sample.is_some())
     }
 }
