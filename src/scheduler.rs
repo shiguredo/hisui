@@ -208,7 +208,6 @@ impl Scheduler {
         let mut tasks = self.tasks.into_iter().map(Some).collect::<Vec<_>>();
 
         // TODO(atode): スレッドへの割り当て方法は後で改善する
-        // TODO(atode): スレッド単位の統計を追加する
         let mut handles = Vec::new();
         for i in 0..self.thread_count.get() {
             let mut worker_thread_stats = WorkerThreadStats::default();

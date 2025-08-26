@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::{
@@ -72,24 +72,6 @@ impl nojson::DisplayJson for Seconds {
 impl Seconds {
     pub fn new(elapsed: Duration) -> Self {
         Self(elapsed)
-    }
-
-    pub fn elapsed<F, T>(f: F) -> (T, Self)
-    where
-        F: FnOnce() -> T,
-    {
-        let start_time = Instant::now();
-        let value = f();
-        (value, Self::new(start_time.elapsed()))
-    }
-
-    pub fn try_elapsed<F, T>(f: F) -> orfail::Result<(T, Self)>
-    where
-        F: FnOnce() -> orfail::Result<T>,
-    {
-        let start_time = Instant::now();
-        let value = f()?;
-        Ok((value, Self::new(start_time.elapsed())))
     }
 
     pub const fn get(self) -> Duration {
