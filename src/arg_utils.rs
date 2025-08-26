@@ -18,6 +18,7 @@ pub fn validate_existing_directory_path(
     Ok(path)
 }
 
+// TODO: remove first arg
 /// 時間ベースのプログレスバーを作成する
 pub fn create_time_progress_bar(show_progress_bar: bool, total_duration: Duration) -> ProgressBar {
     create_progress_bar(
@@ -38,8 +39,8 @@ pub fn create_frame_progress_bar(show_progress_bar: bool, total_frames: u64) -> 
     )
 }
 
-fn create_progress_bar(
-    show_progress_bar: bool,
+ fn create_progress_bar(
+   show_progress_bar: bool,
     total: u64,
     template: Option<&str>,
     unit: Option<&str>,

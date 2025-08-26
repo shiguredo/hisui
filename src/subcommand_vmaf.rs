@@ -17,8 +17,10 @@ use crate::{
     layout::Layout,
     media::MediaStreamId,
     mixer_video::{VideoMixer, VideoMixerThread},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::VideoReader,
     scheduler::Scheduler,
+    stats::ProcessorStats,
     stats::{Seconds, SharedStats},
     types::EngineName,
     video::FrameRate,
@@ -226,7 +228,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let writer = YuvWriter::new(decoder_output_stream_id, &reference_yuv_file_path).or_fail()?;
     scheduler.register(writer).or_fail()?;
 
-    // TODO: プログレスバーを準備
+    // プログレスバーを準備
+    let progress = ProgressBar::new(decoder_output_stream_id, args.frame_count as u64);
+    scheduler.register(progress).or_fail()?;
 
     let stats = scheduler.run().or_fail()?;
     if stats.error.get() {
@@ -517,4 +521,49 @@ struct VmafScoreStats {
     max: f64,
     mean: f64,
     harmonic_mean: f64,
+}
+
+#[derive(Debug)]
+struct ProgressBar {
+    input_stream_id: MediaStreamId,
+    eos: bool,
+    bar: indicatif::ProgressBar,
+}
+
+impl ProgressBar {
+    fn new(input_stream_id: MediaStreamId, total_frame_count: u64) -> Self {
+        Self {
+            input_stream_id,
+            eos: false,
+            bar: crate::arg_utils::create_frame_progress_bar(true, total_frame_count),
+        }
+    }
+}
+
+impl MediaProcessor for ProgressBar {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: Vec::new(),
+            stats: ProcessorStats::other("progress-bar"),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        if input.sample.is_some() {
+            self.bar.inc(1);
+        } else {
+            self.eos = true;
+            self.bar.finish();
+        };
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if self.eos {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::pending(self.input_stream_id))
+        }
+    }
 }
