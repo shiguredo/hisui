@@ -6,7 +6,7 @@ use crate::{
     media::MediaStreamId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     stats::ProcessorStats,
-    video::{VideoFormat, VideoFrame},
+    video::VideoFormat,
 };
 
 #[derive(Debug)]
@@ -29,13 +29,6 @@ impl YuvWriter {
             eos: false,
             file,
         })
-    }
-
-    // TODO: remove
-    pub fn append(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
-        matches!(frame.format, VideoFormat::I420).or_fail()?;
-        self.file.write_all(&frame.data).or_fail()?;
-        Ok(())
     }
 }
 
