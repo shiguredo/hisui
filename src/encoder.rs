@@ -13,7 +13,6 @@ use crate::encoder_fdk_aac::FdkAacEncoder;
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
     audio::AudioData,
-    channel::{self, ErrorFlag},
     encoder_libvpx::LibvpxEncoder,
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
@@ -21,7 +20,7 @@ use crate::{
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioEncoderStats, ProcessorStats, Seconds, SharedStats, VideoEncoderStats},
+    stats::{AudioEncoderStats, ProcessorStats, Seconds, VideoEncoderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -541,140 +540,5 @@ impl VideoEncoderInner {
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.codec(),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct AudioEncoderThread {
-    input_rx: channel::Receiver<AudioData>,
-    output_tx: channel::SyncSender<AudioData>,
-    encoder: AudioEncoder,
-    stats: AudioEncoderStats,
-}
-
-impl AudioEncoderThread {
-    pub fn start(
-        error_flag: ErrorFlag,
-        input_rx: channel::Receiver<AudioData>,
-        encoder: AudioEncoder,
-        stats: SharedStats,
-    ) -> channel::Receiver<AudioData> {
-        let (tx, rx) = channel::sync_channel();
-        std::thread::spawn(move || {
-            let mut this = Self {
-                input_rx,
-                output_tx: tx,
-                stats: AudioEncoderStats::new(encoder.name(), encoder.codec()),
-                encoder,
-            };
-            if let Err(e) = this.run().or_fail() {
-                error_flag.set();
-                this.stats.error.set(true);
-                log::error!("failed to produce encoded audio stream: {e}");
-            }
-
-            stats.with_lock(|stats| {
-                stats
-                    .processors
-                    .push(ProcessorStats::AudioEncoder(this.stats));
-            });
-        });
-        rx
-    }
-
-    fn run(&mut self) -> orfail::Result<()> {
-        while let Some(data) = self.input_rx.recv() {
-            self.stats.total_audio_data_count.add(1);
-
-            let (encoded, elapsed) = Seconds::try_elapsed(|| self.encoder.encode(&data).or_fail())?;
-            self.stats.total_processing_seconds.add(elapsed);
-            let Some(encoded) = encoded else {
-                continue;
-            };
-
-            if !self.output_tx.send(encoded) {
-                // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::info!("receiver of encoded audio stream has been closed");
-                break;
-            }
-        }
-
-        if let Some(encoded) = self.encoder.finish().or_fail()?
-            && !self.output_tx.send(encoded)
-        {
-            log::info!("receiver of encoded audio stream has been closed");
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct VideoEncoderThread {
-    input_rx: channel::Receiver<VideoFrame>,
-    output_tx: channel::SyncSender<VideoFrame>,
-    encoder: VideoEncoder,
-    stats: VideoEncoderStats,
-}
-
-impl VideoEncoderThread {
-    pub fn start(
-        error_flag: ErrorFlag,
-        input_rx: channel::Receiver<VideoFrame>,
-        encoder: VideoEncoder,
-        stats: SharedStats,
-    ) -> channel::Receiver<VideoFrame> {
-        let (tx, rx) = channel::sync_channel();
-        let mut this = Self {
-            input_rx,
-            output_tx: tx,
-            stats: VideoEncoderStats::new(encoder.name(), encoder.codec()),
-            encoder,
-        };
-        std::thread::spawn(move || {
-            if let Err(e) = this.run().or_fail() {
-                error_flag.set();
-                this.stats.error.set(true);
-                log::error!("failed to produce encoded video stream: {e}");
-            }
-
-            stats.with_lock(|stats| {
-                stats
-                    .processors
-                    .push(ProcessorStats::VideoEncoder(this.stats));
-            });
-        });
-        rx
-    }
-
-    fn run(&mut self) -> orfail::Result<()> {
-        while let Some(frame) = self.input_rx.recv() {
-            self.stats.total_input_video_frame_count.add(1);
-            let ((), elapsed) = Seconds::try_elapsed(|| self.encoder.encode(frame).or_fail())?;
-            self.stats.total_processing_seconds.add(elapsed);
-
-            while let Some(encoded) = self.encoder.next_encoded_frame() {
-                self.stats.total_output_video_frame_count.add(1);
-                if !self.output_tx.send(encoded) {
-                    // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::info!("receiver of encoded video stream has been closed");
-                    return Ok(());
-                }
-            }
-        }
-
-        let ((), elapsed) = Seconds::try_elapsed(|| self.encoder.finish().or_fail())?;
-        self.stats.total_processing_seconds.add(elapsed);
-
-        while let Some(encoded) = self.encoder.next_encoded_frame() {
-            self.stats.total_output_video_frame_count.add(1);
-            if !self.output_tx.send(encoded) {
-                // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::info!("receiver of encoded video stream has been closed");
-                break;
-            }
-        }
-
-        Ok(())
     }
 }

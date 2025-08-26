@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -47,21 +46,6 @@ impl AudioDecoder {
             eos: false,
             inner: AudioDecoderInner::new_opus().or_fail()?,
         })
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub(crate) fn decode(&mut self, data: Arc<AudioData>) -> orfail::Result<AudioData> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: Some(MediaSample::Audio(data)),
-        };
-        self.process_input(input).or_fail()?;
-        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
-        else {
-            return Err(orfail::Failure::new("bug"));
-        };
-        let decoded = sample.expect_audio_data().or_fail()?;
-        Arc::into_inner(decoded).or_fail()
     }
 
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
@@ -191,35 +175,6 @@ impl VideoDecoder {
             _ => unreachable!(),
         }
         engines
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn decode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: Some(MediaSample::Video(frame)),
-        };
-        self.process_input(input).or_fail()?;
-        Ok(())
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn finish(&mut self) -> orfail::Result<()> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: None,
-        };
-        self.process_input(input).or_fail()?;
-        Ok(())
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        let Ok(MediaProcessorOutput::Processed { sample, .. }) = self.process_output() else {
-            return None;
-        };
-        let decoded = sample.expect_video_frame().ok()?;
-        Arc::into_inner(decoded)
     }
 }
 

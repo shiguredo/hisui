@@ -24,22 +24,6 @@ impl MediaStreamId {
     }
 }
 
-// TODO(atode): remove
-#[derive(Debug, Default)]
-pub struct MediaStreamIdGenerator(MediaStreamId);
-
-impl MediaStreamIdGenerator {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn next_id(&mut self) -> MediaStreamId {
-        let id = self.0;
-        self.0.0 += 1;
-        id
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum MediaSample {
     Audio(Arc<AudioData>),

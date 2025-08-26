@@ -150,14 +150,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
                 f.member("stats_file_path", path)?;
             }
             f.member("input_root_dir", &args.root_dir)?;
-            if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
-                print_input_stats_summary(f, &stats)?;
-            }
+            print_input_stats_summary(f, &result.stats)?;
             f.member("output_file_path", &output_file_path)?;
-            if let Some(stats) = result.stats.with_lock(|stats| stats.clone()) {
-                print_output_stats_summary(f, &stats)?;
-                print_time_stats_summary(f, &stats)?;
-            }
+            print_output_stats_summary(f, &result.stats)?;
+            print_time_stats_summary(f, &result.stats)?;
 
             Ok(())
         })

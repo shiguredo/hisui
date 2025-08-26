@@ -14,57 +14,6 @@ use crate::{
     video::VideoFrame,
 };
 
-// TODO(atode): remove
-#[derive(Debug, Clone)]
-pub struct SharedStats {
-    inner: Arc<Mutex<Stats>>,
-}
-
-impl Default for SharedStats {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SharedStats {
-    pub fn new() -> Self {
-        let inner = Arc::new(Mutex::new(Stats::default()));
-        Self { inner }
-    }
-
-    pub fn with_lock<F, T>(&self, f: F) -> Option<T>
-    where
-        F: FnOnce(&mut Stats) -> T,
-    {
-        match self.inner.lock() {
-            Ok(mut stats) => Some(f(&mut stats)),
-            Err(e) => {
-                // 統計情報の更新ができなくても致命的ではないので警告に止める
-                log::warn!("failed to acquire stats lock: {e}");
-                None
-            }
-        }
-    }
-
-    pub fn save(&self, output_file_path: &Path) {
-        self.with_lock(|stats| {
-            let json = nojson::json(|f| {
-                f.set_indent_size(2);
-                f.set_spacing(true);
-                f.value(&stats)
-            })
-            .to_string();
-            if let Err(e) = std::fs::write(output_file_path, json) {
-                // 統計が出力できなくても全体を失敗扱いにはしない
-                log::warn!(
-                    "failed to write stats JSON: path={}, reason={e}",
-                    output_file_path.display()
-                );
-            }
-        });
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
     /// 全体の合成に要した実時間
@@ -78,6 +27,24 @@ pub struct Stats {
 
     /// プロセッサを実行するワーカースレッドの統計情報
     pub worker_threads: Vec<WorkerThreadStats>,
+}
+
+impl Stats {
+    pub fn save(&self, output_file_path: &Path) {
+        let json = nojson::json(|f| {
+            f.set_indent_size(2);
+            f.set_spacing(true);
+            f.value(&self)
+        })
+        .to_string();
+        if let Err(e) = std::fs::write(output_file_path, json) {
+            // 統計が出力できなくても全体を失敗扱いにはしない
+            log::warn!(
+                "failed to write stats JSON: path={}, reason={e}",
+                output_file_path.display()
+            );
+        }
+    }
 }
 
 impl nojson::DisplayJson for Stats {

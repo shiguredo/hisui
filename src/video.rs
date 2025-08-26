@@ -8,9 +8,6 @@ use crate::{
     types::{CodecName, EvenUsize},
 };
 
-pub type VideoFrameSyncSender = crate::channel::SyncSender<VideoFrame>;
-pub type VideoFrameReceiver = crate::channel::Receiver<VideoFrame>;
-
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
     pub source_id: Option<SourceId>,
