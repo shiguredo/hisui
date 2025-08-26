@@ -1,4 +1,9 @@
-use std::{collections::HashSet, num::NonZeroUsize, path::PathBuf, time::Instant};
+use std::{
+    collections::HashSet,
+    num::NonZeroUsize,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -12,7 +17,7 @@ use crate::{
     media::{MediaSample, MediaStreamId, MediaStreamIdGenerator},
     mixer_audio::{AudioMixer, AudioMixerThread},
     mixer_video::{VideoMixer, VideoMixerThread},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     source::{AudioSourceThread, VideoSourceThread},
@@ -131,6 +136,38 @@ impl Composer {
         .or_fail()?;
         scheduler.register(video_encoder).or_fail()?;
 
+        // ライターを登録
+        let writer = Mp4Writer::new(
+            out_file_path,
+            &self.layout,
+            self.layout
+                .has_audio()
+                .then_some(audio_encoder_output_stream_id),
+            self.layout
+                .has_video()
+                .then_some(video_encoder_output_stream_id),
+        )
+        .or_fail()?;
+        scheduler.register(writer).or_fail()?;
+
+        // プログレスバーを登録
+        if self.show_progress_bar {
+            let progress = ProgressBar::new(
+                vec![
+                    audio_encoder_output_stream_id,
+                    video_encoder_output_stream_id,
+                ],
+                self.layout.output_duration(),
+            );
+            scheduler.register(progress).or_fail()?;
+        }
+
+        // 合成を実行
+        let stats = scheduler.run().or_fail()?;
+        if stats.error.get() {
+            return Err(orfail::Failure::new("composition process failed").into());
+        }
+
         // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
         let stats = SharedStats::new();
         let start_time = Instant::now();
@@ -146,10 +183,8 @@ impl Composer {
         .or_fail()?;
 
         // プログレスバーを準備
-        let progress_bar = crate::arg_utils::create_time_progress_bar(
-            self.show_progress_bar,
-            self.layout.output_duration(),
-        );
+        let progress_bar =
+            crate::arg_utils::create_time_progress_bar(self.layout.output_duration());
 
         // 映像ミキサーとエンコーダーを準備
         let mut encoded_video_rx = self
@@ -336,4 +371,50 @@ pub fn create_audio_and_video_sources(
         }
     }
     Ok((audio_source_rxs, video_source_rxs))
+}
+
+#[derive(Debug)]
+struct ProgressBar {
+    input_stream_ids: Vec<MediaStreamId>,
+    bar: indicatif::ProgressBar,
+    max_timestamp: Duration,
+}
+
+impl ProgressBar {
+    fn new(input_stream_ids: Vec<MediaStreamId>, output_duration: Duration) -> Self {
+        Self {
+            input_stream_ids,
+            bar: crate::arg_utils::create_time_progress_bar(output_duration),
+            max_timestamp: Duration::ZERO,
+        }
+    }
+}
+
+impl MediaProcessor for ProgressBar {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.input_stream_ids.clone(),
+            output_stream_ids: Vec::new(),
+            stats: ProcessorStats::other("progress-bar"),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        if let Some(sample) = input.sample {
+            self.max_timestamp = self.max_timestamp.max(sample.timestamp());
+            self.bar.set_position(self.max_timestamp.as_secs());
+        } else {
+            self.input_stream_ids.retain(|id| *id != input.stream_id);
+        };
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if self.input_stream_ids.is_empty() {
+            self.bar.finish();
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::awaiting_any())
+        }
+    }
 }

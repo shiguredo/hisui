@@ -19,9 +19,8 @@ pub fn validate_existing_directory_path(
 }
 
 /// 時間ベースのプログレスバーを作成する
-pub fn create_time_progress_bar(show_progress_bar: bool, total_duration: Duration) -> ProgressBar {
+pub fn create_time_progress_bar(total_duration: Duration) -> ProgressBar {
     create_progress_bar(
-        show_progress_bar,
         total_duration.as_secs(),
         Some("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}s ({eta})"),
         None,
@@ -31,25 +30,14 @@ pub fn create_time_progress_bar(show_progress_bar: bool, total_duration: Duratio
 /// フレームベースのプログレスバーを作成する
 pub fn create_frame_progress_bar(total_frames: u64) -> ProgressBar {
     create_progress_bar(
-        true,
         total_frames,
         Some("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})"),
         None,
     )
 }
 
-fn create_progress_bar(
-    show_progress_bar: bool,
-    total: u64,
-    template: Option<&str>,
-    unit: Option<&str>,
-) -> ProgressBar {
-    let progress_bar = if show_progress_bar {
-        ProgressBar::new(total)
-    } else {
-        ProgressBar::hidden()
-    };
-
+fn create_progress_bar(total: u64, template: Option<&str>, unit: Option<&str>) -> ProgressBar {
+    let progress_bar = ProgressBar::new(total);
     let unit_str = unit.unwrap_or("");
     let default_template = if unit_str.is_empty() {
         "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})"

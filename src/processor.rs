@@ -120,6 +120,12 @@ impl MediaProcessorOutput {
         }
     }
 
+    pub fn awaiting_any() -> Self {
+        Self::Pending {
+            awaiting_stream_id: None,
+        }
+    }
+
     pub fn audio_data(stream_id: MediaStreamId, data: AudioData) -> Self {
         Self::Processed {
             stream_id,

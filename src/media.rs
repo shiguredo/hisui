@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
+use std::time::Duration;
 
 use crate::audio::AudioData;
 use crate::video::VideoFrame;
@@ -46,6 +47,13 @@ pub enum MediaSample {
 }
 
 impl MediaSample {
+    pub fn timestamp(&self) -> Duration {
+        match self {
+            Self::Audio(x) => x.timestamp,
+            Self::Video(x) => x.timestamp,
+        }
+    }
+
     pub fn expect_audio_data(self) -> orfail::Result<Arc<AudioData>> {
         if let Self::Audio(sample) = self {
             Ok(sample)
