@@ -89,11 +89,12 @@ impl VideoMixerThread {
                     }
                 }
                 MediaProcessorOutput::Pending { awaiting_stream_id } => {
-                    let i = awaiting_stream_id.get() as usize;
+                    let stream_id = awaiting_stream_id.expect("infallible");
+                    let i = stream_id.get() as usize;
                     let input = if let Some(frame) = self.input_rxs[i].recv() {
-                        MediaProcessorInput::video_frame(awaiting_stream_id, frame)
+                        MediaProcessorInput::video_frame(stream_id, frame)
                     } else {
-                        MediaProcessorInput::eos(awaiting_stream_id)
+                        MediaProcessorInput::eos(stream_id)
                     };
                     self.inner.process_input(input).or_fail()?;
                 }

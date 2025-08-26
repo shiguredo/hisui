@@ -134,7 +134,7 @@ impl Task {
                 Ok(false)
             }
             MediaProcessorOutput::Pending { awaiting_stream_id } => {
-                self.awaiting_input_stream_id = Some(awaiting_stream_id);
+                self.awaiting_input_stream_id = awaiting_stream_id; // TODO
                 Ok(true)
             }
             MediaProcessorOutput::Processed { stream_id, sample } => {

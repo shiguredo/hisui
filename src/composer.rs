@@ -100,17 +100,17 @@ impl Composer {
             match mp4_writer.process_output().or_fail()? {
                 MediaProcessorOutput::Finished => break,
                 MediaProcessorOutput::Pending { awaiting_stream_id }
-                    if awaiting_stream_id == writer_input_audio_stream_id =>
+                    if awaiting_stream_id == Some(writer_input_audio_stream_id) =>
                 {
                     let input = MediaProcessorInput {
-                        stream_id: awaiting_stream_id,
+                        stream_id: writer_input_audio_stream_id,
                         sample: encoded_audio_rx.recv().map(MediaSample::audio_data),
                     };
                     mp4_writer.process_input(input).or_fail()?;
                 }
                 MediaProcessorOutput::Pending { awaiting_stream_id } => {
                     let input = MediaProcessorInput {
-                        stream_id: awaiting_stream_id,
+                        stream_id: awaiting_stream_id.expect("infallible"),
                         sample: encoded_video_rx.recv().map(MediaSample::video_frame),
                     };
                     mp4_writer.process_input(input).or_fail()?;

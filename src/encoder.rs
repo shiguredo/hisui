@@ -195,7 +195,7 @@ impl MediaProcessor for AudioEncoder {
             Ok(MediaProcessorOutput::Finished)
         } else {
             Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: self.input_stream_id,
+                awaiting_stream_id: Some(self.input_stream_id),
             })
         }
     }
@@ -404,7 +404,7 @@ impl MediaProcessor for VideoEncoder {
             Ok(MediaProcessorOutput::Finished)
         } else {
             Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: self.input_stream_id,
+                awaiting_stream_id: Some(self.input_stream_id),
             })
         }
     }

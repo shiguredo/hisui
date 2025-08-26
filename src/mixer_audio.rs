@@ -78,11 +78,14 @@ impl AudioMixerThread {
                     }
                 }
                 MediaProcessorOutput::Pending { awaiting_stream_id } => {
-                    let i = awaiting_stream_id.get() as usize;
+                    let i = awaiting_stream_id.expect("infallible").get() as usize;
                     let input = if let Some(data) = self.input_rxs[i].recv() {
-                        MediaProcessorInput::audio_data(awaiting_stream_id, data)
+                        MediaProcessorInput::audio_data(
+                            awaiting_stream_id.expect("infallible"),
+                            data,
+                        )
                     } else {
-                        MediaProcessorInput::eos(awaiting_stream_id)
+                        MediaProcessorInput::eos(awaiting_stream_id.expect("infallible"))
                     };
                     self.inner.process_input(input).or_fail()?;
                 }
@@ -256,7 +259,7 @@ impl MediaProcessor for AudioMixer {
             if input_stream.sample_queue.len() < MIXED_AUDIO_DATA_SAMPLES {
                 // 次の合成に必要なサンプル数が足りないので待つ
                 return Ok(MediaProcessorOutput::Pending {
-                    awaiting_stream_id: *input_stream_id,
+                    awaiting_stream_id: Some(*input_stream_id),
                 });
             }
         }
