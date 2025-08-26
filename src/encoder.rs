@@ -69,7 +69,7 @@ impl AudioEncoder {
         }
     }
 
-    pub fn new_opus(
+    fn new_opus(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
@@ -86,11 +86,11 @@ impl AudioEncoder {
     }
 
     #[cfg(feature = "fdk-aac")]
-    pub fn new_fdk_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
-        let input_stream_id = MediaStreamId::new(0);
-        let output_stream_id = MediaStreamId::new(1);
-
+    fn new_fdk_aac(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        bitrate: NonZeroUsize,
+    ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::FdkAac, CodecName::Aac);
         Ok(Self {
             input_stream_id,
@@ -103,7 +103,11 @@ impl AudioEncoder {
     }
 
     #[cfg(target_os = "macos")]
-    pub fn new_audio_toolbox_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
+    fn new_audio_toolbox_aac(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        bitrate: NonZeroUsize,
+    ) -> orfail::Result<Self> {
         // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
         let input_stream_id = MediaStreamId::new(0);
         let output_stream_id = MediaStreamId::new(1);
