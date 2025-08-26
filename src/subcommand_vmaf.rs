@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -15,7 +16,7 @@ use crate::{
     encoder::{VideoEncoder, VideoEncoderThread},
     json::JsonObject,
     layout::Layout,
-    media::MediaStreamId,
+    media::{MediaSample, MediaStreamId},
     mixer_video::{VideoMixer, VideoMixerThread},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::VideoReader,
@@ -199,16 +200,25 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     );
     scheduler.register(mixer).or_fail()?;
 
+    // フレーム数を制限する
+    let limiter_output_stream_id = next_stream_id.fetch_add(1);
+    let limiter = FrameCountLimiter::new(
+        mixer_output_stream_id,
+        limiter_output_stream_id,
+        args.frame_count,
+    );
+    scheduler.register(limiter).or_fail()?;
+
     // エンコード前の画像の YUV 書き込みを登録
     let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
-    let writer = YuvWriter::new(mixer_output_stream_id, &distorted_yuv_file_path).or_fail()?;
+    let writer = YuvWriter::new(limiter_output_stream_id, &distorted_yuv_file_path).or_fail()?;
     scheduler.register(writer).or_fail()?;
 
     // エンコーダーを登録
     let encoder_output_stream_id = next_stream_id.fetch_add(1);
     let encoder = VideoEncoder::new(
         &layout,
-        mixer_output_stream_id,
+        limiter_output_stream_id,
         encoder_output_stream_id,
         openh264_lib.clone(),
     )
@@ -521,6 +531,64 @@ struct VmafScoreStats {
     max: f64,
     mean: f64,
     harmonic_mean: f64,
+}
+
+#[derive(Debug)]
+struct FrameCountLimiter {
+    input_stream_id: MediaStreamId,
+    output_stream_id: MediaStreamId,
+    remaining_frame_count: usize,
+    queue: VecDeque<MediaSample>,
+}
+
+impl FrameCountLimiter {
+    fn new(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        total_frame_count: usize,
+    ) -> Self {
+        Self {
+            input_stream_id,
+            output_stream_id,
+            remaining_frame_count: total_frame_count,
+            queue: VecDeque::new(),
+        }
+    }
+}
+
+impl MediaProcessor for FrameCountLimiter {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: vec![self.output_stream_id],
+            stats: ProcessorStats::other("frame-count-limiter"),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        if let Some(sample) = input.sample
+            && let Some(n) = self.remaining_frame_count.checked_sub(1)
+        {
+            self.queue.push_back(sample);
+            self.remaining_frame_count = n;
+        } else {
+            self.remaining_frame_count = 0;
+        };
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if let Some(sample) = self.queue.pop_front() {
+            Ok(MediaProcessorOutput::Processed {
+                stream_id: self.output_stream_id,
+                sample,
+            })
+        } else if self.remaining_frame_count == 0 {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::pending(self.input_stream_id))
+        }
+    }
 }
 
 #[derive(Debug)]
