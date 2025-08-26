@@ -230,7 +230,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     let stats = scheduler.run().or_fail()?;
     if stats.error.get() {
-        return Err(orfail::Failure::new("video composition process failed"));
+        return Err(orfail::Failure::new("video composition process failed").into());
     }
 
     // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
