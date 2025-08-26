@@ -45,7 +45,7 @@ pub struct Task {
     processor: BoxedMediaProcessor,
     input_stream_rxs: HashMap<MediaStreamId, MediaSampleReceiver>,
     output_stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
-    awaiting_input_stream_id: Option<MediaStreamId>,
+    awaiting_input_stream_ids: Vec<MediaStreamId>,
     output_sample: Option<(MediaStreamId, usize, MediaSample)>,
     stats: ProcessorStats,
     finished: bool,
@@ -71,7 +71,7 @@ impl Task {
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             output_stream_txs: HashMap::new(),
-            awaiting_input_stream_id: None,
+            awaiting_input_stream_ids: Vec::new(),
             output_sample: None,
             stats,
             finished: false,
@@ -80,30 +80,33 @@ impl Task {
     }
 
     fn process_input(&mut self) -> orfail::Result<bool> {
-        let Some(stream_id) = self.awaiting_input_stream_id.take() else {
-            return Ok(false);
-        };
-        let rx = self.input_stream_rxs.get(&stream_id).or_fail()?;
-        match rx.try_recv() {
-            Err(mpsc::TryRecvError::Disconnected) => {
-                let input = MediaProcessorInput::eos(stream_id);
-                self.processor.process_input(input).or_fail()?;
-                Ok(true)
+        let mut input = None;
+        for &stream_id in &self.awaiting_input_stream_ids {
+            let rx = self.input_stream_rxs.get(&stream_id).or_fail()?;
+            match rx.try_recv() {
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    input = Some(MediaProcessorInput::eos(stream_id));
+                    self.input_stream_rxs.remove(&stream_id);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Ok(sample) => {
+                    input = Some(MediaProcessorInput::sample(stream_id, sample));
+                    break;
+                }
             }
-            Err(mpsc::TryRecvError::Empty) => {
-                self.awaiting_input_stream_id = Some(stream_id);
-                Ok(false)
-            }
-            Ok(sample) => {
-                let input = MediaProcessorInput::sample(stream_id, sample);
-                self.processor.process_input(input).or_fail()?;
-                Ok(true)
-            }
+        }
+        if let Some(input) = input {
+            self.processor.process_input(input).or_fail()?;
+            self.awaiting_input_stream_ids.clear();
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
     fn process_output(&mut self) -> orfail::Result<bool> {
-        if self.awaiting_input_stream_id.is_some() {
+        if !self.awaiting_input_stream_ids.is_empty() {
             return Ok(false);
         }
 
@@ -134,7 +137,12 @@ impl Task {
                 Ok(false)
             }
             MediaProcessorOutput::Pending { awaiting_stream_id } => {
-                self.awaiting_input_stream_id = Some(awaiting_stream_id);
+                if let Some(id) = awaiting_stream_id {
+                    self.awaiting_input_stream_ids.push(id);
+                } else {
+                    self.awaiting_input_stream_ids
+                        .extend(self.input_stream_rxs.keys().copied());
+                }
                 Ok(true)
             }
             MediaProcessorOutput::Processed { stream_id, sample } => {
@@ -151,9 +159,12 @@ impl Task {
         }
     }
 
-    fn run_until_block(&mut self) -> orfail::Result<()> {
-        while self.process_input().or_fail()? || self.process_output().or_fail()? {}
-        Ok(())
+    fn run_until_block(&mut self) -> orfail::Result<bool> {
+        let mut did_something = false;
+        while self.process_input().or_fail()? || self.process_output().or_fail()? {
+            did_something = true;
+        }
+        Ok(did_something)
     }
 }
 
@@ -291,6 +302,7 @@ impl TaskRunner {
 
     fn run_one(&mut self) {
         let mut i = 0;
+        let mut did_something = false;
         while i < self.tasks.len() {
             let start = Instant::now();
             let result = self.tasks[i].run_until_block().or_fail();
@@ -310,26 +322,22 @@ impl TaskRunner {
                     self.tasks[i].stats.set_error();
                     self.tasks.swap_remove(i);
                 }
-                Ok(()) if self.tasks[i].finished => {
+                Ok(task_did_something) if self.tasks[i].finished => {
                     self.tasks.swap_remove(i);
+                    did_something |= task_did_something;
                 }
-                Ok(()) => {
+                Ok(task_did_something) => {
                     i += 1;
+                    did_something |= task_did_something;
                 }
             }
         }
 
-        if self.is_awaiting() {
+        if !did_something {
             std::thread::sleep(self.sleep_duration);
             self.stats
                 .total_waiting_seconds
                 .add(Seconds::new(self.sleep_duration));
         }
-    }
-
-    fn is_awaiting(&self) -> bool {
-        self.tasks
-            .iter()
-            .all(|t| t.awaiting_input_stream_id.is_some() || t.output_sample.is_some())
     }
 }

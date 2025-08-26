@@ -359,7 +359,7 @@ impl MediaProcessor for OutputPrinter {
             let awaiting_stream_id = self.input_stream_ids[self.next_input_stream_index];
             self.next_input_stream_index =
                 (self.next_input_stream_index + 1) % self.input_stream_ids.len();
-            Ok(MediaProcessorOutput::Pending { awaiting_stream_id })
+            Ok(MediaProcessorOutput::pending(awaiting_stream_id))
         }
     }
 }

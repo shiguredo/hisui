@@ -1,23 +1,24 @@
 use std::{
+    collections::VecDeque,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::{Duration, Instant},
 };
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-    channel::ErrorFlag,
-    composer,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    encoder::{VideoEncoder, VideoEncoderThread},
+    encoder::VideoEncoder,
     json::JsonObject,
     layout::Layout,
-    media::MediaStreamId,
-    mixer_video::VideoMixerThread,
-    stats::{Seconds, SharedStats},
+    media::{MediaSample, MediaStreamId},
+    mixer_video::VideoMixer,
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    reader::VideoReader,
+    scheduler::Scheduler,
+    stats::{ProcessorStats, Seconds},
     types::EngineName,
     video::FrameRate,
     writer_yuv::YuvWriter,
@@ -156,113 +157,97 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // CPU コア数制限を適用
     crate::arg_utils::maybe_limit_cpu_cores(args.max_cpu_cores).or_fail()?;
 
-    // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
-    let stats = SharedStats::new();
-    let start_time = Instant::now();
+    // プロセッサを準備
+    let mut scheduler = Scheduler::new();
+    let mut next_stream_id = MediaStreamId::new(0);
 
-    // 映像ソースの準備（音声の方は使わないので単に無視する）
-    let error_flag = ErrorFlag::new();
-    let (_audio_source_rxs, video_source_rxs) = composer::create_audio_and_video_sources(
+    // リーダーとデコーダーを登録
+    let mut mixer_input_stream_ids = Vec::new();
+    let decoder_options = VideoDecoderOptions {
+        openh264_lib: openh264_lib.clone(),
+    };
+    for (source_id, source_info) in &layout.sources {
+        if layout.video_source_ids().all(|id| id != source_id) {
+            continue;
+        }
+
+        let reader_output_stream_id = next_stream_id.fetch_add(1);
+        let reader =
+            VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+        scheduler.register(reader).or_fail()?;
+
+        let decoder_output_stream_id = next_stream_id.fetch_add(1);
+        let decoder = VideoDecoder::new(
+            reader_output_stream_id,
+            decoder_output_stream_id,
+            decoder_options.clone(),
+        );
+        scheduler.register(decoder).or_fail()?;
+
+        mixer_input_stream_ids.push(decoder_output_stream_id);
+    }
+
+    // ミキサーを登録
+    let mixer_output_stream_id = next_stream_id.fetch_add(1);
+    let mixer = VideoMixer::new(
+        layout.clone(),
+        mixer_input_stream_ids,
+        mixer_output_stream_id,
+    );
+    scheduler.register(mixer).or_fail()?;
+
+    // フレーム数を制限する
+    let limiter_output_stream_id = next_stream_id.fetch_add(1);
+    let limiter = FrameCountLimiter::new(
+        mixer_output_stream_id,
+        limiter_output_stream_id,
+        args.frame_count,
+    );
+    scheduler.register(limiter).or_fail()?;
+
+    // エンコード前の画像の YUV 書き込みを登録
+    let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
+    let writer = YuvWriter::new(limiter_output_stream_id, &distorted_yuv_file_path).or_fail()?;
+    scheduler.register(writer).or_fail()?;
+
+    // エンコーダーを登録
+    let encoder_output_stream_id = next_stream_id.fetch_add(1);
+    let encoder = VideoEncoder::new(
         &layout,
-        error_flag.clone(),
-        stats.clone(),
+        limiter_output_stream_id,
+        encoder_output_stream_id,
         openh264_lib.clone(),
     )
     .or_fail()?;
+    let encoder_name = encoder.name();
+    let encoder_stats = encoder.encoder_stats().clone();
+    scheduler.register(encoder).or_fail()?;
+
+    // エンコード後の画像（のデコード結果）の YUV 書き込みを登録
+    let decoder_output_stream_id = next_stream_id.fetch_add(1);
+    let decoder = VideoDecoder::new(
+        encoder_output_stream_id,
+        decoder_output_stream_id,
+        decoder_options.clone(),
+    );
+    scheduler.register(decoder).or_fail()?;
+
+    let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
+    let writer = YuvWriter::new(decoder_output_stream_id, &reference_yuv_file_path).or_fail()?;
+    scheduler.register(writer).or_fail()?;
 
     // プログレスバーを準備
-    let progress_bar = crate::arg_utils::create_frame_progress_bar(true, args.frame_count as u64);
+    let progress = ProgressBar::new(decoder_output_stream_id, args.frame_count as u64);
+    scheduler.register(progress).or_fail()?;
 
-    // ミキサースレッドを起動
-    let mut mixed_video_rx = VideoMixerThread::start(
-        error_flag.clone(),
-        layout.clone(),
-        video_source_rxs,
-        stats.clone(),
-    );
-
-    // エンコード前の画像の書き込みスレッドを起動
-    let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
-    let mut reference_yuv_writer = YuvWriter::new(&reference_yuv_file_path).or_fail()?;
-    let (mixed_video_temp_tx, mixed_video_temp_rx) = crate::channel::sync_channel();
-    std::thread::spawn(move || {
-        let mut count = 0;
-        while let Some(frame) = mixed_video_rx.recv() {
-            if count < args.frame_count
-                && let Err(e) = reference_yuv_writer.append(&frame).or_fail()
-            {
-                log::error!("failed to write reference YUV frame: {e}");
-                break;
-            }
-            if !mixed_video_temp_tx.send(frame) {
-                break;
-            }
-            count += 1;
-        }
-    });
-
-    // 映像エンコードスレッドを起動
-    let encoder = VideoEncoder::new(&layout, openh264_lib.clone()).or_fail()?;
-    let encoder_name = encoder.name();
-    let mut encoded_video_rx = VideoEncoderThread::start(
-        error_flag.clone(),
-        mixed_video_temp_rx,
-        encoder,
-        stats.clone(),
-    );
-
-    // 最終的な映像のデコード＆ YUV 書き出しの準備
-    let options = VideoDecoderOptions {
-        openh264_lib: openh264_lib.clone(),
-    };
-    let dummy_stream_id = MediaStreamId::new(0);
-    let mut decoder = VideoDecoder::new(dummy_stream_id, dummy_stream_id, options);
-    let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
-    let mut distorted_yuv_writer = YuvWriter::new(&distorted_yuv_file_path).or_fail()?;
-
-    // 必要なフレームの処理が終わるまでループを回す
+    // 合成処理を実行
     eprintln!("# Compose for VMAF");
-    let mut encoded_byte_size = 0;
-    let mut encoded_duration = Duration::ZERO;
-    let mut encoded_frame_count = 0;
-    while encoded_frame_count < args.frame_count {
-        let Some(encoded_frame) = encoded_video_rx.recv() else {
-            // 合成フレームの総数が frame_count よりも少なかった場合にここに来る
-            decoder.finish().or_fail()?;
-            while let Some(decoded_frame) = decoder.next_decoded_frame() {
-                distorted_yuv_writer.append(&decoded_frame).or_fail()?;
-                progress_bar.inc(1);
-                encoded_frame_count += 1;
-                if encoded_frame_count >= args.frame_count {
-                    break;
-                }
-            }
-            break;
-        };
-        encoded_byte_size += encoded_frame.data.len() as u64;
-        encoded_duration += encoded_frame.duration;
-        decoder
-            .decode(std::sync::Arc::new(encoded_frame))
-            .or_fail()?;
-        while let Some(decoded_frame) = decoder.next_decoded_frame() {
-            distorted_yuv_writer.append(&decoded_frame).or_fail()?;
-            progress_bar.inc(1);
-            encoded_frame_count += 1;
-            if encoded_frame_count >= args.frame_count {
-                break;
-            }
-        }
-
-        if error_flag.get() {
-            // ファイル読み込み、デコード、合成、エンコード、のいずれかで失敗したものがあるとここに来る
-            log::error!("The composition process was aborted");
-            break;
-        }
+    let stats = scheduler.run().or_fail()?;
+    if stats.error.get() {
+        return Err(orfail::Failure::new("video composition process failed").into());
     }
-    (encoded_frame_count > 0).or_fail_with(|()| "failed to encode frames".to_owned())?;
 
     // VMAF の下準備としての処理は全て完了した
-    progress_bar.finish();
     eprintln!("=> done\n");
 
     // vmaf コマンドを実行
@@ -290,10 +275,8 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
-        encoded_frame_count,
-        encoded_byte_size,
-        encoded_duration_seconds: Seconds::new(encoded_duration),
-        elapsed_seconds: Seconds::new(start_time.elapsed()),
+        encoded_frame_count: encoder_stats.total_output_video_frame_count.get() as usize,
+        elapsed_seconds: stats.elapsed_seconds,
         vmaf,
     };
     println!(
@@ -394,8 +377,6 @@ struct Output {
     height: usize,
     frame_rate: FrameRate,
     encoded_frame_count: usize,
-    encoded_byte_size: u64,
-    encoded_duration_seconds: Seconds,
     elapsed_seconds: Seconds,
     vmaf: VmafScoreStats,
 }
@@ -414,8 +395,6 @@ impl nojson::DisplayJson for Output {
             f.member("height", self.height)?;
             f.member("frame_rate", self.frame_rate)?;
             f.member("encoded_frame_count", self.encoded_frame_count)?;
-            f.member("encoded_byte_size", self.encoded_byte_size)?;
-            f.member("encoded_duration_seconds", self.encoded_duration_seconds)?;
             f.member("elapsed_seconds", self.elapsed_seconds)?;
             f.member("vmaf_min", self.vmaf.min)?;
             f.member("vmaf_max", self.vmaf.max)?;
@@ -433,4 +412,109 @@ struct VmafScoreStats {
     max: f64,
     mean: f64,
     harmonic_mean: f64,
+}
+
+// 処理対象のフレーム数を制限するためのプロセッサ
+#[derive(Debug)]
+struct FrameCountLimiter {
+    input_stream_id: MediaStreamId,
+    output_stream_id: MediaStreamId,
+    remaining_frame_count: usize,
+    queue: VecDeque<MediaSample>,
+}
+
+impl FrameCountLimiter {
+    fn new(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        total_frame_count: usize,
+    ) -> Self {
+        Self {
+            input_stream_id,
+            output_stream_id,
+            remaining_frame_count: total_frame_count,
+            queue: VecDeque::new(),
+        }
+    }
+}
+
+impl MediaProcessor for FrameCountLimiter {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: vec![self.output_stream_id],
+            stats: ProcessorStats::other("frame-count-limiter"),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        if let Some(sample) = input.sample
+            && let Some(n) = self.remaining_frame_count.checked_sub(1)
+        {
+            self.queue.push_back(sample);
+            self.remaining_frame_count = n;
+        } else {
+            // 指定数フレームを処理した or 入力がEOSに達した
+            self.remaining_frame_count = 0;
+        };
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if let Some(sample) = self.queue.pop_front() {
+            Ok(MediaProcessorOutput::Processed {
+                stream_id: self.output_stream_id,
+                sample,
+            })
+        } else if self.remaining_frame_count == 0 {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::pending(self.input_stream_id))
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ProgressBar {
+    input_stream_id: MediaStreamId,
+    eos: bool,
+    bar: indicatif::ProgressBar,
+}
+
+impl ProgressBar {
+    fn new(input_stream_id: MediaStreamId, total_frame_count: u64) -> Self {
+        Self {
+            input_stream_id,
+            eos: false,
+            bar: crate::arg_utils::create_frame_progress_bar(total_frame_count),
+        }
+    }
+}
+
+impl MediaProcessor for ProgressBar {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: Vec::new(),
+            stats: ProcessorStats::other("progress-bar"),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        if input.sample.is_some() {
+            self.bar.inc(1);
+        } else {
+            self.eos = true;
+            self.bar.finish();
+        };
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        if self.eos {
+            Ok(MediaProcessorOutput::Finished)
+        } else {
+            Ok(MediaProcessorOutput::pending(self.input_stream_id))
+        }
+    }
 }

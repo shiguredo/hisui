@@ -100,17 +100,17 @@ impl Composer {
             match mp4_writer.process_output().or_fail()? {
                 MediaProcessorOutput::Finished => break,
                 MediaProcessorOutput::Pending { awaiting_stream_id }
-                    if awaiting_stream_id == writer_input_audio_stream_id =>
+                    if awaiting_stream_id == Some(writer_input_audio_stream_id) =>
                 {
                     let input = MediaProcessorInput {
-                        stream_id: awaiting_stream_id,
+                        stream_id: writer_input_audio_stream_id,
                         sample: encoded_audio_rx.recv().map(MediaSample::audio_data),
                     };
                     mp4_writer.process_input(input).or_fail()?;
                 }
                 MediaProcessorOutput::Pending { awaiting_stream_id } => {
                     let input = MediaProcessorInput {
-                        stream_id: awaiting_stream_id,
+                        stream_id: awaiting_stream_id.expect("infallible"),
                         sample: encoded_video_rx.recv().map(MediaSample::video_frame),
                     };
                     mp4_writer.process_input(input).or_fail()?;
@@ -156,7 +156,13 @@ impl Composer {
             stats.clone(),
         );
 
-        let encoder = VideoEncoder::new(&self.layout, self.openh264_lib.clone()).or_fail()?;
+        let encoder = VideoEncoder::new(
+            &self.layout,
+            MediaStreamId::new(1000),
+            MediaStreamId::new(1001),
+            self.openh264_lib.clone(),
+        )
+        .or_fail()?;
         let encoded_video_rx =
             VideoEncoderThread::start(error_flag.clone(), mixed_video_rx, encoder, stats.clone());
         Ok(encoded_video_rx)

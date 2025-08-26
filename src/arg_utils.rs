@@ -29,9 +29,9 @@ pub fn create_time_progress_bar(show_progress_bar: bool, total_duration: Duratio
 }
 
 /// フレームベースのプログレスバーを作成する
-pub fn create_frame_progress_bar(show_progress_bar: bool, total_frames: u64) -> ProgressBar {
+pub fn create_frame_progress_bar(total_frames: u64) -> ProgressBar {
     create_progress_bar(
-        show_progress_bar,
+        true,
         total_frames,
         Some("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})"),
         None,
@@ -68,6 +68,7 @@ fn create_progress_bar(
     progress_bar
 }
 
+// TODO(atode): remove
 #[cfg(target_os = "macos")]
 pub fn maybe_limit_cpu_cores(cores: Option<NonZeroUsize>) -> orfail::Result<()> {
     if cores.is_some() {

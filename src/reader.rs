@@ -5,6 +5,7 @@ use orfail::OrFail;
 
 use crate::{
     audio::AudioData,
+    layout::AggregatedSourceInfo,
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
@@ -173,6 +174,19 @@ pub struct VideoReader {
 }
 
 impl VideoReader {
+    pub fn from_source_info(
+        output_stream_id: MediaStreamId,
+        source_info: &AggregatedSourceInfo,
+    ) -> orfail::Result<Self> {
+        Self::new(
+            output_stream_id,
+            source_info.id.clone(),
+            source_info.format,
+            source_info.start_timestamp,
+            source_info.timestamp_sorted_media_paths(),
+        )
+    }
+
     pub fn new(
         output_stream_id: MediaStreamId,
         source_id: SourceId,

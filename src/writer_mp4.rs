@@ -760,15 +760,11 @@ impl MediaProcessor for Mp4Writer {
             if let Some(id) = self.input_video_stream_id
                 && self.input_video_queue.is_empty()
             {
-                return Ok(MediaProcessorOutput::Pending {
-                    awaiting_stream_id: id,
-                });
+                return Ok(MediaProcessorOutput::pending(id));
             } else if let Some(id) = self.input_audio_stream_id
                 && self.input_audio_queue.is_empty()
             {
-                return Ok(MediaProcessorOutput::Pending {
-                    awaiting_stream_id: id,
-                });
+                return Ok(MediaProcessorOutput::pending(id));
             }
 
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);

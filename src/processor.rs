@@ -93,6 +93,10 @@ pub enum MediaProcessorOutput {
         sample: MediaSample,
     },
     Pending {
+        // 入力を待機しているストリームの ID
+        //
+        // None の場合は任意のストリームを待機していることを示す
+        //
         // [NOTE]
         // `Mp4Writer` のように複数の入力をとるプロセッサーが
         // 複数いた場合にデッドロックが発生する可能性がある
@@ -104,14 +108,16 @@ pub enum MediaProcessorOutput {
         //
         // もし発生した場合には `SyncSender` のバッファサイズを増やすか、
         // 問題となっているプロセッサーの実装を見直す必要がある
-        awaiting_stream_id: MediaStreamId,
+        awaiting_stream_id: Option<MediaStreamId>,
     },
     Finished,
 }
 
 impl MediaProcessorOutput {
     pub fn pending(awaiting_stream_id: MediaStreamId) -> Self {
-        Self::Pending { awaiting_stream_id }
+        Self::Pending {
+            awaiting_stream_id: Some(awaiting_stream_id),
+        }
     }
 
     pub fn audio_data(stream_id: MediaStreamId, data: AudioData) -> Self {
