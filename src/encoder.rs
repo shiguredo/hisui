@@ -37,11 +37,43 @@ pub struct AudioEncoder {
 }
 
 impl AudioEncoder {
-    pub fn new_opus(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
-        let input_stream_id = MediaStreamId::new(0);
-        let output_stream_id = MediaStreamId::new(1);
+    pub fn new(
+        layout: &Layout,
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+    ) -> orfail::Result<Self> {
+        match layout.audio_codec {
+            #[cfg(feature = "fdk-aac")]
+            CodecName::Aac => AudioEncoder::new_fdk_aac(
+                input_stream_id,
+                output_stream_id,
+                layout.audio_bitrate_bps(),
+            )
+            .or_fail(),
+            #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
+            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
+                input_stream_id,
+                output_stream_id,
+                layout.audio_bitrate_bps(),
+            )
+            .or_fail(),
+            #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
+            CodecName::Aac => Err(orfail::Failure::new("AAC output is not supported")),
+            CodecName::Opus => AudioEncoder::new_opus(
+                input_stream_id,
+                output_stream_id,
+                layout.audio_bitrate_bps(),
+            )
+            .or_fail(),
+            _ => unreachable!(),
+        }
+    }
 
+    pub fn new_opus(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        bitrate: NonZeroUsize,
+    ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::Opus, CodecName::Opus);
         Ok(Self {
             input_stream_id,

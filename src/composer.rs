@@ -17,7 +17,6 @@ use crate::{
     scheduler::Scheduler,
     source::{AudioSourceThread, VideoSourceThread},
     stats::{ProcessorStats, Seconds, SharedStats},
-    types::CodecName,
     video::VideoFrameReceiver,
     writer_mp4::Mp4Writer,
 };
@@ -111,6 +110,26 @@ impl Composer {
             video_mixer_output_stream_id,
         );
         scheduler.register(video_mixer).or_fail()?;
+
+        // エンコーダーを登録
+        let audio_encoder_output_stream_id = next_stream_id.fetch_add(1);
+        let audio_encoder = AudioEncoder::new(
+            &self.layout,
+            audio_mixer_output_stream_id,
+            audio_encoder_output_stream_id,
+        )
+        .or_fail()?;
+        scheduler.register(audio_encoder).or_fail()?;
+
+        let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
+        let video_encoder = VideoEncoder::new(
+            &self.layout,
+            video_mixer_output_stream_id,
+            video_encoder_output_stream_id,
+            self.openh264_lib.clone(),
+        )
+        .or_fail()?;
+        scheduler.register(video_encoder).or_fail()?;
 
         // 統計情報の準備（実際にファイル出力するかどうかに関わらず、集計自体は常に行う）
         let stats = SharedStats::new();
@@ -249,22 +268,9 @@ impl Composer {
             stats.clone(),
         );
 
-        let audio_encoder = match self.layout.audio_codec {
-            #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => {
-                AudioEncoder::new_fdk_aac(self.layout.audio_bitrate_bps()).or_fail()?
-            }
-            #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
-            CodecName::Aac => {
-                AudioEncoder::new_audio_toolbox_aac(self.layout.audio_bitrate_bps()).or_fail()?
-            }
-            #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
-            CodecName::Aac => {
-                return Err(orfail::Failure::new("AAC output is not supported"));
-            }
-            CodecName::Opus => AudioEncoder::new_opus(self.layout.audio_bitrate_bps()).or_fail()?,
-            _ => unreachable!(),
-        };
+        let audio_encoder =
+            AudioEncoder::new(&self.layout, MediaStreamId::new(0), MediaStreamId::new(1))
+                .or_fail()?;
         let encoded_audio_rx = AudioEncoderThread::start(
             error_flag.clone(),
             mixed_audio_rx,
