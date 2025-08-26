@@ -39,8 +39,8 @@ pub fn create_frame_progress_bar(show_progress_bar: bool, total_frames: u64) -> 
     )
 }
 
- fn create_progress_bar(
-   show_progress_bar: bool,
+fn create_progress_bar(
+    show_progress_bar: bool,
     total: u64,
     template: Option<&str>,
     unit: Option<&str>,
