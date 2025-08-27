@@ -16,7 +16,7 @@ use shiguredo_mp4::{
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, Seconds, VideoResolution},
+    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
     types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
@@ -140,9 +140,7 @@ impl Mp4VideoReaderInner {
         let resolution = (metadata.width, metadata.height);
 
         self.stats.total_sample_count.add(1);
-        self.stats
-            .total_track_seconds
-            .set(Seconds::new(timestamp + duration));
+        self.stats.total_track_duration.set(timestamp + duration);
         if self.stats.codec.get().is_none()
             && let Some(name) = format.codec_name()
         {
@@ -308,9 +306,7 @@ impl Mp4AudioReaderInner {
         let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
 
         self.stats.total_sample_count.add(1);
-        self.stats
-            .total_track_seconds
-            .set(Seconds::new(timestamp + duration));
+        self.stats.total_track_duration.set(timestamp + duration);
 
         Some(Ok(AudioData {
             source_id: Some(self.source_id.clone()),

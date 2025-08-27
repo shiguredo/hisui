@@ -10,7 +10,7 @@ use crate::{
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioMixerStats, ProcessorStats, Seconds},
+    stats::{AudioMixerStats, ProcessorStats},
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);
@@ -95,8 +95,8 @@ impl AudioMixer {
 
         self.stats.total_output_audio_data_count.add(1);
         self.stats
-            .total_output_audio_data_seconds
-            .add(Seconds::new(MIXED_AUDIO_DATA_DURATION));
+            .total_output_audio_data_duration
+            .add(MIXED_AUDIO_DATA_DURATION);
         self.stats
             .total_output_sample_count
             .add(MIXED_AUDIO_DATA_SAMPLES as u64);

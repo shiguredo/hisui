@@ -224,10 +224,10 @@ fn print_output_stats_summary(
 
         f.member(
             "output_audio_duration_seconds",
-            writer.total_audio_track_seconds.get_seconds(),
+            writer.total_audio_track_duration.get().as_secs_f32(),
         )?;
 
-        let duration = writer.total_audio_track_seconds.get_duration();
+        let duration = writer.total_audio_track_duration.get();
         if !duration.is_zero() {
             let bitrate = (writer.total_audio_sample_data_byte_size.get() as f32 * 8.0)
                 / duration.as_secs_f32();
@@ -246,10 +246,10 @@ fn print_output_stats_summary(
 
         f.member(
             "output_video_duration_seconds",
-            writer.total_video_track_seconds.get_seconds(),
+            writer.total_video_track_duration.get().as_secs_f32(),
         )?;
 
-        let duration = writer.total_video_track_seconds.get_duration();
+        let duration = writer.total_video_track_duration.get();
         if !duration.is_zero() {
             let bitrate = (writer.total_video_sample_data_byte_size.get() as f32 * 8.0)
                 / duration.as_secs_f32();
@@ -275,109 +275,109 @@ fn print_time_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
     stats: &Stats,
 ) -> std::fmt::Result {
-    let total_audio_decoder_processing_seconds = stats
+    let total_audio_decoder_processing_duration = stats
         .processors
         .iter()
         .filter_map(|decoder| match decoder {
             ProcessorStats::AudioDecoder(audio_decoder) => {
-                Some(audio_decoder.total_processing_seconds.get_duration())
+                Some(audio_decoder.total_processing_duration.get())
             }
             _ => None,
         })
         .sum::<Duration>();
-    if !total_audio_decoder_processing_seconds.is_zero() {
+    if !total_audio_decoder_processing_duration.is_zero() {
         f.member(
             "total_audio_decoder_processing_seconds",
-            total_audio_decoder_processing_seconds.as_secs_f64(),
+            total_audio_decoder_processing_duration.as_secs_f64(),
         )?;
     }
 
-    let total_video_decoder_processing_seconds = stats
+    let total_video_decoder_processing_duration = stats
         .processors
         .iter()
         .filter_map(|decoder| match decoder {
             ProcessorStats::VideoDecoder(video_decoder) => {
-                Some(video_decoder.total_processing_seconds.get_duration())
+                Some(video_decoder.total_processing_duration.get())
             }
             _ => None,
         })
         .sum::<Duration>();
-    if !total_video_decoder_processing_seconds.is_zero() {
+    if !total_video_decoder_processing_duration.is_zero() {
         f.member(
             "total_video_decoder_processing_seconds",
-            total_video_decoder_processing_seconds.as_secs_f64(),
+            total_video_decoder_processing_duration.as_secs_f64(),
         )?;
     }
 
-    let total_audio_encoder_processing_seconds = stats
+    let total_audio_encoder_processing_duration = stats
         .processors
         .iter()
         .filter_map(|encoder| match encoder {
             ProcessorStats::AudioEncoder(audio_encoder) => {
-                Some(audio_encoder.total_processing_seconds.get_duration())
+                Some(audio_encoder.total_processing_duration.get())
             }
             _ => None,
         })
         .sum::<Duration>();
-    if !total_audio_encoder_processing_seconds.is_zero() {
+    if !total_audio_encoder_processing_duration.is_zero() {
         f.member(
             "total_audio_encoder_processing_seconds",
-            total_audio_encoder_processing_seconds.as_secs_f64(),
+            total_audio_encoder_processing_duration.as_secs_f64(),
         )?;
     }
 
-    let total_video_encoder_processing_seconds = stats
+    let total_video_encoder_processing_duration = stats
         .processors
         .iter()
         .filter_map(|encoder| match encoder {
             ProcessorStats::VideoEncoder(video_encoder) => {
-                Some(video_encoder.total_processing_seconds.get_duration())
+                Some(video_encoder.total_processing_duration.get())
             }
             _ => None,
         })
         .sum::<Duration>();
-    if !total_video_encoder_processing_seconds.is_zero() {
+    if !total_video_encoder_processing_duration.is_zero() {
         f.member(
             "total_video_encoder_processing_seconds",
-            total_video_encoder_processing_seconds.as_secs_f64(),
+            total_video_encoder_processing_duration.as_secs_f64(),
         )?;
     }
 
-    let total_audio_mixer_processing_seconds = stats
+    let total_audio_mixer_processing_duration = stats
         .processors
         .iter()
         .filter_map(|mixer| match mixer {
             ProcessorStats::AudioMixer(audio_mixer) => {
-                Some(audio_mixer.total_processing_seconds.get_duration())
+                Some(audio_mixer.total_processing_duration.get())
             }
             _ => None,
         })
         .sum::<Duration>();
-    if !total_audio_mixer_processing_seconds.is_zero() {
+    if !total_audio_mixer_processing_duration.is_zero() {
         f.member(
             "total_audio_mixer_processing_seconds",
-            total_audio_mixer_processing_seconds.as_secs_f64(),
+            total_audio_mixer_processing_duration.as_secs_f64(),
         )?;
     }
 
-    let total_video_mixer_processing_seconds = stats
+    let total_video_mixer_processing_duration = stats
         .processors
         .iter()
         .filter_map(|mixer| match mixer {
             ProcessorStats::VideoMixer(video_mixer) => {
-                Some(video_mixer.total_processing_seconds.get_duration())
+                Some(video_mixer.total_processing_duration.get())
             }
             _ => None,
         })
         .sum::<Duration>();
-    if !total_video_mixer_processing_seconds.is_zero() {
+    if !total_video_mixer_processing_duration.is_zero() {
         f.member(
             "total_video_mixer_processing_seconds",
-            total_video_mixer_processing_seconds.as_secs_f64(),
+            total_video_mixer_processing_duration.as_secs_f64(),
         )?;
     }
 
-    f.member("elapsed_seconds", stats.elapsed_seconds)?;
+    f.member("elapsed_seconds", stats.elapsed_duration.as_secs_f32())?;
 
     Ok(())
 }

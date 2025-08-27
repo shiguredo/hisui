@@ -17,7 +17,7 @@ use crate::{
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
     /// 全体の合成に要した実時間
-    pub elapsed_seconds: Seconds,
+    pub elapsed_duration: Duration,
 
     /// 全体でひとつでもエラーが発生したら true になる
     pub error: SharedAtomicFlag,
@@ -50,50 +50,12 @@ impl Stats {
 impl nojson::DisplayJson for Stats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("elapsed_seconds", self.elapsed_seconds)?;
+            f.member("elapsed_seconds", self.elapsed_duration.as_secs_f32())?;
             f.member("error", self.error.get())?;
             f.member("processors", &self.processors)?;
             f.member("worker_threads", &self.worker_threads)?;
             Ok(())
         })
-    }
-}
-
-// TODO(atode): remove
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Seconds(Duration);
-
-impl nojson::DisplayJson for Seconds {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        write!(f.inner_mut(), "{}", self.0.as_secs_f32())
-    }
-}
-
-impl Seconds {
-    pub fn new(elapsed: Duration) -> Self {
-        Self(elapsed)
-    }
-
-    pub const fn get(self) -> Duration {
-        self.0
-    }
-}
-
-impl std::ops::AddAssign<Duration> for Seconds {
-    fn add_assign(&mut self, rhs: Duration) {
-        self.0 += rhs;
-    }
-}
-
-impl std::ops::AddAssign for Seconds {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl From<Seconds> for f32 {
-    fn from(value: Seconds) -> Self {
-        value.0.as_secs_f32()
     }
 }
 
@@ -112,7 +74,7 @@ pub enum ProcessorStats {
     Mp4Writer(Mp4WriterStats),
     Other {
         processor_type: String,
-        total_processing_seconds: SharedAtomicSeconds,
+        total_processing_duration: SharedAtomicDuration,
         error: SharedAtomicFlag,
     },
 }
@@ -121,28 +83,28 @@ impl ProcessorStats {
     pub fn other(processor_type: &str) -> Self {
         Self::Other {
             processor_type: processor_type.to_owned(),
-            total_processing_seconds: Default::default(),
+            total_processing_duration: Default::default(),
             error: Default::default(),
         }
     }
 
-    pub fn total_processing_seconds(&self) -> SharedAtomicSeconds {
+    pub fn total_processing_duration(&self) -> SharedAtomicDuration {
         match self {
-            ProcessorStats::Mp4AudioReader(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::Mp4VideoReader(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::WebmAudioReader(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::WebmVideoReader(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::AudioDecoder(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::VideoDecoder(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::AudioMixer(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::VideoMixer(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::AudioEncoder(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::VideoEncoder(stats) => stats.total_processing_seconds.clone(),
-            ProcessorStats::Mp4Writer(stats) => stats.total_processing_seconds.clone(),
+            ProcessorStats::Mp4AudioReader(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::Mp4VideoReader(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::WebmAudioReader(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::WebmVideoReader(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::AudioDecoder(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::VideoDecoder(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::AudioMixer(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::VideoMixer(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::AudioEncoder(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::VideoEncoder(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::Mp4Writer(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::Other {
-                total_processing_seconds,
+                total_processing_duration,
                 ..
-            } => total_processing_seconds.clone(),
+            } => total_processing_duration.clone(),
         }
     }
 
@@ -180,13 +142,13 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
             ProcessorStats::Other {
                 processor_type,
-                total_processing_seconds,
+                total_processing_duration,
                 error,
             } => f.object(|f| {
                 f.member("type", processor_type)?;
                 f.member(
                     "total_processing_seconds",
-                    total_processing_seconds.get_seconds(),
+                    total_processing_duration.get().as_secs_f32(),
                 )?;
                 f.member("error", error.get())
             }),
@@ -204,7 +166,7 @@ pub struct AudioMixerStats {
     pub total_output_audio_data_count: SharedAtomicCounter,
 
     /// ミキサーが生成した `AudioData` の合計尺
-    pub total_output_audio_data_seconds: SharedAtomicSeconds,
+    pub total_output_audio_data_duration: SharedAtomicDuration,
 
     /// ミキサーが生成したサンプルの合計数
     pub total_output_sample_count: SharedAtomicCounter,
@@ -218,7 +180,7 @@ pub struct AudioMixerStats {
     // TODO: 以下のふたつの項目は、個々のプロセッサではなくワーカースレッドが
     // 共通的に処理するものなので個別の統計構造体の外にだした方がいいかもしれない
     /// 合成処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -238,7 +200,7 @@ impl nojson::DisplayJson for AudioMixerStats {
             )?;
             f.member(
                 "total_output_audio_data_seconds",
-                self.total_output_audio_data_seconds.get_seconds(),
+                self.total_output_audio_data_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_output_sample_count",
@@ -254,7 +216,7 @@ impl nojson::DisplayJson for AudioMixerStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -274,7 +236,7 @@ pub struct VideoMixerStats {
     pub total_output_video_frame_count: SharedAtomicCounter,
 
     /// ミキサーが生成した `VideoFrame` の合計尺
-    pub total_output_video_frame_seconds: SharedAtomicSeconds,
+    pub total_output_video_frame_duration: SharedAtomicDuration,
 
     /// 出力から除去された映像フレームの合計数
     pub total_trimmed_video_frame_count: SharedAtomicCounter,
@@ -283,7 +245,7 @@ pub struct VideoMixerStats {
     pub total_extended_video_frame_count: SharedAtomicCounter,
 
     /// 合成処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -304,7 +266,7 @@ impl nojson::DisplayJson for VideoMixerStats {
             )?;
             f.member(
                 "total_output_video_frame_seconds",
-                self.total_output_video_frame_seconds.get_seconds(),
+                self.total_output_video_frame_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_trimmed_video_frame_count",
@@ -316,7 +278,7 @@ impl nojson::DisplayJson for VideoMixerStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -337,7 +299,7 @@ pub struct AudioEncoderStats {
     pub total_audio_data_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -349,7 +311,7 @@ impl AudioEncoderStats {
             engine,
             codec,
             total_audio_data_count: Default::default(),
-            total_processing_seconds: Default::default(),
+            total_processing_duration: Default::default(),
             error: Default::default(),
         }
     }
@@ -364,7 +326,7 @@ impl nojson::DisplayJson for AudioEncoderStats {
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -388,7 +350,7 @@ pub struct VideoEncoderStats {
     pub total_output_video_frame_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -401,7 +363,7 @@ impl VideoEncoderStats {
             codec,
             total_input_video_frame_count: Default::default(),
             total_output_video_frame_count: Default::default(),
-            total_processing_seconds: Default::default(),
+            total_processing_duration: Default::default(),
             error: Default::default(),
         }
     }
@@ -423,7 +385,7 @@ impl nojson::DisplayJson for VideoEncoderStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -447,7 +409,7 @@ pub struct AudioDecoderStats {
     pub total_audio_data_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -463,7 +425,7 @@ impl nojson::DisplayJson for AudioDecoderStats {
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -490,7 +452,7 @@ pub struct VideoDecoderStats {
     pub total_output_video_frame_count: SharedAtomicCounter,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// 解像度リスト
     pub resolutions: SharedSet<VideoResolution>,
@@ -516,7 +478,7 @@ impl nojson::DisplayJson for VideoDecoderStats {
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("resolutions", self.resolutions.get())?;
             f.member("error", self.error.get())?;
@@ -561,29 +523,25 @@ impl SharedAtomicCounter {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct SharedAtomicSeconds(SharedAtomicCounter);
+pub struct SharedAtomicDuration(SharedAtomicCounter);
 
-impl SharedAtomicSeconds {
-    pub fn new(n: Seconds) -> Self {
+impl SharedAtomicDuration {
+    pub fn new(n: Duration) -> Self {
         let v = Self::default();
         v.set(n);
         v
     }
 
-    pub fn add(&self, n: Seconds) {
-        self.0.add(n.get().as_nanos() as u64);
+    pub fn add(&self, n: Duration) {
+        self.0.add(n.as_nanos() as u64);
     }
 
-    pub fn set(&self, n: Seconds) {
-        self.0.set(n.get().as_nanos() as u64);
+    pub fn set(&self, n: Duration) {
+        self.0.set(n.as_nanos() as u64);
     }
 
-    pub fn get_seconds(&self) -> Seconds {
-        Seconds(Duration::from_nanos(self.0.get()))
-    }
-
-    pub fn get_duration(&self) -> Duration {
-        self.get_seconds().get()
+    pub fn get(&self) -> Duration {
+        Duration::from_nanos(self.0.get())
     }
 }
 
@@ -690,10 +648,10 @@ pub struct Mp4AudioReaderStats {
     pub total_sample_count: SharedAtomicCounter,
 
     /// 入力ファイルに含まれる音声トラックの尺
-    pub total_track_seconds: SharedAtomicSeconds,
+    pub total_track_duration: SharedAtomicDuration,
 
     /// 入力処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
@@ -714,11 +672,11 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             f.member("total_sample_count", self.total_sample_count.get())?;
             f.member(
                 "total_track_seconds",
-                self.total_track_seconds.get_seconds(),
+                self.total_track_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
@@ -748,10 +706,10 @@ pub struct Mp4VideoReaderStats {
     pub total_sample_count: SharedAtomicCounter,
 
     /// 入力ファイルに含まれる映像トラックの尺
-    pub total_track_seconds: SharedAtomicSeconds,
+    pub total_track_duration: SharedAtomicDuration,
 
     /// 入力処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
@@ -785,11 +743,11 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
             f.member("total_sample_count", self.total_sample_count.get())?;
             f.member(
                 "total_track_seconds",
-                self.total_track_seconds.get_seconds(),
+                self.total_track_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
@@ -819,10 +777,10 @@ pub struct WebmAudioReaderStats {
     pub total_simple_block_count: SharedAtomicCounter,
 
     /// 入力ファイルに含まれる音声トラックの尺
-    pub total_track_seconds: SharedAtomicSeconds,
+    pub total_track_duration: SharedAtomicDuration,
 
     /// 入力処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
@@ -847,11 +805,11 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
             )?;
             f.member(
                 "total_track_seconds",
-                self.total_track_seconds.get_seconds(),
+                self.total_track_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
@@ -881,10 +839,10 @@ pub struct WebmVideoReaderStats {
     pub total_simple_block_count: SharedAtomicCounter,
 
     /// 入力ファイルに含まれる映像トラックの尺
-    pub total_track_seconds: SharedAtomicSeconds,
+    pub total_track_duration: SharedAtomicDuration,
 
     /// 入力処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
@@ -909,11 +867,11 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
             )?;
             f.member(
                 "total_track_seconds",
-                self.total_track_seconds.get_seconds(),
+                self.total_track_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
@@ -956,13 +914,13 @@ pub struct Mp4WriterStats {
     pub total_video_sample_data_byte_size: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる音声トラックの尺
-    pub total_audio_track_seconds: SharedAtomicSeconds,
+    pub total_audio_track_duration: SharedAtomicDuration,
 
     /// 出力ファイルに含まれる映像トラックの尺
-    pub total_video_track_seconds: SharedAtomicSeconds,
+    pub total_video_track_duration: SharedAtomicDuration,
 
     /// MP4 出力処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -1002,15 +960,15 @@ impl nojson::DisplayJson for Mp4WriterStats {
             )?;
             f.member(
                 "total_audio_track_seconds",
-                self.total_audio_track_seconds.get_seconds(),
+                self.total_audio_track_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_video_track_seconds",
-                self.total_video_track_seconds.get_seconds(),
+                self.total_video_track_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -1025,10 +983,10 @@ pub struct WorkerThreadStats {
     pub processors: Vec<usize>,
 
     /// 処理部分に掛かった時間
-    pub total_processing_seconds: SharedAtomicSeconds,
+    pub total_processing_duration: SharedAtomicDuration,
 
     /// 入出力の待機時間
-    pub total_waiting_seconds: SharedAtomicSeconds,
+    pub total_waiting_duration: SharedAtomicDuration,
 }
 
 impl nojson::DisplayJson for WorkerThreadStats {
@@ -1037,11 +995,11 @@ impl nojson::DisplayJson for WorkerThreadStats {
             f.member("processors", &self.processors)?;
             f.member(
                 "total_processing_seconds",
-                self.total_processing_seconds.get_seconds(),
+                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member(
                 "total_waiting_seconds",
-                self.total_waiting_seconds.get_seconds(),
+                self.total_waiting_duration.get().as_secs_f32(),
             )?;
             Ok(())
         })

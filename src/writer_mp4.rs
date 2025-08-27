@@ -24,7 +24,7 @@ use crate::{
     media::{MediaSample, MediaStreamId},
     mixer_audio::MIXED_AUDIO_DATA_DURATION,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{Mp4WriterStats, ProcessorStats, Seconds},
+    stats::{Mp4WriterStats, ProcessorStats},
     video::VideoFrame,
 };
 
@@ -142,9 +142,9 @@ impl Mp4Writer {
 
     pub fn current_duration(&self) -> Duration {
         self.stats
-            .total_audio_track_seconds
-            .get_duration()
-            .max(self.stats.total_video_track_seconds.get_duration())
+            .total_audio_track_duration
+            .get()
+            .max(self.stats.total_video_track_duration.get())
     }
 
     fn append_video_frame(&mut self, new_chunk: bool) -> orfail::Result<()> {
@@ -191,9 +191,7 @@ impl Mp4Writer {
             .total_video_sample_data_byte_size
             .add(frame.data.len() as u64);
 
-        self.stats
-            .total_video_track_seconds
-            .add(Seconds::new(frame.duration));
+        self.stats.total_video_track_duration.add(frame.duration);
         self.appending_video_chunk = true;
         Ok(())
     }
@@ -242,9 +240,7 @@ impl Mp4Writer {
             .total_audio_sample_data_byte_size
             .add(data.data.len() as u64);
 
-        self.stats
-            .total_audio_track_seconds
-            .add(Seconds::new(data.duration));
+        self.stats.total_audio_track_duration.add(data.duration);
         self.appending_video_chunk = false;
         Ok(())
     }
@@ -323,11 +319,7 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             track_id,
-            duration: self
-                .stats
-                .total_audio_track_seconds
-                .get_duration()
-                .as_micros() as u64,
+            duration: self.stats.total_audio_track_duration.get().as_micros() as u64,
             layer: TkhdBox::DEFAULT_LAYER,
             alternate_group: TkhdBox::DEFAULT_ALTERNATE_GROUP,
             volume: TkhdBox::DEFAULT_AUDIO_VOLUME,
@@ -352,11 +344,7 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             track_id,
-            duration: self
-                .stats
-                .total_video_track_seconds
-                .get_duration()
-                .as_micros() as u64,
+            duration: self.stats.total_video_track_duration.get().as_micros() as u64,
             layer: TkhdBox::DEFAULT_LAYER,
             alternate_group: TkhdBox::DEFAULT_ALTERNATE_GROUP,
             volume: TkhdBox::DEFAULT_VIDEO_VOLUME,
@@ -378,11 +366,7 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             timescale: TIMESCALE,
-            duration: self
-                .stats
-                .total_audio_track_seconds
-                .get_duration()
-                .as_micros() as u64,
+            duration: self.stats.total_audio_track_duration.get().as_micros() as u64,
             language: MdhdBox::LANGUAGE_UNDEFINED,
         };
         let hdlr_box = HdlrBox {
@@ -409,11 +393,7 @@ impl Mp4Writer {
             creation_time: self.finalize_time,
             modification_time: self.finalize_time,
             timescale: TIMESCALE,
-            duration: self
-                .stats
-                .total_video_track_seconds
-                .get_duration()
-                .as_micros() as u64,
+            duration: self.stats.total_video_track_duration.get().as_micros() as u64,
             language: MdhdBox::LANGUAGE_UNDEFINED,
         };
         let hdlr_box = HdlrBox {

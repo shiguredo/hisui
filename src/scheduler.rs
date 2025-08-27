@@ -9,7 +9,7 @@ use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
 };
-use crate::stats::{ProcessorStats, Seconds, SharedAtomicFlag, Stats, WorkerThreadStats};
+use crate::stats::{ProcessorStats, SharedAtomicFlag, Stats, WorkerThreadStats};
 
 type MediaSampleReceiver = mpsc::Receiver<MediaSample>;
 type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;
@@ -243,7 +243,7 @@ impl Scheduler {
                 std::panic::resume_unwind(e);
             }
         }
-        handle.stats.elapsed_seconds = Seconds::new(start.elapsed());
+        handle.stats.elapsed_duration = start.elapsed();
         Ok(handle.stats)
     }
 
@@ -305,13 +305,8 @@ impl TaskRunner {
             let start = Instant::now();
             let result = self.tasks[i].run_until_block().or_fail();
             let elapsed = start.elapsed();
-            self.tasks[i]
-                .stats
-                .total_processing_seconds()
-                .add(Seconds::new(elapsed));
-            self.stats
-                .total_processing_seconds
-                .add(Seconds::new(elapsed));
+            self.tasks[i].stats.total_processing_duration().add(elapsed);
+            self.stats.total_processing_duration.add(elapsed);
 
             match result {
                 Err(e) => {
@@ -333,9 +328,7 @@ impl TaskRunner {
 
         if !did_something {
             std::thread::sleep(self.sleep_duration);
-            self.stats
-                .total_waiting_seconds
-                .add(Seconds::new(self.sleep_duration));
+            self.stats.total_waiting_duration.add(self.sleep_duration);
         }
     }
 }

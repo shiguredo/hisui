@@ -12,7 +12,7 @@ use crate::{
     media::MediaStreamId,
     metadata::SourceId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{ProcessorStats, Seconds, VideoMixerStats, VideoResolution},
+    stats::{ProcessorStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
     video::{VideoFormat, VideoFrame},
 };
@@ -242,9 +242,7 @@ impl VideoMixer {
         }
 
         self.stats.total_output_video_frame_count.add(1);
-        self.stats
-            .total_output_video_frame_seconds
-            .add(Seconds::new(duration));
+        self.stats.total_output_video_frame_duration.add(duration);
 
         Ok(VideoFrame {
             // 固定値
@@ -408,9 +406,7 @@ impl MediaProcessor for VideoMixer {
 
                 last_frame.duration += duration;
                 self.stats.total_extended_video_frame_count.add(1);
-                self.stats
-                    .total_output_video_frame_seconds
-                    .add(Seconds::new(duration)); // 出力フレーム数は増えないけど尺は伸びる
+                self.stats.total_output_video_frame_duration.add(duration); // 出力フレーム数は増えないけど尺は伸びる
 
                 continue;
             }

@@ -3,6 +3,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Duration,
 };
 
 use orfail::OrFail;
@@ -18,7 +19,7 @@ use crate::{
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::VideoReader,
     scheduler::Scheduler,
-    stats::{ProcessorStats, Seconds},
+    stats::ProcessorStats,
     types::EngineName,
     video::FrameRate,
     writer_yuv::YuvWriter,
@@ -276,7 +277,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
         encoded_frame_count: encoder_stats.total_output_video_frame_count.get() as usize,
-        elapsed_seconds: stats.elapsed_seconds,
+        elapsed_duration: stats.elapsed_duration,
         vmaf,
     };
     println!(
@@ -377,7 +378,7 @@ struct Output {
     height: usize,
     frame_rate: FrameRate,
     encoded_frame_count: usize,
-    elapsed_seconds: Seconds,
+    elapsed_duration: Duration,
     vmaf: VmafScoreStats,
 }
 
@@ -395,7 +396,7 @@ impl nojson::DisplayJson for Output {
             f.member("height", self.height)?;
             f.member("frame_rate", self.frame_rate)?;
             f.member("encoded_frame_count", self.encoded_frame_count)?;
-            f.member("elapsed_seconds", self.elapsed_seconds)?;
+            f.member("elapsed_seconds", self.elapsed_duration.as_secs_f32())?;
             f.member("vmaf_min", self.vmaf.min)?;
             f.member("vmaf_max", self.vmaf.max)?;
             f.member("vmaf_mean", self.vmaf.mean)?;

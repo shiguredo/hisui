@@ -9,7 +9,7 @@ use orfail::OrFail;
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
-    stats::{Seconds, WebmAudioReaderStats, WebmVideoReaderStats},
+    stats::{WebmAudioReaderStats, WebmVideoReaderStats},
     types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
@@ -386,8 +386,8 @@ impl WebmAudioReader {
 
         self.stats.total_simple_block_count.add(1);
         self.stats
-            .total_track_seconds
-            .set(Seconds::new(timestamp + self.last_duration));
+            .total_track_duration
+            .set(timestamp + self.last_duration);
 
         Ok(Some(AudioData {
             source_id: Some(self.source_id.clone()),
@@ -558,8 +558,8 @@ impl WebmVideoReader {
 
         self.stats.total_simple_block_count.add(1);
         self.stats
-            .total_track_seconds
-            .set(Seconds::new(timestamp + self.last_duration));
+            .total_track_duration
+            .set(timestamp + self.last_duration);
         if self.stats.codec.get().is_none()
             && let Some(name) = self.header.codec.codec_name()
         {
