@@ -215,6 +215,8 @@ pub struct AudioMixerStats {
     /// 出力から除去されたサンプルの合計数
     pub total_trimmed_sample_count: SharedAtomicCounter,
 
+    // TODO: 以下のふたつの項目は、個々のプロセッサではなくワーカースレッドが
+    // 共通的に処理するものなので個別の統計構造体の外にだした方がいいかもしれない
     /// 合成処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 
