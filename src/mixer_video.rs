@@ -350,6 +350,8 @@ impl MediaProcessor for VideoMixer {
         if let Some(sample) = input.sample {
             // キューに要素を追加する
             let frame = sample.expect_video_frame().or_fail()?;
+            (frame.format == VideoFormat::I420).or_fail()?;
+
             input_stream
                 .frame_queue
                 .push_back(ResizeCachedVideoFrame::new(frame));

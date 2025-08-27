@@ -1095,7 +1095,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
 
 /// 不正なフォーマットの映像フレームを送るテスト
 #[test]
-fn non_rgb_video_input_error() -> orfail::Result<()> {
+fn non_yuv_video_input_error() -> orfail::Result<()> {
     let input_stream_id = MediaStreamId::new(0);
     let total_duration = ms(1000);
 
@@ -1115,15 +1115,17 @@ fn non_rgb_video_input_error() -> orfail::Result<()> {
     );
 
     // 適当に不正なフォーマットを指定して VideoFrame を送る
-    // 入力映像フレームを送信する: 500 ms のフレームを二つ
+    // 入力映像フレームを送信する: 500 ms のフレームをひとつ
     let mut input_frame = video_frame(&source, size, ms(0), ms(500), 2);
     input_frame.format = VideoFormat::Av1;
-    mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id,
-            input_frame,
-        ))
-        .unwrap();
+    assert!(
+        mixer
+            .process_input(MediaProcessorInput::video_frame(
+                input_stream_id,
+                input_frame,
+            ))
+            .is_err()
+    );
     mixer
         .process_input(MediaProcessorInput::eos(input_stream_id))
         .unwrap();
@@ -1136,10 +1138,10 @@ fn non_rgb_video_input_error() -> orfail::Result<()> {
 
     // エラーは発生した
     let stats = mixer.stats();
-    assert!(stats.error.get());
+    assert!(!stats.error.get()); // このフラグはスケジューラ側で管理しているので、ここでは `true` にならない
 
     // 統計値をチェックする
-    assert_eq!(stats.total_input_video_frame_count.get(), 1);
+    assert_eq!(stats.total_input_video_frame_count.get(), 0);
     assert_eq!(stats.total_output_video_frame_count.get(), 0);
     assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(0));
     assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);

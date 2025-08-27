@@ -314,7 +314,7 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
     }
 
     // 不正なフォーマットのデータを送信
-    mixer.process_input(input).or_fail()?;
+    assert!(mixer.process_input(input).is_err());
     mixer.process_input(eos(0)).or_fail()?;
 
     // エラーになるので、出力も存在しない
@@ -325,7 +325,7 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
 
     // 統計値をチェックする
     let stats = mixer.stats();
-    assert!(stats.error.get());
+    assert!(!stats.error.get()); // このフラグはスケジューラ側で管理しているので、ここでは `true` にならない
     assert_eq!(stats.total_input_audio_data_count.get(), 0);
     assert_eq!(stats.total_output_audio_data_count.get(), 0);
     assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(0));
@@ -408,7 +408,8 @@ fn audio_data(
         duration,
         sample_entry: None,
     };
-    MediaProcessorInput::audio_data(MediaStreamId::new(i as u64), data)
+    let id = MediaStreamId::new(source.id.get().parse().expect("infallible"));
+    MediaProcessorInput::audio_data(id, data)
 }
 
 fn eos(i: usize) -> MediaProcessorInput {
