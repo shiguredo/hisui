@@ -250,12 +250,11 @@ impl Scheduler {
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
         for task in &mut self.tasks {
             for id in task.processor.spec().output_stream_ids {
-                let tx = self
-                    .stream_txs
-                    .get(&id)
-                    .cloned()
-                    .or_fail_with(|()| format!("BUG: missing output stream ID: {id:?}"))?;
-                task.output_stream_txs.insert(id, tx);
+                if let Some(tx) = self.stream_txs.get(&id).cloned() {
+                    task.output_stream_txs.insert(id, tx);
+                } else {
+                    // このストリームを入力に取るプロセッサがいない場合にはここにくる（正常系）
+                }
             }
         }
         Ok(())
