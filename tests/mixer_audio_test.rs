@@ -127,49 +127,45 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
 #[test]
 fn mix_three_sources_with_trim() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-
     // それぞれ期間が異なる三つのソース
     // trim をするので、合成後の尺は 260 ms になる
-    let (source0, input_tx0, input_rx0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
-    let (source1, input_tx1, input_rx1) = source(1, 60, 160); // 範囲: 60 ms ~ 160 ms
-    let (source2, input_tx2, input_rx2) = source(2, 200, 300); // 範囲: 200 ms ~ 300 ms
+    let (source0, input_stream_id0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
+    let (source1, input_stream_id1) = source(1, 60, 160); // 範囲: 60 ms ~ 160 ms
+    let (source2, input_stream_id2) = source(2, 200, 300); // 範囲: 200 ms ~ 300 ms
 
     // 空白期間は除去する
     let trim_span = (Duration::from_millis(160), Duration::from_millis(200));
 
-    let mut output_rx = AudioMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = AudioMixer::new(
         layout(
             &[source0.clone(), source1.clone(), source2.clone()],
             Some(trim_span),
         ),
-        vec![input_rx0, input_rx1, input_rx2],
-        stats.clone(),
+        vec![input_stream_id0, input_stream_id1, input_stream_id2],
+        OUTPUT_STREAM_ID,
     );
 
     // ソースに AudioData を供給する
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
-        input_tx0
-            .send(audio_data(&source0, i, duration, sample))
+        mixer
+            .process_input(audio_data(&source0, i, duration, sample))
             .or_fail()?;
-        input_tx1
-            .send(audio_data(&source1, i, duration, sample * 2))
+        mixer
+            .process_input(audio_data(&source1, i, duration, sample * 2))
             .or_fail()?;
-        input_tx2
-            .send(audio_data(&source2, i, duration, sample * 4))
+        mixer
+            .process_input(audio_data(&source2, i, duration, sample * 4))
             .or_fail()?;
     }
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
-    std::mem::drop(input_tx2);
+    mixer.process_input(eos(0)).or_fail()?;
+    mixer.process_input(eos(1)).or_fail()?;
+    mixer.process_input(eos(2)).or_fail()?;
 
     // source0 だけが存在する期間: 0 ms ~ 60 ms
     for _ in 0..3 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202);
         }
@@ -177,7 +173,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source0 と sourde1 が混在する期間: 60 ms ~ 100 ms
     for _ in 0..2 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202 + 0x0404);
         }
@@ -185,7 +181,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source1 だけが存在する期間: 100 ms ~ 160 ms
     for _ in 0..3 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0404);
         }
@@ -193,37 +189,35 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source2 だけが存在する期間: 200 ms ~ 300 ms
     for _ in 0..5 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0808);
         }
     }
 
     // 全てのソースの音声データの処理が終わったので、これ以上は出力もない
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計値をチェックする
-    stats.with_lock(|stats| {
-        let stats = audio_mixer_stats(stats);
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
-        assert_eq!(stats.total_output_audio_data_count.get(), 13); // 260 ms 分
-        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(260));
-        assert_eq!(
-            stats.total_output_sample_count.get(),
-            (SAMPLE_RATE as f64 * 0.26) as u64
-        );
-        assert_eq!(stats.total_output_filled_sample_count.get(), 0);
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
+    assert_eq!(stats.total_output_audio_data_count.get(), 13); // 260 ms 分
+    assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(260));
+    assert_eq!(
+        stats.total_output_sample_count.get(),
+        (SAMPLE_RATE as f64 * 0.26) as u64
+    );
+    assert_eq!(stats.total_output_filled_sample_count.get(), 0);
 
-        // 40 ms 分がトリムされた
-        assert_eq!(
-            stats.total_trimmed_sample_count.get(),
-            (SAMPLE_RATE as f64 * 0.04) as u64
-        );
-    });
+    // 40 ms 分がトリムされた
+    assert_eq!(
+        stats.total_trimmed_sample_count.get(),
+        (SAMPLE_RATE as f64 * 0.04) as u64
+    );
 
     Ok(())
 }
