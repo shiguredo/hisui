@@ -194,6 +194,10 @@ impl VideoMixer {
         }
     }
 
+    pub fn stats(&self) -> &VideoMixerStats {
+        &self.stats
+    }
+
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
             self.stats.total_output_video_frame_count.get()
