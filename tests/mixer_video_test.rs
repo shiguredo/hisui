@@ -2,16 +2,17 @@ use std::{
     collections::{BTreeMap, HashMap},
     num::NonZeroUsize,
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
 use hisui::{
-    channel::{self, ErrorFlag},
     layout::{AggregatedSourceInfo, Layout, Resolution},
     layout_region::{Grid, Region},
+    media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
-    mixer_video::VideoMixerThread,
-    stats::{ProcessorStats, SharedStats, Stats, VideoMixerStats},
+    mixer_video::VideoMixer,
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -29,29 +30,27 @@ const FPS: FrameRate = FrameRate {
 // 5 FPS なので、映像フレーム一つの尺は 200 ms
 const OUTPUT_FRAME_DURATION: Duration = Duration::from_millis(200);
 
+const OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(100);
+
 #[test]
 fn start_noop_video_mixer() {
-    let error_flag = ErrorFlag::new();
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[], &[], size(MIN_OUTPUT_WIDTH, MIN_OUTPUT_HEIGHT), None),
         Vec::new(),
-        SharedStats::new(),
+        OUTPUT_STREAM_ID,
     );
 
     // ミキサーへの入力が空なので、出力も空
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 }
 
 /// 一番単純な合成処理をテストする
 #[test]
 fn mix_single_source() {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx, input_rx) = channel::sync_channel_with_bound(1000);
+    let (input_stream_id,) = (MediaStreamId::new(0),);
     let total_duration = ms(1000);
 
     // 入力をそのまま出力するようなリージョン
@@ -63,23 +62,34 @@ fn mix_single_source() {
     region.grid.columns = 1;
     region.grid.assign_source(source.id.clone(), 0, 0);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[region], &[&source], size, None),
-        vec![input_rx],
-        stats.clone(),
+        vec![input_stream_id],
+        OUTPUT_STREAM_ID,
     );
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
     let input_frame0 = video_frame(&source, size, ms(0), ms(500), 2);
     let input_frame1 = video_frame(&source, size, ms(500), ms(500), 4);
-    input_tx.send(input_frame0.clone());
-    input_tx.send(input_frame1.clone());
-    std::mem::drop(input_tx);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id,
+            input_frame0.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id,
+            input_frame1.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .unwrap();
 
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
-        let frame = output_rx.recv().expect("failed to receive output frame");
+        let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
         assert_eq!(frame.width.get(), size.width);
         assert_eq!(frame.height.get(), size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
@@ -95,32 +105,27 @@ fn mix_single_source() {
     }
 
     // 全ての出力を取得した
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 2);
-        assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(1000)
-        );
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 2);
+    assert_eq!(stats.total_output_video_frame_count.get(), 5);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(1000)
+    );
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
 }
 
 /// リージョンの位置調整が入った合成のテスト
 #[test]
 fn mix_single_source_with_offset() {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx, input_rx) = channel::sync_channel_with_bound(1000);
+    let input_stream_id = MediaStreamId::new(0);
     let total_duration = ms(1000);
 
     // 各種サイズ (region, cell となるにつれて、外側に 1 pixel ずつのマージンや枠線が入る）
@@ -138,24 +143,35 @@ fn mix_single_source_with_offset() {
     region.grid.columns = 1;
     region.grid.assign_source(source.id.clone(), 0, 0);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[region], &[&source], output_size, None),
-        vec![input_rx],
-        stats.clone(),
+        vec![input_stream_id],
+        OUTPUT_STREAM_ID,
     );
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
     // フレームのサイズは cell_size よりも大きいので合成時にリサイズされる
     let input_frame0 = video_frame(&source, output_size, ms(0), ms(500), 2);
     let input_frame1 = video_frame(&source, output_size, ms(500), ms(500), 4);
-    input_tx.send(input_frame0.clone());
-    input_tx.send(input_frame1.clone());
-    std::mem::drop(input_tx);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id,
+            input_frame0.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id,
+            input_frame1.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .unwrap();
 
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
-        let frame = output_rx.recv().expect("failed to receive output frame");
+        let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
         assert_eq!(frame.width.get(), output_size.width);
         assert_eq!(frame.height.get(), output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
@@ -207,32 +223,27 @@ fn mix_single_source_with_offset() {
     }
 
     // 全ての出力を取得した
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 2);
-        assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(1000)
-        );
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 2);
+    assert_eq!(stats.total_output_video_frame_count.get(), 5);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(1000)
+    );
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
 }
 
 /// 一つのソースを複数のリージョンで使用するテスト
 #[test]
 fn single_source_multiple_regions() {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx, input_rx) = channel::sync_channel_with_bound(1000);
+    let input_stream_id = MediaStreamId::new(0);
     let total_duration = ms(1000);
 
     // 各種サイズ
@@ -262,24 +273,35 @@ fn single_source_multiple_regions() {
     region1.grid.columns = 1;
     region1.grid.assign_source(source.id.clone(), 0, 0);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[region0, region1], &[&source], output_size, None),
-        vec![input_rx],
-        stats.clone(),
+        vec![input_stream_id],
+        OUTPUT_STREAM_ID,
     );
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
     // リサイズを防ぐために cell_size を指定する
     let input_frame0 = video_frame(&source, cell_size, ms(0), ms(500), 2);
     let input_frame1 = video_frame(&source, cell_size, ms(500), ms(500), 4);
-    input_tx.send(input_frame0.clone());
-    input_tx.send(input_frame1.clone());
-    std::mem::drop(input_tx);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id,
+            input_frame0.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id,
+            input_frame1.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .unwrap();
 
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
-        let frame = output_rx.recv().expect("failed to receive output frame");
+        let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
         assert_eq!(frame.width.get(), output_size.width);
         assert_eq!(frame.height.get(), output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
@@ -331,32 +353,27 @@ fn single_source_multiple_regions() {
     }
 
     // 全ての出力を取得した
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 2);
-        assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(1000)
-        );
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 2);
+    assert_eq!(stats.total_output_video_frame_count.get(), 5);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(1000)
+    );
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
 }
 
 /// 一つのソースを複数のリージョンで使用するテストのリサイズあり版
 #[test]
 fn single_source_multiple_regions_with_resize() {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx, input_rx) = channel::sync_channel_with_bound(1000);
+    let input_stream_id = MediaStreamId::new(0);
     let total_duration = ms(1000);
 
     // 各種サイズ
@@ -389,25 +406,31 @@ fn single_source_multiple_regions_with_resize() {
     region1.grid.columns = 1;
     region1.grid.assign_source(source.id.clone(), 0, 0);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[region0, region1], &[&source], output_size, None),
-        vec![input_rx],
-        stats.clone(),
+        vec![input_stream_id],
+        OUTPUT_STREAM_ID,
     );
 
     // 入力映像フレームを送信する
     // サイズは cell_size0 に合わせているので region1 での合成の際にはリサイズが発生する
     let input_frame = video_frame(&source, cell_size0, ms(0), ms(1000), 2);
-    input_tx.send(input_frame);
-    std::mem::drop(input_tx);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id,
+            input_frame,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .unwrap();
 
     // 比較用に最初の合成フレームを覚えておく
-    let first_frame = output_rx.recv().expect("failed to receive output frame");
+    let first_frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
 
     // 残りの合成結果を取得する
     for i in 1..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
-        let frame = output_rx.recv().expect("failed to receive output frame");
+        let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
         assert_eq!(frame.width.get(), output_size.width);
         assert_eq!(frame.height.get(), output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
@@ -418,33 +441,28 @@ fn single_source_multiple_regions_with_resize() {
     }
 
     // 全ての出力を取得した
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 1);
-        assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(1000)
-        );
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 1);
+    assert_eq!(stats.total_output_video_frame_count.get(), 5);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(1000)
+    );
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
 }
 
 /// トリム期間（入力ソースが存在しなくて合成結果から除去される期間）がある場合のテスト
 #[test]
 fn mix_with_trim() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx0, input_rx0) = channel::sync_channel_with_bound(1000);
-    let (input_tx1, input_rx1) = channel::sync_channel_with_bound(1000);
+    let input_stream_id0 = MediaStreamId::new(0);
+    let input_stream_id1 = MediaStreamId::new(1);
 
     // ソースは二つ用意する（途中に空白期間がある）
     let source0 = source(0, ms(0), ms(400)); // 0 ms ~ 400 ms
@@ -463,52 +481,61 @@ fn mix_with_trim() -> orfail::Result<()> {
     region.grid.assign_source(source0.id.clone(), 0, 0);
     region.grid.assign_source(source1.id.clone(), 0, 0);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[region], &[&source0, &source1], size, Some(trim_span)),
-        vec![input_rx0, input_rx1],
-        stats.clone(),
+        vec![input_stream_id0, input_stream_id1],
+        OUTPUT_STREAM_ID,
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
     let input_frame0 = video_frame(&source0, size, ms(0), ms(400), 2);
     let input_frame1 = video_frame(&source1, size, ms(800), ms(200), 4);
-    input_tx0.send(input_frame0.clone());
-    input_tx1.send(input_frame1.clone());
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id0,
+            input_frame0.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id1,
+            input_frame1.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .unwrap();
 
     // 合成結果を取得する
-    while let Some(frame) = output_rx.peek() {
-        if ms(400) <= frame.timestamp {
-            // 最初のソースの期間は過ぎた
-            break;
-        }
-        let frame = output_rx.recv().expect("infallible");
+    let mut frames = Vec::new();
+    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output().or_fail()? {
+        let frame = sample.expect_video_frame().or_fail()?;
+        frames.push(frame);
+    }
+
+    // 最初のソースの期間
+    for frame in frames.iter().take_while(|f| f.timestamp < ms(400)) {
         assert_eq!(frame.data, input_frame0.data);
     }
 
-    while let Some(frame) = output_rx.recv() {
-        // 残りは全部次のソースに対応する出力（トリム期間の結果は出力されないので）
+    // 残りは全部次のソースに対応する出力（トリム期間の結果は出力されないので）
+    for frame in frames.iter().skip_while(|f| f.timestamp < ms(400)) {
         assert_eq!(frame.data, input_frame1.data);
     }
 
-    // エラーは発生していない
-    assert!(!error_flag.get());
-
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 2);
-        assert_eq!(stats.total_output_video_frame_count.get(), 3);
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 2);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(600)
-        );
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 2);
+    assert_eq!(stats.total_output_video_frame_count.get(), 3);
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 2);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(600)
+    );
 
     Ok(())
 }
@@ -516,10 +543,8 @@ fn mix_with_trim() -> orfail::Result<()> {
 /// `mix_with_trim()` とほぼ同様だけど、トリムは行わないテスト（空白期間は黒塗りになる）
 #[test]
 fn mix_without_trim() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx0, input_rx0) = channel::sync_channel_with_bound(1000);
-    let (input_tx1, input_rx1) = channel::sync_channel_with_bound(1000);
+    let input_stream_id0 = MediaStreamId::new(0);
+    let input_stream_id1 = MediaStreamId::new(1);
 
     // ソースは二つ用意する（途中に空白期間がある）
     let source0 = source(0, ms(0), ms(400)); // 0 ms ~ 400 ms
@@ -537,28 +562,43 @@ fn mix_without_trim() -> orfail::Result<()> {
     region.grid.assign_source(source0.id.clone(), 0, 0);
     region.grid.assign_source(source1.id.clone(), 0, 0);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[region], &[&source0, &source1], size, None),
-        vec![input_rx0, input_rx1],
-        stats.clone(),
+        vec![input_stream_id0, input_stream_id1],
+        OUTPUT_STREAM_ID,
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
     let input_frame0 = video_frame(&source0, size, ms(0), ms(400), 2);
     let input_frame1 = video_frame(&source1, size, ms(800), ms(200), 4);
-    input_tx0.send(input_frame0.clone());
-    input_tx1.send(input_frame1.clone());
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id0,
+            input_frame0.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id1,
+            input_frame1.clone(),
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .unwrap();
 
     // 合成結果を取得する
-    // まずは最初のソースの期間
-    while let Some(frame) = output_rx.peek() {
-        if ms(400) <= frame.timestamp {
-            break;
-        }
-        let frame = output_rx.recv().expect("infallible");
+    let mut frames = Vec::new();
+    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output().or_fail()? {
+        let frame = sample.expect_video_frame().or_fail()?;
+        frames.push(frame);
+    }
+
+    // 最初のソースの期間
+    for frame in frames.iter().take_while(|f| f.timestamp < ms(400)) {
         assert_eq!(frame.data, input_frame0.data);
     }
 
@@ -567,35 +607,28 @@ fn mix_without_trim() -> orfail::Result<()> {
         EvenUsize::new(size.width).or_fail()?,
         EvenUsize::new(size.height).or_fail()?,
     );
-    while let Some(frame) = output_rx.peek() {
-        if ms(800) <= frame.timestamp {
-            break;
-        }
-        let frame = output_rx.recv().expect("infallible");
+    for frame in frames
+        .iter()
+        .filter(|f| ms(400) <= f.timestamp && f.timestamp < ms(800))
+    {
         assert_eq!(frame.data, black.data);
     }
 
-    // 残りは全部次のソースに対応する出力（トリム期間の結果は出力されないので）
-    while let Some(frame) = output_rx.recv() {
+    // 残りは全部次のソースに対応する出力
+    for frame in frames.iter().filter(|f| ms(800) <= f.timestamp) {
         assert_eq!(frame.data, input_frame1.data);
     }
 
-    // エラーは発生していない
-    assert!(!error_flag.get());
-
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 2);
-        assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(1000)
-        );
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 2);
+    assert_eq!(stats.total_output_video_frame_count.get(), 5);
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(1000)
+    );
 
     Ok(())
 }
@@ -610,12 +643,10 @@ fn mix_without_trim() -> orfail::Result<()> {
 /// ただし、右下のセルは最初から最後まで未割り当てとする。
 #[test]
 fn mix_multiple_cells() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx0, input_rx0) = channel::sync_channel_with_bound(1000);
-    let (input_tx1, input_rx1) = channel::sync_channel_with_bound(1000);
-    let (input_tx2, input_rx2) = channel::sync_channel_with_bound(1000);
-    let (input_tx3, input_rx3) = channel::sync_channel_with_bound(1000);
+    let input_stream_id0 = MediaStreamId::new(0);
+    let input_stream_id1 = MediaStreamId::new(1);
+    let input_stream_id2 = MediaStreamId::new(2);
+    let input_stream_id3 = MediaStreamId::new(3);
 
     // ソースを用意する
     let source0 = source(0, ms(0), ms(1000)); // 0 ms ~ 1000 ms (全期間)
@@ -646,16 +677,20 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     region.top_border_pixels = EvenUsize::truncating_new(2);
     region.left_border_pixels = EvenUsize::truncating_new(2);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(
             &[region],
             &[&source0, &source1, &source2, &source3],
             region_size,
             None,
         ),
-        vec![input_rx0, input_rx1, input_rx2, input_rx3],
-        stats.clone(),
+        vec![
+            input_stream_id0,
+            input_stream_id1,
+            input_stream_id2,
+            input_stream_id3,
+        ],
+        OUTPUT_STREAM_ID,
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
@@ -663,18 +698,46 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     let input_frame1 = video_frame(&source1, region_size, ms(400), ms(400), 2);
     let input_frame2 = video_frame(&source2, region_size, ms(200), ms(800), 3);
     let input_frame3 = video_frame(&source3, region_size, ms(0), ms(600), 4);
-    input_tx0.send(input_frame0);
-    input_tx1.send(input_frame1);
-    input_tx2.send(input_frame2);
-    input_tx3.send(input_frame3);
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
-    std::mem::drop(input_tx2);
-    std::mem::drop(input_tx3);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id0,
+            input_frame0,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id1,
+            input_frame1,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id2,
+            input_frame2,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id3,
+            input_frame3,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id2))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id3))
+        .unwrap();
 
     // 合成結果を取得する
     // 0 ms ~ 200 ms の期間は source0 と source3 だけ
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -696,7 +759,7 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 200 ms ~ 400 ms の期間は source0, source2, source3
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -718,7 +781,7 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 400 ms ~ 600 msの期間は source1, source2, source3
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -740,7 +803,7 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 600 ms ~ 800 msの期間は source1, source2
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -762,7 +825,7 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 800 ms ~ 1000 msの期間は source0, source2
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -784,24 +847,21 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 全ての出力を取得した
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 4);
-        assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(1000)
-        );
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 4);
+    assert_eq!(stats.total_output_video_frame_count.get(), 5);
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(1000)
+    );
 
     Ok(())
 }
@@ -809,12 +869,10 @@ fn mix_multiple_cells() -> orfail::Result<()> {
 /// 枠線なしで複数セルがある場合のテスト
 #[test]
 fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx0, input_rx0) = channel::sync_channel_with_bound(1000);
-    let (input_tx1, input_rx1) = channel::sync_channel_with_bound(1000);
-    let (input_tx2, input_rx2) = channel::sync_channel_with_bound(1000);
-    let (input_tx3, input_rx3) = channel::sync_channel_with_bound(1000);
+    let input_stream_id0 = MediaStreamId::new(0);
+    let input_stream_id1 = MediaStreamId::new(1);
+    let input_stream_id2 = MediaStreamId::new(2);
+    let input_stream_id3 = MediaStreamId::new(3);
 
     // ソースを用意する
     let source0 = source(0, ms(0), ms(1000)); // 0 ms ~ 1000 ms (全期間)
@@ -846,16 +904,20 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
     region.left_border_pixels = EvenUsize::truncating_new(0); // 枠線なし
     region.inner_border_pixels = EvenUsize::truncating_new(0); // 枠線なし
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(
             &[region],
             &[&source0, &source1, &source2, &source3],
             region_size,
             None,
         ),
-        vec![input_rx0, input_rx1, input_rx2, input_rx3],
-        stats.clone(),
+        vec![
+            input_stream_id0,
+            input_stream_id1,
+            input_stream_id2,
+            input_stream_id3,
+        ],
+        OUTPUT_STREAM_ID,
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
@@ -863,18 +925,46 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
     let input_frame1 = video_frame(&source1, region_size, ms(400), ms(400), 2);
     let input_frame2 = video_frame(&source2, region_size, ms(200), ms(800), 3);
     let input_frame3 = video_frame(&source3, region_size, ms(0), ms(600), 4);
-    input_tx0.send(input_frame0);
-    input_tx1.send(input_frame1);
-    input_tx2.send(input_frame2);
-    input_tx3.send(input_frame3);
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
-    std::mem::drop(input_tx2);
-    std::mem::drop(input_tx3);
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id0,
+            input_frame0,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id1,
+            input_frame1,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id2,
+            input_frame2,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::video_frame(
+            input_stream_id3,
+            input_frame3,
+        ))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id2))
+        .unwrap();
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id3))
+        .unwrap();
 
     // 合成結果を取得する
     // 0 ms ~ 200 ms の期間は source0 と source3 だけ
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
         [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -896,7 +986,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 200 ms ~ 400 ms の期間は source0, source2, source3
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
         [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
@@ -918,7 +1008,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 400 ms ~ 600 msの期間は source1, source2, source3
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
         [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
@@ -940,7 +1030,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 600 ms ~ 800 msの期間は source1, source2
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
         [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3],
@@ -962,7 +1052,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 800 ms ~ 1000 msの期間は source0, source2
-    let frame = output_rx.recv().expect("failed to receive output frame");
+    let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
     let expected = grayscale_image([
         [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
         [1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3],
@@ -984,34 +1074,29 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
     assert_eq!(frame.data, expected);
 
     // 全ての出力を取得した
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計情報を確認する
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 4);
-        assert_eq!(stats.total_output_video_frame_count.get(), 5);
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-        assert_eq!(
-            stats.total_output_video_frame_seconds.get_duration(),
-            ms(1000)
-        );
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_video_frame_count.get(), 4);
+    assert_eq!(stats.total_output_video_frame_count.get(), 5);
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
+    assert_eq!(
+        stats.total_output_video_frame_seconds.get_duration(),
+        ms(1000)
+    );
 
     Ok(())
 }
 
 /// 不正なフォーマットの映像フレームを送るテスト
 #[test]
-fn non_rgb_video_input_error() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-    let (input_tx, input_rx) = channel::sync_channel_with_bound(1000);
+fn non_yuv_video_input_error() -> orfail::Result<()> {
+    let input_stream_id = MediaStreamId::new(0);
     let total_duration = ms(1000);
 
     // 入力をそのまま出力するようなリージョン
@@ -1023,36 +1108,43 @@ fn non_rgb_video_input_error() -> orfail::Result<()> {
     region.grid.columns = 1;
     region.grid.assign_source(source.id.clone(), 0, 0);
 
-    let mut output_rx = VideoMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = VideoMixer::new(
         layout(&[region], &[&source], size, None),
-        vec![input_rx],
-        stats.clone(),
+        vec![input_stream_id],
+        OUTPUT_STREAM_ID,
     );
 
     // 適当に不正なフォーマットを指定して VideoFrame を送る
-    // 入力映像フレームを送信する: 500 ms のフレームを二つ
+    // 入力映像フレームを送信する: 500 ms のフレームをひとつ
     let mut input_frame = video_frame(&source, size, ms(0), ms(500), 2);
     input_frame.format = VideoFormat::Av1;
-    input_tx.send(input_frame);
-    std::mem::drop(input_tx);
+    assert!(
+        mixer
+            .process_input(MediaProcessorInput::video_frame(
+                input_stream_id,
+                input_frame,
+            ))
+            .is_err()
+    );
+    mixer
+        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .unwrap();
 
     // エラーになるので、出力も存在しない
-    assert!(output_rx.recv().is_none());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // エラーは発生した
-    assert!(error_flag.get());
+    let stats = mixer.stats();
+    assert!(!stats.error.get()); // このフラグはスケジューラ側で管理しているので、ここでは `true` にならない
 
     // 統計値をチェックする
-    stats.with_lock(|stats| {
-        let stats = video_mixer_stats(stats);
-
-        assert!(stats.error.get());
-        assert_eq!(stats.total_input_video_frame_count.get(), 1);
-        assert_eq!(stats.total_output_video_frame_count.get(), 0);
-        assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(0));
-        assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
-    });
+    assert_eq!(stats.total_input_video_frame_count.get(), 0);
+    assert_eq!(stats.total_output_video_frame_count.get(), 0);
+    assert_eq!(stats.total_output_video_frame_seconds.get_duration(), ms(0));
+    assert_eq!(stats.total_trimmed_video_frame_count.get(), 0);
 
     Ok(())
 }
@@ -1188,16 +1280,13 @@ fn grayscale_image<const W: usize, const H: usize>(image: [[u8; W]; H]) -> Vec<u
     yuv
 }
 
-fn video_mixer_stats(stats: &Stats) -> &VideoMixerStats {
-    stats
-        .processors
-        .iter()
-        .find_map(|x| {
-            if let ProcessorStats::VideoMixer(x) = x {
-                Some(x)
-            } else {
-                None
-            }
-        })
-        .expect("infallible")
+fn next_mixed_frame(mixer: &mut VideoMixer) -> orfail::Result<Arc<VideoFrame>> {
+    mixer
+        .process_output()
+        .or_fail()?
+        .expect_processed()
+        .or_fail()?
+        .1
+        .expect_video_frame()
+        .or_fail()
 }

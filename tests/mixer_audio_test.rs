@@ -1,75 +1,66 @@
-use std::{collections::BTreeMap, path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
-    audio::{
-        AudioData, AudioDataReceiver, AudioDataSyncSender, AudioFormat, CHANNELS, SAMPLE_RATE,
-    },
-    channel::{self, ErrorFlag},
+    audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, Layout, Resolution},
+    media::{MediaSample, MediaStreamId},
     metadata::{SourceId, SourceInfo},
-    mixer_audio::AudioMixerThread,
-    stats::{AudioMixerStats, ProcessorStats, Seconds, SharedStats, Stats},
+    mixer_audio::AudioMixer,
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
+    stats::Seconds,
     types::CodecName,
     video::FrameRate,
 };
 use orfail::OrFail;
 
+const OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(100);
+
 #[test]
 fn start_noop_audio_mixer() {
-    let error_flag = ErrorFlag::new();
-    let mut output_rx = AudioMixerThread::start(
-        error_flag.clone(),
-        layout(&[], None),
-        Vec::new(),
-        SharedStats::new(),
-    );
+    let mut mixer = AudioMixer::new(layout(&[], None), Vec::new(), OUTPUT_STREAM_ID);
 
     // ミキサーへの入力が空なので、出力も空
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 }
 
 #[test]
 fn mix_three_sources_without_trim() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-
     // それぞれ期間が異なる三つのソース
     // trim はしないので、合成後の尺は 300 ms になる
-    let (source0, input_tx0, input_rx0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
-    let (source1, input_tx1, input_rx1) = source(1, 60, 160); // 範囲: 60 ms ~ 160 ms
-    let (source2, input_tx2, input_rx2) = source(2, 200, 300); // 範囲: 200 ms ~ 300 ms
+    let (source0, input_stream_id0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
+    let (source1, input_stream_id1) = source(1, 60, 160); // 範囲: 60 ms ~ 160 ms
+    let (source2, input_stream_id2) = source(2, 200, 300); // 範囲: 200 ms ~ 300 ms
 
-    let mut output_rx = AudioMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = AudioMixer::new(
         layout(&[source0.clone(), source1.clone(), source2.clone()], None),
-        vec![input_rx0, input_rx1, input_rx2],
-        stats.clone(),
+        vec![input_stream_id0, input_stream_id1, input_stream_id2],
+        OUTPUT_STREAM_ID,
     );
 
     // ソースに AudioData を供給する
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
-        input_tx0
-            .send(audio_data(&source0, i, duration, sample))
+        mixer
+            .process_input(audio_data(&source0, i, duration, sample))
             .or_fail()?;
-        input_tx1
-            .send(audio_data(&source1, i, duration, sample * 2))
+        mixer
+            .process_input(audio_data(&source1, i, duration, sample * 2))
             .or_fail()?;
-        input_tx2
-            .send(audio_data(&source2, i, duration, sample * 4))
+        mixer
+            .process_input(audio_data(&source2, i, duration, sample * 4))
             .or_fail()?;
     }
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
-    std::mem::drop(input_tx2);
+    mixer.process_input(eos(0)).or_fail()?;
+    mixer.process_input(eos(1)).or_fail()?;
+    mixer.process_input(eos(2)).or_fail()?;
 
     // source0 だけが存在する期間: 0 ms ~ 60 ms
     for _ in 0..3 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202);
         }
@@ -77,7 +68,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // source0 と sourde1 が混在する期間: 60 ms ~ 100 ms
     for _ in 0..2 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202 + 0x0404);
         }
@@ -85,7 +76,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // source1 だけが存在する期間: 100 ms ~ 160 ms
     for _ in 0..3 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0404);
         }
@@ -93,7 +84,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // 空白期間: 160 ms ~ 200 ms
     for _ in 0..2 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0);
         }
@@ -101,86 +92,80 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // source2 だけが存在する期間: 200 ms ~ 300 ms
     for _ in 0..5 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0808);
         }
     }
 
     // 全てのソースの音声データの処理が終わったので、これ以上は出力もない
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計値をチェックする
-    stats.with_lock(|stats| {
-        let stats = audio_mixer_stats(stats);
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
-        assert_eq!(stats.total_output_audio_data_count.get(), 15); // 300 ms 分
-        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(300));
-        assert_eq!(
-            stats.total_output_sample_count.get(),
-            (SAMPLE_RATE as f64 * 0.3) as u64
-        );
-        assert_eq!(
-            stats.total_output_filled_sample_count.get(),
-            (SAMPLE_RATE as f64 * 0.04) as u64
-        );
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
+    assert_eq!(stats.total_output_audio_data_count.get(), 15); // 300 ms 分
+    assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(300));
+    assert_eq!(
+        stats.total_output_sample_count.get(),
+        (SAMPLE_RATE as f64 * 0.3) as u64
+    );
+    assert_eq!(
+        stats.total_output_filled_sample_count.get(),
+        (SAMPLE_RATE as f64 * 0.04) as u64
+    );
 
-        // trim=false なのでトリム期間はなし
-        assert_eq!(stats.total_trimmed_sample_count.get(), 0);
-    });
+    // trim=false なのでトリム期間はなし
+    assert_eq!(stats.total_trimmed_sample_count.get(), 0);
 
     Ok(())
 }
 
 #[test]
 fn mix_three_sources_with_trim() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-
     // それぞれ期間が異なる三つのソース
     // trim をするので、合成後の尺は 260 ms になる
-    let (source0, input_tx0, input_rx0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
-    let (source1, input_tx1, input_rx1) = source(1, 60, 160); // 範囲: 60 ms ~ 160 ms
-    let (source2, input_tx2, input_rx2) = source(2, 200, 300); // 範囲: 200 ms ~ 300 ms
+    let (source0, input_stream_id0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
+    let (source1, input_stream_id1) = source(1, 60, 160); // 範囲: 60 ms ~ 160 ms
+    let (source2, input_stream_id2) = source(2, 200, 300); // 範囲: 200 ms ~ 300 ms
 
     // 空白期間は除去する
     let trim_span = (Duration::from_millis(160), Duration::from_millis(200));
 
-    let mut output_rx = AudioMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = AudioMixer::new(
         layout(
             &[source0.clone(), source1.clone(), source2.clone()],
             Some(trim_span),
         ),
-        vec![input_rx0, input_rx1, input_rx2],
-        stats.clone(),
+        vec![input_stream_id0, input_stream_id1, input_stream_id2],
+        OUTPUT_STREAM_ID,
     );
 
     // ソースに AudioData を供給する
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
-        input_tx0
-            .send(audio_data(&source0, i, duration, sample))
+        mixer
+            .process_input(audio_data(&source0, i, duration, sample))
             .or_fail()?;
-        input_tx1
-            .send(audio_data(&source1, i, duration, sample * 2))
+        mixer
+            .process_input(audio_data(&source1, i, duration, sample * 2))
             .or_fail()?;
-        input_tx2
-            .send(audio_data(&source2, i, duration, sample * 4))
+        mixer
+            .process_input(audio_data(&source2, i, duration, sample * 4))
             .or_fail()?;
     }
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
-    std::mem::drop(input_tx2);
+    mixer.process_input(eos(0)).or_fail()?;
+    mixer.process_input(eos(1)).or_fail()?;
+    mixer.process_input(eos(2)).or_fail()?;
 
     // source0 だけが存在する期間: 0 ms ~ 60 ms
     for _ in 0..3 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202);
         }
@@ -188,7 +173,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source0 と sourde1 が混在する期間: 60 ms ~ 100 ms
     for _ in 0..2 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202 + 0x0404);
         }
@@ -196,7 +181,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source1 だけが存在する期間: 100 ms ~ 160 ms
     for _ in 0..3 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0404);
         }
@@ -204,37 +189,35 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source2 だけが存在する期間: 200 ms ~ 300 ms
     for _ in 0..5 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0808);
         }
     }
 
     // 全てのソースの音声データの処理が終わったので、これ以上は出力もない
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計値をチェックする
-    stats.with_lock(|stats| {
-        let stats = audio_mixer_stats(stats);
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
-        assert_eq!(stats.total_output_audio_data_count.get(), 13); // 260 ms 分
-        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(260));
-        assert_eq!(
-            stats.total_output_sample_count.get(),
-            (SAMPLE_RATE as f64 * 0.26) as u64
-        );
-        assert_eq!(stats.total_output_filled_sample_count.get(), 0);
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
+    assert_eq!(stats.total_output_audio_data_count.get(), 13); // 260 ms 分
+    assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(260));
+    assert_eq!(
+        stats.total_output_sample_count.get(),
+        (SAMPLE_RATE as f64 * 0.26) as u64
+    );
+    assert_eq!(stats.total_output_filled_sample_count.get(), 0);
 
-        // 40 ms 分がトリムされた
-        assert_eq!(
-            stats.total_trimmed_sample_count.get(),
-            (SAMPLE_RATE as f64 * 0.04) as u64
-        );
-    });
+    // 40 ms 分がトリムされた
+    assert_eq!(
+        stats.total_trimmed_sample_count.get(),
+        (SAMPLE_RATE as f64 * 0.04) as u64
+    );
 
     Ok(())
 }
@@ -242,77 +225,71 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 /// AudioData.duration がソース毎に異なる場合のテスト
 #[test]
 fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-
     // 100 ms のソースを三つ用意する
-    let (source0, input_tx0, input_rx0) = source(0, 0, 100);
-    let (source1, input_tx1, input_rx1) = source(1, 0, 100);
-    let (source2, input_tx2, input_rx2) = source(2, 0, 100);
+    let (source0, input_stream_id0) = source(0, 0, 100);
+    let (source1, input_stream_id1) = source(1, 0, 100);
+    let (source2, input_stream_id2) = source(2, 0, 100);
 
-    let mut output_rx = AudioMixerThread::start(
-        error_flag.clone(),
+    let mut mixer = AudioMixer::new(
         layout(&[source0.clone(), source1.clone(), source2.clone()], None),
-        vec![input_rx0, input_rx1, input_rx2],
-        stats.clone(),
+        vec![input_stream_id0, input_stream_id1, input_stream_id2],
+        OUTPUT_STREAM_ID,
     );
 
     // それぞれのソースに AudioData を供給する
     for i in 0..10 {
         let sample = 2;
         let duration = Duration::from_millis(10); // 尺は 10 ms
-        input_tx0
-            .send(audio_data(&source0, i, duration, sample))
+        mixer
+            .process_input(audio_data(&source0, i, duration, sample))
             .or_fail()?;
     }
     for i in 0..4 {
         let sample = 4;
         let duration = Duration::from_millis(25); // 尺は 25 ms
-        input_tx1
-            .send(audio_data(&source1, i, duration, sample))
+        mixer
+            .process_input(audio_data(&source1, i, duration, sample))
             .or_fail()?;
     }
     for i in 0..50 {
         let sample = 8;
         let duration = Duration::from_millis(2); // 尺は 2 ms
-        input_tx2
-            .send(audio_data(&source2, i, duration, sample))
+        mixer
+            .process_input(audio_data(&source2, i, duration, sample))
             .or_fail()?;
     }
-    std::mem::drop(input_tx0);
-    std::mem::drop(input_tx1);
-    std::mem::drop(input_tx2);
+    mixer.process_input(eos(0)).or_fail()?;
+    mixer.process_input(eos(1)).or_fail()?;
+    mixer.process_input(eos(2)).or_fail()?;
 
     // 合成結果を確認する (合成後の AudioData.duraiton は 20 ms に固定）
     for _ in 0..5 {
-        let audio_data = output_rx.recv().or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0E0E);
         }
     }
 
     // 全てのソースの音声データの処理が終わったので、これ以上は出力もない
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生していない
-    assert!(!error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計値をチェックする
-    stats.with_lock(|stats| {
-        let stats = audio_mixer_stats(stats);
-        assert!(!stats.error.get());
-        assert_eq!(stats.total_input_audio_data_count.get(), 10 + 4 + 50);
-        assert_eq!(stats.total_output_audio_data_count.get(), 5); // 100 ms = 20 ms * 5
-        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(100));
-        assert_eq!(
-            stats.total_output_sample_count.get(),
-            (SAMPLE_RATE as f64 * 0.1) as u64
-        );
+    let stats = mixer.stats();
+    assert!(!stats.error.get());
+    assert_eq!(stats.total_input_audio_data_count.get(), 10 + 4 + 50);
+    assert_eq!(stats.total_output_audio_data_count.get(), 5); // 100 ms = 20 ms * 5
+    assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(100));
+    assert_eq!(
+        stats.total_output_sample_count.get(),
+        (SAMPLE_RATE as f64 * 0.1) as u64
+    );
 
-        // 空白期間はないので無音補完やトリムは発生しない
-        assert_eq!(stats.total_output_filled_sample_count.get(), 0);
-        assert_eq!(stats.total_trimmed_sample_count.get(), 0);
-    });
+    // 空白期間はないので無音補完やトリムは発生しない
+    assert_eq!(stats.total_output_filled_sample_count.get(), 0);
+    assert_eq!(stats.total_trimmed_sample_count.get(), 0);
 
     Ok(())
 }
@@ -320,41 +297,41 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
 /// 不正なフォーマットの音声データを送るテスト
 #[test]
 fn non_pcm_audio_input_error() -> orfail::Result<()> {
-    let error_flag = ErrorFlag::new();
-    let stats = SharedStats::new();
-
-    let (source, input_tx, input_rx) = source(0, 0, 100);
-    let mut output_rx = AudioMixerThread::start(
-        error_flag.clone(),
+    let (source, input_stream_id) = source(0, 0, 100);
+    let mut mixer = AudioMixer::new(
         layout(&[source.clone()], None),
-        vec![input_rx],
-        stats.clone(),
+        vec![input_stream_id],
+        OUTPUT_STREAM_ID,
     );
 
     // 適当に不正なフォーマットを指定して AudioData を送る
     let duration = Duration::from_millis(20);
-    let mut audio_data = audio_data(&source, 0, duration, 0);
-    audio_data.format = AudioFormat::Opus;
-    input_tx.send(audio_data).or_fail()?;
-    std::mem::drop(input_tx);
+    let mut input = audio_data(&source, 0, duration, 0);
+    // MediaProcessorInput から AudioData を取得して format を変更
+    if let Some(MediaSample::Audio(audio_data)) = &mut input.sample {
+        let audio_data = Arc::make_mut(audio_data);
+        audio_data.format = AudioFormat::Opus;
+    }
+
+    // 不正なフォーマットのデータを送信
+    assert!(mixer.process_input(input).is_err());
+    mixer.process_input(eos(0)).or_fail()?;
 
     // エラーになるので、出力も存在しない
-    assert!(output_rx.recv().is_none());
-
-    // エラーは発生した
-    assert!(error_flag.get());
+    assert!(matches!(
+        mixer.process_output(),
+        Ok(MediaProcessorOutput::Finished)
+    ));
 
     // 統計値をチェックする
-    stats.with_lock(|stats| {
-        let stats = audio_mixer_stats(stats);
-        assert!(stats.error.get());
-        assert_eq!(stats.total_input_audio_data_count.get(), 0);
-        assert_eq!(stats.total_output_audio_data_count.get(), 0);
-        assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(0));
-        assert_eq!(stats.total_output_sample_count.get(), 0);
-        assert_eq!(stats.total_output_filled_sample_count.get(), 0);
-        assert_eq!(stats.total_trimmed_sample_count.get(), 0);
-    });
+    let stats = mixer.stats();
+    assert!(!stats.error.get()); // このフラグはスケジューラ側で管理しているので、ここでは `true` にならない
+    assert_eq!(stats.total_input_audio_data_count.get(), 0);
+    assert_eq!(stats.total_output_audio_data_count.get(), 0);
+    assert_eq!(stats.total_output_audio_data_seconds.get_seconds(), ms(0));
+    assert_eq!(stats.total_output_sample_count.get(), 0);
+    assert_eq!(stats.total_output_filled_sample_count.get(), 0);
+    assert_eq!(stats.total_trimmed_sample_count.get(), 0);
 
     Ok(())
 }
@@ -398,11 +375,7 @@ fn layout(audio_sources: &[SourceInfo], trim_span: Option<(Duration, Duration)>)
     }
 }
 
-fn source(
-    id: usize,
-    start_time_ms: u64,
-    end_time_ms: u64,
-) -> (SourceInfo, AudioDataSyncSender, AudioDataReceiver) {
+fn source(id: usize, start_time_ms: u64, end_time_ms: u64) -> (SourceInfo, MediaStreamId) {
     let source = SourceInfo {
         id: SourceId::new(&id.to_string()),
         start_timestamp: Duration::from_millis(start_time_ms),
@@ -413,17 +386,19 @@ fn source(
         video: true,
         format: Default::default(),
     };
-
-    // テストでは全てのソースが同じスレッドから送られるので、詰まらないようにチャネルの上限を大きくしておく
-    let (tx, rx) = channel::sync_channel_with_bound(1000);
-    (source, tx, rx)
+    (source, MediaStreamId::new(id as u64))
 }
 
-fn audio_data(source: &SourceInfo, i: usize, duration: Duration, sample: u8) -> AudioData {
+fn audio_data(
+    source: &SourceInfo,
+    i: usize,
+    duration: Duration,
+    sample: u8,
+) -> MediaProcessorInput {
     let sample_bytes = 2; // 一つのサンプルは i16 で表現されるので 2 バイト
     let sample_count =
         (SAMPLE_RATE as f64 * duration.as_secs_f64()) as usize * CHANNELS as usize * sample_bytes;
-    AudioData {
+    let data = AudioData {
         source_id: Some(source.id.clone()),
         data: vec![sample; sample_count],
         format: AudioFormat::I16Be,
@@ -432,23 +407,26 @@ fn audio_data(source: &SourceInfo, i: usize, duration: Duration, sample: u8) -> 
         timestamp: source.start_timestamp + duration * i as u32,
         duration,
         sample_entry: None,
-    }
+    };
+    let id = MediaStreamId::new(source.id.get().parse().expect("infallible"));
+    MediaProcessorInput::audio_data(id, data)
+}
+
+fn eos(i: usize) -> MediaProcessorInput {
+    MediaProcessorInput::eos(MediaStreamId::new(i as u64))
 }
 
 fn ms(value: u64) -> Seconds {
     Seconds::new(Duration::from_millis(value))
 }
 
-fn audio_mixer_stats(stats: &Stats) -> &AudioMixerStats {
-    stats
-        .processors
-        .iter()
-        .find_map(|x| {
-            if let ProcessorStats::AudioMixer(x) = x {
-                Some(x)
-            } else {
-                None
-            }
-        })
-        .expect("infallible")
+fn next_mixed_data(mixer: &mut AudioMixer) -> orfail::Result<Arc<AudioData>> {
+    mixer
+        .process_output()
+        .or_fail()?
+        .expect_processed()
+        .or_fail()?
+        .1
+        .expect_audio_data()
+        .or_fail()
 }

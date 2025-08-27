@@ -87,10 +87,7 @@ impl Mp4Writer {
             appending_video_chunk: true,
             stats: Mp4WriterStats::default(),
         };
-
-        let (result, elapsed) = Seconds::elapsed(|| this.init(layout).or_fail());
-        result?;
-        this.stats.total_processing_seconds.set(elapsed);
+        this.init(layout).or_fail()?;
 
         Ok(this)
     }
@@ -770,14 +767,11 @@ impl MediaProcessor for Mp4Writer {
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
             let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
 
-            let (result, elapsed) = Seconds::elapsed(|| {
-                self.handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                    .or_fail()
-            });
+            let in_progress = self
+                .handle_next_audio_and_video(audio_timestamp, video_timestamp)
+                .or_fail()?;
 
-            self.stats.total_processing_seconds.add(elapsed);
-
-            if !result? {
+            if !in_progress {
                 return Ok(MediaProcessorOutput::Finished);
             }
         }

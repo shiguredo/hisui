@@ -147,6 +147,10 @@ impl SourceId {
     pub fn new(id: &str) -> Self {
         Self(Arc::new(id.to_owned()))
     }
+
+    pub fn get(&self) -> &str {
+        &self.0
+    }
 }
 
 impl From<SourceId> for String {

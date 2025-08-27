@@ -8,9 +8,6 @@ use shiguredo_mp4::{
 
 use crate::{metadata::SourceId, types::CodecName};
 
-pub type AudioDataSyncSender = crate::channel::SyncSender<AudioData>;
-pub type AudioDataReceiver = crate::channel::Receiver<AudioData>;
-
 // 現時点では 48000 固定
 pub const SAMPLE_RATE: u16 = 48000;
 

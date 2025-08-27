@@ -7,15 +7,14 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
-    channel::{self, ErrorFlag},
     layout::Layout,
     layout_region::Region,
     media::MediaStreamId,
     metadata::SourceId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{ProcessorStats, Seconds, SharedStats, VideoMixerStats, VideoResolution},
+    stats::{ProcessorStats, Seconds, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
-    video::{VideoFormat, VideoFrame, VideoFrameReceiver, VideoFrameSyncSender},
+    video::{VideoFormat, VideoFrame},
 };
 
 // 入力がこの期間更新されなかった場合には、以後は合成ではなく
@@ -29,80 +28,6 @@ const TIMESTAMP_GAP_THRESHOLD: Duration = Duration::from_secs(60);
 //
 // 値は適当なので必要に応じて調整すること
 const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60);
-
-#[derive(Debug)]
-pub struct VideoMixerThread {
-    input_rxs: Vec<VideoFrameReceiver>,
-    output_tx: VideoFrameSyncSender,
-    inner: VideoMixer,
-}
-
-impl VideoMixerThread {
-    pub fn start(
-        error_flag: ErrorFlag,
-        layout: Layout,
-        input_rxs: Vec<VideoFrameReceiver>,
-        shared_stats: SharedStats,
-    ) -> VideoFrameReceiver {
-        let (tx, rx) = channel::sync_channel();
-        let input_stream_ids = (0..input_rxs.len())
-            .map(|i| MediaStreamId::new(i as u64))
-            .collect();
-        let output_stream_id = MediaStreamId::new(input_rxs.len() as u64);
-        let inner = VideoMixer::new(layout, input_stream_ids, output_stream_id);
-        let mut this = Self {
-            input_rxs,
-            output_tx: tx,
-            inner,
-        };
-        std::thread::spawn(move || {
-            log::debug!("video mixer started");
-            if let Err(e) = this.run().or_fail() {
-                error_flag.set();
-                this.inner.spec().stats.set_error();
-                log::error!("failed to mix video sources: {e}");
-            }
-            log::debug!("video mixer finished");
-
-            shared_stats.with_lock(|stats| {
-                stats.processors.push(this.inner.spec().stats);
-            });
-        });
-        rx
-    }
-
-    fn run(&mut self) -> orfail::Result<()> {
-        loop {
-            match self.inner.process_output().or_fail()? {
-                MediaProcessorOutput::Finished => break,
-                MediaProcessorOutput::Processed { sample, .. } => {
-                    let frame = sample.expect_video_frame().or_fail()?;
-
-                    // 今の実装ではここの参照カウントは常に 1 となるので必ず成功する
-                    // [NOTE] 将来的には `run()` 自体がなくなるので、このコードも暫定的なもの
-                    let frame = std::sync::Arc::into_inner(frame).or_fail()?;
-
-                    if !self.output_tx.send(frame) {
-                        // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                        log::info!("receiver of mixed video stream has been closed");
-                        break;
-                    }
-                }
-                MediaProcessorOutput::Pending { awaiting_stream_id } => {
-                    let stream_id = awaiting_stream_id.expect("infallible");
-                    let i = stream_id.get() as usize;
-                    let input = if let Some(frame) = self.input_rxs[i].recv() {
-                        MediaProcessorInput::video_frame(stream_id, frame)
-                    } else {
-                        MediaProcessorInput::eos(stream_id)
-                    };
-                    self.inner.process_input(input).or_fail()?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
@@ -269,6 +194,10 @@ impl VideoMixer {
         }
     }
 
+    pub fn stats(&self) -> &VideoMixerStats {
+        &self.stats
+    }
+
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
             self.stats.total_output_video_frame_count.get()
@@ -421,6 +350,8 @@ impl MediaProcessor for VideoMixer {
         if let Some(sample) = input.sample {
             // キューに要素を追加する
             let frame = sample.expect_video_frame().or_fail()?;
+            (frame.format == VideoFormat::I420).or_fail()?;
+
             input_stream
                 .frame_queue
                 .push_back(ResizeCachedVideoFrame::new(frame));
@@ -485,12 +416,9 @@ impl MediaProcessor for VideoMixer {
             }
 
             // 現在のフレームを合成する
-            //
-            // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-            let (result, elapsed) = Seconds::elapsed(|| self.mix(now).or_fail());
-            self.stats.total_processing_seconds.add(elapsed);
+            let mixed_frame = self.mix(now).or_fail()?;
 
-            if let Some(frame) = self.last_mixed_frame.replace(result?) {
+            if let Some(frame) = self.last_mixed_frame.replace(mixed_frame) {
                 return Ok(MediaProcessorOutput::video_frame(
                     self.output_stream_id,
                     frame,

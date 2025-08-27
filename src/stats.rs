@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::{
@@ -13,57 +13,6 @@ use crate::{
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
-
-// TODO(atode): remove
-#[derive(Debug, Clone)]
-pub struct SharedStats {
-    inner: Arc<Mutex<Stats>>,
-}
-
-impl Default for SharedStats {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SharedStats {
-    pub fn new() -> Self {
-        let inner = Arc::new(Mutex::new(Stats::default()));
-        Self { inner }
-    }
-
-    pub fn with_lock<F, T>(&self, f: F) -> Option<T>
-    where
-        F: FnOnce(&mut Stats) -> T,
-    {
-        match self.inner.lock() {
-            Ok(mut stats) => Some(f(&mut stats)),
-            Err(e) => {
-                // 統計情報の更新ができなくても致命的ではないので警告に止める
-                log::warn!("failed to acquire stats lock: {e}");
-                None
-            }
-        }
-    }
-
-    pub fn save(&self, output_file_path: &Path) {
-        self.with_lock(|stats| {
-            let json = nojson::json(|f| {
-                f.set_indent_size(2);
-                f.set_spacing(true);
-                f.value(&stats)
-            })
-            .to_string();
-            if let Err(e) = std::fs::write(output_file_path, json) {
-                // 統計が出力できなくても全体を失敗扱いにはしない
-                log::warn!(
-                    "failed to write stats JSON: path={}, reason={e}",
-                    output_file_path.display()
-                );
-            }
-        });
-    }
-}
 
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
@@ -78,6 +27,24 @@ pub struct Stats {
 
     /// プロセッサを実行するワーカースレッドの統計情報
     pub worker_threads: Vec<WorkerThreadStats>,
+}
+
+impl Stats {
+    pub fn save(&self, output_file_path: &Path) {
+        let json = nojson::json(|f| {
+            f.set_indent_size(2);
+            f.set_spacing(true);
+            f.value(&self)
+        })
+        .to_string();
+        if let Err(e) = std::fs::write(output_file_path, json) {
+            // 統計が出力できなくても全体を失敗扱いにはしない
+            log::warn!(
+                "failed to write stats JSON: path={}, reason={e}",
+                output_file_path.display()
+            );
+        }
+    }
 }
 
 impl nojson::DisplayJson for Stats {
@@ -105,24 +72,6 @@ impl nojson::DisplayJson for Seconds {
 impl Seconds {
     pub fn new(elapsed: Duration) -> Self {
         Self(elapsed)
-    }
-
-    pub fn elapsed<F, T>(f: F) -> (T, Self)
-    where
-        F: FnOnce() -> T,
-    {
-        let start_time = Instant::now();
-        let value = f();
-        (value, Self::new(start_time.elapsed()))
-    }
-
-    pub fn try_elapsed<F, T>(f: F) -> orfail::Result<(T, Self)>
-    where
-        F: FnOnce() -> orfail::Result<T>,
-    {
-        let start_time = Instant::now();
-        let value = f()?;
-        Ok((value, Self::new(start_time.elapsed())))
     }
 
     pub const fn get(self) -> Duration {
@@ -266,6 +215,8 @@ pub struct AudioMixerStats {
     /// 出力から除去されたサンプルの合計数
     pub total_trimmed_sample_count: SharedAtomicCounter,
 
+    // TODO: 以下のふたつの項目は、個々のプロセッサではなくワーカースレッドが
+    // 共通的に処理するものなので個別の統計構造体の外にだした方がいいかもしれない
     /// 合成処理部分に掛かった時間
     pub total_processing_seconds: SharedAtomicSeconds,
 

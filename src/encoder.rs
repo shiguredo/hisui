@@ -13,7 +13,6 @@ use crate::encoder_fdk_aac::FdkAacEncoder;
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
     audio::AudioData,
-    channel::{self, ErrorFlag},
     encoder_libvpx::LibvpxEncoder,
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
@@ -21,7 +20,7 @@ use crate::{
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioEncoderStats, ProcessorStats, Seconds, SharedStats, VideoEncoderStats},
+    stats::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -37,11 +36,43 @@ pub struct AudioEncoder {
 }
 
 impl AudioEncoder {
-    pub fn new_opus(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
-        let input_stream_id = MediaStreamId::new(0);
-        let output_stream_id = MediaStreamId::new(1);
+    pub fn new(
+        layout: &Layout,
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+    ) -> orfail::Result<Self> {
+        match layout.audio_codec {
+            #[cfg(feature = "fdk-aac")]
+            CodecName::Aac => AudioEncoder::new_fdk_aac(
+                input_stream_id,
+                output_stream_id,
+                layout.audio_bitrate_bps(),
+            )
+            .or_fail(),
+            #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
+            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
+                input_stream_id,
+                output_stream_id,
+                layout.audio_bitrate_bps(),
+            )
+            .or_fail(),
+            #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
+            CodecName::Aac => Err(orfail::Failure::new("AAC output is not supported")),
+            CodecName::Opus => AudioEncoder::new_opus(
+                input_stream_id,
+                output_stream_id,
+                layout.audio_bitrate_bps(),
+            )
+            .or_fail(),
+            _ => unreachable!(),
+        }
+    }
 
+    fn new_opus(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        bitrate: NonZeroUsize,
+    ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::Opus, CodecName::Opus);
         Ok(Self {
             input_stream_id,
@@ -54,11 +85,11 @@ impl AudioEncoder {
     }
 
     #[cfg(feature = "fdk-aac")]
-    pub fn new_fdk_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
-        let input_stream_id = MediaStreamId::new(0);
-        let output_stream_id = MediaStreamId::new(1);
-
+    fn new_fdk_aac(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        bitrate: NonZeroUsize,
+    ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::FdkAac, CodecName::Aac);
         Ok(Self {
             input_stream_id,
@@ -71,11 +102,11 @@ impl AudioEncoder {
     }
 
     #[cfg(target_os = "macos")]
-    pub fn new_audio_toolbox_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        // TODO: スケジューリングスレッドの導入タイミングでちゃんとする
-        let input_stream_id = MediaStreamId::new(0);
-        let output_stream_id = MediaStreamId::new(1);
-
+    fn new_audio_toolbox_aac(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        bitrate: NonZeroUsize,
+    ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::AudioToolbox, CodecName::Aac);
         Ok(Self {
             input_stream_id,
@@ -85,36 +116,6 @@ impl AudioEncoder {
             eos: false,
             inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate).or_fail()?,
         })
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn encode(&mut self, data: &AudioData) -> orfail::Result<Option<AudioData>> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: Some(MediaSample::audio_data(data.clone())),
-        };
-        self.process_input(input).or_fail()?;
-        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
-        else {
-            return Ok(None);
-        };
-        let encoded = sample.expect_audio_data().or_fail()?;
-        Ok(Some(std::sync::Arc::into_inner(encoded).or_fail()?))
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: None,
-        };
-        self.process_input(input).or_fail()?;
-        let MediaProcessorOutput::Processed { sample, .. } = self.process_output().or_fail()?
-        else {
-            return Ok(None);
-        };
-        let encoded = sample.expect_audio_data().or_fail()?;
-        Ok(Some(std::sync::Arc::into_inner(encoded).or_fail()?))
     }
 
     pub fn name(&self) -> EngineName {
@@ -167,16 +168,13 @@ impl MediaProcessor for AudioEncoder {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let (encoded, elapsed) = if let Some(sample) = input.sample {
+        let encoded = if let Some(sample) = input.sample {
             let data = sample.expect_audio_data().or_fail()?;
-            Seconds::try_elapsed(|| self.inner.encode(&data).or_fail())
+            self.inner.encode(&data).or_fail()?
         } else {
             self.eos = true;
-            Seconds::try_elapsed(|| self.inner.finish().or_fail())
-        }?;
-
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        self.stats.total_processing_seconds.add(elapsed);
+            self.inner.finish().or_fail()?
+        };
 
         if let Some(encoded) = encoded {
             self.stats.total_audio_data_count.add(1);
@@ -301,33 +299,6 @@ impl VideoEncoder {
         })
     }
 
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn encode(&mut self, frame: VideoFrame) -> orfail::Result<()> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: Some(MediaSample::video_frame(frame)),
-        };
-        self.process_input(input).or_fail()
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn finish(&mut self) -> orfail::Result<()> {
-        let input = MediaProcessorInput {
-            stream_id: self.input_stream_id,
-            sample: None,
-        };
-        self.process_input(input).or_fail()
-    }
-
-    // TODO: スケジューリングスレッドの導入タイミングで削除する
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        let Ok(MediaProcessorOutput::Processed { sample, .. }) = self.process_output() else {
-            return None;
-        };
-        let encoded = sample.expect_video_frame().ok()?;
-        std::sync::Arc::into_inner(encoded)
-    }
-
     pub fn name(&self) -> EngineName {
         self.inner.name()
     }
@@ -380,17 +351,14 @@ impl MediaProcessor for VideoEncoder {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let ((), elapsed) = if let Some(sample) = input.sample {
+        if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
             self.stats.total_input_video_frame_count.add(1);
-            Seconds::try_elapsed(|| self.inner.encode(frame).or_fail())
+            self.inner.encode(frame).or_fail()?;
         } else {
             self.eos = true;
-            Seconds::try_elapsed(|| self.inner.finish().or_fail())
-        }?;
-
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        self.stats.total_processing_seconds.add(elapsed);
+            self.inner.finish().or_fail()?;
+        }
 
         while let Some(encoded) = self.inner.next_encoded_frame() {
             self.stats.total_output_video_frame_count.add(1);
@@ -505,140 +473,5 @@ impl VideoEncoderInner {
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.codec(),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct AudioEncoderThread {
-    input_rx: channel::Receiver<AudioData>,
-    output_tx: channel::SyncSender<AudioData>,
-    encoder: AudioEncoder,
-    stats: AudioEncoderStats,
-}
-
-impl AudioEncoderThread {
-    pub fn start(
-        error_flag: ErrorFlag,
-        input_rx: channel::Receiver<AudioData>,
-        encoder: AudioEncoder,
-        stats: SharedStats,
-    ) -> channel::Receiver<AudioData> {
-        let (tx, rx) = channel::sync_channel();
-        std::thread::spawn(move || {
-            let mut this = Self {
-                input_rx,
-                output_tx: tx,
-                stats: AudioEncoderStats::new(encoder.name(), encoder.codec()),
-                encoder,
-            };
-            if let Err(e) = this.run().or_fail() {
-                error_flag.set();
-                this.stats.error.set(true);
-                log::error!("failed to produce encoded audio stream: {e}");
-            }
-
-            stats.with_lock(|stats| {
-                stats
-                    .processors
-                    .push(ProcessorStats::AudioEncoder(this.stats));
-            });
-        });
-        rx
-    }
-
-    fn run(&mut self) -> orfail::Result<()> {
-        while let Some(data) = self.input_rx.recv() {
-            self.stats.total_audio_data_count.add(1);
-
-            let (encoded, elapsed) = Seconds::try_elapsed(|| self.encoder.encode(&data).or_fail())?;
-            self.stats.total_processing_seconds.add(elapsed);
-            let Some(encoded) = encoded else {
-                continue;
-            };
-
-            if !self.output_tx.send(encoded) {
-                // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::info!("receiver of encoded audio stream has been closed");
-                break;
-            }
-        }
-
-        if let Some(encoded) = self.encoder.finish().or_fail()?
-            && !self.output_tx.send(encoded)
-        {
-            log::info!("receiver of encoded audio stream has been closed");
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct VideoEncoderThread {
-    input_rx: channel::Receiver<VideoFrame>,
-    output_tx: channel::SyncSender<VideoFrame>,
-    encoder: VideoEncoder,
-    stats: VideoEncoderStats,
-}
-
-impl VideoEncoderThread {
-    pub fn start(
-        error_flag: ErrorFlag,
-        input_rx: channel::Receiver<VideoFrame>,
-        encoder: VideoEncoder,
-        stats: SharedStats,
-    ) -> channel::Receiver<VideoFrame> {
-        let (tx, rx) = channel::sync_channel();
-        let mut this = Self {
-            input_rx,
-            output_tx: tx,
-            stats: VideoEncoderStats::new(encoder.name(), encoder.codec()),
-            encoder,
-        };
-        std::thread::spawn(move || {
-            if let Err(e) = this.run().or_fail() {
-                error_flag.set();
-                this.stats.error.set(true);
-                log::error!("failed to produce encoded video stream: {e}");
-            }
-
-            stats.with_lock(|stats| {
-                stats
-                    .processors
-                    .push(ProcessorStats::VideoEncoder(this.stats));
-            });
-        });
-        rx
-    }
-
-    fn run(&mut self) -> orfail::Result<()> {
-        while let Some(frame) = self.input_rx.recv() {
-            self.stats.total_input_video_frame_count.add(1);
-            let ((), elapsed) = Seconds::try_elapsed(|| self.encoder.encode(frame).or_fail())?;
-            self.stats.total_processing_seconds.add(elapsed);
-
-            while let Some(encoded) = self.encoder.next_encoded_frame() {
-                self.stats.total_output_video_frame_count.add(1);
-                if !self.output_tx.send(encoded) {
-                    // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                    log::info!("receiver of encoded video stream has been closed");
-                    return Ok(());
-                }
-            }
-        }
-
-        let ((), elapsed) = Seconds::try_elapsed(|| self.encoder.finish().or_fail())?;
-        self.stats.total_processing_seconds.add(elapsed);
-
-        while let Some(encoded) = self.encoder.next_encoded_frame() {
-            self.stats.total_output_video_frame_count.add(1);
-            if !self.output_tx.send(encoded) {
-                // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                log::info!("receiver of encoded video stream has been closed");
-                break;
-            }
-        }
-
-        Ok(())
     }
 }

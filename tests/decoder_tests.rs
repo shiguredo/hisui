@@ -1,15 +1,17 @@
-use std::sync::Arc;
-
 use hisui::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::SourceId,
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::Mp4VideoReader,
     video::VideoFrame,
 };
 use orfail::OrFail;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
+
+const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 
 #[test]
 fn h264_multi_resolutions() -> orfail::Result<()> {
@@ -109,34 +111,29 @@ where
     };
 
     // デコードする
-    let input_stream_id = MediaStreamId::new(0);
-    let output_stream_id = MediaStreamId::new(0);
-    let mut decoder = VideoDecoder::new(input_stream_id, output_stream_id, options);
+    let mut decoder = VideoDecoder::new(DECODER_INPUT_STREAM_ID, DECODER_OUTPUT_STREAM_ID, options);
     let mut output_frames = Vec::new();
     let mut blue_count = 0;
     let mut red_count = 0;
 
     for input_frame in reader0 {
-        let input_frame = prepend_h264_sps_pps(input_frame.or_fail()?);
-        decoder.decode(input_frame).or_fail()?;
+        let input = prepend_h264_sps_pps(input_frame.or_fail()?);
+        decoder.process_input(input).or_fail()?;
         blue_count += 1;
-        while let Some(output_frame) = decoder.next_decoded_frame() {
-            output_frames.push(output_frame);
-        }
     }
 
     // このタイミングで解像度などが切り替わる
     for input_frame in reader1 {
-        let input_frame = prepend_h264_sps_pps(input_frame.or_fail()?);
-        decoder.decode(input_frame).or_fail()?;
+        let input = prepend_h264_sps_pps(input_frame.or_fail()?);
+        decoder.process_input(input).or_fail()?;
         red_count += 1;
-        while let Some(output_frame) = decoder.next_decoded_frame() {
-            output_frames.push(output_frame);
-        }
     }
 
-    decoder.finish().or_fail()?;
-    while let Some(output_frame) = decoder.next_decoded_frame() {
+    decoder
+        .process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))
+        .or_fail()?;
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
+        let output_frame = sample.expect_video_frame().or_fail()?;
         output_frames.push(output_frame);
     }
 
@@ -170,7 +167,7 @@ where
     Ok(())
 }
 
-fn prepend_h264_sps_pps(mut frame: VideoFrame) -> Arc<VideoFrame> {
+fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
     if let Some(SampleEntry::Avc1(Avc1Box {
         avcc_box: AvccBox {
             sps_list, pps_list, ..
@@ -189,5 +186,5 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> Arc<VideoFrame> {
     };
 
     // 対象外のフレームはそのまま返す
-    Arc::new(frame)
+    MediaProcessorInput::video_frame(DECODER_INPUT_STREAM_ID, frame)
 }

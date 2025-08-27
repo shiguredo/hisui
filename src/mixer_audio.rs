@@ -6,94 +6,15 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
-    audio::{
-        AudioData, AudioDataReceiver, AudioDataSyncSender, AudioFormat, CHANNELS, SAMPLE_RATE,
-    },
-    channel::{self, ErrorFlag},
+    audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
-    stats::{AudioMixerStats, ProcessorStats, Seconds, SharedStats},
+    stats::{AudioMixerStats, ProcessorStats, Seconds},
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);
 const MIXED_AUDIO_DATA_SAMPLES: usize = 960;
-
-#[derive(Debug)]
-pub struct AudioMixerThread {
-    input_rxs: Vec<AudioDataReceiver>,
-    output_tx: AudioDataSyncSender,
-    inner: AudioMixer,
-}
-
-impl AudioMixerThread {
-    pub fn start(
-        error_flag: ErrorFlag,
-        layout: Layout,
-        input_rxs: Vec<AudioDataReceiver>,
-        shared_stats: SharedStats,
-    ) -> AudioDataReceiver {
-        let (tx, rx) = channel::sync_channel();
-        let input_stream_ids = (0..input_rxs.len())
-            .map(|i| MediaStreamId::new(i as u64))
-            .collect();
-        let output_stream_id = MediaStreamId::new(input_rxs.len() as u64);
-        let inner = AudioMixer::new(layout, input_stream_ids, output_stream_id);
-        let mut this = Self {
-            input_rxs,
-            output_tx: tx,
-            inner,
-        };
-        std::thread::spawn(move || {
-            log::debug!("audio mixer started");
-            if let Err(e) = this.run().or_fail() {
-                error_flag.set();
-                this.inner.stats.error.set(true);
-                log::error!("failed to mix audio sources: {e}");
-            }
-            log::debug!("audio mixer finished");
-
-            shared_stats.with_lock(|stats| {
-                stats.processors.push(this.inner.spec().stats);
-            });
-        });
-        rx
-    }
-
-    fn run(&mut self) -> orfail::Result<()> {
-        loop {
-            match self.inner.process_output().or_fail()? {
-                MediaProcessorOutput::Finished => break,
-                MediaProcessorOutput::Processed { sample, .. } => {
-                    let data = sample.expect_audio_data().or_fail()?;
-
-                    // 今の実装ではここの参照カウントは常に 1 となるので必ず成功する
-                    // [NOTE] 将来的には `run()` 自体がなくなるので、このコードも暫定的なもの
-                    let data = std::sync::Arc::into_inner(data).or_fail()?;
-
-                    if !self.output_tx.send(data) {
-                        // 受信側がすでに閉じている場合にはこれ以上処理しても仕方がないので終了する
-                        log::info!("receiver of mixed audio stream has been closed");
-                        break;
-                    }
-                }
-                MediaProcessorOutput::Pending { awaiting_stream_id } => {
-                    let i = awaiting_stream_id.expect("infallible").get() as usize;
-                    let input = if let Some(data) = self.input_rxs[i].recv() {
-                        MediaProcessorInput::audio_data(
-                            awaiting_stream_id.expect("infallible"),
-                            data,
-                        )
-                    } else {
-                        MediaProcessorInput::eos(awaiting_stream_id.expect("infallible"))
-                    };
-                    self.inner.process_input(input).or_fail()?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Default)]
 struct InputStream {
@@ -125,6 +46,10 @@ impl AudioMixer {
             output_stream_id,
             stats: AudioMixerStats::default(),
         }
+    }
+
+    pub fn stats(&self) -> &AudioMixerStats {
+        &self.stats
     }
 
     fn next_input_timestamp(&self) -> Duration {
@@ -274,12 +199,8 @@ impl MediaProcessor for AudioMixer {
         }
 
         // 合成
-        let (result, elapsed) = Seconds::elapsed(|| self.mix_next_audio_data(now).or_fail());
+        let mixed_data = self.mix_next_audio_data(now).or_fail()?;
 
-        // TODO: プロセッサ実行スレッドの導入タイミングで、時間計測はそっちに移動する
-        self.stats.total_processing_seconds.add(elapsed);
-
-        let mixed_data = result?;
         Ok(MediaProcessorOutput::Processed {
             stream_id: self.output_stream_id,
             sample: MediaSample::audio_data(mixed_data),

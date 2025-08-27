@@ -202,13 +202,12 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
+    fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
         self.update_output_stream_txs().or_fail()?;
 
         let mut tasks = self.tasks.into_iter().map(Some).collect::<Vec<_>>();
 
         // TODO(atode): スレッドへの割り当て方法は後で改善する
-        // TODO(atode): スレッド単位の統計を追加する
         let mut handles = Vec::new();
         for i in 0..self.thread_count.get() {
             let mut worker_thread_stats = WorkerThreadStats::default();
@@ -251,12 +250,11 @@ impl Scheduler {
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
         for task in &mut self.tasks {
             for id in task.processor.spec().output_stream_ids {
-                let tx = self
-                    .stream_txs
-                    .get(&id)
-                    .cloned()
-                    .or_fail_with(|()| format!("BUG: missing output stream ID: {id:?}"))?;
-                task.output_stream_txs.insert(id, tx);
+                if let Some(tx) = self.stream_txs.get(&id).cloned() {
+                    task.output_stream_txs.insert(id, tx);
+                } else {
+                    // このストリームを入力に取るプロセッサがいない場合にはここにくる（正常系）
+                }
             }
         }
         Ok(())
@@ -270,13 +268,13 @@ impl Default for Scheduler {
 }
 
 #[derive(Debug)]
-pub struct SchedulerHandle {
+struct SchedulerHandle {
     handles: Vec<std::thread::JoinHandle<()>>,
     stats: Stats,
 }
 
 #[derive(Debug)]
-pub struct TaskRunner {
+struct TaskRunner {
     tasks: Vec<Task>,
     sleep_duration: Duration,
     stats: WorkerThreadStats,

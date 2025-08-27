@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
+use std::time::Duration;
 
 use crate::audio::AudioData;
 use crate::video::VideoFrame;
@@ -23,22 +24,6 @@ impl MediaStreamId {
     }
 }
 
-// TODO(atode): remove
-#[derive(Debug, Default)]
-pub struct MediaStreamIdGenerator(MediaStreamId);
-
-impl MediaStreamIdGenerator {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn next_id(&mut self) -> MediaStreamId {
-        let id = self.0;
-        self.0.0 += 1;
-        id
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum MediaSample {
     Audio(Arc<AudioData>),
@@ -46,6 +31,13 @@ pub enum MediaSample {
 }
 
 impl MediaSample {
+    pub fn timestamp(&self) -> Duration {
+        match self {
+            Self::Audio(x) => x.timestamp,
+            Self::Video(x) => x.timestamp,
+        }
+    }
+
     pub fn expect_audio_data(self) -> orfail::Result<Arc<AudioData>> {
         if let Self::Audio(sample) = self {
             Ok(sample)
