@@ -202,7 +202,7 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
+    fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
         self.update_output_stream_txs().or_fail()?;
 
         let mut tasks = self.tasks.into_iter().map(Some).collect::<Vec<_>>();
@@ -268,13 +268,13 @@ impl Default for Scheduler {
 }
 
 #[derive(Debug)]
-pub struct SchedulerHandle {
+struct SchedulerHandle {
     handles: Vec<std::thread::JoinHandle<()>>,
     stats: Stats,
 }
 
 #[derive(Debug)]
-pub struct TaskRunner {
+struct TaskRunner {
     tasks: Vec<Task>,
     sleep_duration: Duration,
     stats: WorkerThreadStats,
