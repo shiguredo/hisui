@@ -68,11 +68,11 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
 
     assert_eq!(stats.total_audio_chunk_count.get(), 1);
     assert_eq!(stats.total_audio_sample_count.get(), 60);
-    assert_eq!(stats.total_audio_track_seconds.get_duration(), secs(60));
+    assert_eq!(stats.total_audio_track_duration.get(), secs(60));
 
     assert_eq!(stats.total_video_chunk_count.get(), 0);
     assert_eq!(stats.total_video_sample_count.get(), 0);
-    assert_eq!(stats.total_video_track_seconds.get_duration(), secs(0));
+    assert_eq!(stats.total_video_track_duration.get(), secs(0));
 
     Ok(())
 }
@@ -125,11 +125,11 @@ fn write_video_only_mp4() -> orfail::Result<()> {
 
     assert_eq!(stats.total_audio_chunk_count.get(), 0);
     assert_eq!(stats.total_audio_sample_count.get(), 0);
-    assert_eq!(stats.total_audio_track_seconds.get_duration(), secs(0));
+    assert_eq!(stats.total_audio_track_duration.get(), secs(0));
 
     assert_eq!(stats.total_video_chunk_count.get(), 1);
     assert_eq!(stats.total_video_sample_count.get(), 60);
-    assert_eq!(stats.total_video_track_seconds.get_duration(), secs(60));
+    assert_eq!(stats.total_video_track_duration.get(), secs(60));
 
     Ok(())
 }
@@ -199,11 +199,11 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
 
     assert_eq!(stats.total_audio_chunk_count.get(), 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
     assert_eq!(stats.total_audio_sample_count.get(), 60);
-    assert_eq!(stats.total_audio_track_seconds.get_duration(), secs(60));
+    assert_eq!(stats.total_audio_track_duration.get(), secs(60));
 
     assert_eq!(stats.total_video_chunk_count.get(), 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
     assert_eq!(stats.total_video_sample_count.get(), 60);
-    assert_eq!(stats.total_video_track_seconds.get_duration(), secs(60));
+    assert_eq!(stats.total_video_track_duration.get(), secs(60));
 
     Ok(())
 }
@@ -229,11 +229,11 @@ fn no_video_and_audio_mp4() -> orfail::Result<()> {
 
     assert_eq!(stats.total_audio_chunk_count.get(), 0);
     assert_eq!(stats.total_audio_sample_count.get(), 0);
-    assert_eq!(stats.total_audio_track_seconds.get_duration(), secs(0));
+    assert_eq!(stats.total_audio_track_duration.get(), secs(0));
 
     assert_eq!(stats.total_video_chunk_count.get(), 0);
     assert_eq!(stats.total_video_sample_count.get(), 0);
-    assert_eq!(stats.total_video_track_seconds.get_duration(), secs(0));
+    assert_eq!(stats.total_video_track_duration.get(), secs(0));
 
     Ok(())
 }

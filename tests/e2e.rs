@@ -97,7 +97,7 @@ fn simple_single_source() -> noargs::Result<()> {
     // => これは入力データのサンプル数と等しい
     assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get_duration(),
+        audio_stats.total_track_duration.get(),
         Duration::from_millis(1020)
     );
 
@@ -116,7 +116,7 @@ fn simple_single_source() -> noargs::Result<()> {
     // 一秒分 (25 fps = 40 ms)
     assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
-        video_stats.total_track_seconds.get_duration(),
+        video_stats.total_track_duration.get(),
         Duration::from_secs(1)
     );
 
@@ -193,7 +193,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // => これは入力データのサンプル数と等しい
     assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get_duration(),
+        audio_stats.total_track_duration.get(),
         Duration::from_millis(1020)
     );
 
@@ -216,7 +216,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // 一秒分 (25 fps = 40 ms)
     assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
-        video_stats.total_track_seconds.get_duration(),
+        video_stats.total_track_duration.get(),
         Duration::from_secs(1)
     );
 
@@ -261,7 +261,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     // => これは入力データのサンプル数と等しい
     assert_eq!(audio_stats.total_sample_count.get(), 51);
     assert_eq!(
-        audio_stats.total_track_seconds.get_duration(),
+        audio_stats.total_track_duration.get(),
         Duration::from_millis(1020)
     );
 
@@ -280,7 +280,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     // 一秒分 (25 fps = 40 ms)
     assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
-        video_stats.total_track_seconds.get_duration(),
+        video_stats.total_track_duration.get(),
         Duration::from_secs(1)
     );
 
@@ -390,7 +390,7 @@ fn two_regions() -> noargs::Result<()> {
     // 一秒分 (25 fps = 40 ms)
     assert_eq!(video_stats.total_sample_count.get(), 25);
     assert_eq!(
-        video_stats.total_track_seconds.get_duration(),
+        video_stats.total_track_duration.get(),
         Duration::from_secs(1)
     );
 
