@@ -6,12 +6,10 @@ use std::{
 };
 
 use hisui::{
-    channel::{self, ErrorFlag},
     layout::{AggregatedSourceInfo, Layout, Resolution},
     layout_region::{Grid, Region},
     metadata::{SourceId, SourceInfo},
-    mixer_video::VideoMixerThread,
-    stats::{ProcessorStats, SharedStats, Stats, VideoMixerStats},
+    stats::{ProcessorStats, Stats, VideoMixerStats},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };

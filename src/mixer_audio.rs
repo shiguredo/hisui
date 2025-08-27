@@ -48,6 +48,10 @@ impl AudioMixer {
         }
     }
 
+    pub fn stats(&self) -> &AudioMixerStats {
+        &self.stats
+    }
+
     fn next_input_timestamp(&self) -> Duration {
         Duration::from_secs(
             self.stats.total_output_sample_count.get()

@@ -114,6 +114,14 @@ pub enum MediaProcessorOutput {
 }
 
 impl MediaProcessorOutput {
+    pub fn expect_processed(self) -> Option<(MediaStreamId, MediaSample)> {
+        if let Self::Processed { stream_id, sample } = self {
+            Some((stream_id, sample))
+        } else {
+            None
+        }
+    }
+
     pub fn pending(awaiting_stream_id: MediaStreamId) -> Self {
         Self::Pending {
             awaiting_stream_id: Some(awaiting_stream_id),
