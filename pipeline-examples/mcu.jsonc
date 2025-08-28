@@ -1,0 +1,50 @@
+[
+  {
+    "type": "plugin",
+    "command": "whep.py",
+    "args": ["--channel=sora", "--client_id=foo"],
+    "output_stream_ids": ["source0#audio", "source0#video"],
+  },
+  {
+    "type": "audio_decoder",
+    "input_stream_id": "source0#audio",
+    "output_stream_id": "decoded0#audio",
+  },
+  {
+    "type": "video_decoder",
+    "input_stream_id": "source0#video",
+    "output_stream_id": "decoded0#video",
+  },
+  {
+    "type": "audio_mixer",
+    "input_stream_ids": ["source0#audio"],
+    "output_stream_id": "mixed#audio",
+  },
+  {
+    "type": "video_mixer",
+    "input_stream_ids": ["source0#video"],
+    "output_stream_id": "mixed#video",
+    "layout": {},
+  },
+  {
+    "type": "audio_encoder",
+    "input_stream_id": "mixed#audio",
+    "output_stream_id": "encoded#audio",
+  },
+  {
+    "type": "video_encoder",
+    "input_stream_id": "mixed#video",
+    "output_stream_id": "encoded#video",
+  },
+  {
+    "type": "mp4_writer",
+    "input_stream_ids": ["mixed#audio", "mixed#video"],
+    "output_file": "foo.mp4",
+  },
+  {
+    "type": "plugin",
+    "command": "whip.py",
+    "args": ["--channel=sora-mcu"],
+    "input_stream_ids": ["mixed#audio", "mixed#video"],
+  },
+]
