@@ -1,4 +1,4 @@
-# Recording Composition Tool Hisui
+# Media Pipeline Hisui
 
 [![GitHub tag (latest SemVer)](https://img.shields.io/github/tag/shiguredo/hisui.svg)](https://github.com/shiguredo/hisui)
 [![hisui](https://img.shields.io/crates/v/hisui.svg)](https://crates.io/crates/hisui)
@@ -16,9 +16,7 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 
 ## Recording Composition Tool Hisui について
 
-Recording Composition Tool Hisui は WebRTC SFU Sora 向けの録画合成ツールです。
-
-Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で出力するツールです。
+Media Pipeline Hisui は音声や映像を入出力できるメディアパイプラインです。
 
 ## 特徴
 
@@ -29,6 +27,7 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 
 ### 新しい Hisui とレガシー版 Hisui の違い
 
+- 入力が Sora の録画ファイルだけでなく様々な形式に対応しています
 - Rust で実装されています
 - macOS の Audio Toolbox を利用した AAC の音声エンコードに対応しています
 - macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
@@ -139,7 +138,7 @@ limitations under the License.
 
 ## レガシー版 Hisui
 
-新しい Hisui はレガシー版の Hisui とほぼ互換性があります。
+新しい Hisui の `legacy` はレガシー版の Hisui とほぼ互換性があります。
 レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
 
 <https://github.com/shiguredo/hisui-legacy>
