@@ -1,2 +1,19 @@
 [
+  {
+    "type": "mp4_video_reader",
+    "input_file_path": "/path/to/input.mp4",
+    "output_stream_id": "source",
+    "start_time": "10s",
+    "duration": "1m",
+  },
+  {
+    "type": "video_decoder",
+    "input_stream_id": "source",
+    "output_stream_id": "decoded",
+  },
+  {
+    "type": "plugin",
+    "input_stream_ids": ["source", "decoded"],
+    "command": "inspect.sh",
+  },
 ]
