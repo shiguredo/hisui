@@ -17,14 +17,28 @@ use crate::{
     video::FrameRate,
 };
 
+/// トリム開始時刻から終了時刻へのマップ
+#[derive(Debug, Clone)]
+pub struct TrimSpans(BTreeMap<Duration, Duration>);
+
+impl TrimSpans {
+    pub fn contains(&self, timestamp: Duration) -> bool {
+        if let Some((&start, &end)) = self.0.range(..=timestamp).next_back() {
+            (start..end).contains(&timestamp)
+        } else {
+            false
+        }
+    }
+}
+
 /// 合成レイアウト
 #[derive(Debug, Clone)]
 pub struct Layout {
     pub base_path: PathBuf,
     // z-pos 順に並んだリージョン列
     pub video_regions: Vec<Region>,
-    // トリム開始時刻から終了時刻へのマップ
-    pub trim_spans: BTreeMap<Duration, Duration>,
+
+    pub trim_spans: TrimSpans,
     pub resolution: Resolution,
 
     pub audio_source_ids: BTreeSet<SourceId>,
@@ -170,6 +184,7 @@ impl Layout {
 
     fn trim_duration(&self) -> Duration {
         self.trim_spans
+            .0
             .iter()
             .map(|(start, end)| end.saturating_sub(*start))
             .fold(Duration::ZERO, |acc, duration| acc.saturating_add(duration))
@@ -177,14 +192,6 @@ impl Layout {
 
     pub fn output_duration(&self) -> Duration {
         self.duration().saturating_sub(self.trim_duration())
-    }
-
-    pub fn is_in_trim_span(&self, timestamp: Duration) -> bool {
-        if let Some((&start, &end)) = self.trim_spans.range(..=timestamp).next_back() {
-            (start..end).contains(&timestamp)
-        } else {
-            false
-        }
     }
 }
 
@@ -573,7 +580,7 @@ fn is_wildcard_name_matched(wildcard_name: &str, mut name: &str) -> bool {
 fn decide_trim_spans(
     sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
     trim_first_gap_only: bool,
-) -> BTreeMap<Duration, Duration> {
+) -> TrimSpans {
     // 時刻順でソートする
     let mut sources = sources
         .values()
@@ -600,7 +607,7 @@ fn decide_trim_spans(
         }
     }
 
-    trim_spans
+    TrimSpans(trim_spans)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

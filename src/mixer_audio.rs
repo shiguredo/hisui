@@ -168,7 +168,7 @@ impl MediaProcessor for AudioMixer {
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         let mut now = self.next_input_timestamp();
-        while self.layout.is_in_trim_span(now) {
+        while self.layout.trim_spans.contains(now) {
             self.stats
                 .total_trimmed_sample_count
                 .add(MIXED_AUDIO_DATA_SAMPLES as u64);

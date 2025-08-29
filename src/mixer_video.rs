@@ -365,7 +365,7 @@ impl MediaProcessor for VideoMixer {
             let mut now = self.next_input_timestamp();
 
             // トリム対象期間ならその分はスキップする
-            while self.layout.is_in_trim_span(now) {
+            while self.layout.trim_spans.contains(now) {
                 self.stats.total_trimmed_video_frame_count.add(1);
                 now = self.next_input_timestamp();
             }
