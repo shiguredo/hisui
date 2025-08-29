@@ -1,13 +1,25 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::media::MediaStreamName;
 
 #[derive(Debug, Clone)]
 pub enum PipelineComponent {
+    AudioReader {
+        input_file: PathBuf,
+        output_stream: MediaStreamName,
+        start_time: Duration,
+    },
+    VideoReader {
+        input_file: PathBuf,
+        output_stream: MediaStreamName,
+        start_time: Duration,
+    },
     AudioDecoder {
         input_stream: MediaStreamName,
         output_stream: MediaStreamName,
     },
+    // MEMO: Sora 固有のコンポーネントとして `Archive{Audio,Video}Reader` や `SplitArchive{Audio,Video}Reader` があるとよさそう
     VideoDecoder {
         input_stream: MediaStreamName,
         output_stream: MediaStreamName,
