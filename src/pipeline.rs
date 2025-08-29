@@ -1,19 +1,20 @@
 use std::path::PathBuf;
-use std::time::Duration;
 
+use crate::json::JsonObject;
 use crate::media::MediaStreamName;
+use crate::types::TimeOffset;
 
 #[derive(Debug, Clone)]
 pub enum PipelineComponent {
     AudioReader {
         input_file: PathBuf,
         output_stream: MediaStreamName,
-        start_time: Duration,
+        start_time: TimeOffset,
     },
     VideoReader {
         input_file: PathBuf,
         output_stream: MediaStreamName,
-        start_time: Duration,
+        start_time: TimeOffset,
     },
     AudioDecoder {
         input_stream: MediaStreamName,
@@ -53,4 +54,61 @@ pub enum PipelineComponent {
         input_stream: Vec<MediaStreamName>,
         output_stream: Vec<MediaStreamName>,
     },
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineComponent {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let obj = JsonObject::new(value)?;
+        let component_type: String = obj.get_required("type")?;
+
+        match component_type.as_str() {
+            "audio_reader" => Ok(Self::AudioReader {
+                input_file: obj.get_required("input_file")?,
+                output_stream: obj.get_required("output_stream")?,
+                start_time: obj.get("start_time")?.unwrap_or_default(),
+            }),
+            "video_reader" => Ok(Self::VideoReader {
+                input_file: obj.get_required("input_file")?,
+                output_stream: obj.get_required("output_stream")?,
+                start_time: obj.get("start_time")?.unwrap_or_default(),
+            }),
+            "audio_decoder" => Ok(Self::AudioDecoder {
+                input_stream: obj.get_required("input_stream")?,
+                output_stream: obj.get_required("output_stream")?,
+            }),
+            "video_decoder" => Ok(Self::VideoDecoder {
+                input_stream: obj.get_required("input_stream")?,
+                output_stream: obj.get_required("output_stream")?,
+            }),
+            "audio_mixer" => Ok(Self::AudioMixer {
+                input_stream: obj.get_required("input_stream")?,
+                output_stream: obj.get_required("output_stream")?,
+            }),
+            "video_mixer" => Ok(Self::VideoMixer {
+                input_stream: obj.get_required("input_stream")?,
+                output_stream: obj.get_required("output_stream")?,
+            }),
+            "audio_encoder" => Ok(Self::AudioEncoder {
+                input_stream: obj.get_required("input_stream")?,
+                output_stream: obj.get_required("output_stream")?,
+            }),
+            "video_encoder" => Ok(Self::VideoEncoder {
+                input_stream: obj.get_required("input_stream")?,
+                output_stream: obj.get_required("output_stream")?,
+            }),
+            "mp4_writer" => Ok(Self::Mp4Writer {
+                input_stream: obj.get_required("input_stream")?,
+                output_file: obj.get_required("output_file")?,
+            }),
+            "plugin_command" => Ok(Self::PluginCommand {
+                command: obj.get_required("command")?,
+                args: obj.get("args")?.unwrap_or_default(),
+                input_stream: obj.get("input_stream")?.unwrap_or_default(),
+                output_stream: obj.get("output_stream")?.unwrap_or_default(),
+            }),
+            unknown => Err(value.invalid(format!("unknown pipeline component type: {unknown:?}"))),
+        }
+    }
 }

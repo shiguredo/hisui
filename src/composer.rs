@@ -156,7 +156,7 @@ impl Composer {
         // 合成を実行
         let stats = scheduler.run().or_fail()?;
         if stats.error.get() {
-            return Err(orfail::Failure::new("composition process failed").into());
+            return Err(orfail::Failure::new("composition process failed"));
         }
 
         if let Some(path) = &self.stats_file_path {

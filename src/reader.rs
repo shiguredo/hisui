@@ -306,6 +306,7 @@ impl MediaProcessor for VideoReader {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum VideoReaderInner {
     Mp4(Mp4VideoReader),
     Webm(WebmVideoReader),
