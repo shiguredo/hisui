@@ -9,7 +9,7 @@ use crate::{
     layout::Layout,
     media::MediaStreamId,
     mixer_audio::AudioMixer,
-    mixer_video::VideoMixer,
+    mixer_video::{VideoMixer, VideoMixerSpec},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
@@ -101,7 +101,7 @@ impl Composer {
 
         let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
         let video_mixer = VideoMixer::new(
-            self.layout.clone(),
+            VideoMixerSpec::from_layout(&self.layout),
             video_mixer_input_stream_ids,
             video_mixer_output_stream_id,
         );

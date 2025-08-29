@@ -11,7 +11,7 @@ use hisui::{
     layout_region::{Grid, Region},
     media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
-    mixer_video::VideoMixer,
+    mixer_video::{VideoMixer, VideoMixerSpec},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
@@ -1130,8 +1130,8 @@ fn layout(
     sources: &[&SourceInfo],
     size: Size,
     trim_span: Option<(Duration, Duration)>,
-) -> Layout {
-    Layout {
+) -> VideoMixerSpec {
+    let layout = Layout {
         trim_spans: TrimSpans::new(if let Some((start, end)) = trim_span {
             [(start, end)].into_iter().collect()
         } else {
@@ -1166,7 +1166,8 @@ fn layout(
         audio_bitrate: None,
         video_bitrate: None,
         encode_params: Default::default(),
-    }
+    };
+    VideoMixerSpec::from_layout(&layout)
 }
 
 fn region(region_size: Size, cell_size: Size) -> Region {

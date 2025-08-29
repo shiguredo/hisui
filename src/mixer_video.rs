@@ -7,14 +7,14 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
-    layout::Layout,
+    layout::{Layout, Resolution, TrimSpans},
     layout_region::Region,
     media::MediaStreamId,
     metadata::SourceId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     stats::{ProcessorStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
-    video::{VideoFormat, VideoFrame},
+    video::{FrameRate, VideoFormat, VideoFrame},
 };
 
 // 入力がこの期間更新されなかった場合には、以後は合成ではなく
@@ -160,9 +160,28 @@ impl Canvas {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct VideoMixerSpec {
+    pub regions: Vec<Region>,
+    pub frame_rate: FrameRate,
+    pub resolution: Resolution,
+    pub trim_spans: TrimSpans,
+}
+
+impl VideoMixerSpec {
+    pub fn from_layout(layout: &Layout) -> Self {
+        Self {
+            regions: layout.video_regions.clone(),
+            frame_rate: layout.frame_rate,
+            resolution: layout.resolution,
+            trim_spans: layout.trim_spans.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct VideoMixer {
-    layout: Layout,
+    spec: VideoMixerSpec,
     input_streams: HashMap<MediaStreamId, InputStream>,
     output_stream_id: MediaStreamId,
     last_mixed_frame: Option<VideoFrame>,
@@ -171,13 +190,13 @@ pub struct VideoMixer {
 
 impl VideoMixer {
     pub fn new(
-        layout: Layout,
+        spec: VideoMixerSpec,
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_id: MediaStreamId,
     ) -> Self {
-        let resolution = layout.resolution;
+        let resolution = spec.resolution;
         Self {
-            layout,
+            spec,
             input_streams: input_stream_ids
                 .into_iter()
                 .map(|id| (id, InputStream::default()))
@@ -208,8 +227,8 @@ impl VideoMixer {
 
     // フレーム数に対応するタイムスタンプを求める
     fn frames_to_timestamp(&self, frames: u64) -> Duration {
-        Duration::from_secs(frames * self.layout.frame_rate.denumerator.get() as u64)
-            / self.layout.frame_rate.numerator.get() as u32
+        Duration::from_secs(frames * self.spec.frame_rate.denumerator.get() as u64)
+            / self.spec.frame_rate.numerator.get() as u32
     }
 
     fn next_output_timestamp(&self) -> Duration {
@@ -232,12 +251,9 @@ impl VideoMixer {
         let timestamp = self.next_output_timestamp();
         let duration = self.next_output_duration();
 
-        let mut canvas = Canvas::new(
-            self.layout.resolution.width(),
-            self.layout.resolution.height(),
-        );
+        let mut canvas = Canvas::new(self.spec.resolution.width(), self.spec.resolution.height());
 
-        for region in &self.layout.video_regions {
+        for region in &self.spec.regions {
             Self::mix_region(&mut canvas, region, &mut self.input_streams, now).or_fail()?;
         }
 
@@ -254,8 +270,8 @@ impl VideoMixer {
             // 可変値
             timestamp,
             duration,
-            width: self.layout.resolution.width(),
-            height: self.layout.resolution.height(),
+            width: self.spec.resolution.width(),
+            height: self.spec.resolution.height(),
             data: canvas.data,
         })
     }
@@ -365,7 +381,7 @@ impl MediaProcessor for VideoMixer {
             let mut now = self.next_input_timestamp();
 
             // トリム対象期間ならその分はスキップする
-            while self.layout.trim_spans.contains(now) {
+            while self.spec.trim_spans.contains(now) {
                 self.stats.total_trimmed_video_frame_count.add(1);
                 now = self.next_input_timestamp();
             }

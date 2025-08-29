@@ -15,7 +15,7 @@ use crate::{
     json::JsonObject,
     layout::Layout,
     media::{MediaSample, MediaStreamId},
-    mixer_video::VideoMixer,
+    mixer_video::{VideoMixer, VideoMixerSpec},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::VideoReader,
     scheduler::Scheduler,
@@ -191,7 +191,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // ミキサーを登録
     let mixer_output_stream_id = next_stream_id.fetch_add(1);
     let mixer = VideoMixer::new(
-        layout.clone(),
+        VideoMixerSpec::from_layout(&layout),
         mixer_input_stream_ids,
         mixer_output_stream_id,
     );
