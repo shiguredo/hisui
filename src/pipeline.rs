@@ -159,13 +159,17 @@ impl PipelineComponent {
                 let resolution = *resolution;
                 let mut dummy_sources = BTreeMap::new();
 
-                fn resolver(
-                    _base: &Path,
-                    sources: &[PathBuf],
-                    sources_excluded: &[PathBuf],
-                ) -> orfail::Result<Vec<(SourceInfo, PathBuf)>> {
+                let resolver = |_base: &Path,
+                                sources: &[PathBuf],
+                                _sources_excluded: &[PathBuf]|
+                 -> orfail::Result<Vec<(SourceInfo, PathBuf)>> {
+                    // TODO: いろいろとちゃんとする
+                    // let mut resolved=Vec::new();
+                    // TODO: ["*"] だけいったん特別扱いする
+                    // TODO: それ以外は単純にストリーム ID をソース ID に変換する
+                    // それ以外のメタデータはトリム周り以外には影響しないので、ダミー値でいい
                     todo!()
-                }
+                };
 
                 let spec = VideoMixerSpec {
                     trim_spans: Default::default(),
