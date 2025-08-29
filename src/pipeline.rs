@@ -2,11 +2,12 @@ use std::path::PathBuf;
 
 use orfail::OrFail;
 
+use crate::decoder::AudioDecoder;
 use crate::json::JsonObject;
 use crate::media::{MediaStreamName, MediaStreamNameRegistry};
 use crate::metadata::ContainerFormat;
 use crate::processor::BoxedMediaProcessor;
-use crate::reader::AudioReader;
+use crate::reader::{AudioReader, VideoReader};
 use crate::types::TimeOffset;
 
 #[derive(Debug, Clone)]
@@ -21,11 +22,11 @@ pub enum PipelineComponent {
         output_stream: MediaStreamName,
         start_time: TimeOffset,
     },
+    // MEMO: Sora 固有のコンポーネントとして `Archive{Audio,Video}Reader` や `SplitArchive{Audio,Video}Reader` があるとよさそう
     AudioDecoder {
         input_stream: MediaStreamName,
         output_stream: MediaStreamName,
     },
-    // MEMO: Sora 固有のコンポーネントとして `Archive{Audio,Video}Reader` や `SplitArchive{Audio,Video}Reader` があるとよさそう
     VideoDecoder {
         input_stream: MediaStreamName,
         output_stream: MediaStreamName,
@@ -84,6 +85,34 @@ impl PipelineComponent {
                 )
                 .or_fail()?;
                 Ok(BoxedMediaProcessor::new(reader))
+            }
+            Self::VideoReader {
+                input_file,
+                output_stream,
+                start_time,
+            } => {
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                let source_id = output_stream.to_source_id();
+                let format = ContainerFormat::from_path(input_file).or_fail()?;
+                let reader = VideoReader::new(
+                    output_stream_id,
+                    source_id,
+                    format,
+                    start_time.get(),
+                    vec![input_file.clone()],
+                )
+                .or_fail()?;
+                Ok(BoxedMediaProcessor::new(reader))
+            }
+            Self::AudioDecoder {
+                input_stream,
+                output_stream,
+            } => {
+                let input_stream_id = registry.get_id(input_stream).or_fail()?;
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                let processor =
+                    AudioDecoder::new_opus(input_stream_id, output_stream_id).or_fail()?;
+                Ok(BoxedMediaProcessor::new(processor))
             }
             _ => todo!(),
         }
