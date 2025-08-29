@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use orfail::OrFail;
 
-use crate::decoder::AudioDecoder;
+use crate::decoder::{AudioDecoder, VideoDecoder};
 use crate::json::JsonObject;
 use crate::media::{MediaStreamName, MediaStreamNameRegistry};
 use crate::metadata::ContainerFormat;
@@ -113,6 +113,25 @@ impl PipelineComponent {
                 let processor =
                     AudioDecoder::new_opus(input_stream_id, output_stream_id).or_fail()?;
                 Ok(BoxedMediaProcessor::new(processor))
+            }
+            Self::VideoDecoder {
+                input_stream,
+                output_stream,
+            } => {
+                // TODO: openh264 を指定できるようにする
+                let input_stream_id = registry.get_id(input_stream).or_fail()?;
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                let options = Default::default();
+                let processor = VideoDecoder::new(input_stream_id, output_stream_id, options);
+                Ok(BoxedMediaProcessor::new(processor))
+            }
+            Self::AudioMixer {
+                //input_stream,
+                //output_stream,
+..
+             } => {
+                // let layout = Layout::default();
+                 todo!()
             }
             _ => todo!(),
         }
