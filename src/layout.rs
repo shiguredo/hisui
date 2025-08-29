@@ -286,7 +286,12 @@ impl RawLayout {
         let mut video_regions = Vec::new();
         for (_region_name, raw_region) in self.video_layout {
             let region = raw_region
-                .into_region(&base_path, &mut sources, self.resolution)
+                .into_region(
+                    &base_path,
+                    &mut sources,
+                    self.resolution,
+                    resolve_source_and_media_path_pairs,
+                )
                 .or_fail()?;
             video_regions.push(region);
         }
@@ -625,7 +630,7 @@ pub struct AggregatedSourceInfo {
     // 開始時刻（分割録画の場合には一番小さな値）
     pub start_timestamp: Duration,
 
-    // 終了時刻（分割録画の場合には一番小さな値）
+    // 終了時刻（分割録画の場合には一番大きな値）
     pub stop_timestamp: Duration,
 
     // 録画ファイルのパスと対応する情報（分割録画の場合には複数になる）
