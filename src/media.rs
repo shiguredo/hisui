@@ -1,9 +1,39 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
 use crate::audio::AudioData;
 use crate::video::VideoFrame;
+
+#[derive(Debug, Default)]
+pub struct MediaStreamRegistry {
+    name_to_id: HashMap<MediaStreamName, MediaStreamId>,
+    next_id: MediaStreamId,
+}
+
+impl MediaStreamRegistry {
+    pub fn new() -> Self {
+        Self {
+            name_to_id: HashMap::new(),
+            next_id: MediaStreamId::new(0),
+        }
+    }
+
+    pub fn get_id(&self, name: &MediaStreamName) -> Option<MediaStreamId> {
+        self.name_to_id.get(name).copied()
+    }
+
+    pub fn register_name(&mut self, name: MediaStreamName) -> Option<MediaStreamId> {
+        if self.name_to_id.contains_key(&name) {
+            None
+        } else {
+            let id = self.next_id.fetch_add(1);
+            self.name_to_id.insert(name, id);
+            Some(id)
+        }
+    }
+}
 
 // 設定ファイルなどで使われる外部用の名前
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
