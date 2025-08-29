@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
@@ -267,7 +267,7 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
         frame_rate: FrameRate::FPS_1,
 
         // 以下のフィールドはテストで使われないので、適当な値を設定しておく
-        trim_spans: BTreeMap::new(),
+        trim_spans: Default::default(),
         base_path: PathBuf::from(""),
         resolution: Resolution::new(16, 16).expect("infallible"),
         audio_codec: CodecName::Opus,

@@ -18,10 +18,14 @@ use crate::{
 };
 
 /// トリム開始時刻から終了時刻へのマップ
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct TrimSpans(BTreeMap<Duration, Duration>);
 
 impl TrimSpans {
+    pub fn new(spans: BTreeMap<Duration, Duration>) -> Self {
+        Self(spans)
+    }
+
     pub fn contains(&self, timestamp: Duration) -> bool {
         if let Some((&start, &end)) = self.0.range(..=timestamp).next_back() {
             (start..end).contains(&timestamp)

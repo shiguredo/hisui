@@ -93,7 +93,7 @@ impl Composer {
         // ミキサーを登録
         let audio_mixer_output_stream_id = next_stream_id.fetch_add(1);
         let audio_mixer = AudioMixer::new(
-            self.layout.clone(),
+            self.layout.trim_spans.clone(),
             audio_mixer_input_stream_ids,
             audio_mixer_output_stream_id,
         );

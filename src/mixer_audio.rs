@@ -7,7 +7,7 @@ use orfail::OrFail;
 
 use crate::{
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
-    layout::Layout,
+    layout::TrimSpans,
     media::{MediaSample, MediaStreamId},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     stats::{AudioMixerStats, ProcessorStats},
@@ -25,7 +25,7 @@ struct InputStream {
 
 #[derive(Debug)]
 pub struct AudioMixer {
-    layout: Layout,
+    trim_spans: TrimSpans,
     input_streams: HashMap<MediaStreamId, InputStream>,
     output_stream_id: MediaStreamId,
     stats: AudioMixerStats,
@@ -33,12 +33,12 @@ pub struct AudioMixer {
 
 impl AudioMixer {
     pub fn new(
-        layout: Layout,
+        trim_spans: TrimSpans,
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_id: MediaStreamId,
     ) -> Self {
         Self {
-            layout,
+            trim_spans,
             input_streams: input_stream_ids
                 .into_iter()
                 .map(|id| (id, InputStream::default()))
@@ -168,7 +168,7 @@ impl MediaProcessor for AudioMixer {
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         let mut now = self.next_input_timestamp();
-        while self.layout.trim_spans.contains(now) {
+        while self.trim_spans.contains(now) {
             self.stats
                 .total_trimmed_sample_count
                 .add(MIXED_AUDIO_DATA_SAMPLES as u64);

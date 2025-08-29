@@ -7,7 +7,7 @@ use std::{
 };
 
 use hisui::{
-    layout::{AggregatedSourceInfo, Layout, Resolution},
+    layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     layout_region::{Grid, Region},
     media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
@@ -1132,11 +1132,11 @@ fn layout(
     trim_span: Option<(Duration, Duration)>,
 ) -> Layout {
     Layout {
-        trim_spans: if let Some((start, end)) = trim_span {
+        trim_spans: TrimSpans::new(if let Some((start, end)) = trim_span {
             [(start, end)].into_iter().collect()
         } else {
             BTreeMap::new()
-        },
+        }),
         video_regions: video_regions.to_vec(),
         sources: sources
             .iter()
