@@ -26,7 +26,15 @@
       "type": "video_mixer",
       "input_stream": ["source0#video"],
       "output_stream": "mixed#video",
-      "video_layout": {},
+      "video_layout": {
+        "main": {
+          "cell_width": 320,
+          "cell_height": 240,
+          "max_columns": 4,
+          "max_rows": 4,
+          "video_sources": ["*"],
+        },
+      },
       // レイアウト JSON の映像関連の項目がここで指定可能
     },
     {

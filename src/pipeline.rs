@@ -1,12 +1,16 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use orfail::OrFail;
 
 use crate::decoder::{AudioDecoder, VideoDecoder};
 use crate::json::JsonObject;
+use crate::layout::Resolution;
+use crate::layout_region::{RawRegion, Region};
 use crate::media::{MediaStreamName, MediaStreamNameRegistry};
 use crate::metadata::ContainerFormat;
 use crate::mixer_audio::AudioMixer;
+use crate::mixer_video::{VideoMixer, VideoMixerSpec};
 use crate::processor::BoxedMediaProcessor;
 use crate::reader::{AudioReader, VideoReader};
 use crate::types::TimeOffset;
@@ -39,7 +43,8 @@ pub enum PipelineComponent {
     VideoMixer {
         input_stream: Vec<MediaStreamName>,
         output_stream: MediaStreamName,
-        // video_layout: ()
+        resolution: Option<Resolution>,
+        video_layout: BTreeMap<String, RawRegion>,
     },
     AudioEncoder {
         input_stream: MediaStreamName,
@@ -139,6 +144,25 @@ impl PipelineComponent {
                 let processor = AudioMixer::new(trim_spans, input_stream_ids, output_stream_id);
                 Ok(BoxedMediaProcessor::new(processor))
             }
+            Self::VideoMixer {
+                input_stream,
+                output_stream,
+                resolution,
+                video_layout,
+            } => {
+                /*
+                                let input_stream_ids = input_stream
+                                    .iter()
+                                    .map(|name| registry.get_id(name).or_fail())
+                                    .collect::<orfail::Result<_>>()?;
+                                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                                let trim_spans = Default::default();
+                                let processor = VideoMixer::new(trim_spans, input_stream_ids, output_stream_id);
+                                Ok(BoxedMediaProcessor::new(processor))
+
+                */
+                todo!()
+            }
             _ => todo!(),
         }
     }
@@ -177,6 +201,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineCompone
             "video_mixer" => Ok(Self::VideoMixer {
                 input_stream: obj.get_required("input_stream")?,
                 output_stream: obj.get_required("output_stream")?,
+                resolution: obj.get("resolution")?,
+                video_layout: obj.get_required("video_layout")?,
             }),
             "audio_encoder" => Ok(Self::AudioEncoder {
                 input_stream: obj.get_required("input_stream")?,
