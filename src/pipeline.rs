@@ -1,7 +1,12 @@
 use std::path::PathBuf;
 
+use orfail::OrFail;
+
 use crate::json::JsonObject;
-use crate::media::MediaStreamName;
+use crate::media::{MediaStreamName, MediaStreamNameRegistry};
+use crate::metadata::ContainerFormat;
+use crate::processor::BoxedMediaProcessor;
+use crate::reader::AudioReader;
 use crate::types::TimeOffset;
 
 #[derive(Debug, Clone)]
@@ -54,6 +59,35 @@ pub enum PipelineComponent {
         input_stream: Vec<MediaStreamName>,
         output_stream: Vec<MediaStreamName>,
     },
+}
+
+impl PipelineComponent {
+    pub fn create_processor(
+        &self,
+        registry: &mut MediaStreamNameRegistry,
+    ) -> orfail::Result<BoxedMediaProcessor> {
+        match self {
+            Self::AudioReader {
+                input_file,
+                output_stream,
+                start_time,
+            } => {
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                let source_id = output_stream.to_source_id();
+                let format = ContainerFormat::from_path(input_file).or_fail()?;
+                let reader = AudioReader::new(
+                    output_stream_id,
+                    source_id,
+                    format,
+                    start_time.get(),
+                    vec![input_file.clone()],
+                )
+                .or_fail()?;
+                Ok(BoxedMediaProcessor::new(reader))
+            }
+            _ => todo!(),
+        }
+    }
 }
 
 impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineComponent {

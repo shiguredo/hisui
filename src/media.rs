@@ -3,16 +3,19 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
+use orfail::OrFail;
+
 use crate::audio::AudioData;
+use crate::metadata::SourceId;
 use crate::video::VideoFrame;
 
 #[derive(Debug, Default)]
-pub struct MediaStreamRegistry {
+pub struct MediaStreamNameRegistry {
     name_to_id: HashMap<MediaStreamName, MediaStreamId>,
     next_id: MediaStreamId,
 }
 
-impl MediaStreamRegistry {
+impl MediaStreamNameRegistry {
     pub fn new() -> Self {
         Self {
             name_to_id: HashMap::new(),
@@ -24,14 +27,13 @@ impl MediaStreamRegistry {
         self.name_to_id.get(name).copied()
     }
 
-    pub fn register_name(&mut self, name: MediaStreamName) -> Option<MediaStreamId> {
-        if self.name_to_id.contains_key(&name) {
-            None
-        } else {
-            let id = self.next_id.fetch_add(1);
-            self.name_to_id.insert(name, id);
-            Some(id)
-        }
+    pub fn register_name(&mut self, name: MediaStreamName) -> orfail::Result<MediaStreamId> {
+        (!self.name_to_id.contains_key(&name))
+            .or_fail_with(|()| format!("duplicate stream name: {:?}", name.get()))?;
+
+        let id = self.next_id.fetch_add(1);
+        self.name_to_id.insert(name, id);
+        Ok(id)
     }
 }
 
@@ -46,6 +48,10 @@ impl MediaStreamName {
 
     pub fn get(&self) -> &str {
         &self.0
+    }
+
+    pub fn to_source_id(&self) -> SourceId {
+        SourceId::new(&self.0)
     }
 }
 
