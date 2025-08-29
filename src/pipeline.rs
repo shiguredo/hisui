@@ -1,19 +1,20 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use orfail::OrFail;
 
 use crate::decoder::{AudioDecoder, VideoDecoder};
 use crate::json::JsonObject;
 use crate::layout::Resolution;
-use crate::layout_region::{RawRegion, Region};
+use crate::layout_region::RawRegion;
 use crate::media::{MediaStreamName, MediaStreamNameRegistry};
-use crate::metadata::ContainerFormat;
+use crate::metadata::{ContainerFormat, SourceInfo};
 use crate::mixer_audio::AudioMixer;
 use crate::mixer_video::{VideoMixer, VideoMixerSpec};
 use crate::processor::BoxedMediaProcessor;
 use crate::reader::{AudioReader, VideoReader};
 use crate::types::TimeOffset;
+use crate::video::FrameRate;
 
 #[derive(Debug, Clone)]
 pub enum PipelineComponent {
@@ -43,7 +44,7 @@ pub enum PipelineComponent {
     VideoMixer {
         input_stream: Vec<MediaStreamName>,
         output_stream: MediaStreamName,
-        resolution: Option<Resolution>,
+        resolution: Resolution, // TODO: optional にする
         video_layout: BTreeMap<String, RawRegion>,
     },
     AudioEncoder {
@@ -150,18 +151,42 @@ impl PipelineComponent {
                 resolution,
                 video_layout,
             } => {
-                /*
-                                let input_stream_ids = input_stream
-                                    .iter()
-                                    .map(|name| registry.get_id(name).or_fail())
-                                    .collect::<orfail::Result<_>>()?;
-                                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
-                                let trim_spans = Default::default();
-                                let processor = VideoMixer::new(trim_spans, input_stream_ids, output_stream_id);
-                                Ok(BoxedMediaProcessor::new(processor))
+                let input_stream_ids = input_stream
+                    .iter()
+                    .map(|name| registry.get_id(name).or_fail())
+                    .collect::<orfail::Result<_>>()?;
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                let resolution = *resolution;
+                let mut dummy_sources = BTreeMap::new();
 
-                */
-                todo!()
+                fn resolver(
+                    _base: &Path,
+                    sources: &[PathBuf],
+                    sources_excluded: &[PathBuf],
+                ) -> orfail::Result<Vec<(SourceInfo, PathBuf)>> {
+                    todo!()
+                }
+
+                let spec = VideoMixerSpec {
+                    trim_spans: Default::default(),
+                    resolution,
+                    frame_rate: FrameRate::FPS_25,
+                    // TODO: z-pos を考慮する
+                    regions: video_layout
+                        .iter()
+                        .map(|(_name, raw_region)| {
+                            Ok(raw_region.clone().into_region(
+                                &Path::new("/dummy/"),
+                                &mut dummy_sources,
+                                Some(resolution),
+                                resolver,
+                            )?)
+                        })
+                        .collect::<orfail::Result<_>>()
+                        .or_fail()?,
+                };
+                let processor = VideoMixer::new(spec, input_stream_ids, output_stream_id);
+                Ok(BoxedMediaProcessor::new(processor))
             }
             _ => todo!(),
         }
@@ -201,7 +226,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineCompone
             "video_mixer" => Ok(Self::VideoMixer {
                 input_stream: obj.get_required("input_stream")?,
                 output_stream: obj.get_required("output_stream")?,
-                resolution: obj.get("resolution")?,
+                resolution: obj.get_required("resolution")?,
                 video_layout: obj.get_required("video_layout")?,
             }),
             "audio_encoder" => Ok(Self::AudioEncoder {
