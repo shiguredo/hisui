@@ -23,8 +23,11 @@ impl MediaStreamNameRegistry {
         }
     }
 
-    pub fn get_id(&self, name: &MediaStreamName) -> Option<MediaStreamId> {
-        self.name_to_id.get(name).copied()
+    pub fn get_id(&self, name: &MediaStreamName) -> orfail::Result<MediaStreamId> {
+        self.name_to_id
+            .get(name)
+            .copied()
+            .or_fail_with(|()| format!("unknown stream name: {:?}", name.get()))
     }
 
     pub fn register_name(&mut self, name: MediaStreamName) -> orfail::Result<MediaStreamId> {

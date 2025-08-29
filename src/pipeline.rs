@@ -6,6 +6,7 @@ use crate::decoder::{AudioDecoder, VideoDecoder};
 use crate::json::JsonObject;
 use crate::media::{MediaStreamName, MediaStreamNameRegistry};
 use crate::metadata::ContainerFormat;
+use crate::mixer_audio::AudioMixer;
 use crate::processor::BoxedMediaProcessor;
 use crate::reader::{AudioReader, VideoReader};
 use crate::types::TimeOffset;
@@ -126,12 +127,17 @@ impl PipelineComponent {
                 Ok(BoxedMediaProcessor::new(processor))
             }
             Self::AudioMixer {
-                //input_stream,
-                //output_stream,
-..
-             } => {
-                // let layout = Layout::default();
-                 todo!()
+                input_stream,
+                output_stream,
+            } => {
+                let input_stream_ids = input_stream
+                    .iter()
+                    .map(|name| registry.get_id(name).or_fail())
+                    .collect::<orfail::Result<_>>()?;
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                let trim_spans = Default::default();
+                let processor = AudioMixer::new(trim_spans, input_stream_ids, output_stream_id);
+                Ok(BoxedMediaProcessor::new(processor))
             }
             _ => todo!(),
         }
