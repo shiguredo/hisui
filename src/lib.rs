@@ -34,6 +34,7 @@ pub mod metadata;
 pub mod mixer_audio;
 pub mod mixer_video;
 pub mod optuna;
+pub mod pipeline;
 pub mod processor;
 pub mod reader;
 pub mod reader_mp4;

@@ -45,7 +45,7 @@
     },
     {
       "type": "mp4_writer",
-      "input_stream": ["mixed#audio", "mixed#video"],
+      "input_stream": ["encoded#audio", "encoded#video"],
       "output_file": "foo.mp4",
     },
     {

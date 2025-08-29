@@ -5,6 +5,29 @@ use std::time::Duration;
 use crate::audio::AudioData;
 use crate::video::VideoFrame;
 
+// 設定ファイルなどで使われる外部用の名前
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MediaStreamName(String);
+
+impl MediaStreamName {
+    pub fn new(name: &str) -> Self {
+        Self(name.to_owned())
+    }
+
+    pub fn get(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for MediaStreamName {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
+    }
+}
+
+// 内部用の識別子
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MediaStreamId(u64);
 
