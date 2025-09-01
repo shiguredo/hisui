@@ -274,6 +274,34 @@ impl PipelineComponent {
 
                 Ok(BoxedMediaProcessor::new(processor))
             }
+            Self::Mp4Writer {
+                input_stream,
+                output_file,
+            } => {
+                let input_stream_ids: Vec<_> = input_stream
+                    .iter()
+                    .map(|name| registry.get_id(name).or_fail())
+                    .collect::<orfail::Result<_>>()?;
+
+                // TODO: ちゃんとする
+                let input_audio_stream_id = input_stream_ids.get(0).copied();
+                let input_video_stream_id = input_stream_ids.get(1).copied();
+                let options = crate::writer_mp4::Mp4WriterOptions {
+                    resolution: Resolution::new(1280, 720).or_fail()?,
+                    duration: ONE_DAY,
+                    frame_rate: FrameRate::FPS_25,
+                };
+
+                let processor = crate::writer_mp4::Mp4Writer::new(
+                    output_file,
+                    &options,
+                    input_audio_stream_id,
+                    input_video_stream_id,
+                )
+                .or_fail()?;
+
+                Ok(BoxedMediaProcessor::new(processor))
+            }
             _ => todo!(),
         }
     }
