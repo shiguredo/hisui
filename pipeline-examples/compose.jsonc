@@ -42,7 +42,7 @@
         "main": {
           "max_columns": 4,
           "max_rows": 4,
-          "video_sources": ["*"]
+          "video_sources": ["video_raw#source1"]
         }
       }
     },

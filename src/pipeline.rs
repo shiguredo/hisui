@@ -195,8 +195,6 @@ impl PipelineComponent {
                         } else if s.contains('*') {
                             return Err(orfail::Failure::new(format!("not supported yet: {s:?}")));
                         } else {
-                            (input_stream.iter().any(|name| name.get() == s))
-                                .or_fail_with(|()| format!("unknown source ID: {s:?}"))?;
                             resolved.push((source_info(&s), source.clone()));
                         }
                     }
