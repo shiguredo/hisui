@@ -256,6 +256,7 @@ impl PipelineComponent {
                 let options = crate::encoder::VideoEncoderOptions {
                     codec: crate::types::CodecName::Vp8,
                     bitrate: 1_000_000, // 1 Mbps
+                    // TODO: 解像度は入力にあわせて動的に決定すべき
                     width: crate::types::EvenUsize::new(1280).or_fail()?,
                     height: crate::types::EvenUsize::new(720).or_fail()?,
                     frame_rate: crate::video::FrameRate::FPS_25,
