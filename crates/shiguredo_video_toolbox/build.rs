@@ -78,6 +78,9 @@ fn main() {
                 .display()
                 .to_string(),
         )
+        // ターゲット判定がうまくいかないことがあるので、明示的に指定する
+        // ちゃんとやるなら TargetConditionals.h をインクルードするようにした方がいいかもしれない
+        .clang_arg("-DTARGET_OS_OSX=1")
         // Video Toolbox 側のコメントが誤ってテスト対象と認識されてしまいエラーとなることがあるので、
         // コメントは生成しないようにしている。
         .generate_comments(false)
