@@ -47,6 +47,7 @@ pub mod subcommand_legacy;
 pub mod subcommand_list_codecs;
 pub mod subcommand_tune;
 pub mod subcommand_vmaf;
+pub mod subcommand_pipeline;
 pub mod types;
 pub mod video;
 pub mod video_h264;
