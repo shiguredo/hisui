@@ -14,7 +14,7 @@ use crate::{
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     stats::{ProcessorStats, Stats},
-    writer_mp4::Mp4Writer,
+    writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
 
 #[derive(Debug)]
@@ -131,7 +131,7 @@ impl Composer {
         // ライターを登録
         let writer = Mp4Writer::new(
             out_file_path,
-            &self.layout,
+            &Mp4WriterOptions::from_layout(&self.layout),
             self.layout
                 .has_audio()
                 .then_some(audio_encoder_output_stream_id),
