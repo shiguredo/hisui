@@ -1,80 +1,63 @@
 {
   "pipeline": [
-    // Audio processing pipeline
-    {
+    // 音声の処理パイプライン: read -> decode -> mix -> encode
+    { // メディアファイルからの音声データの読み込み
       "type": "audio_reader",
-      "input_file": "audio.webm", // This would be dynamically resolved from layout sources
+      "input_file": "audio.mp4", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
       "output_stream": "audio_raw#source1",
       "start_time": 0,
     },
-    {
+    { // 音声をデコード
       "type": "audio_decoder",
       "input_stream": "audio_raw#source1",
-      "output_stream": "audio_decoded#source1"
+      "output_stream": "audio_decoded#source1",
+    },
+    { // 音声を合成: この例では入力がひとつなので実質的には何もしない
+      "type": "audio_mixer",
+      "input_stream": ["audio_decoded#source1"],
+      "output_stream": "mixed#audio",
+    },
+    { // 合成後の音声をエンコード
+      "type": "audio_encoder",
+      "input_stream": "mixed#audio",
+      "output_stream": "encoded#audio",
     },
 
-    // Video processing pipeline
-    {
+    // 映像の処理パイプライン: read -> decode -> mix -> encode
+    { // メディアファイルからの映像データの読み込み
       "type": "video_reader",
-      "input_file": "video.webm", // This would be dynamically resolved from layout sources
+      "input_file": "video.webm", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
       "output_stream": "video_raw#source1",
       "start_time": 0,
     },
-    {
+    { // 映像をデコード
       "type": "video_decoder",
       "input_stream": "video_raw#source1",
-      "output_stream": "video_decoded#source1"
+      "output_stream": "video_decoded#source1",
     },
-
-    // Mixing stage - combines all audio/video sources
-    {
-      "type": "audio_mixer",
-      "input_stream": ["audio_decoded#source1"], // Would include all audio sources from layout
-      "output_stream": "mixed#audio"
-      // trim_spans and other audio layout parameters would go here
-    },
-    {
+    { // 映像を合成: この例では入力がひとつなので実質的にはリサイズしているだけ
       "type": "video_mixer",
-      "input_stream": ["video_decoded#source1"], // Would include all video sources from layout
+      "input_stream": ["video_decoded#source1"],
       "output_stream": "mixed#video",
       "resolution": "1280x720",
       "video_layout": {
         "main": {
-          "max_columns": 4,
-          "max_rows": 4,
+          // TODO: "video_reader" の出力ストリーム ID を指定する必要があるのはわかりにくいので修正する
           "video_sources": ["video_raw#source1"]
         }
       }
     },
-
-    // Encoding stage - prepares for output
-    {
-      "type": "audio_encoder",
-      "input_stream": "mixed#audio",
-      "output_stream": "encoded#audio",
-      "codec": "Opus",
-      "bitrate": 128000 // From layout audio_bitrate_bps
-    },
-    {
+    { // 合成後の映像をエンコード
       "type": "video_encoder",
       "input_stream": "mixed#video",
       "output_stream": "encoded#video",
-      "codec": "VP8", // From layout video_codec
-      "bitrate": 1000000, // From layout video_bitrate_bps
-      "width": 1280,
-      "height": 720,
-      "frame_rate": 25,
-      "libvpx_vp8_encode_params": {} // From layout encode_params
     },
 
-    // Output stage - writes final MP4
+    // エンコード後の音声と映像を MP4 ファイルに出力
     {
       "type": "mp4_writer",
       "input_stream": ["encoded#audio", "encoded#video"],
-      "output_file": "output.mp4", // Equivalent to compose command's output file
-      "resolution": {"width": 1280, "height": 720},
-      "duration": "24:00:00", // Max duration, from layout output_duration
-      "frame_rate": 25
+      "output_file": "output.mp4",
     }
   ],
 }
