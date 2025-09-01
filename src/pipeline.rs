@@ -57,8 +57,8 @@ pub enum PipelineComponent {
     VideoEncoder {
         input_stream: MediaStreamName,
         output_stream: MediaStreamName,
-        // codec: String,
-        // libvpx_vp9_encode_params: ()
+        // TODO: codec: CodecName
+        // TODO: libvpx_vp9_encode_params, etc
     },
     Mp4Writer {
         input_stream: Vec<MediaStreamName>,
@@ -223,6 +223,28 @@ impl PipelineComponent {
                         .or_fail()?,
                 };
                 let processor = VideoMixer::new(spec, input_stream_ids, output_stream_id);
+                Ok(BoxedMediaProcessor::new(processor))
+            }
+            Self::AudioEncoder {
+                input_stream,
+                output_stream,
+            } => {
+                let input_stream_id = registry.get_id(input_stream).or_fail()?;
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+
+                // TODO: 変更可能にする
+                let codec = crate::types::CodecName::Opus;
+                let bitrate =
+                    std::num::NonZeroUsize::new(crate::audio::DEFAULT_BITRATE).or_fail()?;
+
+                let processor = crate::encoder::AudioEncoder::new(
+                    codec,
+                    bitrate,
+                    input_stream_id,
+                    output_stream_id,
+                )
+                .or_fail()?;
+
                 Ok(BoxedMediaProcessor::new(processor))
             }
             _ => todo!(),

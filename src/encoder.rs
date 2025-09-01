@@ -37,33 +37,26 @@ pub struct AudioEncoder {
 
 impl AudioEncoder {
     pub fn new(
-        layout: &Layout,
+        codec: CodecName,
+        bitrate: NonZeroUsize,
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
     ) -> orfail::Result<Self> {
-        match layout.audio_codec {
+        match codec {
             #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => AudioEncoder::new_fdk_aac(
-                input_stream_id,
-                output_stream_id,
-                layout.audio_bitrate_bps(),
-            )
-            .or_fail(),
+            CodecName::Aac => {
+                AudioEncoder::new_fdk_aac(input_stream_id, output_stream_id, bitrate).or_fail()
+            }
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
-            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
-                input_stream_id,
-                output_stream_id,
-                layout.audio_bitrate_bps(),
-            )
-            .or_fail(),
+            CodecName::Aac => {
+                AudioEncoder::new_audio_toolbox_aac(input_stream_id, output_stream_id, bitrate)
+                    .or_fail()
+            }
             #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
             CodecName::Aac => Err(orfail::Failure::new("AAC output is not supported")),
-            CodecName::Opus => AudioEncoder::new_opus(
-                input_stream_id,
-                output_stream_id,
-                layout.audio_bitrate_bps(),
-            )
-            .or_fail(),
+            CodecName::Opus => {
+                AudioEncoder::new_opus(input_stream_id, output_stream_id, bitrate).or_fail()
+            }
             _ => unreachable!(),
         }
     }

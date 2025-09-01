@@ -110,7 +110,8 @@ impl Composer {
         // エンコーダーを登録
         let audio_encoder_output_stream_id = next_stream_id.fetch_add(1);
         let audio_encoder = AudioEncoder::new(
-            &self.layout,
+            self.layout.audio_codec,
+            self.layout.audio_bitrate_bps(),
             audio_mixer_output_stream_id,
             audio_encoder_output_stream_id,
         )
