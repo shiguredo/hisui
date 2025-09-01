@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use orfail::OrFail;
 
@@ -8,13 +9,15 @@ use crate::json::JsonObject;
 use crate::layout::Resolution;
 use crate::layout_region::RawRegion;
 use crate::media::{MediaStreamName, MediaStreamNameRegistry};
-use crate::metadata::{ContainerFormat, SourceInfo};
+use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
 use crate::mixer_audio::AudioMixer;
 use crate::mixer_video::{VideoMixer, VideoMixerSpec};
 use crate::processor::BoxedMediaProcessor;
 use crate::reader::{AudioReader, VideoReader};
 use crate::types::TimeOffset;
 use crate::video::FrameRate;
+
+const ONE_DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone)]
 pub enum PipelineComponent {
@@ -151,7 +154,7 @@ impl PipelineComponent {
                 resolution,
                 video_layout,
             } => {
-                let input_stream_ids = input_stream
+                let input_stream_ids: Vec<_> = input_stream
                     .iter()
                     .map(|name| registry.get_id(name).or_fail())
                     .collect::<orfail::Result<_>>()?;
@@ -161,14 +164,44 @@ impl PipelineComponent {
 
                 let resolver = |_base: &Path,
                                 sources: &[PathBuf],
-                                _sources_excluded: &[PathBuf]|
+                                sources_excluded: &[PathBuf]|
                  -> orfail::Result<Vec<(SourceInfo, PathBuf)>> {
                     // TODO: いろいろとちゃんとする
-                    // let mut resolved=Vec::new();
-                    // TODO: ["*"] だけいったん特別扱いする
-                    // TODO: それ以外は単純にストリーム ID をソース ID に変換する
-                    // それ以外のメタデータはトリム周り以外には影響しないので、ダミー値でいい
-                    todo!()
+                    sources_excluded.is_empty().or_fail_with(|()| {
+                        "not supported yet: non empty 'sources_excluded'".to_owned()
+                    })?;
+
+                    fn source_info(id: &str) -> SourceInfo {
+                        // ID 以外のメタデータはトリム周り以外には影響しないので、ダミー値でいい
+                        SourceInfo {
+                            id: SourceId::new(id),
+                            format: ContainerFormat::Mp4,
+                            audio: true,
+                            video: true,
+                            start_timestamp: Duration::ZERO,
+                            stop_timestamp: ONE_DAY,
+                        }
+                    }
+
+                    let mut resolved = Vec::new();
+                    for source in sources {
+                        let s = source.display().to_string();
+                        if s == "*" {
+                            resolved.extend(
+                                input_stream
+                                    .iter()
+                                    .map(|name| (source_info(name.get()), source.clone())),
+                            );
+                        } else if s.contains('*') {
+                            return Err(orfail::Failure::new(format!("not supported yet: {s:?}")));
+                        } else {
+                            (input_stream.iter().any(|name| name.get() == s))
+                                .or_fail_with(|()| format!("unknown source ID: {s:?}"))?;
+                            resolved.push((source_info(&s), source.clone()));
+                        }
+                    }
+
+                    Ok(resolved)
                 };
 
                 let spec = VideoMixerSpec {
