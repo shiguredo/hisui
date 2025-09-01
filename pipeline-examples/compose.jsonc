@@ -5,7 +5,7 @@
       "type": "audio_reader",
       "input_file": "audio.webm", // This would be dynamically resolved from layout sources
       "output_stream": "audio_raw#source1",
-      "start_time": "0s"
+      "start_time": 0,
     },
     {
       "type": "audio_decoder",
@@ -18,7 +18,7 @@
       "type": "video_reader",
       "input_file": "video.webm", // This would be dynamically resolved from layout sources
       "output_stream": "video_raw#source1",
-      "start_time": "0s"
+      "start_time": 0,
     },
     {
       "type": "video_decoder",
@@ -37,14 +37,12 @@
       "type": "video_mixer",
       "input_stream": ["video_decoded#source1"], // Would include all video sources from layout
       "output_stream": "mixed#video",
-      "resolution": {"width": 1280, "height": 720}, // From layout output resolution
+      "resolution": "1280x720",
       "video_layout": {
         "main": {
-          "cell_width": 320,
-          "cell_height": 240,
           "max_columns": 4,
           "max_rows": 4,
-          "video_sources": ["*"] // All sources, resolved from layout regions
+          "video_sources": ["*"]
         }
       }
     },

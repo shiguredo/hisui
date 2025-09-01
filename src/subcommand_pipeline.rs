@@ -19,6 +19,7 @@ impl Args {
                 .short('p')
                 .ty("PATH")
                 .env("HISUI_PIPELINE_FILE_PATH")
+                .example("/path/to/pipeline.jsonc")
                 .doc("実行するパイプラインを定義したJSONファイルのパスを指定します")
                 .take(raw_args)
                 .then(|a| a.value().parse())?,
