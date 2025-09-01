@@ -5,7 +5,7 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    encoder::{AudioEncoder, VideoEncoder},
+    encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
     layout::Layout,
     media::MediaStreamId,
     mixer_audio::AudioMixer,
@@ -120,7 +120,7 @@ impl Composer {
 
         let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
         let video_encoder = VideoEncoder::new(
-            &self.layout,
+            &VideoEncoderOptions::from_layout(&self.layout),
             video_mixer_output_stream_id,
             video_encoder_output_stream_id,
             self.openh264_lib.clone(),

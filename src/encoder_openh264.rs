@@ -7,7 +7,7 @@ use shiguredo_mp4::{
 };
 
 use crate::{
-    layout::Layout,
+    encoder::VideoEncoderOptions,
     types::EvenUsize,
     video::{self, VideoFormat, VideoFrame},
     video_h264::{
@@ -24,16 +24,19 @@ pub struct Openh264Encoder {
 }
 
 impl Openh264Encoder {
-    pub fn new(lib: shiguredo_openh264::Openh264Library, layout: &Layout) -> orfail::Result<Self> {
-        let width = layout.resolution.width().get();
-        let height = layout.resolution.height().get();
+    pub fn new(
+        lib: shiguredo_openh264::Openh264Library,
+        options: &VideoEncoderOptions,
+    ) -> orfail::Result<Self> {
+        let width = options.width.get();
+        let height = options.height.get();
         let config = shiguredo_openh264::EncoderConfig {
-            fps_numerator: layout.frame_rate.numerator.get(),
-            fps_denominator: layout.frame_rate.denumerator.get(),
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denumerator.get(),
             width,
             height,
-            target_bitrate: layout.video_bitrate_bps(),
-            ..layout.encode_params.openh264.clone().unwrap_or_default()
+            target_bitrate: options.bitrate,
+            ..options.encode_params.openh264.clone().unwrap_or_default()
         };
         let inner = shiguredo_openh264::Encoder::new(lib, &config).or_fail()?;
         Ok(Self {

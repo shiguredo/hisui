@@ -8,7 +8,7 @@ use shiguredo_mp4::{
 };
 
 use crate::{
-    layout::Layout,
+    encoder::VideoEncoderOptions,
     types::{CodecName, EvenUsize},
     video::{self, VideoFormat, VideoFrame},
 };
@@ -34,20 +34,20 @@ pub struct LibvpxEncoder {
 }
 
 impl LibvpxEncoder {
-    pub fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
+    pub fn new_vp8(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let config = shiguredo_libvpx::EncoderConfig {
-            width: layout.resolution.width().get(),
-            height: layout.resolution.height().get(),
-            fps_numerator: layout.frame_rate.numerator.get(),
-            fps_denominator: layout.frame_rate.denumerator.get(),
-            target_bitrate: layout.video_bitrate_bps(),
-            ..layout.encode_params.libvpx_vp8.clone().unwrap_or_default()
+            width: options.width.get(),
+            height: options.height.get(),
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denumerator.get(),
+            target_bitrate: options.bitrate,
+            ..options.encode_params.libvpx_vp8.clone().unwrap_or_default()
         };
         log::debug!("libvpx vp8 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
 
-        let width = layout.resolution.width();
-        let height = layout.resolution.height();
+        let width = options.width;
+        let height = options.height;
         let sample_entry = vp8_sample_entry(width, height);
 
         Ok(Self {
@@ -59,20 +59,20 @@ impl LibvpxEncoder {
         })
     }
 
-    pub fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
+    pub fn new_vp9(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let config = shiguredo_libvpx::EncoderConfig {
-            width: layout.resolution.width().get(),
-            height: layout.resolution.height().get(),
-            fps_numerator: layout.frame_rate.numerator.get(),
-            fps_denominator: layout.frame_rate.denumerator.get(),
-            target_bitrate: layout.video_bitrate_bps(),
-            ..layout.encode_params.libvpx_vp9.clone().unwrap_or_default()
+            width: options.width.get(),
+            height: options.height.get(),
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denumerator.get(),
+            target_bitrate: options.bitrate,
+            ..options.encode_params.libvpx_vp9.clone().unwrap_or_default()
         };
         log::debug!("libvpx vp9 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;
 
-        let width = layout.resolution.width();
-        let height = layout.resolution.height();
+        let width = options.width;
+        let height = options.height;
         let sample_entry = vp9_sample_entry(width, height);
 
         Ok(Self {
