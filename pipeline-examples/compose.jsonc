@@ -1,0 +1,82 @@
+{
+  "pipeline": [
+    // Audio processing pipeline
+    {
+      "type": "audio_reader",
+      "input_file": "audio.webm", // This would be dynamically resolved from layout sources
+      "output_stream": "audio_raw#source1",
+      "start_time": "0s"
+    },
+    {
+      "type": "audio_decoder",
+      "input_stream": "audio_raw#source1",
+      "output_stream": "audio_decoded#source1"
+    },
+
+    // Video processing pipeline
+    {
+      "type": "video_reader",
+      "input_file": "video.webm", // This would be dynamically resolved from layout sources
+      "output_stream": "video_raw#source1",
+      "start_time": "0s"
+    },
+    {
+      "type": "video_decoder",
+      "input_stream": "video_raw#source1",
+      "output_stream": "video_decoded#source1"
+    },
+
+    // Mixing stage - combines all audio/video sources
+    {
+      "type": "audio_mixer",
+      "input_stream": ["audio_decoded#source1"], // Would include all audio sources from layout
+      "output_stream": "mixed#audio"
+      // trim_spans and other audio layout parameters would go here
+    },
+    {
+      "type": "video_mixer",
+      "input_stream": ["video_decoded#source1"], // Would include all video sources from layout
+      "output_stream": "mixed#video",
+      "resolution": {"width": 1280, "height": 720}, // From layout output resolution
+      "video_layout": {
+        "main": {
+          "cell_width": 320,
+          "cell_height": 240,
+          "max_columns": 4,
+          "max_rows": 4,
+          "video_sources": ["*"] // All sources, resolved from layout regions
+        }
+      }
+    },
+
+    // Encoding stage - prepares for output
+    {
+      "type": "audio_encoder",
+      "input_stream": "mixed#audio",
+      "output_stream": "encoded#audio",
+      "codec": "Opus",
+      "bitrate": 128000 // From layout audio_bitrate_bps
+    },
+    {
+      "type": "video_encoder",
+      "input_stream": "mixed#video",
+      "output_stream": "encoded#video",
+      "codec": "VP8", // From layout video_codec
+      "bitrate": 1000000, // From layout video_bitrate_bps
+      "width": 1280,
+      "height": 720,
+      "frame_rate": 25,
+      "libvpx_vp8_encode_params": {} // From layout encode_params
+    },
+
+    // Output stage - writes final MP4
+    {
+      "type": "mp4_writer",
+      "input_stream": ["encoded#audio", "encoded#video"],
+      "output_file": "output.mp4", // Equivalent to compose command's output file
+      "resolution": {"width": 1280, "height": 720},
+      "duration": "24:00:00", // Max duration, from layout output_duration
+      "frame_rate": 25
+    }
+  ],
+}
