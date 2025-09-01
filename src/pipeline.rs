@@ -247,6 +247,33 @@ impl PipelineComponent {
 
                 Ok(BoxedMediaProcessor::new(processor))
             }
+            Self::VideoEncoder {
+                input_stream,
+                output_stream,
+            } => {
+                let input_stream_id = registry.get_id(input_stream).or_fail()?;
+                let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+
+                // TODO: ちゃんとする
+                let options = crate::encoder::VideoEncoderOptions {
+                    codec: crate::types::CodecName::Vp8,
+                    bitrate: 1_000_000, // 1 Mbps
+                    width: crate::types::EvenUsize::new(1280).or_fail()?,
+                    height: crate::types::EvenUsize::new(720).or_fail()?,
+                    frame_rate: crate::video::FrameRate::FPS_25,
+                    encode_params: Default::default(),
+                };
+
+                let processor = crate::encoder::VideoEncoder::new(
+                    &options,
+                    input_stream_id,
+                    output_stream_id,
+                    None,
+                )
+                .or_fail()?;
+
+                Ok(BoxedMediaProcessor::new(processor))
+            }
             _ => todo!(),
         }
     }
