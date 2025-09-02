@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_dav1d"
-version = "2025.1.0-canary.1"
+version = "2025.1.0-canary.2"
 dependencies = [
  "bindgen",
  "toml",
@@ -412,14 +412,14 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_fdk_aac"
-version = "2025.1.0-canary.1"
+version = "2025.1.0-canary.2"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "shiguredo_libvpx"
-version = "2025.1.0-canary.3"
+version = "2025.1.0-canary.4"
 dependencies = [
  "bindgen",
  "toml",
@@ -433,7 +433,7 @@ checksum = "d74bd04dc827a7f96d11d77dc432d92666198bb813ab8db477e869539b5b7ccb"
 
 [[package]]
 name = "shiguredo_openh264"
-version = "2025.1.0-canary.2"
+version = "2025.1.0-canary.3"
 dependencies = [
  "bindgen",
  "libloading",
@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_opus"
-version = "2025.1.0-canary.2"
+version = "2025.1.0-canary.3"
 dependencies = [
  "bindgen",
  "toml",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_svt_av1"
-version = "2025.1.0-canary.2"
+version = "2025.1.0-canary.3"
 dependencies = [
  "bindgen",
  "log",
@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_video_toolbox"
-version = "2025.1.0-canary.2"
+version = "2025.1.0-canary.3"
 dependencies = [
  "bindgen",
  "log",
