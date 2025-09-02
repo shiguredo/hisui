@@ -190,11 +190,11 @@ impl std::ops::Mul<usize> for EvenUsize {
     }
 }
 
-// Time offset
+// タイムオフセット
 //
-// FORMAT:
-// - <NUMBER> (unit: seconds)
-// - "<HOUR>:<MINUTE>:<SECOND>[.<FRACTION_SECOND>]"
+// フォーマット:
+// - 数値 (単位: 秒)
+// - "時:分:秒[.小数秒]" 形式の文字列
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TimeOffset(Duration);
 
