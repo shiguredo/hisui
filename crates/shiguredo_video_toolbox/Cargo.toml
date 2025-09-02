@@ -1,6 +1,6 @@
 [package]
 name = "shiguredo_video_toolbox"
-version = "2025.1.0-canary.2"
+version = "2025.1.0-canary.3"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Shiguredo Inc."]

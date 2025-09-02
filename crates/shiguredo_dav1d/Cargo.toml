@@ -1,6 +1,6 @@
 [package]
 name = "shiguredo_dav1d"
-version = "2025.1.0-canary.1"
+version = "2025.1.0-canary.2"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Shiguredo Inc."]

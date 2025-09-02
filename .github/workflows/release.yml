@@ -6,8 +6,8 @@ on:
       - '*'
 
 jobs:
-  github-release-draft:
-    name: 'Create GitHub Release Draft'
+  github-release:
+    name: 'Create GitHub Release'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}
@@ -28,7 +28,6 @@ jobs:
           release_output=$(gh release create ${{ steps.get_version.outputs.VERSION }} \
             --title "${{ steps.get_version.outputs.VERSION }}" \
             --notes "Pre-release ${{ steps.get_version.outputs.VERSION }}" \
-            --draft \
             --prerelease)
           release_id=$(echo "$release_output" | grep -o 'releases/[0-9]*' | cut -d'/' -f2)
           echo "release-id=$release_id" >> $GITHUB_OUTPUT
@@ -43,7 +42,7 @@ jobs:
           - name: ubuntu-24.04_arm64
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.platform.runs-on }}
-    needs: github-release-draft
+    needs: github-release
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
@@ -53,23 +52,27 @@ jobs:
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
       - run: rustup update stable
       - run: cargo build --release
-      - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
+      - run: |
+          mkdir -p hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
+          cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}/
+          tar -czf hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz 
+            hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
       - name: Upload artifact for Docker image
         uses: actions/upload-artifact@v4
         with:
           name: hisui-binary-${{ matrix.platform.name }}
-          path: hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
+          path: hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ needs.github-release-draft.outputs.version }} \
-            hisui-${{ needs.github-release-draft.outputs.version }}.${{ matrix.platform.name }}
+          gh release upload ${{ needs.github-release.outputs.version }} \
+            hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz
 
   macos-binary:
     name: 'Upload Binary for MacOS'
     runs-on: macos-latest
-    needs: github-release-draft
+    needs: github-release
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
@@ -80,18 +83,22 @@ jobs:
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
       - run: cargo build --release
-      - run: mv target/release/hisui hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
+      - run: |
+          mkdir -p hisui-${{ needs.github-release.outputs.version }}_macos_arm64
+          cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_macos_arm64/
+          tar -czf hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz 
+            hisui-${{ needs.github-release.outputs.version }}_macos_arm64
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ needs.github-release-draft.outputs.version }} \
-            hisui-${{ needs.github-release-draft.outputs.version }}.macos_arm64
+          gh release upload ${{ needs.github-release.outputs.version }} \
+            hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz
 
   docker-image:
     name: 'Build and Push Docker Image'
     runs-on: ubuntu-24.04
-    needs: [github-release-draft, ubuntu-binary]
+    needs: [github-release, ubuntu-binary]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
@@ -121,8 +128,10 @@ jobs:
 
       - name: Prepare binaries
         run: |
-          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_x86_64 hisui.amd64
-          mv hisui-${{ needs.github-release-draft.outputs.version }}.ubuntu-24.04_arm64 hisui.arm64
+          tar -xzf hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_x86_64.tar.gz
+          mv hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_x86_64/hisui hisui.amd64
+          tar -xzf hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_arm64.tar.gz
+          mv hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_arm64/hisui hisui.arm64
           chmod +x hisui.*
 
       - name: Build and push multi-arch image (canary)
@@ -145,7 +154,7 @@ jobs:
             .
 
   slack_notify_failed:
-    needs: [github-release-draft, ubuntu-binary, macos-binary, docker-image]
+    needs: [github-release, ubuntu-binary, macos-binary, docker-image]
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     if: failure()
