@@ -71,7 +71,7 @@ jobs:
 
   macos-binary:
     name: 'Upload Binary for MacOS'
-    runs-on: macos-latest
+    runs-on: macos-15
     needs: github-release
     steps:
       - name: Checkout sources
@@ -81,7 +81,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           brew update
-          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+          brew install meson nasm yasm automake autoconf libtool pkg-config
       - run: cargo build --release
       - run: |
           mkdir -p hisui-${{ needs.github-release.outputs.version }}_macos_arm64
