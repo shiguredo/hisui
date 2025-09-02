@@ -58,7 +58,7 @@ impl Args {
                 .ty("PATH")
                 .default("reference.yuv")
                 .doc(concat!(
-                    "参照映像（合成前）のYUVファイルの出力先を指定します\n",
+                    "参照映像のYUVファイルの出力先を指定します\n",
                     "\n",
                     "相対パスの場合は ROOT_DIR が起点となります"
                 ))
@@ -68,7 +68,7 @@ impl Args {
                 .ty("PATH")
                 .default("distorted.yuv")
                 .doc(concat!(
-                    "歪み映像（合成後）のYUVファイルの出力先を指定します\n",
+                    "歪み映像のYUVファイルの出力先を指定します\n",
                     "\n",
                     "相対パスの場合は ROOT_DIR が起点となります"
                 ))
