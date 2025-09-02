@@ -1,5 +1,7 @@
 # Hisui を利用してみる
 
+まずは Hisui を使って録画データの合成をしてみましょう。
+
 ## リリースされたビルド済みのバイナリを使用して合成する
 
 ビルド済みのバイナリを使用する場合は [Releases](https://github.com/shiguredo/hisui/releases) より環境に応じた最新のバイナリをダウンロードしてください。
@@ -8,6 +10,8 @@
 $ curl -L https://github.com/shiguredo/hisui/releases/download/{ VERSION }/{ BINARY_NAME } -o hisui
 $ chmod +x hisui
 ```
+
+なお、自前でのビルドについては [ビルド方法](build.md) をご参照ください。
 
 Hisui には録画ファイルの合成を行うための [compose](command_compose.md) コマンドがあります。
 Sora が録画ファイルを保存したディレクトリを指定して、このコマンドを実行すると合成が始まります。
@@ -26,8 +30,6 @@ $ ./hisui compose 録画ファイルの配置ディレクトリ/
 # 合成結果ファイルを確認
 $ ls 録画ファイルの配置ディレクトリ/output.mp4
 ```
-
-自前でのビルドについては [ビルド方法](build.md) をご参照ください。
 
 ## Docker イメージを使用して合成する
 
