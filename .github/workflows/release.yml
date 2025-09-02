@@ -55,7 +55,7 @@ jobs:
       - run: |
           mkdir -p hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
           cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}/
-          tar -czf hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz 
+          tar -czf hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
             hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
       - name: Upload artifact for Docker image
         uses: actions/upload-artifact@v4
@@ -86,7 +86,7 @@ jobs:
       - run: |
           mkdir -p hisui-${{ needs.github-release.outputs.version }}_macos_arm64
           cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_macos_arm64/
-          tar -czf hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz 
+          tar -czf hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz \
             hisui-${{ needs.github-release.outputs.version }}_macos_arm64
       - name: Upload Release Asset
         env:
