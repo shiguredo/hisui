@@ -1,3 +1,4 @@
+// compose コマンド相当の処理を実行するパイプラインの例
 {
   "pipeline": [
     // 音声の処理パイプライン: read -> decode -> mix -> encode
