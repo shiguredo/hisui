@@ -84,6 +84,6 @@ vmaf_v0.6.1: 96.361266
 }
 ```
 
-VMAF スコアの解釈方法については、VMAF 自体の[公式リポジトリ](https://github.com/Netflix/vmaf )や、
+VMAF スコアの解釈方法については、VMAF 自体の[公式リポジトリ](https://github.com/Netflix/vmaf)や、
 そこから辿れるドキュメントを参照してください。
 
