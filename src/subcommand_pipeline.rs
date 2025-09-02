@@ -15,10 +15,7 @@ struct Args {
 impl Args {
     fn parse(raw_args: &mut noargs::RawArgs) -> noargs::Result<Self> {
         Ok(Self {
-            pipeline_file_path: noargs::opt("pipeline-file")
-                .short('p')
-                .ty("PATH")
-                .env("HISUI_PIPELINE_FILE_PATH")
+            pipeline_file_path: noargs::arg("PIPELINE_FILE")
                 .example("/path/to/pipeline.jsonc")
                 .doc("実行するパイプラインを定義したJSONファイルのパスを指定します")
                 .take(raw_args)
