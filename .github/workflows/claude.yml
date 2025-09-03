@@ -28,7 +28,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           trigger_phrase: "!opus"
           claude_args: |
-            --model claude-opus-4-1-20250805"
+            --model claude-opus-4-1-20250805
             --disallowedTools "Bash(git:*)"
 
   check-permission:
