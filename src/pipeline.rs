@@ -14,6 +14,7 @@ use crate::media::{MediaStreamName, MediaStreamNameRegistry};
 use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
 use crate::mixer_audio::AudioMixer;
 use crate::mixer_video::{VideoMixer, VideoMixerSpec};
+use crate::plugin::PluginCommand;
 use crate::processor::BoxedMediaProcessor;
 use crate::reader::{AudioReader, VideoReader};
 use crate::types::{CodecName, EvenUsize, TimeOffset};
@@ -73,13 +74,7 @@ pub enum PipelineComponent {
         input_stream: Vec<MediaStreamName>,
         output_file: PathBuf,
     },
-    // TODO(atode):
-    // PluginCommand {
-    //      command: PathBuf,
-    //      args: Vec<String>,
-    //      input_stream: Vec<MediaStreamName>,
-    //      output_stream: Vec<MediaStreamName>,
-    // },
+    PluginCommand(PluginCommand),
 }
 
 impl PipelineComponent {
@@ -295,6 +290,10 @@ impl PipelineComponent {
                 )
                 .or_fail()?;
 
+                Ok(BoxedMediaProcessor::new(processor))
+            }
+            Self::PluginCommand(plugin) => {
+                let processor = plugin.start(registry).or_fail()?;
                 Ok(BoxedMediaProcessor::new(processor))
             }
         }

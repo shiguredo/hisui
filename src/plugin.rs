@@ -10,7 +10,7 @@ use crate::processor::{
 };
 use crate::stats::ProcessorStats;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PluginCommand {
     pub command: PathBuf,
     pub args: Vec<String>,
