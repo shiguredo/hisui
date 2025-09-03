@@ -1,0 +1,14 @@
+[project]
+name = "hisui-plugin-examples"
+version = "0.1.0"
+
+dependencies = [
+    "sora-sdk",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
