@@ -3,13 +3,11 @@ use std::path::PathBuf;
 
 use orfail::OrFail;
 
-use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
 };
 use crate::stats::ProcessorStats;
-use crate::video::VideoFrame;
 
 #[derive(Debug)]
 pub struct PluginCommand {
@@ -103,8 +101,34 @@ impl MediaProcessor for PluginCommandProcessor {
                 );
                 self.cast(&req, None).or_fail()?;
             }
-            Some(MediaSample::Audio(_)) => {}
-            Some(MediaSample::Video(_)) => {}
+            Some(MediaSample::Audio(data)) => {
+                let req = JsonRpcRequest::notification(
+                    "notify_audio",
+                    nojson::object(|f| {
+                        f.member("stream_id", input.stream_id)?;
+                        f.member("stereo", data.stereo)?;
+                        f.member("sample_rate", data.sample_rate)?;
+                        f.member("timestamp_us", data.timestamp.as_micros())?;
+                        f.member("duration_us", data.duration.as_micros())?;
+                        Ok(())
+                    }),
+                );
+                self.cast(&req, Some(&data.data)).or_fail()?;
+            }
+            Some(MediaSample::Video(frame)) => {
+                let req = JsonRpcRequest::notification(
+                    "notify_video",
+                    nojson::object(|f| {
+                        f.member("stream_id", input.stream_id)?;
+                        f.member("width", frame.width.get())?;
+                        f.member("height", frame.height.get())?;
+                        f.member("timestamp_us", frame.timestamp.as_micros())?;
+                        f.member("duration_us", frame.duration.as_micros())?;
+                        Ok(())
+                    }),
+                );
+                self.cast(&req, Some(&frame.data)).or_fail()?;
+            }
         }
         Ok(())
     }
