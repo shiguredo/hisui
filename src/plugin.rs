@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use orfail::OrFail;
 
 use crate::json::JsonObject;
-use crate::media::{MediaSample, MediaStreamId};
+use crate::media::{MediaSample, MediaStreamId, MediaStreamName, MediaStreamNameRegistry};
 use crate::processor::{
     MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
 };
@@ -14,11 +14,19 @@ use crate::stats::ProcessorStats;
 pub struct PluginCommand {
     pub command: PathBuf,
     pub args: Vec<String>,
-    pub input_stream_ids: Vec<MediaStreamId>,
+    pub input_stream_names: Vec<MediaStreamName>,
 }
 
 impl PluginCommand {
-    pub fn start(&self) -> orfail::Result<PluginCommandProcessor> {
+    pub fn start(
+        &self,
+        registry: &mut MediaStreamNameRegistry,
+    ) -> orfail::Result<PluginCommandProcessor> {
+        let mut input_stream_ids = Vec::new();
+        for name in &self.input_stream_names {
+            input_stream_ids.push(registry.get_id(name).or_fail()?);
+        }
+
         let mut process = std::process::Command::new(&self.command)
             .args(&self.args)
             .stdin(std::process::Stdio::piped())
@@ -40,8 +48,22 @@ impl PluginCommand {
             process,
             stdin: BufWriter::new(stdin),
             stdout: BufReader::new(stdout),
-            input_stream_ids: self.input_stream_ids.clone(),
+            input_stream_ids,
             next_request_id: 0,
+        })
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PluginCommand {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let obj = JsonObject::new(value)?;
+
+        Ok(Self {
+            command: obj.get_required("command")?,
+            args: obj.get("args")?.unwrap_or_default(),
+            input_stream_names: obj.get_required("input_stream")?,
         })
     }
 }
