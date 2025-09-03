@@ -67,7 +67,7 @@ Commands:
   inspect     録画ファイルの情報を取得します
   list-codecs 利用可能なコーデック一覧を表示します
   compose     録画ファイルの合成を行います
-  legacy      レガシー Hisui との互換性維持用のコマンドです（省略可能）
+  legacy      レガシー Hisui との互換性維持用のコマンドです
   vmaf        VMAF を用いた映像エンコード品質の評価を行います
   tune        Optuna を用いた映像エンコードパラメーターの調整を行います
 
