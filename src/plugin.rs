@@ -1,12 +1,15 @@
+use std::io::BufWriter;
 use std::path::PathBuf;
 
 use orfail::OrFail;
 
+use crate::audio::AudioData;
 use crate::media::MediaStreamId;
 use crate::processor::{
     MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
 };
 use crate::stats::ProcessorStats;
+use crate::video::VideoFrame;
 
 #[derive(Debug)]
 pub struct PluginCommand {
@@ -36,9 +39,10 @@ impl PluginCommand {
 
         Ok(PluginCommandProcessor {
             process,
-            stdin,
+            stdin: BufWriter::new(stdin),
             stdout,
             input_stream_ids: self.input_stream_ids.clone(),
+            next_request_id: 0,
         })
     }
 }
@@ -46,9 +50,10 @@ impl PluginCommand {
 #[derive(Debug)]
 pub struct PluginCommandProcessor {
     process: std::process::Child,
-    stdin: std::process::ChildStdin,
+    stdin: BufWriter<std::process::ChildStdin>,
     stdout: std::process::ChildStdout,
     input_stream_ids: Vec<MediaStreamId>,
+    next_request_id: u64,
 }
 
 impl MediaProcessor for PluginCommandProcessor {
@@ -61,7 +66,11 @@ impl MediaProcessor for PluginCommandProcessor {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        todo!()
+        if let Some(sample) = input.sample {
+        } else {
+            self.input_stream_ids.retain(|id| *id != input.stream_id);
+        }
+        Ok(())
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
@@ -74,4 +83,29 @@ impl Drop for PluginCommandProcessor {
         let _ = self.process.kill();
         let _ = self.process.wait();
     }
+}
+
+#[derive(Debug)]
+pub enum JsonRpcRequest<'a> {
+    NotifyAudioData {
+        stream_id: MediaStreamId,
+        data: &'a AudioData,
+    },
+    NotifyVideoFrame {
+        stream_id: MediaStreamId,
+        frame: &'a VideoFrame,
+    },
+    NotifyEos {
+        stream_id: MediaStreamId,
+    },
+    PollOutput {
+        request_id: u64,
+    },
+}
+
+#[derive(Debug)]
+pub enum PollOutputResponse {
+    WaitingInputAny,
+    WaitingInput { stream_id: MediaStreamId },
+    Finished,
 }
