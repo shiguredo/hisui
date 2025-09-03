@@ -299,6 +299,43 @@ impl VideoFrame {
         self.data = new_data;
         Ok(())
     }
+
+    pub fn to_rgb_data(&self) -> orfail::Result<Vec<u8>> {
+        (self.format == VideoFormat::I420).or_fail()?;
+
+        let (y_plane, u_plane, v_plane) = self.as_yuv_planes().or_fail()?;
+
+        let width = self.width.get();
+        let height = self.height.get();
+        let mut rgb_data = Vec::with_capacity(width * height * 3);
+
+        for y in 0..height {
+            for x in 0..width {
+                let y_idx = y * width + x;
+                let uv_idx = (y / 2) * (width / 2) + (x / 2);
+
+                let y_val = y_plane[y_idx] as f32;
+                let u_val = u_plane[uv_idx] as f32 - 128.0;
+                let v_val = v_plane[uv_idx] as f32 - 128.0;
+
+                // ITU-R BT.601 standard YUV to RGB conversion
+                let r = y_val + 1.402 * v_val;
+                let g = y_val - 0.344 * u_val - 0.714 * v_val;
+                let b = y_val + 1.772 * u_val;
+
+                // Clamp values to 0-255 range
+                let r = r.max(0.0).min(255.0) as u8;
+                let g = g.max(0.0).min(255.0) as u8;
+                let b = b.max(0.0).min(255.0) as u8;
+
+                rgb_data.push(r);
+                rgb_data.push(g);
+                rgb_data.push(b);
+            }
+        }
+
+        Ok(rgb_data)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
