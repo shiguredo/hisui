@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use orfail::OrFail;
 
 use crate::decoder::{AudioDecoder, VideoDecoder};
+use crate::encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions};
 use crate::json::JsonObject;
 use crate::layout::Resolution;
 use crate::layout_region::RawRegion;
@@ -14,8 +16,9 @@ use crate::mixer_audio::AudioMixer;
 use crate::mixer_video::{VideoMixer, VideoMixerSpec};
 use crate::processor::BoxedMediaProcessor;
 use crate::reader::{AudioReader, VideoReader};
-use crate::types::TimeOffset;
+use crate::types::{CodecName, EvenUsize, TimeOffset};
 use crate::video::FrameRate;
+use crate::writer_mp4::{Mp4Writer, Mp4WriterOptions};
 
 const ONE_DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -131,7 +134,7 @@ impl PipelineComponent {
                 input_stream,
                 output_stream,
             } => {
-                // TODO: openh264 を指定できるようにする
+                // TODO(atode): openh264 を指定できるようにする
                 let input_stream_id = registry.get_id(input_stream).or_fail()?;
                 let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
                 let options = Default::default();
@@ -169,7 +172,7 @@ impl PipelineComponent {
                                 sources: &[PathBuf],
                                 sources_excluded: &[PathBuf]|
                  -> orfail::Result<Vec<(SourceInfo, PathBuf)>> {
-                    // TODO: いろいろとちゃんとする
+                    // TODO(atode): いろいろとちゃんとする
                     sources_excluded.is_empty().or_fail_with(|()| {
                         "not supported yet: non empty 'sources_excluded'".to_owned()
                     })?;
@@ -209,7 +212,7 @@ impl PipelineComponent {
                     trim_spans: Default::default(),
                     resolution,
                     frame_rate: FrameRate::FPS_25,
-                    // TODO: z-pos を考慮する
+                    // TODO(atode): z-pos を考慮する
                     regions: video_layout
                         .iter()
                         .map(|(_name, raw_region)| {
@@ -232,19 +235,12 @@ impl PipelineComponent {
             } => {
                 let input_stream_id = registry.get_id(input_stream).or_fail()?;
                 let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
+                let codec = CodecName::Opus;
+                let bitrate = NonZeroUsize::new(crate::audio::DEFAULT_BITRATE).or_fail()?;
 
-                // TODO: 変更可能にする
-                let codec = crate::types::CodecName::Opus;
-                let bitrate =
-                    std::num::NonZeroUsize::new(crate::audio::DEFAULT_BITRATE).or_fail()?;
-
-                let processor = crate::encoder::AudioEncoder::new(
-                    codec,
-                    bitrate,
-                    input_stream_id,
-                    output_stream_id,
-                )
-                .or_fail()?;
+                let processor =
+                    AudioEncoder::new(codec, bitrate, input_stream_id, output_stream_id)
+                        .or_fail()?;
 
                 Ok(BoxedMediaProcessor::new(processor))
             }
@@ -255,24 +251,19 @@ impl PipelineComponent {
                 let input_stream_id = registry.get_id(input_stream).or_fail()?;
                 let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
 
-                // TODO: ちゃんとする
-                let options = crate::encoder::VideoEncoderOptions {
-                    codec: crate::types::CodecName::Vp8,
+                let options = VideoEncoderOptions {
+                    codec: CodecName::Vp8,
                     bitrate: 1_000_000, // 1 Mbps
-                    // TODO: 解像度は入力にあわせて動的に決定すべき
-                    width: crate::types::EvenUsize::new(1280).or_fail()?,
-                    height: crate::types::EvenUsize::new(720).or_fail()?,
-                    frame_rate: crate::video::FrameRate::FPS_25,
+                    // TODO(atode): 解像度は入力にあわせて動的に決定すべき
+                    width: EvenUsize::new(1280).or_fail()?,
+                    height: EvenUsize::new(720).or_fail()?,
+                    frame_rate: FrameRate::FPS_25,
                     encode_params: Default::default(),
                 };
 
-                let processor = crate::encoder::VideoEncoder::new(
-                    &options,
-                    input_stream_id,
-                    output_stream_id,
-                    None,
-                )
-                .or_fail()?;
+                let processor =
+                    VideoEncoder::new(&options, input_stream_id, output_stream_id, None)
+                        .or_fail()?;
 
                 Ok(BoxedMediaProcessor::new(processor))
             }
@@ -284,17 +275,15 @@ impl PipelineComponent {
                     .iter()
                     .map(|name| registry.get_id(name).or_fail())
                     .collect::<orfail::Result<_>>()?;
-
-                // TODO: ちゃんとする
                 let input_audio_stream_id = input_stream_ids.get(0).copied();
                 let input_video_stream_id = input_stream_ids.get(1).copied();
-                let options = crate::writer_mp4::Mp4WriterOptions {
+                let options = Mp4WriterOptions {
                     resolution: Resolution::new(1280, 720).or_fail()?,
                     duration: ONE_DAY,
                     frame_rate: FrameRate::FPS_25,
                 };
 
-                let processor = crate::writer_mp4::Mp4Writer::new(
+                let processor = Mp4Writer::new(
                     output_file,
                     &options,
                     input_audio_stream_id,
