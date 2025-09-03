@@ -1,8 +1,9 @@
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 
 use orfail::OrFail;
 
+use crate::json::JsonObject;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -38,7 +39,7 @@ impl PluginCommand {
         Ok(PluginCommandProcessor {
             process,
             stdin: BufWriter::new(stdin),
-            stdout,
+            stdout: BufReader::new(stdout),
             input_stream_ids: self.input_stream_ids.clone(),
             next_request_id: 0,
         })
@@ -49,7 +50,7 @@ impl PluginCommand {
 pub struct PluginCommandProcessor {
     process: std::process::Child,
     stdin: BufWriter<std::process::ChildStdin>,
-    stdout: std::process::ChildStdout,
+    stdout: BufReader<std::process::ChildStdout>,
     input_stream_ids: Vec<MediaStreamId>,
     next_request_id: u64,
 }
@@ -78,6 +79,71 @@ impl PluginCommandProcessor {
 
         self.stdin.flush().or_fail()?;
         Ok(())
+    }
+
+    fn call<T, U>(&mut self, request: &JsonRpcRequest<T>) -> orfail::Result<U>
+    where
+        T: nojson::DisplayJson,
+        U: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>>,
+    {
+        let request = nojson::Json(request).to_string();
+        writeln!(self.stdin, "Content-Length: {}", request.len()).or_fail()?;
+        writeln!(self.stdin, "Content-Type: application/json").or_fail()?;
+        writeln!(self.stdin).or_fail()?;
+        write!(self.stdin, "{request}").or_fail()?;
+        self.stdin.flush().or_fail()?;
+
+        // Read headers to get content length
+        let mut content_length = None;
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            self.stdout.read_line(&mut line).or_fail()?;
+
+            if line.trim().is_empty() {
+                // Empty line indicates end of headers
+                break;
+            }
+
+            if let Some(header_value) = line.strip_prefix("Content-Length: ") {
+                content_length = Some(
+                    header_value
+                        .trim()
+                        .parse::<usize>()
+                        .or_fail_with(|e| format!("invalid content length: {e}"))?,
+                );
+            }
+        }
+
+        let content_length = content_length
+            .or_fail_with(|()| "missing Content-Length header in response".to_owned())?;
+
+        // Read the JSON response body
+        let mut response_buffer = vec![0u8; content_length];
+        self.stdout.read_exact(&mut response_buffer).or_fail()?;
+
+        let response_text = std::str::from_utf8(&response_buffer)
+            .or_fail_with(|e| format!("invalid UTF-8 in response: {e}"))?;
+
+        // Parse the JSON-RPC response
+        let json = nojson::RawJson::parse(response_text)
+            .or_fail_with(|e| format!("failed to parse JSON response: {e}"))?;
+
+        // Extract the result field from the JSON-RPC response
+        if let Some(error) = json.value().to_member("error").or_fail()?.get() {
+            return Err(orfail::Failure::new(format!("JSON-RPC error: {error}",)));
+        }
+
+        let result = json
+            .value()
+            .to_member("result")
+            .or_fail()?
+            .required()
+            .or_fail()?;
+        U::try_from(result).map_err(|_| {
+            orfail::Failure::new("failed to convert response to expected type".to_owned())
+        })
     }
 }
 
@@ -135,7 +201,20 @@ impl MediaProcessor for PluginCommandProcessor {
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        todo!()
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+
+        let req = JsonRpcRequest::request("poll_output", id, ());
+        let res: PollOutputResponse = self.call(&req).or_fail()?;
+
+        let output = match res {
+            PollOutputResponse::WaitingInputAny => MediaProcessorOutput::awaiting_any(),
+            PollOutputResponse::WaitingInput { stream_id } => {
+                MediaProcessorOutput::pending(stream_id)
+            }
+            PollOutputResponse::Finished => MediaProcessorOutput::Finished,
+        };
+        Ok(output)
     }
 }
 
@@ -161,6 +240,14 @@ impl<'a, T> JsonRpcRequest<'a, T> {
             params,
         }
     }
+
+    pub fn request(method: &'a str, id: u64, params: T) -> Self {
+        Self {
+            method,
+            id: Some(id),
+            params,
+        }
+    }
 }
 
 impl<'a, T> nojson::DisplayJson for JsonRpcRequest<'a, T>
@@ -180,29 +267,30 @@ where
     }
 }
 
-/*
-#[derive(Debug)]
-pub enum JsonRpcRequest<'a> {
-    NotifyAudioData {
-        stream_id: MediaStreamId,
-        data: &'a AudioData,
-    },
-    NotifyVideoFrame {
-        stream_id: MediaStreamId,
-        frame: &'a VideoFrame,
-    },
-    NotifyEos {
-        stream_id: MediaStreamId,
-    },
-    PollOutput {
-        request_id: u64,
-    },
-}
-*/
-
 #[derive(Debug)]
 pub enum PollOutputResponse {
     WaitingInputAny,
     WaitingInput { stream_id: MediaStreamId },
     Finished,
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PollOutputResponse {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let obj = JsonObject::new(value)?;
+        let response_type: String = obj.get_required("type")?;
+
+        match response_type.as_str() {
+            "waiting_input_any" => Ok(Self::WaitingInputAny),
+            "waiting_input" => {
+                let stream_id = obj.get_required("stream_id")?;
+                Ok(Self::WaitingInput { stream_id })
+            }
+            "finished" => Ok(Self::Finished),
+            unknown => {
+                Err(value.invalid(format!("unknown poll output response type: {unknown:?}")))
+            }
+        }
+    }
 }
