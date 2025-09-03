@@ -47,29 +47,32 @@ pub enum PipelineComponent {
     VideoMixer {
         input_stream: Vec<MediaStreamName>,
         output_stream: MediaStreamName,
-        resolution: Resolution, // TODO: optional にする
+        resolution: Resolution, // TODO(atode): optional にする
         video_layout: BTreeMap<String, RawRegion>,
+        // TODO(atode): 他のオプションを指定可能にする
     },
     AudioEncoder {
         input_stream: MediaStreamName,
         output_stream: MediaStreamName,
+        // TODO(atode): 他のオプションを指定可能にする
     },
     VideoEncoder {
         input_stream: MediaStreamName,
         output_stream: MediaStreamName,
-        // TODO: codec: CodecName
-        // TODO: libvpx_vp9_encode_params, etc
+        // TODO(atode): 他のオプションを指定可能にする
     },
     Mp4Writer {
+        // TODO(atode): 入力が映像か音声かを区別できるようにする
         input_stream: Vec<MediaStreamName>,
         output_file: PathBuf,
     },
-    PluginCommand {
-        command: PathBuf,
-        args: Vec<String>,
-        input_stream: Vec<MediaStreamName>,
-        output_stream: Vec<MediaStreamName>,
-    },
+    // TODO(atode):
+    // PluginCommand {
+    //      command: PathBuf,
+    //      args: Vec<String>,
+    //      input_stream: Vec<MediaStreamName>,
+    //      output_stream: Vec<MediaStreamName>,
+    // },
 }
 
 impl PipelineComponent {
@@ -301,7 +304,6 @@ impl PipelineComponent {
 
                 Ok(BoxedMediaProcessor::new(processor))
             }
-            _ => todo!(),
         }
     }
 }
@@ -353,12 +355,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineCompone
             "mp4_writer" => Ok(Self::Mp4Writer {
                 input_stream: obj.get_required("input_stream")?,
                 output_file: obj.get_required("output_file")?,
-            }),
-            "plugin_command" => Ok(Self::PluginCommand {
-                command: obj.get_required("command")?,
-                args: obj.get("args")?.unwrap_or_default(),
-                input_stream: obj.get("input_stream")?.unwrap_or_default(),
-                output_stream: obj.get("output_stream")?.unwrap_or_default(),
             }),
             unknown => Err(value.invalid(format!("unknown pipeline component type: {unknown:?}"))),
         }
