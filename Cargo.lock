@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_svt_av1"
-version = "2025.1.0-canary.3"
+version = "2025.1.0-canary.4"
 dependencies = [
  "bindgen",
  "log",
