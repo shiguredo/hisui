@@ -21,6 +21,10 @@ use crate::video::FrameRate;
 use crate::writer_mp4::{Mp4Writer, Mp4WriterOptions};
 
 const ONE_DAY: Duration = Duration::from_secs(24 * 60 * 60);
+const RESOLUTION_HD: Resolution = Resolution {
+    width: EvenUsize::truncating_new(1280),
+    height: EvenUsize::truncating_new(720),
+};
 
 #[derive(Debug, Clone)]
 pub enum PipelineComponent {
@@ -255,8 +259,8 @@ impl PipelineComponent {
                     codec: CodecName::Vp8,
                     bitrate: 1_000_000, // 1 Mbps
                     // TODO(atode): 解像度は入力にあわせて動的に決定すべき
-                    width: EvenUsize::new(1280).or_fail()?,
-                    height: EvenUsize::new(720).or_fail()?,
+                    width: RESOLUTION_HD.width,
+                    height: RESOLUTION_HD.height,
                     frame_rate: FrameRate::FPS_25,
                     encode_params: Default::default(),
                 };
@@ -278,7 +282,7 @@ impl PipelineComponent {
                 let input_audio_stream_id = input_stream_ids.get(0).copied();
                 let input_video_stream_id = input_stream_ids.get(1).copied();
                 let options = Mp4WriterOptions {
-                    resolution: Resolution::new(1280, 720).or_fail()?,
+                    resolution: RESOLUTION_HD,
                     duration: ONE_DAY,
                     frame_rate: FrameRate::FPS_25,
                 };
