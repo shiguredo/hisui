@@ -819,7 +819,7 @@ fn trim() -> orfail::Result<()> {
         (25, false),
     ] {
         assert_eq!(
-            layout.is_in_trim_span(Duration::from_secs(time)),
+            layout.trim_spans.contains(Duration::from_secs(time)),
             should_trim,
             "{time}: {should_trim}"
         );
@@ -842,7 +842,7 @@ fn trim() -> orfail::Result<()> {
         (25, false),
     ] {
         assert_eq!(
-            layout.is_in_trim_span(Duration::from_secs(time)),
+            layout.trim_spans.contains(Duration::from_secs(time)),
             should_trim,
             "{time}: {should_trim}"
         );

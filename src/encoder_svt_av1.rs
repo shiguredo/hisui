@@ -8,7 +8,7 @@ use shiguredo_mp4::{
 };
 
 use crate::{
-    layout::Layout,
+    encoder::VideoEncoderOptions,
     types::EvenUsize,
     video::{self, VideoFormat, VideoFrame},
 };
@@ -24,16 +24,16 @@ pub struct SvtAv1Encoder {
 }
 
 impl SvtAv1Encoder {
-    pub fn new(layout: &Layout) -> orfail::Result<Self> {
-        let width = layout.resolution.width();
-        let height = layout.resolution.height();
+    pub fn new(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width;
+        let height = options.height;
         let config = shiguredo_svt_av1::EncoderConfig {
-            target_bitrate: layout.video_bitrate_bps(),
+            target_bitrate: options.bitrate,
             width: width.get(),
             height: height.get(),
-            fps_numerator: layout.frame_rate.numerator.get(),
-            fps_denominator: layout.frame_rate.denumerator.get(),
-            ..layout.encode_params.svt_av1.clone().unwrap_or_default()
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denumerator.get(),
+            ..options.encode_params.svt_av1.clone().unwrap_or_default()
         };
         let inner = shiguredo_svt_av1::Encoder::new(&config).or_fail()?;
         let sample_entry = sample_entry(width, height, inner.extra_data());

@@ -176,6 +176,25 @@ pub enum ContainerFormat {
     Mp4,
 }
 
+impl ContainerFormat {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
+        let ext = path
+            .as_ref()
+            .extension()
+            .or_fail_with(|()| format!("no media file extension: {}", path.as_ref().display()))?;
+        if ext == "mp4" {
+            Ok(Self::Mp4)
+        } else if ext == "webm" {
+            Ok(Self::Webm)
+        } else {
+            Err(orfail::Failure::new(format!(
+                "unexpected media file extension: {}",
+                path.as_ref().display()
+            )))
+        }
+    }
+}
+
 impl nojson::DisplayJson for ContainerFormat {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {

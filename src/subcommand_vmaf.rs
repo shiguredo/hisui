@@ -11,11 +11,11 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{
     decoder::{VideoDecoder, VideoDecoderOptions},
-    encoder::VideoEncoder,
+    encoder::{VideoEncoder, VideoEncoderOptions},
     json::JsonObject,
     layout::Layout,
     media::{MediaSample, MediaStreamId},
-    mixer_video::VideoMixer,
+    mixer_video::{VideoMixer, VideoMixerSpec},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::VideoReader,
     scheduler::Scheduler,
@@ -191,7 +191,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // ミキサーを登録
     let mixer_output_stream_id = next_stream_id.fetch_add(1);
     let mixer = VideoMixer::new(
-        layout.clone(),
+        VideoMixerSpec::from_layout(&layout),
         mixer_input_stream_ids,
         mixer_output_stream_id,
     );
@@ -214,7 +214,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // エンコーダーを登録
     let encoder_output_stream_id = next_stream_id.fetch_add(1);
     let encoder = VideoEncoder::new(
-        &layout,
+        &VideoEncoderOptions::from_layout(&layout),
         limiter_output_stream_id,
         encoder_output_stream_id,
         openh264_lib.clone(),

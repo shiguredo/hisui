@@ -5,16 +5,16 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    encoder::{AudioEncoder, VideoEncoder},
+    encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
     layout::Layout,
     media::MediaStreamId,
     mixer_audio::AudioMixer,
-    mixer_video::VideoMixer,
+    mixer_video::{VideoMixer, VideoMixerSpec},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     stats::{ProcessorStats, Stats},
-    writer_mp4::Mp4Writer,
+    writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
 
 #[derive(Debug)]
@@ -93,7 +93,7 @@ impl Composer {
         // ミキサーを登録
         let audio_mixer_output_stream_id = next_stream_id.fetch_add(1);
         let audio_mixer = AudioMixer::new(
-            self.layout.clone(),
+            self.layout.trim_spans.clone(),
             audio_mixer_input_stream_ids,
             audio_mixer_output_stream_id,
         );
@@ -101,7 +101,7 @@ impl Composer {
 
         let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
         let video_mixer = VideoMixer::new(
-            self.layout.clone(),
+            VideoMixerSpec::from_layout(&self.layout),
             video_mixer_input_stream_ids,
             video_mixer_output_stream_id,
         );
@@ -110,7 +110,8 @@ impl Composer {
         // エンコーダーを登録
         let audio_encoder_output_stream_id = next_stream_id.fetch_add(1);
         let audio_encoder = AudioEncoder::new(
-            &self.layout,
+            self.layout.audio_codec,
+            self.layout.audio_bitrate_bps(),
             audio_mixer_output_stream_id,
             audio_encoder_output_stream_id,
         )
@@ -119,7 +120,7 @@ impl Composer {
 
         let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
         let video_encoder = VideoEncoder::new(
-            &self.layout,
+            &VideoEncoderOptions::from_layout(&self.layout),
             video_mixer_output_stream_id,
             video_encoder_output_stream_id,
             self.openh264_lib.clone(),
@@ -130,7 +131,7 @@ impl Composer {
         // ライターを登録
         let writer = Mp4Writer::new(
             out_file_path,
-            &self.layout,
+            &Mp4WriterOptions::from_layout(&self.layout),
             self.layout
                 .has_audio()
                 .then_some(audio_encoder_output_stream_id),
@@ -156,7 +157,7 @@ impl Composer {
         // 合成を実行
         let stats = scheduler.run().or_fail()?;
         if stats.error.get() {
-            return Err(orfail::Failure::new("composition process failed").into());
+            return Err(orfail::Failure::new("composition process failed"));
         }
 
         if let Some(path) = &self.stats_file_path {

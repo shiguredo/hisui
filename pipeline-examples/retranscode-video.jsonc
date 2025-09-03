@@ -1,0 +1,37 @@
+// 音声はそのままで、映像のみを再変換するパイプラインの例
+{
+  "pipeline": [
+    // 音声の処理パイプライン: read のみ
+    { // メディアファイルからの音声データの読み込み
+      "type": "audio_reader",
+      "input_file": "input.mp4", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
+      "output_stream": "audio_raw",
+      "start_time": 0,
+    },
+
+    // 映像の処理パイプライン: read -> decode -> encode
+    { // メディアファイルからの映像データの読み込み
+      "type": "video_reader",
+      "input_file": "input.mp4", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
+      "output_stream": "video_raw",
+      "start_time": 0,
+    },
+    { // 映像をデコード
+      "type": "video_decoder",
+      "input_stream": "video_raw",
+      "output_stream": "video_decoded",
+    },
+    { // 合成後の映像をエンコード
+      "type": "video_encoder",
+      "input_stream": "video_decoded",
+      "output_stream": "video_encoded",
+    },
+
+    // オリジナルの音声とエンコード後の映像を MP4 ファイルに出力
+    {
+      "type": "mp4_writer",
+      "input_stream": ["audio_raw", "video_encoded"],
+      "output_file": "output.mp4",
+    }
+  ],
+}

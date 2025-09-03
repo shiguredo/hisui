@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -8,8 +8,8 @@ use orfail::OrFail;
 
 use crate::{
     json::JsonObject,
-    layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
-    metadata::SourceId,
+    layout::{AggregatedSourceInfo, AssignedSource, Resolution},
+    metadata::{SourceId, SourceInfo},
     types::{EvenUsize, PixelPosition},
     video::VideoFrame,
 };
@@ -113,12 +113,16 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawRegion {
 }
 
 impl RawRegion {
-    pub fn into_region(
+    pub fn into_region<F>(
         mut self,
         base_path: &Path,
         sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
         resolution: Option<Resolution>,
-    ) -> orfail::Result<Region> {
+        resolve: F,
+    ) -> orfail::Result<Region>
+    where
+        F: Fn(&Path, &[PathBuf], &[PathBuf]) -> orfail::Result<Vec<(SourceInfo, PathBuf)>>,
+    {
         if self.width != 0 && self.cell_width != 0 {
             return Err(orfail::Failure::new(
                 "Cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
@@ -131,12 +135,8 @@ impl RawRegion {
             ));
         }
 
-        let resolved = layout::resolve_source_and_media_path_pairs(
-            base_path,
-            &self.video_sources,
-            &self.video_sources_excluded,
-        )
-        .or_fail()?;
+        let resolved =
+            resolve(base_path, &self.video_sources, &self.video_sources_excluded).or_fail()?;
 
         let mut source_ids = BTreeSet::new();
         for (source, media_path) in resolved {

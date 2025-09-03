@@ -1,5 +1,6 @@
 //! 雑多な型定義をまとめたモジュール
 use std::str::FromStr;
+use std::time::Duration;
 
 /// コーデック名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -186,5 +187,60 @@ impl std::ops::Mul<usize> for EvenUsize {
 
     fn mul(self, rhs: usize) -> Self::Output {
         Self(self.0 * rhs)
+    }
+}
+
+// タイムオフセット
+//
+// フォーマット:
+// - 数値 (単位: 秒)
+// - "時:分:秒[.小数秒]" 形式の文字列
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TimeOffset(Duration);
+
+impl TimeOffset {
+    pub fn get(self) -> Duration {
+        self.0
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for TimeOffset {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        if let Ok(n) = value.as_number_str() {
+            let secs = n
+                .parse()
+                .map_err(|_| value.invalid("not a non negative finite number"))?;
+            Ok(Self(Duration::from_secs_f64(secs)))
+        } else if let Ok(s) = value.to_unquoted_string_str() {
+            let parts: Vec<&str> = s.split(':').collect();
+            if parts.len() != 3 {
+                return Err(value.invalid("time string must be in format HH:MM:SS[.fraction]"));
+            }
+
+            let hours: u64 = parts[0]
+                .parse()
+                .map_err(|_| value.invalid("invalid hour value"))?;
+            let minutes: u64 = parts[1]
+                .parse()
+                .map_err(|_| value.invalid("invalid minute value"))?;
+            let seconds: f64 = parts[2]
+                .parse()
+                .map_err(|_| value.invalid("invalid second value"))?;
+
+            if minutes >= 60 {
+                return Err(value.invalid("minutes must be less than 60"));
+            }
+            if seconds >= 60.0 {
+                return Err(value.invalid("seconds must be less than 60"));
+            }
+
+            let total_duration =
+                Duration::from_secs(hours * 3600 + minutes * 60) + Duration::from_secs_f64(seconds);
+            Ok(Self(total_duration))
+        } else {
+            Err(value.invalid("expected number or time string in format HH:MM:SS[.fraction]"))
+        }
     }
 }

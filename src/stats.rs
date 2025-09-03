@@ -34,7 +34,7 @@ impl Stats {
         let json = nojson::json(|f| {
             f.set_indent_size(2);
             f.set_spacing(true);
-            f.value(&self)
+            f.value(self)
         })
         .to_string();
         if let Err(e) = std::fs::write(output_file_path, json) {
