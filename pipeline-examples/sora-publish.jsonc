@@ -32,7 +32,8 @@
       "type": "plugin_command",
       "input_stream": ["audio_decoded", "video_decoded"],
       "command": "uv",
-      "args": ["run", "--config-file", "plugin-examples/pyproject.toml", "plugin-examples/sora-publish.py", "--channel-id", "sora"],
+      "args": ["run", "--directory", "plugin-examples/", "sora-publish.py", "--channel-id", "sora",
+               "--signaling-url", "ws://localhost:5000/signaling],
     }
   ],
 }

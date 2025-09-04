@@ -6,13 +6,6 @@ import time
 from typing import Optional, Dict, Any
 import numpy as np
 
-try:
-    import sora_sdk
-    from sora_sdk import Sora, SoraConnection, SoraAudioSource, SoraVideoSource
-except ImportError:
-    print("Error: sora-sdk is required. Install with: pip install sora-sdk", file=sys.stderr)
-    sys.exit(1)
-
 
 class SoraPublisher:
     def __init__(self, channel_id: str, signaling_urls: list[str]):

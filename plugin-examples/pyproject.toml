@@ -4,7 +4,10 @@ version = "0.1.0"
 
 dependencies = [
     "sora-sdk",
+    "numpy",
 ]
+
+requires-python = ">=3.12"
 
 [build-system]
 requires = ["hatchling"]
