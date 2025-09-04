@@ -128,10 +128,10 @@
 Sora が録画時に配信者毎に生成する `archive-{ CONNECTION_ID }.json` ファイルを指定します。
 
 Hisui は、この `archive.json` ファイルの中の以下の情報を参照します:
-```json
+```jsonc
 {
   "connection_id": "コネクション ID",
-  "format": "webm" | "mp4",
+  "format": "webm" | "mp4", // 省略時は "webm" 扱い
   "audio": true | false,
   "video": true | false,
   "start_time_offset": 開始時刻（秒）,
