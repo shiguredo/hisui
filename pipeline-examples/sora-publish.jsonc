@@ -27,13 +27,28 @@
       "output_stream": "video_decoded",
     },
 
+    // リアルタイム用にペースを制御
+    {
+      "type": "stream_realtime_pacer",
+      "input_stream": ["audio_decoded", "video_decoded"],
+      "output_stream": ["audio_paced", "video_paced"]
+    },
+
     // 音声と映像を Sora に配信
     {
       "type": "plugin_command",
-      "input_stream": ["audio_decoded", "video_decoded"],
+      "input_stream": ["audio_paced", "video_paced"],
       "command": "uv",
-      "args": ["run", "--directory", "plugin-examples/", "sora_publish.py", "--channel-id", "sora",
-               "--signaling-url", "ws://localhost:5000/signaling"],
+      "args": [
+        "run",
+        "--directory",
+        "plugin-examples/",
+        "sora_publish.py",
+        "--channel-id",
+        "sora",
+        "--signaling-url",
+        "ws://localhost:5000/signaling"
+      ],
     }
   ],
 }
