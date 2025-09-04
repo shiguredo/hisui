@@ -31,6 +31,7 @@ impl PluginCommand {
             .args(&self.args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
             .spawn()
             .or_fail_with(|e| format!("failed to start plugin command: {e}"))?;
 

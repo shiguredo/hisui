@@ -167,27 +167,61 @@ class HisuiSoraPlugin:
         binary_data = None
         content_type = headers.get('Content-Type', '')
 
+    def read_message(self):
+        """Read a JSON-RPC message from stdin."""
+        # Read headers
+        headers = {}
+        while True:
+            line = sys.stdin.readline()
+            if not line:
+                return None, None
+
+            line = line.strip()
+            if not line:  # Empty line marks end of headers
+                break
+
+            if ':' in line:
+                key, value = line.split(':', 1)
+                headers[key.strip()] = value.strip()
+
+        # Read content
+        content_length = int(headers.get('Content-Length', 0))
+        if content_length == 0:
+            return None, None
+
+        content = sys.stdin.read(content_length)
+
+        # Parse JSON to check if binary data is expected
+        binary_data = None
+        content_type = headers.get('Content-Type', '')
+
         if 'application/json' in content_type:
-            # Check if there's another message (binary data)
             try:
-                # Try to read more headers for binary data
-                line = sys.stdin.readline()
-                if line and line.strip():
-                    # Read binary headers
-                    binary_headers = {line.split(':', 1)[0].strip(): line.split(':', 1)[1].strip()}
+                # Parse the JSON to check the method
+                request = json.loads(content)
+                method = request.get('method')
 
-                    while True:
-                        line = sys.stdin.readline()
-                        if not line or not line.strip():
-                            break
-                        key, value = line.split(':', 1)
-                        binary_headers[key.strip()] = value.strip()
+                # Only read binary data for methods that expect it
+                if method in ['notify_audio', 'notify_video']:
+                    # Try to read binary data headers
+                    line = sys.stdin.readline()
+                    if line and line.strip():
+                        # Read binary headers
+                        binary_headers = {line.split(':', 1)[0].strip(): line.split(':', 1)[1].strip()}
 
-                    binary_length = int(binary_headers.get('Content-Length', 0))
-                    if binary_length > 0:
-                        binary_data = sys.stdin.buffer.read(binary_length)
-            except:
-                pass  # No binary data
+                        while True:
+                            line = sys.stdin.readline()
+                            if not line or not line.strip():
+                                break
+                            key, value = line.split(':', 1)
+                            binary_headers[key.strip()] = value.strip()
+
+                        binary_length = int(binary_headers.get('Content-Length', 0))
+                        if binary_length > 0:
+                            binary_data = sys.stdin.buffer.read(binary_length)
+            except (json.JSONDecodeError, ValueError, KeyError):
+                # If JSON parsing fails or headers are malformed, continue without binary data
+                pass
 
         return content, binary_data
 
