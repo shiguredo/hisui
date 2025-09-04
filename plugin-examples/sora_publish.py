@@ -24,6 +24,7 @@ class SoraPublisher:
         self.video_source: Optional[SoraVideoSource] = None
         self.connected = False
         self.streams: Dict[int, str] = {}  # stream_id -> media_type mapping
+        self.started = False 
 
         # Default audio/video parameters
         self.audio_channels = 2
@@ -92,6 +93,7 @@ class SoraPublisher:
         """Handle audio sample from Hisui."""
         if not self.connected or not self.audio_source:
             return
+        self.started = True
 
         # Convert raw audio data to numpy array
         # Assuming 16-bit PCM audio data
@@ -110,6 +112,7 @@ class SoraPublisher:
         """Handle video frame from Hisui."""
         if not self.connected or not self.video_source:
             return
+        self.started = True
 
         # Convert RGB data to numpy array
         # Assuming RGB24 format (3 bytes per pixel)
@@ -254,14 +257,25 @@ class HisuiSoraPlugin:
             self.publisher.handle_eos(stream_id)
 
         elif method == 'poll_output':
-            # Return that we're waiting for any input
-            if request_id is not None:
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {"type": "waiting_input_any"}
-                }
-                self.send_response(response)
+            # Check if all input streams have reached EOS
+            if self.publisher.started and not self.publisher.streams:
+                # All inputs have reached EOS, signal that processing is finished
+                if request_id is not None:
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {"type": "finished"}
+                    }
+                    self.send_response(response)
+            else:
+                # Still have active streams, waiting for any input
+                if request_id is not None:
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {"type": "waiting_input_any"}
+                    }
+                    self.send_response(response)
 
     def run(self):
         """Main plugin loop."""
