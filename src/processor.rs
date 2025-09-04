@@ -1,3 +1,8 @@
+use std::collections::{BinaryHeap, HashMap};
+use std::time::{Duration, Instant};
+
+use orfail::OrFail;
+
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::stats::ProcessorStats;
@@ -146,5 +151,113 @@ impl MediaProcessorOutput {
             stream_id,
             sample: MediaSample::video_frame(frame),
         }
+    }
+}
+
+#[derive(Debug)]
+struct PacerQueueItem(MediaStreamId, MediaSample);
+
+impl PartialEq for PacerQueueItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.1.timestamp() == other.1.timestamp()
+    }
+}
+
+impl Eq for PacerQueueItem {}
+
+impl PartialOrd for PacerQueueItem {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PacerQueueItem {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Note: BinaryHeap is a max-heap, so we reverse the comparison
+        // to get earliest timestamps first
+        other.1.timestamp().cmp(&self.1.timestamp())
+    }
+}
+
+#[derive(Debug)]
+pub struct StreamRealtimePacer {
+    stream_ids: HashMap<MediaStreamId, MediaStreamId>,
+    queue: BinaryHeap<PacerQueueItem>,
+    start_time: Option<Instant>,
+}
+
+impl StreamRealtimePacer {
+    pub fn new(
+        input_stream_ids: Vec<MediaStreamId>,
+        output_stream_ids: Vec<MediaStreamId>,
+    ) -> orfail::Result<Self> {
+        (input_stream_ids.len() == output_stream_ids.len()).or_fail()?;
+        Ok(Self {
+            stream_ids: input_stream_ids
+                .into_iter()
+                .zip(output_stream_ids.into_iter())
+                .collect(),
+            queue: BinaryHeap::new(),
+            start_time: None,
+        })
+    }
+
+    fn elapsed(&mut self) -> Duration {
+        if let Some(t) = self.start_time {
+            t.elapsed()
+        } else {
+            let t = Instant::now();
+            self.start_time = Some(t);
+            t.elapsed()
+        }
+    }
+}
+
+impl MediaProcessor for StreamRealtimePacer {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.stream_ids.keys().copied().collect(),
+            output_stream_ids: self.stream_ids.values().copied().collect(),
+            stats: ProcessorStats::other("stream_realtime_pacer"),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        if let Some(sample) = input.sample {
+            // TODO(atode): キューはストリーム毎に管理すべき
+            self.queue.push(PacerQueueItem(input.stream_id, sample));
+        } else {
+            self.stream_ids.remove(&input.stream_id);
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        let Some(PacerQueueItem(stream_id, sample)) = self.queue.pop() else {
+            if self.stream_ids.is_empty() {
+                return Ok(MediaProcessorOutput::Finished);
+            } else {
+                return Ok(MediaProcessorOutput::awaiting_any());
+            }
+        };
+
+        let now = self.elapsed();
+        let Some(time_to_wait) = sample
+            .timestamp()
+            .checked_sub(now)
+            .take_if(|d| !d.is_zero())
+        else {
+            return Ok(MediaProcessorOutput::Processed { stream_id, sample });
+        };
+
+        // TODO(atode): ハードコーディングをやめる
+        if self.queue.len() < 10 {
+            self.queue.push(PacerQueueItem(stream_id, sample));
+            return Ok(MediaProcessorOutput::awaiting_any());
+        }
+
+        // TODO(atode): sleep はやめる
+        std::thread::sleep(time_to_wait);
+        Ok(MediaProcessorOutput::Processed { stream_id, sample })
     }
 }
