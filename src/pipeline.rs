@@ -348,6 +348,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineCompone
                 input_stream: obj.get_required("input_stream")?,
                 output_file: obj.get_required("output_file")?,
             }),
+            "plugin_command" => PluginCommand::try_from(value).map(Self::PluginCommand),
             unknown => Err(value.invalid(format!("unknown pipeline component type: {unknown:?}"))),
         }
     }
