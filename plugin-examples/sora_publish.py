@@ -6,6 +6,13 @@ import time
 from typing import Optional, Dict, Any
 import numpy as np
 
+from sora_sdk import (
+    Sora,
+    SoraConnection,
+    SoraAudioSource,
+    SoraVideoSource,
+)
+
 
 class SoraPublisher:
     def __init__(self, channel_id: str, signaling_urls: list[str]):
@@ -32,6 +39,12 @@ class SoraPublisher:
         """Connect to Sora."""
         if not self.sora:
             self.initialize()
+
+        # Create audio and video sources before creating connection
+        self.audio_source = self.sora.create_audio_source(
+            self.audio_channels, self.audio_sample_rate
+        )
+        self.video_source = self.sora.create_video_source()
 
         # Create connection
         self.connection = self.sora.create_connection(
@@ -77,17 +90,8 @@ class SoraPublisher:
     def handle_audio(self, stream_id: int, stereo: bool, sample_rate: int,
                     timestamp_us: int, duration_us: int, data: bytes):
         """Handle audio sample from Hisui."""
-        if not self.connected:
+        if not self.connected or not self.audio_source:
             return
-
-        # Create audio source if not exists
-        if not self.audio_source:
-            channels = 2 if stereo else 1
-            self.audio_source = self.sora.create_audio_source(channels, sample_rate)
-            # Update connection with audio source
-            if self.connection:
-                # Note: In real implementation, you might need to recreate connection
-                pass
 
         # Convert raw audio data to numpy array
         # Assuming 16-bit PCM audio data
@@ -99,22 +103,13 @@ class SoraPublisher:
             audio_array = audio_array.reshape(-1, channels)
 
         # Send to Sora
-        if self.audio_source:
-            self.audio_source.on_data(audio_array)
+        self.audio_source.on_data(audio_array)
 
     def handle_video(self, stream_id: int, width: int, height: int,
                     timestamp_us: int, duration_us: int, rgb_data: bytes):
         """Handle video frame from Hisui."""
-        if not self.connected:
+        if not self.connected or not self.video_source:
             return
-
-        # Create video source if not exists
-        if not self.video_source:
-            self.video_source = self.sora.create_video_source()
-            # Update connection with video source
-            if self.connection:
-                # Note: In real implementation, you might need to recreate connection
-                pass
 
         # Convert RGB data to numpy array
         # Assuming RGB24 format (3 bytes per pixel)
@@ -126,8 +121,7 @@ class SoraPublisher:
         frame = np.frombuffer(rgb_data, dtype=np.uint8).reshape((height, width, 3))
 
         # Send to Sora
-        if self.video_source:
-            self.video_source.on_captured(frame)
+        self.video_source.on_captured(frame)
 
     def handle_eos(self, stream_id: int):
         """Handle end of stream."""
@@ -295,3 +289,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
