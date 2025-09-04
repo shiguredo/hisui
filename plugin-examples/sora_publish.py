@@ -89,7 +89,7 @@ class SoraPublisher:
         self.connected = False
 
     def handle_audio(self, stream_id: int, stereo: bool, sample_rate: int,
-                    timestamp_us: int, duration_us: int, data: bytes):
+                timestamp_us: int, duration_us: int, data: bytes):
         """Handle audio sample from Hisui."""
         if not self.connected or not self.audio_source:
             return
@@ -99,12 +99,24 @@ class SoraPublisher:
         # Assuming 16-bit PCM audio data
         audio_array = np.frombuffer(data, dtype=np.int16)
 
-        # Reshape for channels
+        # Reshape for channels - Sora expects (samples_per_channel, channels)
         channels = 2 if stereo else 1
         if len(audio_array) % channels == 0:
-            audio_array = audio_array.reshape(-1, channels)
+            samples_per_channel = len(audio_array) // channels
+            # Reshape to (samples_per_channel, channels) - this is the key fix
+            audio_array = audio_array.reshape(samples_per_channel, channels)
+        else:
+            print(f"Warning: Audio data length {len(audio_array)} not divisible by channels {channels}", file=sys.stderr)
+            return
 
-        # Send to Sora
+        print(f"SHAPE: {audio_array.shape}", file=sys.stderr)
+        print(f"DTYPE: {audio_array.dtype}", file=sys.stderr)
+        print(f"ORDER: {'C' if audio_array.flags.c_contiguous else 'F' if audio_array.flags.f_contiguous else 'Neither'}", file=sys.stderr)
+        print(f"DEVICE: CPU", file=sys.stderr)  # NumPy arrays are always on CPU
+
+        # Send to Sora - use the numpy array overload
+        # NOTE: timestamp is intendetly unspecified as sora python sdk buggly handle that
+
         self.audio_source.on_data(audio_array)
 
     def handle_video(self, stream_id: int, width: int, height: int,
