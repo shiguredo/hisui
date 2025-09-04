@@ -141,10 +141,10 @@ class HisuiSoraPlugin:
 
     def read_message(self):
         """Read a JSON-RPC message from stdin."""
-        # Read headers
+        # Read headers using buffer
         headers = {}
         while True:
-            line = sys.stdin.readline()
+            line = sys.stdin.buffer.readline().decode('utf-8')
             if not line:
                 return None, None
 
@@ -161,73 +161,51 @@ class HisuiSoraPlugin:
         if content_length == 0:
             return None, None
 
-        content = sys.stdin.read(content_length)
-
-        # Check if there's binary data following
-        binary_data = None
-        content_type = headers.get('Content-Type', '')
-
-    def read_message(self):
-        """Read a JSON-RPC message from stdin."""
-        # Read headers
-        headers = {}
-        while True:
-            line = sys.stdin.readline()
-            if not line:
-                return None, None
-
-            line = line.strip()
-            if not line:  # Empty line marks end of headers
-                break
-
-            if ':' in line:
-                key, value = line.split(':', 1)
-                headers[key.strip()] = value.strip()
-
-        # Read content
-        content_length = int(headers.get('Content-Length', 0))
-        if content_length == 0:
-            return None, None
-
-        content = sys.stdin.read(content_length)
+        content_bytes = sys.stdin.buffer.read(content_length)
+        content = content_bytes.decode('utf-8')
 
         # Parse JSON to check if binary data is expected
         binary_data = None
-        content_type = headers.get('Content-Type', '')
+        try:
+            request = json.loads(content)
+            method = request.get('method')
 
-        if 'application/json' in content_type:
-            try:
-                # Parse the JSON to check the method
-                request = json.loads(content)
-                method = request.get('method')
+            # Only read binary data for methods that expect it
+            if method in ['notify_audio', 'notify_video']:
+                # Read binary data headers using buffer
+                binary_headers = {}
+                while True:
+                    line = sys.stdin.buffer.readline().decode('utf-8')
+                    if not line:
+                        break
 
-                # Only read binary data for methods that expect it
-                if method in ['notify_audio', 'notify_video']:
-                    # Try to read binary data headers
-                    line = sys.stdin.readline()
-                    if line and line.strip():
-                        # Read binary headers
-                        binary_headers = {line.split(':', 1)[0].strip(): line.split(':', 1)[1].strip()}
+                    line = line.strip()
+                    if not line:  # Empty line marks end of headers
+                        break
 
-                        while True:
-                            line = sys.stdin.readline()
-                            if not line or not line.strip():
-                                break
-                            key, value = line.split(':', 1)
-                            binary_headers[key.strip()] = value.strip()
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        binary_headers[key.strip()] = value.strip()
 
-                        binary_length = int(binary_headers.get('Content-Length', 0))
-                        if binary_length > 0:
-                            binary_data = sys.stdin.buffer.read(binary_length)
-            except (json.JSONDecodeError, ValueError, KeyError):
-                # If JSON parsing fails or headers are malformed, continue without binary data
-                pass
+                binary_length = int(binary_headers.get('Content-Length', 0))
+                print(f"binary len: {binary_length}", file=sys.stderr)
+                print(f"headers: {binary_headers}", file=sys.stderr)
+                if binary_length > 0:
+                    # ここでブロックする理由を検討してください
+                    # rust側とpython側でデータの長さはあっています
+                    binary_data = sys.stdin.buffer.read(binary_length)
+                    print(f"read binary data: {len(binary_data)} bytes", file=sys.stderr)
+                print(f"headers: {binary_headers}", file=sys.stderr)
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            print(f"Error parsing JSON or reading binary data: {e}", file=sys.stderr)
 
         return content, binary_data
 
     def send_response(self, response: dict):
         """Send a JSON-RPC response to stdout."""
         response_json = json.dumps(response)
+        print(f"res: {response_json}", file=sys.stderr)
         print(f"Content-Length: {len(response_json)}")
         print("Content-Type: application/json")
         print()
@@ -236,6 +214,8 @@ class HisuiSoraPlugin:
 
     def process_request(self, request_data: str, binary_data: bytes = None):
         """Process a JSON-RPC request."""
+        print(f"req: {request_data}", file=sys.stderr)
+ 
         try:
             request = json.loads(request_data)
         except json.JSONDecodeError:
