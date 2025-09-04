@@ -103,20 +103,13 @@ class SoraPublisher:
         channels = 2 if stereo else 1
         if len(audio_array) % channels == 0:
             samples_per_channel = len(audio_array) // channels
-            # Reshape to (samples_per_channel, channels) - this is the key fix
-            audio_array = audio_array.reshape(samples_per_channel, channels)
+            # Reshape to (samples_per_channel, channels) and copy to ensure contiguous memory
+            audio_array = audio_array.reshape(samples_per_channel, channels).copy()
         else:
             print(f"Warning: Audio data length {len(audio_array)} not divisible by channels {channels}", file=sys.stderr)
             return
 
-        print(f"SHAPE: {audio_array.shape}", file=sys.stderr)
-        print(f"DTYPE: {audio_array.dtype}", file=sys.stderr)
-        print(f"ORDER: {'C' if audio_array.flags.c_contiguous else 'F' if audio_array.flags.f_contiguous else 'Neither'}", file=sys.stderr)
-        print(f"DEVICE: CPU", file=sys.stderr)  # NumPy arrays are always on CPU
-
         # Send to Sora - use the numpy array overload
-        # NOTE: timestamp is intendetly unspecified as sora python sdk buggly handle that
-
         self.audio_source.on_data(audio_array)
 
     def handle_video(self, stream_id: int, width: int, height: int,
