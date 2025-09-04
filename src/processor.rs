@@ -223,9 +223,10 @@ impl MediaProcessor for StreamRealtimePacer {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let output_stream_id = self.stream_ids.get(&input.stream_id).copied().or_fail()?;
         if let Some(sample) = input.sample {
             // TODO(atode): キューはストリーム毎に管理すべき
-            self.queue.push(PacerQueueItem(input.stream_id, sample));
+            self.queue.push(PacerQueueItem(output_stream_id, sample));
         } else {
             self.stream_ids.remove(&input.stream_id);
         }
