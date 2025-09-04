@@ -126,7 +126,7 @@ class SoraPublisher:
             print(f"Warning: Expected {expected_size} bytes for {width}x{height} RGB, got {len(rgb_data)}", file=sys.stderr)
             return
 
-        frame = np.frombuffer(rgb_data, dtype=np.uint8).reshape((height, width, 3))
+        frame = np.frombuffer(rgb_data, dtype=np.uint8).reshape((height, width, 3)).copy()
 
         # Send to Sora
         self.video_source.on_captured(frame)
