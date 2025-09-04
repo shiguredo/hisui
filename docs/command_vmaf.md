@@ -1,8 +1,17 @@
 # `hisui vmaf` コマンド
 
-`hisui vmaf` コマンドは、録画ファイルの品質評価を行うためのコマンドです。
+`hisui vmaf` コマンドは、録画ファイルの合成結果のエンコード品質評価を行うためのコマンドです。
 
-このコマンドは、参照映像（合成前）と歪み映像（合成後）の VMAF（Video Multimethod Assessment Fusion）スコアを計算し、映像品質の客観的な評価を提供します。
+このコマンドは、参照映像（合成後の映像）と歪み映像（参照映像のエンコード後の映像）の
+ VMAF（Video Multimethod Assessment Fusion）スコアを計算し、映像品質の客観的な評価を提供します。
+
+具体的には、以下の処理を行います：
+
+1. **参照映像の生成**: 録画ファイルを合成してエンコード前の生映像を出力
+2. **歪み映像の生成**: 同じ合成映像をエンコード後、再度デコードした映像を出力
+3. **VMAF 評価**: 両映像を比較して VMAF スコアを算出
+
+これにより、エンコード処理による映像品質の劣化を定量的に測定できます。
 
 このコマンドは、主に [`hisui tune`](command_tune.md) コマンドと組み合わせて、
 映像エンコードパラメーターの調整に利用することを想定しています。
@@ -36,8 +45,8 @@ Options:
       --version                   バージョン番号を表示します
       --verbose                   警告未満のログメッセージも出力します
   -l, --layout-file <PATH>        合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH]
-      --reference-yuv-file <PATH> 参照映像（合成前）のYUVファイルの出力先を指定します [default: reference.yuv]
-      --distorted-yuv-file <PATH> 歪み映像（合成後）のYUVファイルの出力先を指定します [default: distorted.yuv]
+      --reference-yuv-file <PATH> 参照映像のYUVファイルの出力先を指定します [default: reference.yuv]
+      --distorted-yuv-file <PATH> 歪み映像のYUVファイルの出力先を指定します [default: distorted.yuv]
       --vmaf-output-file <PATH>   vmaf コマンドの実行結果ファイルの出力先を指定します [default: vmaf-output.json]
       --openh264 <PATH>           OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
   -c, --max-cpu-cores <INTEGER>   合成処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
@@ -74,3 +83,10 @@ vmaf_v0.6.1: 96.361266
   "vmaf_harmonic_mean": 96.351588
 }
 ```
+
+VMAF スコアの解釈方法については、VMAF 自体の[公式リポジトリ](https://github.com/Netflix/vmaf)や、
+そこから辿れるドキュメントを参照してください。
+
+なお、`hisui vmaf` コマンド実行後に生成される YUV ファイル群は、
+映像の生データを格納しているため、ファイルサイズが巨大になる可能性があります。
+VMAF スコアの計算後には不要なファイルなので、削除しても問題ありません。
