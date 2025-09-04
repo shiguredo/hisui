@@ -96,7 +96,10 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let connection_id = value.to_member("connection_id")?.required()?;
-        let format = value.to_member("format")?.required()?;
+        let format = value
+            .to_member("format")?
+            .map(ContainerFormat::try_from)?
+            .unwrap_or(ContainerFormat::Webm); // MP4 録画に対応する前は format 項目自体がなかった
         let audio = value.to_member("audio")?.required()?;
         let video = value.to_member("video")?.required()?;
         let start_time_offset = value.to_member("start_time_offset")?.required()?;
@@ -104,7 +107,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
 
         Ok(Self {
             connection_id: connection_id.try_into()?,
-            format: format.try_into()?,
+            format,
             audio: audio.try_into()?,
             video: video.try_into()?,
             start_time_offset: start_time_offset.try_into()?,
