@@ -116,7 +116,7 @@ impl PluginCommandProcessor {
         write!(self.stdin, "{request}").or_fail()?;
         self.stdin.flush().or_fail()?;
 
-        // Read headers to get content length
+        // ヘッダーを読み取ってコンテンツ長を取得
         let mut content_length = None;
         let mut line = String::new();
 
@@ -125,7 +125,7 @@ impl PluginCommandProcessor {
             self.stdout.read_line(&mut line).or_fail()?;
 
             if line.trim().is_empty() {
-                // Empty line indicates end of headers
+                // 空行はヘッダー終了を示す
                 break;
             }
 
@@ -142,18 +142,16 @@ impl PluginCommandProcessor {
         let content_length = content_length
             .or_fail_with(|()| "missing Content-Length header in response".to_owned())?;
 
-        // Read the JSON response body
+        // JSON レスポンス本体を読み取り
         let mut response_buffer = vec![0u8; content_length];
         self.stdout.read_exact(&mut response_buffer).or_fail()?;
 
         let response_text = std::str::from_utf8(&response_buffer)
             .or_fail_with(|e| format!("invalid UTF-8 in response: {e}"))?;
 
-        // Parse the JSON-RPC response
+        // JSON-RPC レスポンスをパース
         let json = nojson::RawJson::parse(response_text)
             .or_fail_with(|e| format!("failed to parse JSON response: {e}"))?;
-
-        // Extract the result field from the JSON-RPC response
         if let Some(error) = json.value().to_member("error").or_fail()?.get() {
             return Err(orfail::Failure::new(format!("JSON-RPC error: {error}",)));
         }
