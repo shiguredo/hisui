@@ -303,14 +303,11 @@ class HisuiSoraPlugin:
 def main():
     parser = argparse.ArgumentParser(description="Sora に配信するための Hisui プラグイン")
     parser.add_argument("--channel-id", required=True, help="Sora チャンネル ID")
-    parser.add_argument("--signaling-url", action="append",
+    parser.add_argument("--signaling-url", required=True, action="append",
                        help="Sora シグナリング URL（複数回指定可能）")
-
     args = parser.parse_args()
 
-    signaling_urls = args.signaling_url or ["ws://localhost:3000/signaling"]
-
-    plugin = HisuiSoraPlugin(args.channel_id, signaling_urls)
+    plugin = HisuiSoraPlugin(args.channel_id, args.signaling_url)
     plugin.run()
 
 
