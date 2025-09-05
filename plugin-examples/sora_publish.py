@@ -293,9 +293,6 @@ class HisuiSoraPlugin:
                     self.process_request(message, binary_data)
                 except Exception as e:
                     print(f"メッセージ処理エラー: {e}", file=sys.stderr)
-
-        except KeyboardInterrupt:
-            print("中断されました", file=sys.stderr)
         finally:
             self.publisher.disconnect()
 
