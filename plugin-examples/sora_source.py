@@ -10,7 +10,6 @@ import numpy as np
 from sora_sdk import (
     Sora,
     SoraConnection,
-    SoraAudioSink,
     SoraVideoSink,
     SoraMediaTrack,
     SoraVideoFrame,
@@ -19,10 +18,9 @@ from sora_sdk import (
 
 class SoraReceiver:
     def __init__(self, channel_id: str, signaling_urls: list[str],
-                 audio_stream_names: List[str], video_stream_names: List[str]):
+                 video_stream_names: List[str]):
         self.channel_id = channel_id
         self.signaling_urls = signaling_urls
-        self.audio_stream_names = audio_stream_names
         self.video_stream_names = video_stream_names
         self.sora: Optional[Sora] = None
         self.connection: Optional[SoraConnection] = None
@@ -32,13 +30,11 @@ class SoraReceiver:
         self.stream_name_to_id: Dict[str, int] = {}
         self.next_stream_id = 1
 
-        # 受信データのキュー
-        self.audio_queue = queue.Queue()
+        # 受信データのキュー（映像のみ）
         self.video_queue = queue.Queue()
         self.finished_streams = set()
 
-        # audio/video sinks
-        self.audio_sinks: List[SoraAudioSink] = []
+        # video sinks
         self.video_sinks: List[SoraVideoSink] = []
 
     def initialize(self):
@@ -50,12 +46,12 @@ class SoraReceiver:
         if not self.sora:
             self.initialize()
 
-        # 接続を作成
+        # 接続を作成（映像のみ）
         self.connection = self.sora.create_connection(
             signaling_urls=self.signaling_urls,
             role="recvonly",
             channel_id=self.channel_id,
-            audio=bool(self.audio_stream_names),
+            audio=False,  # 音声は無効
             video=bool(self.video_stream_names),
         )
 
@@ -90,27 +86,14 @@ class SoraReceiver:
         self.connected = False
 
         # 全てのストリームを終了としてマーク
-        for stream_name in self.audio_stream_names + self.video_stream_names:
+        for stream_name in self.video_stream_names:
             if stream_name in self.stream_name_to_id:
                 stream_id = self.stream_name_to_id[stream_name]
                 self.finished_streams.add(stream_id)
 
     def _on_track(self, track: SoraMediaTrack):
         """トラックを受信した時の処理"""
-        if track.kind == "audio" and self.audio_stream_names:
-            # 音声ストリーム名を順番に割り当て
-            stream_name = self.audio_stream_names[len(self.audio_sinks) % len(self.audio_stream_names)]
-            stream_id = self.next_stream_id
-            self.next_stream_id += 1
-            self.stream_name_to_id[stream_name] = stream_id
-
-            # 48kHz, ステレオで音声シンクを作成
-            audio_sink = SoraAudioSink(track, 48000, 2)
-            audio_sink.on_data = lambda data: self._on_audio_data(stream_id, stream_name, data)
-            self.audio_sinks.append(audio_sink)
-            print(f"音声トラックを受信: {stream_name} (stream_id: {stream_id})", file=sys.stderr)
-
-        elif track.kind == "video" and self.video_stream_names:
+        if track.kind == "video" and self.video_stream_names:
             # 映像ストリーム名を順番に割り当て
             stream_name = self.video_stream_names[len(self.video_sinks) % len(self.video_stream_names)]
             stream_id = self.next_stream_id
@@ -121,41 +104,6 @@ class SoraReceiver:
             video_sink.on_frame = lambda frame: self._on_video_frame(stream_id, stream_name, frame)
             self.video_sinks.append(video_sink)
             print(f"映像トラックを受信: {stream_name} (stream_id: {stream_id})", file=sys.stderr)
-
-    def _on_audio_data(self, stream_id: int, stream_name: str, audio_data: np.ndarray):
-        """音声データを受信した時の処理"""
-        if not self.connected:
-            return
-
-        # numpy配列から bytes に変換 (I16Be format)
-        # audio_data は (samples_per_channel, channels) の形状
-        if len(audio_data.shape) == 2:
-            samples_per_channel, channels = audio_data.shape
-            stereo = channels == 2
-        else:
-            # モノラルの場合
-            samples_per_channel = len(audio_data)
-            channels = 1
-            stereo = False
-            audio_data = audio_data.reshape(-1, 1)
-
-        # int16をビッグエンディアンのバイト配列に変換
-        audio_bytes = audio_data.astype('>i2').tobytes()
-
-        # タイムスタンプとデュレーションを計算（簡易実装）
-        sample_rate = 48000
-        duration_us = int((samples_per_channel * 1_000_000) / sample_rate)
-        timestamp_us = int(time.time() * 1_000_000)
-
-        self.audio_queue.put({
-            'stream_id': stream_id,
-            'stream_name': stream_name,
-            'stereo': stereo,
-            'sample_rate': sample_rate,
-            'timestamp_us': timestamp_us,
-            'duration_us': duration_us,
-            'data': audio_bytes
-        })
 
     def _on_video_frame(self, stream_id: int, stream_name: str, frame: SoraVideoFrame):
         """映像フレームを受信した時の処理"""
@@ -172,9 +120,6 @@ class SoraReceiver:
         duration_us = int(1_000_000 / 30)  # 30 FPS と仮定
         timestamp_us = int(time.time() * 1_000_000)
 
-        # numpy配列をbytesに変換してキューに追加
-        video_bytes = bgr_data.tobytes()
-
         self.video_queue.put({
             'stream_id': stream_id,
             'stream_name': stream_name,
@@ -188,15 +133,13 @@ class SoraReceiver:
 
 class HisuiSoraSourcePlugin:
     def __init__(self, channel_id: str, signaling_urls: list[str] = None,
-                 audio_stream_names: List[str] = None, video_stream_names: List[str] = None):
+                 video_stream_names: List[str] = None):
         if signaling_urls is None:
             signaling_urls = ["ws://localhost:3000/signaling"]
-        if audio_stream_names is None:
-            audio_stream_names = []
         if video_stream_names is None:
             video_stream_names = []
 
-        self.receiver = SoraReceiver(channel_id, signaling_urls, audio_stream_names, video_stream_names)
+        self.receiver = SoraReceiver(channel_id, signaling_urls, video_stream_names)
         self.running = True
 
     def read_message(self):
@@ -261,25 +204,6 @@ class HisuiSoraSourcePlugin:
         request_id = request.get('id')
 
         if method == 'poll_output':
-            # 音声データを優先的に処理
-            if not self.receiver.audio_queue.empty():
-                audio_data = self.receiver.audio_queue.get_nowait()
-                if request_id is not None:
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {
-                            "type": "audio_data",
-                            "stream_name": audio_data['stream_name'],
-                            "stereo": audio_data['stereo'],
-                            "sample_rate": audio_data['sample_rate'],
-                            "timestamp_us": audio_data['timestamp_us'],
-                            "duration_us": audio_data['duration_us']
-                        }
-                    }
-                    self.send_response_with_payload(response, audio_data['data'])
-                return
-
             # 映像データを処理
             if not self.receiver.video_queue.empty():
                 video_data = self.receiver.video_queue.get_nowait()
@@ -300,7 +224,7 @@ class HisuiSoraSourcePlugin:
                 return
 
             # 全てのストリームが終了したかチェック
-            expected_stream_count = len(self.receiver.audio_stream_names) + len(self.receiver.video_stream_names)
+            expected_stream_count = len(self.receiver.video_stream_names)
             if len(self.receiver.finished_streams) >= expected_stream_count and expected_stream_count > 0:
                 if request_id is not None:
                     response = {
@@ -341,12 +265,10 @@ class HisuiSoraSourcePlugin:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sora から受信するための Hisui プラグイン")
+    parser = argparse.ArgumentParser(description="Sora から映像を受信するための Hisui プラグイン")
     parser.add_argument("--channel-id", required=True, help="Sora チャンネル ID")
     parser.add_argument("--signaling-url", required=True, action="append",
                        help="Sora シグナリング URL（複数回指定可能）")
-    parser.add_argument("--audio-stream-name", action="append", default=[],
-                       help="音声ストリーム名（複数回指定可能）")
     parser.add_argument("--video-stream-name", action="append", default=[],
                        help="映像ストリーム名（複数回指定可能）")
     args = parser.parse_args()
@@ -354,7 +276,6 @@ def main():
     plugin = HisuiSoraSourcePlugin(
         args.channel_id,
         args.signaling_url,
-        args.audio_stream_name,
         args.video_stream_name
     )
     plugin.run()
