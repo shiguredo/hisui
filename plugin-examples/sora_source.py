@@ -162,14 +162,18 @@ class SoraReceiver:
         if not self.connected:
             return
 
-        # フレームをBGR形式に変換
+        # フレームをBGR形式のnumpy配列として取得
         bgr_data = frame.data()
-        width = frame.width()
-        height = frame.height()
+
+        # numpy配列の形状から幅と高さを取得 (H x W x BGR)
+        height, width = bgr_data.shape[:2]
 
         # タイムスタンプとデュレーション（簡易実装）
         duration_us = int(1_000_000 / 30)  # 30 FPS と仮定
         timestamp_us = int(time.time() * 1_000_000)
+
+        # numpy配列をbytesに変換してキューに追加
+        video_bytes = bgr_data.tobytes()
 
         self.video_queue.put({
             'stream_id': stream_id,
