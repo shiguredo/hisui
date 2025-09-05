@@ -3,7 +3,7 @@
 Hisui では、レイアウトを定義した JSON ファイルを使うことで、複数映像ソースを合成する際の配置を細かく指定できます。
 また、レイアウト JSON では、映像ソースの配置以外に、映像や音声のエンコード設定も指定できます。
 
-[`hisui compose`](./command_compose.md) コマンドの場合は、以下のように `-l` オプションでレイアウトファイルを指定できます：
+[`hisui compose`](./command_compose.md) コマンドの場合は、以下のように `-l` オプションでレイアウトファイルを指定できます。
 
 ```console
 $ hisui compose -l /path/to/layout.json /path/to/archive/RECORDING_ID/
@@ -13,7 +13,7 @@ $ hisui compose -l /path/to/layout.json /path/to/archive/RECORDING_ID/
 
 ## レイアウト JSON の概要
 
-レイアウト JSON ではおおまかには、以下が指定できます:
+レイアウト JSON には、以下が指定できます。
 - 音声の合成に使用するファイル一覧（未指定時には音声なし合成）
 - 映像の合成に使用するファイル一覧（未指定時には映像なし合成）
 - 合成後の音声のエンコードに使用するコーデックとビットレート
@@ -29,7 +29,7 @@ $ hisui compose -l /path/to/layout.json /path/to/archive/RECORDING_ID/
 ## レイアウトの例: グリッド（デフォルトレイアウト）
 
 以下は [layout-examples/compose-default.json](../layout-examples/compose-default.json) でも採用されている、
-一番ベーシックな配信者の映像をグリッド状に配置するレイアウト JSON の例です：
+一番ベーシックな配信者の映像をグリッド状に配置するレイアウト JSON の例です。
 
 ```json
 {
@@ -49,7 +49,7 @@ $ hisui compose -l /path/to/layout.json /path/to/archive/RECORDING_ID/
 }
 ```
 
-JSON の各項目の概要は以下の通りです:
+JSON の各項目の概要は以下の通りです。
 
 - `audio_sources`: 音声合成に使用するソースファイル一覧です
   - `archive-*.json` というワイルドカード指定により、録画ディレクトリ内の全ての配信者の音声が合成されます
@@ -62,7 +62,7 @@ JSON の各項目の概要は以下の通りです:
 
 ここでは `main` という名前のリージョンを一つだけ定義しています。
 リージョン内に各映像ソースを配置するグリッドの形状は、
-おおまかには `max_columns` および `max_rows` と映像ソースの数によって決定されます。
+`max_columns` および `max_rows` の設定、映像ソースの数などに基づいて決定されます。
 今回の設定では、最大で `3x2` のグリッドが形成されることになります。
 
 ### 合成結果のイメージ
@@ -95,7 +95,7 @@ JSON の各項目の概要は以下の通りです:
 ## レイアウトの例: Picture-in-Picture
 
 以下は、二つのリージョンを使って、
-メイン映像と小さなサブ映像を組み合わせた Picture-in-Picture レイアウトの例です：
+メイン映像と小さなサブ映像を組み合わせた Picture-in-Picture レイアウトの例です。
 
 ```json
 {
@@ -133,7 +133,7 @@ JSON の各項目の概要は以下の通りです:
 }
 ```
 
-JSON の各項目の概要は以下の通りです:
+JSON の各項目の概要は以下の通りです。
 
 - `audio_sources`: 音声合成に使用するソースファイル一覧です
   - `archive-*.json` というワイルドカード指定により、録画ディレクトリ内の全ての配信者の音声が合成されます
@@ -154,7 +154,7 @@ JSON の各項目の概要は以下の通りです:
 
 ### 合成結果のイメージ
 
-Picture-in-Picture レイアウトの合成結果のイメージは以下の通りです：
+Picture-in-Picture レイアウトの合成結果のイメージは以下の通りです。
 
 ```
 ┌─ main ─────────────────────────────────────────────────────────────┐
