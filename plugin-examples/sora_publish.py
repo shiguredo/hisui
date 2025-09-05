@@ -26,41 +26,9 @@ class SoraPublisher:
         self.streams: Dict[int, str] = {}  # stream_id -> media_type mapping
         self.started = False
 
-        # Add timing tracking
-        self.start_time: Optional[float] = None
-        self.first_timestamp_us: Optional[int] = None
-
         # Default audio/video parameters
         self.audio_channels = 2
         self.audio_sample_rate = 48000
-        self.video_width = 640
-        self.video_height = 480
-
-    def _calculate_time_drift(self, timestamp_us: int, media_type: str) -> None:
-        """Calculate and display time drift between timestamp_us and actual elapsed time."""
-        current_time = time.time()
-
-        if self.start_time is None:
-            self.start_time = current_time
-            self.first_timestamp_us = timestamp_us
-            return
-
-        if self.first_timestamp_us is None:
-            self.first_timestamp_us = timestamp_us
-            return
-
-        # Calculate actual elapsed time in microseconds
-        actual_elapsed_us = int((current_time - self.start_time) * 1_000_000)
-
-        # Calculate timestamp elapsed time in microseconds
-        timestamp_elapsed_us = timestamp_us - self.first_timestamp_us
-
-        # Calculate drift (positive means timestamp is ahead, negative means behind)
-        drift_us = timestamp_elapsed_us - actual_elapsed_us
-        drift_ms = drift_us / 1000.0
-
-        print(f"[{media_type}] Time drift: {drift_ms:+.3f}ms (timestamp: {timestamp_elapsed_us/1000:.3f}ms, actual: {actual_elapsed_us/1000:.3f}ms)",
-              file=sys.stderr)
 
     def initialize(self):
         """Initialize Sora SDK and create connection."""
@@ -126,9 +94,6 @@ class SoraPublisher:
             return
         self.started = True
 
-        # Display time drift between timestamp_us and actual elapsed time
-        self._calculate_time_drift(timestamp_us, "AUDIO")
-
         # Convert raw audio data to numpy array
         # Data is in I16Be (big-endian 16-bit PCM) format
         audio_array_be = np.frombuffer(data, dtype='>i2')  # Big-endian 16-bit signed
@@ -153,9 +118,6 @@ class SoraPublisher:
         if not self.connected or not self.video_source:
             return
         self.started = True
-
-        # Display time drift between timestamp_us and actual elapsed time
-        self._calculate_time_drift(timestamp_us, "VIDEO")
 
         # Convert BGR data to numpy array
         # Assuming BGR24 format (3 bytes per pixel)
