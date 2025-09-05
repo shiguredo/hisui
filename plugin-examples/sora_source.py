@@ -245,6 +245,8 @@ class HisuiSoraSourcePlugin:
         print(f"Content-Length: {len(payload)}")
         print("Content-Type: application/octet-stream")
         print()
+        sys.stdout.flush()
+
         sys.stdout.buffer.write(payload)
         sys.stdout.flush()
 
