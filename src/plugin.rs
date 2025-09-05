@@ -218,7 +218,7 @@ impl MediaProcessor for PluginCommandProcessor {
     fn spec(&self) -> MediaProcessorSpec {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
-            output_stream_ids: Vec::new(),
+            output_stream_ids: self.output_stream_ids.values().copied().collect(),
             stats: ProcessorStats::other("plugin_command"),
         }
     }
