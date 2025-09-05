@@ -1,7 +1,7 @@
-// 入力ファイルの音声と映像を Sora に配信するパイプラインの例
+// Sora から受信した複数の音声と映像を、合成してから Sora に配信するパイプラインの例
 {
   "pipeline": [
-    // 音声と映像を Sora から取得
+    // 音声と映像を Sora から受信
     {
       "type": "plugin_command",
       "output_stream": ["audio-source1", "video-source1", "audio-source2", "video-source2"],
