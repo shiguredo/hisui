@@ -180,14 +180,14 @@ impl Ord for PacerQueueItem {
 }
 
 #[derive(Debug)]
-pub struct StreamRealtimePacer {
+pub struct RealtimePacer {
     stream_ids: HashMap<MediaStreamId, MediaStreamId>,
     stream_timestamps: HashMap<MediaStreamId, Duration>,
     queue: BinaryHeap<PacerQueueItem>,
     start_time: Option<Instant>,
 }
 
-impl StreamRealtimePacer {
+impl RealtimePacer {
     pub fn new(
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_ids: Vec<MediaStreamId>,
@@ -220,12 +220,12 @@ impl StreamRealtimePacer {
     }
 }
 
-impl MediaProcessor for StreamRealtimePacer {
+impl MediaProcessor for RealtimePacer {
     fn spec(&self) -> MediaProcessorSpec {
         MediaProcessorSpec {
             input_stream_ids: self.stream_ids.keys().copied().collect(),
             output_stream_ids: self.stream_ids.values().copied().collect(),
-            stats: ProcessorStats::other("stream_realtime_pacer"),
+            stats: ProcessorStats::other("realtime_pacer"),
         }
     }
 

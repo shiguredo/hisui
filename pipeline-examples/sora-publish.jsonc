@@ -29,7 +29,7 @@
 
     // リアルタイム用にペースを制御
     {
-      "type": "stream_realtime_pacer",
+      "type": "realtime_pacer",
       "input_stream": ["audio_decoded", "video_decoded"],
       "output_stream": ["audio_paced", "video_paced"]
     },
