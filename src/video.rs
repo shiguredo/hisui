@@ -300,14 +300,14 @@ impl VideoFrame {
         Ok(())
     }
 
-    pub fn to_rgb_data(&self) -> orfail::Result<Vec<u8>> {
+    pub fn to_bgr_data(&self) -> orfail::Result<Vec<u8>> {
         (self.format == VideoFormat::I420).or_fail()?;
 
         let (y_plane, u_plane, v_plane) = self.as_yuv_planes().or_fail()?;
 
         let width = self.width.get();
         let height = self.height.get();
-        let mut rgb_data = Vec::with_capacity(width * height * 3);
+        let mut bgr_data = Vec::with_capacity(width * height * 3);
 
         for y in 0..height {
             for x in 0..width {
@@ -328,13 +328,13 @@ impl VideoFrame {
                 let g = g.max(0.0).min(255.0) as u8;
                 let b = b.max(0.0).min(255.0) as u8;
 
-                rgb_data.push(r);
-                rgb_data.push(g);
-                rgb_data.push(b);
+                bgr_data.push(b);
+                bgr_data.push(g);
+                bgr_data.push(r);
             }
         }
 
-        Ok(rgb_data)
+        Ok(bgr_data)
     }
 }
 
