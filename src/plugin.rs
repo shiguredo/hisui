@@ -216,8 +216,8 @@ impl MediaProcessor for PluginCommandProcessor {
                         Ok(())
                     }),
                 );
-                let rgb_data = frame.to_rgb_data().or_fail()?;
-                self.cast(&req, Some(&rgb_data)).or_fail()?;
+                let bgr_data = frame.to_bgr_data().or_fail()?;
+                self.cast(&req, Some(&bgr_data)).or_fail()?;
             }
         }
         Ok(())
