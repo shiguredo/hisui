@@ -66,7 +66,7 @@ class SoraReceiver:
         self.connection.connect()
 
         # 接続を待機（簡易実装）
-        time.sleep(2)
+        time.sleep(1)
         self.connected = True
 
     def disconnect(self):
