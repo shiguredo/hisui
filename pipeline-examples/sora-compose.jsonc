@@ -26,7 +26,8 @@
       "resolution": "1280x720",
       "video_layout": {
         "main": {
-          "video_sources": ["video-source1", "video-source2"]
+          "video_sources": ["video-source1", "video-source2"],
+          "background_color": [255, 0, 0],
         }
       }
     },

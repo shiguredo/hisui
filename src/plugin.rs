@@ -7,6 +7,7 @@ use orfail::OrFail;
 
 use crate::json::JsonObject;
 use crate::media::{MediaSample, MediaStreamId, MediaStreamName, MediaStreamNameRegistry};
+use crate::metadata::SourceId;
 use crate::processor::{
     MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
 };
@@ -294,7 +295,7 @@ impl MediaProcessor for PluginCommandProcessor {
                     .or_fail()?;
                 let audio_data = self.read_payload().or_fail()?;
 
-                let audio_sample = crate::audio::AudioData {
+                let mut audio_sample = crate::audio::AudioData {
                     source_id: None,
                     data: audio_data,
                     format: crate::audio::AudioFormat::I16Be,
@@ -304,6 +305,7 @@ impl MediaProcessor for PluginCommandProcessor {
                     duration,
                     sample_entry: None,
                 };
+                audio_sample.source_id = Some(SourceId::new(stream_name.get()));
 
                 MediaProcessorOutput::audio_data(stream_id, audio_sample)
             }
@@ -321,7 +323,7 @@ impl MediaProcessor for PluginCommandProcessor {
                     .or_fail()?;
                 let frame_data = self.read_payload().or_fail()?;
 
-                let video_frame = crate::video::VideoFrame::from_bgr_data(
+                let mut video_frame = crate::video::VideoFrame::from_bgr_data(
                     &frame_data,
                     width,
                     height,
@@ -329,6 +331,7 @@ impl MediaProcessor for PluginCommandProcessor {
                     duration,
                 )
                 .or_fail()?;
+                video_frame.source_id = Some(SourceId::new(stream_name.get()));
                 MediaProcessorOutput::video_frame(stream_id, video_frame)
             }
             PollOutputResponse::Finished => MediaProcessorOutput::Finished,

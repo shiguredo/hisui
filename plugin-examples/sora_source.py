@@ -172,7 +172,6 @@ class HisuiSoraSourcePlugin:
     def send_response(self, response: dict):
         """標準出力に JSON-RPC レスポンスを送信"""
         response_json = json.dumps(response)
-        print(f"res1: {response_json}", file=sys.stderr)
 
         print(f"Content-Length: {len(response_json)}")
         print("Content-Type: application/json")
@@ -195,7 +194,6 @@ class HisuiSoraSourcePlugin:
         print("Content-Type: application/octet-stream")
         print()
         sys.stdout.flush()
-        print(f"res2-payload: {len(payload)}", file=sys.stderr)
 
         sys.stdout.buffer.write(payload)
         sys.stdout.flush()
