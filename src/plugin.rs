@@ -191,6 +191,7 @@ impl MediaProcessor for PluginCommandProcessor {
                 self.cast(&req, None).or_fail()?;
             }
             Some(MediaSample::Audio(data)) => {
+                (data.format == crate::audio::AudioFormat::I16Be).or_fail()?;
                 let req = JsonRpcRequest::notification(
                     "notify_audio",
                     nojson::object(|f| {

@@ -24,13 +24,43 @@ class SoraPublisher:
         self.video_source: Optional[SoraVideoSource] = None
         self.connected = False
         self.streams: Dict[int, str] = {}  # stream_id -> media_type mapping
-        self.started = False 
+        self.started = False
+
+        # Add timing tracking
+        self.start_time: Optional[float] = None
+        self.first_timestamp_us: Optional[int] = None
 
         # Default audio/video parameters
         self.audio_channels = 2
         self.audio_sample_rate = 48000
         self.video_width = 640
         self.video_height = 480
+
+    def _calculate_time_drift(self, timestamp_us: int, media_type: str) -> None:
+        """Calculate and display time drift between timestamp_us and actual elapsed time."""
+        current_time = time.time()
+
+        if self.start_time is None:
+            self.start_time = current_time
+            self.first_timestamp_us = timestamp_us
+            return
+
+        if self.first_timestamp_us is None:
+            self.first_timestamp_us = timestamp_us
+            return
+
+        # Calculate actual elapsed time in microseconds
+        actual_elapsed_us = int((current_time - self.start_time) * 1_000_000)
+
+        # Calculate timestamp elapsed time in microseconds
+        timestamp_elapsed_us = timestamp_us - self.first_timestamp_us
+
+        # Calculate drift (positive means timestamp is ahead, negative means behind)
+        drift_us = timestamp_elapsed_us - actual_elapsed_us
+        drift_ms = drift_us / 1000.0
+
+        print(f"[{media_type}] Time drift: {drift_ms:+.3f}ms (timestamp: {timestamp_elapsed_us/1000:.3f}ms, actual: {actual_elapsed_us/1000:.3f}ms)",
+              file=sys.stderr)
 
     def initialize(self):
         """Initialize Sora SDK and create connection."""
@@ -56,6 +86,7 @@ class SoraPublisher:
             video=True,
             audio_source=self.audio_source,
             video_source=self.video_source,
+            video_bit_rate=1000,
         )
 
         # Set up callbacks
@@ -95,9 +126,13 @@ class SoraPublisher:
             return
         self.started = True
 
+        # Display time drift between timestamp_us and actual elapsed time
+        self._calculate_time_drift(timestamp_us, "AUDIO")
+
         # Convert raw audio data to numpy array
-        # Assuming 16-bit PCM audio data
-        audio_array = np.frombuffer(data, dtype=np.int16)
+        # Data is in I16Be (big-endian 16-bit PCM) format
+        audio_array_be = np.frombuffer(data, dtype='>i2')  # Big-endian 16-bit signed
+        audio_array = audio_array_be.astype(np.int16)      # Convert to native endian int16
 
         # Reshape for channels - Sora expects (samples_per_channel, channels)
         channels = 2 if stereo else 1
@@ -113,20 +148,23 @@ class SoraPublisher:
         self.audio_source.on_data(audio_array)
 
     def handle_video(self, stream_id: int, width: int, height: int,
-                    timestamp_us: int, duration_us: int, rgb_data: bytes):
+                    timestamp_us: int, duration_us: int, bgr_data: bytes):
         """Handle video frame from Hisui."""
         if not self.connected or not self.video_source:
             return
         self.started = True
 
-        # Convert RGB data to numpy array
-        # Assuming RGB24 format (3 bytes per pixel)
+        # Display time drift between timestamp_us and actual elapsed time
+        self._calculate_time_drift(timestamp_us, "VIDEO")
+
+        # Convert BGR data to numpy array
+        # Assuming BGR24 format (3 bytes per pixel)
         expected_size = width * height * 3
-        if len(rgb_data) != expected_size:
-            print(f"Warning: Expected {expected_size} bytes for {width}x{height} RGB, got {len(rgb_data)}", file=sys.stderr)
+        if len(bgr_data) != expected_size:
+            print(f"Warning: Expected {expected_size} bytes for {width}x{height} BGR, got {len(bgr_data)}", file=sys.stderr)
             return
 
-        frame = np.frombuffer(rgb_data, dtype=np.uint8).reshape((height, width, 3)).copy()
+        frame = np.frombuffer(bgr_data, dtype=np.uint8).reshape((height, width, 3)).copy()
 
         # Send to Sora
         self.video_source.on_captured(frame)
@@ -196,14 +234,8 @@ class HisuiSoraPlugin:
                         binary_headers[key.strip()] = value.strip()
 
                 binary_length = int(binary_headers.get('Content-Length', 0))
-                print(f"binary len: {binary_length}", file=sys.stderr)
-                print(f"headers: {binary_headers}", file=sys.stderr)
                 if binary_length > 0:
-                    # ここでブロックする理由を検討してください
-                    # rust側とpython側でデータの長さはあっています
                     binary_data = sys.stdin.buffer.read(binary_length)
-                    print(f"read binary data: {len(binary_data)} bytes", file=sys.stderr)
-                print(f"headers: {binary_headers}", file=sys.stderr)
 
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             print(f"Error parsing JSON or reading binary data: {e}", file=sys.stderr)
@@ -213,7 +245,7 @@ class HisuiSoraPlugin:
     def send_response(self, response: dict):
         """Send a JSON-RPC response to stdout."""
         response_json = json.dumps(response)
-        print(f"res: {response_json}", file=sys.stderr)
+        # print(f"res: {response_json}", file=sys.stderr)
         print(f"Content-Length: {len(response_json)}")
         print("Content-Type: application/json")
         print()
@@ -222,7 +254,7 @@ class HisuiSoraPlugin:
 
     def process_request(self, request_data: str, binary_data: bytes = None):
         """Process a JSON-RPC request."""
-        print(f"req: {request_data}", file=sys.stderr)
+        # print(f"req: {request_data}", file=sys.stderr)
  
         try:
             request = json.loads(request_data)
