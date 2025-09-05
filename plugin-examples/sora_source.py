@@ -15,6 +15,8 @@ from sora_sdk import (
     SoraVideoFrame,
 )
 
+# プログラムの開始時刻を記録
+START_TIME = time.time()
 
 class SoraReceiver:
     def __init__(self, channel_id: str, signaling_urls: list[str],
@@ -118,7 +120,7 @@ class SoraReceiver:
 
         # タイムスタンプとデュレーション（簡易実装）
         duration_us = int(1_000_000 / 30)  # 30 FPS と仮定
-        timestamp_us = int(time.time() * 1_000_000)
+        timestamp_us = int((time.time() - START_TIME) * 1_000_000)  # プログラム開始時刻を起点にする
 
         self.video_queue.put({
             'stream_id': stream_id,
@@ -127,7 +129,7 @@ class SoraReceiver:
             'height': height,
             'timestamp_us': timestamp_us,
             'duration_us': duration_us,
-            'data': bgr_data
+            'data': bgr_data.flatten().tobytes()  # フラットな配列にしてバイト列に変換
         })
 
 
@@ -170,6 +172,8 @@ class HisuiSoraSourcePlugin:
     def send_response(self, response: dict):
         """標準出力に JSON-RPC レスポンスを送信"""
         response_json = json.dumps(response)
+        print(f"res1: {response_json}", file=sys.stderr)
+
         print(f"Content-Length: {len(response_json)}")
         print("Content-Type: application/json")
         print()
@@ -179,6 +183,8 @@ class HisuiSoraSourcePlugin:
     def send_response_with_payload(self, response: dict, payload: bytes):
         """標準出力に JSON-RPC レスポンス（ペイロード付き）を送信"""
         response_json = json.dumps(response)
+        print(f"res2: {response_json}", file=sys.stderr)
+
         print(f"Content-Length: {len(response_json)}")
         print("Content-Type: application/json")
         print()
@@ -189,6 +195,7 @@ class HisuiSoraSourcePlugin:
         print("Content-Type: application/octet-stream")
         print()
         sys.stdout.flush()
+        print(f"res2-payload: {len(payload)}", file=sys.stderr)
 
         sys.stdout.buffer.write(payload)
         sys.stdout.flush()
