@@ -1,10 +1,10 @@
-// Sora から受信した複数の音声と映像を、合成してから Sora に配信するパイプラインの例
+// Sora から受信した複数の映像を、合成してから Sora に配信するパイプラインの例
 {
   "pipeline": [
     // 音声と映像を Sora から受信
     {
       "type": "plugin_command",
-      "output_stream": ["audio-source1", "video-source1", "audio-source2", "video-source2"],
+      "output_stream": ["video-source1", "video-source2"],
       "command": "uv",
       "args": [
         "run",
@@ -13,18 +13,9 @@
         "sora_source.py",
         "--channel-id=sora1",
         "--signaling-url=ws://localhost:5000/signaling",
-        "--audio-stream-name=audio-source1",
-        "--audio-stream-name=audio-source2",
         "--video-stream-name=video-source1",
         "--video-stream-name=video-source2",
       ],
-    },
-
-    // 音声の合成処理
-    {
-      "type": "audio_mixer",
-      "input_stream": ["audio-source1", "audio-source2"],
-      "output_stream": "audio-mixed",
     },
 
     // 映像の合成処理
@@ -43,7 +34,7 @@
     // 音声と映像を Sora に配信
     {
       "type": "plugin_command",
-      "input_stream": ["audio-mixed", "video-mixed"],
+      "input_stream": ["video-mixed"],
       "command": "uv",
       "args": [
         "run",
@@ -51,7 +42,8 @@
         "plugin-examples/",
         "sora_publish.py",
         "--channel-id=sora2",
-        "--signaling-url=ws://localhost:5000/signaling"
+        "--signaling-url=ws://localhost:5000/signaling",
+        "--video-only",
       ],
     },
   ],
