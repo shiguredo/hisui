@@ -207,7 +207,6 @@ class HisuiSoraPlugin:
     def send_response(self, response: dict):
         """標準出力に JSON-RPC レスポンスを送信"""
         response_json = json.dumps(response)
-        # print(f"res: {response_json}", file=sys.stderr)
         print(f"Content-Length: {len(response_json)}")
         print("Content-Type: application/json")
         print()
@@ -216,8 +215,6 @@ class HisuiSoraPlugin:
 
     def process_request(self, request_data: str, binary_data: bytes = None):
         """JSON-RPC リクエストを処理"""
-        # print(f"req: {request_data}", file=sys.stderr)
-
         try:
             request = json.loads(request_data)
         except json.JSONDecodeError:
