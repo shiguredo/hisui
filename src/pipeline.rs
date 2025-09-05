@@ -14,7 +14,8 @@ use crate::media::{MediaStreamName, MediaStreamNameRegistry};
 use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
 use crate::mixer_audio::AudioMixer;
 use crate::mixer_video::{VideoMixer, VideoMixerSpec};
-use crate::processor::BoxedMediaProcessor;
+use crate::plugin::PluginCommand;
+use crate::processor::{BoxedMediaProcessor, RealtimePacer};
 use crate::reader::{AudioReader, VideoReader};
 use crate::types::{CodecName, EvenUsize, TimeOffset};
 use crate::video::FrameRate;
@@ -73,13 +74,11 @@ pub enum PipelineComponent {
         input_stream: Vec<MediaStreamName>,
         output_file: PathBuf,
     },
-    // TODO(atode):
-    // PluginCommand {
-    //      command: PathBuf,
-    //      args: Vec<String>,
-    //      input_stream: Vec<MediaStreamName>,
-    //      output_stream: Vec<MediaStreamName>,
-    // },
+    PluginCommand(PluginCommand),
+    RealtimePacer {
+        input_stream: Vec<MediaStreamName>,
+        output_stream: Vec<MediaStreamName>,
+    },
 }
 
 impl PipelineComponent {
@@ -297,6 +296,27 @@ impl PipelineComponent {
 
                 Ok(BoxedMediaProcessor::new(processor))
             }
+            Self::PluginCommand(plugin) => {
+                let processor = plugin.start(registry).or_fail()?;
+                Ok(BoxedMediaProcessor::new(processor))
+            }
+            Self::RealtimePacer {
+                input_stream,
+                output_stream,
+            } => {
+                let input_stream_ids: Vec<_> = input_stream
+                    .iter()
+                    .map(|name| registry.get_id(name).or_fail())
+                    .collect::<orfail::Result<_>>()?;
+                let output_stream_ids: Vec<_> = output_stream
+                    .iter()
+                    .map(|name| registry.register_name(name.clone()).or_fail())
+                    .collect::<orfail::Result<_>>()?;
+
+                let processor =
+                    RealtimePacer::new(input_stream_ids, output_stream_ids).or_fail()?;
+                Ok(BoxedMediaProcessor::new(processor))
+            }
         }
     }
 }
@@ -348,6 +368,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineCompone
             "mp4_writer" => Ok(Self::Mp4Writer {
                 input_stream: obj.get_required("input_stream")?,
                 output_file: obj.get_required("output_file")?,
+            }),
+            "plugin_command" => PluginCommand::try_from(value).map(Self::PluginCommand),
+            "realtime_pacer" => Ok(Self::RealtimePacer {
+                input_stream: obj.get_required("input_stream")?,
+                output_stream: obj.get_required("output_stream")?,
             }),
             unknown => Err(value.invalid(format!("unknown pipeline component type: {unknown:?}"))),
         }

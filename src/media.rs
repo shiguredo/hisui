@@ -86,6 +86,20 @@ impl MediaStreamId {
     }
 }
 
+impl nojson::DisplayJson for MediaStreamId {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.0)
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for MediaStreamId {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MediaSample {
     Audio(Arc<AudioData>),

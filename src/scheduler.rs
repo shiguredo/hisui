@@ -171,7 +171,7 @@ impl Task {
 #[derive(Debug)]
 pub struct Scheduler {
     tasks: Vec<Task>,
-    thread_count: NonZeroUsize,
+    pub thread_count: NonZeroUsize, // TODO(atode): private にする
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     stats: Stats,
 }
@@ -219,6 +219,9 @@ impl Scheduler {
                 thread_tasks.push(task.take().or_fail()?);
                 worker_thread_stats.processors.push(j);
             }
+            if thread_tasks.is_empty() {
+                continue;
+            };
             let runner = TaskRunner::new(
                 thread_tasks,
                 worker_thread_stats.clone(),
