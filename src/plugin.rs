@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use orfail::OrFail;
 
@@ -9,6 +10,7 @@ use crate::processor::{
     MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
 };
 use crate::stats::ProcessorStats;
+use crate::types::EvenUsize;
 
 #[derive(Debug, Clone)]
 pub struct PluginCommand {
@@ -166,6 +168,37 @@ impl PluginCommandProcessor {
             orfail::Failure::new("failed to convert response to expected type".to_owned())
         })
     }
+
+    fn read_payload(&mut self) -> orfail::Result<Vec<u8>> {
+        let mut content_length = None;
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            self.stdout.read_line(&mut line).or_fail()?;
+
+            if line.trim().is_empty() {
+                break;
+            }
+
+            if let Some(header_value) = line.strip_prefix("Content-Length: ") {
+                content_length = Some(
+                    header_value
+                        .trim()
+                        .parse::<usize>()
+                        .or_fail_with(|e| format!("invalid content length: {e}"))?,
+                );
+            }
+        }
+
+        let content_length = content_length
+            .or_fail_with(|()| "missing Content-Length header for payload".to_owned())?;
+
+        let mut payload_data = vec![0u8; content_length];
+        self.stdout.read_exact(&mut payload_data).or_fail()?;
+
+        Ok(payload_data)
+    }
 }
 
 impl MediaProcessor for PluginCommandProcessor {
@@ -234,6 +267,47 @@ impl MediaProcessor for PluginCommandProcessor {
             PollOutputResponse::WaitingInput { stream_id } => {
                 MediaProcessorOutput::pending(stream_id)
             }
+            PollOutputResponse::AudioData {
+                stream_id,
+                stereo,
+                sample_rate,
+                timestamp,
+                duration,
+            } => {
+                let audio_data = self.read_payload().or_fail()?;
+
+                let audio_sample = crate::audio::AudioData {
+                    source_id: None,
+                    data: audio_data,
+                    format: crate::audio::AudioFormat::I16Be,
+                    stereo,
+                    sample_rate: sample_rate as u16,
+                    timestamp,
+                    duration,
+                    sample_entry: None,
+                };
+
+                MediaProcessorOutput::audio_data(stream_id, audio_sample)
+            }
+            PollOutputResponse::VideoFrame {
+                stream_id,
+                width,
+                height,
+                timestamp,
+                duration,
+            } => {
+                let frame_data = self.read_payload().or_fail()?;
+
+                let video_frame = crate::video::VideoFrame::from_bgr_data(
+                    &frame_data,
+                    width,
+                    height,
+                    timestamp,
+                    duration,
+                )
+                .or_fail()?;
+                MediaProcessorOutput::video_frame(stream_id, video_frame)
+            }
             PollOutputResponse::Finished => MediaProcessorOutput::Finished,
         };
         Ok(output)
@@ -292,7 +366,23 @@ where
 #[derive(Debug)]
 pub enum PollOutputResponse {
     WaitingInputAny,
-    WaitingInput { stream_id: MediaStreamId },
+    WaitingInput {
+        stream_id: MediaStreamId,
+    },
+    AudioData {
+        stream_id: MediaStreamId,
+        stereo: bool,
+        sample_rate: u32,
+        timestamp: Duration,
+        duration: Duration,
+    },
+    VideoFrame {
+        stream_id: MediaStreamId,
+        width: EvenUsize,
+        height: EvenUsize,
+        timestamp: Duration,
+        duration: Duration,
+    },
     Finished,
 }
 
@@ -308,6 +398,40 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PollOutputRespo
             "waiting_input" => {
                 let stream_id = obj.get_required("stream_id")?;
                 Ok(Self::WaitingInput { stream_id })
+            }
+            "audio_data" => {
+                let stream_id = obj.get_required("stream_id")?;
+                let stereo = obj.get_required("stereo")?;
+                let sample_rate = obj.get_required("sample_rate")?;
+                let timestamp_us: u64 = obj.get_required("timestamp_us")?;
+                let duration_us: u64 = obj.get_required("duration_us")?;
+                Ok(Self::AudioData {
+                    stream_id,
+                    stereo,
+                    sample_rate,
+                    timestamp: Duration::from_micros(timestamp_us),
+                    duration: Duration::from_micros(duration_us),
+                })
+            }
+            "video_frame" => {
+                let stream_id = obj.get_required("stream_id")?;
+                let width_raw: u32 = obj.get_required("width")?;
+                let height_raw: u32 = obj.get_required("height")?;
+                let timestamp_us: u64 = obj.get_required("timestamp_us")?;
+                let duration_us: u64 = obj.get_required("duration_us")?;
+
+                let width = EvenUsize::new(width_raw as usize)
+                    .ok_or_else(|| value.invalid("width must be even"))?;
+                let height = EvenUsize::new(height_raw as usize)
+                    .ok_or_else(|| value.invalid("height must be even"))?;
+
+                Ok(Self::VideoFrame {
+                    stream_id,
+                    width,
+                    height,
+                    timestamp: Duration::from_micros(timestamp_us),
+                    duration: Duration::from_micros(duration_us),
+                })
             }
             "finished" => Ok(Self::Finished),
             unknown => {
