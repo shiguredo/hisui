@@ -57,6 +57,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // スケジューラーを作成
     let mut scheduler = Scheduler::new();
 
+    // TODO(atode): スレッド数やその割り当て方法は後でちゃんとする
+    scheduler.thread_count = std::num::NonZeroUsize::new(pipeline_def.pipeline.len()).or_fail()?;
+
     // パイプライン内の各コンポーネントをプロセッサに変換してスケジューラーに登録
     for component in &pipeline_def.pipeline {
         log::debug!("Creating processor for component: {component:?}");
