@@ -182,6 +182,7 @@ impl Ord for PacerQueueItem {
 #[derive(Debug)]
 pub struct StreamRealtimePacer {
     stream_ids: HashMap<MediaStreamId, MediaStreamId>,
+    stream_timestamps: HashMap<MediaStreamId, Duration>,
     queue: BinaryHeap<PacerQueueItem>,
     start_time: Option<Instant>,
 }
@@ -194,8 +195,14 @@ impl StreamRealtimePacer {
         (input_stream_ids.len() == output_stream_ids.len()).or_fail()?;
         Ok(Self {
             stream_ids: input_stream_ids
-                .into_iter()
+                .iter()
+                .copied()
                 .zip(output_stream_ids.into_iter())
+                .collect(),
+            stream_timestamps: input_stream_ids
+                .iter()
+                .copied()
+                .zip(std::iter::repeat(Duration::ZERO))
                 .collect(),
             queue: BinaryHeap::new(),
             start_time: None,
@@ -225,6 +232,9 @@ impl MediaProcessor for StreamRealtimePacer {
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         let output_stream_id = self.stream_ids.get(&input.stream_id).copied().or_fail()?;
         if let Some(sample) = input.sample {
+            self.stream_timestamps
+                .insert(input.stream_id, sample.timestamp());
+
             // TODO(atode): キューはストリーム毎に管理すべき
             self.queue.push(PacerQueueItem(output_stream_id, sample));
         } else {
@@ -254,7 +264,14 @@ impl MediaProcessor for StreamRealtimePacer {
         // TODO(atode): ハードコーディングをやめる
         if self.queue.len() < 10 {
             self.queue.push(PacerQueueItem(stream_id, sample));
-            return Ok(MediaProcessorOutput::awaiting_any());
+
+            if let Some((input_stream_id, _)) =
+                self.stream_timestamps.iter().min_by_key(|(_, t)| *t)
+            {
+                return Ok(MediaProcessorOutput::pending(*input_stream_id));
+            } else {
+                return Ok(MediaProcessorOutput::awaiting_any());
+            }
         }
 
         // TODO(atode): sleep はやめる

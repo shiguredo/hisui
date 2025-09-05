@@ -171,7 +171,7 @@ impl Task {
 #[derive(Debug)]
 pub struct Scheduler {
     tasks: Vec<Task>,
-    pub thread_count: NonZeroUsize, // TODO
+    pub thread_count: NonZeroUsize, // TODO(atode): private にする
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     stats: Stats,
 }
