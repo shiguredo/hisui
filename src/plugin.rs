@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -17,6 +18,7 @@ pub struct PluginCommand {
     pub command: PathBuf,
     pub args: Vec<String>,
     pub input_stream_names: Vec<MediaStreamName>,
+    pub output_stream_names: Vec<MediaStreamName>,
 }
 
 impl PluginCommand {
@@ -27,6 +29,14 @@ impl PluginCommand {
         let mut input_stream_ids = Vec::new();
         for name in &self.input_stream_names {
             input_stream_ids.push(registry.get_id(name).or_fail()?);
+        }
+
+        let mut output_stream_ids = HashMap::new();
+        for name in &self.output_stream_names {
+            output_stream_ids.insert(
+                name.clone(),
+                registry.register_name(name.clone()).or_fail()?,
+            );
         }
 
         let mut process = std::process::Command::new(&self.command)
@@ -53,6 +63,7 @@ impl PluginCommand {
             stdout: BufReader::new(stdout),
             input_stream_ids,
             next_request_id: 0,
+            output_stream_ids,
         })
     }
 }
@@ -66,7 +77,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PluginCommand {
         Ok(Self {
             command: obj.get_required("command")?,
             args: obj.get("args")?.unwrap_or_default(),
-            input_stream_names: obj.get_required("input_stream")?,
+            input_stream_names: obj.get("input_stream")?.unwrap_or_default(),
+            output_stream_names: obj.get("output_stream")?.unwrap_or_default(),
         })
     }
 }
@@ -77,6 +89,7 @@ pub struct PluginCommandProcessor {
     stdin: BufWriter<std::process::ChildStdin>,
     stdout: BufReader<std::process::ChildStdout>,
     input_stream_ids: Vec<MediaStreamId>,
+    output_stream_ids: HashMap<MediaStreamName, MediaStreamId>,
     next_request_id: u64,
 }
 
@@ -268,12 +281,17 @@ impl MediaProcessor for PluginCommandProcessor {
                 MediaProcessorOutput::pending(stream_id)
             }
             PollOutputResponse::AudioData {
-                stream_id,
+                stream_name,
                 stereo,
                 sample_rate,
                 timestamp,
                 duration,
             } => {
+                let stream_id = self
+                    .output_stream_ids
+                    .get(&stream_name)
+                    .copied()
+                    .or_fail()?;
                 let audio_data = self.read_payload().or_fail()?;
 
                 let audio_sample = crate::audio::AudioData {
@@ -290,12 +308,17 @@ impl MediaProcessor for PluginCommandProcessor {
                 MediaProcessorOutput::audio_data(stream_id, audio_sample)
             }
             PollOutputResponse::VideoFrame {
-                stream_id,
+                stream_name,
                 width,
                 height,
                 timestamp,
                 duration,
             } => {
+                let stream_id = self
+                    .output_stream_ids
+                    .get(&stream_name)
+                    .copied()
+                    .or_fail()?;
                 let frame_data = self.read_payload().or_fail()?;
 
                 let video_frame = crate::video::VideoFrame::from_bgr_data(
@@ -370,14 +393,14 @@ pub enum PollOutputResponse {
         stream_id: MediaStreamId,
     },
     AudioData {
-        stream_id: MediaStreamId,
+        stream_name: MediaStreamName,
         stereo: bool,
         sample_rate: u32,
         timestamp: Duration,
         duration: Duration,
     },
     VideoFrame {
-        stream_id: MediaStreamId,
+        stream_name: MediaStreamName,
         width: EvenUsize,
         height: EvenUsize,
         timestamp: Duration,
@@ -400,13 +423,13 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PollOutputRespo
                 Ok(Self::WaitingInput { stream_id })
             }
             "audio_data" => {
-                let stream_id = obj.get_required("stream_id")?;
+                let stream_name = obj.get_required("stream_name")?;
                 let stereo = obj.get_required("stereo")?;
                 let sample_rate = obj.get_required("sample_rate")?;
                 let timestamp_us: u64 = obj.get_required("timestamp_us")?;
                 let duration_us: u64 = obj.get_required("duration_us")?;
                 Ok(Self::AudioData {
-                    stream_id,
+                    stream_name,
                     stereo,
                     sample_rate,
                     timestamp: Duration::from_micros(timestamp_us),
@@ -414,7 +437,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PollOutputRespo
                 })
             }
             "video_frame" => {
-                let stream_id = obj.get_required("stream_id")?;
+                let stream_name = obj.get_required("stream_name")?;
                 let width_raw: u32 = obj.get_required("width")?;
                 let height_raw: u32 = obj.get_required("height")?;
                 let timestamp_us: u64 = obj.get_required("timestamp_us")?;
@@ -426,7 +449,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PollOutputRespo
                     .ok_or_else(|| value.invalid("height must be even"))?;
 
                 Ok(Self::VideoFrame {
-                    stream_id,
+                    stream_name,
                     width,
                     height,
                     timestamp: Duration::from_micros(timestamp_us),
