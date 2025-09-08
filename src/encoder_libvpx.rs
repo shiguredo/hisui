@@ -9,7 +9,7 @@ use shiguredo_mp4::{
 
 use crate::{
     encoder::VideoEncoderOptions,
-    types::{CodecName, EvenUsize},
+    types::CodecName,
     video::{self, VideoFormat, VideoFrame},
 };
 
@@ -35,9 +35,11 @@ pub struct LibvpxEncoder {
 
 impl LibvpxEncoder {
     pub fn new_vp8(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width.get();
+        let height = options.height.get();
         let config = shiguredo_libvpx::EncoderConfig {
-            width: options.width.get(),
-            height: options.height.get(),
+            width,
+            height,
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
             target_bitrate: options.bitrate,
@@ -45,9 +47,6 @@ impl LibvpxEncoder {
         };
         log::debug!("libvpx vp8 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
-
-        let width = options.width;
-        let height = options.height;
         let sample_entry = vp8_sample_entry(width, height);
 
         Ok(Self {
@@ -60,9 +59,11 @@ impl LibvpxEncoder {
     }
 
     pub fn new_vp9(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width.get();
+        let height = options.height.get();
         let config = shiguredo_libvpx::EncoderConfig {
-            width: options.width.get(),
-            height: options.height.get(),
+            width,
+            height,
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
             target_bitrate: options.bitrate,
@@ -70,9 +71,6 @@ impl LibvpxEncoder {
         };
         log::debug!("libvpx vp9 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;
-
-        let width = options.width;
-        let height = options.height;
         let sample_entry = vp9_sample_entry(width, height);
 
         Ok(Self {
@@ -118,8 +116,8 @@ impl LibvpxEncoder {
                 data: frame.data().to_vec(),
                 format: self.format,
                 keyframe: frame.is_keyframe(),
-                width: EvenUsize::new(frame.width() as usize).or_fail()?,
-                height: EvenUsize::new(frame.height() as usize).or_fail()?,
+                width: frame.width() as usize,
+                height: frame.height() as usize,
                 timestamp: input_frame.timestamp,
                 duration: input_frame.duration,
             });
@@ -133,7 +131,7 @@ impl LibvpxEncoder {
     }
 }
 
-fn vp8_sample_entry(width: EvenUsize, height: EvenUsize) -> SampleEntry {
+fn vp8_sample_entry(width: usize, height: usize) -> SampleEntry {
     SampleEntry::Vp08(Vp08Box {
         visual: video::sample_entry_visual_fields(width, height),
         vpcc_box: VpccBox {
@@ -154,7 +152,7 @@ fn vp8_sample_entry(width: EvenUsize, height: EvenUsize) -> SampleEntry {
     })
 }
 
-fn vp9_sample_entry(width: EvenUsize, height: EvenUsize) -> SampleEntry {
+fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
     SampleEntry::Vp09(Vp09Box {
         visual: video::sample_entry_visual_fields(width, height),
         vpcc_box: VpccBox {

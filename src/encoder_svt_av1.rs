@@ -79,8 +79,8 @@ impl SvtAv1Encoder {
                 data: frame.data().to_vec(),
                 format: VideoFormat::Av1,
                 keyframe: frame.is_keyframe(),
-                width: self.width,
-                height: self.height,
+                width: self.width.get(),
+                height: self.height.get(),
                 timestamp: input_frame.timestamp,
                 duration: input_frame.duration,
                 sample_entry: self.sample_entry.take(),
@@ -92,7 +92,7 @@ impl SvtAv1Encoder {
 
 fn sample_entry(width: EvenUsize, height: EvenUsize, config_obus: &[u8]) -> SampleEntry {
     SampleEntry::Av01(Av01Box {
-        visual: video::sample_entry_visual_fields(width, height),
+        visual: video::sample_entry_visual_fields(width.get(), height.get()),
         av1c_box: Av1cBox {
             seq_profile: Uint::new(0),            // Main profile
             seq_level_idx_0: Uint::new(0),        // Default level (unrestricted)

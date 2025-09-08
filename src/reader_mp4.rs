@@ -17,7 +17,6 @@ use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
-    types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -151,18 +150,6 @@ impl Mp4VideoReaderInner {
             height: resolution.1 as usize,
         });
 
-        let (Some(width), Some(height)) = (
-            EvenUsize::new(metadata.width as usize),
-            EvenUsize::new(metadata.height as usize),
-        ) else {
-            // [NOTE] 奇数入力はもしかしたら対応する必要があるかもしれない（ただ結構大変）
-            //        もし対応するならデコード後に端の画像を切り捨ててしまうのが簡単そう
-            return Some(Err(orfail::Failure::new(format!(
-                "odd video resolution is unsupported: {}x{}",
-                metadata.width, metadata.height,
-            ))));
-        };
-
         Some(Ok(VideoFrame {
             source_id: Some(self.source_id.clone()),
             sample_entry: if self
@@ -178,8 +165,8 @@ impl Mp4VideoReaderInner {
             data,
             format,
             keyframe: sample.is_sync_sample(),
-            width,
-            height,
+            width: metadata.width as usize,
+            height: metadata.height as usize,
             timestamp,
             duration,
         }))

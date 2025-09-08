@@ -10,7 +10,6 @@ use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
     stats::{WebmAudioReaderStats, WebmVideoReaderStats},
-    types::EvenUsize,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -578,8 +577,8 @@ impl WebmVideoReader {
             duration: self.last_duration,
 
             // 以降のフィールドはデコーダーには参照されないのでダミー値を設定しておく
-            width: EvenUsize::default(),
-            height: EvenUsize::default(),
+            width: 0,
+            height: 0,
             sample_entry: None,
         }))
     }

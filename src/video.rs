@@ -519,11 +519,11 @@ impl nojson::DisplayJson for FrameRate {
     }
 }
 
-pub fn sample_entry_visual_fields(width: EvenUsize, height: EvenUsize) -> VisualSampleEntryFields {
+pub fn sample_entry_visual_fields(width: usize, height: usize) -> VisualSampleEntryFields {
     VisualSampleEntryFields {
         data_reference_index: VisualSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
-        width: width.get() as u16,
-        height: height.get() as u16,
+        width: width as u16,
+        height: height as u16,
         horizresolution: VisualSampleEntryFields::DEFAULT_HORIZRESOLUTION,
         vertresolution: VisualSampleEntryFields::DEFAULT_VERTRESOLUTION,
         frame_count: VisualSampleEntryFields::DEFAULT_FRAME_COUNT,

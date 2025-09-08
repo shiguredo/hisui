@@ -56,7 +56,7 @@ impl ResizeCachedVideoFrame {
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> orfail::Result<&VideoFrame> {
-        if self.original.width == width && self.original.height == height {
+        if self.original.width == width.get() && self.original.height == height.get() {
             // リサイズ不要
             return Ok(&self.original);
         }
@@ -98,42 +98,36 @@ impl Canvas {
 
     fn draw_frame(&mut self, position: PixelPosition, frame: &VideoFrame) -> orfail::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
-        (frame.width <= self.width).or_fail()?;
-        (frame.height <= self.height).or_fail()?;
+        (frame.width <= self.width.get()).or_fail()?;
+        (frame.height <= self.height.get()).or_fail()?;
+        (frame.width % 2 == 0).or_fail()?;
+        (frame.height % 2 == 0).or_fail()?;
 
         // Y成分の描画
         let offset_x = position.x.get();
         let offset_y = position.y.get();
-        let y_size = frame.width.get() * frame.height.get();
+        let y_size = frame.width * frame.height;
         let y_data = &frame.data[..y_size];
-        for y in 0..frame.height.get() {
-            let i = y * frame.width.get();
-            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame.width.get()]);
+        for y in 0..frame.height {
+            let i = y * frame.width;
+            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame.width]);
         }
 
         // U成分の描画
         let offset_x = position.x.get() / 2;
         let offset_y = position.y.get() / 2;
-        let u_size = (frame.width.get() / 2) * (frame.height.get() / 2);
+        let u_size = (frame.width / 2) * (frame.height / 2);
         let u_data = &frame.data[y_size..][..u_size];
-        for y in 0..frame.height.get() / 2 {
-            let i = y * (frame.width.get() / 2);
-            self.draw_u_line(
-                offset_x,
-                offset_y + y,
-                &u_data[i..][..frame.width.get() / 2],
-            );
+        for y in 0..frame.height / 2 {
+            let i = y * (frame.width / 2);
+            self.draw_u_line(offset_x, offset_y + y, &u_data[i..][..frame.width / 2]);
         }
 
         // V成分の描画
         let v_data = &frame.data[y_size + u_size..][..u_size];
-        for y in 0..frame.height.get() / 2 {
-            let i = y * (frame.width.get() / 2);
-            self.draw_v_line(
-                offset_x,
-                offset_y + y,
-                &v_data[i..][..frame.width.get() / 2],
-            );
+        for y in 0..frame.height / 2 {
+            let i = y * (frame.width / 2);
+            self.draw_v_line(offset_x, offset_y + y, &v_data[i..][..frame.width / 2]);
         }
 
         Ok(())
@@ -270,8 +264,8 @@ impl VideoMixer {
             // 可変値
             timestamp,
             duration,
-            width: self.spec.resolution.width(),
-            height: self.spec.resolution.height(),
+            width: self.spec.resolution.width().get(),
+            height: self.spec.resolution.height().get(),
             data: canvas.data,
         })
     }

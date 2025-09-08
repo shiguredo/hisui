@@ -255,8 +255,8 @@ impl MediaProcessor for PluginCommandProcessor {
                     "notify_video",
                     nojson::object(|f| {
                         f.member("stream_id", input.stream_id)?;
-                        f.member("width", frame.width.get())?;
-                        f.member("height", frame.height.get())?;
+                        f.member("width", frame.width)?;
+                        f.member("height", frame.height)?;
                         f.member("timestamp_us", frame.timestamp.as_micros())?;
                         f.member("duration_us", frame.duration.as_micros())?;
                         Ok(())
