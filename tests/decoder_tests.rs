@@ -141,8 +141,8 @@ where
     for output_frame in output_frames {
         if blue_count > 0 {
             blue_count -= 1;
-            assert_eq!(output_frame.width.get(), 640);
-            assert_eq!(output_frame.height.get(), 480);
+            assert_eq!(output_frame.width, 640);
+            assert_eq!(output_frame.height, 480);
 
             // 単色青色かどうかのチェック
             let (y_plane, u_plane, v_plane) = output_frame.as_yuv_planes().or_fail()?;
@@ -151,8 +151,8 @@ where
             v_plane.iter().for_each(|&y| assert_eq!(y, 110));
         } else {
             red_count -= 1;
-            assert_eq!(output_frame.width.get(), 320);
-            assert_eq!(output_frame.height.get(), 320);
+            assert_eq!(output_frame.width, 320);
+            assert_eq!(output_frame.height, 320);
 
             // 単色赤色かどうかのチェック
             let (y_plane, u_plane, v_plane) = output_frame.as_yuv_planes().or_fail()?;

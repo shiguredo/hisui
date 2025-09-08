@@ -90,8 +90,8 @@ fn mix_single_source() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), size.width);
-        assert_eq!(frame.height.get(), size.height);
+        assert_eq!(frame.width, size.width);
+        assert_eq!(frame.height, size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -169,8 +169,8 @@ fn mix_single_source_with_offset() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), output_size.width);
-        assert_eq!(frame.height.get(), output_size.height);
+        assert_eq!(frame.width, output_size.width);
+        assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -296,8 +296,8 @@ fn single_source_multiple_regions() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), output_size.width);
-        assert_eq!(frame.height.get(), output_size.height);
+        assert_eq!(frame.width, output_size.width);
+        assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -422,8 +422,8 @@ fn single_source_multiple_regions_with_resize() {
     // 残りの合成結果を取得する
     for i in 1..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), output_size.width);
-        assert_eq!(frame.height.get(), output_size.height);
+        assert_eq!(frame.width, output_size.width);
+        assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -1227,8 +1227,8 @@ fn video_frame(
             .collect(),
         format: VideoFormat::I420,
         keyframe: true,
-        width: EvenUsize::new(size.width).unwrap(),
-        height: EvenUsize::new(size.height).unwrap(),
+        width: size.width,
+        height: size.height,
         timestamp,
         duration,
         sample_entry: None,
