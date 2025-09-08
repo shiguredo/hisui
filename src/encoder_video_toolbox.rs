@@ -160,8 +160,8 @@ impl VideoToolboxEncoder {
                 data: frame.data,
                 format: self.format,
                 keyframe: frame.keyframe,
-                width: self.width,
-                height: self.height,
+                width: self.width.get(),
+                height: self.height.get(),
                 timestamp: input_frame.timestamp,
                 duration: input_frame.duration,
                 sample_entry,
@@ -178,7 +178,7 @@ fn h264_sample_entry(
     pps_list: Vec<Vec<u8>>,
 ) -> orfail::Result<SampleEntry> {
     Ok(SampleEntry::Avc1(Avc1Box {
-        visual: video::sample_entry_visual_fields(width, height),
+        visual: video::sample_entry_visual_fields(width.get(), height.get()),
         avcc_box: AvccBox {
             // 実際のエンコードストリームに合わせた値
             sps_list,
@@ -207,7 +207,7 @@ fn h265_sample_entry(
     pps_list: Vec<Vec<u8>>,
 ) -> orfail::Result<SampleEntry> {
     Ok(SampleEntry::Hev1(Hev1Box {
-        visual: video::sample_entry_visual_fields(width, height),
+        visual: video::sample_entry_visual_fields(width.get(), height.get()),
         hvcc_box: HvccBox {
             // 以下はSora の録画ファイルに合わせた値（必要に応じて調整すること）
             general_profile_compatibility_flags: 0x60000000,

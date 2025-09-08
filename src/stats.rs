@@ -1015,8 +1015,8 @@ pub struct VideoResolution {
 impl VideoResolution {
     pub fn new(frame: &VideoFrame) -> Self {
         Self {
-            width: frame.width.get(),
-            height: frame.height.get(),
+            width: frame.width,
+            height: frame.height,
         }
     }
 }

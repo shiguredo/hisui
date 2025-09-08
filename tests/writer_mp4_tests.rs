@@ -361,8 +361,8 @@ fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame 
         data: vec![0], // 中身はなんでもいい
         format: VideoFormat::I420,
         keyframe: i % 2 == 0,
-        width: EvenUsize::MIN_CELL_SIZE,
-        height: EvenUsize::MIN_CELL_SIZE,
+        width: EvenUsize::MIN_CELL_SIZE.get(),
+        height: EvenUsize::MIN_CELL_SIZE.get(),
         timestamp: source.start_timestamp + duration * i as u32,
         duration,
         sample_entry: if i == 0 {

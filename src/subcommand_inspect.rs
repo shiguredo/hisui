@@ -146,8 +146,8 @@ struct VideoSampleInfo {
 impl VideoSampleInfo {
     fn update(&mut self, decoded: &VideoFrame) {
         self.decoded_data_size = Some(decoded.data.len());
-        self.width = Some(decoded.width.get());
-        self.height = Some(decoded.height.get());
+        self.width = Some(decoded.width);
+        self.height = Some(decoded.height);
     }
 }
 

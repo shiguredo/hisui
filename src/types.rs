@@ -115,9 +115,7 @@ pub struct PixelPosition {
     pub y: EvenUsize,
 }
 
-/// YUV (I420) 画像のサイズや位置を表現するための構造体
-///
-/// 通常の usize と同様だが、I420 に合わせて奇数が表現できないようになっている
+/// 奇数が表現できない usize のための構造体
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EvenUsize(usize);
 
@@ -130,6 +128,10 @@ impl EvenUsize {
 
     pub const fn truncating_new(n: usize) -> Self {
         if n % 2 == 0 { Self(n) } else { Self(n - 1) }
+    }
+
+    pub const fn ceiling_new(n: usize) -> Self {
+        if n % 2 == 0 { Self(n) } else { Self(n + 1) }
     }
 
     pub const fn get(self) -> usize {

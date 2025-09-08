@@ -8,7 +8,6 @@ use shiguredo_mp4::{
 
 use crate::{
     encoder::VideoEncoderOptions,
-    types::EvenUsize,
     video::{self, VideoFormat, VideoFrame},
     video_h264::{
         H264_LEVEL_3_1, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SEI, H264_NALU_TYPE_SPS,
@@ -100,7 +99,7 @@ impl Openh264Encoder {
     }
 }
 
-fn sample_entry(width: EvenUsize, height: EvenUsize, data: &[u8]) -> orfail::Result<SampleEntry> {
+fn sample_entry(width: usize, height: usize, data: &[u8]) -> orfail::Result<SampleEntry> {
     // H.264 ストリームから SPS と PPS と取り出す
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
