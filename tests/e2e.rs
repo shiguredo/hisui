@@ -152,6 +152,110 @@ fn simple_single_source() -> noargs::Result<()> {
     Ok(())
 }
 
+/// 単一のソースをそのまま変換する場合（奇数解像度版）
+/// - 入力:
+///   - 映像:
+///     - VP9
+///     - 30 fps
+///     - 319x239
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 319x239
+#[test]
+fn odd_resolution_single_source() -> noargs::Result<()> {
+    // 変換を実行
+    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let args = Args::parse(noargs::RawArgs::new(
+        [
+            "hisui",
+            "--show-progress-bar=false",
+            "-f",
+            "testdata/e2e/odd_resolution_single_source/report.json",
+            "--out-file",
+            &out_file.path().display().to_string(),
+        ]
+        .into_iter()
+        .map(|s| s.to_string()),
+    ))?;
+    Runner::new(args).run()?;
+
+    // 変換結果ファイルを読み込む
+    assert!(out_file.path().exists());
+    let mut audio_reader =
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats()).or_fail()?;
+    let mut video_reader =
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+
+    // 後でデコードするために読み込み結果を覚えておく
+    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+
+    // 統計値を確認
+    let audio_stats = audio_reader.stats();
+    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+
+    // 一秒分 + 一サンプル (25 ms)
+    // => これは入力データのサンプル数と等しい
+    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(
+        audio_stats.total_track_duration.get(),
+        Duration::from_millis(1020)
+    );
+
+    let video_stats = video_reader.stats();
+    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(
+        video_stats
+            .resolutions
+            .get()
+            .into_iter()
+            .map(|r| (r.width, r.height))
+            .collect::<Vec<_>>(),
+        [(319, 239)]
+    );
+
+    // 一秒分 (25 fps = 40 ms)
+    assert_eq!(video_stats.total_sample_count.get(), 25);
+    assert_eq!(
+        video_stats.total_track_duration.get(),
+        Duration::from_secs(1)
+    );
+
+    // 音声をデコードをして中身を確認する
+    let mut decoder = OpusDecoder::new().or_fail()?;
+    for data in audio_samples {
+        let decoded = decoder.decode(&data).or_fail()?;
+
+        // 無音期間があるのは想定外
+        assert!(!decoded.data.iter().all(|v| *v == 0));
+    }
+
+    // 映像をデコードをして中身を確認する
+    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
+        while let Some(decoded) = decoder.next_decoded_frame() {
+            // 画像が赤一色かどうかの確認する
+            let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
+            y_plane.iter().for_each(|x| assert_eq!(*x, 81));
+            u_plane.iter().for_each(|x| assert_eq!(*x, 90));
+            v_plane.iter().for_each(|x| assert_eq!(*x, 240));
+        }
+        Ok(())
+    };
+
+    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    for frame in video_samples {
+        decoder.decode(&frame).or_fail()?;
+        check_decoded_frames(&mut decoder).or_fail()?;
+    }
+    decoder.finish().or_fail()?;
+    check_decoded_frames(&mut decoder).or_fail()?;
+
+    Ok(())
+}
+
 /// 複数のソースをレイアウト指定なしで変換する場合
 #[test]
 fn simple_multi_sources() -> noargs::Result<()> {

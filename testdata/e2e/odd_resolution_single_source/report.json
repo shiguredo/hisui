@@ -1,0 +1,9 @@
+{
+  "format": "mp4",
+  "archives": [
+    {
+      "connection_id": "1",
+      "metadata_filename": "red-noise.json"
+    }
+  ]
+}
