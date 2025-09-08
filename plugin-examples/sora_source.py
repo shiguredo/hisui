@@ -182,7 +182,6 @@ class HisuiSoraSourcePlugin:
     def send_response_with_payload(self, response: dict, payload: bytes):
         """標準出力に JSON-RPC レスポンス（ペイロード付き）を送信"""
         response_json = json.dumps(response)
-        print(f"res2: {response_json}", file=sys.stderr)
 
         print(f"Content-Length: {len(response_json)}")
         print("Content-Type: application/json")
