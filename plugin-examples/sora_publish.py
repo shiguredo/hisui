@@ -15,9 +15,10 @@ from sora_sdk import (
 
 
 class SoraPublisher:
-    def __init__(self, channel_id: str, signaling_urls: list[str]):
+    def __init__(self, channel_id: str, signaling_urls: list[str], video_only: bool = False):
         self.channel_id = channel_id
         self.signaling_urls = signaling_urls
+        self.video_only = video_only
         self.sora: Optional[Sora] = None
         self.connection: Optional[SoraConnection] = None
         self.audio_source: Optional[SoraAudioSource] = None
@@ -40,9 +41,10 @@ class SoraPublisher:
             self.initialize()
 
         # 接続を作成する前に音声・映像ソースを作成
-        self.audio_source = self.sora.create_audio_source(
-            self.audio_channels, self.audio_sample_rate
-        )
+        if not self.video_only:
+            self.audio_source = self.sora.create_audio_source(
+                self.audio_channels, self.audio_sample_rate
+            )
         self.video_source = self.sora.create_video_source()
 
         # 接続を作成
@@ -50,9 +52,9 @@ class SoraPublisher:
             signaling_urls=self.signaling_urls,
             role="sendonly",
             channel_id=self.channel_id,
-            audio=True,
+            audio=not self.video_only,
             video=True,
-            audio_source=self.audio_source,
+            audio_source=self.audio_source if not self.video_only else None,
             video_source=self.video_source,
             video_bit_rate=1000,
         )
@@ -88,8 +90,11 @@ class SoraPublisher:
         self.connected = False
 
     def handle_audio(self, stream_id: int, stereo: bool, sample_rate: int,
-                timestamp_us: int, duration_us: int, data: bytes):
+                    timestamp_us: int, duration_us: int, data: bytes):
         """Hisui からの音声サンプルを処理"""
+        if self.video_only:
+            return  # video-only モードでは音声を無視
+
         if not self.connected or not self.audio_source:
             return
         self.started = True
@@ -140,11 +145,11 @@ class SoraPublisher:
 
 
 class HisuiSoraPlugin:
-    def __init__(self, channel_id: str, signaling_urls: list[str] = None):
+    def __init__(self, channel_id: str, signaling_urls: list[str] = None, video_only: bool = False):
         if signaling_urls is None:
             signaling_urls = ["ws://localhost:3000/signaling"]
 
-        self.publisher = SoraPublisher(channel_id, signaling_urls)
+        self.publisher = SoraPublisher(channel_id, signaling_urls, video_only)
         self.running = True
 
     def read_message(self):
@@ -231,10 +236,11 @@ class HisuiSoraPlugin:
             timestamp_us = params['timestamp_us']
             duration_us = params['duration_us']
 
-            self.publisher.streams[stream_id] = 'audio'
-            if binary_data:
-                self.publisher.handle_audio(stream_id, stereo, sample_rate,
-                                          timestamp_us, duration_us, binary_data)
+            if not self.publisher.video_only:
+                self.publisher.streams[stream_id] = 'audio'
+                if binary_data:
+                    self.publisher.handle_audio(stream_id, stereo, sample_rate,
+                                              timestamp_us, duration_us, binary_data)
 
         elif method == 'notify_video':
             stream_id = params['stream_id']
@@ -299,11 +305,14 @@ def main():
     parser.add_argument("--channel-id", required=True, help="Sora チャンネル ID")
     parser.add_argument("--signaling-url", required=True, action="append",
                        help="Sora シグナリング URL（複数回指定可能）")
+    parser.add_argument("--video-only", action="store_true",
+                       help="映像のみを配信（音声を無効化）")
     args = parser.parse_args()
 
-    plugin = HisuiSoraPlugin(args.channel_id, args.signaling_url)
+    plugin = HisuiSoraPlugin(args.channel_id, args.signaling_url, video_only=args.video_only)
     plugin.run()
 
 
 if __name__ == "__main__":
     main()
+

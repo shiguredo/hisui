@@ -22,6 +22,73 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    pub fn from_bgr_data(
+        bgr_data: &[u8],
+        width: EvenUsize,
+        height: EvenUsize,
+        timestamp: Duration,
+        duration: Duration,
+    ) -> orfail::Result<Self> {
+        let width_val = width.get();
+        let height_val = height.get();
+
+        let expected_size = width_val * height_val * 3;
+        if bgr_data.len() != expected_size {
+            return Err(orfail::Failure::new(format!(
+                "BGR data size mismatch: expected {}, got {}",
+                expected_size,
+                bgr_data.len()
+            )));
+        }
+
+        let y_size = width_val * height_val;
+        let uv_size = (width_val / 2) * (height_val / 2);
+        let mut yuv_data = Vec::with_capacity(y_size + uv_size * 2);
+
+        let mut y_plane = vec![0u8; y_size];
+        let mut u_plane = vec![0u8; uv_size];
+        let mut v_plane = vec![0u8; uv_size];
+
+        for y in 0..height_val {
+            for x in 0..width_val {
+                let bgr_idx = (y * width_val + x) * 3;
+                let b = bgr_data[bgr_idx] as f32;
+                let g = bgr_data[bgr_idx + 1] as f32;
+                let r = bgr_data[bgr_idx + 2] as f32;
+
+                // ITU-R BT.601 standard RGB to YUV conversion
+                let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
+                let u_val = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
+                let v_val = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
+
+                y_plane[y * width_val + x] = y_val;
+
+                // U and V are subsampled (4:2:0)
+                if y % 2 == 0 && x % 2 == 0 {
+                    let uv_idx = (y / 2) * (width_val / 2) + (x / 2);
+                    u_plane[uv_idx] = u_val;
+                    v_plane[uv_idx] = v_val;
+                }
+            }
+        }
+
+        yuv_data.extend_from_slice(&y_plane);
+        yuv_data.extend_from_slice(&u_plane);
+        yuv_data.extend_from_slice(&v_plane);
+
+        Ok(Self {
+            source_id: None,
+            data: yuv_data,
+            format: VideoFormat::I420,
+            keyframe: true,
+            width,
+            height,
+            timestamp,
+            duration,
+            sample_entry: None,
+        })
+    }
+
     pub fn to_stripped(&self) -> Self {
         Self {
             source_id: self.source_id.clone(),
