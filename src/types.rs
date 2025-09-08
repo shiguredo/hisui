@@ -115,9 +115,7 @@ pub struct PixelPosition {
     pub y: EvenUsize,
 }
 
-/// YUV (I420) 画像のサイズや位置を表現するための構造体
-///
-/// 通常の usize と同様だが、I420 に合わせて奇数が表現できないようになっている
+/// 奇数が表現できない usize のための構造体
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EvenUsize(usize);
 
