@@ -102,6 +102,7 @@ impl Canvas {
         (frame.height <= self.height.get()).or_fail()?;
 
         // セルの解像度は偶数前提なので、奇数になることはない
+        // (入力が奇数の場合でもリサイズによって常に偶数解像度になる）
         (frame.width % 2 == 0).or_fail()?;
         (frame.height % 2 == 0).or_fail()?;
 
