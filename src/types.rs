@@ -132,6 +132,10 @@ impl EvenUsize {
         if n % 2 == 0 { Self(n) } else { Self(n - 1) }
     }
 
+    pub const fn ceiling_new(n: usize) -> Self {
+        if n % 2 == 0 { Self(n) } else { Self(n + 1) }
+    }
+
     pub const fn get(self) -> usize {
         self.0
     }

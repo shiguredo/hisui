@@ -14,8 +14,8 @@ pub struct VideoFrame {
     pub data: Vec<u8>,
     pub format: VideoFormat,
     pub keyframe: bool,
-    pub width: EvenUsize,
-    pub height: EvenUsize,
+    pub width: usize,
+    pub height: usize,
     pub timestamp: Duration,
     pub duration: Duration,
     pub sample_entry: Option<SampleEntry>,
@@ -81,8 +81,8 @@ impl VideoFrame {
             data: yuv_data,
             format: VideoFormat::I420,
             keyframe: true,
-            width,
-            height,
+            width: width.get(),
+            height: width.get(),
             timestamp,
             duration,
             sample_entry: None,
@@ -152,8 +152,8 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true, // 生データは全てキーフレーム扱い
-            width,
-            height,
+            width: width.get(),
+            height: height.get(),
             timestamp: input_frame.timestamp,
             duration: input_frame.duration,
         }
@@ -196,8 +196,8 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width,
-            height,
+            width: width.get(),
+            height: height.get(),
             timestamp: Duration::ZERO,
             duration: Duration::ZERO,
             sample_entry: None,
@@ -220,12 +220,20 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width,
-            height,
+            width: width.get(),
+            height: height.get(),
             timestamp: Duration::ZERO,
             duration: Duration::ZERO,
             sample_entry: None,
         }
+    }
+
+    pub fn ceiling_width(&self) -> EvenUsize {
+        EvenUsize::ceiling_new(self.width)
+    }
+
+    pub fn ceiling_height(&self) -> EvenUsize {
+        EvenUsize::ceiling_new(self.height)
     }
 
     pub fn as_yuv_planes(&self) -> Option<(&[u8], &[u8], &[u8])> {
@@ -233,7 +241,7 @@ impl VideoFrame {
             return None;
         }
 
-        let y_size = self.width.get() * self.height.get();
+        let y_size = self.ceiling_width().get() * self.ceiling_height().get();
         let uv_size = y_size / 4;
 
         let y_plane = &self.data[..y_size];
@@ -253,7 +261,7 @@ impl VideoFrame {
 
         let width = self.width;
         let height = self.height;
-        if width == new_width && height == new_height {
+        if width == new_width.get() && height == new_height.get() {
             // リサイズ不要
             return Ok(());
         }
@@ -263,14 +271,14 @@ impl VideoFrame {
         let new_uv_size = (new_width.get() / 2) * (new_height.get() / 2);
         let mut new_data = vec![0; new_y_size + new_uv_size * 2];
 
-        // 元のデータのサイズを計算
-        let y_size = width.get() * height.get();
-        let uv_width = width.get() / 2;
-        let uv_height = height.get() / 2;
+        // 元のデータのサイズを計算（奇数の解像度を考慮）
+        let y_size = width * height;
+        let uv_width = width.div_ceil(2); // 奇数幅の場合は切り上げ
+        let uv_height = height.div_ceil(2); // 奇数高さの場合は切り上げ
 
         // Y 平面のリサイズ
-        let x_ratio = width.get() as f64 / new_width.get() as f64;
-        let y_ratio = height.get() as f64 / new_height.get() as f64;
+        let x_ratio = width as f64 / new_width.get() as f64;
+        let y_ratio = height as f64 / new_height.get() as f64;
         for y in 0..new_height.get() {
             for x in 0..new_width.get() {
                 // ボックスフィルターの開始位置
@@ -285,9 +293,9 @@ impl VideoFrame {
                 let mut y_acc = 0u32;
                 let mut count = 0u32;
 
-                for box_y in y_start..y_end.min(height.get()) {
-                    for box_x in x_start..x_end.min(width.get()) {
-                        let i = box_y * width.get() + box_x;
+                for box_y in y_start..y_end.min(height) {
+                    for box_x in x_start..x_end.min(width) {
+                        let i = box_y * width + box_x;
                         y_acc += self.data[i] as u32;
                         count += 1;
                     }
@@ -361,8 +369,8 @@ impl VideoFrame {
             }
         }
 
-        self.width = new_width;
-        self.height = new_height;
+        self.width = new_width.get();
+        self.height = new_height.get();
         self.data = new_data;
         Ok(())
     }
@@ -370,30 +378,43 @@ impl VideoFrame {
     pub fn to_bgr_data(&self) -> orfail::Result<Vec<u8>> {
         (self.format == VideoFormat::I420).or_fail()?;
 
+        // 実際の解像度（出力に使用）
+        let actual_width = self.width;
+        let actual_height = self.height;
+
+        // YUV プレーンを取得（奇数解像度の場合はパディングを含む）
         let (y_plane, u_plane, v_plane) = self.as_yuv_planes().or_fail()?;
 
-        let width = self.width.get();
-        let height = self.height.get();
-        let mut bgr_data = Vec::with_capacity(width * height * 3);
+        // パディングされた解像度を計算（内部データアクセス用）
+        let padded_width = self.ceiling_width().get();
+        let padded_uv_width = padded_width / 2;
 
-        for y in 0..height {
-            for x in 0..width {
-                let y_idx = y * width + x;
-                let uv_idx = (y / 2) * (width / 2) + (x / 2);
+        // 出力 BGR データは実際の解像度のみを含む
+        let mut bgr_data = Vec::with_capacity(actual_width * actual_height * 3);
+
+        for y in 0..actual_height {
+            for x in 0..actual_width {
+                // Y プレーンのインデックス（パディング幅をストライドとして使用）
+                let y_idx = y * padded_width + x;
+
+                // UV プレーンのインデックス（パディングUV幅をストライドとして使用）
+                let uv_y = y / 2;
+                let uv_x = x / 2;
+                let uv_idx = uv_y * padded_uv_width + uv_x;
 
                 let y_val = y_plane[y_idx] as f32;
                 let u_val = u_plane[uv_idx] as f32 - 128.0;
                 let v_val = v_plane[uv_idx] as f32 - 128.0;
 
-                // ITU-R BT.601 standard YUV to RGB conversion
+                // ITU-R BT.601 標準 YUV から RGB への変換
                 let r = y_val + 1.402 * v_val;
                 let g = y_val - 0.344 * u_val - 0.714 * v_val;
                 let b = y_val + 1.772 * u_val;
 
-                // Clamp values to 0-255 range
-                let r = r.max(0.0).min(255.0) as u8;
-                let g = g.max(0.0).min(255.0) as u8;
-                let b = b.max(0.0).min(255.0) as u8;
+                // 値を 0-255 の範囲にクランプ
+                let r = r.clamp(0.0, 255.0) as u8;
+                let g = g.clamp(0.0, 255.0) as u8;
+                let b = b.clamp(0.0, 255.0) as u8;
 
                 bgr_data.push(b);
                 bgr_data.push(g);
