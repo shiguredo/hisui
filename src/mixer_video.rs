@@ -101,7 +101,7 @@ impl Canvas {
         (frame.width <= self.width.get()).or_fail()?;
         (frame.height <= self.height.get()).or_fail()?;
 
-        // 合成後の解像度は偶数前提
+        // セルの解像度は偶数前提なので、奇数になることはない
         (frame.width % 2 == 0).or_fail()?;
         (frame.height % 2 == 0).or_fail()?;
 
