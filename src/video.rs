@@ -247,7 +247,10 @@ impl VideoFrame {
         }
 
         let y_size = self.ceiling_width().get() * self.ceiling_height().get();
-        let uv_size = y_size / 4;
+
+        let uv_width = self.width.div_ceil(2);
+        let uv_height = self.height.div_ceil(2);
+        let uv_size = uv_width * uv_height;
 
         let y_plane = &self.data[..y_size];
         let u_plane = &self.data[y_size..][..uv_size];
