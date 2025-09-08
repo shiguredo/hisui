@@ -82,7 +82,7 @@ impl VideoFrame {
             format: VideoFormat::I420,
             keyframe: true,
             width: width.get(),
-            height: width.get(),
+            height: height.get(),
             timestamp,
             duration,
             sample_entry: None,
