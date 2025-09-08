@@ -108,10 +108,13 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
         Ok(Self {
             connection_id: connection_id.try_into()?,
             format,
-            audio: audio.try_into()?,
-            video: video.try_into()?,
             start_time_offset: start_time_offset.try_into()?,
             stop_time_offset: stop_time_offset.try_into()?,
+
+            // 以下のフィールドは、 Sora のバージョンによって、
+            // 値がブールだったりオブジェクトだったりするので、ゆるい判定にしておく
+            audio: audio.as_raw_str() != "false",
+            video: video.as_raw_str() != "false",
         })
     }
 }
