@@ -100,6 +100,8 @@ impl Canvas {
         (frame.format == VideoFormat::I420).or_fail()?;
         (frame.width <= self.width.get()).or_fail()?;
         (frame.height <= self.height.get()).or_fail()?;
+
+        // 合成後の解像度は偶数前提
         (frame.width % 2 == 0).or_fail()?;
         (frame.height % 2 == 0).or_fail()?;
 
