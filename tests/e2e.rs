@@ -215,6 +215,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         // 合成後は偶数解像度になる
+        //（下と右に枠線が入る）
         [(320, 240)]
     );
 
@@ -237,13 +238,38 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     // 映像をデコードをして中身を確認する
     let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
-            // 画像が赤一色かどうかの確認する
+            // 画像が赤一色かどうかの確認する（ただし、右と下の枠線は黒色になる）
             let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
-            y_plane
-                .iter()
-                .for_each(|x| assert!(matches!(x, 80 | 81), "y={x}"));
-            u_plane.iter().for_each(|x| assert_eq!(*x, 90));
-            v_plane.iter().for_each(|x| assert_eq!(*x, 240));
+
+            y_plane.iter().enumerate().for_each(|(i, &x)| {
+                let col = i % 320;
+                let row = i / 320;
+                if col >= 318 || row >= 238 {
+                    assert!(matches!(x, 0..=3), "Expected black Y value, got y={x}",);
+                } else {
+                    assert!(matches!(x, 79..=82), "Expected red Y value, got y={x}",);
+                }
+            });
+
+            u_plane.iter().enumerate().for_each(|(i, &x)| {
+                let col = (i % 160) * 2;
+                let row = (i / 160) * 2;
+                if col >= 318 || row >= 238 {
+                    assert!(matches!(x, 124..=131), "Expected black U value, got u={x}");
+                } else {
+                    assert!(matches!(x, 88..=95), "Expected red U value, got u={x}");
+                }
+            });
+
+            v_plane.iter().enumerate().for_each(|(i, &x)| {
+                let col = (i % 160) * 2;
+                let row = (i / 160) * 2;
+                if col >= 318 || row >= 238 {
+                    assert!(matches!(x, 122..=130), "Expected black V value, got v={x}");
+                } else {
+                    assert!(matches!(x, 239..=243), "Expected red V value, got v={x}");
+                }
+            });
         }
         Ok(())
     };
