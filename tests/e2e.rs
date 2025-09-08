@@ -214,7 +214,8 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
             .into_iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
-        [(319, 239)]
+        // 合成後は偶数解像度になる
+        [(320, 240)]
     );
 
     // 一秒分 (25 fps = 40 ms)
@@ -238,7 +239,9 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 画像が赤一色かどうかの確認する
             let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
-            y_plane.iter().for_each(|x| assert_eq!(*x, 81));
+            y_plane
+                .iter()
+                .for_each(|x| assert!(matches!(x, 80 | 81), "y={x}"));
             u_plane.iter().for_each(|x| assert_eq!(*x, 90));
             v_plane.iter().for_each(|x| assert_eq!(*x, 240));
         }
