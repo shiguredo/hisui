@@ -6,8 +6,7 @@
     "main": {
       "cell_width": 320,
       "cell_height": 240,
-      "max_columns": 4,
-      "max_rows": 4,
+      "max_columns": 3,
       "video_sources": [
         "archive*.json"
       ]
