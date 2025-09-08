@@ -2,10 +2,7 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 
-use crate::{
-    types::EvenUsize,
-    video::{VideoFormat, VideoFrame},
-};
+use crate::video::{VideoFormat, VideoFrame};
 
 #[derive(Debug)]
 pub struct LibvpxDecoder {
@@ -52,8 +49,8 @@ impl LibvpxDecoder {
         while let Some(image) = self.inner.next_frame() {
             self.output_queue.push_back(VideoFrame::new_i420(
                 self.input_queue.pop_front().or_fail()?,
-                EvenUsize::new(image.width()).or_fail()?,
-                EvenUsize::new(image.height()).or_fail()?,
+                image.width(),
+                image.height(),
                 image.y_plane(),
                 image.u_plane(),
                 image.v_plane(),

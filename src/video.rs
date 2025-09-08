@@ -106,8 +106,8 @@ impl VideoFrame {
     #[expect(clippy::too_many_arguments)]
     pub fn new_i420(
         input_frame: Self,
-        width: EvenUsize,
-        height: EvenUsize,
+        width: usize,
+        height: usize,
         y_plane: &[u8],
         u_plane: &[u8],
         v_plane: &[u8],
@@ -115,34 +115,39 @@ impl VideoFrame {
         u_stride: usize,
         v_stride: usize,
     ) -> Self {
-        let y_size = width.get() * height.get();
-        let uv_size = width.get() / 2 * height.get() / 2;
+        let y_size = width * height;
+        // 奇数の場合は切り上げ除算を使用してUVプレーンのサイズを計算
+        let uv_width = width.div_ceil(2);
+        let uv_height = height.div_ceil(2);
+        let uv_size = uv_width * uv_height;
         let mut data = Vec::with_capacity(y_size + uv_size * 2);
 
         // ストライドを考慮して YUV 成分をコピーする
-        if width.get() == y_stride {
+        if width == y_stride {
             // ストライドと横幅が同じならパディングバイトの考慮が不要
-            data.extend_from_slice(y_plane);
+            data.extend_from_slice(&y_plane[..y_size]);
         } else {
-            for i in 0..height.get() {
+            for i in 0..height {
                 let offset = y_stride * i;
-                data.extend_from_slice(&y_plane[offset..][..width.get()]);
+                data.extend_from_slice(&y_plane[offset..][..width]);
             }
         }
-        if width.get() / 2 == u_stride {
-            data.extend_from_slice(u_plane);
+
+        if uv_width == u_stride {
+            data.extend_from_slice(&u_plane[..uv_size]);
         } else {
-            for i in 0..height.get() / 2 {
+            for i in 0..uv_height {
                 let offset = u_stride * i;
-                data.extend_from_slice(&u_plane[offset..][..width.get() / 2]);
+                data.extend_from_slice(&u_plane[offset..][..uv_width]);
             }
         }
-        if width.get() / 2 == v_stride {
-            data.extend_from_slice(v_plane);
+
+        if uv_width == v_stride {
+            data.extend_from_slice(&v_plane[..uv_size]);
         } else {
-            for i in 0..height.get() / 2 {
+            for i in 0..uv_height {
                 let offset = v_stride * i;
-                data.extend_from_slice(&v_plane[offset..][..width.get() / 2]);
+                data.extend_from_slice(&v_plane[offset..][..uv_width]);
             }
         }
 
@@ -152,8 +157,8 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true, // 生データは全てキーフレーム扱い
-            width: width.get(),
-            height: height.get(),
+            width,
+            height,
             timestamp: input_frame.timestamp,
             duration: input_frame.duration,
         }

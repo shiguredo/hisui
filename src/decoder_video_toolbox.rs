@@ -2,7 +2,6 @@ use orfail::OrFail;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use crate::{
-    types::EvenUsize,
     video::{VideoFormat, VideoFrame},
     video_h264::{
         H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, H265_NALU_TYPE_PPS,
@@ -117,8 +116,8 @@ impl VideoToolboxDecoder {
 
         self.decoded = Some(VideoFrame::new_i420(
             frame.to_stripped(),
-            EvenUsize::new(decoded.width()).or_fail()?,
-            EvenUsize::new(decoded.height()).or_fail()?,
+            decoded.width(),
+            decoded.height(),
             decoded.y_plane(),
             decoded.u_plane(),
             decoded.v_plane(),
