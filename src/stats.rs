@@ -992,7 +992,16 @@ pub struct WorkerThreadStats {
 impl nojson::DisplayJson for WorkerThreadStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("processors", &self.processors)?;
+            f.member(
+                "processors",
+                nojson::json(|f| {
+                    let indent = f.get_indent_size();
+                    f.set_indent_size(0);
+                    f.value(&self.processors)?;
+                    f.set_indent_size(indent);
+                    Ok(())
+                }),
+            )?;
             f.member(
                 "total_processing_seconds",
                 self.total_processing_duration.get().as_secs_f32(),
