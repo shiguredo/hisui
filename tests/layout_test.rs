@@ -527,6 +527,113 @@ fn invalid_resolutions() -> orfail::Result<()> {
     Ok(())
 }
 
+#[test]
+fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
+    let base_path = PathBuf::from(".");
+
+    // 基本的な cell_width と cell_height の指定をテスト
+    let layout_json = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": ["testdata/source_timestamps/archive-*.json"],
+      "cell_width": 320,
+      "cell_height": 240,
+      "max_columns": 2,
+      "max_rows": 2
+    }
+  }
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path.clone(), layout_json)?;
+    let region = &layout.video_regions[0];
+
+    // セル寸法が正しく設定されているかを確認
+    assert_eq!(region.grid.cell_width.get(), 320);
+    assert_eq!(region.grid.cell_height.get(), 240);
+
+    // リージョン寸法がセル寸法から計算されているかを確認
+    // 2x2 グリッドで 320x240 セルの場合、640x480 + 枠線分となる
+    // デフォルトの border_pixels = 2 の場合:
+    // 幅: 320*2 + 2*1 (内側) + 2*2 (外側) = 646
+    // 高さ: 240*2 + 2*1 (内側) + 2*2 (外側) = 486
+    assert_eq!(region.width.get(), 646);
+    assert_eq!(region.height.get(), 486);
+
+    // エラーケースのテスト: width と cell_width の同時指定はエラーになる
+    let invalid_layout_json = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 640,
+      "cell_width": 320,
+      "max_columns": 2,
+      "max_rows": 2
+    }
+  }
+}"#;
+
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_layout_json);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .message
+            .contains("cannot specify both 'width' and 'cell_width'")
+    );
+
+    // エラーケースのテスト: height と cell_height の同時指定はエラーになる
+    let invalid_layout_json2 = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "height": 480,
+      "cell_height": 240,
+      "max_columns": 2,
+      "max_rows": 2
+    }
+  }
+}"#;
+
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_layout_json2);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .message
+            .contains("cannot specify both 'height' and 'cell_height'")
+    );
+
+    // 奇数値が偶数に丸められることをテスト
+    let layout_json_odd = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "cell_width": 321,
+      "cell_height": 241,
+      "max_columns": 1,
+      "max_rows": 1
+    }
+  }
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path, layout_json_odd)?;
+    let region = &layout.video_regions[0];
+
+    // 奇数値は偶数に丸められる
+    assert_eq!(region.grid.cell_width.get(), 320); // 321 -> 320
+    assert_eq!(region.grid.cell_height.get(), 240); // 241 -> 240
+
+    Ok(())
+}
+
 fn source(start: u64, end: u64) -> SourceInfo {
     SourceInfo {
         id: SourceId::new(&format!("{start}_{end}")),

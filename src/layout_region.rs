@@ -72,8 +72,8 @@ pub struct RawRegion {
     video_sources: Vec<std::path::PathBuf>,
     video_sources_excluded: Vec<std::path::PathBuf>,
     width: usize,
-    cell_width: usize,  // TODO: ユニットテスト追加
-    cell_height: usize, // TODO: ユニットテスト追加
+    cell_width: usize,
+    cell_height: usize,
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
@@ -125,13 +125,13 @@ impl RawRegion {
     {
         if self.width != 0 && self.cell_width != 0 {
             return Err(orfail::Failure::new(
-                "Cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
+                "cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
             ));
         }
 
         if self.height != 0 && self.cell_height != 0 {
             return Err(orfail::Failure::new(
-                "Cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
+                "cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
             ));
         }
 
