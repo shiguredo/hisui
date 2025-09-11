@@ -276,7 +276,7 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 - `resolution` が指定されている場合:
   - おおまかには `全体の解像度 / グリッドの行数` となります
 
-なお `height` と `cell_height` を同時に指定にした場合にはエラーになります。
+なお `height` と `cell_height` を同時に指定した場合にはエラーになります。
 
 リージョンの高さの計算方法の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
