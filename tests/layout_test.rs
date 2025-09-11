@@ -537,7 +537,7 @@ fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
   "resolution": "1920x1080",
   "video_layout": {
     "main": {
-      "video_sources": [],
+      "video_sources": ["testdata/source_timestamps/archive-*.json"],
       "cell_width": 320,
       "cell_height": 240,
       "max_columns": 2,
