@@ -72,8 +72,8 @@ pub struct RawRegion {
     video_sources: Vec<std::path::PathBuf>,
     video_sources_excluded: Vec<std::path::PathBuf>,
     width: usize,
-    cell_width: usize,  // TODO: ユニットテスト追加
-    cell_height: usize, // TODO: ユニットテスト追加
+    cell_width: usize,
+    cell_height: usize,
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
