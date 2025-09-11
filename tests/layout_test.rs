@@ -528,6 +528,73 @@ fn invalid_resolutions() -> orfail::Result<()> {
 }
 
 #[test]
+fn layout_without_resolution_specified() -> orfail::Result<()> {
+    let base_path = PathBuf::from(".");
+
+    // resolution を省略した場合、リージョンのサイズと位置から自動計算される
+    let layout_json = r#"
+{
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 640,
+      "height": 480,
+      "x_pos": 100,
+      "y_pos": 50
+    },
+    "sub": {
+      "video_sources": [],
+      "width": 200,
+      "height": 150,
+      "x_pos": 800,
+      "y_pos": 300
+    }
+  }
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path.clone(), layout_json)?;
+
+    // main リージョン: 右端 100 + 640 = 740, 下端 50 + 480 = 530
+    // sub リージョン: 右端 800 + 200 = 1000, 下端 300 + 150 = 450
+    // 全体解像度は両リージョンを包含する最小サイズ: 1000x530
+    assert_eq!(layout.resolution.width.get(), 1000);
+    assert_eq!(layout.resolution.height.get(), 530);
+
+    // 音声のみの場合（video_layout が空）
+    let audio_only_json = r#"
+{
+  "audio_sources": ["testdata/source_timestamps/archive-*.json"]
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path.clone(), audio_only_json)?;
+
+    // 音声のみの場合は最小解像度（16x16）が設定される
+    assert_eq!(layout.resolution.width.get(), 16);
+    assert_eq!(layout.resolution.height.get(), 16);
+
+    // リージョンが存在するが width/height が未指定で resolution も未指定の場合はエラー
+    let invalid_json = r#"
+{
+  "video_layout": {
+    "main": {
+      "video_sources": []
+    }
+  }
+}"#;
+
+    let result = Layout::from_layout_json_str(base_path, invalid_json);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .message
+            .contains("Region width must be specified")
+    );
+
+    Ok(())
+}
+
+#[test]
 fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
     let base_path = PathBuf::from(".");
 

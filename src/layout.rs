@@ -205,7 +205,7 @@ struct RawLayout {
     audio_sources_excluded: Vec<PathBuf>,
     video_layout: BTreeMap<String, RawRegion>,
     trim: bool,
-    resolution: Option<Resolution>, // TODO: ユニットテスト追加 (None の場合)
+    resolution: Option<Resolution>,
     audio_bitrate: Option<NonZeroUsize>,
     video_bitrate: Option<usize>,
     audio_codec: CodecName,
