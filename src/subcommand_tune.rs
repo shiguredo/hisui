@@ -56,7 +56,7 @@ impl Args {
                 .ty("PATH")
                 .doc(concat!(
                     "チューニング用に使われる作業ディレクトリを指定します",
-                    "（デフォルト:ROOT_DIR/hisui-tune/）"
+                    "（デフォルト: ROOT_DIR/hisui-tune/）"
                 ))
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
