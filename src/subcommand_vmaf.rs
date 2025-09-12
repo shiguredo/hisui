@@ -30,9 +30,9 @@ const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/vmaf-default.
 #[derive(Debug)]
 struct Args {
     layout_file_path: Option<PathBuf>,
-    reference_yuv_file_path: PathBuf,
-    distorted_yuv_file_path: PathBuf,
-    vmaf_output_file_path: PathBuf,
+    reference_yuv_file_path: Option<PathBuf>,
+    distorted_yuv_file_path: Option<PathBuf>,
+    vmaf_output_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
@@ -56,34 +56,19 @@ impl Args {
                 .present_and_then(|a| a.value().parse())?,
             reference_yuv_file_path: noargs::opt("reference-yuv-file")
                 .ty("PATH")
-                .default("reference.yuv")
-                .doc(concat!(
-                    "参照映像のYUVファイルの出力先を指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .doc("参照映像のYUVファイルの出力先を指定します（デフォルト: ROOT_DIR/reference.yuv）")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .present_and_then(|a| a.value().parse())?,
             distorted_yuv_file_path: noargs::opt("distorted-yuv-file")
                 .ty("PATH")
-                .default("distorted.yuv")
-                .doc(concat!(
-                    "歪み映像のYUVファイルの出力先を指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .doc("歪み映像のYUVファイルの出力先を指定します（デフォルト: ROOT_DIR/distorted.yuv）")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .present_and_then(|a| a.value().parse())?,
             vmaf_output_file_path: noargs::opt("vmaf-output-file")
                 .ty("PATH")
-                .default("vmaf-output.json")
-                .doc(concat!(
-                    "vmaf コマンドの実行結果ファイルの出力先を指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .doc("vmaf コマンドの実行結果ファイルの出力先を指定します（デフォルト: ROOT_DIR/vmaf-output.json）")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .present_and_then(|a| a.value().parse())?,
             openh264: noargs::opt("openh264")
                 .ty("PATH")
                 .env("HISUI_OPENH264_PATH")
@@ -207,7 +192,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     scheduler.register(limiter).or_fail()?;
 
     // エンコード前の画像の YUV 書き込みを登録
-    let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
+    let distorted_yuv_file_path = args
+        .distorted_yuv_file_path
+        .unwrap_or_else(|| args.root_dir.join("distorted.yuv"));
     let writer = YuvWriter::new(limiter_output_stream_id, &distorted_yuv_file_path).or_fail()?;
     scheduler.register(writer).or_fail()?;
 
@@ -233,7 +220,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     );
     scheduler.register(decoder).or_fail()?;
 
-    let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
+    let reference_yuv_file_path = args
+        .reference_yuv_file_path
+        .unwrap_or_else(|| args.root_dir.join("reference.yuv"));
     let writer = YuvWriter::new(decoder_output_stream_id, &reference_yuv_file_path).or_fail()?;
     scheduler.register(writer).or_fail()?;
 
@@ -253,7 +242,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // vmaf コマンドを実行
     eprintln!("# Run vmaf command");
-    let vmaf_output_file_path = args.root_dir.join(args.vmaf_output_file_path);
+    let vmaf_output_file_path = args
+        .vmaf_output_file_path
+        .unwrap_or_else(|| args.root_dir.join("vmaf-output.json"));
     run_vmaf_evaluation(
         &reference_yuv_file_path,
         &distorted_yuv_file_path,
