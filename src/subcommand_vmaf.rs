@@ -46,29 +46,28 @@ impl Args {
                 .short('l')
                 .ty("PATH")
                 .env("HISUI_LAYOUT_FILE_PATH")
-                .doc(concat!(
-                    "合成に使用するレイアウトファイルを指定します\n",
-                    "\n",
-                    "省略された場合には ",
-                    "hisui/layout-examples/vmaf-default.json の内容が使用されます",
-                ))
+                .default("HISUI_REPO/layout-examples/vmaf-default.json")
+                .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             reference_yuv_file_path: noargs::opt("reference-yuv-file")
                 .ty("PATH")
-                .doc("参照映像のYUVファイルの出力先を指定します（デフォルト: ROOT_DIR/reference.yuv）")
+                .default("ROOT_DIR/reference.yuv")
+                .doc("参照映像のYUVファイルの出力先を指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             distorted_yuv_file_path: noargs::opt("distorted-yuv-file")
                 .ty("PATH")
-                .doc("歪み映像のYUVファイルの出力先を指定します（デフォルト: ROOT_DIR/distorted.yuv）")
+                .default("ROOT_DIR/distorted.yuv")
+                .doc("歪み映像のYUVファイルの出力先を指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             vmaf_output_file_path: noargs::opt("vmaf-output-file")
                 .ty("PATH")
-                .doc("vmaf コマンドの実行結果ファイルの出力先を指定します（デフォルト: ROOT_DIR/vmaf-output.json）")
+                .default("ROOT_DIR/vmaf-output.json")
+                .doc("vmaf コマンドの実行結果ファイルの出力先を指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             openh264: noargs::opt("openh264")
                 .ty("PATH")
                 .env("HISUI_OPENH264_PATH")
