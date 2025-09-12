@@ -224,7 +224,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
             // 事前にリージョン名の重複をチェックする
             let mut region_names = BTreeSet::new();
             for (name, _) in video_layout.to_object()? {
-                if region_names.insert(name.to_unquoted_string_str()?) {
+                if !region_names.insert(name.to_unquoted_string_str()?) {
                     return Err(name.invalid("duplicate region name"));
                 }
             }
@@ -717,6 +717,20 @@ mod tests {
             // 手間なのでここでは RawLayout を使っている
             json.parse::<nojson::Json<RawLayout>>().or_fail()?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_duplicate_region_name() -> orfail::Result<()> {
+        let json = include_str!("../testdata/layouts/error-layout-duplicate-region-name.json");
+        let result = json.parse::<nojson::Json<RawLayout>>();
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            let error_message = e.to_string();
+            assert!(error_message.contains("duplicate region name"));
+        }
+
         Ok(())
     }
 }
