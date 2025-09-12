@@ -157,6 +157,15 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
     log::debug!("search space: {search_space:?}");
 
+    (!search_space.params.is_empty()).or_fail_with(|()| {
+        concat!(
+            "No tunable parameters found in the search space. ",
+            "This could happen if the layout file doesn't contain any null values ",
+            "that correspond to the parameters defined in the search space file."
+        )
+        .to_owned()
+    })?;
+
     // 探索を始める前にいろいろと情報を表示する
     let storage_url = format!(
         "sqlite:///{}",
