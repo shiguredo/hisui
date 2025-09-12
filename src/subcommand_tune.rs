@@ -19,7 +19,7 @@ const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/f
 struct Args {
     layout_file_path: Option<PathBuf>,
     search_space_file_path: Option<PathBuf>,
-    tune_working_dir: PathBuf,
+    tune_working_dir: Option<PathBuf>,
     study_name: String,
     trial_count: usize,
     openh264: Option<PathBuf>,
@@ -54,14 +54,12 @@ impl Args {
                 .present_and_then(|a| a.value().parse())?,
             tune_working_dir: noargs::opt("tune-working-dir")
                 .ty("PATH")
-                .default("hisui-tune/")
                 .doc(concat!(
-                    "チューニング用に使われる作業ディレクトリを指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
+                    "チューニング用に使われる作業ディレクトリを指定します",
+                    "（デフォルト:ROOT_DIR/hisui-tune/）"
                 ))
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .present_and_then(|a| a.value().parse())?,
             study_name: noargs::opt("study-name")
                 .ty("NAME")
                 .default("hisui-tune")
@@ -115,11 +113,19 @@ impl Args {
                 .then(crate::arg_utils::validate_existing_directory_path)?,
         })
     }
+
+    fn tune_working_dir(&self) -> PathBuf {
+        // メソッド呼び出しの度にメモリアロケーションが発生するが、
+        // そのコストは無視できる程度のものなので、コードの簡潔さの方を優先している
+        self.tune_working_dir
+            .clone()
+            .unwrap_or_else(|| self.root_dir.join("hisui-tune/"))
+    }
 }
 
 pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // コマンドライン引数処理
-    let mut args = Args::parse(&mut raw_args)?;
+    let args = Args::parse(&mut raw_args)?;
     if let Some(help) = raw_args.finish()? {
         print!("{help}");
         return Ok(());
@@ -130,12 +136,11 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     subcommand_vmaf::check_vmaf_availability().or_fail()?;
 
     // 必要なら tune_working_dir を作る
-    args.tune_working_dir = args.root_dir.join(args.tune_working_dir);
-    if !args.tune_working_dir.exists() {
-        std::fs::create_dir_all(&args.tune_working_dir).or_fail_with(|e| {
+    if !args.tune_working_dir().exists() {
+        std::fs::create_dir_all(args.tune_working_dir()).or_fail_with(|e| {
             format!(
                 "failed to create working directory {}: {e}",
-                args.tune_working_dir.display()
+                args.tune_working_dir().display()
             )
         })?;
     }
@@ -164,7 +169,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // 探索を始める前にいろいろと情報を表示する
     let storage_url = format!(
         "sqlite:///{}",
-        args.tune_working_dir.join("optuna.db").display()
+        args.tune_working_dir().join("optuna.db").display()
     );
     eprintln!("====== INFO ======");
     eprintln!(
@@ -179,7 +184,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             .as_ref()
             .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
     );
-    eprintln!("tune working dir:\t {}", args.tune_working_dir.display());
+    eprintln!("tune working dir:\t {}", args.tune_working_dir().display());
     eprintln!("optuna storage:\t {storage_url}");
     eprintln!("optuna study name:\t {}", args.study_name);
     eprintln!("optuna trial count:\t {}", args.trial_count);
@@ -234,7 +239,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 }
 
 fn trial_dir(args: &Args, trial_number: usize) -> PathBuf {
-    args.tune_working_dir
+    args.tune_working_dir()
         .join(&args.study_name)
         .join(format!("trial-{}", trial_number))
 }
