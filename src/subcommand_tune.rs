@@ -34,32 +34,23 @@ impl Args {
             layout_file_path: noargs::opt("layout-file")
                 .short('l')
                 .ty("PATH")
-                .doc(concat!(
-                    "パラメータ調整に使用するレイアウトファイルを指定します\n",
-                    "\n",
-                    "省略された場合には ",
-                    "hisui/layout-examples/tune-libvpx-vp8.json の内容が使用されます",
-                ))
+                .default("HISUI_REPO/layout-examples/tune-libvpx-vp8.json")
+                .doc("パラメータ調整に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             search_space_file_path: noargs::opt("search-space-file")
                 .short('s')
                 .ty("PATH")
-                .doc(concat!(
-                    "探索空間定義ファイル（JSON）のパスを指定します\n",
-                    "\n",
-                    "省略された場合には hisui/search-space-examples/full.json の内容が使用されます",
-                ))
+                .default("HISUI_REPO/search-space-examples/full.json")
+                .doc("探索空間定義ファイル（JSON）のパスを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             tune_working_dir: noargs::opt("tune-working-dir")
                 .ty("PATH")
-                .doc(concat!(
-                    "チューニング用に使われる作業ディレクトリを指定します",
-                    "（デフォルト: ROOT_DIR/hisui-tune/）"
-                ))
+                .default("ROOT_DIR/hisui-tune/")
+                .doc("チューニング用に使われる作業ディレクトリを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             study_name: noargs::opt("study-name")
                 .ty("NAME")
                 .default("hisui-tune")

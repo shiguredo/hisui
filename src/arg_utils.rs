@@ -2,6 +2,15 @@ use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
 
 use indicatif::{ProgressBar, ProgressStyle};
 
+pub fn parse_non_default_opt<T>(opt: noargs::Opt) -> Result<Option<T>, T::Err>
+where
+    T: std::str::FromStr,
+{
+    matches!(opt, noargs::Opt::Default { .. })
+        .then(|| opt.value().parse())
+        .transpose()
+}
+
 pub fn validate_existing_directory_path(
     arg: noargs::Arg,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
