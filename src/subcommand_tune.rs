@@ -12,7 +12,7 @@ use crate::{
     subcommand_vmaf,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp8.json");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp9.json");
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.json");
 
 #[derive(Debug)]
@@ -34,7 +34,7 @@ impl Args {
             layout_file_path: noargs::opt("layout-file")
                 .short('l')
                 .ty("PATH")
-                .default("HISUI_REPO/layout-examples/tune-libvpx-vp8.json")
+                .default("HISUI_REPO/layout-examples/tune-libvpx-vp9.json")
                 .doc("パラメータ調整に使用するレイアウトファイルを指定します")
                 .take(raw_args)
                 .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
