@@ -80,7 +80,7 @@ Options:
   -h, --help                     このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
       --version                  バージョン番号を表示します
       --verbose                  警告未満のログメッセージも出力します
-  -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp8.json]
+  -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp9.json]
   -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します [default: HISUI_REPO/search-space-examples/full.json]
       --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
       --study-name <NAME>        Optuna の study 名を指定します [default: hisui-tune]
@@ -126,7 +126,7 @@ Optuna による最適化は、以下のような流れとなります:
 ### デフォルト設定での実行
 
 オプションを指定しなかった場合には、以下のデフォルト設定で最適化が実行されます。
-- レイアウトファイル: [layout-examples/tune-libvpx-vp8.json](../layout-examples/tune-libvpx-vp8.json)
+- レイアウトファイル: [layout-examples/tune-libvpx-vp9.json](../layout-examples/tune-libvpx-vp9.json)
 - 探索空間定義ファイル: [search-space-examples/full.json](../search-space-examples/full.json)
 
 ```console
@@ -217,16 +217,16 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 ただし、JSON オブジェクトのメンバーの値が `null` の場合には、
 それが Optuna によって提案された値に置換された上で `hisui vmaf` コマンドに渡される点が異なります。
 
-例えば以下は、デフォルトで使われる [tune-libvpx-vp8.json](../layout-examples/tune-libvpx-vp8.json) の内容を一部抜粋したものです。
+例えば以下は、デフォルトで使われる [tune-libvpx-vp9.json](../layout-examples/tune-libvpx-vp9.json) の内容を一部抜粋したものです。
 
 ```json
 {
   "resolution": "1280x720",
-  "video_codec": "VP8",
+  "video_codec": "VP9",
   "video_bitrate": 1000000,
   "frame_rate": 30,
   ...
-  "libvpx_vp8_encode_params": {
+  "libvpx_vp9_encode_params": {
     "threads": 1,
     "keyframe_interval": 300,
     "min_quantizer": null,
@@ -238,10 +238,10 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 }
 ```
 
-この中の `resolution` や `libvpx_vp8_encode_params.threads` などには `null` ではない値が指定されているので、
+この中の `resolution` や `libvpx_vp9_encode_params.threads` などには `null` ではない値が指定されているので、
 各トライアルで固定の値が使われます。
 
-一方、`libvpx_vp8_encode_params.min_quantizer` や `libvpx_vp8_encode_params.cq_level` には `null` が指定されているので、
+一方、`libvpx_vp9_encode_params.min_quantizer` や `libvpx_vp9_encode_params.cq_level` には `null` が指定されているので、
 各トライアルで別々の、Optuna が提案した値が使われることになります。
 
 つまり、「探索したいパラメーターには `null` を指定する」という点が通常のレイアウトファイルとの差異となります。
@@ -255,11 +255,11 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 
 ```json
   ...,
-  "libvpx_vp8_encode_params.cq_level": {
+  "libvpx_vp9_encode_params.cq_level": {
     "min": 0,
     "max": 63
   },
-  "libvpx_vp8_encode_params.deadline": [
+  "libvpx_vp9_encode_params.deadline": [
     "best",
     "good",
     "realtime"
