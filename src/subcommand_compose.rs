@@ -14,7 +14,7 @@ const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-defau
 #[derive(Debug)]
 struct Args {
     layout_file_path: Option<PathBuf>,
-    output_file_path: PathBuf,
+    output_file_path: Option<PathBuf>,
     stats_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
     no_progress_bar: bool,
@@ -29,36 +29,21 @@ impl Args {
                 .short('l')
                 .ty("PATH")
                 .env("HISUI_LAYOUT_FILE_PATH")
-                .doc(concat!(
-                    "合成に使用するレイアウトファイルを指定します\n",
-                    "\n",
-                    "省略された場合には ",
-                    "hisui/layout-examples/compose-default.json の内容が使用されます",
-                ))
+                .default("HISUI_REPO/layout-examples/compose-default.json")
+                .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             output_file_path: noargs::opt("output-file")
                 .short('o')
                 .ty("PATH")
-                .default("output.mp4")
-                .doc(concat!(
-                    "合成結果を保存するファイルを指定します\n",
-                    "\n",
-                    "この引数が未指定の場合には ROOT_DIR 引数で\n",
-                    "指定したディレクトリに `output.mp4` という名前で保存されます\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .default("ROOT_DIR/output.mp4")
+                .doc("合成結果を保存するファイルを指定します")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             stats_file_path: noargs::opt("stats-file")
                 .short('s')
                 .ty("PATH")
-                .doc(concat!(
-                    "合成中に収集した統計情報 (JSON) を保存するファイルを指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .doc("合成中に収集した統計情報 (JSON) を保存するファイルを指定します")
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
             openh264: noargs::opt("openh264")
@@ -124,14 +109,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // 出力ファイルパスを決定
-    let output_file_path = args.root_dir.join(args.output_file_path);
+    let output_file_path = args
+        .output_file_path
+        .unwrap_or_else(|| args.root_dir.join("output.mp4"));
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !args.no_progress_bar;
     composer.max_cpu_cores = args.max_cpu_cores;
-    composer.stats_file_path = args.stats_file_path.map(|path| args.root_dir.join(path));
+    composer.stats_file_path = args.stats_file_path;
 
     // 合成を実行
     let result = composer.compose(&output_file_path).or_fail()?;
