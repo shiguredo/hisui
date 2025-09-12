@@ -80,9 +80,9 @@ Options:
   -h, --help                     このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
       --version                  バージョン番号を表示します
       --verbose                  警告未満のログメッセージも出力します
-  -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します
-  -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します
-      --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: hisui-tune/]
+  -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp8.json]
+  -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します [default: HISUI_REPO/search-space-examples/full.json]
+      --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
       --study-name <NAME>        Optuna の study 名を指定します [default: hisui-tune]
   -n, --trial-count <INTEGER>    実行する試行回数を指定します [default: 100]
       --openh264 <PATH>          OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
