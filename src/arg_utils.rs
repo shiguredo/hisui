@@ -6,9 +6,11 @@ pub fn parse_non_default_opt<T>(opt: noargs::Opt) -> Result<Option<T>, T::Err>
 where
     T: std::str::FromStr,
 {
-    matches!(opt, noargs::Opt::Default { .. })
-        .then(|| opt.value().parse())
-        .transpose()
+    if matches!(opt, noargs::Opt::Default { .. }) {
+        Ok(None)
+    } else {
+        opt.value().parse().map(Some)
+    }
 }
 
 pub fn validate_existing_directory_path(
