@@ -326,6 +326,10 @@ impl RawLayout {
 
         let trim_spans = decide_trim_spans(&sources, !self.trim);
 
+        for source in sources.values() {
+            source.validate_duplicate_timestamp().or_fail()?;
+        }
+
         Ok(Layout {
             base_path,
             video_regions,
@@ -658,6 +662,26 @@ impl AggregatedSourceInfo {
         self.stop_timestamp = self.stop_timestamp.max(source_info.stop_timestamp);
         self.media_paths
             .insert(media_path.to_path_buf(), source_info.clone());
+    }
+
+    pub fn validate_duplicate_timestamp(&self) -> orfail::Result<()> {
+        let mut known = BTreeSet::new();
+        for source in self.media_paths.values() {
+            known
+                .insert((source.start_timestamp, source.stop_timestamp))
+                .or_fail_with(|()| {
+                    format!(
+                        concat!(
+                            "duplicate timestamp detected for source '{}': ",
+                            "start_timestamp_seconds={}, stop_timestamp_seconds={}"
+                        ),
+                        self.id.get(),
+                        source.start_timestamp.as_secs_f32(),
+                        source.stop_timestamp.as_secs_f32(),
+                    )
+                })?;
+        }
+        Ok(())
     }
 
     // 二つのソースが時間的に重なる部分があるかどうかを求める
