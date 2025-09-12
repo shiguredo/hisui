@@ -29,20 +29,17 @@ impl Args {
                 .short('l')
                 .ty("PATH")
                 .env("HISUI_LAYOUT_FILE_PATH")
-                .doc(concat!(
-                    "合成に使用するレイアウトファイルを指定します\n",
-                    "\n",
-                    "省略された場合には ",
-                    "hisui/layout-examples/compose-default.json の内容が使用されます",
-                ))
+                .default("HISUI_REPO/layout-examples/compose-default.json")
+                .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             output_file_path: noargs::opt("output-file")
                 .short('o')
                 .ty("PATH")
-                .doc("合成結果を保存するファイルを指定します（デフォルト: ROOT_DIR/output.mp4）")
+                .default("ROOT_DIR/output.mp4")
+                .doc("合成結果を保存するファイルを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
             stats_file_path: noargs::opt("stats-file")
                 .short('s')
                 .ty("PATH")
