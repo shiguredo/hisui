@@ -723,14 +723,9 @@ mod tests {
     #[test]
     fn test_duplicate_region_name() -> orfail::Result<()> {
         let json = include_str!("../testdata/layouts/error-layout-duplicate-region-name.json");
-        let result = json.parse::<nojson::Json<RawLayout>>();
-
-        assert!(result.is_err());
-        if let Err(e) = result {
-            let error_message = e.to_string();
-            assert!(error_message.contains("duplicate region name"));
-        }
-
+        let e = json.parse::<nojson::Json<RawLayout>>().err().or_fail()?;
+        let error_message = e.to_string();
+        assert!(error_message.contains("duplicate region name"));
         Ok(())
     }
 }
