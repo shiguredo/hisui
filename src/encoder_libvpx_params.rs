@@ -139,11 +139,11 @@ fn update_vp8_encode_params(
 
     // ARNR設定
     if let Some(arnr_config) = params.get_with("arnr_config", JsonObject::new)? {
-        let mut arnr = vp8_config.arnr_config.unwrap_or_default();
-        arnr.max_frames = arnr_config.get("max_frames")?.unwrap_or(arnr.max_frames);
-        arnr.strength = arnr_config.get("strength")?.unwrap_or(arnr.strength);
-        arnr.filter_type = arnr_config.get("filter_type")?.unwrap_or(arnr.filter_type);
-        vp8_config.arnr_config = Some(arnr);
+        vp8_config.arnr_config = Some(shiguredo_libvpx::ArnrConfig {
+            max_frames: arnr_config.get_required("max_frames")?,
+            strength: arnr_config.get_required("strength")?,
+            filter_type: arnr_config.get_required("filter_type")?,
+        });
     }
 
     config.vp8_config = Some(vp8_config);
