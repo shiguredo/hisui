@@ -339,23 +339,14 @@ impl Runner {
             }
         });
 
-        // 引数のエンコードパラメータはレイアウトで未指定の場合にだけ反映する
-        if layout.encode_params.libvpx_vp8.is_none() {
-            layout.encode_params.libvpx_vp8 = Some(shiguredo_libvpx::EncoderConfig {
-                max_quantizer: self.args.libvpx_max_q,
-                min_quantizer: self.args.libvpx_min_q,
-                cq_level: self.args.libvpx_cq_level,
-                ..Default::default()
-            });
-        }
-        if layout.encode_params.libvpx_vp9.is_none() {
-            layout.encode_params.libvpx_vp9 = Some(shiguredo_libvpx::EncoderConfig {
-                max_quantizer: self.args.libvpx_max_q,
-                min_quantizer: self.args.libvpx_min_q,
-                cq_level: self.args.libvpx_cq_level,
-                ..Default::default()
-            });
-        }
+        // レガシーでは引数のエンコードパラメータをレイアウトで指定されたものよりも優先する
+        layout.encode_params.libvpx_vp8.max_quantizer = self.args.libvpx_max_q;
+        layout.encode_params.libvpx_vp8.min_quantizer = self.args.libvpx_min_q;
+        layout.encode_params.libvpx_vp8.cq_level = self.args.libvpx_cq_level;
+
+        layout.encode_params.libvpx_vp9.max_quantizer = self.args.libvpx_max_q;
+        layout.encode_params.libvpx_vp9.min_quantizer = self.args.libvpx_min_q;
+        layout.encode_params.libvpx_vp9.cq_level = self.args.libvpx_cq_level;
 
         // 必要に応じて openh264 の共有ライブラリを読み込む
         let openh264_lib =

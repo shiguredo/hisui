@@ -33,7 +33,7 @@ impl SvtAv1Encoder {
             height: height.get(),
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
-            ..options.encode_params.svt_av1.clone().unwrap_or_default()
+            ..options.encode_params.svt_av1.clone()
         };
         let inner = shiguredo_svt_av1::Encoder::new(&config).or_fail()?;
         let sample_entry = sample_entry(width, height, inner.extra_data());
