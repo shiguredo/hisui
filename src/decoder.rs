@@ -228,6 +228,7 @@ impl MediaProcessor for VideoDecoder {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
