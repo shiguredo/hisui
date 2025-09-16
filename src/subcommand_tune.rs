@@ -2,6 +2,7 @@ use std::{
     num::NonZeroUsize,
     path::PathBuf,
     process::{Command, Stdio},
+    time::Duration,
 };
 
 use orfail::OrFail;
@@ -22,6 +23,7 @@ struct Args {
     tune_working_dir: Option<PathBuf>,
     study_name: String,
     trial_count: usize,
+    trial_timeout: Option<Duration>,
     openh264: Option<PathBuf>,
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
@@ -64,6 +66,15 @@ impl Args {
                 .doc("実行する試行回数を指定します")
                 .take(raw_args)
                 .then(|a| a.value().parse())?,
+            trial_timeout: noargs::opt("trial-timeout")
+                .short('t')
+                .ty("SECONDS")
+                .doc(concat!(
+                    "各試行トライアルのタイムアウト時間（秒）を指定します",
+                    "（超過した場合は失敗扱い）"
+                ))
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse::<f32>().map(Duration::from_secs_f32))?,
             openh264: noargs::opt("openh264")
                 .ty("PATH")
                 .env("HISUI_OPENH264_PATH")
@@ -287,6 +298,9 @@ fn run_trial_evaluation(
         .stderr(Stdio::inherit());
     if let Some(openh264_path) = &args.openh264 {
         cmd.arg("--openh264").arg(openh264_path);
+    }
+    if let Some(timeout) = &args.trial_timeout {
+        cmd.arg(format!("--timeout={}", timeout.as_secs_f32()));
     }
 
     if let Some(cores) = &args.max_cpu_cores {

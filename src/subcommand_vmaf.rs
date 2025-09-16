@@ -36,6 +36,7 @@ struct Args {
     openh264: Option<PathBuf>,
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
+    timeout: Option<Duration>,
     root_dir: PathBuf,
 }
 
@@ -93,6 +94,11 @@ impl Args {
                 .doc("変換するフレーム数を指定します")
                 .take(raw_args)
                 .then(|a| a.value().parse())?,
+            timeout: noargs::opt("timeout")
+                .ty("SECONDS")
+                .doc("処理のタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）")
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse::<f32>().map(Duration::from_secs_f32))?,
             root_dir: noargs::arg("ROOT_DIR")
                 .example("/path/to/archive/RECORDING_ID/")
                 .doc(concat!(
@@ -231,9 +237,17 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 合成処理を実行
     eprintln!("# Compose for VMAF");
-    let stats = scheduler.run().or_fail()?;
+    let (timeout_expired, stats) = if let Some(timeout) = args.timeout {
+        scheduler.run_timeout(timeout).or_fail()?
+    } else {
+        (false, scheduler.run().or_fail()?)
+    };
     if stats.error.get() {
-        return Err(orfail::Failure::new("video composition process failed").into());
+        return Err(orfail::Failure::new(format!(
+            "video composition process failed{}",
+            if timeout_expired { " (timeout)" } else { "" }
+        ))
+        .into());
     }
 
     // VMAF の下準備としての処理は全て完了した

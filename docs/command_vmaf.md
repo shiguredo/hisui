@@ -51,6 +51,7 @@ Options:
       --openh264 <PATH>           OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
   -c, --max-cpu-cores <INTEGER>   合成処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
   -f, --frame-count <FRAMES>      変換するフレーム数を指定します [default: 1000]
+      --timeout <SECONDS>         処理のタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）
 ```
 
 ## 実行例

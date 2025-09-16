@@ -250,6 +250,49 @@ impl Scheduler {
         Ok(handle.stats)
     }
 
+    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, Stats)> {
+        // 完了待ちのビジーループを避けるためのスリープの時間
+        // 適当に長めの時間ならなんでもいい
+        const SLEEP_DURATION: Duration = Duration::from_millis(100);
+
+        let start = Instant::now();
+        let mut handle = self.spawn().or_fail()?;
+        let mut timeout_expired = false;
+        while !handle.handles.is_empty() {
+            if !timeout_expired && timeout < start.elapsed() {
+                // エラーフラグを立てて、ワーカースレッドを終了処理に移行させる
+                handle.stats.error.set(true);
+                timeout_expired = true;
+                log::debug!(
+                    "Timeout expired after {} seconds, signaling worker threads to terminate",
+                    timeout.as_secs_f32()
+                );
+            }
+
+            let mut i = 0;
+            let mut did_something = false;
+            while i < handle.handles.len() {
+                if !handle.handles[i].is_finished() {
+                    i += 1;
+                    continue;
+                }
+
+                let handle = handle.handles.swap_remove(i);
+                if let Err(e) = handle.join() {
+                    std::panic::resume_unwind(e);
+                }
+                did_something = true;
+            }
+
+            if !did_something {
+                std::thread::sleep(SLEEP_DURATION);
+            }
+        }
+
+        handle.stats.elapsed_duration = start.elapsed();
+        Ok((timeout_expired, handle.stats))
+    }
+
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
         for task in &mut self.tasks {
             for id in task.processor.spec().output_stream_ids {

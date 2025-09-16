@@ -85,6 +85,7 @@ Options:
       --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
       --study-name <NAME>        Optuna の study 名を指定します [default: hisui-tune]
   -n, --trial-count <INTEGER>    実行する試行回数を指定します [default: 100]
+  -t, --trial-timeout <SECONDS>  各試行トライアルのタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）
       --openh264 <PATH>          OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
   -c, --max-cpu-cores <INTEGER>  調整処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
   -f, --frame-count <FRAMES>     調整用にエンコードする映像フレームの数を指定します [default: 300]
@@ -408,6 +409,9 @@ Hisui や依存ライブラリー（例えば OpenH264 の動的ライブラリ�
 その場合は `--frame-count` オプションで小さな値を指定すると、各トライアルの実行時間を短くすることができます。
 ただし、VMAF スコア計算の際に参照できる映像フレームの数が減るため、品質評価結果の信頼度が下ることになります。
 
+また大半のトライアルの実行は許容可能な時間内で終わるけれど、一部のトライアルだけ極端に長い場合には
+`--trial-timeout` オプションを指定することで、そういったトライアルを途中で中断できるようになります。
+
 ### 実行済み探索の最適解集合のみを確認したい
 
---trial-count 0 を指定することで、新たなトライアルを実行せずに既存の最適解集合のみを表示できます。
+`--trial-count 0` を指定することで、新たなトライアルを実行せずに既存の最適解集合のみを表示できます。
