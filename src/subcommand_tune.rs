@@ -13,7 +13,7 @@ use crate::{
     subcommand_vmaf,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp9.json");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp9.jsonc");
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.jsonc");
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ impl Args {
             layout_file_path: noargs::opt("layout-file")
                 .short('l')
                 .ty("PATH")
-                .default("HISUI_REPO/layout-examples/tune-libvpx-vp9.json")
+                .default("HISUI_REPO/layout-examples/tune-libvpx-vp9.jsonc")
                 .doc("パラメータ調整に使用するレイアウトファイルを指定します")
                 .take(raw_args)
                 .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
@@ -271,7 +271,7 @@ fn run_trial_evaluation(
     let trial_dir = trial_dir.canonicalize().or_fail()?;
 
     // レイアウトファイルを作成
-    let layout_file_path = trial_dir.join("layout.json");
+    let layout_file_path = trial_dir.join("layout.jsonc");
     let layout_json = crate::json::to_pretty_string(layout);
     std::fs::write(&layout_file_path, layout_json).or_fail_with(|e| {
         format!(
@@ -386,7 +386,7 @@ fn display_best_trials_if_updated(
             eprintln!("    {}:\t {}", key, nojson::Json(value));
         }
 
-        let layout_file_path = trial_dir(args, trial.number).join("layout.json");
+        let layout_file_path = trial_dir(args, trial.number).join("layout.jsonc");
 
         eprintln!("  Compose Command:");
         eprintln!(

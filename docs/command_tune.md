@@ -80,7 +80,7 @@ Options:
   -h, --help                     このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
       --version                  バージョン番号を表示します
       --verbose                  警告未満のログメッセージも出力します
-  -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp9.json]
+  -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp9.jsonc]
   -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します [default: HISUI_REPO/search-space-examples/full.jsonc]
       --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
       --study-name <NAME>        Optuna の study 名を指定します [default: hisui-tune]
@@ -127,7 +127,7 @@ Optuna による最適化は、以下のような流れとなります:
 ### デフォルト設定での実行
 
 オプションを指定しなかった場合には、以下のデフォルト設定で最適化が実行されます。
-- レイアウトファイル: [layout-examples/tune-libvpx-vp9.json](../layout-examples/tune-libvpx-vp9.json)
+- レイアウトファイル: [layout-examples/tune-libvpx-vp9.jsonc](../layout-examples/tune-libvpx-vp9.jsonc)
 - 探索空間定義ファイル: [search-space-examples/full.jsonc](../search-space-examples/full.jsonc)
 
 ```console
@@ -157,7 +157,7 @@ tuning parameters (7):
 [I 2025-07-16 12:35:42,360] Asked trial 0 with parameters {'video_toolbox_h265_encode_params.allow_open_gop': False, 'video_toolbox_h265_encode_params.allow_temporal_compression': True, ...}.
 
 === EVALUATE PARAMETERS ===
-$ "hisui" "vmaf" "--layout-file" "/path/to/trial-0/layout.json" ...
+$ "hisui" "vmaf" "--layout-file" "/path/to/trial-0/layout.jsonc" ...
 
 # Compose for VMAF
   [00:00:00] [########################################] 10/10 (0s)
@@ -184,7 +184,7 @@ Trial #0
     video_toolbox_h265_encode_params.real_time:  true
     video_toolbox_h265_encode_params.use_parallelization:        true
   Compose Command:
-    $ hisui compose -l /path/to/trial-0/layout.json /path/to/archive/RECORDING_ID/
+    $ hisui compose -l /path/to/trial-0/layout.jsonc /path/to/archive/RECORDING_ID/
 
 ...
 ```
@@ -218,7 +218,7 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 ただし、JSON オブジェクトのメンバーの値が `null` の場合には、
 それが Optuna によって提案された値に置換された上で `hisui vmaf` コマンドに渡される点が異なります。
 
-例えば以下は、デフォルトで使われる [tune-libvpx-vp9.json](../layout-examples/tune-libvpx-vp9.json) の内容を一部抜粋したものです。
+例えば以下は、デフォルトで使われる [tune-libvpx-vp9.jsonc](../layout-examples/tune-libvpx-vp9.jsonc) の内容を一部抜粋したものです。
 
 ```json
 {
@@ -284,12 +284,12 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 ### 探索に使用するレイアウトファイルの作成方法
 
 `hisui` リポジトリには各コーデック・エンコーダー毎に参考にできるレイアウトファイルが用意されています。
-- VP8 (libvpx): [tune-libvpx-vp8.json](../layout-examples/tune-libvpx-vp8.json)
-- VP9 (libvpx): [tune-libvpx-vp9.json](../layout-examples/tune-libvpx-vp9.json)
-- AV1 (SVT-AV1): [tune-svt-av1.json](../layout-examples/tune-svt-av1.json)
-- H.264 (OpenH264): [tune-openh264.json](../layout-examples/tune-openh264.json)
-- H.264 (Video Toolbox): [tune-video-toolbox-h264.json](../layout-examples/tune-video-toolbox-h264.json)
-- H.265 (Video Toolbox): [tune-video-toolbox-h265.json](../layout-examples/tune-video-toolbox-h265.json)
+- VP8 (libvpx): [tune-libvpx-vp8.jsonc](../layout-examples/tune-libvpx-vp8.jsonc)
+- VP9 (libvpx): [tune-libvpx-vp9.jsonc](../layout-examples/tune-libvpx-vp9.jsonc)
+- AV1 (SVT-AV1): [tune-svt-av1.jsonc](../layout-examples/tune-svt-av1.jsonc)
+- H.264 (OpenH264): [tune-openh264.jsonc](../layout-examples/tune-openh264.jsonc)
+- H.264 (Video Toolbox): [tune-video-toolbox-h264.jsonc](../layout-examples/tune-video-toolbox-h264.jsonc)
+- H.265 (Video Toolbox): [tune-video-toolbox-h265.jsonc](../layout-examples/tune-video-toolbox-h265.jsonc)
 
 これらをベースにした上で、`video_layout` や `resolution` などの項目を各自のユースケースに合わせて修正するのが簡単です。
 

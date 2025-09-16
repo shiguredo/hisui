@@ -9,7 +9,7 @@ use crate::{
     stats::{ProcessorStats, Stats},
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.jsonc");
 
 #[derive(Debug)]
 struct Args {
