@@ -253,7 +253,14 @@ impl Scheduler {
     pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, Stats)> {
         let start = Instant::now();
         let mut handle = self.spawn().or_fail()?;
-        while !handle.handles.is_empty() && start.elapsed() <= timeout {
+        let mut timeout_expired = false;
+        while !handle.handles.is_empty() {
+            if !timeout_expired && timeout < start.elapsed() {
+                // エラーフラグを立てて、ワーカースレッドを終了処理に移行させる
+                handle.stats.error.set(true);
+                timeout_expired = true;
+            }
+
             for i in 0..handle.handles.len() {
                 if !handle.handles[i].is_finished() {
                     continue;
@@ -265,8 +272,9 @@ impl Scheduler {
                 }
             }
         }
+
         handle.stats.elapsed_duration = start.elapsed();
-        Ok((handle.handles.is_empty(), handle.stats))
+        Ok((!timeout_expired, handle.stats))
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
