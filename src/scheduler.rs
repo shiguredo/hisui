@@ -259,6 +259,10 @@ impl Scheduler {
                 // エラーフラグを立てて、ワーカースレッドを終了処理に移行させる
                 handle.stats.error.set(true);
                 timeout_expired = true;
+                log::debug!(
+                    "Timeout expired after {} seconds, signaling worker threads to terminate",
+                    timeout.as_secs_f32()
+                );
             }
 
             for i in 0..handle.handles.len() {
@@ -274,7 +278,7 @@ impl Scheduler {
         }
 
         handle.stats.elapsed_duration = start.elapsed();
-        Ok((!timeout_expired, handle.stats))
+        Ok((timeout_expired, handle.stats))
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
