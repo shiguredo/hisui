@@ -250,6 +250,25 @@ impl Scheduler {
         Ok(handle.stats)
     }
 
+    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, Stats)> {
+        let start = Instant::now();
+        let mut handle = self.spawn().or_fail()?;
+        while !handle.handles.is_empty() && start.elapsed() <= timeout {
+            for i in 0..handle.handles.len() {
+                if !handle.handles[i].is_finished() {
+                    continue;
+                }
+
+                let handle = handle.handles.swap_remove(i);
+                if let Err(e) = handle.join() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+        }
+        handle.stats.elapsed_duration = start.elapsed();
+        Ok((handle.handles.is_empty(), handle.stats))
+    }
+
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
         for task in &mut self.tasks {
             for id in task.processor.spec().output_stream_ids {
