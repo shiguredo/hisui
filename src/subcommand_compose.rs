@@ -5,11 +5,9 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{
     composer::Composer,
-    layout::Layout,
+    layout::{DEFAULT_LAYOUT_JSON, Layout},
     stats::{ProcessorStats, Stats},
 };
-
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.jsonc");
 
 #[derive(Debug)]
 struct Args {

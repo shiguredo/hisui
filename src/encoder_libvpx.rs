@@ -43,7 +43,7 @@ impl LibvpxEncoder {
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
             target_bitrate: options.bitrate,
-            ..options.encode_params.libvpx_vp8.clone().unwrap_or_default()
+            ..options.encode_params.libvpx_vp8.clone()
         };
         log::debug!("libvpx vp8 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
@@ -67,7 +67,7 @@ impl LibvpxEncoder {
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
             target_bitrate: options.bitrate,
-            ..options.encode_params.libvpx_vp9.clone().unwrap_or_default()
+            ..options.encode_params.libvpx_vp9.clone()
         };
         log::debug!("libvpx vp9 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;

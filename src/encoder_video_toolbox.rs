@@ -6,7 +6,6 @@ use shiguredo_mp4::{
     Uint,
     boxes::{Avc1Box, AvccBox, Hev1Box, HvccBox, HvccNalUintArray, SampleEntry},
 };
-use shiguredo_video_toolbox::{EncoderConfig, ProfileLevel};
 
 use crate::{
     encoder::VideoEncoderOptions,
@@ -40,11 +39,7 @@ impl VideoToolboxEncoder {
             target_bitrate: options.bitrate,
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
-            ..options
-                .encode_params
-                .video_toolbox_h264
-                .clone()
-                .unwrap_or_default()
+            ..options.encode_params.video_toolbox_h264.clone()
         };
         let inner = shiguredo_video_toolbox::Encoder::new_h264(&config).or_fail()?;
         Ok(Self {
@@ -62,21 +57,13 @@ impl VideoToolboxEncoder {
     pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let width = options.width;
         let height = options.height;
-        let default = EncoderConfig {
-            profile_level: ProfileLevel::H265Main,
-            ..Default::default()
-        };
         let config = shiguredo_video_toolbox::EncoderConfig {
             width: width.get(),
             height: height.get(),
             target_bitrate: options.bitrate,
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
-            ..options
-                .encode_params
-                .video_toolbox_h265
-                .clone()
-                .unwrap_or(default)
+            ..options.encode_params.video_toolbox_h265.clone()
         };
         let inner = shiguredo_video_toolbox::Encoder::new_h265(&config).or_fail()?;
         Ok(Self {

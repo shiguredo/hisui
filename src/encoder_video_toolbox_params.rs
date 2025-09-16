@@ -1,50 +1,98 @@
 use crate::json::JsonObject;
+use crate::layout::DEFAULT_LAYOUT_JSON;
 use shiguredo_video_toolbox::{EncoderConfig, H264EntropyMode, ProfileLevel};
 use std::time::Duration;
 
 pub fn parse_h264_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<EncoderConfig, nojson::JsonParseError> {
+    let mut config = EncoderConfig::default();
+
+    // デフォルトレイアウトの設定を反映
+    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
+    let params = JsonObject::new(
+        default
+            .value()
+            .to_member("video_toolbox_h264_encode_params")?
+            .required()?,
+    )?;
+    update_h264_encode_params(params, &mut config)?;
+
+    // 実際のレイアウトの設定を反映
+    let params = JsonObject::new(value)?;
+    update_h264_encode_params(params, &mut config)?;
+
+    Ok(config)
+}
+
+pub fn parse_h265_encode_params(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<EncoderConfig, nojson::JsonParseError> {
+    let mut config = EncoderConfig {
+        // H.265用のデフォルト設定
+        profile_level: ProfileLevel::H265Main,
+        ..Default::default()
+    };
+
+    // デフォルトレイアウトの設定を反映
+    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
+    let params = JsonObject::new(
+        default
+            .value()
+            .to_member("video_toolbox_h265_encode_params")?
+            .required()?,
+    )?;
+    update_h265_encode_params(params, &mut config)?;
+
+    // 実際のレイアウトの設定を反映
+    let params = JsonObject::new(value)?;
+    update_h265_encode_params(params, &mut config)?;
+
+    Ok(config)
+}
+
+fn update_h264_encode_params(
+    params: JsonObject<'_, '_>,
+    config: &mut EncoderConfig,
+) -> Result<(), nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
     // - width
     // - height
     // - fps_numerator
     // - fps_denominator
     // - target_bitrate
-    let params = JsonObject::new(value)?;
-    let mut config = EncoderConfig::default();
 
     // 速度と品質のバランス設定
-    if let Some(prioritize_speed) = params.get("prioritize_speed_over_quality")? {
-        config.prioritize_speed_over_quality = prioritize_speed;
-    }
-    if let Some(real_time) = params.get("real_time")? {
-        config.real_time = real_time;
-    }
-    if let Some(maximize_power) = params.get("maximize_power_efficiency")? {
-        config.maximize_power_efficiency = maximize_power;
-    }
+    config.prioritize_speed_over_quality = params
+        .get("prioritize_speed_over_quality")?
+        .unwrap_or(config.prioritize_speed_over_quality);
+
+    config.real_time = params.get("real_time")?.unwrap_or(config.real_time);
+
+    config.maximize_power_efficiency = params
+        .get("maximize_power_efficiency")?
+        .unwrap_or(config.maximize_power_efficiency);
 
     // フレーム構造設定
-    if let Some(allow_open_gop) = params.get("allow_open_gop")? {
-        config.allow_open_gop = allow_open_gop;
-    }
-    if let Some(allow_temporal) = params.get("allow_temporal_compression")? {
-        config.allow_temporal_compression = allow_temporal;
-    }
-    // Hisui が B に対応するまでは指定できないようにする
-    // if let Some(allow_reordering) = params.get("allow_frame_reordering")? {
-    //     config.allow_frame_reordering = allow_reordering;
-    // }
+    config.allow_open_gop = params
+        .get("allow_open_gop")?
+        .unwrap_or(config.allow_open_gop);
+
+    config.allow_temporal_compression = params
+        .get("allow_temporal_compression")?
+        .unwrap_or(config.allow_temporal_compression);
 
     // キーフレーム間隔設定（フレーム数）
-    config.max_key_frame_interval = params.get("max_key_frame_interval")?;
+    if let Some(max_key_frame_interval) = params.get("max_key_frame_interval")? {
+        config.max_key_frame_interval = Some(max_key_frame_interval);
+    }
 
     // キーフレーム間隔設定（秒数）
-    config.max_key_frame_interval_duration = params
-        .get_with("max_key_frame_interval_duration", |v| {
-            Ok(Duration::from_secs_f64(v.try_into()?))
-        })?;
+    if let Some(duration) = params.get_with("max_key_frame_interval_duration", |v| {
+        Ok(Duration::from_secs_f64(v.try_into()?))
+    })? {
+        config.max_key_frame_interval_duration = Some(duration);
+    }
 
     // プロファイルレベル設定
     config.profile_level = params
@@ -70,71 +118,59 @@ pub fn parse_h264_encode_params(
         .unwrap_or(config.h264_entropy_mode);
 
     // フレーム遅延制限
-    config.max_frame_delay_count = params.get("max_frame_delay_count")?;
+    if let Some(max_frame_delay_count) = params.get("max_frame_delay_count")? {
+        config.max_frame_delay_count = Some(max_frame_delay_count);
+    }
 
     // 並列処理設定
-    config.use_parallelization = params.get("use_parallelization")?.unwrap_or_default();
+    config.use_parallelization = params
+        .get("use_parallelization")?
+        .unwrap_or(config.use_parallelization);
 
-    Ok(config)
+    Ok(())
 }
 
-pub fn parse_h265_encode_params(
-    value: nojson::RawJsonValue<'_, '_>,
-) -> Result<EncoderConfig, nojson::JsonParseError> {
+fn update_h265_encode_params(
+    params: JsonObject<'_, '_>,
+    config: &mut EncoderConfig,
+) -> Result<(), nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
     // - width
     // - height
     // - fps_numerator
     // - fps_denominator
     // - target_bitrate
-    let params = JsonObject::new(value)?;
-    let mut config = EncoderConfig {
-        // H.265用のデフォルト設定
-        profile_level: ProfileLevel::H265Main,
-        ..Default::default()
-    };
-
-    // 基本的なエンコーダーパラメーター
-    if let Some(bitrate) = params.get("target_bitrate")? {
-        config.target_bitrate = bitrate;
-    }
-    if let Some(fps_num) = params.get("fps_numerator")? {
-        config.fps_numerator = fps_num;
-    }
-    if let Some(fps_den) = params.get("fps_denominator")? {
-        config.fps_denominator = fps_den;
-    }
 
     // 速度と品質のバランス設定
-    if let Some(real_time) = params.get("real_time")? {
-        config.real_time = real_time;
-    }
-    if let Some(maximize_power) = params.get("maximize_power_efficiency")? {
-        config.maximize_power_efficiency = maximize_power;
-    }
+    config.real_time = params.get("real_time")?.unwrap_or(config.real_time);
 
-    config.prioritize_speed_over_quality = true; // H.265 ではこれが false だとエラーになる
+    config.maximize_power_efficiency = params
+        .get("maximize_power_efficiency")?
+        .unwrap_or(config.maximize_power_efficiency);
+
+    // H.265 ではこれが false だとエラーになるため、常に true を指定する
+    config.prioritize_speed_over_quality = true;
 
     // フレーム構造設定
-    if let Some(allow_open_gop) = params.get("allow_open_gop")? {
-        config.allow_open_gop = allow_open_gop;
-    }
-    if let Some(allow_temporal) = params.get("allow_temporal_compression")? {
-        config.allow_temporal_compression = allow_temporal;
-    }
-    // Hisui が B に対応するまでは指定できないようにする
-    // if let Some(allow_reordering) = params.get("allow_frame_reordering")? {
-    //     config.allow_frame_reordering = allow_reordering;
-    // }
+    config.allow_open_gop = params
+        .get("allow_open_gop")?
+        .unwrap_or(config.allow_open_gop);
+
+    config.allow_temporal_compression = params
+        .get("allow_temporal_compression")?
+        .unwrap_or(config.allow_temporal_compression);
 
     // キーフレーム間隔設定（フレーム数）
-    config.max_key_frame_interval = params.get("max_key_frame_interval")?;
+    if let Some(max_key_frame_interval) = params.get("max_key_frame_interval")? {
+        config.max_key_frame_interval = Some(max_key_frame_interval);
+    }
 
     // キーフレーム間隔設定（秒数）
-    config.max_key_frame_interval_duration = params
-        .get_with("max_key_frame_interval_duration", |v| {
-            Ok(Duration::from_secs_f64(v.try_into()?))
-        })?;
+    if let Some(duration) = params.get_with("max_key_frame_interval_duration", |v| {
+        Ok(Duration::from_secs_f64(v.try_into()?))
+    })? {
+        config.max_key_frame_interval_duration = Some(duration);
+    }
 
     // プロファイルレベル設定（H.265用）
     config.profile_level = params
@@ -148,10 +184,14 @@ pub fn parse_h265_encode_params(
         .unwrap_or(config.profile_level);
 
     // フレーム遅延制限
-    config.max_frame_delay_count = params.get("max_frame_delay_count")?;
+    if let Some(max_frame_delay_count) = params.get("max_frame_delay_count")? {
+        config.max_frame_delay_count = Some(max_frame_delay_count);
+    }
 
     // 並列処理設定
-    config.use_parallelization = params.get("use_parallelization")?.unwrap_or_default();
+    config.use_parallelization = params
+        .get("use_parallelization")?
+        .unwrap_or(config.use_parallelization);
 
-    Ok(config)
+    Ok(())
 }

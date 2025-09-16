@@ -17,6 +17,8 @@ use crate::{
     video::FrameRate,
 };
 
+pub const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.jsonc");
+
 /// トリム開始時刻から終了時刻へのマップ
 #[derive(Debug, Default, Clone)]
 pub struct TrimSpans(BTreeMap<Duration, Duration>);
