@@ -8,14 +8,13 @@ pub fn parse_vp8_encode_params(
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    if let Ok(default_params) = default
-        .value()
-        .to_member("libvpx_vp8_encode_params")
-        .and_then(|m| m.required())
-    {
-        let params = JsonObject::new(default_params)?;
-        update_vp8_encode_params(params, &mut config)?;
-    }
+    let params = JsonObject::new(
+        default
+            .value()
+            .to_member("libvpx_vp8_encode_params")?
+            .required()?,
+    )?;
+    update_vp8_encode_params(params, &mut config)?;
 
     // 実際のレイアウトの設定を反映
     let params = JsonObject::new(value)?;
@@ -31,14 +30,13 @@ pub fn parse_vp9_encode_params(
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    if let Ok(default_params) = default
-        .value()
-        .to_member("libvpx_vp9_encode_params")
-        .and_then(|m| m.required())
-    {
-        let params = JsonObject::new(default_params)?;
-        update_vp9_encode_params(params, &mut config)?;
-    }
+    let params = JsonObject::new(
+        default
+            .value()
+            .to_member("libvpx_vp9_encode_params")?
+            .required()?,
+    )?;
+    update_vp9_encode_params(params, &mut config)?;
 
     // 実際のレイアウトの設定を反映
     let params = JsonObject::new(value)?;
@@ -140,25 +138,12 @@ fn update_vp8_encode_params(
     }
 
     // ARNR設定
-    if let Some(arnr_config) = params.get_with("arnr_config", |v| {
-        let arnr_obj = JsonObject::new(v)?;
-        let mut arnr =
-            vp8_config
-                .arnr_config
-                .clone()
-                .unwrap_or_else(|| shiguredo_libvpx::ArnrConfig {
-                    max_frames: 0,
-                    strength: 3,
-                    filter_type: 1,
-                });
-
-        arnr.max_frames = arnr_obj.get("max_frames")?.unwrap_or(arnr.max_frames);
-        arnr.strength = arnr_obj.get("strength")?.unwrap_or(arnr.strength);
-        arnr.filter_type = arnr_obj.get("filter_type")?.unwrap_or(arnr.filter_type);
-
-        Ok(arnr)
-    })? {
-        vp8_config.arnr_config = Some(arnr_config);
+    if let Some(arnr_config) = params.get_with("arnr_config", JsonObject::new)? {
+        let mut arnr = vp8_config.arnr_config.unwrap_or_default();
+        arnr.max_frames = arnr_config.get("max_frames")?.unwrap_or(arnr.max_frames);
+        arnr.strength = arnr_config.get("strength")?.unwrap_or(arnr.strength);
+        arnr.filter_type = arnr_config.get("filter_type")?.unwrap_or(arnr.filter_type);
+        vp8_config.arnr_config = Some(arnr);
     }
 
     config.vp8_config = Some(vp8_config);
