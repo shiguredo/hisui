@@ -124,7 +124,6 @@
     "max_frame_delay_count": 16,
     "max_key_frame_interval": 300,
     "maximize_power_efficiency": false,
-    "prioritize_speed_over_quality": true,
     "profile_level": "main",
     "real_time": false,
     "use_parallelization": false,

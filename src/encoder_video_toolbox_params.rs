@@ -67,9 +67,7 @@ fn update_h264_encode_params(
         .get("prioritize_speed_over_quality")?
         .unwrap_or(config.prioritize_speed_over_quality);
 
-    config.real_time = params
-        .get("real_time")?
-        .unwrap_or(config.real_time);
+    config.real_time = params.get("real_time")?.unwrap_or(config.real_time);
 
     config.maximize_power_efficiency = params
         .get("maximize_power_efficiency")?
@@ -155,24 +153,14 @@ fn update_h265_encode_params(
     }
 
     // 速度と品質のバランス設定
-    config.real_time = params
-        .get("real_time")?
-        .unwrap_or(config.real_time);
+    config.real_time = params.get("real_time")?.unwrap_or(config.real_time);
 
     config.maximize_power_efficiency = params
         .get("maximize_power_efficiency")?
         .unwrap_or(config.maximize_power_efficiency);
 
-    // H.265では特別な処理が必要
-    if let Some(prioritize_speed) = params.get("prioritize_speed_over_quality")? {
-        if prioritize_speed {
-            config.prioritize_speed_over_quality = true;
-        }
-        // H.265 ではこれが false だとエラーになるため、true以外の場合はデフォルト値を保持
-    } else {
-        // パラメータが指定されていない場合は true に設定
-        config.prioritize_speed_over_quality = true;
-    }
+    // H.265 ではこれが false だとエラーになるため、常に true を指定する
+    config.prioritize_speed_over_quality = true;
 
     // フレーム構造設定
     config.allow_open_gop = params
@@ -218,4 +206,3 @@ fn update_h265_encode_params(
 
     Ok(())
 }
-
