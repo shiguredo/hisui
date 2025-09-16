@@ -14,7 +14,7 @@ use crate::{
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp9.json");
-const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.json");
+const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.jsonc");
 
 #[derive(Debug)]
 struct Args {
@@ -43,7 +43,7 @@ impl Args {
             search_space_file_path: noargs::opt("search-space-file")
                 .short('s')
                 .ty("PATH")
-                .default("HISUI_REPO/search-space-examples/full.json")
+                .default("HISUI_REPO/search-space-examples/full.jsonc")
                 .doc("探索空間定義ファイル（JSON）のパスを指定します")
                 .take(raw_args)
                 .then(|a| crate::arg_utils::parse_non_default_opt(a))?,

@@ -81,7 +81,7 @@ Options:
       --version                  バージョン番号を表示します
       --verbose                  警告未満のログメッセージも出力します
   -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp9.json]
-  -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します [default: HISUI_REPO/search-space-examples/full.json]
+  -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します [default: HISUI_REPO/search-space-examples/full.jsonc]
       --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
       --study-name <NAME>        Optuna の study 名を指定します [default: hisui-tune]
   -n, --trial-count <INTEGER>    実行する試行回数を指定します [default: 100]
@@ -128,7 +128,7 @@ Optuna による最適化は、以下のような流れとなります:
 
 オプションを指定しなかった場合には、以下のデフォルト設定で最適化が実行されます。
 - レイアウトファイル: [layout-examples/tune-libvpx-vp9.json](../layout-examples/tune-libvpx-vp9.json)
-- 探索空間定義ファイル: [search-space-examples/full.json](../search-space-examples/full.json)
+- 探索空間定義ファイル: [search-space-examples/full.jsonc](../search-space-examples/full.jsonc)
 
 ```console
 $ hisui tune /path/to/archive/RECORDING_ID/
@@ -252,7 +252,7 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 上述の通り、レイアウトファイルで指定するのはあくまでも「特定のパラメーターを探索対象に含めるかどうか」ということだけです。
 「各パラメーターの具体的な探索範囲」は、別途 `--search-space-file` で指定したファイルで定義することになります。
 
-例えば、以下は、デフォルトの探索空間定義である [full.json](../search-space-examples/full.json) からの抜粋です。
+例えば、以下は、デフォルトの探索空間定義である [full.jsonc](../search-space-examples/full.jsonc) からの抜粋です。
 
 ```json
   ...,
@@ -277,7 +277,7 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 - 値リスト: `[ JSON_VALUE ]`
 
 なおユースケース毎に修正が必要なレイアウトファイルとは異なり、
-通常は、探索空間定義については `full.json` をそのまま使って問題ありません。
+通常は、探索空間定義については `full.jsonc` をそのまま使って問題ありません。
 
 ## Tips
 
@@ -297,12 +297,12 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 
 ### 探索に使用する探索空間定義ファイルはどうすべきか
 
-基本的には、デフォルトの [full.json](../search-space-examples/full.json) をそのまま使えば大丈夫です。
+基本的には、デフォルトの [full.jsonc](../search-space-examples/full.jsonc) をそのまま使えば大丈夫です。
 
-ただし、以下のような場合は `full.json` を修正して使用するのをお勧めします。
-- `full.json` に含まれていないパラメーターを調整したい場合
+ただし、以下のような場合は `full.jsonc` を修正して使用するのをお勧めします。
+- `full.jsonc` に含まれていないパラメーターを調整したい場合
   - 例えば（通常は行わないですが）`video_bitrate` や `frame_rate` の値を調整したい場合には、自分で探索範囲を定義する必要があります
-- `full.json` の探索範囲を狭めたい場合
+- `full.jsonc` の探索範囲を狭めたい場合
   - デフォルトの探索空間定義はかなり広めになっています
   - 以前の探索の知見などから、必要な探索範囲がある程度判明している時には、デフォルトよりも範囲を限定することで、より効率的な探索が行えるようになります
 
