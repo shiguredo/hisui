@@ -85,6 +85,7 @@ Options:
       --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
       --study-name <NAME>        Optuna の study 名を指定します [default: hisui-tune]
   -n, --trial-count <INTEGER>    実行する試行回数を指定します [default: 100]
+  -t, --trial-timeout <SECONDS>  各試行トライアルのタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）
       --openh264 <PATH>          OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
   -c, --max-cpu-cores <INTEGER>  調整処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
   -f, --frame-count <FRAMES>     調整用にエンコードする映像フレームの数を指定します [default: 300]

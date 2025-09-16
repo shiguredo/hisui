@@ -96,7 +96,7 @@ impl Args {
                 .then(|a| a.value().parse())?,
             timeout: noargs::opt("timeout")
                 .ty("SECONDS")
-                .doc("処理のタイムアウト時間（秒）を指定します（超過した場合はエラー扱い）")
+                .doc("処理のタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）")
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse::<f32>().map(Duration::from_secs_f32))?,
             root_dir: noargs::arg("ROOT_DIR")
