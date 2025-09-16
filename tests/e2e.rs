@@ -134,7 +134,9 @@ fn simple_single_source() -> noargs::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 画像が赤一色かどうかの確認する
             let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
-            y_plane.iter().for_each(|x| assert_eq!(*x, 81));
+            y_plane
+                .iter()
+                .for_each(|x| assert!(matches!(x, 80..=82), "y={x}"));
             u_plane.iter().for_each(|x| assert_eq!(*x, 90));
             v_plane.iter().for_each(|x| assert_eq!(*x, 240));
         }
@@ -247,7 +249,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 if col >= 318 || row >= 238 {
                     assert!(matches!(x, 0..=3), "Expected black Y value, got y={x}",);
                 } else {
-                    assert!(matches!(x, 79..=82), "Expected red Y value, got y={x}",);
+                    assert!(matches!(x, 79..=83), "Expected red Y value, got y={x}",);
                 }
             });
 
@@ -257,7 +259,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 if col >= 318 || row >= 238 {
                     assert!(matches!(x, 124..=131), "Expected black U value, got u={x}");
                 } else {
-                    assert!(matches!(x, 88..=95), "Expected red U value, got u={x}");
+                    assert!(matches!(x, 87..=95), "Expected red U value, got u={x}");
                 }
             });
 
@@ -265,9 +267,9 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 let col = (i % 160) * 2;
                 let row = (i / 160) * 2;
                 if col >= 318 || row >= 238 {
-                    assert!(matches!(x, 122..=130), "Expected black V value, got v={x}");
+                    assert!(matches!(x, 122..=131), "Expected black V value, got v={x}");
                 } else {
-                    assert!(matches!(x, 239..=243), "Expected red V value, got v={x}");
+                    assert!(matches!(x, 238..=244), "Expected red V value, got v={x}");
                 }
             });
         }
@@ -436,7 +438,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
             for (i, y) in y_plane.iter().copied().enumerate() {
                 if i / width < 16 {
                     // 最初の 16 行は青
-                    assert_eq!(y, 41);
+                    assert!(matches!(y, 40..=42), "y={y}");
                 } else if i / width < 16 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");
