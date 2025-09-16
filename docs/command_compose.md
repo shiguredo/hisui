@@ -5,7 +5,7 @@
 このコマンドは、録画されたメディアファイルを指定されたレイアウトに従って合成し、単一の動画ファイルとして出力します。
 
 どのようなレイアウトが指定可能かについては [レイアウト機能](layout.md) のドキュメントをご参照ください。
-デフォルトでは [layout-examples/compose-default.json](../layout-examples/compose-default.json) のレイアウトが使用されます。
+デフォルトでは [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) のレイアウトが使用されます。
 
 ## 使用方法
 
@@ -25,7 +25,7 @@ Options:
   -h, --help                    このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
       --version                 バージョン番号を表示します
       --verbose                 警告未満のログメッセージも出力します
-  -l, --layout-file <PATH>      合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH] [default: HISUI_REPO/layout-examples/compose-default.json]
+  -l, --layout-file <PATH>      合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH] [default: HISUI_REPO/layout-examples/compose-default.jsonc]
   -o, --output-file <PATH>      合成結果を保存するファイルを指定します [default: ROOT_DIR/output.mp4]
   -s, --stats-file <PATH>       合成中に収集した統計情報 (JSON) を保存するファイルを指定します
       --openh264 <PATH>         OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
@@ -67,10 +67,10 @@ $ hisui compose /path/to/archive/RECORDING_ID/
 ### レイアウトファイルを指定しての合成
 
 ```console
-$ hisui compose -l layout-examples/compose-default.json /path/to/archive/RECORDING_ID/
+$ hisui compose -l layout-examples/compose-default.jsonc /path/to/archive/RECORDING_ID/
   [00:00:09] [########################################] 27/27s (0s)
 {
-  "layout_file_path": "layout-examples/compose-default.json",
+  "layout_file_path": "layout-examples/compose-default.jsonc",
   "input_root_dir": "/path/to/archive/RECORDING_ID/",
   "input_audio_file_count": 2,
   "input_video_file_count": 2,

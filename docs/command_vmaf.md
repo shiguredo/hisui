@@ -44,10 +44,10 @@ Options:
   -h, --help                      このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
       --version                   バージョン番号を表示します
       --verbose                   警告未満のログメッセージも出力します
-  -l, --layout-file <PATH>        合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH] [default: HISUI_REPO/layout-examples/vmaf-default.json]
+  -l, --layout-file <PATH>        合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH] [default: HISUI_REPO/layout-examples/vmaf-default.jsonc]
       --reference-yuv-file <PATH> 参照映像のYUVファイルの出力先を指定します [default: ROOT_DIR/reference.yuv]
       --distorted-yuv-file <PATH> 歪み映像のYUVファイルの出力先を指定します [default: ROOT_DIR/distorted.yuv]
-      --vmaf-output-file <PATH>   vmaf コマンドの実行結果ファイルの出力先を指定します [default: ROOT_DIR/vmaf-output.json]
+      --vmaf-output-file <PATH>   vmaf コマンドの実行結果ファイルの出力先を指定します [default: ROOT_DIR/vmaf-output.jsonc]
       --openh264 <PATH>           OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
   -c, --max-cpu-cores <INTEGER>   合成処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
   -f, --frame-count <FRAMES>      変換するフレーム数を指定します [default: 1000]
@@ -71,7 +71,7 @@ vmaf_v0.6.1: 96.361266
 {
   "reference_yuv_file_path": "/path/to/archive/RECORDING_ID/reference.yuv",
   "distorted_yuv_file_path": "/path/to/archive/RECORDING_ID/distorted.yuv",
-  "vmaf_output_file_path": "/path/to/archive/RECORDING_ID/vmaf-output.json",
+  "vmaf_output_file_path": "/path/to/archive/RECORDING_ID/vmaf-output.jsonc",
   "encoder_name": "libvpx",
   "width": 642,
   "height": 240,

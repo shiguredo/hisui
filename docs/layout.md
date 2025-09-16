@@ -6,10 +6,10 @@ Hisui では、レイアウトを定義した JSON ファイルを使うこと�
 [`hisui compose`](./command_compose.md) コマンドの場合は、以下のように `-l` オプションでレイアウトファイルを指定できます。
 
 ```console
-$ hisui compose -l /path/to/layout.json /path/to/archive/RECORDING_ID/
+$ hisui compose -l /path/to/layout.jsonc /path/to/archive/RECORDING_ID/
 ```
 
-レイアウトファイルを指定しない場合は [layout-examples/compose-default.json](../layout-examples/compose-default.json) が使用されます。
+レイアウトファイルを指定しない場合は [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) が使用されます。
 
 ## レイアウト JSON の概要
 
@@ -28,7 +28,7 @@ $ hisui compose -l /path/to/layout.json /path/to/archive/RECORDING_ID/
 
 ## レイアウトの例: グリッド（デフォルトレイアウト）
 
-以下は [layout-examples/compose-default.json](../layout-examples/compose-default.json) でも採用されている、
+以下は [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) でも採用されている、
 一番ベーシックな配信者の映像をグリッド状に配置するレイアウト JSON の例です。
 
 ```json

@@ -9,7 +9,7 @@ use crate::{
     stats::{ProcessorStats, Stats},
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.jsonc");
 
 #[derive(Debug)]
 struct Args {
@@ -29,7 +29,7 @@ impl Args {
                 .short('l')
                 .ty("PATH")
                 .env("HISUI_LAYOUT_FILE_PATH")
-                .default("HISUI_REPO/layout-examples/compose-default.json")
+                .default("HISUI_REPO/layout-examples/compose-default.jsonc")
                 .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
                 .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
