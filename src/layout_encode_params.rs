@@ -1,5 +1,6 @@
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox_params;
+use crate::layout::DEFAULT_LAYOUT_JSON;
 use crate::{encoder_libvpx_params, encoder_openh264_params, encoder_svt_av1_params};
 
 #[derive(Debug, Clone)]
@@ -50,8 +51,56 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodePar
     }
 }
 
+impl LayoutEncodeParams {
+    fn new_from_default_layout() -> Result<Self, nojson::JsonParseError> {
+        let default_layout = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
+        let value = default_layout.value();
+
+        let libvpx_vp8 = encoder_libvpx_params::parse_vp8_encode_params(
+            value.to_member("libvpx_vp8_encode_params")?.required()?,
+        )?;
+
+        let libvpx_vp9 = encoder_libvpx_params::parse_vp9_encode_params(
+            value.to_member("libvpx_vp9_encode_params")?.required()?,
+        )?;
+
+        let openh264 = encoder_openh264_params::parse_encode_params(
+            value.to_member("openh264_encode_params")?.required()?,
+        )?;
+
+        let svt_av1 = encoder_svt_av1_params::parse_encode_params(
+            value.to_member("svt_av1_encode_params")?.required()?,
+        )?;
+
+        #[cfg(target_os = "macos")]
+        let video_toolbox_h264 = encoder_video_toolbox_params::parse_h264_encode_params(
+            value
+                .to_member("video_toolbox_h264_encode_params")?
+                .required()?,
+        )?;
+
+        #[cfg(target_os = "macos")]
+        let video_toolbox_h265 = encoder_video_toolbox_params::parse_h265_encode_params(
+            value
+                .to_member("video_toolbox_h265_encode_params")?
+                .required()?,
+        )?;
+
+        Ok(Self {
+            libvpx_vp8,
+            libvpx_vp9,
+            openh264,
+            svt_av1,
+            #[cfg(target_os = "macos")]
+            video_toolbox_h264,
+            #[cfg(target_os = "macos")]
+            video_toolbox_h265,
+        })
+    }
+}
+
 impl Default for LayoutEncodeParams {
     fn default() -> Self {
-        todo!()
+        Self::new_from_default_layout().expect("bug")
     }
 }
