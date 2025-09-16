@@ -23,4 +23,20 @@
 
   // デフォルトでは合成後の映像を VP9 でエンコードする
   "video_codec": "VP9",
+
+  // 以降は各エンコーダーでデフォルトで使用されるエンコードパラメーター
+  //
+  // 仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_encode_params.md
+  "libvpx_vp8_encode_params": {
+  },
+  "libvpx_vp9_encode_params": {
+  },
+  "openh264_encode_params": {
+  },
+  "svt_av1_encode_params": {
+  },
+  "video_toolbox_h264_encode_params": {
+  },
+  "video_toolbox_h265_encode_params": {
+  },
 }
