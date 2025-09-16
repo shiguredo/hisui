@@ -29,7 +29,6 @@ jobs:
           trigger_phrase: "!opus"
           claude_args: |
             --model claude-opus-4-1-20250805
-            --disallowedTools "Bash(git:*)"
 
   check-permission:
     if: github.event.comment.user.login != 'voluntas'
@@ -57,4 +56,3 @@ jobs:
           trigger_phrase: "!sonnet"
           claude_args: |
             --model claude-sonnet-4-20250514
-            --disallowedTools "Bash(git:*)"
