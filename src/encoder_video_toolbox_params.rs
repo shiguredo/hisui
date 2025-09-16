@@ -141,17 +141,6 @@ fn update_h265_encode_params(
     // - fps_denominator
     // - target_bitrate
 
-    // 基本的なエンコーダーパラメーター
-    if let Some(bitrate) = params.get("target_bitrate")? {
-        config.target_bitrate = bitrate;
-    }
-    if let Some(fps_num) = params.get("fps_numerator")? {
-        config.fps_numerator = fps_num;
-    }
-    if let Some(fps_den) = params.get("fps_denominator")? {
-        config.fps_denominator = fps_den;
-    }
-
     // 速度と品質のバランス設定
     config.real_time = params.get("real_time")?.unwrap_or(config.real_time);
 
