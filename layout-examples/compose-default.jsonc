@@ -1,7 +1,15 @@
+// デフォルトのレイアウトファイル
+// レイアウトファイルの仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_spec.md
 {
+  // 音声の合成方法の指定（全てのソースを合成する）
   "audio_sources": [
     "archive*.json"
   ],
+
+  // 映像の合成方法の指定
+  // デフォルトでは、列数が最大で 3 のグリッド上に映像ソースが配置される
+  //
+  // 仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_region.md
   "video_layout": {
     "main": {
       "cell_width": 320,
@@ -11,5 +19,5 @@
         "archive*.json"
       ]
     }
-  }
+  },
 }
