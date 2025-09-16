@@ -50,7 +50,7 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'rate_control_mode' value")),
             }
         })?
-        .unwrap_or(config.rate_control_mode.clone());
+        .unwrap_or(config.rate_control_mode);
 
     config.max_bit_rate = params.get("max_bit_rate")?.or(config.max_bit_rate);
     config.over_shoot_pct = params
@@ -103,7 +103,7 @@ fn update_encode_params(
     config.enable_tpl_la = params.get("enable_tpl_la")?.unwrap_or(config.enable_tpl_la);
     config.force_key_frames = params
         .get("force_key_frames")?
-        .unwrap_or(config.force_key_frames.clone());
+        .unwrap_or(config.force_key_frames);
     config.stat_report = params.get("stat_report")?.unwrap_or(config.stat_report);
     config.recon_enabled = params.get("recon_enabled")?.unwrap_or(config.recon_enabled);
 
@@ -122,7 +122,7 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'encoder_color_format' value")),
             }
         })?
-        .unwrap_or(config.encoder_color_format.clone());
+        .unwrap_or(config.encoder_color_format);
 
     config.profile = params.get("profile")?.unwrap_or(config.profile);
     config.level = params.get("level")?.unwrap_or(config.level);

@@ -73,7 +73,7 @@ fn update_vp8_encode_params(
             "realtime" => Ok(shiguredo_libvpx::EncodingDeadline::Realtime),
             _ => Err(v.invalid("unknown 'deadline' value")),
         })?
-        .unwrap_or(config.deadline.clone());
+        .unwrap_or(config.deadline);
 
     // レート制御モード
     config.rate_control = params
@@ -85,7 +85,7 @@ fn update_vp8_encode_params(
                 _ => Err(v.invalid("unknown 'rate_control' value")),
             }
         })?
-        .unwrap_or(config.rate_control.clone());
+        .unwrap_or(config.rate_control);
 
     // 先読みフレーム数
     if let Some(lag_in_frames) = params.get("lag_in_frames")? {
@@ -116,7 +116,7 @@ fn update_vp8_encode_params(
     let mut vp8_config = config
         .vp8_config
         .take()
-        .unwrap_or_else(|| shiguredo_libvpx::Vp8Config {
+        .unwrap_or(shiguredo_libvpx::Vp8Config {
             noise_sensitivity: None,
             static_threshold: None,
             token_partitions: None,
@@ -178,7 +178,7 @@ fn update_vp9_encode_params(
             "realtime" => Ok(shiguredo_libvpx::EncodingDeadline::Realtime),
             _ => Err(v.invalid("unknown 'deadline' value")),
         })?
-        .unwrap_or(config.deadline.clone());
+        .unwrap_or(config.deadline);
 
     // レート制御モード
     config.rate_control = params
@@ -190,7 +190,7 @@ fn update_vp9_encode_params(
                 _ => Err(v.invalid("unknown 'rate_control' value")),
             }
         })?
-        .unwrap_or(config.rate_control.clone());
+        .unwrap_or(config.rate_control);
 
     // 先読みフレーム数
     if let Some(lag_in_frames) = params.get("lag_in_frames")? {
@@ -221,7 +221,7 @@ fn update_vp9_encode_params(
     let mut vp9_config = config
         .vp9_config
         .take()
-        .unwrap_or_else(|| shiguredo_libvpx::Vp9Config {
+        .unwrap_or(shiguredo_libvpx::Vp9Config {
             aq_mode: None,
             noise_sensitivity: None,
             tile_columns: None,

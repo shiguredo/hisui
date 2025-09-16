@@ -50,25 +50,25 @@ impl Args {
                 .default("HISUI_REPO/layout-examples/vmaf-default.jsonc")
                 .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             reference_yuv_file_path: noargs::opt("reference-yuv-file")
                 .ty("PATH")
                 .default("ROOT_DIR/reference.yuv")
                 .doc("参照映像のYUVファイルの出力先を指定します")
                 .take(raw_args)
-                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             distorted_yuv_file_path: noargs::opt("distorted-yuv-file")
                 .ty("PATH")
                 .default("ROOT_DIR/distorted.yuv")
                 .doc("歪み映像のYUVファイルの出力先を指定します")
                 .take(raw_args)
-                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             vmaf_output_file_path: noargs::opt("vmaf-output-file")
                 .ty("PATH")
                 .default("ROOT_DIR/vmaf-output.json")
                 .doc("vmaf コマンドの実行結果ファイルの出力先を指定します")
                 .take(raw_args)
-                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             openh264: noargs::opt("openh264")
                 .ty("PATH")
                 .env("HISUI_OPENH264_PATH")

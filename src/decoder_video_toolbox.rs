@@ -96,7 +96,7 @@ impl VideoToolboxDecoder {
         )
         .or_fail()?;
 
-        self.reinitialize_if_need(&frame).or_fail()?;
+        self.reinitialize_if_need(frame).or_fail()?;
 
         let decoded = if matches!(frame.format, VideoFormat::H264AnnexB) {
             // AVC 形式に変換する

@@ -216,15 +216,13 @@ impl PipelineComponent {
                     resolution,
                     frame_rate: FrameRate::FPS_25,
                     // TODO(atode): z-pos を考慮する
-                    regions: video_layout
-                        .iter()
-                        .map(|(_name, raw_region)| {
-                            Ok(raw_region.clone().into_region(
-                                &Path::new("/dummy/"),
+                    regions: video_layout.values().map(|raw_region| {
+                            raw_region.clone().into_region(
+                                Path::new("/dummy/"),
                                 &mut dummy_sources,
                                 Some(resolution),
                                 resolver,
-                            )?)
+                            )
                         })
                         .collect::<orfail::Result<_>>()
                         .or_fail()?,
@@ -278,7 +276,7 @@ impl PipelineComponent {
                     .iter()
                     .map(|name| registry.get_id(name).or_fail())
                     .collect::<orfail::Result<_>>()?;
-                let input_audio_stream_id = input_stream_ids.get(0).copied();
+                let input_audio_stream_id = input_stream_ids.first().copied();
                 let input_video_stream_id = input_stream_ids.get(1).copied();
                 let options = Mp4WriterOptions {
                     resolution: RESOLUTION_HD,

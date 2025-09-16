@@ -48,7 +48,7 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'complexity_mode' value")),
             }
         })?
-        .unwrap_or(config.complexity_mode.clone());
+        .unwrap_or(config.complexity_mode);
 
     // エントロピー符号化モード
     config.entropy_coding = params
@@ -87,7 +87,7 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'rate_control_mode' value")),
             }
         })?
-        .unwrap_or(config.rate_control_mode.clone());
+        .unwrap_or(config.rate_control_mode);
 
     // 前処理機能設定
     config.denoise = params.get("denoise")?.unwrap_or(config.denoise);
@@ -125,7 +125,7 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'slice_mode.type' value")),
             }
         })?
-        .unwrap_or(config.slice_mode.clone());
+        .unwrap_or(config.slice_mode);
 
     Ok(())
 }

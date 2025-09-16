@@ -30,14 +30,14 @@ impl Args {
                 .default("HISUI_REPO/layout-examples/compose-default.jsonc")
                 .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             output_file_path: noargs::opt("output-file")
                 .short('o')
                 .ty("PATH")
                 .default("ROOT_DIR/output.mp4")
                 .doc("合成結果を保存するファイルを指定します")
                 .take(raw_args)
-                .then(|a| crate::arg_utils::parse_non_default_opt(a))?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             stats_file_path: noargs::opt("stats-file")
                 .short('s')
                 .ty("PATH")

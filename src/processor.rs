@@ -197,7 +197,7 @@ impl RealtimePacer {
             stream_ids: input_stream_ids
                 .iter()
                 .copied()
-                .zip(output_stream_ids.into_iter())
+                .zip(output_stream_ids)
                 .collect(),
             stream_timestamps: input_stream_ids
                 .iter()

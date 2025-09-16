@@ -250,7 +250,7 @@ impl VideoDecoderInner {
             Self::Initial { options } => match frame.format {
                 #[cfg(target_os = "macos")]
                 VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
-                    *self = VideoToolboxDecoder::new_h264(&frame)
+                    *self = VideoToolboxDecoder::new_h264(frame)
                         .or_fail()
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);
@@ -271,7 +271,7 @@ impl VideoDecoderInner {
                 }
                 #[cfg(target_os = "macos")]
                 VideoFormat::H265 => {
-                    *self = VideoToolboxDecoder::new_h265(&frame)
+                    *self = VideoToolboxDecoder::new_h265(frame)
                         .or_fail()
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);
