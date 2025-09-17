@@ -33,13 +33,15 @@ const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60
 struct ResizeCachedVideoFrame {
     original: Arc<VideoFrame>,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
+    resize_filter_mode: shiguredo_libyuv::FilterMode,
 }
 
 impl ResizeCachedVideoFrame {
-    fn new(original: Arc<VideoFrame>) -> Self {
+    fn new(original: Arc<VideoFrame>, resize_filter_mode: shiguredo_libyuv::FilterMode) -> Self {
         Self {
             original,
             resized: Vec::new(),
+            resize_filter_mode,
         }
     }
 
@@ -55,12 +57,7 @@ impl ResizeCachedVideoFrame {
         self.original.source_id.as_ref()
     }
 
-    fn resize(
-        &mut self,
-        width: EvenUsize,
-        height: EvenUsize,
-        resize_filter_mode: shiguredo_libyuv::FilterMode,
-    ) -> orfail::Result<&VideoFrame> {
+    fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> orfail::Result<&VideoFrame> {
         if self.original.width == width.get() && self.original.height == height.get() {
             // リサイズ不要
             return Ok(&self.original);
@@ -70,7 +67,11 @@ impl ResizeCachedVideoFrame {
         // resized の要素数は、通常は 1 で多くても 2~3 である想定なので線形探索で十分
         if !self.resized.iter().any(|x| x.0 == (width, height)) {
             // キャッシュにないので新規リサイズが必要
-            if let Some(resized) = self.original.resize(width, height, resize_filter_mode).or_fail()? {
+            if let Some(resized) = self
+                .original
+                .resize(width, height, self.resize_filter_mode)
+                .or_fail()?
+            {
                 self.resized.push(((width, height), resized));
             }
         }
@@ -258,14 +259,7 @@ impl VideoMixer {
         let mut canvas = Canvas::new(self.spec.resolution.width(), self.spec.resolution.height());
 
         for region in &self.spec.regions {
-            Self::mix_region(
-                &mut canvas,
-                region,
-                &mut self.input_streams,
-                now,
-                self.spec.resize_filter_mode,
-            )
-            .or_fail()?;
+            Self::mix_region(&mut canvas, region, &mut self.input_streams, now).or_fail()?;
         }
 
         self.stats.total_output_video_frame_count.add(1);
@@ -292,7 +286,6 @@ impl VideoMixer {
         region: &Region,
         input_streams: &mut HashMap<MediaStreamId, InputStream>,
         now: Duration,
-        resize_filter_mode: shiguredo_libyuv::FilterMode,
     ) -> orfail::Result<()> {
         // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
         //        (必要に応じて最適化する)
@@ -332,9 +325,7 @@ impl VideoMixer {
                 EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
             position.y +=
                 EvenUsize::truncating_new((region.grid.cell_height - frame_height).get() / 2);
-            let resized_frame = frame
-                .resize(frame_width, frame_height, resize_filter_mode)
-                .or_fail()?;
+            let resized_frame = frame.resize(frame_width, frame_height).or_fail()?;
             canvas.draw_frame(position, resized_frame).or_fail()?;
         }
 
@@ -382,7 +373,10 @@ impl MediaProcessor for VideoMixer {
 
             input_stream
                 .frame_queue
-                .push_back(ResizeCachedVideoFrame::new(frame));
+                .push_back(ResizeCachedVideoFrame::new(
+                    frame,
+                    self.spec.resize_filter_mode,
+                ));
             self.stats.total_input_video_frame_count.add(1);
         } else {
             input_stream.eos = true;
