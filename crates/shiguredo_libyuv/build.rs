@@ -40,8 +40,10 @@ fn main() {
     if std::env::var("DOCS_RS").is_ok() {
         // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップして、
         // 代わりに、ドキュメント生成時に最低限必要な定義だけをダミーで出力している。
+        // NOTE: 今のところ libyuv では Docs.rs 用に必要な型定義はないので、空ファイルでいい
         //
         // See also: https://docs.rs/about/builds
+        std::fs::write(output_bindings_path, "").expect("write file error");
         return;
     }
 
