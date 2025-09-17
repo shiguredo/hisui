@@ -22,6 +22,26 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    /// I420 形式の各プレーンサイズを計算
+    fn i420_plane_sizes(width: usize, height: usize) -> (usize, usize, usize) {
+        let y_size = width * height;
+        let uv_width = width.div_ceil(2);
+        let uv_height = height.div_ceil(2);
+        let uv_size = uv_width * uv_height;
+        (y_size, uv_size, uv_size)
+    }
+
+    /// I420 形式の総データサイズを計算
+    fn i420_total_size(width: usize, height: usize) -> usize {
+        let (y_size, u_size, v_size) = Self::i420_plane_sizes(width, height);
+        y_size + u_size + v_size
+    }
+
+    /// UV プレーンの幅・高さを計算
+    fn i420_uv_dimensions(width: usize, height: usize) -> (usize, usize) {
+        (width.div_ceil(2), height.div_ceil(2))
+    }
+
     pub fn from_bgr_data(
         bgr_data: &[u8],
         width: EvenUsize,
@@ -41,13 +61,12 @@ impl VideoFrame {
             )));
         }
 
-        let y_size = width_val * height_val;
-        let uv_size = (width_val / 2) * (height_val / 2);
-        let mut yuv_data = Vec::with_capacity(y_size + uv_size * 2);
+        let (y_size, u_size, _) = Self::i420_plane_sizes(width_val, height_val);
+        let mut yuv_data = Vec::with_capacity(Self::i420_total_size(width_val, height_val));
 
         let mut y_plane = vec![0u8; y_size];
-        let mut u_plane = vec![0u8; uv_size];
-        let mut v_plane = vec![0u8; uv_size];
+        let mut u_plane = vec![0u8; u_size];
+        let mut v_plane = vec![0u8; u_size];
 
         for y in 0..height_val {
             for x in 0..width_val {
@@ -115,12 +134,10 @@ impl VideoFrame {
         u_stride: usize,
         v_stride: usize,
     ) -> Self {
-        let y_size = width * height;
-        // 奇数の場合は切り上げ除算を使用してUVプレーンのサイズを計算
-        let uv_width = width.div_ceil(2);
-        let uv_height = height.div_ceil(2);
+        let (y_size, _, _) = Self::i420_plane_sizes(width, height);
+        let (uv_width, uv_height) = Self::i420_uv_dimensions(width, height);
         let uv_size = uv_width * uv_height;
-        let mut data = Vec::with_capacity(y_size + uv_size * 2);
+        let mut data = Vec::with_capacity(Self::i420_total_size(width, height));
 
         // ストライドを考慮して YUV 成分をコピーする
         if width == y_stride {
@@ -182,10 +199,8 @@ impl VideoFrame {
 
         let actual_width = width.get();
         let actual_height = height.get();
-        let y_plane_size = actual_width * actual_height;
-        let u_plane_size = actual_width.div_ceil(2) * actual_height.div_ceil(2);
-        let v_plane_size = u_plane_size;
-        let total_size = y_plane_size + u_plane_size + v_plane_size;
+        let (y_plane_size, u_plane_size, _) = Self::i420_plane_sizes(actual_width, actual_height);
+        let total_size = Self::i420_total_size(actual_width, actual_height);
 
         let mut data = Vec::with_capacity(total_size);
 
@@ -214,10 +229,8 @@ impl VideoFrame {
     pub fn black(width: EvenUsize, height: EvenUsize) -> Self {
         let actual_width = width.get();
         let actual_height = height.get();
-        let y_plane_size = actual_width * actual_height;
-        let u_plane_size = actual_width.div_ceil(2) * actual_height.div_ceil(2);
-        let v_plane_size = u_plane_size;
-        let total_size = y_plane_size + u_plane_size + v_plane_size;
+        let (y_plane_size, _, _) = Self::i420_plane_sizes(actual_width, actual_height);
+        let total_size = Self::i420_total_size(actual_width, actual_height);
 
         let mut data = vec![0; total_size];
         for b in data.iter_mut().take(total_size).skip(y_plane_size) {
@@ -250,11 +263,7 @@ impl VideoFrame {
             return None;
         }
 
-        let y_size = self.width * self.height;
-
-        let uv_width = self.width.div_ceil(2);
-        let uv_height = self.height.div_ceil(2);
-        let uv_size = uv_width * uv_height;
+        let (y_size, uv_size, _) = Self::i420_plane_sizes(self.width, self.height);
 
         let y_plane = &self.data[..y_size];
         let u_plane = &self.data[y_size..][..uv_size];
@@ -284,16 +293,16 @@ impl VideoFrame {
         }
 
         // 新しい YUV バッファを作成
-        let new_y_size = new_width.get() * new_height.get();
-        let new_uv_size = (new_width.get() / 2) * (new_height.get() / 2);
-        let mut new_data = vec![0; new_y_size + new_uv_size * 2];
+        let (new_y_size, new_uv_size, _) =
+            Self::i420_plane_sizes(new_width.get(), new_height.get());
+        let mut new_data = vec![0; Self::i420_total_size(new_width.get(), new_height.get())];
 
         // 元のYUVプレーンを取得
         let (src_y, src_u, src_v) = self.as_yuv_planes().or_fail()?;
 
         // ストライド計算（元画像） - 実際の幅を使用
         let src_width = self.width;
-        let src_uv_width = self.width.div_ceil(2);
+        let (src_uv_width, _) = Self::i420_uv_dimensions(self.width, self.height);
 
         // ストライド計算（出力画像）
         let dst_width = new_width.get();
@@ -357,7 +366,7 @@ impl VideoFrame {
 
         // ストライドは実際の幅を使用
         let y_stride = actual_width;
-        let uv_stride = actual_width.div_ceil(2);
+        let (uv_stride, _) = Self::i420_uv_dimensions(actual_width, actual_height);
 
         // 出力 BGR データは実際の解像度のみを含む
         let mut bgr_data = Vec::with_capacity(actual_width * actual_height * 3);
