@@ -264,14 +264,18 @@ impl VideoFrame {
     }
 
     /// ボックスフィルターアルゴリズムで YUV(I420) 画像をリサイズする
-    pub fn resize(&mut self, new_width: EvenUsize, new_height: EvenUsize) -> orfail::Result<()> {
+    pub fn resize(
+        &self,
+        new_width: EvenUsize,
+        new_height: EvenUsize,
+    ) -> orfail::Result<Option<Self>> {
         (self.format == VideoFormat::I420).or_fail()?;
 
         let width = self.width;
         let height = self.height;
         if width == new_width.get() && height == new_height.get() {
             // リサイズ不要
-            return Ok(());
+            return Ok(None);
         }
 
         // 新しい YUV バッファを作成
@@ -377,10 +381,18 @@ impl VideoFrame {
             }
         }
 
-        self.width = new_width.get();
-        self.height = new_height.get();
-        self.data = new_data;
-        Ok(())
+        let resized = Self {
+            source_id: self.source_id.clone(),
+            data: new_data,
+            format: self.format,
+            keyframe: self.keyframe,
+            width: new_width.get(),
+            height: new_height.get(),
+            timestamp: self.timestamp,
+            duration: self.duration,
+            sample_entry: self.sample_entry.clone(),
+        };
+        Ok(Some(resized))
     }
 
     pub fn to_bgr_data(&self) -> orfail::Result<Vec<u8>> {
