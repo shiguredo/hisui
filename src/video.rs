@@ -183,7 +183,7 @@ impl VideoFrame {
         let actual_width = width.get();
         let actual_height = height.get();
         let y_plane_size = actual_width * actual_height;
-        let u_plane_size = (actual_width.div_ceil(2)) * (actual_height.div_ceil(2));
+        let u_plane_size = actual_width.div_ceil(2) * actual_height.div_ceil(2);
         let v_plane_size = u_plane_size;
         let total_size = y_plane_size + u_plane_size + v_plane_size;
 
@@ -215,7 +215,7 @@ impl VideoFrame {
         let actual_width = width.get();
         let actual_height = height.get();
         let y_plane_size = actual_width * actual_height;
-        let u_plane_size = (actual_width.div_ceil(2)) * (actual_height.div_ceil(2));
+        let u_plane_size = actual_width.div_ceil(2) * actual_height.div_ceil(2);
         let v_plane_size = u_plane_size;
         let total_size = y_plane_size + u_plane_size + v_plane_size;
 
