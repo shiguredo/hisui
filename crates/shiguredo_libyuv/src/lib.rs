@@ -84,89 +84,126 @@ impl FilterMode {
     }
 }
 
+/// I420 画像の各プレーン情報
+#[derive(Debug)]
+pub struct I420Planes<'a> {
+    /// Y プレーンデータ
+    pub y: &'a [u8],
+    /// Y プレーンのストライド（行あたりのバイト数）
+    pub y_stride: usize,
+    /// U プレーンデータ
+    pub u: &'a [u8],
+    /// U プレーンのストライド
+    pub u_stride: usize,
+    /// V プレーンデータ
+    pub v: &'a [u8],
+    /// V プレーンのストライド
+    pub v_stride: usize,
+}
+
+/// I420 画像の各プレーン情報（可変）
+#[derive(Debug)]
+pub struct I420PlanesMut<'a> {
+    /// Y プレーンデータ
+    pub y: &'a mut [u8],
+    /// Y プレーンのストライド（行あたりのバイト数）
+    pub y_stride: usize,
+    /// U プレーンデータ
+    pub u: &'a mut [u8],
+    /// U プレーンのストライド
+    pub u_stride: usize,
+    /// V プレーンデータ
+    pub v: &'a mut [u8],
+    /// V プレーンのストライド
+    pub v_stride: usize,
+}
+
+/// 画像の幅と高さ
+#[derive(Debug, Clone, Copy)]
+pub struct ImageSize {
+    /// 画像の幅
+    pub width: usize,
+    /// 画像の高さ
+    pub height: usize,
+}
+
+impl ImageSize {
+    /// 新しい画像サイズを作成
+    pub fn new(width: usize, height: usize) -> Self {
+        Self { width, height }
+    }
+}
+
+/// RGB24 画像情報
+#[derive(Debug)]
+pub struct Rgb24Image<'a> {
+    /// RGB24 データ (R, G, B の順)
+    pub data: &'a [u8],
+    /// RGB24 のストライド
+    pub stride: usize,
+}
+
+/// RGB24 画像情報（可変）
+#[derive(Debug)]
+pub struct Rgb24ImageMut<'a> {
+    /// RGB24 データ (R, G, B の順)
+    pub data: &'a mut [u8],
+    /// RGB24 のストライド
+    pub stride: usize,
+}
+
 /// I420 形式の YUV データをリサイズする
-///
-/// # 引数
-/// * `src_y` - ソース Y プレーンデータ
-/// * `src_stride_y` - ソース Y プレーンのストライド（行あたりのバイト数）
-/// * `src_u` - ソース U プレーンデータ
-/// * `src_stride_u` - ソース U プレーンのストライド
-/// * `src_v` - ソース V プレーンデータ
-/// * `src_stride_v` - ソース V プレーンのストライド
-/// * `src_width` - ソース画像の幅
-/// * `src_height` - ソース画像の高さ
-/// * `dst_y` - 出力 Y プレーンバッファ
-/// * `dst_stride_y` - 出力 Y プレーンのストライド
-/// * `dst_u` - 出力 U プレーンバッファ
-/// * `dst_stride_u` - 出力 U プレーンのストライド
-/// * `dst_v` - 出力 V プレーンバッファ
-/// * `dst_stride_v` - 出力 V プレーンのストライド
-/// * `dst_width` - 出力画像の幅
-/// * `dst_height` - 出力画像の高さ
-/// * `filtering` - フィルタリングモード
 pub fn i420_scale(
-    src_y: &[u8],
-    src_stride_y: usize,
-    src_u: &[u8],
-    src_stride_u: usize,
-    src_v: &[u8],
-    src_stride_v: usize,
-    src_width: usize,
-    src_height: usize,
-    dst_y: &mut [u8],
-    dst_stride_y: usize,
-    dst_u: &mut [u8],
-    dst_stride_u: usize,
-    dst_v: &mut [u8],
-    dst_stride_v: usize,
-    dst_width: usize,
-    dst_height: usize,
+    src: &I420Planes<'_>,
+    src_size: ImageSize,
+    dst: &mut I420PlanesMut<'_>,
+    dst_size: ImageSize,
     filtering: FilterMode,
 ) -> Result<(), Error> {
     // バッファサイズの検証
-    let src_y_size = src_stride_y * src_height;
-    let src_u_size = src_stride_u * src_height.div_ceil(2);
-    let src_v_size = src_stride_v * src_height.div_ceil(2);
-    let dst_y_size = dst_stride_y * dst_height;
-    let dst_u_size = dst_stride_u * dst_height.div_ceil(2);
-    let dst_v_size = dst_stride_v * dst_height.div_ceil(2);
+    let src_y_size = src.y_stride * src_size.height;
+    let src_u_size = src.u_stride * src_size.height.div_ceil(2);
+    let src_v_size = src.v_stride * src_size.height.div_ceil(2);
+    let dst_y_size = dst.y_stride * dst_size.height;
+    let dst_u_size = dst.u_stride * dst_size.height.div_ceil(2);
+    let dst_v_size = dst.v_stride * dst_size.height.div_ceil(2);
 
-    if src_y.len() < src_y_size {
+    if src.y.len() < src_y_size {
         return Err(Error::with_reason(
             -1,
             "I420Scale",
             "source Y buffer too small",
         ));
     }
-    if src_u.len() < src_u_size {
+    if src.u.len() < src_u_size {
         return Err(Error::with_reason(
             -1,
             "I420Scale",
             "source U buffer too small",
         ));
     }
-    if src_v.len() < src_v_size {
+    if src.v.len() < src_v_size {
         return Err(Error::with_reason(
             -1,
             "I420Scale",
             "source V buffer too small",
         ));
     }
-    if dst_y.len() < dst_y_size {
+    if dst.y.len() < dst_y_size {
         return Err(Error::with_reason(
             -1,
             "I420Scale",
             "destination Y buffer too small",
         ));
     }
-    if dst_u.len() < dst_u_size {
+    if dst.u.len() < dst_u_size {
         return Err(Error::with_reason(
             -1,
             "I420Scale",
             "destination U buffer too small",
         ));
     }
-    if dst_v.len() < dst_v_size {
+    if dst.v.len() < dst_v_size {
         return Err(Error::with_reason(
             -1,
             "I420Scale",
@@ -176,22 +213,22 @@ pub fn i420_scale(
 
     let result = unsafe {
         sys::I420Scale(
-            src_y.as_ptr(),
-            src_stride_y as c_int,
-            src_u.as_ptr(),
-            src_stride_u as c_int,
-            src_v.as_ptr(),
-            src_stride_v as c_int,
-            src_width as c_int,
-            src_height as c_int,
-            dst_y.as_mut_ptr(),
-            dst_stride_y as c_int,
-            dst_u.as_mut_ptr(),
-            dst_stride_u as c_int,
-            dst_v.as_mut_ptr(),
-            dst_stride_v as c_int,
-            dst_width as c_int,
-            dst_height as c_int,
+            src.y.as_ptr(),
+            src.y_stride as c_int,
+            src.u.as_ptr(),
+            src.u_stride as c_int,
+            src.v.as_ptr(),
+            src.v_stride as c_int,
+            src_size.width as c_int,
+            src_size.height as c_int,
+            dst.y.as_mut_ptr(),
+            dst.y_stride as c_int,
+            dst.u.as_mut_ptr(),
+            dst.u_stride as c_int,
+            dst.v.as_mut_ptr(),
+            dst.v_stride as c_int,
+            dst_size.width as c_int,
+            dst_size.height as c_int,
             filtering.to_libyuv_filter_mode(),
         )
     };
@@ -200,42 +237,23 @@ pub fn i420_scale(
 }
 
 /// RGB24 から I420 への変換
-///
-/// # 引数
-/// * `src_rgb24` - ソース RGB24 データ (R, G, B の順)
-/// * `src_stride_rgb24` - ソース RGB24 のストライド
-/// * `dst_y` - 出力 Y プレーンバッファ
-/// * `dst_stride_y` - 出力 Y プレーンのストライド
-/// * `dst_u` - 出力 U プレーンバッファ
-/// * `dst_stride_u` - 出力 U プレーンのストライド
-/// * `dst_v` - 出力 V プレーンバッファ
-/// * `dst_stride_v` - 出力 V プレーンのストライド
-/// * `width` - 画像の幅
-/// * `height` - 画像の高さ
 pub fn rgb24_to_i420(
-    src_rgb24: &[u8],
-    src_stride_rgb24: usize,
-    dst_y: &mut [u8],
-    dst_stride_y: usize,
-    dst_u: &mut [u8],
-    dst_stride_u: usize,
-    dst_v: &mut [u8],
-    dst_stride_v: usize,
-    width: usize,
-    height: usize,
+    src: &Rgb24Image<'_>,
+    dst: &mut I420PlanesMut<'_>,
+    size: ImageSize,
 ) -> Result<(), Error> {
     let result = unsafe {
         sys::RGB24ToI420(
-            src_rgb24.as_ptr(),
-            src_stride_rgb24 as c_int,
-            dst_y.as_mut_ptr(),
-            dst_stride_y as c_int,
-            dst_u.as_mut_ptr(),
-            dst_stride_u as c_int,
-            dst_v.as_mut_ptr(),
-            dst_stride_v as c_int,
-            width as c_int,
-            height as c_int,
+            src.data.as_ptr(),
+            src.stride as c_int,
+            dst.y.as_mut_ptr(),
+            dst.y_stride as c_int,
+            dst.u.as_mut_ptr(),
+            dst.u_stride as c_int,
+            dst.v.as_mut_ptr(),
+            dst.v_stride as c_int,
+            size.width as c_int,
+            size.height as c_int,
         )
     };
 
@@ -243,42 +261,23 @@ pub fn rgb24_to_i420(
 }
 
 /// I420 から RGB24 への変換
-///
-/// # 引数
-/// * `src_y` - ソース Y プレーンデータ
-/// * `src_stride_y` - ソース Y プレーンのストライド
-/// * `src_u` - ソース U プレーンデータ
-/// * `src_stride_u` - ソース U プレーンのストライド
-/// * `src_v` - ソース V プレーンデータ
-/// * `src_stride_v` - ソース V プレーンのストライド
-/// * `dst_rgb24` - 出力 RGB24 バッファ (R, G, B の順)
-/// * `dst_stride_rgb24` - 出力 RGB24 のストライド
-/// * `width` - 画像の幅
-/// * `height` - 画像の高さ
 pub fn i420_to_rgb24(
-    src_y: &[u8],
-    src_stride_y: usize,
-    src_u: &[u8],
-    src_stride_u: usize,
-    src_v: &[u8],
-    src_stride_v: usize,
-    dst_rgb24: &mut [u8],
-    dst_stride_rgb24: usize,
-    width: usize,
-    height: usize,
+    src: &I420Planes<'_>,
+    dst: &mut Rgb24ImageMut<'_>,
+    size: ImageSize,
 ) -> Result<(), Error> {
     let result = unsafe {
         sys::I420ToRGB24(
-            src_y.as_ptr(),
-            src_stride_y as c_int,
-            src_u.as_ptr(),
-            src_stride_u as c_int,
-            src_v.as_ptr(),
-            src_stride_v as c_int,
-            dst_rgb24.as_mut_ptr(),
-            dst_stride_rgb24 as c_int,
-            width as c_int,
-            height as c_int,
+            src.y.as_ptr(),
+            src.y_stride as c_int,
+            src.u.as_ptr(),
+            src.u_stride as c_int,
+            src.v.as_ptr(),
+            src.v_stride as c_int,
+            dst.data.as_mut_ptr(),
+            dst.stride as c_int,
+            size.width as c_int,
+            size.height as c_int,
         )
     };
 
