@@ -49,8 +49,8 @@ impl std::fmt::Display for Error {
         if let Some(reason) = self.reason {
             write!(
                 f,
-                "{}() failed: code={}, reason={}",
-                self.function, self.code, reason
+                "{}() failed: code={}, reason={reason}",
+                self.function, self.code
             )
         } else {
             write!(f, "{}() failed: code={}", self.function, self.code)
@@ -125,11 +125,11 @@ pub fn i420_scale(
 ) -> Result<(), Error> {
     // バッファサイズの検証
     let src_y_size = src_stride_y * src_height;
-    let src_u_size = src_stride_u * ((src_height + 1) / 2);
-    let src_v_size = src_stride_v * ((src_height + 1) / 2);
+    let src_u_size = src_stride_u * src_height.div_ceil(2);
+    let src_v_size = src_stride_v * src_height.div_ceil(2);
     let dst_y_size = dst_stride_y * dst_height;
-    let dst_u_size = dst_stride_u * ((dst_height + 1) / 2);
-    let dst_v_size = dst_stride_v * ((dst_height + 1) / 2);
+    let dst_u_size = dst_stride_u * dst_height.div_ceil(2);
+    let dst_v_size = dst_stride_v * dst_height.div_ceil(2);
 
     if src_y.len() < src_y_size {
         return Err(Error::with_reason(
