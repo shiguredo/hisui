@@ -659,13 +659,18 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     region.top_border_pixels = EvenUsize::truncating_new(2);
     region.left_border_pixels = EvenUsize::truncating_new(2);
 
+    let mut spec = layout(
+        &[region],
+        &[&source0, &source1, &source2, &source3],
+        region_size,
+        None,
+    );
+
+    // リサイズによる入力画像の変化を最小限に抑えるために None を指定する
+    spec.resize_filter_mode = shiguredo_libyuv::FilterMode::None;
+
     let mut mixer = VideoMixer::new(
-        layout(
-            &[region],
-            &[&source0, &source1, &source2, &source3],
-            region_size,
-            None,
-        ),
+        spec,
         vec![
             input_stream_id0,
             input_stream_id1,

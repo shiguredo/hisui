@@ -22,6 +22,26 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    /// I420 形式の各プレーンサイズを計算
+    fn i420_plane_sizes(width: usize, height: usize) -> (usize, usize, usize) {
+        let y_size = width * height;
+        let uv_width = width.div_ceil(2);
+        let uv_height = height.div_ceil(2);
+        let uv_size = uv_width * uv_height;
+        (y_size, uv_size, uv_size)
+    }
+
+    /// I420 形式の総データサイズを計算
+    fn i420_total_size(width: usize, height: usize) -> usize {
+        let (y_size, u_size, v_size) = Self::i420_plane_sizes(width, height);
+        y_size + u_size + v_size
+    }
+
+    /// UV プレーンの幅・高さを計算
+    fn i420_uv_dimensions(width: usize, height: usize) -> (usize, usize) {
+        (width.div_ceil(2), height.div_ceil(2))
+    }
+
     pub fn from_bgr_data(
         bgr_data: &[u8],
         width: EvenUsize,
@@ -41,13 +61,12 @@ impl VideoFrame {
             )));
         }
 
-        let y_size = width_val * height_val;
-        let uv_size = (width_val / 2) * (height_val / 2);
-        let mut yuv_data = Vec::with_capacity(y_size + uv_size * 2);
+        let (y_size, u_size, _) = Self::i420_plane_sizes(width_val, height_val);
+        let mut yuv_data = Vec::with_capacity(Self::i420_total_size(width_val, height_val));
 
         let mut y_plane = vec![0u8; y_size];
-        let mut u_plane = vec![0u8; uv_size];
-        let mut v_plane = vec![0u8; uv_size];
+        let mut u_plane = vec![0u8; u_size];
+        let mut v_plane = vec![0u8; u_size];
 
         for y in 0..height_val {
             for x in 0..width_val {
@@ -115,12 +134,10 @@ impl VideoFrame {
         u_stride: usize,
         v_stride: usize,
     ) -> Self {
-        let y_size = width * height;
-        // 奇数の場合は切り上げ除算を使用してUVプレーンのサイズを計算
-        let uv_width = width.div_ceil(2);
-        let uv_height = height.div_ceil(2);
+        let (y_size, _, _) = Self::i420_plane_sizes(width, height);
+        let (uv_width, uv_height) = Self::i420_uv_dimensions(width, height);
         let uv_size = uv_width * uv_height;
-        let mut data = Vec::with_capacity(y_size + uv_size * 2);
+        let mut data = Vec::with_capacity(Self::i420_total_size(width, height));
 
         // ストライドを考慮して YUV 成分をコピーする
         if width == y_stride {
@@ -180,10 +197,10 @@ impl VideoFrame {
         let u = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
         let v = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
 
-        let y_plane_size = width.get() * height.get();
-        let u_plane_size = (width.get() / 2) * (height.get() / 2);
-        let v_plane_size = u_plane_size;
-        let total_size = y_plane_size + u_plane_size + v_plane_size;
+        let actual_width = width.get();
+        let actual_height = height.get();
+        let (y_plane_size, u_plane_size, _) = Self::i420_plane_sizes(actual_width, actual_height);
+        let total_size = Self::i420_total_size(actual_width, actual_height);
 
         let mut data = Vec::with_capacity(total_size);
 
@@ -201,8 +218,8 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width: width.get(),
-            height: height.get(),
+            width: actual_width,
+            height: actual_height,
             timestamp: Duration::ZERO,
             duration: Duration::ZERO,
             sample_entry: None,
@@ -210,10 +227,10 @@ impl VideoFrame {
     }
 
     pub fn black(width: EvenUsize, height: EvenUsize) -> Self {
-        let y_plane_size = width.get() * height.get();
-        let u_plane_size = (width.get() / 2) * (height.get() / 2);
-        let v_plane_size = u_plane_size;
-        let total_size = y_plane_size + u_plane_size + v_plane_size;
+        let actual_width = width.get();
+        let actual_height = height.get();
+        let (y_plane_size, _, _) = Self::i420_plane_sizes(actual_width, actual_height);
+        let total_size = Self::i420_total_size(actual_width, actual_height);
 
         let mut data = vec![0; total_size];
         for b in data.iter_mut().take(total_size).skip(y_plane_size) {
@@ -225,8 +242,8 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width: width.get(),
-            height: height.get(),
+            width: actual_width,
+            height: actual_height,
             timestamp: Duration::ZERO,
             duration: Duration::ZERO,
             sample_entry: None,
@@ -246,11 +263,7 @@ impl VideoFrame {
             return None;
         }
 
-        let y_size = self.ceiling_width().get() * self.ceiling_height().get();
-
-        let uv_width = self.width.div_ceil(2);
-        let uv_height = self.height.div_ceil(2);
-        let uv_size = uv_width * uv_height;
+        let (y_size, uv_size, _) = Self::i420_plane_sizes(self.width, self.height);
 
         let y_plane = &self.data[..y_size];
         let u_plane = &self.data[y_size..][..uv_size];
@@ -263,11 +276,12 @@ impl VideoFrame {
         self.timestamp + self.duration
     }
 
-    /// ボックスフィルターアルゴリズムで YUV(I420) 画像をリサイズする
+    /// libyuv を使った YUV(I420) 画像リサイズ
     pub fn resize(
         &self,
         new_width: EvenUsize,
         new_height: EvenUsize,
+        filter_mode: shiguredo_libyuv::FilterMode,
     ) -> orfail::Result<Option<Self>> {
         (self.format == VideoFormat::I420).or_fail()?;
 
@@ -279,107 +293,52 @@ impl VideoFrame {
         }
 
         // 新しい YUV バッファを作成
-        let new_y_size = new_width.get() * new_height.get();
-        let new_uv_size = (new_width.get() / 2) * (new_height.get() / 2);
-        let mut new_data = vec![0; new_y_size + new_uv_size * 2];
+        let (new_y_size, new_uv_size, _) =
+            Self::i420_plane_sizes(new_width.get(), new_height.get());
+        let mut new_data = vec![0; Self::i420_total_size(new_width.get(), new_height.get())];
 
-        // 元のデータのサイズを計算（奇数の解像度を考慮）
-        let y_size = width * height;
-        let uv_width = width.div_ceil(2); // 奇数幅の場合は切り上げ
-        let uv_height = height.div_ceil(2); // 奇数高さの場合は切り上げ
+        // 元のYUVプレーンを取得
+        let (src_y, src_u, src_v) = self.as_yuv_planes().or_fail()?;
 
-        // Y 平面のリサイズ
-        let x_ratio = width as f64 / new_width.get() as f64;
-        let y_ratio = height as f64 / new_height.get() as f64;
-        for y in 0..new_height.get() {
-            for x in 0..new_width.get() {
-                // ボックスフィルターの開始位置
-                let x_start = (x as f64 * x_ratio) as usize;
-                let y_start = (y as f64 * y_ratio) as usize;
+        // ストライド計算（元画像） - 実際の幅を使用
+        let src_width = self.width;
+        let (src_uv_width, _) = Self::i420_uv_dimensions(self.width, self.height);
 
-                // ボックスフィルターの終了位置
-                let x_end = (((x as f64 + 1.0) * x_ratio) as usize).max(x_start + 1);
-                let y_end = (((y as f64 + 1.0) * y_ratio) as usize).max(y_start + 1);
+        // ストライド計算（出力画像）
+        let dst_width = new_width.get();
+        let dst_uv_width = dst_width / 2;
 
-                // ボックス領域のピクセルの値を累積する
-                let mut y_acc = 0u32;
-                let mut count = 0u32;
+        // 出力バッファを分割
+        let (dst_y, rest) = new_data.split_at_mut(new_y_size);
+        let (dst_u, dst_v) = rest.split_at_mut(new_uv_size);
 
-                for box_y in y_start..y_end.min(height) {
-                    for box_x in x_start..x_end.min(width) {
-                        let i = box_y * width + box_x;
-                        y_acc += self.data[i] as u32;
-                        count += 1;
-                    }
-                }
+        // libyuv でリサイズ実行
+        let src = shiguredo_libyuv::I420Planes {
+            y: src_y,
+            y_stride: src_width, // 実際の幅をストライドとして使用
+            u: src_u,
+            u_stride: src_uv_width, // U プレーンのストライド
+            v: src_v,
+            v_stride: src_uv_width, // V プレーンのストライド
+        };
 
-                // 新しいピクセル値を平均値で求める
-                let i = y * new_width.get() + x;
-                new_data[i] = (y_acc / count) as u8;
-            }
-        }
+        let mut dst = shiguredo_libyuv::I420PlanesMut {
+            y: dst_y,
+            y_stride: dst_width, // 出力 Y プレーンのストライド
+            u: dst_u,
+            u_stride: dst_uv_width, // 出力 U プレーンのストライド
+            v: dst_v,
+            v_stride: dst_uv_width, // 出力 V プレーンのストライド
+        };
 
-        // U平面のリサイズ
-        let new_uv_width = new_width.get() / 2;
-        let new_uv_height = new_height.get() / 2;
-        let x_ratio_uv = uv_width as f64 / new_uv_width as f64;
-        let y_ratio_uv = uv_height as f64 / new_uv_height as f64;
-        for y in 0..new_uv_height {
-            for x in 0..new_uv_width {
-                // ボックスフィルターの開始位置
-                let x_start = (x as f64 * x_ratio_uv) as usize;
-                let y_start = (y as f64 * y_ratio_uv) as usize;
-
-                // ボックスフィルターの終了位置
-                let x_end = (((x as f64 + 1.0) * x_ratio_uv) as usize).max(x_start + 1);
-                let y_end = (((y as f64 + 1.0) * y_ratio_uv) as usize).max(y_start + 1);
-
-                // ボックス領域のピクセルの値を累積する
-                let mut u_acc = 0u32;
-                let mut count = 0u32;
-
-                for box_y in y_start..y_end.min(uv_height) {
-                    for box_x in x_start..x_end.min(uv_width) {
-                        let i = y_size + box_y * uv_width + box_x;
-                        u_acc += self.data[i] as u32;
-                        count += 1;
-                    }
-                }
-
-                // 新しいピクセル値を平均値で求める
-                let i = new_y_size + y * new_uv_width + x;
-                new_data[i] = (u_acc / count) as u8;
-            }
-        }
-
-        // V平面のリサイズ
-        for y in 0..new_uv_height {
-            for x in 0..new_uv_width {
-                // ボックスフィルターの開始位置
-                let x_start = (x as f64 * x_ratio_uv) as usize;
-                let y_start = (y as f64 * y_ratio_uv) as usize;
-
-                // ボックスフィルターの終了位置
-                let x_end = (((x as f64 + 1.0) * x_ratio_uv) as usize).max(x_start + 1);
-                let y_end = (((y as f64 + 1.0) * y_ratio_uv) as usize).max(y_start + 1);
-
-                // ボックス領域のピクセルの値を累積する
-                let mut v_acc = 0u32;
-                let mut count = 0u32;
-
-                for box_y in y_start..y_end.min(uv_height) {
-                    for box_x in x_start..x_end.min(uv_width) {
-                        let i = y_size + (uv_width * uv_height) + box_y * uv_width + box_x;
-                        v_acc += self.data[i] as u32;
-                        count += 1;
-                    }
-                }
-
-                // 新しいピクセル値を平均値で求める
-                let i = new_y_size + new_uv_size + y * new_uv_width + x;
-                new_data[i] = (v_acc / count) as u8;
-            }
-        }
+        shiguredo_libyuv::i420_scale(
+            &src,
+            shiguredo_libyuv::ImageSize::new(width, height), // 元画像の実際のサイズ
+            &mut dst,
+            shiguredo_libyuv::ImageSize::new(dst_width, new_height.get()), // 出力画像のサイズ
+            filter_mode,
+        )
+        .or_fail()?;
 
         let resized = Self {
             source_id: self.source_id.clone(),
@@ -402,25 +361,25 @@ impl VideoFrame {
         let actual_width = self.width;
         let actual_height = self.height;
 
-        // YUV プレーンを取得（奇数解像度の場合はパディングを含む）
+        // YUV プレーンを取得
         let (y_plane, u_plane, v_plane) = self.as_yuv_planes().or_fail()?;
 
-        // パディングされた解像度を計算（内部データアクセス用）
-        let padded_width = self.ceiling_width().get();
-        let padded_uv_width = padded_width / 2;
+        // ストライドは実際の幅を使用
+        let y_stride = actual_width;
+        let (uv_stride, _) = Self::i420_uv_dimensions(actual_width, actual_height);
 
         // 出力 BGR データは実際の解像度のみを含む
         let mut bgr_data = Vec::with_capacity(actual_width * actual_height * 3);
 
         for y in 0..actual_height {
             for x in 0..actual_width {
-                // Y プレーンのインデックス（パディング幅をストライドとして使用）
-                let y_idx = y * padded_width + x;
+                // Y プレーンのインデックス（実際の幅をストライドとして使用）
+                let y_idx = y * y_stride + x;
 
-                // UV プレーンのインデックス（パディングUV幅をストライドとして使用）
+                // UV プレーンのインデックス（実際のUV幅をストライドとして使用）
                 let uv_y = y / 2;
                 let uv_x = x / 2;
-                let uv_idx = uv_y * padded_uv_width + uv_x;
+                let uv_idx = uv_y * uv_stride + uv_x;
 
                 let y_val = y_plane[y_idx] as f32;
                 let u_val = u_plane[uv_idx] as f32 - 128.0;

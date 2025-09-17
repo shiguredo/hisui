@@ -33,13 +33,15 @@ const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60
 struct ResizeCachedVideoFrame {
     original: Arc<VideoFrame>,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
+    resize_filter_mode: shiguredo_libyuv::FilterMode,
 }
 
 impl ResizeCachedVideoFrame {
-    fn new(original: Arc<VideoFrame>) -> Self {
+    fn new(original: Arc<VideoFrame>, resize_filter_mode: shiguredo_libyuv::FilterMode) -> Self {
         Self {
             original,
             resized: Vec::new(),
+            resize_filter_mode,
         }
     }
 
@@ -65,7 +67,11 @@ impl ResizeCachedVideoFrame {
         // resized の要素数は、通常は 1 で多くても 2~3 である想定なので線形探索で十分
         if !self.resized.iter().any(|x| x.0 == (width, height)) {
             // キャッシュにないので新規リサイズが必要
-            if let Some(resized) = self.original.resize(width, height).or_fail()? {
+            if let Some(resized) = self
+                .original
+                .resize(width, height, self.resize_filter_mode)
+                .or_fail()?
+            {
                 self.resized.push(((width, height), resized));
             }
         }
@@ -163,6 +169,7 @@ pub struct VideoMixerSpec {
     pub frame_rate: FrameRate,
     pub resolution: Resolution,
     pub trim_spans: TrimSpans,
+    pub resize_filter_mode: shiguredo_libyuv::FilterMode,
 }
 
 impl VideoMixerSpec {
@@ -172,6 +179,7 @@ impl VideoMixerSpec {
             frame_rate: layout.frame_rate,
             resolution: layout.resolution,
             trim_spans: layout.trim_spans.clone(),
+            resize_filter_mode: shiguredo_libyuv::FilterMode::Bilinear,
         }
     }
 }
@@ -365,7 +373,10 @@ impl MediaProcessor for VideoMixer {
 
             input_stream
                 .frame_queue
-                .push_back(ResizeCachedVideoFrame::new(frame));
+                .push_back(ResizeCachedVideoFrame::new(
+                    frame,
+                    self.spec.resize_filter_mode,
+                ));
             self.stats.total_input_video_frame_count.add(1);
         } else {
             input_stream.eos = true;
