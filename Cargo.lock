@@ -154,6 +154,7 @@ dependencies = [
  "shiguredo_dav1d",
  "shiguredo_fdk_aac",
  "shiguredo_libvpx",
+ "shiguredo_libyuv",
  "shiguredo_mp4",
  "shiguredo_openh264",
  "shiguredo_opus",
@@ -420,6 +421,14 @@ dependencies = [
 [[package]]
 name = "shiguredo_libvpx"
 version = "2025.1.0-canary.4"
+dependencies = [
+ "bindgen",
+ "toml",
+]
+
+[[package]]
+name = "shiguredo_libyuv"
+version = "2025.1.0-canary.0"
 dependencies = [
  "bindgen",
  "toml",

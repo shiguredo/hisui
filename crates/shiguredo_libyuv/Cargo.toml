@@ -1,0 +1,25 @@
+[package]
+name = "shiguredo_libyuv"
+version = "2025.1.0-canary.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Shiguredo Inc."]
+license = "Apache-2.0"
+description = "libyuv wrapper for Hisui"
+homepage = "https://github.com/shiguredo/hisui"
+repository = "https://github.com/shiguredo/hisui"
+readme = "README.md"
+build = "build.rs"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.72.0"
+toml = "0.9.0"
+
+# 以降は外部ライブラリビルド用のメタデータ
+# (この内容は build.rs の中からのみ参照される)
+#
+# なお libyuv にはタグが存在しないので、コミットハッシュで参照している
+[package.metadata.external-dependencies]
+libyuv = { git = "https://chromium.googlesource.com/libyuv/libyuv", version = "b33794a58681aee39590f91652cb3eec447ae7f4" }
