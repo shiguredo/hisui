@@ -28,6 +28,7 @@ shiguredo_libvpx = { version = "2025.1.0-canary.0", path = "crates/shiguredo_lib
 shiguredo_openh264 = { version = "2025.1.0-canary.0", path = "crates/shiguredo_openh264/" }
 shiguredo_opus = { version = "2025.1.0-canary.0", path = "crates/shiguredo_opus/" }
 shiguredo_svt_av1 = { version = "2025.1.0-canary.0", path = "crates/shiguredo_svt_av1/" }
+shiguredo_libyuv = { version = "2025.1.0-canary.0", path = "crates/shiguredo_libyuv/" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = { version = "2025.1.0-canary.0", path = "crates/shiguredo_audio_toolbox/" }
@@ -45,5 +46,6 @@ members = [
   "crates/shiguredo_openh264",
   "crates/shiguredo_opus" ,
   "crates/shiguredo_svt_av1",
-  "crates/shiguredo_video_toolbox"
+  "crates/shiguredo_video_toolbox",
+  "crates/shiguredo_libyuv",
 ]
