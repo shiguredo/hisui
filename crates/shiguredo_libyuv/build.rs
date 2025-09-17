@@ -18,7 +18,6 @@ fn main() {
     let src_dir = out_build_dir.join(LIB_NAME);
     let input_header_dir = src_dir.join("include/");
     let cmake_dir = src_dir.join("out");
-    let output_lib_dir = cmake_dir.clone(); // CMakeの出力ディレクトリを使用
     let output_metadata_path = out_dir.join("metadata.rs");
     let output_bindings_path = out_dir.join("bindings.rs");
     let _ = std::fs::remove_dir_all(&out_build_dir);
@@ -85,7 +84,7 @@ fn main() {
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    println!("cargo::rustc-link-search={}", output_lib_dir.display());
+    println!("cargo::rustc-link-search={}", cmake_dir.display());
     println!("cargo::rustc-link-lib=static={LINK_NAME}");
 }
 
