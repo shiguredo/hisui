@@ -179,7 +179,7 @@ impl VideoMixerSpec {
             frame_rate: layout.frame_rate,
             resolution: layout.resolution,
             trim_spans: layout.trim_spans.clone(),
-            resize_filter_mode: shiguredo_libyuv::FilterMode::Bilinear,
+            resize_filter_mode: shiguredo_libyuv::FilterMode::Box,
         }
     }
 }
