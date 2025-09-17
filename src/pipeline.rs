@@ -215,8 +215,11 @@ impl PipelineComponent {
                     trim_spans: Default::default(),
                     resolution,
                     frame_rate: FrameRate::FPS_25,
+                    resize_filter_mode: shiguredo_libyuv::FilterMode::Bilinear,
                     // TODO(atode): z-pos を考慮する
-                    regions: video_layout.values().map(|raw_region| {
+                    regions: video_layout
+                        .values()
+                        .map(|raw_region| {
                             raw_region.clone().into_region(
                                 Path::new("/dummy/"),
                                 &mut dummy_sources,

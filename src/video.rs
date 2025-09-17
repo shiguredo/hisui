@@ -267,11 +267,12 @@ impl VideoFrame {
         self.timestamp + self.duration
     }
 
-    /// libyuv を使った高品質な YUV(I420) 画像リサイズ
+    /// libyuv を使った YUV(I420) 画像リサイズ
     pub fn resize(
         &self,
         new_width: EvenUsize,
         new_height: EvenUsize,
+        filter_mode: shiguredo_libyuv::FilterMode,
     ) -> orfail::Result<Option<Self>> {
         (self.format == VideoFormat::I420).or_fail()?;
 
@@ -326,7 +327,7 @@ impl VideoFrame {
             shiguredo_libyuv::ImageSize::new(width, height), // 元画像の実際のサイズ
             &mut dst,
             shiguredo_libyuv::ImageSize::new(dst_width, new_height.get()), // 出力画像のサイズ
-            shiguredo_libyuv::FilterMode::Bilinear, // 高品質なバイリニアフィルタ
+            filter_mode,
         )
         .or_fail()?;
 
