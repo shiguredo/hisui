@@ -129,7 +129,7 @@ pub struct ImageSize {
 
 impl ImageSize {
     /// 新しい画像サイズを作成
-    pub fn new(width: usize, height: usize) -> Self {
+    pub const fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
 }
@@ -284,18 +284,17 @@ pub fn i420_to_rgb24(
     Error::check(result, "I420ToRGB24")
 }
 
-/// プレーンの高速コピー（libyuv の CopyPlane を使用）
+/// プレーンのコピー
 pub fn copy_plane(
     src: &[u8],
     src_stride: usize,
     dst: &mut [u8],
     dst_stride: usize,
-    width: usize,
-    height: usize,
+    size: ImageSize,
 ) -> Result<(), Error> {
     // バッファサイズの検証
-    let src_size = src_stride * height;
-    let dst_size = dst_stride * height;
+    let src_size = src_stride * size.height;
+    let dst_size = dst_stride * size.height;
 
     if src.len() < src_size {
         return Err(Error::with_reason(
@@ -318,23 +317,22 @@ pub fn copy_plane(
             src_stride as c_int,
             dst.as_mut_ptr(),
             dst_stride as c_int,
-            width as c_int,
-            height as c_int,
+            size.width as c_int,
+            size.height as c_int,
         )
     };
 
     Ok(())
 }
 
-/// プレーンを指定値で塗りつぶし（libyuv の SetPlane を使用）
+/// プレーンを指定値で塗りつぶし
 pub fn set_plane(
     dst: &mut [u8],
     dst_stride: usize,
-    width: usize,
-    height: usize,
+    size: ImageSize,
     value: u8,
 ) -> Result<(), Error> {
-    let dst_size = dst_stride * height;
+    let dst_size = dst_stride * size.height;
 
     if dst.len() < dst_size {
         return Err(Error::with_reason(
@@ -348,9 +346,9 @@ pub fn set_plane(
         sys::SetPlane(
             dst.as_mut_ptr(),
             dst_stride as c_int,
-            width as c_int,
-            height as c_int,
-            value.into(), // Convert u8 to u32
+            size.width as c_int,
+            size.height as c_int,
+            value as u32,
         )
     };
 
