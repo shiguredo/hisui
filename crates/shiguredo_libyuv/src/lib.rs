@@ -76,10 +76,10 @@ pub enum FilterMode {
 impl FilterMode {
     fn to_libyuv_filter_mode(self) -> c_uint {
         match self {
-            FilterMode::None => 0,     // kFilterNone
-            FilterMode::Linear => 1,   // kFilterLinear
-            FilterMode::Bilinear => 2, // kFilterBilinear
-            FilterMode::Box => 3,      // kFilterBox
+            FilterMode::None => sys::FilterMode_kFilterNone,
+            FilterMode::Linear => sys::FilterMode_kFilterLinear,
+            FilterMode::Bilinear => sys::FilterMode_kFilterBilinear,
+            FilterMode::Box => sys::FilterMode_kFilterBox,
         }
     }
 }
