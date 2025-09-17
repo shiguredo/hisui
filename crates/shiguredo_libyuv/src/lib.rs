@@ -23,23 +23,23 @@ pub struct Error {
 }
 
 impl Error {
-    fn check(code: i32, function: &'static str) -> Result<(), Self> {
-        if code == 0 {
-            Ok(())
-        } else {
-            Err(Self {
-                code,
-                function,
-                reason: None,
-            })
+    fn new(code: i32, function: &'static str, reason: Option<&'static str>) -> Self {
+        Self {
+            code,
+            function,
+            reason,
         }
     }
 
     fn with_reason(code: i32, function: &'static str, reason: &'static str) -> Self {
-        Self {
-            code,
-            function,
-            reason: Some(reason),
+        Self::new(code, function, Some(reason))
+    }
+
+    fn check(code: i32, function: &'static str) -> Result<(), Self> {
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(Self::new(code, function, None))
         }
     }
 }
