@@ -92,18 +92,28 @@ fn main() {
 // 外部ライブラリのリポジトリを git clone する
 fn git_clone_external_lib(build_dir: &Path) {
     let (git_url, version) = get_git_url_and_version();
+
     let success = Command::new("git")
         .arg("clone")
-        .arg("--depth")
-        .arg("1")
-        .arg("--branch")
-        .arg(version)
-        .arg(git_url)
+        .arg(&git_url)
+        .arg(LIB_NAME)
         .current_dir(build_dir)
         .status()
         .is_ok_and(|status| status.success());
     if !success {
         panic!("failed to clone {LIB_NAME} repository");
+    }
+
+    let repo_dir = build_dir.join(LIB_NAME);
+
+    let success = Command::new("git")
+        .arg("checkout")
+        .arg(&version)
+        .current_dir(&repo_dir)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !success {
+        panic!("failed to checkout commit {version} in {LIB_NAME} repository");
     }
 }
 
