@@ -246,7 +246,7 @@ impl VideoFrame {
             return None;
         }
 
-        let y_size = self.ceiling_width().get() * self.ceiling_height().get();
+        let y_size = self.width * self.height;
 
         let uv_width = self.width.div_ceil(2);
         let uv_height = self.height.div_ceil(2);
@@ -263,7 +263,7 @@ impl VideoFrame {
         self.timestamp + self.duration
     }
 
-    /// ボックスフィルターアルゴリズムで YUV(I420) 画像をリサイズする
+    /// libyuv を使った高品質な YUV(I420) 画像リサイズ
     pub fn resize(
         &self,
         new_width: EvenUsize,
@@ -283,103 +283,48 @@ impl VideoFrame {
         let new_uv_size = (new_width.get() / 2) * (new_height.get() / 2);
         let mut new_data = vec![0; new_y_size + new_uv_size * 2];
 
-        // 元のデータのサイズを計算（奇数の解像度を考慮）
-        let y_size = width * height;
-        let uv_width = width.div_ceil(2); // 奇数幅の場合は切り上げ
-        let uv_height = height.div_ceil(2); // 奇数高さの場合は切り上げ
+        // 元のYUVプレーンを取得
+        let (src_y, src_u, src_v) = self.as_yuv_planes().or_fail()?;
 
-        // Y 平面のリサイズ
-        let x_ratio = width as f64 / new_width.get() as f64;
-        let y_ratio = height as f64 / new_height.get() as f64;
-        for y in 0..new_height.get() {
-            for x in 0..new_width.get() {
-                // ボックスフィルターの開始位置
-                let x_start = (x as f64 * x_ratio) as usize;
-                let y_start = (y as f64 * y_ratio) as usize;
+        // ストライド計算（元画像） - 実際の幅を使用
+        let src_width = self.width;
+        let src_uv_width = self.width.div_ceil(2);
 
-                // ボックスフィルターの終了位置
-                let x_end = (((x as f64 + 1.0) * x_ratio) as usize).max(x_start + 1);
-                let y_end = (((y as f64 + 1.0) * y_ratio) as usize).max(y_start + 1);
+        // ストライド計算（出力画像）
+        let dst_width = new_width.get();
+        let dst_uv_width = dst_width / 2;
 
-                // ボックス領域のピクセルの値を累積する
-                let mut y_acc = 0u32;
-                let mut count = 0u32;
+        // 出力バッファを分割
+        let (dst_y, rest) = new_data.split_at_mut(new_y_size);
+        let (dst_u, dst_v) = rest.split_at_mut(new_uv_size);
 
-                for box_y in y_start..y_end.min(height) {
-                    for box_x in x_start..x_end.min(width) {
-                        let i = box_y * width + box_x;
-                        y_acc += self.data[i] as u32;
-                        count += 1;
-                    }
-                }
+        // libyuv でリサイズ実行
+        let src = shiguredo_libyuv::I420Planes {
+            y: src_y,
+            y_stride: src_width, // 実際の幅をストライドとして使用
+            u: src_u,
+            u_stride: src_uv_width, // U プレーンのストライド
+            v: src_v,
+            v_stride: src_uv_width, // V プレーンのストライド
+        };
 
-                // 新しいピクセル値を平均値で求める
-                let i = y * new_width.get() + x;
-                new_data[i] = (y_acc / count) as u8;
-            }
-        }
+        let mut dst = shiguredo_libyuv::I420PlanesMut {
+            y: dst_y,
+            y_stride: dst_width, // 出力 Y プレーンのストライド
+            u: dst_u,
+            u_stride: dst_uv_width, // 出力 U プレーンのストライド
+            v: dst_v,
+            v_stride: dst_uv_width, // 出力 V プレーンのストライド
+        };
 
-        // U平面のリサイズ
-        let new_uv_width = new_width.get() / 2;
-        let new_uv_height = new_height.get() / 2;
-        let x_ratio_uv = uv_width as f64 / new_uv_width as f64;
-        let y_ratio_uv = uv_height as f64 / new_uv_height as f64;
-        for y in 0..new_uv_height {
-            for x in 0..new_uv_width {
-                // ボックスフィルターの開始位置
-                let x_start = (x as f64 * x_ratio_uv) as usize;
-                let y_start = (y as f64 * y_ratio_uv) as usize;
-
-                // ボックスフィルターの終了位置
-                let x_end = (((x as f64 + 1.0) * x_ratio_uv) as usize).max(x_start + 1);
-                let y_end = (((y as f64 + 1.0) * y_ratio_uv) as usize).max(y_start + 1);
-
-                // ボックス領域のピクセルの値を累積する
-                let mut u_acc = 0u32;
-                let mut count = 0u32;
-
-                for box_y in y_start..y_end.min(uv_height) {
-                    for box_x in x_start..x_end.min(uv_width) {
-                        let i = y_size + box_y * uv_width + box_x;
-                        u_acc += self.data[i] as u32;
-                        count += 1;
-                    }
-                }
-
-                // 新しいピクセル値を平均値で求める
-                let i = new_y_size + y * new_uv_width + x;
-                new_data[i] = (u_acc / count) as u8;
-            }
-        }
-
-        // V平面のリサイズ
-        for y in 0..new_uv_height {
-            for x in 0..new_uv_width {
-                // ボックスフィルターの開始位置
-                let x_start = (x as f64 * x_ratio_uv) as usize;
-                let y_start = (y as f64 * y_ratio_uv) as usize;
-
-                // ボックスフィルターの終了位置
-                let x_end = (((x as f64 + 1.0) * x_ratio_uv) as usize).max(x_start + 1);
-                let y_end = (((y as f64 + 1.0) * y_ratio_uv) as usize).max(y_start + 1);
-
-                // ボックス領域のピクセルの値を累積する
-                let mut v_acc = 0u32;
-                let mut count = 0u32;
-
-                for box_y in y_start..y_end.min(uv_height) {
-                    for box_x in x_start..x_end.min(uv_width) {
-                        let i = y_size + (uv_width * uv_height) + box_y * uv_width + box_x;
-                        v_acc += self.data[i] as u32;
-                        count += 1;
-                    }
-                }
-
-                // 新しいピクセル値を平均値で求める
-                let i = new_y_size + new_uv_size + y * new_uv_width + x;
-                new_data[i] = (v_acc / count) as u8;
-            }
-        }
+        shiguredo_libyuv::i420_scale(
+            &src,
+            shiguredo_libyuv::ImageSize::new(width, height), // 元画像の実際のサイズ
+            &mut dst,
+            shiguredo_libyuv::ImageSize::new(dst_width, new_height.get()), // 出力画像のサイズ
+            shiguredo_libyuv::FilterMode::Bilinear, // 高品質なバイリニアフィルタ
+        )
+        .or_fail()?;
 
         let resized = Self {
             source_id: self.source_id.clone(),
