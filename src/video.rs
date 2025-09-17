@@ -180,8 +180,10 @@ impl VideoFrame {
         let u = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
         let v = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
 
-        let y_plane_size = width.get() * height.get();
-        let u_plane_size = (width.get() / 2) * (height.get() / 2);
+        let actual_width = width.get();
+        let actual_height = height.get();
+        let y_plane_size = actual_width * actual_height;
+        let u_plane_size = (actual_width.div_ceil(2)) * (actual_height.div_ceil(2));
         let v_plane_size = u_plane_size;
         let total_size = y_plane_size + u_plane_size + v_plane_size;
 
@@ -201,8 +203,8 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width: width.get(),
-            height: height.get(),
+            width: actual_width,
+            height: actual_height,
             timestamp: Duration::ZERO,
             duration: Duration::ZERO,
             sample_entry: None,
@@ -210,8 +212,10 @@ impl VideoFrame {
     }
 
     pub fn black(width: EvenUsize, height: EvenUsize) -> Self {
-        let y_plane_size = width.get() * height.get();
-        let u_plane_size = (width.get() / 2) * (height.get() / 2);
+        let actual_width = width.get();
+        let actual_height = height.get();
+        let y_plane_size = actual_width * actual_height;
+        let u_plane_size = (actual_width.div_ceil(2)) * (actual_height.div_ceil(2));
         let v_plane_size = u_plane_size;
         let total_size = y_plane_size + u_plane_size + v_plane_size;
 
@@ -225,8 +229,8 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width: width.get(),
-            height: height.get(),
+            width: actual_width,
+            height: actual_height,
             timestamp: Duration::ZERO,
             duration: Duration::ZERO,
             sample_entry: None,
@@ -347,25 +351,25 @@ impl VideoFrame {
         let actual_width = self.width;
         let actual_height = self.height;
 
-        // YUV プレーンを取得（奇数解像度の場合はパディングを含む）
+        // YUV プレーンを取得
         let (y_plane, u_plane, v_plane) = self.as_yuv_planes().or_fail()?;
 
-        // パディングされた解像度を計算（内部データアクセス用）
-        let padded_width = self.ceiling_width().get();
-        let padded_uv_width = padded_width / 2;
+        // ストライドは実際の幅を使用
+        let y_stride = actual_width;
+        let uv_stride = actual_width.div_ceil(2);
 
         // 出力 BGR データは実際の解像度のみを含む
         let mut bgr_data = Vec::with_capacity(actual_width * actual_height * 3);
 
         for y in 0..actual_height {
             for x in 0..actual_width {
-                // Y プレーンのインデックス（パディング幅をストライドとして使用）
-                let y_idx = y * padded_width + x;
+                // Y プレーンのインデックス（実際の幅をストライドとして使用）
+                let y_idx = y * y_stride + x;
 
-                // UV プレーンのインデックス（パディングUV幅をストライドとして使用）
+                // UV プレーンのインデックス（実際のUV幅をストライドとして使用）
                 let uv_y = y / 2;
                 let uv_x = x / 2;
-                let uv_idx = uv_y * padded_uv_width + uv_x;
+                let uv_idx = uv_y * uv_stride + uv_x;
 
                 let y_val = y_plane[y_idx] as f32;
                 let u_val = u_plane[uv_idx] as f32 - 128.0;
