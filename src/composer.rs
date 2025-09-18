@@ -25,7 +25,7 @@ pub struct Composer {
     pub layout: Layout,
     pub openh264_lib: Option<Openh264Library>,
     pub show_progress_bar: bool,
-    pub max_cpu_cores: Option<NonZeroUsize>,
+    pub worker_threads: NonZeroUsize,
     pub stats_file_path: Option<PathBuf>,
 }
 
@@ -41,7 +41,7 @@ impl Composer {
             layout,
             openh264_lib: None,
             show_progress_bar: false,
-            max_cpu_cores: None,
+            worker_threads: NonZeroUsize::MIN,
             stats_file_path: None,
         }
     }

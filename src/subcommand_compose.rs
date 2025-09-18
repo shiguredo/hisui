@@ -16,7 +16,7 @@ struct Args {
     stats_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
     no_progress_bar: bool,
-    max_cpu_cores: Option<NonZeroUsize>,
+    worker_threads: NonZeroUsize,
     root_dir: PathBuf,
 }
 
@@ -55,18 +55,19 @@ impl Args {
                 .doc("指定された場合は、合成の進捗を非表示にします")
                 .take(raw_args)
                 .is_present(),
-            max_cpu_cores: noargs::opt("max-cpu-cores")
-                .short('c')
+            worker_threads: noargs::opt("worker-threads")
+                .short('T')
                 .ty("INTEGER")
-                .env("HISUI_MAX_CPU_CORES")
+                .default("1")
+                .env("HISUI_WORKER_THREADS")
                 .doc(concat!(
-                    "合成処理を行うプロセスが使用するコア数の上限を指定します\n",
-                    "（未指定時には上限なし）\n",
+                    "合成処理に使用するワーカースレッド数を指定します\n",
                     "\n",
-                    "NOTE: macOS ではこの引数は無視されます",
+                    "なおこれはあくまでも Hisui 自体が起動するスレッドの数であり、\n",
+                    "各エンコーダーやデコーダーが内部で起動するスレッドには関与しません",
                 ))
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| a.value().parse())?,
             root_dir: noargs::arg("ROOT_DIR")
                 .example("/path/to/archive/RECORDING_ID/")
                 .doc(concat!(
@@ -115,7 +116,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let mut composer = Composer::new(layout);
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !args.no_progress_bar;
-    composer.max_cpu_cores = args.max_cpu_cores;
+    composer.worker_threads = args.worker_threads;
     composer.stats_file_path = args.stats_file_path;
 
     // 合成を実行

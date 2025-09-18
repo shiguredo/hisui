@@ -41,7 +41,7 @@ pub struct Args {
     pub audio_only: bool,
     pub show_progress_bar: bool,
     pub layout: Option<PathBuf>,
-    pub cpu_cores: Option<NonZeroUsize>,
+    pub worker_threads: NonZeroUsize,
 }
 
 impl Args {
@@ -210,17 +210,19 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             .doc("true が指定された場合には合成の進捗を表示します")
             .take(&mut args)
             .then(|a| a.value().parse())?;
-        let cpu_cores = noargs::opt("max-cpu-cores")
-            .short('c')
+        let worker_threads = noargs::opt("worker-threads")
+            .short('T')
             .ty("INTEGER")
+            .default("1")
+            .env("HISUI_WORKER_THREADS")
             .doc(concat!(
-                "合成処理を行うプロセスが使用するコア数の上限を指定します\n",
-                "（未指定時には上限なし）\n",
+                "合成処理に使用するワーカースレッド数を指定します\n",
                 "\n",
-                "NOTE: macOS ではこの引数は無視されます",
+                "なおこれはあくまでも Hisui 自体が起動するスレッドの数であり、\n",
+                "各エンコーダーやデコーダーが内部で起動するスレッドには関与しません",
             ))
             .take(&mut args)
-            .present_and_then(|a| a.value().parse())?;
+            .then(|a| a.value().parse())?;
         let out_stats_file = noargs::opt("out-stats-file")
             .ty("PATH")
             .doc("合成実行中に集めた統計情報 JSON の出力先ファイル")
@@ -294,7 +296,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
             out_opus_bit_rate,
             out_aac_bit_rate,
             show_progress_bar,
-            cpu_cores,
+            worker_threads,
             out_stats_file,
             help: args.finish()?,
         })
@@ -369,7 +371,7 @@ impl Runner {
         let mut composer = Composer::new(layout);
         composer.openh264_lib = openh264_lib;
         composer.show_progress_bar = self.args.show_progress_bar;
-        composer.max_cpu_cores = self.args.cpu_cores;
+        composer.worker_threads = self.args.worker_threads;
         composer.stats_file_path = self.args.out_stats_file.clone();
 
         // 合成を実行
