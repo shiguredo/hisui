@@ -64,6 +64,16 @@ pub enum MediaProcessorWorkloadHint {
 }
 
 impl MediaProcessorWorkloadHint {
+    // 各処理毎のワークロードヒントの値。
+    //
+    // これはヒューリスティックな値であって、実際のコストは入力やレイアウトによって
+    // 大きく変動する可能性がある。
+    //
+    // そういったケースにも対応するためには、プログラムの実行時に動的に値を決定するか、
+    // ワークスティールのように実際の負荷状況を考慮してのリバランシングが必要となる。
+    //
+    // そういった手法は実装も大変で、効果が見合うかどうかが不明なので、まずは
+    // 今のようなヒューリスティックな値を使って運用してみて、様子を見ることにする。
     pub const READER: Self = Self::IoIntensive;
     pub const WRITER: Self = Self::IoIntensive;
     pub const CPU_MISC: Self = Self::cpu_intensive(1);
