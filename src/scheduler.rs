@@ -205,43 +205,17 @@ impl Scheduler {
     fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
         self.update_output_stream_txs().or_fail()?;
 
-        // I/O < CPU (コストが高い順、の順番でソートする
-        self.tasks
-            .sort_by(|a, b| match (a.workload_hint, b.workload_hint) {
-                (
-                    MediaProcessorWorkloadHint::IoIntensive,
-                    MediaProcessorWorkloadHint::IoIntensive,
-                ) => std::cmp::Ordering::Equal,
-                (MediaProcessorWorkloadHint::IoIntensive, _) => std::cmp::Ordering::Less,
-                (_, MediaProcessorWorkloadHint::IoIntensive) => std::cmp::Ordering::Greater,
-                (
-                    MediaProcessorWorkloadHint::CpuIntensive { cost: cost0 },
-                    MediaProcessorWorkloadHint::CpuIntensive { cost: cost1 },
-                ) => cost0.cmp(&cost1).reverse(),
-            });
+        // コストが高い順にソートする
+        // なお、現時点では、I/O タスクは「コストが最低の CPU タスク」として扱っている
+        // （将来的に I/O タスクと特別扱いした方がいいようなユースケースが出てきたら、その時に扱いを変更する）
+        self.tasks.sort_by_key(|t| match t.workload_hint {
+            MediaProcessorWorkloadHint::IoIntensive => NonZeroUsize::MIN,
+            MediaProcessorWorkloadHint::CpuIntensive { cost } => cost,
+        });
+        self.tasks.reverse();
 
-        // マルチスレッド、かつ、I/O タスクがある場合には、一番最後のスレッドは I/O タスク専用にする
-        let cpu_thread_count = if self.thread_count.get() >= 2
-            && self
-                .tasks
-                .iter()
-                .any(|t| t.workload_hint == MediaProcessorWorkloadHint::IoIntensive)
-        {
-            let io_thread_number = self.thread_count.get() - 1;
-            for task in self
-                .tasks
-                .iter_mut()
-                .take_while(|t| t.workload_hint == MediaProcessorWorkloadHint::IoIntensive)
-            {
-                task.thread_number = io_thread_number;
-            }
-            self.thread_count.get() - 1
-        } else {
-            self.thread_count.get()
-        };
-
-        // 残りの CPU タスク群にスレッドを（コストができるだけ均等になるように）割り当てる
-        let mut thread_costs = vec![0; cpu_thread_count];
+        // コストができるだけ均等になるように、タスクをスレッドに割り当てる
+        let mut thread_costs = vec![0; self.thread_count.get()];
         for task in &mut self.tasks {
             let MediaProcessorWorkloadHint::CpuIntensive { cost } = task.workload_hint else {
                 continue;
