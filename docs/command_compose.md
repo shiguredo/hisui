@@ -22,15 +22,15 @@ Arguments:
   ROOT_DIR 合成処理を行う際のルートディレクトリを指定します
 
 Options:
-  -h, --help                    このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
-      --version                 バージョン番号を表示します
-      --verbose                 警告未満のログメッセージも出力します
-  -l, --layout-file <PATH>      合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH] [default: HISUI_REPO/layout-examples/compose-default.jsonc]
-  -o, --output-file <PATH>      合成結果を保存するファイルを指定します [default: ROOT_DIR/output.mp4]
-  -s, --stats-file <PATH>       合成中に収集した統計情報 (JSON) を保存するファイルを指定します
-      --openh264 <PATH>         OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
-  -P, --no-progress-bar         指定された場合は、合成の進捗を非表示にします
-  -c, --max-cpu-cores <INTEGER> 合成処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
+  -h, --help                     このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
+      --version                  バージョン番号を表示します
+      --verbose                  警告未満のログメッセージも出力します
+  -l, --layout-file <PATH>       合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH] [default: HISUI_REPO/layout-examples/compose-default.jsonc]
+  -o, --output-file <PATH>       合成結果を保存するファイルを指定します [default: ROOT_DIR/output.mp4]
+  -s, --stats-file <PATH>        合成中に収集した統計情報 (JSON) を保存するファイルを指定します
+      --openh264 <PATH>          OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
+  -P, --no-progress-bar          指定された場合は、合成の進捗を非表示にします
+  -T, --worker-threads <INTEGER> 合成処理に使用するワーカースレッド数を指定します [env: HISUI_WORKER_THREADS] [default: 1]
 ```
 
 ## 実行例

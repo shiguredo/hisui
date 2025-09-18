@@ -87,7 +87,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
         let out_video_codec = noargs::opt("out-video-codec")
             .ty("VP8|VP9|H264|H265|AV1")
             .doc(concat!(
-                "映像のエンコードコーデック (default: VP9)\n",
+                "映像のエンコードコーデック [default: VP9]\n",
                 "\n",
                 "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
                 "「`video_codec` がレイアウトで指定されている」場合には、その値が使われます"
@@ -97,7 +97,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
         let out_audio_codec = noargs::opt("out-audio-codec")
             .ty("Opus|AAC")
             .doc(concat!(
-                "音声のエンコードコーデック (default: Opus)\n",
+                "音声のエンコードコーデック [default: Opus]\n",
                 "\n",
                 "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
                 "「`audio_codec` がレイアウトで指定されている」場合には、その値が使われます\n",
@@ -112,7 +112,7 @@ NOTE: `--layout` 引数が指定されている場合にはこの引数は無視
         let out_video_frame_rate = noargs::opt("out-video-frame-rate")
             .ty("INTEGER|RATIONAL")
             .doc(concat!(
-                "合成後の映像のフレームーレート (default: 25)\n",
+                "合成後の映像のフレームーレート [default: 25]\n",
                 "\n",
                 "なお「この引数が未指定」かつ「--layout 引数が指定されている」かつ",
                 "「`frame_rate` がレイアウトで指定されている」場合には、その値が使われます"
