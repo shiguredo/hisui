@@ -259,7 +259,7 @@ impl Scheduler {
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
 
-            worker_thread_stats.processors.sort();
+            worker_thread_stats.processors.sort(); // JSON として出力する際の可読性向上用にソートする
             self.stats.worker_threads.push(worker_thread_stats);
         }
 
