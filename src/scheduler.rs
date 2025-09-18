@@ -217,8 +217,9 @@ impl Scheduler {
         // コストができるだけ均等になるように、タスクをスレッドに割り当てる
         let mut thread_costs = vec![0; self.thread_count.get()];
         for task in &mut self.tasks {
-            let MediaProcessorWorkloadHint::CpuIntensive { cost } = task.workload_hint else {
-                continue;
+            let cost = match task.workload_hint {
+                MediaProcessorWorkloadHint::IoIntensive => NonZeroUsize::MIN,
+                MediaProcessorWorkloadHint::CpuIntensive { cost } => cost,
             };
 
             // スレッド数は多くても高々数十なので、シンプルな線形探索を行う
