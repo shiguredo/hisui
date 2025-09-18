@@ -10,7 +10,10 @@ use crate::{
     media::MediaStreamId,
     mixer_audio::AudioMixer,
     mixer_video::{VideoMixer, VideoMixerSpec},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     stats::{ProcessorStats, Stats},
@@ -187,7 +190,8 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress-bar"),
+            stats: ProcessorStats::other("progress_bar"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

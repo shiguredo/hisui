@@ -16,7 +16,10 @@ use crate::{
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     mixer_video::{VideoMixer, VideoMixerSpec},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader::VideoReader,
     scheduler::Scheduler,
     stats::ProcessorStats,
@@ -447,6 +450,7 @@ impl MediaProcessor for FrameCountLimiter {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::other("frame-count-limiter"),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }
 
@@ -499,7 +503,8 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress-bar"),
+            stats: ProcessorStats::other("progress_bar"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

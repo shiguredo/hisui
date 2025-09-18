@@ -12,7 +12,10 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     media::{MediaSample, MediaStreamId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
@@ -63,6 +66,7 @@ impl MediaProcessor for AudioDecoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::AudioDecoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::AUDIO_DECODER,
         }
     }
 
@@ -184,6 +188,7 @@ impl MediaProcessor for VideoDecoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::VideoDecoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::VIDEO_DECODER,
         }
     }
 

@@ -8,7 +8,10 @@ use crate::{
     layout::AggregatedSourceInfo,
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     stats::{
@@ -119,6 +122,7 @@ impl MediaProcessor for AudioReader {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
             stats: self.inner.stats(),
+            workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }
 
@@ -274,6 +278,7 @@ impl MediaProcessor for VideoReader {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
             stats: self.inner.stats(),
+            workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }
 

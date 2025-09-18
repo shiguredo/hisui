@@ -10,6 +10,7 @@ use crate::media::{MediaSample, MediaStreamId, MediaStreamName, MediaStreamNameR
 use crate::metadata::SourceId;
 use crate::processor::{
     MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+    MediaProcessorWorkloadHint,
 };
 use crate::stats::ProcessorStats;
 use crate::types::EvenUsize;
@@ -221,6 +222,7 @@ impl MediaProcessor for PluginCommandProcessor {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: self.output_stream_ids.values().copied().collect(),
             stats: ProcessorStats::other("plugin_command"),
+            workload_hint: MediaProcessorWorkloadHint::PLUGIN,
         }
     }
 

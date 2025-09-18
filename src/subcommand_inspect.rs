@@ -4,7 +4,10 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     stats::ProcessorStats,
@@ -289,7 +292,8 @@ impl MediaProcessor for OutputPrinter {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("output-printer"),
+            stats: ProcessorStats::other("output_printer"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

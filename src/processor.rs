@@ -63,10 +63,30 @@ pub enum MediaProcessorWorkloadHint {
     },
 }
 
+impl MediaProcessorWorkloadHint {
+    pub const READER: Self = Self::IoIntensive;
+    pub const WRITER: Self = Self::IoIntensive;
+    pub const CPU_MISC: Self = Self::cpu_intensive(1);
+    pub const AUDIO_DECODER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_MIXER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_ENCODER: Self = Self::cpu_intensive(1);
+    pub const VIDEO_DECODER: Self = Self::cpu_intensive(2);
+    pub const VIDEO_MIXER: Self = Self::cpu_intensive(10);
+    pub const VIDEO_ENCODER: Self = Self::cpu_intensive(10);
+    pub const PLUGIN: Self = Self::cpu_intensive(1); // TODO(atode): プラグイン側から取得するようにする
+
+    const fn cpu_intensive(cost: usize) -> Self {
+        Self::CpuIntensive {
+            cost: std::num::NonZeroUsize::new(cost).expect("bug"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
+    pub workload_hint: MediaProcessorWorkloadHint,
     pub stats: ProcessorStats,
 }
 
@@ -241,6 +261,7 @@ impl MediaProcessor for RealtimePacer {
             input_stream_ids: self.stream_ids.keys().copied().collect(),
             output_stream_ids: self.stream_ids.values().copied().collect(),
             stats: ProcessorStats::other("realtime_pacer"),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }
 

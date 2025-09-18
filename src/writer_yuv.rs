@@ -4,7 +4,10 @@ use orfail::OrFail;
 
 use crate::{
     media::MediaStreamId,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::ProcessorStats,
     video::VideoFormat,
 };
@@ -38,6 +41,7 @@ impl MediaProcessor for YuvWriter {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: Vec::new(),
             stats: ProcessorStats::other("yuv_writer"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 
