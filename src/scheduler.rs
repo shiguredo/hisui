@@ -8,6 +8,7 @@ use orfail::OrFail;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
+    MediaProcessorWorkloadHint,
 };
 use crate::stats::{ProcessorStats, SharedAtomicFlag, Stats, WorkerThreadStats};
 
@@ -48,6 +49,7 @@ pub struct Task {
     awaiting_input_stream_ids: Vec<MediaStreamId>,
     output_sample: Option<(MediaStreamId, usize, MediaSample)>,
     stats: ProcessorStats,
+    workload_hint: MediaProcessorWorkloadHint,
     finished: bool,
 }
 
@@ -59,21 +61,22 @@ impl Task {
         let mut input_stream_rxs = HashMap::new();
         let mut input_stream_txs = Vec::new();
 
+        let spec = processor.spec();
         let channel_size = sync_channel_size();
-        for input_stream_id in processor.spec().input_stream_ids {
+        for input_stream_id in spec.input_stream_ids {
             let (tx, rx) = mpsc::sync_channel(channel_size);
             input_stream_rxs.insert(input_stream_id, rx);
             input_stream_txs.push((input_stream_id, tx));
         }
 
-        let stats = processor.spec().stats;
         let task = Self {
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             output_stream_txs: HashMap::new(),
             awaiting_input_stream_ids: Vec::new(),
             output_sample: None,
-            stats,
+            stats: spec.stats,
+            workload_hint: spec.workload_hint,
             finished: false,
         };
         (task, input_stream_txs)
@@ -193,9 +196,8 @@ impl Scheduler {
     where
         P: 'static + Send + MediaProcessor,
     {
-        self.stats.processors.push(processor.spec().stats);
-
         let (task, input_stream_txs) = Task::new(processor);
+        self.stats.processors.push(task.stats.clone());
         self.tasks.push(task);
 
         for (id, tx) in input_stream_txs {
