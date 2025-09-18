@@ -31,6 +31,7 @@ fn sync_channel_size() -> usize {
 
 #[derive(Debug)]
 pub struct Task {
+    sequence_number: usize,
     processor: BoxedMediaProcessor,
     input_stream_rxs: HashMap<MediaStreamId, MediaSampleReceiver>,
     output_stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
@@ -42,7 +43,10 @@ pub struct Task {
 }
 
 impl Task {
-    fn new<P>(processor: P) -> (Self, Vec<(MediaStreamId, MediaSampleSyncSender)>)
+    fn new<P>(
+        sequence_number: usize,
+        processor: P,
+    ) -> (Self, Vec<(MediaStreamId, MediaSampleSyncSender)>)
     where
         P: 'static + Send + MediaProcessor,
     {
@@ -58,6 +62,7 @@ impl Task {
         }
 
         let task = Self {
+            sequence_number,
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             output_stream_txs: HashMap::new(),
@@ -184,7 +189,7 @@ impl Scheduler {
     where
         P: 'static + Send + MediaProcessor,
     {
-        let (task, input_stream_txs) = Task::new(processor);
+        let (task, input_stream_txs) = Task::new(self.tasks.len(), processor);
         self.stats.processors.push(task.stats.clone());
         self.tasks.push(task);
 
