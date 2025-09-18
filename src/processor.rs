@@ -49,6 +49,21 @@ impl MediaProcessor for BoxedMediaProcessor {
 }
 
 #[derive(Debug, Clone)]
+pub enum MediaProcessorWorkloadHint {
+    /// I/O集約的なプロセッサ
+    ///
+    /// できるだけCPU集約的なプロセッサ群とは別のスレッドにまとめて配置される
+    IoIntensive,
+
+    /// CPU集約的なプロセッサ
+    CpuIntensive {
+        /// プロセッサの処理の重さの目安
+        /// 各スレッドが担当するコストの総量ができるだけ均等になるように配置される
+        cost: std::num::NonZeroUsize,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
