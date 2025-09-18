@@ -29,18 +29,6 @@ fn sync_channel_size() -> usize {
     size
 }
 
-// プロセッサーが入力ないし出力送信待ちでやることがない場合のスリープ時間。
-//
-// 値の細かい調整は不要な想定だが、いちおう、隠し設定として環境変数経由で変更可能にしておく。
-fn idle_thread_sleep_duration() -> Duration {
-    let ms = std::env::var("HISUI_IDLE_THREAD_SLEEP_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
-    log::debug!("IDLE_THREAD_SLEEP_MS={ms}");
-    Duration::from_millis(ms)
-}
-
 #[derive(Debug)]
 pub struct Task {
     processor: BoxedMediaProcessor,
@@ -327,19 +315,18 @@ struct SchedulerHandle {
 #[derive(Debug)]
 struct TaskRunner {
     tasks: Vec<Task>,
-    sleep_duration: Duration,
     stats: WorkerThreadStats,
     error_flag: SharedAtomicFlag,
+    next_sleep_duration: Option<Duration>,
 }
 
 impl TaskRunner {
     fn new(tasks: Vec<Task>, stats: WorkerThreadStats, error_flag: SharedAtomicFlag) -> Self {
-        let sleep_duration = idle_thread_sleep_duration();
         Self {
             tasks,
-            sleep_duration,
             stats,
             error_flag,
+            next_sleep_duration: None,
         }
     }
 
@@ -377,9 +364,21 @@ impl TaskRunner {
             }
         }
 
-        if !did_something {
-            std::thread::sleep(self.sleep_duration);
-            self.stats.total_waiting_duration.add(self.sleep_duration);
+        if did_something {
+            self.next_sleep_duration = None;
+        } else {
+            // 指数的バックオフを使ってスリープする
+            //
+            // 最大値は適当に大きめの値であればなんでもいい
+            const MAX_SLEEP_DURATION: Duration = Duration::from_millis(50);
+
+            if let Some(duration) = self.next_sleep_duration {
+                std::thread::sleep(duration);
+                self.stats.total_waiting_duration.add(duration);
+                self.next_sleep_duration = Some((duration * 2).min(MAX_SLEEP_DURATION));
+            } else {
+                self.next_sleep_duration = Some(Duration::from_millis(1));
+            }
         }
     }
 }
