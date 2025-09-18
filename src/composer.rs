@@ -48,7 +48,7 @@ impl Composer {
 
     pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
         // プロセッサを準備
-        let mut scheduler = Scheduler::new();
+        let mut scheduler = Scheduler::with_thread_count(self.worker_threads);
         let mut next_stream_id = MediaStreamId::new(0);
 
         // リーダーとデコーダーを登録

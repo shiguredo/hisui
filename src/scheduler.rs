@@ -171,21 +171,24 @@ impl Task {
 #[derive(Debug)]
 pub struct Scheduler {
     tasks: Vec<Task>,
-    pub thread_count: NonZeroUsize, // TODO(atode): private にする
+    thread_count: NonZeroUsize,
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     stats: Stats,
 }
 
 impl Scheduler {
     pub fn new() -> Self {
+        Self::with_thread_count(NonZeroUsize::MIN)
+    }
+
+    pub fn with_thread_count(thread_count: NonZeroUsize) -> Self {
         Self {
             tasks: Vec::new(),
-            thread_count: NonZeroUsize::MIN,
+            thread_count,
             stream_txs: HashMap::new(),
             stats: Stats::default(),
         }
     }
-
     pub fn register<P>(&mut self, processor: P) -> orfail::Result<()>
     where
         P: 'static + Send + MediaProcessor,
