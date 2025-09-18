@@ -32,6 +32,7 @@ fn sync_channel_size() -> usize {
 #[derive(Debug)]
 pub struct Task {
     sequence_number: usize,
+    thread_number: usize,
     processor: BoxedMediaProcessor,
     input_stream_rxs: HashMap<MediaStreamId, MediaSampleReceiver>,
     output_stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
@@ -63,6 +64,7 @@ impl Task {
 
         let task = Self {
             sequence_number,
+            thread_number: 0, // 複数スレッドを使う場合には、後で再割り当てされる
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             output_stream_txs: HashMap::new(),
@@ -203,19 +205,71 @@ impl Scheduler {
     fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
         self.update_output_stream_txs().or_fail()?;
 
-        let mut tasks = self.tasks.into_iter().map(Some).collect::<Vec<_>>();
+        // I/O < CPU (コストが高い順、の順番でソートする
+        self.tasks
+            .sort_by(|a, b| match (a.workload_hint, b.workload_hint) {
+                (
+                    MediaProcessorWorkloadHint::IoIntensive,
+                    MediaProcessorWorkloadHint::IoIntensive,
+                ) => std::cmp::Ordering::Equal,
+                (MediaProcessorWorkloadHint::IoIntensive, _) => std::cmp::Ordering::Less,
+                (_, MediaProcessorWorkloadHint::IoIntensive) => std::cmp::Ordering::Greater,
+                (
+                    MediaProcessorWorkloadHint::CpuIntensive { cost: cost0 },
+                    MediaProcessorWorkloadHint::CpuIntensive { cost: cost1 },
+                ) => cost0.cmp(&cost1).reverse(),
+            });
 
-        // TODO(atode): スレッドへの割り当て方法は後で改善する
+        // マルチスレッド、かつ、I/O タスクがある場合には、一番最後のスレッドは I/O タスク専用にする
+        let cpu_thread_count = if self.thread_count.get() > 2
+            && self.tasks.last().map(|t| t.workload_hint)
+                == Some(MediaProcessorWorkloadHint::IoIntensive)
+        {
+            let io_thread_number = self.thread_count.get() - 1;
+            for task in self
+                .tasks
+                .iter_mut()
+                .take_while(|t| t.workload_hint == MediaProcessorWorkloadHint::IoIntensive)
+            {
+                task.thread_number = io_thread_number;
+            }
+            self.thread_count.get() - 1
+        } else {
+            self.thread_count.get()
+        };
+
+        // 残りの CPU タスク群にスレッドを（コストができるだけ均等になるように）割り当てる
+        let mut thread_costs = vec![0; cpu_thread_count];
+        for task in &mut self.tasks {
+            let MediaProcessorWorkloadHint::CpuIntensive { cost } = task.workload_hint else {
+                continue;
+            };
+
+            // スレッド数は多くても高々数十なので、シンプルな線形探索を行う
+            let i = thread_costs
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, cost)| *cost) // 累積コストが一番低いスレッドを選ぶ
+                .or_fail()?
+                .0;
+            thread_costs[i] += cost.get();
+            task.thread_number = i;
+        }
+
         let mut handles = Vec::new();
         for i in 0..self.thread_count.get() {
             let mut worker_thread_stats = WorkerThreadStats::default();
             let mut thread_tasks = Vec::new();
-            for (j, task) in tasks.iter_mut().enumerate() {
-                if j % self.thread_count.get() != i {
-                    continue;
-                }
-                thread_tasks.push(task.take().or_fail()?);
-                worker_thread_stats.processors.push(j);
+
+            let mut j = 0;
+            while j < self.tasks.len() {
+                if self.tasks[j].thread_number == i {
+                    let task = self.tasks.swap_remove(j);
+                    worker_thread_stats.processors.push(task.sequence_number);
+                    thread_tasks.push(task);
+                } else {
+                    j += 1
+                };
             }
             if thread_tasks.is_empty() {
                 continue;
@@ -227,6 +281,8 @@ impl Scheduler {
             );
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
+
+            worker_thread_stats.processors.sort();
             self.stats.worker_threads.push(worker_thread_stats);
         }
 

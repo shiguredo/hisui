@@ -48,7 +48,7 @@ impl MediaProcessor for BoxedMediaProcessor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaProcessorWorkloadHint {
     /// I/O集約的なプロセッサ
     ///
