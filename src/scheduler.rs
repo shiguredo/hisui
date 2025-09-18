@@ -366,19 +366,17 @@ impl TaskRunner {
 
         if did_something {
             self.next_sleep_duration = None;
-        } else {
+        } else if let Some(duration) = self.next_sleep_duration {
             // 指数的バックオフを使ってスリープする
             //
             // 最大値は適当に大きめの値であればなんでもいい
             const MAX_SLEEP_DURATION: Duration = Duration::from_millis(50);
 
-            if let Some(duration) = self.next_sleep_duration {
-                std::thread::sleep(duration);
-                self.stats.total_waiting_duration.add(duration);
-                self.next_sleep_duration = Some((duration * 2).min(MAX_SLEEP_DURATION));
-            } else {
-                self.next_sleep_duration = Some(Duration::from_millis(1));
-            }
+            std::thread::sleep(duration);
+            self.stats.total_waiting_duration.add(duration);
+            self.next_sleep_duration = Some((duration * 2).min(MAX_SLEEP_DURATION));
+        } else {
+            self.next_sleep_duration = Some(Duration::from_millis(1));
         }
     }
 }
