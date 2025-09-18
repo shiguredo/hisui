@@ -293,17 +293,26 @@ pub fn copy_plane(
     size: ImageSize,
 ) -> Result<(), Error> {
     // バッファサイズの検証
-    let src_size = src_stride * size.height;
-    let dst_size = dst_stride * size.height;
+    let src_required_size = if size.height > 0 {
+        (size.height - 1) * src_stride + size.width
+    } else {
+        0
+    };
 
-    if src.len() < src_size {
+    let dst_required_size = if size.height > 0 {
+        (size.height - 1) * dst_stride + size.width
+    } else {
+        0
+    };
+
+    if src.len() < src_required_size {
         return Err(Error::with_reason(
             -1,
             "CopyPlane",
             "source buffer too small",
         ));
     }
-    if dst.len() < dst_size {
+    if dst.len() < dst_required_size {
         return Err(Error::with_reason(
             -1,
             "CopyPlane",
