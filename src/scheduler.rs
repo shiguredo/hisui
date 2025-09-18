@@ -221,7 +221,7 @@ impl Scheduler {
             });
 
         // マルチスレッド、かつ、I/O タスクがある場合には、一番最後のスレッドは I/O タスク専用にする
-        let cpu_thread_count = if self.thread_count.get() > 2
+        let cpu_thread_count = if self.thread_count.get() >= 2
             && self
                 .tasks
                 .iter()
