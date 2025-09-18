@@ -222,8 +222,10 @@ impl Scheduler {
 
         // マルチスレッド、かつ、I/O タスクがある場合には、一番最後のスレッドは I/O タスク専用にする
         let cpu_thread_count = if self.thread_count.get() > 2
-            && self.tasks.last().map(|t| t.workload_hint)
-                == Some(MediaProcessorWorkloadHint::IoIntensive)
+            && self
+                .tasks
+                .iter()
+                .any(|t| t.workload_hint == MediaProcessorWorkloadHint::IoIntensive)
         {
             let io_thread_number = self.thread_count.get() - 1;
             for task in self
