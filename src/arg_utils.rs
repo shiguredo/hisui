@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -65,42 +65,4 @@ fn create_progress_bar(total: u64, template: Option<&str>, unit: Option<&str>) -
             .progress_chars("#>-"),
     );
     progress_bar
-}
-
-// TODO(atode): remove
-#[cfg(target_os = "macos")]
-pub fn maybe_limit_cpu_cores(cores: Option<NonZeroUsize>) -> orfail::Result<()> {
-    if cores.is_some() {
-        log::warn!("`--cpu-cores` option is ignored on MacOS");
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn maybe_limit_cpu_cores(cores: Option<NonZeroUsize>) -> orfail::Result<()> {
-    use orfail::OrFail;
-
-    let Some(cores) = cores else {
-        // 制限なし
-        return Ok(());
-    };
-
-    unsafe {
-        let mut cpu_set = std::mem::MaybeUninit::zeroed().assume_init();
-        libc::CPU_ZERO(&mut cpu_set);
-
-        for i in 0..cores.get() {
-            libc::CPU_SET(i, &mut cpu_set);
-        }
-
-        let pid = libc::getpid();
-        (libc::sched_setaffinity(pid, std::mem::size_of::<libc::cpu_set_t>(), &cpu_set) == 0)
-            .or_fail_with(|()| {
-                format!(
-                    "Failed to set CPU affinity: {}",
-                    std::io::Error::last_os_error()
-                )
-            })?;
-    }
-    Ok(())
 }

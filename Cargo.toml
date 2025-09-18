@@ -15,7 +15,6 @@ fdk-aac = ["shiguredo_fdk_aac"]
 
 [dependencies]
 indicatif = "0.18.0"
-libc = "0.2.171"
 log = "0.4.25"
 noargs = "0.4.0"
 nojson = "0.3.2"

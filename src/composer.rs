@@ -44,9 +44,6 @@ impl Composer {
     }
 
     pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
-        // 利用する CPU コア数を制限する
-        crate::arg_utils::maybe_limit_cpu_cores(self.max_cpu_cores).or_fail()?;
-
         // プロセッサを準備
         let mut scheduler = Scheduler::new();
         let mut next_stream_id = MediaStreamId::new(0);

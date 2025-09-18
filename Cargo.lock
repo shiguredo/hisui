@@ -145,7 +145,6 @@ name = "hisui"
 version = "2025.1.0-canary.16"
 dependencies = [
  "indicatif",
- "libc",
  "log",
  "noargs",
  "nojson",

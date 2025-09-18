@@ -34,6 +34,7 @@ struct Args {
     distorted_yuv_file_path: Option<PathBuf>,
     vmaf_output_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
+    #[expect(dead_code)]
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
     timeout: Option<Duration>,
@@ -144,9 +145,6 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     } else {
         None
     };
-
-    // CPU コア数制限を適用
-    crate::arg_utils::maybe_limit_cpu_cores(args.max_cpu_cores).or_fail()?;
 
     // プロセッサを準備
     let mut scheduler = Scheduler::new();
