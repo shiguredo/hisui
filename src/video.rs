@@ -210,13 +210,13 @@ impl VideoFrame {
         // Y プレーンを 10-bit から 8-bit に変換
         if width * 2 == y_stride {
             // パディングなし、チャンク単位で処理可能
-            if y_plane_16.len() < y_size * 2 {
-                return Err(orfail::Failure::new(format!(
+            (y_plane_16.len() >= y_size * 2).or_fail_with(|()| {
+                format!(
                     "Y plane data insufficient: expected {} bytes, got {}",
                     y_size * 2,
                     y_plane_16.len()
-                )));
-            }
+                )
+            })?;
             for chunk in y_plane_16[..y_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
@@ -226,14 +226,14 @@ impl VideoFrame {
             // ストライドにパディングがある場合の処理
             for row in 0..height {
                 let row_start = row * y_stride;
-                if row_start + width * 2 > y_plane_16.len() {
-                    return Err(orfail::Failure::new(format!(
+                (row_start + width * 2 <= y_plane_16.len()).or_fail_with(|()| {
+                    format!(
                         "Y plane data insufficient: row {} requires {} bytes but only {} available",
                         row,
                         row_start + width * 2,
                         y_plane_16.len()
-                    )));
-                }
+                    )
+                })?;
                 let row_data = &y_plane_16[row_start..row_start + width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
@@ -245,13 +245,13 @@ impl VideoFrame {
 
         // U プレーンを 10-bit から 8-bit に変換
         if uv_width * 2 == u_stride {
-            if u_plane_16.len() < uv_size * 2 {
-                return Err(orfail::Failure::new(format!(
+            (u_plane_16.len() >= uv_size * 2).or_fail_with(|()| {
+                format!(
                     "U plane data insufficient: expected {} bytes, got {}",
                     uv_size * 2,
                     u_plane_16.len()
-                )));
-            }
+                )
+            })?;
             for chunk in u_plane_16[..uv_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
@@ -260,14 +260,14 @@ impl VideoFrame {
         } else {
             for row in 0..uv_height {
                 let row_start = row * u_stride;
-                if row_start + uv_width * 2 > u_plane_16.len() {
-                    return Err(orfail::Failure::new(format!(
+                (row_start + uv_width * 2 <= u_plane_16.len()).or_fail_with(|()| {
+                    format!(
                         "U plane data insufficient: row {} requires {} bytes but only {} available",
                         row,
                         row_start + uv_width * 2,
                         u_plane_16.len()
-                    )));
-                }
+                    )
+                })?;
                 let row_data = &u_plane_16[row_start..row_start + uv_width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
@@ -279,13 +279,13 @@ impl VideoFrame {
 
         // V プレーンを 10-bit から 8-bit に変換
         if uv_width * 2 == v_stride {
-            if v_plane_16.len() < uv_size * 2 {
-                return Err(orfail::Failure::new(format!(
+            (v_plane_16.len() >= uv_size * 2).or_fail_with(|()| {
+                format!(
                     "V plane data insufficient: expected {} bytes, got {}",
                     uv_size * 2,
                     v_plane_16.len()
-                )));
-            }
+                )
+            })?;
             for chunk in v_plane_16[..uv_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
@@ -294,14 +294,14 @@ impl VideoFrame {
         } else {
             for row in 0..uv_height {
                 let row_start = row * v_stride;
-                if row_start + uv_width * 2 > v_plane_16.len() {
-                    return Err(orfail::Failure::new(format!(
+                (row_start + uv_width * 2 <= v_plane_16.len()).or_fail_with(|()| {
+                    format!(
                         "V plane data insufficient: row {} requires {} bytes but only {} available",
                         row,
                         row_start + uv_width * 2,
                         v_plane_16.len()
-                    )));
-                }
+                    )
+                })?;
                 let row_data = &v_plane_16[row_start..row_start + uv_width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
