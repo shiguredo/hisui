@@ -112,8 +112,8 @@ impl Canvas {
 
         // セルの解像度は偶数前提なので、奇数になることはない
         // (入力が奇数の場合でもリサイズによって常に偶数解像度になる）
-        (frame.width % 2 == 0).or_fail()?;
-        (frame.height % 2 == 0).or_fail()?;
+        frame.width.is_multiple_of(2).or_fail()?;
+        frame.height.is_multiple_of(2).or_fail()?;
 
         // Y成分の描画
         let offset_x = position.x.get();
