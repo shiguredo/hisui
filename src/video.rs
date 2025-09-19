@@ -181,7 +181,9 @@ impl VideoFrame {
         }
     }
 
-    /// 10 ビット高ビット深度 YUV データから I420 VideoFrame を作成
+    /// 高ビット深度 YUV データから I420 VideoFrame を作成
+    ///
+    /// なお、この関数は libvpx のデコード結果を処理するためのものである前提。
     /// libvpx は 10-bit 前提のため、10-bit -> 8-bit 変換に特化
     #[expect(clippy::too_many_arguments)]
     pub fn new_i420_from_high_depth(
