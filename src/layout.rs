@@ -700,7 +700,7 @@ impl AggregatedSourceInfo {
                 let existing_start = existing_info.start_timestamp;
                 let existing_stop = existing_info.stop_timestamp;
 
-                // 重複があるかチェック
+                // 重複があるかチェック（境界値を含む）
                 let has_overlap = start < existing_stop && stop > existing_start;
 
                 if has_overlap {
@@ -720,14 +720,22 @@ impl AggregatedSourceInfo {
                         // 既存のソースが長く、現在のソースを含んでいる
                         should_add = false;
                         break;
-                    } else if current_duration > existing_duration {
-                        // 現在のソースが長いが完全に包含はしていない場合
-                        // 部分的重複の場合は長い方を優先
-                        paths_to_remove.push(existing_path.clone());
                     } else {
-                        // 既存のソースが長いか同じ長さなので、現在のソースをスキップ
-                        should_add = false;
-                        break;
+                        // 部分的重複の場合は長い方を優先
+                        if current_duration > existing_duration {
+                            paths_to_remove.push(existing_path.clone());
+                        } else if current_duration < existing_duration {
+                            should_add = false;
+                            break;
+                        } else {
+                            // 同じ長さの場合は、開始時刻が早い方を優先
+                            if start <= existing_start {
+                                paths_to_remove.push(existing_path.clone());
+                            } else {
+                                should_add = false;
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -891,15 +899,15 @@ mod tests {
 
         aggregated.merge_overlapping_sources().or_fail()?;
 
-        // 長いソースが残るべき
+        // 長いソースが残るべき（source1の方が長い：15秒 vs 10秒）
         assert_eq!(aggregated.media_paths.len(), 1);
         assert!(
             aggregated
                 .media_paths
-                .contains_key(Path::new("source2.webm"))
+                .contains_key(Path::new("source1.webm"))
         );
-        assert_eq!(aggregated.start_timestamp, Duration::from_secs(10));
-        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(20));
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(15));
 
         Ok(())
     }
@@ -917,8 +925,15 @@ mod tests {
 
         aggregated.merge_overlapping_sources().or_fail()?;
 
-        // いずれか一つのソースが残るべき（同じ長さの場合は最初に遭遇したもの）
+        // 同じ長さの場合は開始時刻が早い方が残るべき
         assert_eq!(aggregated.media_paths.len(), 1);
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source1.webm"))
+        );
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(10));
 
         Ok(())
     }
