@@ -16,7 +16,10 @@ use crate::{
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     mixer_video::{VideoMixer, VideoMixerSpec},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader::VideoReader,
     scheduler::Scheduler,
     stats::ProcessorStats,
@@ -34,6 +37,7 @@ struct Args {
     distorted_yuv_file_path: Option<PathBuf>,
     vmaf_output_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
+    #[expect(dead_code)]
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
     timeout: Option<Duration>,
@@ -144,9 +148,6 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     } else {
         None
     };
-
-    // CPU コア数制限を適用
-    crate::arg_utils::maybe_limit_cpu_cores(args.max_cpu_cores).or_fail()?;
 
     // プロセッサを準備
     let mut scheduler = Scheduler::new();
@@ -449,6 +450,7 @@ impl MediaProcessor for FrameCountLimiter {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::other("frame-count-limiter"),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }
 
@@ -501,7 +503,8 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress-bar"),
+            stats: ProcessorStats::other("progress_bar"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

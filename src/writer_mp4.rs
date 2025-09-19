@@ -23,7 +23,10 @@ use crate::{
     layout::{Layout, Resolution},
     media::{MediaSample, MediaStreamId},
     mixer_audio::MIXED_AUDIO_DATA_DURATION,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{Mp4WriterStats, ProcessorStats},
     video::{FrameRate, VideoFrame},
 };
@@ -723,6 +726,7 @@ impl MediaProcessor for Mp4Writer {
                 .collect(),
             output_stream_ids: Vec::new(),
             stats: ProcessorStats::Mp4Writer(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

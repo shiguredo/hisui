@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use orfail::OrFail;
@@ -55,10 +56,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let mut registry = MediaStreamNameRegistry::new();
 
     // スケジューラーを作成
-    let mut scheduler = Scheduler::new();
-
     // TODO(atode): スレッド数やその割り当て方法は後でちゃんとする
-    scheduler.thread_count = std::num::NonZeroUsize::new(pipeline_def.pipeline.len()).or_fail()?;
+    let mut scheduler = Scheduler::with_thread_count(
+        NonZeroUsize::new(pipeline_def.pipeline.len()).unwrap_or(NonZeroUsize::MIN),
+    );
 
     // パイプライン内の各コンポーネントをプロセッサに変換してスケジューラーに登録
     for component in &pipeline_def.pipeline {

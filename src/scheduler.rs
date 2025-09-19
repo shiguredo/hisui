@@ -8,6 +8,7 @@ use orfail::OrFail;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
+    MediaProcessorWorkloadHint,
 };
 use crate::stats::{ProcessorStats, SharedAtomicFlag, Stats, WorkerThreadStats};
 
@@ -28,52 +29,49 @@ fn sync_channel_size() -> usize {
     size
 }
 
-// プロセッサーが入力ないし出力送信待ちでやることがない場合のスリープ時間。
-//
-// 値の細かい調整は不要な想定だが、いちおう、隠し設定として環境変数経由で変更可能にしておく。
-fn idle_thread_sleep_duration() -> Duration {
-    let ms = std::env::var("HISUI_IDLE_THREAD_SLEEP_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
-    log::debug!("IDLE_THREAD_SLEEP_MS={ms}");
-    Duration::from_millis(ms)
-}
-
 #[derive(Debug)]
 pub struct Task {
+    sequence_number: usize,
+    thread_number: usize,
     processor: BoxedMediaProcessor,
     input_stream_rxs: HashMap<MediaStreamId, MediaSampleReceiver>,
     output_stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     awaiting_input_stream_ids: Vec<MediaStreamId>,
     output_sample: Option<(MediaStreamId, usize, MediaSample)>,
     stats: ProcessorStats,
+    workload_hint: MediaProcessorWorkloadHint,
     finished: bool,
 }
 
 impl Task {
-    fn new<P>(processor: P) -> (Self, Vec<(MediaStreamId, MediaSampleSyncSender)>)
+    fn new<P>(
+        sequence_number: usize,
+        processor: P,
+    ) -> (Self, Vec<(MediaStreamId, MediaSampleSyncSender)>)
     where
         P: 'static + Send + MediaProcessor,
     {
         let mut input_stream_rxs = HashMap::new();
         let mut input_stream_txs = Vec::new();
 
+        let spec = processor.spec();
         let channel_size = sync_channel_size();
-        for input_stream_id in processor.spec().input_stream_ids {
+        for input_stream_id in spec.input_stream_ids {
             let (tx, rx) = mpsc::sync_channel(channel_size);
             input_stream_rxs.insert(input_stream_id, rx);
             input_stream_txs.push((input_stream_id, tx));
         }
 
-        let stats = processor.spec().stats;
         let task = Self {
+            sequence_number,
+            thread_number: 0, // 複数スレッドを使う場合には、後で再割り当てされる
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             output_stream_txs: HashMap::new(),
             awaiting_input_stream_ids: Vec::new(),
             output_sample: None,
-            stats,
+            stats: spec.stats,
+            workload_hint: spec.workload_hint,
             finished: false,
         };
         (task, input_stream_txs)
@@ -171,28 +169,30 @@ impl Task {
 #[derive(Debug)]
 pub struct Scheduler {
     tasks: Vec<Task>,
-    pub thread_count: NonZeroUsize, // TODO(atode): private にする
+    thread_count: NonZeroUsize,
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     stats: Stats,
 }
 
 impl Scheduler {
     pub fn new() -> Self {
+        Self::with_thread_count(NonZeroUsize::MIN)
+    }
+
+    pub fn with_thread_count(thread_count: NonZeroUsize) -> Self {
         Self {
             tasks: Vec::new(),
-            thread_count: NonZeroUsize::MIN,
+            thread_count,
             stream_txs: HashMap::new(),
             stats: Stats::default(),
         }
     }
-
     pub fn register<P>(&mut self, processor: P) -> orfail::Result<()>
     where
         P: 'static + Send + MediaProcessor,
     {
-        self.stats.processors.push(processor.spec().stats);
-
-        let (task, input_stream_txs) = Task::new(processor);
+        let (task, input_stream_txs) = Task::new(self.tasks.len(), processor);
+        self.stats.processors.push(task.stats.clone());
         self.tasks.push(task);
 
         for (id, tx) in input_stream_txs {
@@ -205,19 +205,48 @@ impl Scheduler {
     fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
         self.update_output_stream_txs().or_fail()?;
 
-        let mut tasks = self.tasks.into_iter().map(Some).collect::<Vec<_>>();
+        // コストが高い順にソートする
+        // なお、現時点では、I/O タスクは「コストが最低の CPU タスク」として扱っている
+        // （将来的に I/O タスクと特別扱いした方がいいようなユースケースが出てきたら、その時に扱いを変更する）
+        self.tasks.sort_by_key(|t| match t.workload_hint {
+            MediaProcessorWorkloadHint::IoIntensive => NonZeroUsize::MIN,
+            MediaProcessorWorkloadHint::CpuIntensive { cost } => cost,
+        });
+        self.tasks.reverse();
 
-        // TODO(atode): スレッドへの割り当て方法は後で改善する
+        // コストができるだけ均等になるように、タスクをスレッドに割り当てる
+        let mut thread_costs = vec![0; self.thread_count.get()];
+        for task in &mut self.tasks {
+            let cost = match task.workload_hint {
+                MediaProcessorWorkloadHint::IoIntensive => NonZeroUsize::MIN,
+                MediaProcessorWorkloadHint::CpuIntensive { cost } => cost,
+            };
+
+            // スレッド数は多くても高々数十なので、シンプルな線形探索を行う
+            let i = thread_costs
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, cost)| *cost) // 累積コストが一番低いスレッドを選ぶ
+                .or_fail()?
+                .0;
+            thread_costs[i] += cost.get();
+            task.thread_number = i;
+        }
+
         let mut handles = Vec::new();
         for i in 0..self.thread_count.get() {
             let mut worker_thread_stats = WorkerThreadStats::default();
             let mut thread_tasks = Vec::new();
-            for (j, task) in tasks.iter_mut().enumerate() {
-                if j % self.thread_count.get() != i {
-                    continue;
-                }
-                thread_tasks.push(task.take().or_fail()?);
-                worker_thread_stats.processors.push(j);
+
+            let mut j = 0;
+            while j < self.tasks.len() {
+                if self.tasks[j].thread_number == i {
+                    let task = self.tasks.swap_remove(j);
+                    worker_thread_stats.processors.push(task.sequence_number);
+                    thread_tasks.push(task);
+                } else {
+                    j += 1
+                };
             }
             if thread_tasks.is_empty() {
                 continue;
@@ -229,6 +258,8 @@ impl Scheduler {
             );
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
+
+            worker_thread_stats.processors.sort(); // JSON として出力する際の可読性向上用にソートする
             self.stats.worker_threads.push(worker_thread_stats);
         }
 
@@ -322,19 +353,18 @@ struct SchedulerHandle {
 #[derive(Debug)]
 struct TaskRunner {
     tasks: Vec<Task>,
-    sleep_duration: Duration,
     stats: WorkerThreadStats,
     error_flag: SharedAtomicFlag,
+    next_sleep_duration: Option<Duration>,
 }
 
 impl TaskRunner {
     fn new(tasks: Vec<Task>, stats: WorkerThreadStats, error_flag: SharedAtomicFlag) -> Self {
-        let sleep_duration = idle_thread_sleep_duration();
         Self {
             tasks,
-            sleep_duration,
             stats,
             error_flag,
+            next_sleep_duration: None,
         }
     }
 
@@ -372,9 +402,19 @@ impl TaskRunner {
             }
         }
 
-        if !did_something {
-            std::thread::sleep(self.sleep_duration);
-            self.stats.total_waiting_duration.add(self.sleep_duration);
+        if did_something {
+            self.next_sleep_duration = None;
+        } else if let Some(duration) = self.next_sleep_duration {
+            // 指数的バックオフを使ってスリープする
+            //
+            // 最大値は適当に大きめの値であればなんでもいい
+            const MAX_SLEEP_DURATION: Duration = Duration::from_millis(50);
+
+            std::thread::sleep(duration);
+            self.stats.total_waiting_duration.add(duration);
+            self.next_sleep_duration = Some((duration * 2).min(MAX_SLEEP_DURATION));
+        } else {
+            self.next_sleep_duration = Some(Duration::from_millis(1));
         }
     }
 }

@@ -9,7 +9,10 @@ use crate::{
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::TrimSpans,
     media::{MediaSample, MediaStreamId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{AudioMixerStats, ProcessorStats},
 };
 
@@ -128,6 +131,7 @@ impl MediaProcessor for AudioMixer {
             input_stream_ids: self.input_streams.keys().copied().collect(),
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::AudioMixer(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::AUDIO_MIXER,
         }
     }
 

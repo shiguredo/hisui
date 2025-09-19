@@ -11,7 +11,10 @@ use crate::{
     layout_region::Region,
     media::MediaStreamId,
     metadata::SourceId,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{ProcessorStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
@@ -361,6 +364,7 @@ impl MediaProcessor for VideoMixer {
             input_stream_ids: self.input_streams.keys().copied().collect(),
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::VideoMixer(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::VIDEO_MIXER,
         }
     }
 

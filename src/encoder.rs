@@ -20,7 +20,10 @@ use crate::{
     layout::Layout,
     layout_encode_params::LayoutEncodeParams,
     media::{MediaSample, MediaStreamId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
@@ -158,6 +161,7 @@ impl MediaProcessor for AudioEncoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::AudioEncoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::AUDIO_ENCODER,
         }
     }
 
@@ -364,6 +368,7 @@ impl MediaProcessor for VideoEncoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::VideoEncoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::VIDEO_ENCODER,
         }
     }
 

@@ -10,7 +10,10 @@ use crate::{
     media::MediaStreamId,
     mixer_audio::AudioMixer,
     mixer_video::{VideoMixer, VideoMixerSpec},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     stats::{ProcessorStats, Stats},
@@ -22,7 +25,7 @@ pub struct Composer {
     pub layout: Layout,
     pub openh264_lib: Option<Openh264Library>,
     pub show_progress_bar: bool,
-    pub max_cpu_cores: Option<NonZeroUsize>,
+    pub worker_threads: NonZeroUsize,
     pub stats_file_path: Option<PathBuf>,
 }
 
@@ -38,17 +41,14 @@ impl Composer {
             layout,
             openh264_lib: None,
             show_progress_bar: false,
-            max_cpu_cores: None,
+            worker_threads: NonZeroUsize::MIN,
             stats_file_path: None,
         }
     }
 
     pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
-        // 利用する CPU コア数を制限する
-        crate::arg_utils::maybe_limit_cpu_cores(self.max_cpu_cores).or_fail()?;
-
         // プロセッサを準備
-        let mut scheduler = Scheduler::new();
+        let mut scheduler = Scheduler::with_thread_count(self.worker_threads);
         let mut next_stream_id = MediaStreamId::new(0);
 
         // リーダーとデコーダーを登録
@@ -190,7 +190,8 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress-bar"),
+            stats: ProcessorStats::other("progress_bar"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

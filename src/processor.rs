@@ -48,10 +48,52 @@ impl MediaProcessor for BoxedMediaProcessor {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaProcessorWorkloadHint {
+    /// I/O集約的なプロセッサ
+    IoIntensive,
+
+    /// CPU集約的なプロセッサ
+    CpuIntensive {
+        /// プロセッサの処理の重さの目安
+        cost: std::num::NonZeroUsize,
+    },
+}
+
+impl MediaProcessorWorkloadHint {
+    // 各処理毎のワークロードヒントの値。
+    //
+    // これはヒューリスティックな値であって、実際のコストは入力やレイアウトによって
+    // 大きく変動する可能性がある。
+    //
+    // そういったケースにも対応するためには、プログラムの実行時に動的に値を決定するか、
+    // ワークスティールのように実際の負荷状況を考慮してのリバランシングが必要となる。
+    //
+    // そういった手法は実装も大変で、効果が見合うかどうかが不明なので、まずは
+    // 今のようなヒューリスティックな値を使って運用してみて、様子を見ることにする。
+    pub const READER: Self = Self::IoIntensive;
+    pub const WRITER: Self = Self::IoIntensive;
+    pub const CPU_MISC: Self = Self::cpu_intensive(1);
+    pub const AUDIO_DECODER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_MIXER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_ENCODER: Self = Self::cpu_intensive(1);
+    pub const VIDEO_DECODER: Self = Self::cpu_intensive(2);
+    pub const VIDEO_MIXER: Self = Self::cpu_intensive(10);
+    pub const VIDEO_ENCODER: Self = Self::cpu_intensive(10);
+    pub const PLUGIN: Self = Self::cpu_intensive(1); // TODO(atode): プラグイン側から取得するようにする
+
+    const fn cpu_intensive(cost: usize) -> Self {
+        Self::CpuIntensive {
+            cost: std::num::NonZeroUsize::new(cost).expect("bug"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
+    pub workload_hint: MediaProcessorWorkloadHint,
     pub stats: ProcessorStats,
 }
 
@@ -226,6 +268,7 @@ impl MediaProcessor for RealtimePacer {
             input_stream_ids: self.stream_ids.keys().copied().collect(),
             output_stream_ids: self.stream_ids.values().copied().collect(),
             stats: ProcessorStats::other("realtime_pacer"),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }
 
