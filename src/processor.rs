@@ -51,14 +51,11 @@ impl MediaProcessor for BoxedMediaProcessor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaProcessorWorkloadHint {
     /// I/O集約的なプロセッサ
-    ///
-    /// できるだけCPU集約的なプロセッサ群とは別のスレッドにまとめて配置される
     IoIntensive,
 
     /// CPU集約的なプロセッサ
     CpuIntensive {
         /// プロセッサの処理の重さの目安
-        /// 各スレッドが担当するコストの総量ができるだけ均等になるように配置される
         cost: std::num::NonZeroUsize,
     },
 }
