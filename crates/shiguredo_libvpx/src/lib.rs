@@ -208,8 +208,15 @@ impl Decoder {
             }
             let image = &*image;
 
-            // 画像フォーマットは I420 である前提
-            assert_eq!(image.fmt, sys::vpx_img_fmt_VPX_IMG_FMT_I420);
+            // 画像フォーマットは I420 または high-depth バージョンである前提
+            assert!(
+                matches!(
+                    image.fmt,
+                    sys::vpx_img_fmt_VPX_IMG_FMT_I420 | sys::vpx_img_fmt_VPX_IMG_FMT_I42016
+                ),
+                "unexpected image format: {:?}",
+                image.fmt
+            );
 
             Some(DecodedFrame(image))
         }
@@ -236,19 +243,29 @@ impl std::fmt::Debug for Decoder {
 pub struct DecodedFrame<'a>(&'a sys::vpx_image);
 
 impl DecodedFrame<'_> {
+    /// フレームが高ビット深度（16ビット）かどうかを返す
+    pub fn is_high_depth(&self) -> bool {
+        self.0.fmt == sys::vpx_img_fmt_VPX_IMG_FMT_I42016
+    }
+
     /// フレームの Y 成分のデータを返す
     pub fn y_plane(&self) -> &[u8] {
         unsafe {
-            std::slice::from_raw_parts(self.0.planes[0], self.0.d_h as usize * self.y_stride())
+            let bytes_per_sample = if self.is_high_depth() { 2 } else { 1 };
+            std::slice::from_raw_parts(
+                self.0.planes[0],
+                self.0.d_h as usize * self.y_stride() * bytes_per_sample,
+            )
         }
     }
 
     /// フレームの U 成分のデータを返す
     pub fn u_plane(&self) -> &[u8] {
         unsafe {
+            let bytes_per_sample = if self.is_high_depth() { 2 } else { 1 };
             std::slice::from_raw_parts(
                 self.0.planes[1],
-                self.0.d_h.div_ceil(2) as usize * self.u_stride(),
+                self.0.d_h.div_ceil(2) as usize * self.u_stride() * bytes_per_sample,
             )
         }
     }
@@ -256,9 +273,10 @@ impl DecodedFrame<'_> {
     /// フレームの V 成分のデータを返す
     pub fn v_plane(&self) -> &[u8] {
         unsafe {
+            let bytes_per_sample = if self.is_high_depth() { 2 } else { 1 };
             std::slice::from_raw_parts(
                 self.0.planes[2],
-                self.0.d_h.div_ceil(2) as usize * self.v_stride(),
+                self.0.d_h.div_ceil(2) as usize * self.v_stride() * bytes_per_sample,
             )
         }
     }
