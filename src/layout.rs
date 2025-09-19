@@ -328,8 +328,8 @@ impl RawLayout {
 
         let trim_spans = decide_trim_spans(&sources, !self.trim);
 
-        for source in sources.values() {
-            source.validate_duplicate_timestamp().or_fail()?;
+        for source in sources.values_mut() {
+            source.merge_overlapping_sources().or_fail()?;
         }
 
         Ok(Layout {
@@ -666,23 +666,101 @@ impl AggregatedSourceInfo {
             .insert(media_path.to_path_buf(), source_info.clone());
     }
 
-    pub fn validate_duplicate_timestamp(&self) -> orfail::Result<()> {
-        let mut known = BTreeSet::new();
-        for source in self.media_paths.values() {
-            known
-                .insert((source.start_timestamp, source.stop_timestamp))
-                .or_fail_with(|()| {
-                    format!(
-                        concat!(
-                            "duplicate timestamp detected for source '{}': ",
-                            "start_timestamp_seconds={}, stop_timestamp_seconds={}"
-                        ),
-                        self.id.get(),
-                        source.start_timestamp.as_secs_f32(),
-                        source.stop_timestamp.as_secs_f32(),
-                    )
-                })?;
+    // 重なる期間（包含関係）があるソースは長い方を採用する（一括録画と分割録画のファイルを統合できるように）
+    pub fn merge_overlapping_sources(&mut self) -> orfail::Result<()> {
+        let mut sources_by_timespan: Vec<(Duration, Duration, PathBuf, SourceInfo)> = self
+            .media_paths
+            .iter()
+            .map(|(path, info)| {
+                (
+                    info.start_timestamp,
+                    info.stop_timestamp,
+                    path.clone(),
+                    info.clone(),
+                )
+            })
+            .collect();
+
+        // 開始時刻でソート、次に長さでソート（長い方が先）
+        sources_by_timespan.sort_by(|a, b| {
+            a.0.cmp(&b.0).then_with(|| {
+                let duration_a = a.1.saturating_sub(a.0);
+                let duration_b = b.1.saturating_sub(b.0);
+                duration_b.cmp(&duration_a) // 長い方が先
+            })
+        });
+
+        let mut merged_sources = BTreeMap::new();
+
+        for (start, stop, path, info) in sources_by_timespan {
+            let mut should_add = true;
+            let mut paths_to_remove = Vec::new();
+
+            // 既存のソースとの重複をチェック
+            for (existing_path, existing_info) in &merged_sources {
+                let existing_start = existing_info.start_timestamp;
+                let existing_stop = existing_info.stop_timestamp;
+
+                // 重複があるかチェック
+                let has_overlap = start < existing_stop && stop > existing_start;
+
+                if has_overlap {
+                    let current_duration = stop.saturating_sub(start);
+                    let existing_duration = existing_stop.saturating_sub(existing_start);
+
+                    // どちらかが完全に包含しているかチェック
+                    let current_contains_existing =
+                        start <= existing_start && stop >= existing_stop;
+                    let existing_contains_current =
+                        existing_start <= start && existing_stop >= stop;
+
+                    if current_contains_existing {
+                        // 現在のソースが長く、既存のソースを含んでいる
+                        paths_to_remove.push(existing_path.clone());
+                    } else if existing_contains_current {
+                        // 既存のソースが長く、現在のソースを含んでいる
+                        should_add = false;
+                        break;
+                    } else if current_duration > existing_duration {
+                        // 現在のソースが長いが完全に包含はしていない場合
+                        // 部分的重複の場合は長い方を優先
+                        paths_to_remove.push(existing_path.clone());
+                    } else {
+                        // 既存のソースが長いか同じ長さなので、現在のソースをスキップ
+                        should_add = false;
+                        break;
+                    }
+                }
+            }
+
+            // 重複した短いソースを削除
+            for path_to_remove in paths_to_remove {
+                merged_sources.remove(&path_to_remove);
+            }
+
+            // 現在のソースを追加すべきかどうか
+            if should_add {
+                merged_sources.insert(path, info);
+            }
         }
+
+        // マージされたソースでmedia_pathsを更新
+        self.media_paths = merged_sources;
+
+        // 残ったソースに基づいて開始・終了タイムスタンプを再計算
+        if let Some((min_start, max_stop)) = self
+            .media_paths
+            .values()
+            .map(|info| (info.start_timestamp, info.stop_timestamp))
+            .fold(None, |acc, (start, stop)| match acc {
+                None => Some((start, stop)),
+                Some((min_start, max_stop)) => Some((min_start.min(start), max_stop.max(stop))),
+            })
+        {
+            self.start_timestamp = min_start;
+            self.stop_timestamp = max_stop;
+        }
+
         Ok(())
     }
 
