@@ -690,8 +690,7 @@ impl AggregatedSourceInfo {
             })
         });
 
-        let mut merged_sources = BTreeMap::new();
-
+        let mut merged_sources: BTreeMap<PathBuf, SourceInfo> = BTreeMap::new();
         for (start, stop, path, info) in sources_by_timespan {
             let mut should_add = true;
             let mut paths_to_remove = Vec::new();
