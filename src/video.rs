@@ -181,6 +181,96 @@ impl VideoFrame {
         }
     }
 
+    /// 16 ビット高ビット深度 YUV データから I420 VideoFrame を作成
+    #[expect(clippy::too_many_arguments)]
+    pub fn new_i420_from_high_depth(
+        input_frame: Self,
+        width: usize,
+        height: usize,
+        y_plane_16: &[u8],
+        u_plane_16: &[u8],
+        v_plane_16: &[u8],
+        y_stride: usize,
+        u_stride: usize,
+        v_stride: usize,
+    ) -> Self {
+        let (y_size, _, _) = Self::i420_plane_sizes(width, height);
+        let (uv_width, uv_height) = Self::i420_uv_dimensions(width, height);
+        let uv_size = uv_width * uv_height;
+        let mut data = Vec::with_capacity(Self::i420_total_size(width, height));
+
+        // Y プレーンを 16 ビットから 8 ビットに変換
+        if width * 2 == y_stride {
+            // パディングなし、チャンク単位で処理可能
+            for chunk in y_plane_16[..y_size * 2].chunks_exact(2) {
+                let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
+                let value_8 = (value_16 >> 8) as u8; // ダウンサンプリングのため MSB を取得
+                data.push(value_8);
+            }
+        } else {
+            // ストライドにパディングがある場合の処理
+            for row in 0..height {
+                let row_start = row * y_stride;
+                let row_data = &y_plane_16[row_start..row_start + width * 2];
+                for chunk in row_data.chunks_exact(2) {
+                    let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    let value_8 = (value_16 >> 8) as u8;
+                    data.push(value_8);
+                }
+            }
+        }
+
+        // U プレーンを 16 ビットから 8 ビットに変換
+        if uv_width * 2 == u_stride {
+            for chunk in u_plane_16[..uv_size * 2].chunks_exact(2) {
+                let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
+                let value_8 = (value_16 >> 8) as u8;
+                data.push(value_8);
+            }
+        } else {
+            for row in 0..uv_height {
+                let row_start = row * u_stride;
+                let row_data = &u_plane_16[row_start..row_start + uv_width * 2];
+                for chunk in row_data.chunks_exact(2) {
+                    let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    let value_8 = (value_16 >> 8) as u8;
+                    data.push(value_8);
+                }
+            }
+        }
+
+        // V プレーンを 16 ビットから 8 ビットに変換
+        if uv_width * 2 == v_stride {
+            for chunk in v_plane_16[..uv_size * 2].chunks_exact(2) {
+                let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
+                let value_8 = (value_16 >> 8) as u8;
+                data.push(value_8);
+            }
+        } else {
+            for row in 0..uv_height {
+                let row_start = row * v_stride;
+                let row_data = &v_plane_16[row_start..row_start + uv_width * 2];
+                for chunk in row_data.chunks_exact(2) {
+                    let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    let value_8 = (value_16 >> 8) as u8;
+                    data.push(value_8);
+                }
+            }
+        }
+
+        Self {
+            source_id: input_frame.source_id,
+            sample_entry: None, // 生データにはサンプルエントリは存在しない
+            data,
+            format: VideoFormat::I420,
+            keyframe: true, // 生データは全てキーフレーム扱い
+            width,
+            height,
+            timestamp: input_frame.timestamp,
+            duration: input_frame.duration,
+        }
+    }
+
     pub fn mono_color(rgb: [u8; 3], width: EvenUsize, height: EvenUsize) -> Self {
         if rgb == [0, 0, 0] {
             // 典型的なユースケースでは最適化された実装を使う
