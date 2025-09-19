@@ -258,21 +258,16 @@ impl DecodedFrame<'_> {
     /// フレームの Y 成分のデータを返す
     pub fn y_plane(&self) -> &[u8] {
         unsafe {
-            let bytes_per_sample = if self.is_high_depth() { 2 } else { 1 };
-            std::slice::from_raw_parts(
-                self.0.planes[0],
-                self.0.d_h as usize * self.y_stride() * bytes_per_sample,
-            )
+            std::slice::from_raw_parts(self.0.planes[0], self.0.d_h as usize * self.y_stride())
         }
     }
 
     /// フレームの U 成分のデータを返す
     pub fn u_plane(&self) -> &[u8] {
         unsafe {
-            let bytes_per_sample = if self.is_high_depth() { 2 } else { 1 };
             std::slice::from_raw_parts(
                 self.0.planes[1],
-                self.0.d_h.div_ceil(2) as usize * self.u_stride() * bytes_per_sample,
+                self.0.d_h.div_ceil(2) as usize * self.u_stride(),
             )
         }
     }
@@ -280,10 +275,9 @@ impl DecodedFrame<'_> {
     /// フレームの V 成分のデータを返す
     pub fn v_plane(&self) -> &[u8] {
         unsafe {
-            let bytes_per_sample = if self.is_high_depth() { 2 } else { 1 };
             std::slice::from_raw_parts(
                 self.0.planes[2],
-                self.0.d_h.div_ceil(2) as usize * self.v_stride() * bytes_per_sample,
+                self.0.d_h.div_ceil(2) as usize * self.v_stride(),
             )
         }
     }
