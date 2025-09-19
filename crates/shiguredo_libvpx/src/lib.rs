@@ -208,8 +208,15 @@ impl Decoder {
             }
             let image = &*image;
 
-            // 画像フォーマットは I420 である前提
-            assert_eq!(image.fmt, sys::vpx_img_fmt_VPX_IMG_FMT_I420);
+            // 画像フォーマットは I420 または high-depth バージョンである前提
+            assert!(
+                matches!(
+                    image.fmt,
+                    sys::vpx_img_fmt_VPX_IMG_FMT_I420 | sys::vpx_img_fmt_VPX_IMG_FMT_I42016
+                ),
+                "unexpected image format: {:?}",
+                image.fmt
+            );
 
             Some(DecodedFrame(image))
         }
@@ -236,6 +243,18 @@ impl std::fmt::Debug for Decoder {
 pub struct DecodedFrame<'a>(&'a sys::vpx_image);
 
 impl DecodedFrame<'_> {
+    /// フレームが高ビット深度（16ビット）かどうかを返す
+    //
+    // libvpx での高ビット深度フォーマットについてのメモ：
+    // - libvpx は VP9 の 10-bit プロファイル（Profile 2 など）をサポート
+    // - 高ビット深度データは 16-bit リトルエンディアン形式で格納される
+    // - 実際の値範囲は 10-bit (0-1023) だが、上位6ビットは未使用
+    // - YUV420 サブサンプリングは通常の 8-bit と同様に適用される
+    // - ストライドは 16-bit 単位（バイト数は width * 2）で計算される
+    pub fn is_high_depth(&self) -> bool {
+        self.0.fmt == sys::vpx_img_fmt_VPX_IMG_FMT_I42016
+    }
+
     /// フレームの Y 成分のデータを返す
     pub fn y_plane(&self) -> &[u8] {
         unsafe {

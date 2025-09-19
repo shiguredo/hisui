@@ -47,17 +47,36 @@ impl LibvpxDecoder {
 
     fn handle_decoded_frames(&mut self) -> orfail::Result<()> {
         while let Some(image) = self.inner.next_frame() {
-            self.output_queue.push_back(VideoFrame::new_i420(
-                self.input_queue.pop_front().or_fail()?,
-                image.width(),
-                image.height(),
-                image.y_plane(),
-                image.u_plane(),
-                image.v_plane(),
-                image.y_stride(),
-                image.u_stride(),
-                image.v_stride(),
-            ));
+            if image.is_high_depth() {
+                // 高ビット深度データの処理
+                self.output_queue.push_back(
+                    VideoFrame::new_i420_from_high_depth(
+                        self.input_queue.pop_front().or_fail()?,
+                        image.width(),
+                        image.height(),
+                        image.y_plane(),
+                        image.u_plane(),
+                        image.v_plane(),
+                        image.y_stride(),
+                        image.u_stride(),
+                        image.v_stride(),
+                    )
+                    .or_fail()?,
+                );
+            } else {
+                // 通常の 8 ビット I420 データの処理
+                self.output_queue.push_back(VideoFrame::new_i420(
+                    self.input_queue.pop_front().or_fail()?,
+                    image.width(),
+                    image.height(),
+                    image.y_plane(),
+                    image.u_plane(),
+                    image.v_plane(),
+                    image.y_stride(),
+                    image.u_stride(),
+                    image.v_stride(),
+                ));
+            }
         }
         Ok(())
     }
