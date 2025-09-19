@@ -181,7 +181,8 @@ impl VideoFrame {
         }
     }
 
-    /// 16 ビット高ビット深度 YUV データから I420 VideoFrame を作成
+    /// 10 ビット高ビット深度 YUV データから I420 VideoFrame を作成
+    /// libvpx は 10-bit 前提のため、10-bit -> 8-bit 変換に特化
     #[expect(clippy::too_many_arguments)]
     pub fn new_i420_from_high_depth(
         input_frame: Self,
@@ -193,72 +194,122 @@ impl VideoFrame {
         y_stride: usize,
         u_stride: usize,
         v_stride: usize,
-    ) -> Self {
+    ) -> orfail::Result<Self> {
         let (y_size, _, _) = Self::i420_plane_sizes(width, height);
         let (uv_width, uv_height) = Self::i420_uv_dimensions(width, height);
         let uv_size = uv_width * uv_height;
         let mut data = Vec::with_capacity(Self::i420_total_size(width, height));
 
-        // Y プレーンを 16 ビットから 8 ビットに変換
+        // 10-bit (0-1023) から 8-bit (0-255) への変換
+        // 正確なスケーリング: (value * 255 + 511) / 1023
+        let convert_10bit_to_8bit =
+            |value_16: u16| -> u8 { ((value_16 as u32 * 255 + 511) / 1023) as u8 };
+
+        // Y プレーンを 10-bit から 8-bit に変換
         if width * 2 == y_stride {
             // パディングなし、チャンク単位で処理可能
+            if y_plane_16.len() < y_size * 2 {
+                return Err(orfail::Failure::new(format!(
+                    "Y plane data insufficient: expected {} bytes, got {}",
+                    y_size * 2,
+                    y_plane_16.len()
+                )));
+            }
             for chunk in y_plane_16[..y_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
-                let value_8 = (value_16 >> 8) as u8; // ダウンサンプリングのため MSB を取得
+                let value_8 = convert_10bit_to_8bit(value_16);
                 data.push(value_8);
             }
         } else {
             // ストライドにパディングがある場合の処理
             for row in 0..height {
                 let row_start = row * y_stride;
+                if row_start + width * 2 > y_plane_16.len() {
+                    return Err(orfail::Failure::new(format!(
+                        "Y plane data insufficient: row {} requires {} bytes but only {} available",
+                        row,
+                        row_start + width * 2,
+                        y_plane_16.len()
+                    )));
+                }
                 let row_data = &y_plane_16[row_start..row_start + width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    let value_8 = (value_16 >> 8) as u8;
+                    let value_8 = convert_10bit_to_8bit(value_16);
                     data.push(value_8);
                 }
             }
         }
 
-        // U プレーンを 16 ビットから 8 ビットに変換
+        // U プレーンを 10-bit から 8-bit に変換
         if uv_width * 2 == u_stride {
+            if u_plane_16.len() < uv_size * 2 {
+                return Err(orfail::Failure::new(format!(
+                    "U plane data insufficient: expected {} bytes, got {}",
+                    uv_size * 2,
+                    u_plane_16.len()
+                )));
+            }
             for chunk in u_plane_16[..uv_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
-                let value_8 = (value_16 >> 8) as u8;
+                let value_8 = convert_10bit_to_8bit(value_16);
                 data.push(value_8);
             }
         } else {
             for row in 0..uv_height {
                 let row_start = row * u_stride;
+                if row_start + uv_width * 2 > u_plane_16.len() {
+                    return Err(orfail::Failure::new(format!(
+                        "U plane data insufficient: row {} requires {} bytes but only {} available",
+                        row,
+                        row_start + uv_width * 2,
+                        u_plane_16.len()
+                    )));
+                }
                 let row_data = &u_plane_16[row_start..row_start + uv_width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    let value_8 = (value_16 >> 8) as u8;
+                    let value_8 = convert_10bit_to_8bit(value_16);
                     data.push(value_8);
                 }
             }
         }
 
-        // V プレーンを 16 ビットから 8 ビットに変換
+        // V プレーンを 10-bit から 8-bit に変換
         if uv_width * 2 == v_stride {
+            if v_plane_16.len() < uv_size * 2 {
+                return Err(orfail::Failure::new(format!(
+                    "V plane data insufficient: expected {} bytes, got {}",
+                    uv_size * 2,
+                    v_plane_16.len()
+                )));
+            }
             for chunk in v_plane_16[..uv_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
-                let value_8 = (value_16 >> 8) as u8;
+                let value_8 = convert_10bit_to_8bit(value_16);
                 data.push(value_8);
             }
         } else {
             for row in 0..uv_height {
                 let row_start = row * v_stride;
+                if row_start + uv_width * 2 > v_plane_16.len() {
+                    return Err(orfail::Failure::new(format!(
+                        "V plane data insufficient: row {} requires {} bytes but only {} available",
+                        row,
+                        row_start + uv_width * 2,
+                        v_plane_16.len()
+                    )));
+                }
                 let row_data = &v_plane_16[row_start..row_start + uv_width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    let value_8 = (value_16 >> 8) as u8;
+                    let value_8 = convert_10bit_to_8bit(value_16);
                     data.push(value_8);
                 }
             }
         }
 
-        Self {
+        Ok(Self {
             source_id: input_frame.source_id,
             sample_entry: None, // 生データにはサンプルエントリは存在しない
             data,
@@ -268,7 +319,7 @@ impl VideoFrame {
             height,
             timestamp: input_frame.timestamp,
             duration: input_frame.duration,
-        }
+        })
     }
 
     pub fn mono_color(rgb: [u8; 3], width: EvenUsize, height: EvenUsize) -> Self {

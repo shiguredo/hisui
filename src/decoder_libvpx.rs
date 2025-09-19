@@ -49,8 +49,8 @@ impl LibvpxDecoder {
         while let Some(image) = self.inner.next_frame() {
             if image.is_high_depth() {
                 // 16 ビット高ビット深度データの処理
-                self.output_queue
-                    .push_back(VideoFrame::new_i420_from_high_depth(
+                self.output_queue.push_back(
+                    VideoFrame::new_i420_from_high_depth(
                         self.input_queue.pop_front().or_fail()?,
                         image.width(),
                         image.height(),
@@ -60,7 +60,9 @@ impl LibvpxDecoder {
                         image.y_stride(),
                         image.u_stride(),
                         image.v_stride(),
-                    ));
+                    )
+                    .or_fail()?,
+                );
             } else {
                 // 通常の 8 ビット I420 データの処理
                 self.output_queue.push_back(VideoFrame::new_i420(
