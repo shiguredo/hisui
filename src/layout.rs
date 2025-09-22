@@ -954,13 +954,17 @@ mod tests {
 
         aggregated.merge_overlapping_sources().or_fail()?;
 
-        // source2は source1の終了時刻10と同じタイミングで開始するため除外される（< 条件）
-        // source3は source1の終了時刻10より後に開始するため残る
-        assert_eq!(aggregated.media_paths.len(), 2);
+        // 境界で接触するソースは重複とみなさないため、すべてのソースが残る
+        assert_eq!(aggregated.media_paths.len(), 3);
         assert!(
             aggregated
                 .media_paths
                 .contains_key(Path::new("source1.webm"))
+        );
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source2.webm"))
         );
         assert!(
             aggregated
