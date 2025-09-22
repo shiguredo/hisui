@@ -930,7 +930,7 @@ mod tests {
 
         aggregated.merge_overlapping_sources().or_fail()?;
 
-        // 新しい実装では同じ開始時刻の場合、長い方（終了時刻が後の方）が優先される
+        // 同じ開始時刻の場合、長い方（終了時刻が後の方）が優先される
         assert_eq!(aggregated.media_paths.len(), 1);
         assert!(aggregated.media_paths.contains_key(Path::new("long.webm")));
         assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
