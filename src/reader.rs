@@ -140,6 +140,7 @@ impl MediaProcessor for AudioReader {
                         return Ok(MediaProcessorOutput::Finished);
                     }
                     self.timestamp_offset = self.next_timestamp_offset;
+                    self.inner.set_timestamp_offset(self.timestamp_offset);
                 }
                 Some(Err(e)) => return Err(e),
                 Some(Ok(mut data)) => {
@@ -166,6 +167,13 @@ impl AudioReaderInner {
         match self {
             Self::Mp4(r) => ProcessorStats::Mp4AudioReader(r.stats().clone()),
             Self::Webm(r) => ProcessorStats::WebmAudioReader(r.stats().clone()),
+        }
+    }
+
+    fn set_timestamp_offset(&self, offset: Duration) {
+        match self {
+            Self::Mp4(r) => r.stats().track_duration_offset.set(offset),
+            Self::Webm(r) => r.stats().track_duration_offset.set(offset),
         }
     }
 }
@@ -297,6 +305,7 @@ impl MediaProcessor for VideoReader {
                         return Ok(MediaProcessorOutput::Finished);
                     }
                     self.timestamp_offset = self.next_timestamp_offset;
+                    self.inner.set_timestamp_offset(self.timestamp_offset);
                 }
                 Some(Err(e)) => return Err(e),
                 Some(Ok(mut frame)) => {
@@ -324,6 +333,13 @@ impl VideoReaderInner {
         match self {
             Self::Mp4(r) => ProcessorStats::Mp4VideoReader(r.stats().clone()),
             Self::Webm(r) => ProcessorStats::WebmVideoReader(r.stats().clone()),
+        }
+    }
+
+    fn set_timestamp_offset(&self, offset: Duration) {
+        match self {
+            Self::Mp4(r) => r.stats().track_duration_offset.set(offset),
+            Self::Webm(r) => r.stats().track_duration_offset.set(offset),
         }
     }
 }

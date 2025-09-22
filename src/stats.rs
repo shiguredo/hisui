@@ -650,6 +650,9 @@ pub struct Mp4AudioReaderStats {
     /// 入力ファイルに含まれる音声トラックの尺
     pub total_track_duration: SharedAtomicDuration,
 
+    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
+    pub track_duration_offset: SharedAtomicDuration,
+
     /// 入力処理部分に掛かった時間
     pub total_processing_duration: SharedAtomicDuration,
 
@@ -672,7 +675,7 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             f.member("total_sample_count", self.total_sample_count.get())?;
             f.member(
                 "total_track_seconds",
-                self.total_track_duration.get().as_secs_f32(),
+                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
@@ -707,6 +710,9 @@ pub struct Mp4VideoReaderStats {
 
     /// 入力ファイルに含まれる映像トラックの尺
     pub total_track_duration: SharedAtomicDuration,
+
+    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
+    pub track_duration_offset: SharedAtomicDuration,
 
     /// 入力処理部分に掛かった時間
     pub total_processing_duration: SharedAtomicDuration,
@@ -743,7 +749,7 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
             f.member("total_sample_count", self.total_sample_count.get())?;
             f.member(
                 "total_track_seconds",
-                self.total_track_duration.get().as_secs_f32(),
+                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
@@ -779,6 +785,9 @@ pub struct WebmAudioReaderStats {
     /// 入力ファイルに含まれる音声トラックの尺
     pub total_track_duration: SharedAtomicDuration,
 
+    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
+    pub track_duration_offset: SharedAtomicDuration,
+
     /// 入力処理部分に掛かった時間
     pub total_processing_duration: SharedAtomicDuration,
 
@@ -805,7 +814,7 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
             )?;
             f.member(
                 "total_track_seconds",
-                self.total_track_duration.get().as_secs_f32(),
+                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
@@ -841,6 +850,9 @@ pub struct WebmVideoReaderStats {
     /// 入力ファイルに含まれる映像トラックの尺
     pub total_track_duration: SharedAtomicDuration,
 
+    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
+    pub track_duration_offset: SharedAtomicDuration,
+
     /// 入力処理部分に掛かった時間
     pub total_processing_duration: SharedAtomicDuration,
 
@@ -867,7 +879,7 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
             )?;
             f.member(
                 "total_track_seconds",
-                self.total_track_duration.get().as_secs_f32(),
+                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
             )?;
             f.member(
                 "total_processing_seconds",
