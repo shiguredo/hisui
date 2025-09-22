@@ -2,11 +2,18 @@
 
 このドキュメントは [C++ で実装されている 2024.1.1 以前の Hisui][hisui-legacy] から Rust で
 書き直された 2025.1.0 の Hisui への移行方法を説明するものです。
-なお、このドキュメントでは、前者と後者をそれぞれ「レガシー Hisui」および「新 Hisui」と呼称します。
+このドキュメントでは、前者と後者をそれぞれ「レガシー Hisui」および「新 Hisui」と呼称します。
+
+新 Hisui は実装言語が変更されただけではなく、さまざまな点でレガシー Hisui とは異なっています。
+互換性は可能な限りを維持されてはいますが、レガシー Hisui のユーザーは
+新 Hisui に切り替える前に、このドキュメントに一通り目を通すことをおすすめします。
 
 [hisui-legacy]: https://github.com/shiguredo/hisui-legacy
 
 ## 基本的な移行方法
+
+新 Hisui はレガシー Hisui との
+ [`hisui legacy`](./command_legacy.md)
 
 MEMO:
 - コマンドラインインタフェースの差異
