@@ -139,6 +139,7 @@ impl MediaProcessor for AudioReader {
                     if !self.start_next_input_file().or_fail()? {
                         return Ok(MediaProcessorOutput::Finished);
                     }
+                    self.timestamp_offset = self.next_timestamp_offset;
                 }
                 Some(Err(e)) => return Err(e),
                 Some(Ok(mut data)) => {
@@ -295,6 +296,7 @@ impl MediaProcessor for VideoReader {
                     if !self.start_next_input_file().or_fail()? {
                         return Ok(MediaProcessorOutput::Finished);
                     }
+                    self.timestamp_offset = self.next_timestamp_offset;
                 }
                 Some(Err(e)) => return Err(e),
                 Some(Ok(mut frame)) => {
