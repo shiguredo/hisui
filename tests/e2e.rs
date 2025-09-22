@@ -358,6 +358,136 @@ fn simple_multi_sources() -> noargs::Result<()> {
     Ok(())
 }
 
+/// 分割録画の変換テスト
+/// - 同一接続から時系列で分割された複数のソースファイル（R -> G -> B）を一つにまとめる
+/// - 各ソースファイルは16x16の解像度
+/// - レイアウトファイルで縦に並べて配置
+#[test]
+fn simple_split_archive() -> noargs::Result<()> {
+    // 変換を実行
+    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let args = Args::parse(noargs::RawArgs::new(
+        [
+            "hisui",
+            "--show-progress-bar=false",
+            "--layout",
+            "testdata/e2e/simple_split_archive/layout.jsonc",
+            "--out-file",
+            &out_file.path().display().to_string(),
+        ]
+        .into_iter()
+        .map(|s| s.to_string()),
+    ))?;
+    Runner::new(args).run()?;
+
+    // 変換結果ファイルを読み込む
+    assert!(out_file.path().exists());
+    let mut audio_reader =
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats()).or_fail()?;
+    let mut video_reader =
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+
+    // 後でデコードするために読み込み結果を覚えておく
+    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+
+    // 統計値を確認
+    let audio_stats = audio_reader.stats();
+    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+
+    // 分割ファイルが3つ（各1秒）なので合計3秒分 + 3サンプル (25 ms * 3)
+    assert_eq!(audio_stats.total_sample_count.get(), 153); // 51 * 3
+    assert_eq!(
+        audio_stats.total_track_duration.get(),
+        Duration::from_millis(3060) // 1020 * 3
+    );
+
+    let video_stats = video_reader.stats();
+    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(
+        video_stats
+            .resolutions
+            .get()
+            .into_iter()
+            .map(|r| (r.width, r.height))
+            .collect::<Vec<_>>(),
+        [(16, 16)] // 単一ソース（分割された部分）なので16x16
+    );
+
+    // 3秒分 (25 fps = 40 ms * 75フレーム)
+    assert_eq!(video_stats.total_sample_count.get(), 75); // 25 * 3
+    assert_eq!(
+        video_stats.total_track_duration.get(),
+        Duration::from_secs(3)
+    );
+
+    // 音声をデコードをして中身を確認する
+    let mut decoder = OpusDecoder::new().or_fail()?;
+    for data in audio_samples {
+        let decoded = decoder.decode(&data).or_fail()?;
+
+        // 無音期間があるのは想定外
+        assert!(!decoded.data.iter().all(|v| *v == 0));
+    }
+
+    // 映像をデコードをして中身を確認する
+    // 時系列順に R -> G -> B の色変化を確認
+    let check_decoded_frames =
+        |decoder: &mut LibvpxDecoder, frame_index: &mut usize| -> orfail::Result<()> {
+            while let Some(decoded) = decoder.next_decoded_frame() {
+                // Y成分だけを確認して色の変化を検証
+                let (y_plane, _u_plane, _v_plane) = decoded.as_yuv_planes().or_fail()?;
+
+                // フレーム番号に基づいて期待される色を判定
+                // 0-24: 赤, 25-49: 緑, 50-74: 青
+                if *frame_index < 25 {
+                    // 赤色の期間
+                    y_plane.iter().for_each(|&y| {
+                        assert!(
+                            matches!(y, 80..=82),
+                            "Expected red Y value, got y={y} at frame {}",
+                            *frame_index
+                        );
+                    });
+                } else if *frame_index < 50 {
+                    // 緑色の期間
+                    y_plane.iter().for_each(|&y| {
+                        assert!(
+                            matches!(y, 186..=189),
+                            "Expected green Y value, got y={y} at frame {}",
+                            *frame_index
+                        );
+                    });
+                } else if *frame_index < 75 {
+                    // 青色の期間
+                    y_plane.iter().for_each(|&y| {
+                        assert!(
+                            matches!(y, 40..=42),
+                            "Expected blue Y value, got y={y} at frame {}",
+                            *frame_index
+                        );
+                    });
+                }
+                *frame_index += 1;
+            }
+            Ok(())
+        };
+
+    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    let mut frame_index = 0;
+    for frame in video_samples {
+        decoder.decode(&frame).or_fail()?;
+        check_decoded_frames(&mut decoder, &mut frame_index).or_fail()?;
+    }
+    decoder.finish().or_fail()?;
+    check_decoded_frames(&mut decoder, &mut frame_index).or_fail()?;
+
+    // 全フレームが処理されたことを確認
+    assert_eq!(frame_index, 75);
+
+    Ok(())
+}
+
 /// 複数のソースをレイアウト指定で、縦に並べて変換する場合
 #[test]
 fn multi_sources_single_column() -> noargs::Result<()> {
