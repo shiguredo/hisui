@@ -2,8 +2,10 @@
 // レイアウトファイルの仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_spec.md
 {
   // 音声の合成方法の指定（全てのソースを合成する）
+  // 
+  // NOTE: 分割録画も扱えるように先頭にも '*' を指定している
   "audio_sources": [
-    "archive*.json"
+    "*archive*.json"
   ],
 
   // 映像の合成方法の指定
@@ -16,7 +18,8 @@
       "cell_height": 240,
       "max_columns": 3,
       "video_sources": [
-        "archive*.json"
+        // NOTE: 分割録画も扱えるように先頭にも '*' を指定している
+        "*archive*.json"
       ]
     }
   },
