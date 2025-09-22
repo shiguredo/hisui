@@ -32,7 +32,7 @@ $ hisui legacy -f /path/to/report.json ...その他の引数...
 
 ## 相違点: 廃止された機能
 
-### 実験的なコマンドライン引数は完全に廃止
+### 実験的なコマンドライン引数は廃止
 
 レガシー Hisui で実験的な扱いであったり、ドキュメントに記載がなかったりした引数は、新 Hisui では完全に廃止されました。
 これらの引数が指定された場合には、コマンドライン引数のパース時にエラーになります。
@@ -41,6 +41,13 @@ $ hisui legacy -f /path/to/report.json ...その他の引数...
 
 出力形式としては MP4 のみのサポートとなりました。
 それに伴い `--out-container` 引数は非推奨となりました（指定しても無視されます）。
+
+### OneVPL を使った H.264 エンコードおよびデコードの廃止
+
+OneVPL 対応は廃止され、それに伴い `--h264-encoder` 引数は非推奨となりました（指定しても無視されます）。
+
+Linux 環境で、H.264 のエンコードおよびデコードを行うためには OpenH264 が必須となります。
+なお macOS 環境では Apple Video Toolbox を使った H.264 ストリーム処理をサポートしています。
 
 ### `--video-codec-engines` 
 
@@ -53,7 +60,7 @@ $ hisui legacy -f /path/to/report.json ...その他の引数...
 MEMO:
 - コマンドラインインタフェースの差異
   - それ以外の引数で新 Hisui で使っていないものは「指定できるけれど（警告ログを出して）無視する」という形
-    - TODO: 列挙する: `--out-container`, `--mp4-muxer`, `--dir-for-faststart`, `--h264-encoder`, etc
+    - TODO: 列挙する: `--mp4-muxer`, `--dir-for-faststart`, etc
   - 軽微なもの:
     - ログ内容
     - プログレスバー
