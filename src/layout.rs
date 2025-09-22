@@ -328,8 +328,8 @@ impl RawLayout {
 
         let trim_spans = decide_trim_spans(&sources, !self.trim);
 
-        for source in sources.values() {
-            source.validate_duplicate_timestamp().or_fail()?;
+        for source in sources.values_mut() {
+            source.merge_overlapping_sources().or_fail()?;
         }
 
         Ok(Layout {
@@ -666,23 +666,34 @@ impl AggregatedSourceInfo {
             .insert(media_path.to_path_buf(), source_info.clone());
     }
 
-    pub fn validate_duplicate_timestamp(&self) -> orfail::Result<()> {
-        let mut known = BTreeSet::new();
-        for source in self.media_paths.values() {
-            known
-                .insert((source.start_timestamp, source.stop_timestamp))
-                .or_fail_with(|()| {
-                    format!(
-                        concat!(
-                            "duplicate timestamp detected for source '{}': ",
-                            "start_timestamp_seconds={}, stop_timestamp_seconds={}"
-                        ),
-                        self.id.get(),
-                        source.start_timestamp.as_secs_f32(),
-                        source.stop_timestamp.as_secs_f32(),
-                    )
-                })?;
+    // 一括録画と分割録画のファイルを統合するためのメソッド
+    // 重なる期間があるソースは長い方を採用する
+    pub fn merge_overlapping_sources(&mut self) -> orfail::Result<()> {
+        let mut sources_by_timespan: Vec<_> = self.media_paths.iter().collect();
+
+        // 開始時刻でソート、次に長さでソート（長い方が先）
+        sources_by_timespan.sort_by(|a, b| {
+            a.1.start_timestamp.cmp(&b.1.start_timestamp).then_with(|| {
+                // 長い方（= 終了時刻が後の方）が先
+                a.1.stop_timestamp.cmp(&b.1.stop_timestamp).reverse()
+            })
+        });
+
+        // 重複期間を除去する
+        let mut merged_sources: BTreeMap<PathBuf, SourceInfo> = BTreeMap::new();
+        let mut last_stop_timestamp = Duration::ZERO;
+        for (path, info) in sources_by_timespan {
+            if info.start_timestamp < last_stop_timestamp {
+                continue;
+            }
+
+            merged_sources.insert(path.clone(), info.clone());
+            last_stop_timestamp = info.stop_timestamp;
         }
+
+        // マージされたソースでmedia_pathsを更新
+        self.media_paths = merged_sources;
+
         Ok(())
     }
 
@@ -724,7 +735,10 @@ impl Default for AggregatedSourceInfo {
 // 非公開構造体のテストは layout_test.rs ではなくこっちでやる
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
+    use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
 
     #[test]
     fn load_layout_jsons() -> orfail::Result<()> {
@@ -753,5 +767,235 @@ mod tests {
         let error_message = e.to_string();
         assert!(error_message.contains("duplicate region name"));
         Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_no_overlap() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        // 重複しないソースを追加
+        let source1 = create_test_source_info(Duration::from_secs(0), Duration::from_secs(10));
+        let source2 = create_test_source_info(Duration::from_secs(20), Duration::from_secs(30));
+
+        aggregated.update(&source1, Path::new("path1.webm"));
+        aggregated.update(&source2, Path::new("path2.webm"));
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // 両方のソースが保持されるべき
+        assert_eq!(aggregated.media_paths.len(), 2);
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(30));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_complete_containment() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        // 一方が他方を完全に含むソースを追加
+        let long_source = create_test_source_info(Duration::from_secs(0), Duration::from_secs(20));
+        let short_source = create_test_source_info(Duration::from_secs(5), Duration::from_secs(15));
+
+        aggregated.update(&long_source, Path::new("long.webm"));
+        aggregated.update(&short_source, Path::new("short.webm"));
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // 長いソースのみが残るべき
+        assert_eq!(aggregated.media_paths.len(), 1);
+        assert!(aggregated.media_paths.contains_key(Path::new("long.webm")));
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(20));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_empty() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // 空の場合を適切に処理すべき
+        assert_eq!(aggregated.media_paths.len(), 0);
+        assert_eq!(aggregated.start_timestamp, Duration::MAX);
+        assert_eq!(aggregated.stop_timestamp, Duration::ZERO);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_partial_overlap() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        // 部分的に重複するソースを追加
+        let source1 = create_test_source_info(Duration::from_secs(0), Duration::from_secs(15));
+        let source2 = create_test_source_info(Duration::from_secs(10), Duration::from_secs(20));
+
+        aggregated.update(&source1, Path::new("source1.webm"));
+        aggregated.update(&source2, Path::new("source2.webm"));
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // 開始時刻順でソートし、長い方を優先する
+        // source1 (0-15) が先に処理され、source2 (10-20) は source1 の終了時刻 (15) より前に開始するため除外される
+        assert_eq!(aggregated.media_paths.len(), 1);
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source1.webm"))
+        );
+        // タイムスタンプは update() で設定されるので変更されない
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(20)); // updateで設定された最大値
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_identical_duration() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        // 同じ長さだが異なる開始時刻のソースを追加
+        let source1 = create_test_source_info(Duration::from_secs(0), Duration::from_secs(10));
+        let source2 = create_test_source_info(Duration::from_secs(5), Duration::from_secs(15));
+
+        aggregated.update(&source1, Path::new("source1.webm"));
+        aggregated.update(&source2, Path::new("source2.webm"));
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // 開始時刻が早い source1 が残り、source2 は除外される
+        assert_eq!(aggregated.media_paths.len(), 1);
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source1.webm"))
+        );
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(15)); // updateで設定された最大値
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_multiple_overlaps() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        // 様々な重複パターンを持つ複数のソースを追加
+        let source1 = create_test_source_info(Duration::from_secs(0), Duration::from_secs(30));
+        let source2 = create_test_source_info(Duration::from_secs(5), Duration::from_secs(15));
+        let source3 = create_test_source_info(Duration::from_secs(10), Duration::from_secs(25));
+        let source4 = create_test_source_info(Duration::from_secs(40), Duration::from_secs(50));
+
+        aggregated.update(&source1, Path::new("source1.webm"));
+        aggregated.update(&source2, Path::new("source2.webm"));
+        aggregated.update(&source3, Path::new("source3.webm"));
+        aggregated.update(&source4, Path::new("source4.webm"));
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // - source1 (0-30) が最初に処理される (開始時刻0、終了時刻30で最長)
+        // - source2,3は source1の終了時刻30より前に開始するため除外
+        // - source4 (40-50) は source1の終了時刻30より後に開始するため残る
+        assert_eq!(aggregated.media_paths.len(), 2);
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source1.webm"))
+        );
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source4.webm"))
+        );
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(50));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_different_durations_same_start() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        // 同じ開始時刻で異なる長さのソースを追加
+        let short_source = create_test_source_info(Duration::from_secs(0), Duration::from_secs(10));
+        let long_source = create_test_source_info(Duration::from_secs(0), Duration::from_secs(20));
+
+        aggregated.update(&short_source, Path::new("short.webm"));
+        aggregated.update(&long_source, Path::new("long.webm"));
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // 同じ開始時刻の場合、長い方（終了時刻が後の方）が優先される
+        assert_eq!(aggregated.media_paths.len(), 1);
+        assert!(aggregated.media_paths.contains_key(Path::new("long.webm")));
+        assert_eq!(aggregated.start_timestamp, Duration::from_secs(0));
+        assert_eq!(aggregated.stop_timestamp, Duration::from_secs(20));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_overlapping_sources_sequential() -> orfail::Result<()> {
+        let mut aggregated = create_test_aggregated_source_info();
+
+        // 連続するが重複しないソースを追加
+        let source1 = create_test_source_info(Duration::from_secs(0), Duration::from_secs(10));
+        let source2 = create_test_source_info(Duration::from_secs(10), Duration::from_secs(20)); // 境界で接触
+        let source3 = create_test_source_info(Duration::from_secs(21), Duration::from_secs(30)); // 1秒の隙間
+
+        aggregated.update(&source1, Path::new("source1.webm"));
+        aggregated.update(&source2, Path::new("source2.webm"));
+        aggregated.update(&source3, Path::new("source3.webm"));
+
+        aggregated.merge_overlapping_sources().or_fail()?;
+
+        // 境界で接触するソースは重複とみなさないため、すべてのソースが残る
+        assert_eq!(aggregated.media_paths.len(), 3);
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source1.webm"))
+        );
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source2.webm"))
+        );
+        assert!(
+            aggregated
+                .media_paths
+                .contains_key(Path::new("source3.webm"))
+        );
+
+        Ok(())
+    }
+
+    // テスト用ヘルパー関数
+    fn create_test_aggregated_source_info() -> AggregatedSourceInfo {
+        AggregatedSourceInfo {
+            id: SourceId::new("test_source"),
+            format: ContainerFormat::Webm,
+            audio: true,
+            video: true,
+            start_timestamp: Duration::MAX,
+            stop_timestamp: Duration::ZERO,
+            media_paths: BTreeMap::new(),
+        }
+    }
+
+    fn create_test_source_info(start: Duration, stop: Duration) -> SourceInfo {
+        SourceInfo {
+            id: SourceId::new("test_source"),
+            format: ContainerFormat::Webm,
+            audio: true,
+            video: true,
+            start_timestamp: start,
+            stop_timestamp: stop,
+        }
     }
 }
