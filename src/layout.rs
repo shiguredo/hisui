@@ -681,12 +681,14 @@ impl AggregatedSourceInfo {
 
         // 重複期間を除去する
         let mut merged_sources: BTreeMap<PathBuf, SourceInfo> = BTreeMap::new();
-        let last_stop_timestamp = Duration::ZERO;
+        let mut last_stop_timestamp = Duration::ZERO;
         for (path, info) in sources_by_timespan {
             if info.start_timestamp < last_stop_timestamp {
                 continue;
             }
+
             merged_sources.insert(path.clone(), info.clone());
+            last_stop_timestamp = info.stop_timestamp;
         }
 
         // マージされたソースでmedia_pathsを更新
