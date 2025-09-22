@@ -12,8 +12,26 @@
 
 ## 基本的な移行方法
 
-新 Hisui はレガシー Hisui との
- [`hisui legacy`](./command_legacy.md)
+新 Hisui は、レガシー Hisui との互換性維持を目的とした [`hisui legacy`](./command_legacy.md) コマンドを提供しています。
+そのため通常は、以下のように、レガシー Hisui で使用していた引数群の前に `legacy` を付与すれば、そのまま動作するはずです。
+
+```console
+// レガシー Hisui
+$ hisui -f /path/to/report.json ...その他の引数...
+
+// 新 Hisui
+// => `hisui` の直後に `legacy` を追加する
+$ hisui legacy -f /path/to/report.json ...その他の引数...
+```
+
+しかし `hisui legacy` コマンドも 100% の互換性がある訳ではないので、注意が必要です。
+以降では、具体的な相違点を記載します。
+
+## 相違点: 廃止された機能
+
+## 相違点: 挙動が変わった機能
+
+## その他の相違点
 
 MEMO:
 - コマンドラインインタフェースの差異
