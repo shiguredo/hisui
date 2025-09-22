@@ -325,7 +325,9 @@ fn run_trial_evaluation(
     // YUV ファイルはサイズが大きいので不要になったら削除する
     for name in ["reference.yuv", "distorted.yuv"] {
         let path = trial_dir.join(name);
-        if let Err(e) = std::fs::remove_file(&path) {
+        if path.exists()
+            && let Err(e) = std::fs::remove_file(&path)
+        {
             eprintln!("[WARN] failed to remove file {}: {e}", path.display());
         }
     }
