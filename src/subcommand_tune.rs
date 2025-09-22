@@ -311,21 +311,27 @@ fn run_trial_evaluation(
     eprintln!("$ {cmd:?}");
     eprintln!();
 
-    let output = cmd
+    let result = cmd
         .output()
-        .or_fail_with(|e| format!("failed to execute `$ hisui vmaf` command: {e}"))?;
-    output
-        .status
-        .success()
-        .or_fail_with(|()| "`$ hisui vmaf` command failed".to_owned())?;
+        .or_fail_with(|e| format!("failed to execute `$ hisui vmaf` command: {e}"))
+        .and_then(|output| {
+            output
+                .status
+                .success()
+                .or_fail_with(|()| "`$ hisui vmaf` command failed".to_owned())?;
+            Ok(output)
+        });
 
     // YUV ファイルはサイズが大きいので不要になったら削除する
     for name in ["reference.yuv", "distorted.yuv"] {
         let path = trial_dir.join(name);
-        if let Err(e) = std::fs::remove_file(&path) {
+        if path.exists()
+            && let Err(e) = std::fs::remove_file(&path)
+        {
             eprintln!("[WARN] failed to remove file {}: {e}", path.display());
         }
     }
+    let output = result?;
 
     // 出力結果をパース
     let stdout = String::from_utf8(output.stdout).or_fail()?;
