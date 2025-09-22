@@ -436,25 +436,28 @@ fn simple_split_archive() -> noargs::Result<()> {
         |decoder: &mut LibvpxDecoder, frame_index: &mut usize| -> orfail::Result<()> {
             while let Some(decoded) = decoder.next_decoded_frame() {
                 // Y成分だけを確認して色の変化を検証
-                let (y_plane, _u_plane, _v_plane) = decoded.as_yuv_planes().or_fail()?;
+                let (y_plane, _u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
 
                 // フレーム番号に基づいて期待される色を判定
                 // 0-24: 赤, 25-49: 緑, 50-74: 青
+                //
+                // なお赤と緑は同じような Y 値でエンコードされているので、 Vの値も考慮している
+
                 if *frame_index < 25 {
                     // 赤色の期間
-                    y_plane.iter().for_each(|&y| {
+                    (y_plane.iter().zip(v_plane.iter())).for_each(|(&y, &v)| {
                         assert!(
-                            matches!(y, 80..=82),
-                            "Expected red Y value, got y={y} at frame {}",
+                            matches!(y, 80..=82) && matches!(v, 240),
+                            "Expected red Y / V value, got y={y} / v={v} at frame {}",
                             *frame_index
                         );
                     });
                 } else if *frame_index < 50 {
                     // 緑色の期間
-                    y_plane.iter().for_each(|&y| {
+                    (y_plane.iter().zip(v_plane.iter())).for_each(|(&y, &v)| {
                         assert!(
-                            matches!(y, 186..=189),
-                            "Expected green Y value, got y={y} at frame {}",
+                            matches!(y, 80..=82) && matches!(v, 81),
+                            "Expected green Y / V value, got y={y} / v={v} at frame {}",
                             *frame_index
                         );
                     });
