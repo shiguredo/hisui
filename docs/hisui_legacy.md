@@ -47,14 +47,15 @@ $ hisui --layout /path/to/layout.json
 
 // 新 Hisui
 // => `hisui` の直後に `compose` を追加する
+// => `--layout-file` オプションでレイアウトファイルを指定する
 // => レポートファイルなどが配置されているディレクトリを指定する
-$ hisui compose --layout /path/to/layout.json /path/to/合成対象の録画ファイルが配置されているディレクトリ/
+$ hisui compose --layout-file /path/to/layout.json /path/to/合成対象の録画ファイルが配置されているディレクトリ/
 ```
 
-`hisui compose` サブコマンドで `--layout` オプションを省略した場合にはデフォルトレイアウトでの合成が行われます。
+`hisui compose` サブコマンドで `--layout-file` オプションを省略した場合にはデフォルトレイアウトでの合成が行われます。
 デフォルトレイアウトは、レガシー Hisui でレポートファイルを指定した場合のレイアウトと同じになっているため、
 レガシー Hisui でレポートファイル指定で合成を行っていた場合には、
-次のように `--layout` オプションの指定を省略することで、同じ結果が得られます。
+次のように `--layout-file` オプションの指定を省略することで、同じ結果が得られます。
 
 ```console
 // レガシー Hisui
@@ -63,7 +64,7 @@ $ hisui -f /path/to/report.json ...その他の引数...
 // 新 Hisui
 // => `hisui` の直後に `compose` を追加する
 // => レポートファイルなどが配置されているディレクトリを指定する
-// => `--layout` オプションは指定しない
+// => `--layout-file` オプションは指定しない
 $ hisui compose /path/to/合成対象の録画ファイルが配置されているディレクトリ/
 ```
 
@@ -197,17 +198,46 @@ Sora の MP4 録画機能で録画されたファイルを合成できるよう�
 
 macOS では Apple Vision Toolbox を使って H.265 ストリームを扱えるようになりました。
 
-### エンコードパラメーターの細かい指定と自動調整に対応した
+### レイアウトファイルへの追加項目
 
-### Hisui 自体のマルチスレッド実行に対応した
+新 Hisui では、レガシー Hisui に比べてレイアウトファイルで指定できる項目が増えています。
 
-### 統計情報の出力に対応した
+追加項目は以下の通りです。
+- audio_codec
+- video_codec
+- audio_bitrate
+- video_bitrate
+- frame_rate
+- libvpx_vp8_encode_params
+- libvpx_vp9_encode_params
+- openh264_encode_params
+- svt_av1_encode_params
+- video_toolbox_h264_encode_params
+- video_toolbox_h265_encode_params
+- video_layout.リージョン名.cell_width
+- video_layout.リージョン名.cell_height
+- video_layout.リージョン名.border_pixels
 
-MEMO:
+各項目についての説明は [レイアウトの仕様ドキュメント](./layout_spec.md) をご参照ください。
 
-- レイアウト周りの差異
-  - cell_width / cell_height の追加 (後方互換)
-    - モチベーション: レガシー hisui で report.json を指定した場合の挙動に近いものを、レイアウトで表現できるようにするため
-    - 同じ理由で new hisui では `resolution` の指定がオプショナルになっている
-  - `border_pixels`
+### エンコードパラメーターの細かい指定と自動調整に対応
+
+新 Hisui では、レガシー Hisui に比べて、合成結果のエンコードの際のパラメーターをより細かく指定できるようになっています。
+詳細は [エンコードパラメーター指定のドキュメント](./layout_encode_params.md) をご参照ください。
+
+また [`hisui tune`](./command_tune.md) サブコマンドを使うことで、用途に合ったエンコードパラメーターを、ある程度自動で探索することもできます。
+
+### Hisui 自体のマルチスレッド実行に対応
+
+新 Hisui では `--worker-threads` 引数を指定することでデコードや画像合成、エンコードなどの処理を別々のスレッドで実行することができます
+(デフォルトではレガシー Hisui と同様にシングルスレッドで実行されます）。
+
+なお、この引数が影響するのはあくまでも Hisui 自体が使用するワーカースレッドのみとなります。
+映像エンコーダーは、内部的にマルチスレッドでの処理に対応していることが多いですが、
+それらの挙動の制御は `libvpx_vp8_encode_params` などの、各エンコードー固有のオプション指定を通して行ってください。
+
+### 統計情報の出力に対応
+
+新 Hisui では `--stats-file` 引数を指定することで、
+合成処理中に収集された統計情報をファイルに出力することができます。
 
