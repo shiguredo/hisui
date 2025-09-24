@@ -18,7 +18,7 @@ const TUNE_COMMAND: noargs::CmdSpec =
 const LEGACY_COMMAND: noargs::CmdSpec =
     noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです");
 const PIPELINE_COMMAND: noargs::CmdSpec =
-    noargs::cmd("pipeline").doc("ユーザー定義のパイプラインを実行します");
+    noargs::cmd("pipeline").doc("ユーザー定義のパイプラインを実行します（実験的機能）");
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
