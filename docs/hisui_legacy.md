@@ -47,7 +47,7 @@ $ hisui --layout /path/to/layout.json
 
 // 新 Hisui
 // => `hisui` の直後に `compose` を追加する
-// => `--layout-file` オプションでレイアウトファイルを指定する
+// => オプション名を `--layout` から `--layout-file` に変更する
 // => レポートファイルなどが配置されているディレクトリを指定する
 $ hisui compose --layout-file /path/to/layout.json /path/to/合成対象の録画ファイルが配置されているディレクトリ/
 ```
