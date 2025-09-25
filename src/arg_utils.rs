@@ -33,7 +33,7 @@ pub fn validate_existing_directory_path(
 pub fn create_time_progress_bar(total_duration: Duration) -> ProgressBar {
     create_progress_bar(
         total_duration.as_secs(),
-        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] {percent}% of {len}s total output duration",
+        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] complete {percent}% of {len}s total output duration",
     )
 }
 
@@ -41,7 +41,7 @@ pub fn create_time_progress_bar(total_duration: Duration) -> ProgressBar {
 pub fn create_frame_progress_bar(total_frames: u64) -> ProgressBar {
     create_progress_bar(
         total_frames,
-        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] {percent}% of {len} total frames",
+        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] complete {percent}% of {len} total frames",
     )
 }
 
