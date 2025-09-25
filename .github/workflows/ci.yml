@@ -79,6 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
       - run: rustc --version
       - name: Install packages to build external dependencies
         run: |
