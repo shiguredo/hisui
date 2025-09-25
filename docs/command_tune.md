@@ -227,16 +227,23 @@ Trial #0
     - 新しい最適解が発見されて、最適解集合が更新された後
     - `hisui tune` コマンドが指定のトライアル回数の実行を完了して終了する時
 
-最適解集合の表示には、
-そのパラメーターセットを使って合成を行うコマンドの例（`$ hisui compose -l ...`）も含まれているので、
-見つかった最適解の合成を簡単に試すことができます。
+最適解集合の表示には、次のように、
+見つかったパラメーターセットを使った合成を行うコマンドの例も含まれているので、簡単に試すことができます。
 
-`hisui tune` コマンドの探索結果についての出力は必要最低限のものとなっていますが、
+```
+  Compose Command:
+    $ hisui compose -l /path/to/trial-0/layout.jsonc /path/to/archive/RECORDING_ID/
+```
+
+もし、この `hisui compose` の実行結果が期待通りのものであれば、このトライアルのレイアウトファイルを、
+実際の運用で使うものとして採用することができます。
+
+なお `[I 2025-07-16 12:35:43,172] ...` という形式のログ出力は Optuna によるものです。
+
+また、`hisui tune` コマンドの探索結果についての出力は必要最低限のものとなっていますが、
 Optuna の可視化機能やダッシュボードを活用することで、より詳細な確認や分析が可能となります。
 - 可視化機能: [Optuna Documentation - Visualization](https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/005_visualization.html)
 - ダッシュボード: [Optuna Dashboard](https://github.com/optuna/optuna-dashboard)
-
-なお `[I 2025-07-16 12:35:43,172] ...` という形式のログ出力は Optuna によるものです。
 
 ## 探索用のレイアウトファイル
 
