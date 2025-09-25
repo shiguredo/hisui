@@ -42,8 +42,8 @@ $ hisui compose /path/to/archive/RECORDING_ID/
   [00:00:09] [########################################] 27/27s (0s)
 {
   "input_root_dir": "/path/to/archive/RECORDING_ID/",
-  "input_audio_file_count": 2,
-  "input_video_file_count": 2,
+  "input_audio_source_count": 2,
+  "input_video_source_count": 2,
   "output_file_path": "/path/to/archive/RECORDING_ID/output.mp4",
   "output_audio_codec": "OPUS",
   "output_audio_encoder_name": "opus",

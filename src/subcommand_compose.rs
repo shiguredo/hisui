@@ -166,7 +166,7 @@ fn print_input_stats_summary(
         })
         .count();
     if count > 0 {
-        f.member("input_audio_file_count", count)?;
+        f.member("input_audio_source_count", count)?;
     }
 
     let count = stats
@@ -180,7 +180,7 @@ fn print_input_stats_summary(
         })
         .count();
     if count > 0 {
-        f.member("input_video_file_count", count)?;
+        f.member("input_video_source_count", count)?;
     }
 
     Ok(())
