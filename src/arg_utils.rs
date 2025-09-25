@@ -33,8 +33,7 @@ pub fn validate_existing_directory_path(
 pub fn create_time_progress_bar(total_duration: Duration) -> ProgressBar {
     create_progress_bar(
         total_duration.as_secs(),
-        Some("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}s ({eta})"),
-        None,
+        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] {percent}% of {len}s total output duration",
     )
 }
 
@@ -42,25 +41,15 @@ pub fn create_time_progress_bar(total_duration: Duration) -> ProgressBar {
 pub fn create_frame_progress_bar(total_frames: u64) -> ProgressBar {
     create_progress_bar(
         total_frames,
-        Some("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})"),
-        None,
+        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] {percent}% of {len} total frames",
     )
 }
 
-fn create_progress_bar(total: u64, template: Option<&str>, unit: Option<&str>) -> ProgressBar {
+fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
     let progress_bar = ProgressBar::new(total);
-    let unit_str = unit.unwrap_or("");
-    let default_template = if unit_str.is_empty() {
-        "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})"
-    } else {
-        &format!(
-            "{{spinner:.green}} [{{elapsed_precise}}] [{{bar:40.cyan/blue}}] {{pos}}/{{len}}{unit_str} ({{eta}})"
-        )
-    };
-
     progress_bar.set_style(
         ProgressStyle::default_bar()
-            .template(template.unwrap_or(default_template))
+            .template(template)
             .unwrap()
             .progress_chars("#>-"),
     );
