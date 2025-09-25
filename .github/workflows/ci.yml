@@ -23,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -51,6 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
+      - run: rustup component add clippy
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -79,6 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -107,6 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -149,6 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -185,6 +191,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -225,6 +232,7 @@ jobs:
       # docs.rs 向けでは外部ライブラリのビルドは走らないので依存パッケージなどのインストールは不要
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustup default stable
       - run: cargo doc --workspace --exclude hisui
 
   slack_notify_failed:
@@ -242,3 +250,4 @@ jobs:
           SLACK_TITLE: "FAILED"
           SLACK_MESSAGE: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{github.event.head_commit.message }}>
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
