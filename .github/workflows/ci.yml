@@ -79,6 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup update stable
+      - run: rustc --version
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -99,6 +100,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+      - run: rustc --version
       - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
 
   test-fdk-aac:
