@@ -22,7 +22,7 @@ $ brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
 
 Hisui は Rust のビルドツールである [Cargo](https://doc.rust-lang.org/cargo/) を使って以下のようにビルドします。
 
-なお、Rust のバージョンは 1.88 以上である必要があります。
+なお、必要な Rust バージョンは `Cargo.toml` の `rust-version` を参照してください。
 
 ```console
 // crates.io からビルドする場合（まだ canary リリースしかないのでバージョン指定が必須）
