@@ -45,7 +45,8 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
   - WebM での出力形式は非対応です
 - AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
 - Intel VPL に非対応です
-  - 将来的に対応予定です
+- [Optuna](https://optuna.org/) を利用したエンコーダーパラメータの自動調整機能を利用できます
+-
 
 詳細は [hisui_legacy\.md](docs/hisui_legacy.md) をご覧ください。
 
@@ -89,7 +90,7 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 
 ## 対応 Sora
 
-- WebRTC SFU Sora 2024.1 以降
+- WebRTC SFU Sora 2025.1 以降
 
 ## ドキュメント
 
@@ -100,6 +101,19 @@ Hisui の利用方法は [usage.md](docs/usage.md) をご確認ください。
 Hisui のビルド方法は [build.md](docs/build.md) をご確認ください。
 
 ## サポートについて
+
+## 優先実装
+
+優先実装とは Sora のライセンスを契約頂いているお客様向けに Sora Python SDK の実装予定機能を有償にて前倒しで実装することです。
+
+**詳細は Discord やメールなどでお気軽にお問い合わせください**
+
+### 優先実装が可能な機能一覧
+
+- NVIDIA Video Codec 対応
+- Intel VPL 対応
+- AMD AMF 対応
+- NETINT Quadra 対応
 
 ### Discord
 
