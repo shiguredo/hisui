@@ -27,6 +27,13 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 - 複雑なレイアウトを JSON で指定することができます
 - 用途に合わせた[エンコードパラメーターの指定](./docs/layout_encode_params.md)や[自動調整](./docs/command_tune.md)ができます
 
+### レガシー版 Hisui
+
+新しい Hisui はレガシー版の Hisui とほぼ互換性があります。
+レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
+
+<https://github.com/shiguredo/hisui-legacy>
+
 ### 新しい Hisui とレガシー版 Hisui の違い
 
 - Rust で実装されています
@@ -137,9 +144,24 @@ limitations under the License.
 "OpenH264 Video Codec provided by Cisco Systems, Inc."
 ```
 
-## レガシー版 Hisui
+## H.264 (AVC) と H.265 (HEVC) のライセンスについて
 
-新しい Hisui はレガシー版の Hisui とほぼ互換性があります。
-レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
+**時雨堂が提供する Hisui のビルド済みバイナリには H.264 と H.265 のコーデックは含まれていません**
 
-<https://github.com/shiguredo/hisui-legacy>
+### H.264
+
+H.264 対応は [Via LA Licensing](https://www.via-la.com/) (旧 MPEG-LA) に連絡を取り、ロイヤリティの対象にならないことを確認しています。
+
+> 時雨堂がエンドユーザーの PC /デバイスに既に存在する AVC / H.264 エンコーダー/デコーダーに依存する製品を提供する場合は、
+> ソフトウェア製品は AVC ライセンスの対象外となり、ロイヤリティの対象にもなりません。
+
+### H.265
+
+H.265 対応は以下の二つの団体に連絡を取り、H.265 ハードウェアアクセラレーターのみを利用し、
+H.265 が利用可能なバイナリを配布する事は、ライセンスが不要であることを確認しています。
+
+また、H.265 のハードウェアアクセラレーターのみを利用した H.265 対応の SDK を OSS で公開し、
+ビルド済みバイナリを配布する事は、ライセンスが不要であることも確認しています。
+
+- [Access Advance](https://accessadvance.com/ja/)
+- [Via Licensing Alliance](https://www.via-la.com/)
