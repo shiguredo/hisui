@@ -1,0 +1,27 @@
+{
+  "resolution": "1280x720",
+  "video_codec": "H264",
+  "video_bitrate": 1000000,
+  "frame_rate": 30,
+  "video_layout": {
+    "main": {
+      "max_columns": 3,
+      "video_sources": [
+        "archive*.json"
+      ]
+    }
+  },
+  "openh264_encode_params": {
+    "thread_count": 1,
+    "intra_period": 300,
+    "complexity_mode": null,
+    "rate_control_mode": null,
+    "max_qp": null,
+    "min_qp": null,
+    "denoise": null,
+    "background_detection": null,
+    "adaptive_quantization": null,
+    "scene_change_detection": null,
+    "deblocking_filter": null
+  }
+}

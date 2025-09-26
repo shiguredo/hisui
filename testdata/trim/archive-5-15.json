@@ -1,0 +1,8 @@
+{
+  "connection_id": "5-15",
+  "audio": true,
+  "video": true,
+  "start_time_offset": 5,
+  "stop_time_offset": 15
+}
+

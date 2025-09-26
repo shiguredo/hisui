@@ -1,0 +1,16 @@
+{
+  "audio_sources": [
+    "./archive-*.json"
+  ],
+  "video_layout": {
+    "grid": {
+      "video_sources": [
+        "./archive-QGB72PXZR178HCC8V6GDFY753R.json"
+      ]
+    }
+  },
+  "trim": true,
+  "format": "webm",
+  "resolution": "1920x1080",
+  "bitrate": 3000
+}

@@ -1,0 +1,1026 @@
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+    time::Duration,
+};
+
+use hisui::{
+    layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
+    layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
+    metadata::{SourceId, SourceInfo},
+};
+use orfail::OrFail;
+
+#[test]
+fn valid_resolutions() -> orfail::Result<()> {
+    let valid_jsons = [r#""16x16""#, r#""3840x3840""#];
+    for json in valid_jsons {
+        json.parse::<nojson::Json<Resolution>>().or_fail()?;
+    }
+
+    // 値は 2 の倍数に丸められる
+    for i in 0..2 {
+        let json = format!(r#""{}x{}""#, 32 + i, 32 + i);
+        let v = json.parse::<nojson::Json<Resolution>>().or_fail()?;
+        assert_eq!(v.0.width().get(), 32);
+        assert_eq!(v.0.height().get(), 32);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn decide_grid_dimensions_works() {
+    // max_rows / max_columns の両方が未指定の場合
+    assert_eq!(decide_grid_dimensions(0, 0, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(0, 0, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(0, 0, 3), (2, 2));
+    assert_eq!(decide_grid_dimensions(0, 0, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(0, 0, 5), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 6), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 7), (3, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 9), (3, 3));
+    assert_eq!(decide_grid_dimensions(0, 0, 10), (3, 4));
+    assert_eq!(decide_grid_dimensions(0, 0, 12), (3, 4));
+    assert_eq!(decide_grid_dimensions(0, 0, 17), (4, 5));
+    assert_eq!(decide_grid_dimensions(0, 0, 20), (4, 5));
+
+    // max_rows / max_columns の片方が未指定の場合
+    assert_eq!(decide_grid_dimensions(1, 0, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(0, 1, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 0, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(0, 1, 2), (2, 1));
+    assert_eq!(decide_grid_dimensions(1, 0, 3), (1, 3));
+    assert_eq!(decide_grid_dimensions(0, 1, 3), (3, 1));
+    assert_eq!(decide_grid_dimensions(2, 0, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(0, 2, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 5), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 2, 5), (3, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 6), (2, 3));
+    assert_eq!(decide_grid_dimensions(0, 2, 6), (3, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 7), (2, 4));
+    assert_eq!(decide_grid_dimensions(0, 2, 7), (4, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 9), (2, 5));
+    assert_eq!(decide_grid_dimensions(0, 2, 9), (5, 2));
+    assert_eq!(decide_grid_dimensions(2, 0, 12), (2, 6));
+    assert_eq!(decide_grid_dimensions(0, 2, 12), (6, 2));
+
+    assert_eq!(decide_grid_dimensions(0, 4, 5), (2, 4));
+    assert_eq!(decide_grid_dimensions(4, 0, 5), (4, 2));
+
+    // max_rows / max_columns の両方が指定されている場合
+    assert_eq!(decide_grid_dimensions(1, 1, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(2, 2, 1), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 1, 2), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 2), (1, 2));
+    assert_eq!(decide_grid_dimensions(1, 1, 3), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 3), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 3), (2, 2));
+    assert_eq!(decide_grid_dimensions(1, 1, 4), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 4), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 4), (2, 2));
+    assert_eq!(decide_grid_dimensions(1, 1, 5), (1, 1));
+    assert_eq!(decide_grid_dimensions(1, 2, 5), (1, 2));
+    assert_eq!(decide_grid_dimensions(2, 2, 5), (2, 2));
+    assert_eq!(decide_grid_dimensions(1, 7, 9), (1, 7));
+    assert_eq!(decide_grid_dimensions(2, 7, 9), (2, 5));
+    assert_eq!(decide_grid_dimensions(3, 7, 9), (3, 3));
+
+    assert_eq!(decide_grid_dimensions(10, 10, 5), (1, 5));
+    assert_eq!(decide_grid_dimensions(10, 9, 5), (1, 5));
+    assert_eq!(decide_grid_dimensions(9, 10, 5), (5, 1));
+}
+
+#[test]
+fn decide_required_cells_works() {
+    // https://s3.amazonaws.com/com.twilio.prod.twilio-docs/images/composer_understanding_trim.original.png
+    let source0 = source(0, 2);
+    let source1 = source(1, 1);
+    let source2 = source(4, 6);
+    let source3 = source(5, 7);
+    let source4 = source(6, 8);
+    let sources = [source0, source1, source2, source3, source4]
+        .into_iter()
+        .map(|s| {
+            (
+                s.id.clone(),
+                AggregatedSourceInfo {
+                    id: s.id,
+                    start_timestamp: s.start_timestamp,
+                    stop_timestamp: s.stop_timestamp,
+                    audio: true,
+                    video: true,
+                    format: Default::default(),
+                    media_paths: Default::default(),
+                },
+            )
+        })
+        .collect();
+
+    // [再利用あり] 除外セルなし
+    let kind = ReuseKind::ShowOldest;
+    let cells_excluded = [];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 3);
+    assert_eq!(
+        decide_required_cells(
+            &sources.clone().into_iter().take(2).collect(),
+            kind,
+            &cells_excluded
+        ),
+        2
+    );
+
+    // [再利用あり] 除外セルあり
+    let cells_excluded = [1, 3];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 5);
+
+    let cells_excluded = [2];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 4);
+
+    // [再利用あり] 除外セルがあるけど、範囲外なので考慮されない
+    let cells_excluded = [3];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 3);
+
+    // [再利用なし] 除外セルなし
+    let kind = ReuseKind::None;
+    let cells_excluded = [];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 5); // ソース数と同じ
+    assert_eq!(
+        decide_required_cells(
+            &sources.clone().into_iter().take(2).collect(),
+            kind,
+            &cells_excluded
+        ),
+        2
+    ); // ソース数と同じ
+
+    // [再利用なし] 除外セルあり
+    let cells_excluded = [1, 3];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 7); // ソース数 + 除外セル数（範囲内）
+
+    let cells_excluded = [2];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 6); // ソース数 + 除外セル数（範囲内）
+
+    // [再利用なし] 除外セルがあるけど、範囲外なので考慮されない
+    let cells_excluded = [5, 10];
+    assert_eq!(decide_required_cells(&sources, kind, &cells_excluded), 5); // ソース数と同じ（除外セルは範囲外）
+
+    // [再利用なし] 空のソース
+    let empty_sources = BTreeMap::new();
+    assert_eq!(decide_required_cells(&empty_sources, kind, &[]), 0);
+    assert_eq!(decide_required_cells(&empty_sources, kind, &[1, 2]), 0); // 除外セルがあっても0
+}
+
+#[test]
+fn assign_sources_works() {
+    // https://s3.amazonaws.com/com.twilio.prod.twilio-docs/images/composer_understanding_trim.original.png
+    let source0 = source(0, 2);
+    let source1 = source(1, 1);
+    let source2 = source(4, 6);
+    let source3 = source(5, 7);
+    let source4 = source(6, 8);
+    let sources = [source0, source1, source2, source3, source4]
+        .into_iter()
+        .map(|s| {
+            (
+                s.id.clone(),
+                AggregatedSourceInfo {
+                    id: s.id.clone(),
+                    start_timestamp: s.start_timestamp,
+                    stop_timestamp: s.stop_timestamp,
+                    audio: true,
+                    video: true,
+                    format: Default::default(),
+                    media_paths: Default::default(),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    // このテストでは除外セルはなし
+    let cells_excluded = [];
+
+    // 指定された時間に指定されたセルに割り当てられたソースのインデックスを返す
+    fn get_assigned_source(
+        assigned: &HashMap<SourceId, AssignedSource>,
+        sources: &BTreeMap<SourceId, AggregatedSourceInfo>,
+        timestamp: u64,
+        cell_index: usize,
+    ) -> Option<usize> {
+        let t = Duration::from_secs(timestamp);
+        sources
+            .values()
+            .enumerate()
+            .filter(|(_i, s)| (s.start_timestamp..=s.stop_timestamp).contains(&t))
+            .filter_map(|(i, s)| assigned.get(&s.id).map(|v| (i, v)))
+            .filter(|(_i, s)| s.cell_index == cell_index)
+            .map(|(i, s)| (s.priority, i))
+            .min()
+            .map(|(_priority, i)| i)
+    }
+
+    // 1x1 region, ReuseKind::None
+    let assigned = assign_sources(
+        ReuseKind::None,
+        sources.values().cloned().collect(),
+        1,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), None);
+
+    // 1x1 region, ReuseKind::ShowOldest
+    let assigned = assign_sources(
+        ReuseKind::ShowOldest,
+        sources.values().cloned().collect(),
+        1,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), Some(4));
+
+    // 1x1 region, ReuseKind::ShowNewest
+    let assigned = assign_sources(
+        ReuseKind::ShowNewest,
+        sources.values().cloned().collect(),
+        1,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(1));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), Some(4));
+
+    // 1x2 region, ReuseKind::None
+    let assigned = assign_sources(
+        ReuseKind::None,
+        sources.values().cloned().collect(),
+        2,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 1), Some(1));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
+
+    // 1x2 region, ReuseKind::ShowOldest
+    let assigned = assign_sources(
+        ReuseKind::ShowOldest,
+        sources.values().cloned().collect(),
+        2,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 1), Some(1));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
+
+    // 1x2 region, ReuseKind::ShowNewest
+    let assigned = assign_sources(
+        ReuseKind::ShowNewest,
+        sources.values().cloned().collect(),
+        2,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 1), Some(1));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
+
+    // 2x3 region, ReuseKind::None
+    let assigned = assign_sources(
+        ReuseKind::None,
+        sources.values().cloned().collect(),
+        2 * 3,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 4), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 1), Some(1));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 4), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 4), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 4), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 2), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 4), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 2), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 3), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 4), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 2), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 3), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 4), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 3), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 4), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 5), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 4), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 5), None);
+
+    // 2x2 region, ReuseKind::ShowOldest
+    let assigned = assign_sources(
+        ReuseKind::ShowOldest,
+        sources.values().cloned().collect(),
+        2 * 2,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 1), Some(1));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 2), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 2), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 2), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 3), None);
+
+    // 2x2 region, ReuseKind::ShowNewest
+    let assigned = assign_sources(
+        ReuseKind::ShowNewest,
+        sources.values().cloned().collect(),
+        2 * 2,
+        &cells_excluded,
+    );
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 0, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 1), Some(1));
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 1, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 0), Some(0));
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 2, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 3, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 4, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 2), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 5, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 0), Some(2));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 2), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 6, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 1), Some(3));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 2), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 7, 3), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 0), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 1), None);
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 2), Some(4));
+    assert_eq!(get_assigned_source(&assigned, &sources, 8, 3), None);
+}
+
+#[test]
+fn invalid_resolutions() -> orfail::Result<()> {
+    let invalid_jsons = [
+        // width が小さすぎる
+        r#""15x20""#,
+        // width が大きすぎる
+        r#""3841x20""#,
+        // height が小さすぎる
+        r#""100x15""#,
+        // height が大きすぎる
+        r#""30x3841""#,
+        // width がない
+        r#""x100""#,
+        // height がない
+        r#""100x""#,
+        // width が float
+        r#""100.0x100""#,
+        // height が float
+        r#""100x100.0""#,
+    ];
+    for json in invalid_jsons {
+        assert!(json.parse::<nojson::Json<Resolution>>().is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn layout_without_resolution_specified() -> orfail::Result<()> {
+    let base_path = PathBuf::from(".");
+
+    // resolution を省略した場合、リージョンのサイズと位置から自動計算される
+    let layout_json = r#"
+{
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 640,
+      "height": 480,
+      "x_pos": 100,
+      "y_pos": 50
+    },
+    "sub": {
+      "video_sources": [],
+      "width": 200,
+      "height": 150,
+      "x_pos": 800,
+      "y_pos": 300
+    }
+  }
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path.clone(), layout_json)?;
+
+    // main リージョン: 右端 100 + 640 = 740, 下端 50 + 480 = 530
+    // sub リージョン: 右端 800 + 200 = 1000, 下端 300 + 150 = 450
+    // 全体解像度は両リージョンを包含する最小サイズ: 1000x530
+    assert_eq!(layout.resolution.width.get(), 1000);
+    assert_eq!(layout.resolution.height.get(), 530);
+
+    // 音声のみの場合（video_layout が空）
+    let audio_only_json = r#"
+{
+  "audio_sources": ["testdata/source_timestamps/archive-*.json"]
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path.clone(), audio_only_json)?;
+
+    // 音声のみの場合は最小解像度（16x16）が設定される
+    assert_eq!(layout.resolution.width.get(), 16);
+    assert_eq!(layout.resolution.height.get(), 16);
+
+    // リージョンが存在するが width/height が未指定で resolution も未指定の場合はエラー
+    let invalid_json = r#"
+{
+  "video_layout": {
+    "main": {
+      "video_sources": []
+    }
+  }
+}"#;
+
+    let result = Layout::from_layout_json_str(base_path, invalid_json);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .message
+            .contains("Region width must be specified")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
+    let base_path = PathBuf::from(".");
+
+    // 基本的な cell_width と cell_height の指定をテスト
+    let layout_json = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": ["testdata/source_timestamps/archive-*.json"],
+      "cell_width": 320,
+      "cell_height": 240,
+      "max_columns": 2,
+      "max_rows": 2
+    }
+  }
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path.clone(), layout_json)?;
+    let region = &layout.video_regions[0];
+
+    // セル寸法が正しく設定されているかを確認
+    assert_eq!(region.grid.cell_width.get(), 320);
+    assert_eq!(region.grid.cell_height.get(), 240);
+
+    // リージョン寸法がセル寸法から計算されているかを確認
+    // 2x2 グリッドで 320x240 セルの場合、640x480 + 枠線分となる
+    // デフォルトの border_pixels = 2 の場合:
+    // 幅: 320*2 + 2*1 (内側) + 2*2 (外側) = 646
+    // 高さ: 240*2 + 2*1 (内側) + 2*2 (外側) = 486
+    assert_eq!(region.width.get(), 646);
+    assert_eq!(region.height.get(), 486);
+
+    // エラーケースのテスト: width と cell_width の同時指定はエラーになる
+    let invalid_layout_json = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 640,
+      "cell_width": 320,
+      "max_columns": 2,
+      "max_rows": 2
+    }
+  }
+}"#;
+
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_layout_json);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .message
+            .contains("cannot specify both 'width' and 'cell_width'")
+    );
+
+    // エラーケースのテスト: height と cell_height の同時指定はエラーになる
+    let invalid_layout_json2 = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "height": 480,
+      "cell_height": 240,
+      "max_columns": 2,
+      "max_rows": 2
+    }
+  }
+}"#;
+
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_layout_json2);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .message
+            .contains("cannot specify both 'height' and 'cell_height'")
+    );
+
+    // 奇数値が偶数に丸められることをテスト
+    let layout_json_odd = r#"
+{
+  "resolution": "1920x1080",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "cell_width": 321,
+      "cell_height": 241,
+      "max_columns": 1,
+      "max_rows": 1
+    }
+  }
+}"#;
+
+    let layout = Layout::from_layout_json_str(base_path, layout_json_odd)?;
+    let region = &layout.video_regions[0];
+
+    // 奇数値は偶数に丸められる
+    assert_eq!(region.grid.cell_width.get(), 320); // 321 -> 320
+    assert_eq!(region.grid.cell_height.get(), 240); // 241 -> 240
+
+    Ok(())
+}
+
+fn source(start: u64, end: u64) -> SourceInfo {
+    SourceInfo {
+        id: SourceId::new(&format!("{start}_{end}")),
+        start_timestamp: Duration::from_secs(start),
+        stop_timestamp: Duration::from_secs(end),
+
+        // 以下はダミー値
+        audio: true,
+        video: true,
+        format: Default::default(),
+    }
+}
+
+#[test]
+fn source_wildcard() -> orfail::Result<()> {
+    let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
+    let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
+
+    // ソースパスを明示的に指定
+    let resolved = layout::resolve_source_paths(
+        &base_path,
+        &[PathBuf::from("bar-0.json"), PathBuf::from("foo-1.json")],
+        &[],
+    )
+    .or_fail()?;
+    assert_eq!(
+        resolved,
+        &[to_absolute("bar-0.json")?, to_absolute("foo-1.json")?]
+    );
+
+    // ソースパスと除外パスを明示的に指定
+    let resolved = layout::resolve_source_paths(
+        &base_path,
+        &[PathBuf::from("bar-0.json"), PathBuf::from("foo-1.json")],
+        &[
+            PathBuf::from("foo-1.json"),
+            PathBuf::from("foo-2.json"), // こっちはマッチしない
+        ],
+    )
+    .or_fail()?;
+    assert_eq!(resolved, &[to_absolute("bar-0.json")?]);
+
+    // ソースパスをワイルドカードで指定
+    let resolved =
+        layout::resolve_source_paths(&base_path, &[PathBuf::from("foo-*.json")], &[]).or_fail()?;
+    assert_eq!(
+        resolved,
+        &[
+            to_absolute("foo-0.json")?,
+            to_absolute("foo-1.json")?,
+            to_absolute("foo-2.json")?
+        ]
+    );
+
+    // ソースパスと除外パスをワイルドカードで指定
+    let resolved = layout::resolve_source_paths(
+        &base_path,
+        &[PathBuf::from("*.json")],
+        &[PathBuf::from("*-1.json")],
+    )
+    .or_fail()?;
+    assert_eq!(
+        resolved,
+        &[
+            to_absolute("bar-0.json")?,
+            to_absolute("bar-2.json")?,
+            to_absolute("baz-0.json")?,
+            to_absolute("baz-2.json")?,
+            to_absolute("foo-0.json")?,
+            to_absolute("foo-2.json")?
+        ]
+    );
+
+    // ワイルドカードと通常パスの混合
+    let resolved = layout::resolve_source_paths(
+        &base_path,
+        &[
+            PathBuf::from("foo-2.json"),
+            PathBuf::from("bar-*.json"),
+            PathBuf::from("baz-0.json"),
+        ],
+        &[PathBuf::from("bar-2.json"), PathBuf::from("baz-*.json")],
+    )
+    .or_fail()?;
+    assert_eq!(
+        resolved,
+        &[
+            to_absolute("foo-2.json")?,
+            to_absolute("bar-0.json")?,
+            to_absolute("bar-1.json")?,
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn source_path_outside_base_dir_error() -> orfail::Result<()> {
+    // ベースディレクトリの外をレイアウトの中で参照した場合にはエラーになる
+    let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
+
+    let result =
+        layout::resolve_source_paths(&base_path, &[PathBuf::from("../files2/foo-0.json")], &[]);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("outside the base dir")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
+    // files2/ ディレクトリには以下のファイルがある：
+    // - foo-0.json + foo-0.mp4 (メディアファイルあり)
+    // - source-without-media.json (メディアファイルなし)
+    let base_path = PathBuf::from("testdata/files2/").canonicalize().or_fail()?;
+    let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
+
+    // ワイルドカードで全 JSON ファイルを指定
+    let resolved =
+        layout::resolve_source_paths(&base_path, &[PathBuf::from("*.json")], &[]).or_fail()?;
+
+    // メディアファイルが存在するソースのみが含まれることを確認
+    // source-without-media.json は対応するメディアファイル（.webm または .mp4）が
+    // 存在しないため、展開結果から除外される
+    assert_eq!(resolved, &[to_absolute("foo-0.json")?]);
+
+    // [おまけ]
+    // source-without-media.json をワイルドカードではなく直接指定した場合にはエラーになる
+    let result = layout::resolve_source_paths(
+        &base_path,
+        &[PathBuf::from("source-without-media.json")],
+        &[],
+    );
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("no media file for the source")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn invalid_layouts() {
+    // バリデーションで弾かれるべきなレイアウト群
+
+    let base_path = PathBuf::from(".");
+
+    // x_pos + width が範囲外
+    let invalid_json = r#"
+{
+  "resolution": "720x480",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 700,
+      "height": 400,
+      "x_pos": 50
+    }
+  }
+}"#;
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
+    assert!(result.is_err());
+
+    let error_message = result.unwrap_err().message;
+    assert!(error_message.contains("x_pos + width"));
+    assert!(error_message.contains("exceeds resolution width"));
+
+    // x_pos + width == resolution.width なら大丈夫
+    let valid_json = invalid_json.replace(r#"x_pos": 50"#, r#"x_pos": 20"#);
+    let result = Layout::from_layout_json_str(base_path.clone(), &valid_json);
+    assert!(result.is_ok());
+
+    // y_pos + height が範囲外
+    let invalid_json = r#"
+{
+  "resolution": "720x480",
+  "video_layout": {
+    "main": {
+      "video_sources": [],
+      "width": 700,
+      "height": 400,
+      "y_pos": 100
+    }
+  }
+}"#;
+    let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
+    assert!(result.is_err());
+
+    let error_message = result.unwrap_err().message;
+    assert!(error_message.contains("y_pos + height"));
+    assert!(error_message.contains("exceeds resolution height"));
+
+    // y_pos + height == resolution.height なら大丈夫
+    let valid_json = invalid_json.replace(r#"y_pos": 100"#, r#"y_pos": 80"#);
+    let result = Layout::from_layout_json_str(base_path.clone(), &valid_json);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn source_timestamps() -> orfail::Result<()> {
+    // ソースのタイムスタンプ情報が適切に反映されているかどうかのテスト
+    let base_path = PathBuf::from("./testdata/source_timestamps/");
+
+    // 一括録画の場合
+    let layout_path = base_path.join("layout.json");
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 4);
+
+    let id = SourceId::new("0TFGTG90RS5J55VGR0D7Z5QKJC");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 0);
+    assert_eq!(source.stop_timestamp.as_secs(), 31);
+
+    let id = SourceId::new("EVYCT2Q86H6ZDCD08JV3YTXCDR");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 22);
+    assert_eq!(source.stop_timestamp.as_secs(), 61);
+
+    let id = SourceId::new("SBRZKAAYF526HCRFGPB5VXCX78");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 41);
+    assert_eq!(source.stop_timestamp.as_secs(), 73);
+
+    let id = SourceId::new("Z2EDY12WX13QK8X8JDZK81MM0G");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 11);
+    assert_eq!(source.stop_timestamp.as_secs(), 51);
+
+    // 分割録画の場合
+    let layout_path = base_path.join("split-layout.json");
+    let layout = Layout::from_layout_json_file(base_path, &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 4);
+
+    let id = SourceId::new("0TFGTG90RS5J55VGR0D7Z5QKJC");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 0);
+    assert_eq!(source.stop_timestamp.as_secs(), 31);
+
+    let id = SourceId::new("EVYCT2Q86H6ZDCD08JV3YTXCDR");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 22);
+    assert_eq!(source.stop_timestamp.as_secs(), 61);
+
+    let id = SourceId::new("SBRZKAAYF526HCRFGPB5VXCX78");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 41);
+    assert_eq!(source.stop_timestamp.as_secs(), 73);
+
+    let id = SourceId::new("Z2EDY12WX13QK8X8JDZK81MM0G");
+    let source = layout.sources.get(&id).or_fail()?;
+    assert_eq!(source.start_timestamp.as_secs(), 11);
+    assert_eq!(source.stop_timestamp.as_secs(), 51);
+
+    Ok(())
+}
+
+#[test]
+fn trim() -> orfail::Result<()> {
+    // trim 指定が適切に反映されているかどうかのテスト
+    let base_path = PathBuf::from("./testdata/trim/");
+
+    // trim:true の場合は、ソースが存在しない全ての期間がトリム対象となる
+    let layout_path = base_path.join("layout-trim-true.json");
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 3);
+
+    // ソースの時刻情報を確認
+    for (start, stop) in [(5, 15), (10, 20), (25, 30)] {
+        let id = SourceId::new(&format!("{start}-{stop}"));
+        let source = layout.sources.get(&id).or_fail()?;
+        assert_eq!(source.start_timestamp.as_secs(), start);
+        assert_eq!(source.stop_timestamp.as_secs(), stop);
+    }
+
+    // トリム判定が期待通りかを確認
+    for (time, should_trim) in [
+        (0, true),
+        (5, false),
+        (10, false),
+        (15, false),
+        (20, true),
+        (25, false),
+    ] {
+        assert_eq!(
+            layout.trim_spans.contains(Duration::from_secs(time)),
+            should_trim,
+            "{time}: {should_trim}"
+        );
+    }
+
+    // trim:false の場合は、ソースが存在しない冒頭期間のみがトリム対象となる
+    let layout_path = base_path.join("layout-trim-false.json");
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    assert_eq!(layout.sources.len(), 3);
+
+    // [NOTE] ソースの時刻情報は上と同様
+
+    // トリム判定が期待通りかを確認
+    for (time, should_trim) in [
+        (0, true),
+        (5, false),
+        (10, false),
+        (15, false),
+        (20, false), // <- ここが `trim:true` の場合と異なる
+        (25, false),
+    ] {
+        assert_eq!(
+            layout.trim_spans.contains(Duration::from_secs(time)),
+            should_trim,
+            "{time}: {should_trim}"
+        );
+    }
+
+    Ok(())
+}

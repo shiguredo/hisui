@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "develop"
+      - "feature/**"
+    paths-ignore:
+      - "**.md"
+  schedule:
+    # UTC の 01:00 は JST だと 10:00 。
+    # 1-5 で 月曜日から金曜日
+    - cron: "0 1 * * 1-5"
+
+env:
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup update stable
+      - run: rustup default stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+
+            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
+            **/build.rs
+            **/Cargo.toml
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+
+  clippy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup update stable
+      - run: rustup default stable
+      - run: rustup component add clippy
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+
+            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
+            **/build.rs
+            **/Cargo.toml
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox -- --deny warnings
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup update stable
+      - run: rustup default stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+
+            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
+            **/build.rs
+            **/Cargo.toml
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+
+  test-fdk-aac:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup update stable
+      - run: rustup default stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libfdk-aac-dev
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+
+            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
+            **/build.rs
+            **/Cargo.toml
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+      - run: cargo test --package shiguredo_fdk_aac
+      - run: cargo test --features fdk-aac
+
+      - run: cargo build --features fdk-aac
+      - run: ldd target/debug/hisui
+      - name: FDK-AAC が動的リンクされることを確認する
+        run: ldd target/debug/hisui | grep fdk-aac
+
+      - run: cargo build
+      - run: ldd target/debug/hisui
+      - name: FDK-AAC がリンクされないことを確認する
+        run: if ldd target/debug/hisui | grep -q fdk-aac; then exit 1; else exit 0; fi
+
+  test-openh264:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OPENH264_VERSION: "2.6.0"
+      OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup update stable
+      - run: rustup default stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+
+            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
+            **/build.rs
+            **/Cargo.toml
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+      - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
+        run: |
+          curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
+          bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
+          mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
+      - run: cargo test -p hisui -p shiguredo_openh264
+
+  valgrind:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OPENH264_VERSION: "2.6.0"
+      OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup update stable
+      - run: rustup default stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake valgrind libfdk-aac-dev
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+
+            # cargo-valgrind 用に bin/ もキャッシュする
+            ~/.cargo/bin/
+
+            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
+            **/build.rs
+            **/Cargo.toml
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+      - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
+        run: |
+          curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
+          bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
+          mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
+      - run: cargo install cargo-valgrind || echo 'already installed'
+      - run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+
+  docs_rs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DOCS_RS: 1
+    steps:
+      # docs.rs 向けでは外部ライブラリのビルドは走らないので依存パッケージなどのインストールは不要
+      - uses: actions/checkout@v5
+      - run: rustup update stable
+      - run: rustup default stable
+      - run: cargo doc --workspace --exclude hisui
+
+  slack_notify_failed:
+    needs: [check, clippy, test, test-fdk-aac, test-openh264, valgrind, docs_rs]
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    if: failure()
+    steps:
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: hisui
+          SLACK_COLOR: danger
+          SLACK_ICON_EMOJI: ":japanese_ogre:"
+          SLACK_TITLE: "FAILED"
+          SLACK_MESSAGE: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{github.event.head_commit.message }}>
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+

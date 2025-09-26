@@ -1,0 +1,54 @@
+// 入力ファイルの音声と映像を Sora に配信するパイプラインの例
+{
+  "pipeline": [
+    // 音声の処理パイプライン: read -> decode
+    { // メディアファイルからの音声データの読み込み
+      "type": "audio_reader",
+      "input_file": "input.mp4", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
+      "output_stream": "audio_raw",
+      "start_time": 0,
+    },
+    { // 音声をデコード
+      "type": "audio_decoder",
+      "input_stream": "audio_raw",
+      "output_stream": "audio_decoded",
+    },
+
+    // 映像の処理パイプライン: read -> decode
+    { // メディアファイルからの映像データの読み込み
+      "type": "video_reader",
+      "input_file": "input.mp4", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
+      "output_stream": "video_raw",
+      "start_time": 0,
+    },
+    { // 映像をデコード
+      "type": "video_decoder",
+      "input_stream": "video_raw",
+      "output_stream": "video_decoded",
+    },
+
+    // リアルタイム用にペースを制御
+    {
+      "type": "realtime_pacer",
+      "input_stream": ["audio_decoded", "video_decoded"],
+      "output_stream": ["audio_paced", "video_paced"]
+    },
+
+    // 音声と映像を Sora に配信
+    {
+      "type": "plugin_command",
+      "input_stream": ["audio_paced", "video_paced"],
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "plugin-examples/",
+        "sora_publish.py",
+        "--channel-id",
+        "sora",
+        "--signaling-url",
+        "ws://localhost:5000/signaling"
+      ],
+    }
+  ],
+}

@@ -1,0 +1,170 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  github-release:
+    name: 'Create GitHub Release'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
+      release-id: ${{ steps.create-release.outputs.release-id }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Get the version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+
+      - name: Create Release Draft
+        id: create-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_output=$(gh release create ${{ steps.get_version.outputs.VERSION }} \
+            --title "${{ steps.get_version.outputs.VERSION }}" \
+            --notes "Pre-release ${{ steps.get_version.outputs.VERSION }}" \
+            --prerelease)
+          release_id=$(echo "$release_output" | grep -o 'releases/[0-9]*' | cut -d'/' -f2)
+          echo "release-id=$release_id" >> $GITHUB_OUTPUT
+
+  ubuntu-binary:
+    name: 'Upload Binary for Ubuntu'
+    strategy:
+      matrix:
+        platform:
+          - name: ubuntu-24.04_x86_64
+            runs-on: ubuntu-24.04
+          - name: ubuntu-24.04_arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.platform.runs-on }}
+    needs: github-release
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+      - run: rustup update stable
+      - run: cargo build --release
+      - run: |
+          mkdir -p hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
+          cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}/
+          tar -czf hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
+            hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
+      - name: Upload artifact for Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: hisui-binary-${{ matrix.platform.name }}
+          path: hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz
+      - name: Upload Release Asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ needs.github-release.outputs.version }} \
+            hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz
+
+  macos-binary:
+    name: 'Upload Binary for MacOS'
+    runs-on: macos-15
+    needs: github-release
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - run: rustup update stable
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson nasm yasm automake autoconf libtool pkg-config
+      - run: cargo build --release
+      - run: |
+          mkdir -p hisui-${{ needs.github-release.outputs.version }}_macos_arm64
+          cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_macos_arm64/
+          tar -czf hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz \
+            hisui-${{ needs.github-release.outputs.version }}_macos_arm64
+      - name: Upload Release Asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ needs.github-release.outputs.version }} \
+            hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz
+
+  docker-image:
+    name: 'Build and Push Docker Image'
+    runs-on: ubuntu-24.04
+    needs: [github-release, ubuntu-binary]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Download Ubuntu x86_64 binary
+        uses: actions/download-artifact@v5
+        with:
+          name: hisui-binary-ubuntu-24.04_x86_64
+
+      - name: Download Ubuntu arm64 binary
+        uses: actions/download-artifact@v5
+        with:
+          name: hisui-binary-ubuntu-24.04_arm64
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare binaries
+        run: |
+          tar -xzf hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_x86_64.tar.gz
+          mv hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_x86_64/hisui hisui.amd64
+          tar -xzf hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_arm64.tar.gz
+          mv hisui-${{ needs.github-release.outputs.version }}_ubuntu-24.04_arm64/hisui hisui.arm64
+          chmod +x hisui.*
+
+      - name: Build and push multi-arch image (canary)
+        if: contains(github.ref_name, 'canary')
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --tag ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            .
+
+      - name: Build and push multi-arch image (release)
+        if: ${{ !contains(github.ref_name, 'canary') }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --tag ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            --tag ghcr.io/${{ github.repository }}:latest \
+            .
+
+  slack_notify_failed:
+    needs: [github-release, ubuntu-binary, macos-binary, docker-image]
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    if: failure()
+    steps:
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: hisui
+          SLACK_COLOR: danger
+          SLACK_ICON_EMOJI: ":japanese_ogre:"
+          SLACK_TITLE: "FAILED"
+          SLACK_MESSAGE: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{github.event.head_commit.message }}>
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

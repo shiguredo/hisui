@@ -1,0 +1,17 @@
+{
+  "format": "mp4",
+  "archives": [
+    {
+      "connection_id": "1",
+      "metadata_filename": "red-noise.json"
+    },
+    {
+      "connection_id": "2",
+      "metadata_filename": "green-noise.json"
+    },
+    {
+      "connection_id": "3",
+      "metadata_filename": "blue-noise.json"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+// compose コマンド相当の処理を実行するパイプラインの例
+{
+  "pipeline": [
+    // 音声の処理パイプライン: read -> decode -> mix -> encode
+    { // メディアファイルからの音声データの読み込み
+      "type": "audio_reader",
+      "input_file": "audio.mp4", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
+      "output_stream": "audio_raw#source1",
+      "start_time": 0,
+    },
+    { // 音声をデコード
+      "type": "audio_decoder",
+      "input_stream": "audio_raw#source1",
+      "output_stream": "audio_decoded#source1",
+    },
+    { // 音声を合成: この例では入力がひとつなので実質的には何もしない
+      "type": "audio_mixer",
+      "input_stream": ["audio_decoded#source1"],
+      "output_stream": "mixed#audio",
+    },
+    { // 合成後の音声をエンコード
+      "type": "audio_encoder",
+      "input_stream": "mixed#audio",
+      "output_stream": "encoded#audio",
+    },
+
+    // 映像の処理パイプライン: read -> decode -> mix -> encode
+    { // メディアファイルからの映像データの読み込み
+      "type": "video_reader",
+      "input_file": "video.webm", // [NOTE] 入力ファイルのパスは実際に使うものを指定すること
+      "output_stream": "video_raw#source1",
+      "start_time": 0,
+    },
+    { // 映像をデコード
+      "type": "video_decoder",
+      "input_stream": "video_raw#source1",
+      "output_stream": "video_decoded#source1",
+    },
+    { // 映像を合成: この例では入力がひとつなので実質的にはリサイズしているだけ
+      "type": "video_mixer",
+      "input_stream": ["video_decoded#source1"],
+      "output_stream": "mixed#video",
+      "resolution": "1280x720",
+      "video_layout": {
+        "main": {
+          // TODO: "video_reader" の出力ストリーム ID を指定する必要があるのはわかりにくいので修正する
+          "video_sources": ["video_raw#source1"]
+        }
+      }
+    },
+    { // 合成後の映像をエンコード
+      "type": "video_encoder",
+      "input_stream": "mixed#video",
+      "output_stream": "encoded#video",
+    },
+
+    // エンコード後の音声と映像を MP4 ファイルに出力
+    {
+      "type": "mp4_writer",
+      "input_stream": ["encoded#audio", "encoded#video"],
+      "output_file": "output.mp4",
+    }
+  ],
+}

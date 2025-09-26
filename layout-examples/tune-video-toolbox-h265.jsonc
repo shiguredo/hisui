@@ -1,0 +1,24 @@
+{
+  "resolution": "1280x720",
+  "video_codec": "H265",
+  "video_bitrate": 1000000,
+  "frame_rate": 30,
+  "video_layout": {
+    "main": {
+      "max_columns": 3,
+      "video_sources": [
+        "archive*.json"
+      ]
+    }
+  },
+  "video_toolbox_h265_encode_params": {
+    "max_key_frame_interval": 300,
+    "real_time": null,
+    "maximize_power_efficiency": null,
+    "allow_temporal_compression": null,
+    "allow_open_gop": null,
+    "profile_level": null,
+    "max_frame_delay_count": null,
+    "use_parallelization": null
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "audio_sources": [
+    "./archive-CXF106QYAN2RV93GGWMQSN93RW.json",
+    "./archive-EM68QBD0811976R843DPZ8B4N0.json",
+    "./archive-RJAE8N3YYH6CF37XC8N8RTN3A8.json",
+    "./archive-WSTB03DVGD7896EA51RDEXYB90.json",
+    "./archive-XCDEBGNF2D5WVD1QQGGGKJZ44W.json"
+  ],
+  "audio_sources_excluded": [
+    "./archive-CXF106QYAN2RV93GGWMQSN93RW.json",
+    "./archive-RJAE8N3YYH6CF37XC8N8RTN3A8.json",
+    "./archive-XCDEBGNF2D5WVD1QQGGGKJZ44W.json"
+  ],
+  "video_layout": {
+    "Cell": {
+      "x_pos": 10,
+      "y_pos": 0,
+      "width": 1260,
+      "height": 720,
+      "max_rows": 3,
+      "max_columns": 3,
+      "reuse": "show_newest",
+      "cells_excluded": [
+        1,
+        3,
+        5,
+        7
+      ],
+      "video_sources": [
+        "./archive-CXF106QYAN2RV93GGWMQSN93RW.json",
+        "./archive-EM68QBD0811976R843DPZ8B4N0.json",
+        "./archive-RJAE8N3YYH6CF37XC8N8RTN3A8.json",
+        "./archive-WSTB03DVGD7896EA51RDEXYB90.json",
+        "./archive-XCDEBGNF2D5WVD1QQGGGKJZ44W.json"
+      ]
+    }
+  },
+  "trim": true,
+  "format": "mp4",
+  "resolution": "1920x1080",
+  "bitrate": 500
+}

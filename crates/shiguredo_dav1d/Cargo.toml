@@ -1,0 +1,22 @@
+[package]
+name = "shiguredo_dav1d"
+version = "2025.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Shiguredo Inc."]
+license = "Apache-2.0"
+description = "dav1d AV1 decoder for Hisui"
+homepage = "https://github.com/shiguredo/hisui"
+repository = "https://github.com/shiguredo/hisui"
+readme = "README.md"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.72.0"
+toml = "0.9.0"
+
+# 以降は外部ライブラリビルド用のメタデータ
+# (この内容は build.rs の中からのみ参照される)
+[package.metadata.external-dependencies]
+dav1d = { git = "https://github.com/videolan/dav1d.git", version = "1.5.1" }

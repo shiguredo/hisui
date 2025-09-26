@@ -1,0 +1,51 @@
+// Sora から受信した複数の映像を、合成してから Sora に配信するパイプラインの例
+{
+  "pipeline": [
+    // 映像を Sora から受信
+    {
+      "type": "plugin_command",
+      "output_stream": ["video-source1", "video-source2"],
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "plugin-examples/",
+        "sora_source.py",
+        "--channel-id=sora1",
+        "--signaling-url=ws://localhost:5000/signaling",
+        "--video-stream-name=video-source1",
+        "--video-stream-name=video-source2",
+      ],
+    },
+
+    // 映像の合成処理
+    {
+      "type": "video_mixer",
+      "input_stream": ["video-source1", "video-source2"],
+      "output_stream": "video-mixed",
+      "resolution": "1280x720",
+      "video_layout": {
+        "main": {
+          "video_sources": ["video-source1", "video-source2"],
+          "background_color": [255, 0, 0],
+        }
+      }
+    },
+
+    // 映像を Sora に配信
+    {
+      "type": "plugin_command",
+      "input_stream": ["video-mixed"],
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "plugin-examples/",
+        "sora_publish.py",
+        "--channel-id=sora2",
+        "--signaling-url=ws://localhost:5000/signaling",
+        "--video-only",
+      ],
+    },
+  ],
+}

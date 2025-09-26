@@ -1,0 +1,19 @@
+{
+  "audio_sources": [
+    "./archive-*.json"
+  ],
+  "audio_sources_excluded": [
+    "./archive-7VZRQBE3ZS5ES9BV5VGVF4TSTW.json"
+  ],
+  "video_layout": {
+    "grid": {
+      "video_sources": [
+        "./archive-*.json"
+      ]
+    }
+  },
+  "trim": true,
+  "format": "webm",
+  "resolution": "640x360",
+  "bitrate": 1000
+}

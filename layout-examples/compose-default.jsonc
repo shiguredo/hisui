@@ -1,0 +1,134 @@
+// デフォルトのレイアウトファイル
+// レイアウトファイルの仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_spec.md
+{
+  // 音声の合成方法の指定（全てのソースを合成する）
+  // 
+  // NOTE: 分割録画も扱えるように先頭にも '*' を指定している
+  "audio_sources": [
+    "*archive*.json"
+  ],
+
+  // 映像の合成方法の指定
+  // デフォルトでは、列数が最大で 3 のグリッド上に映像ソースが配置される
+  //
+  // 仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_region.md
+  "video_layout": {
+    "main": {
+      "cell_width": 320,
+      "cell_height": 240,
+      "max_columns": 3,
+      "video_sources": [
+        // NOTE: 分割録画も扱えるように先頭にも '*' を指定している
+        "*archive*.json"
+      ]
+    }
+  },
+
+  // デフォルトでは合成後の映像を VP9 でエンコードする
+  "video_codec": "VP9",
+
+  // 以降は各エンコーダーでデフォルトで使用されるエンコードパラメーター
+  //
+  // 仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_encode_params.md
+  "libvpx_vp8_encode_params": {
+    "arnr_config": {
+      "filter_type": 2,
+      "max_frames": 1,
+      "strength": 4,
+    },
+    "cpu_used": 1,
+    "cq_level": 5,
+    "deadline": "realtime",
+    "error_resilient": false,
+    "keyframe_interval": 300,
+    "lag_in_frames": 6,
+    "max_intra_bitrate_pct": 6668,
+    "max_quantizer": 40,
+    "min_quantizer": 26,
+    "noise_sensitivity": 0,
+    "rate_control": "cbr",
+    "static_threshold": 957,
+    "threads": 1,
+    "token_partitions": 0,
+  },
+  "libvpx_vp9_encode_params": {
+    "aq_mode": 3,
+    "cpu_used": 9,
+    "cq_level": 33,
+    "deadline": "realtime",
+    "error_resilient": false,
+    "frame_parallel_decoding": false,
+    "keyframe_interval": 300,
+    "lag_in_frames": 16,
+    "max_quantizer": 43,
+    "min_quantizer": 15,
+    "noise_sensitivity": 2,
+    "rate_control": "cq",
+    "row_mt": false,
+    "threads": 1,
+    "tile_columns": 5,
+    "tile_rows": 1,
+    "tune_content": "default",
+  },
+  "openh264_encode_params": {
+    "adaptive_quantization": false,
+    "background_detection": true,
+    "complexity_mode": "low",
+    "deblocking_filter": false,
+    "denoise": false,
+    "intra_period": 300,
+    "max_qp": 39,
+    "min_qp": 19,
+    "rate_control_mode": "timestamp",
+    "scene_change_detection": false,
+    "thread_count": 1,
+  },
+  "svt_av1_encode_params": {
+    "cdef_level": -1,
+    "enable_dlf_flag": false,
+    "enable_overlays": false,
+    "enable_restoration_filtering": false,
+    "enable_tf": true,
+    "enable_tpl_la": false,
+    "enc_mode": 13,
+    "fast_decode": false,
+    "film_grain_denoise_strength": 0,
+    "force_key_frames": false,
+    "hierarchical_levels": 3,
+    "intra_period_length": 300,
+    "look_ahead_distance": 13,
+    "max_qp_allowed": 50,
+    "min_qp_allowed": 12,
+    "over_shoot_pct": 51,
+    "pin_threads": 1,
+    "qp": 46,
+    "rate_control_mode": "vbr",
+    "scene_change_detection": false,
+    "stat_report": false,
+    "tier": 1,
+    "under_shoot_pct": 75,
+  },
+  "video_toolbox_h264_encode_params": {
+    "allow_frame_reordering": false,
+    "allow_temporal_compression": true,
+    "h264_entropy_mode": "cavlc",
+    "max_frame_delay_count": 2,
+    "max_key_frame_interval": 300,
+    "maximize_power_efficiency": false,
+    "prioritize_speed_over_quality": true,
+    "profile_level": "baseline",
+    "real_time": false,
+    "use_parallelization": false,
+  },
+  "video_toolbox_h265_encode_params": {
+    "allow_frame_reordering": false,
+    "allow_open_gop": true,
+    "allow_temporal_compression": true,
+    "max_frame_delay_count": 15,
+    "max_key_frame_interval": 300,
+    "maximize_power_efficiency": false,
+    "profile_level": "main",
+    "real_time": false,
+    "use_parallelization": true,
+  },
+}

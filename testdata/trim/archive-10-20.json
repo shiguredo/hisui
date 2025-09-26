@@ -1,0 +1,8 @@
+{
+  "connection_id": "10-20",
+  "format": "webm",
+  "audio": { "codec_type": "OPUS" },
+  "video": { "bit_rate": 3000, "codec_type": "VP8", "height": 480, "width": 640 },
+  "start_time_offset": 10,
+  "stop_time_offset": 20
+}
