@@ -52,7 +52,13 @@ impl Decoder {
         unsafe {
             sys::dav1d_default_settings(settings.as_mut_ptr());
 
-            let settings = settings.assume_init();
+            let mut settings = settings.assume_init();
+
+            // Hisui の用途ではデコーダー自体はシングルスレッドで動作して
+            // マルチスレッドの管理はより上のレイヤーの方で行う方が効率がいいので、
+            // シングルスレッドで動作するように設定する
+            settings.n_threads = 1;
+
             let mut ctx = std::ptr::null_mut();
             let code = sys::dav1d_open(&mut ctx, &settings);
             Error::check(code, "dav1d_open")?;
