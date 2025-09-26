@@ -22,8 +22,8 @@
 
 macOS の場合には以下のようにして、依存パッケージがインストールできます。
 
-```console
-$ brew install libvmaf
+```bash
+brew install libvmaf
 ```
 
 ## 使用方法

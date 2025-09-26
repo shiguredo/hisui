@@ -18,13 +18,13 @@
 レガシー Hisui との互換性維持を目的としたものとしては、[`hisui legacy`](./command_legacy.md) サブコマンドが提供されています。
 通常は以下のように、レガシー Hisui で使用していた引数群の前に `legacy` を付与すれば、新 Hisui でもそのまま動作するはずです。
 
-```console
-// レガシー Hisui
-$ hisui -f /path/to/report.json ...その他の引数...
+```bash
+# レガシー Hisui
+hisui -f /path/to/report.json ...その他の引数...
 
-// 新 Hisui
-// => `hisui` の直後に `legacy` を追加する
-$ hisui legacy -f /path/to/report.json ...その他の引数...
+# 新 Hisui
+# => `hisui` の直後に `legacy` を追加する
+hisui legacy -f /path/to/report.json ...その他の引数...
 ```
 
 しかし `hisui legacy` サブコマンドも 100% の互換性が維持されている訳ではないので、注意が必要です。
@@ -41,15 +41,15 @@ $ hisui legacy -f /path/to/report.json ...その他の引数...
 レイアウトファイルの互換性は維持されているので、レガシー Hisui ですでにレイアウトファイルを使って合成を行っていた場合には、
 基本的には、次のような単純な修正で移行できます。
 
-```console
-// レガシー Hisui
-$ hisui --layout /path/to/layout.json 
+```bash
+# レガシー Hisui
+hisui --layout /path/to/layout.json 
 
-// 新 Hisui
-// => `hisui` の直後に `compose` を追加する
-// => オプション名を `--layout` から `--layout-file` に変更する
-// => レポートファイルなどが配置されているディレクトリを指定する
-$ hisui compose --layout-file /path/to/layout.json /path/to/合成対象の録画ファイルが配置されているディレクトリ/
+# 新 Hisui
+# => `hisui` の直後に `compose` を追加する
+# => オプション名を `--layout` から `--layout-file` に変更する
+# => レポートファイルなどが配置されているディレクトリを指定する
+hisui compose --layout-file /path/to/layout.json /path/to/合成対象の録画ファイルが配置されているディレクトリ/
 ```
 
 `hisui compose` サブコマンドで `--layout-file` オプションを省略した場合にはデフォルトレイアウトでの合成が行われます。
@@ -57,15 +57,15 @@ $ hisui compose --layout-file /path/to/layout.json /path/to/合成対象の録�
 レガシー Hisui でレポートファイル指定で合成を行っていた場合には、
 次のように `--layout-file` オプションの指定を省略することで、同じ結果が得られます。
 
-```console
-// レガシー Hisui
-$ hisui -f /path/to/report.json ...その他の引数...
+```bash
+# レガシー Hisui
+hisui -f /path/to/report.json ...その他の引数...
 
-// 新 Hisui
-// => `hisui` の直後に `compose` を追加する
-// => レポートファイルなどが配置されているディレクトリを指定する
-// => `--layout-file` オプションは指定しない
-$ hisui compose /path/to/合成対象の録画ファイルが配置されているディレクトリ/
+# 新 Hisui
+# => `hisui` の直後に `compose` を追加する
+# => レポートファイルなどが配置されているディレクトリを指定する
+# => `--layout-file` オプションは指定しない
+hisui compose /path/to/合成対象の録画ファイルが配置されているディレクトリ/
 ```
 
 なお `hisui compose` サブコマンドでは、レガシー Hisui や新 Hisui の `hisui legacy` サブコマンドとは異なり、

@@ -5,8 +5,8 @@ Hisui では、レイアウトを定義した JSON ファイルを使うこと�
 
 [`hisui compose`](./command_compose.md) コマンドの場合は、以下のように `-l` オプションでレイアウトファイルを指定できます。
 
-```console
-$ hisui compose -l /path/to/layout.jsonc /path/to/archive/RECORDING_ID/
+```bash
+hisui compose -l /path/to/layout.jsonc /path/to/archive/RECORDING_ID/
 ```
 
 レイアウトファイルを指定しない場合は [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) が使用されます。
