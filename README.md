@@ -47,7 +47,7 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 - Intel VPL に非対応です
   - 将来的に対応予定です
 
-詳細は [hisui_legacy\.md](docs/hisui_legacy.md) をご覧ください。
+詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。
 
 ## ファイル形式
 
