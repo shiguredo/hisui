@@ -106,7 +106,7 @@ FDK-AAC を利用する場合は、[ビルド方法](build.md) を参考にし�
 
 ### 注意
 
-[レガシー版の Hisui](./hisui_legacy.md) との互換性維持のため、`bitrate` フィールド（kbps単位）も利用可能ですが、両方が指定された場合には `video_bitrate` が優先されます。
+[レガシー版の Hisui](./migrate_hisui_legacy.md) との互換性維持のため、`bitrate` フィールド（kbps単位）も利用可能ですが、両方が指定された場合には `video_bitrate` が優先されます。
 
 ## 映像エンコーダー固有のパラメーターセットの指定
 

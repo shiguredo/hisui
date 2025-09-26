@@ -12,7 +12,7 @@
 ## 注意事項
 
 `hisui legacy` コマンドも [レガシー版 Hisui] と 100% の互換性がある訳ではありません。
-詳しい差異については [hisui_legacy\.md](hisui_legacy.md) をご確認ください。
+詳しい差異については [migrate_hisui_legacy\.md](migrate_hisui_legacy.md) をご確認ください。
 
 また `hisui legacy` コマンドは将来的に削除される可能性があるため、 [`hisui compose`](command_compose.md) への移行を推奨しています。
 
