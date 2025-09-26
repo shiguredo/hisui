@@ -55,11 +55,11 @@ impl Args {
                 .doc("指定された場合は、合成の進捗を非表示にします")
                 .take(raw_args)
                 .is_present(),
-            worker_threads: noargs::opt("worker-threads")
+            worker_threads: noargs::opt("thread-count")
                 .short('T')
                 .ty("INTEGER")
                 .default("1")
-                .env("HISUI_WORKER_THREADS")
+                .env("HISUI_THREAD_COUNT")
                 .doc(concat!(
                     "合成処理に使用するワーカースレッド数を指定します\n",
                     "\n",

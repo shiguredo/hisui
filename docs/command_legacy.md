@@ -46,7 +46,7 @@ Options:
       --out-opus-bit-rate <BPS>                 Opus でエンコードする際のビットレート [default: 65536]
       --out-aac-bit-rate <BPS>                  AAC でエンコードする際のビットレート [default: 64000]
       --show-progress-bar <true|false>          true が指定された場合には合成の進捗を表示します [default: true]
-  -T, --worker-threads <INTEGER>                合成処理に使用するワーカースレッド数を指定します [env: HISUI_WORKER_THREADS] [default: 1]
+  -T, --thread-count <INTEGER>                  合成処理に使用するワーカースレッド数を指定します [env: HISUI_THREAD_COUNT] [default: 1]
       --out-stats-file <PATH>                   合成実行中に集めた統計情報 JSON の出力先ファイル
       --video-codec-engines                     OBSOLETE: 2025.1.0 以降では指定しても無視されます
       --mp4-muxer <IGNORED>                     OBSOLETE: 2025.1.0 以降では指定しても無視されます
