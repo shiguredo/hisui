@@ -26,7 +26,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           release_output=$(gh release create ${{ steps.get_version.outputs.VERSION }} \
-            --title "${{ steps.get_version.outputs.VERSION }}")
+            --title "${{ steps.get_version.outputs.VERSION }}") \
+            --notes "Release ${{ steps.get_version.outputs.VERSION }}")
           release_id=$(echo "$release_output" | grep -o 'releases/[0-9]*' | cut -d'/' -f2)
           echo "release-id=$release_id" >> $GITHUB_OUTPUT
 
