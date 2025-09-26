@@ -50,9 +50,9 @@
 macOS の場合には以下のようにして、依存パッケージがインストールできます
 （[uv](https://docs.astral.sh/uv/) はPython用のパッケージマネージャーです）：
 
-```console
-$ brew install libvmaf
-$ uv tool install optuna
+```bash
+brew install libvmaf
+uv tool install optuna
 ```
 
 ### Ubuntu で利用する場合
@@ -63,29 +63,29 @@ Ubuntu では依存パッケージをビルドする必要があります。
 
 1. 必要なパッケージをインストール
 
-```console
-$ sudo apt-get update
-$ sudo apt-get install ninja-build meson nasm
+```bash
+sudo apt-get update
+sudo apt-get install ninja-build meson nasm
 ```
 
 2. vmaf [ソースコード](https://github.com/Netflix/vmaf/releases) をダウンロード
 3. ソースコードの展開とビルド
 
-```console
+```bash
 # X.Y.Z はダウンロードした vmaf のバージョン
-$ tar -xzf vmaf-X.Y.Z.tar.gz
-$ cd vmaf-X.Y.Z/libvmaf
-$ meson build --buildtype release
-$ ninja -vC build
-$ sudo ninja -vC build install
+tar -xzf vmaf-X.Y.Z.tar.gz
+cd vmaf-X.Y.Z/libvmaf
+meson build --buildtype release
+ninja -vC build
+sudo ninja -vC build install
 ```
 
 #### optuna のインストール
 
 macOS と同様に uv を利用してインストールします。
 
-```console
-$ uv tool install optuna
+```bash
+uv tool install optuna
 ```
 
 ## 使用方法

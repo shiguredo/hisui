@@ -6,9 +6,9 @@
 
 ビルド済みのバイナリを使用する場合は [Releases](https://github.com/shiguredo/hisui/releases) より環境に応じた最新のバイナリをダウンロードしてください。
 
-```console
-$ curl -L https://github.com/shiguredo/hisui/releases/download/{ VERSION }/{ BINARY_NAME } -o hisui
-$ chmod +x hisui
+```bash
+curl -L https://github.com/shiguredo/hisui/releases/download/{ VERSION }/{ BINARY_NAME } -o hisui
+chmod +x hisui
 ```
 
 なお、自前でのビルドについては [ビルド方法](build.md) をご参照ください。
@@ -44,9 +44,9 @@ Hisui にはレイアウトという機能があり、そちらを利用する�
 レイアウトは JSON 形式のファイルで定義し、
 `compose` コマンドの `--layout` 引数で指定します。
 
-```console
+```bash
 # レイアウトファイルを指定して合成を実行
-$ ./hisui compose --layout レイアウト.jsonc 録画ファイルの配置ディレクトリ/
+./hisui compose --layout レイアウト.jsonc 録画ファイルの配置ディレクトリ/
 ```
 
 `--layout` 引数が省略された場合は [デフォルトのレイアウト](../layout-examples/compose-default.jsonc) が使用されます。

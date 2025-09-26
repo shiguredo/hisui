@@ -6,16 +6,16 @@
 
 Ubuntu の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
-```
-$ sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake clang
+```bash
+sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake clang
 ```
 
 ### macOS の場合
 
 macOS の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
-```
-$ brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+```bash
+brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
 ```
 
 ## Hisui 本体のビルド方法
@@ -24,31 +24,31 @@ Hisui は Rust のビルドツールである [Cargo](https://doc.rust-lang.org/
 
 なお、必要な Rust バージョンは [`Cargo.toml`](../Cargo.toml) の `rust-version` を参照してください。
 
-```console
-// crates.io からビルドする場合（まだ canary リリースしかないのでバージョン指定が必須）
-$ cargo install hisui@2025.1.0-canary.6
+```bash
+# crates.io からビルドする場合（まだ canary リリースしかないのでバージョン指定が必須）
+cargo install hisui@2025.1.0-canary.6
 
-// リポジトリ指定でビルドする場合
-$ cargo install --git https://github.com/shiguredo/hisui.git
+# リポジトリ指定でビルドする場合
+cargo install --git https://github.com/shiguredo/hisui.git
 
-// ローカルに clone してからビルドする場合
-$ git clone https://github.com/shiguredo/hisui.git
-$ cd hisui/
-$ cargo install --path .
+# ローカルに clone してからビルドする場合
+git clone https://github.com/shiguredo/hisui.git
+cd hisui/
+cargo install --path .
 ```
 
 上のいずれかの方法でビルドした hisui のバイナリは
 `$HOME/.cargo/bin/hisui` のようなディレクトリに配置されます。
-アンインストールする場合には `$ cargo uninstall hisui` を実行してください。
+アンインストールする場合には `cargo uninstall hisui` を実行してください。
 
 ### FDK-AAC を使った AAC エンコードを有効にする場合
 
 Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
 `--features fdk-aac` を指定して Hisui をビルドする必要があります。
 
-```console
-$ sudo apt-get install -y libfdk-aac-dev
-$ cargo install hisui@2025.1.0-canary.6 --features fdk-aac
+```bash
+sudo apt-get install -y libfdk-aac-dev
+cargo install hisui@2025.1.0-canary.6 --features fdk-aac
 ```
 
 なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。
