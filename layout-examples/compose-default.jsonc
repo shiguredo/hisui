@@ -122,13 +122,13 @@
   },
   "video_toolbox_h265_encode_params": {
     "allow_frame_reordering": false,
-    "allow_open_gop": false,
+    "allow_open_gop": true,
     "allow_temporal_compression": true,
-    "max_frame_delay_count": 16,
+    "max_frame_delay_count": 15,
     "max_key_frame_interval": 300,
     "maximize_power_efficiency": false,
     "profile_level": "main",
     "real_time": false,
-    "use_parallelization": false,
+    "use_parallelization": true,
   },
 }
