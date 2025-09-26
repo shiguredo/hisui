@@ -240,60 +240,6 @@ impl Default for EncoderConfig {
     }
 }
 
-impl EncoderConfig {
-    /// 高速エンコード用の設定
-    pub fn fast_encode() -> Self {
-        Self {
-            enc_mode: 10,                                            // 高速プリセット
-            look_ahead_distance: 16,                                 // 先読み距離を短縮
-            enable_tf: false,                                        // テンポラルフィルタ無効
-            enable_overlays: false,                                  // オーバーレイ無効
-            scene_change_detection: false,                           // シーンチェンジ検出無効
-            enable_tpl_la: false,                                    // TPL無効
-            tile_columns: Some(NonZeroUsize::MIN.saturating_add(1)), // タイル分割で並列化
-            tile_rows: Some(NonZeroUsize::MIN),
-            hierarchical_levels: 4, // 階層レベルを制限
-            ..Default::default()
-        }
-    }
-
-    /// 高品質エンコード用の設定
-    pub fn high_quality() -> Self {
-        Self {
-            enc_mode: 4,             // 高品質プリセット
-            look_ahead_distance: 64, // 長い先読み
-            enable_tf: true,         // テンポラルフィルタ有効
-            enable_tpl_la: true,     // TPL有効
-            cdef_level: 1,           // CDEF有効
-            enable_restoration_filtering: true,
-            over_shoot_pct: 10, // より厳しい制御
-            under_shoot_pct: 10,
-            ..Default::default()
-        }
-    }
-
-    /// リアルタイム配信用の設定
-    pub fn realtime() -> Self {
-        Self {
-            enc_mode: 12,                            // 最高速プリセット
-            rate_control_mode: RateControlMode::Cbr, // CBR
-            look_ahead_distance: 0,                  // 先読み無効
-            enable_tf: false,                        // テンポラルフィルタ無効
-            enable_overlays: false,                  // オーバーレイ無効
-            scene_change_detection: false,           // シーンチェンジ検出無効
-            enable_tpl_la: false,                    // TPL無効
-            hierarchical_levels: 3,                  // 階層レベルを制限
-            pred_structure: 1,                       // 低遅延
-            tile_columns: Some(NonZeroUsize::MIN),
-            tile_rows: Some(NonZeroUsize::MIN),
-            fast_decode: true,
-            over_shoot_pct: 50, // リアルタイム用途では緩い制御
-            under_shoot_pct: 50,
-            ..Default::default()
-        }
-    }
-}
-
 /// AV1 エンコーダー
 #[derive(Debug)]
 pub struct Encoder {

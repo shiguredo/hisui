@@ -466,41 +466,8 @@ pub enum SliceMode {
     SizeConstrained(usize),
 }
 
-impl EncoderConfig {
-    /// 最高速度優先の設定
-    pub fn fastest() -> Self {
-        Self {
-            width: 1920,
-            height: 1080,
-            target_bitrate: 2_000_000,
-            fps_numerator: 30,
-            fps_denominator: 1,
-
-            // 高速化設定
-            complexity_mode: ComplexityMode::Low,
-            entropy_coding: false, // CAVLC
-            ref_frame_count: NonZeroUsize::MIN,
-            thread_count: None, // 自動
-            spatial_layers: NonZeroUsize::MIN,
-            temporal_layers: NonZeroUsize::MIN,
-            intra_period: Some(30),
-            rate_control_mode: RateControlMode::Off,
-            max_qp: 51,
-            min_qp: 0,
-
-            // 前処理機能を全て無効化
-            denoise: false,
-            background_detection: false,
-            adaptive_quantization: false,
-            scene_change_detection: false,
-            deblocking_filter: false,
-            long_term_reference: false,
-            slice_mode: SliceMode::Single,
-        }
-    }
-
-    /// 高速オフライン用設定
-    pub fn fast_offline() -> Self {
+impl Default for EncoderConfig {
+    fn default() -> Self {
         Self {
             width: 1920,
             height: 1080,
@@ -529,44 +496,6 @@ impl EncoderConfig {
             long_term_reference: false,
             slice_mode: SliceMode::Single,
         }
-    }
-
-    /// 品質重視設定
-    pub fn high_quality() -> Self {
-        Self {
-            width: 1920,
-            height: 1080,
-            target_bitrate: 2_000_000,
-            fps_numerator: 30,
-            fps_denominator: 1,
-
-            // 品質重視設定
-            complexity_mode: ComplexityMode::High,
-            entropy_coding: true, // CABAC
-            ref_frame_count: NonZeroUsize::MIN.saturating_add(3),
-            thread_count: None, // 自動
-            spatial_layers: NonZeroUsize::MIN,
-            temporal_layers: NonZeroUsize::MIN,
-            intra_period: Some(120),
-            rate_control_mode: RateControlMode::Quality,
-            max_qp: 30,
-            min_qp: 5,
-
-            // 前処理機能を有効活用
-            denoise: true,
-            background_detection: true,
-            adaptive_quantization: true,
-            scene_change_detection: true,
-            deblocking_filter: true,
-            long_term_reference: true,
-            slice_mode: SliceMode::Single,
-        }
-    }
-}
-
-impl Default for EncoderConfig {
-    fn default() -> Self {
-        Self::fast_offline()
     }
 }
 
