@@ -63,7 +63,7 @@ Hisui は Sora 向けの Recording Composition Tool から汎用的な Media Pip
 
 - Sora Python SDK から受信した映像・音声をリアルタイムで合成
 - JSON-RPC 経由で Python による音声文字起こし結果を映像に埋め込み
-- 処理済み映像を Sora Python SDK で Sora へ配信しながら MP4 ファイルとして同時出力
+- 処理済み映像を Sora Python SDK で配信しつつ、RTMP で配信しつつ、MP4 ファイルとして同時出力
 
 Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 
