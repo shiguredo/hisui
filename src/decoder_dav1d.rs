@@ -2,10 +2,7 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 
-use crate::{
-    types::EvenUsize,
-    video::{VideoFormat, VideoFrame},
-};
+use crate::video::{VideoFormat, VideoFrame};
 
 #[derive(Debug)]
 pub struct Dav1dDecoder {
@@ -42,8 +39,8 @@ impl Dav1dDecoder {
         while let Some(decoded) = self.inner.next_frame().or_fail()? {
             self.output_queue.push_back(VideoFrame::new_i420(
                 self.input_queue.pop_front().or_fail()?,
-                EvenUsize::new(decoded.width()).or_fail()?,
-                EvenUsize::new(decoded.height()).or_fail()?,
+                decoded.width(),
+                decoded.height(),
                 decoded.y_plane(),
                 decoded.u_plane(),
                 decoded.v_plane(),

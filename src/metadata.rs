@@ -96,7 +96,10 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let connection_id = value.to_member("connection_id")?.required()?;
-        let format = value.to_member("format")?.required()?;
+        let format = value
+            .to_member("format")?
+            .map(ContainerFormat::try_from)?
+            .unwrap_or(ContainerFormat::Webm); // MP4 録画に対応する前は format 項目自体がなかった
         let audio = value.to_member("audio")?.required()?;
         let video = value.to_member("video")?.required()?;
         let start_time_offset = value.to_member("start_time_offset")?.required()?;
@@ -104,11 +107,14 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
 
         Ok(Self {
             connection_id: connection_id.try_into()?,
-            format: format.try_into()?,
-            audio: audio.try_into()?,
-            video: video.try_into()?,
+            format,
             start_time_offset: start_time_offset.try_into()?,
             stop_time_offset: stop_time_offset.try_into()?,
+
+            // 以下のフィールドは、 Sora のバージョンによって、
+            // 値がブールだったりオブジェクトだったりするので、ゆるい判定にしておく
+            audio: audio.as_raw_str() != "false",
+            video: video.as_raw_str() != "false",
         })
     }
 }
@@ -174,6 +180,25 @@ pub enum ContainerFormat {
     #[default]
     Webm,
     Mp4,
+}
+
+impl ContainerFormat {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
+        let ext = path
+            .as_ref()
+            .extension()
+            .or_fail_with(|()| format!("no media file extension: {}", path.as_ref().display()))?;
+        if ext == "mp4" {
+            Ok(Self::Mp4)
+        } else if ext == "webm" {
+            Ok(Self::Webm)
+        } else {
+            Err(orfail::Failure::new(format!(
+                "unexpected media file extension: {}",
+                path.as_ref().display()
+            )))
+        }
+    }
 }
 
 impl nojson::DisplayJson for ContainerFormat {

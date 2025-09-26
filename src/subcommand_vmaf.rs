@@ -11,12 +11,15 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{
     decoder::{VideoDecoder, VideoDecoderOptions},
-    encoder::VideoEncoder,
+    encoder::{VideoEncoder, VideoEncoderOptions},
     json::JsonObject,
     layout::Layout,
     media::{MediaSample, MediaStreamId},
-    mixer_video::VideoMixer,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    mixer_video::{VideoMixer, VideoMixerSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader::VideoReader,
     scheduler::Scheduler,
     stats::ProcessorStats,
@@ -25,17 +28,19 @@ use crate::{
     writer_yuv::YuvWriter,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/vmaf-default.json");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/vmaf-default.jsonc");
 
 #[derive(Debug)]
 struct Args {
     layout_file_path: Option<PathBuf>,
-    reference_yuv_file_path: PathBuf,
-    distorted_yuv_file_path: PathBuf,
-    vmaf_output_file_path: PathBuf,
+    reference_yuv_file_path: Option<PathBuf>,
+    distorted_yuv_file_path: Option<PathBuf>,
+    vmaf_output_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
+    #[expect(dead_code)]
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
+    timeout: Option<Duration>,
     root_dir: PathBuf,
 }
 
@@ -46,44 +51,28 @@ impl Args {
                 .short('l')
                 .ty("PATH")
                 .env("HISUI_LAYOUT_FILE_PATH")
-                .doc(concat!(
-                    "合成に使用するレイアウトファイルを指定します\n",
-                    "\n",
-                    "省略された場合には ",
-                    "hisui/layout-examples/vmaf-default.json の内容が使用されます",
-                ))
+                .default("HISUI_REPO/layout-examples/vmaf-default.jsonc")
+                .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             reference_yuv_file_path: noargs::opt("reference-yuv-file")
                 .ty("PATH")
-                .default("reference.yuv")
-                .doc(concat!(
-                    "参照映像（合成前）のYUVファイルの出力先を指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .default("ROOT_DIR/reference.yuv")
+                .doc("参照映像のYUVファイルの出力先を指定します")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             distorted_yuv_file_path: noargs::opt("distorted-yuv-file")
                 .ty("PATH")
-                .default("distorted.yuv")
-                .doc(concat!(
-                    "歪み映像（合成後）のYUVファイルの出力先を指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .default("ROOT_DIR/distorted.yuv")
+                .doc("歪み映像のYUVファイルの出力先を指定します")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             vmaf_output_file_path: noargs::opt("vmaf-output-file")
                 .ty("PATH")
-                .default("vmaf-output.json")
-                .doc(concat!(
-                    "vmaf コマンドの実行結果ファイルの出力先を指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .default("ROOT_DIR/vmaf-output.json")
+                .doc("vmaf コマンドの実行結果ファイルの出力先を指定します")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             openh264: noargs::opt("openh264")
                 .ty("PATH")
                 .env("HISUI_OPENH264_PATH")
@@ -109,6 +98,11 @@ impl Args {
                 .doc("変換するフレーム数を指定します")
                 .take(raw_args)
                 .then(|a| a.value().parse())?,
+            timeout: noargs::opt("timeout")
+                .ty("SECONDS")
+                .doc("処理のタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）")
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse::<f32>().map(Duration::from_secs_f32))?,
             root_dir: noargs::arg("ROOT_DIR")
                 .example("/path/to/archive/RECORDING_ID/")
                 .doc(concat!(
@@ -155,9 +149,6 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         None
     };
 
-    // CPU コア数制限を適用
-    crate::arg_utils::maybe_limit_cpu_cores(args.max_cpu_cores).or_fail()?;
-
     // プロセッサを準備
     let mut scheduler = Scheduler::new();
     let mut next_stream_id = MediaStreamId::new(0);
@@ -191,7 +182,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // ミキサーを登録
     let mixer_output_stream_id = next_stream_id.fetch_add(1);
     let mixer = VideoMixer::new(
-        layout.clone(),
+        VideoMixerSpec::from_layout(&layout),
         mixer_input_stream_ids,
         mixer_output_stream_id,
     );
@@ -207,14 +198,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     scheduler.register(limiter).or_fail()?;
 
     // エンコード前の画像の YUV 書き込みを登録
-    let distorted_yuv_file_path = args.root_dir.join(&args.distorted_yuv_file_path);
+    let distorted_yuv_file_path = args
+        .distorted_yuv_file_path
+        .unwrap_or_else(|| args.root_dir.join("distorted.yuv"));
     let writer = YuvWriter::new(limiter_output_stream_id, &distorted_yuv_file_path).or_fail()?;
     scheduler.register(writer).or_fail()?;
 
     // エンコーダーを登録
     let encoder_output_stream_id = next_stream_id.fetch_add(1);
     let encoder = VideoEncoder::new(
-        &layout,
+        &VideoEncoderOptions::from_layout(&layout),
         limiter_output_stream_id,
         encoder_output_stream_id,
         openh264_lib.clone(),
@@ -233,7 +226,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     );
     scheduler.register(decoder).or_fail()?;
 
-    let reference_yuv_file_path = args.root_dir.join(&args.reference_yuv_file_path);
+    let reference_yuv_file_path = args
+        .reference_yuv_file_path
+        .unwrap_or_else(|| args.root_dir.join("reference.yuv"));
     let writer = YuvWriter::new(decoder_output_stream_id, &reference_yuv_file_path).or_fail()?;
     scheduler.register(writer).or_fail()?;
 
@@ -243,9 +238,17 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 合成処理を実行
     eprintln!("# Compose for VMAF");
-    let stats = scheduler.run().or_fail()?;
+    let (timeout_expired, stats) = if let Some(timeout) = args.timeout {
+        scheduler.run_timeout(timeout).or_fail()?
+    } else {
+        (false, scheduler.run().or_fail()?)
+    };
     if stats.error.get() {
-        return Err(orfail::Failure::new("video composition process failed").into());
+        return Err(orfail::Failure::new(format!(
+            "video composition process failed{}",
+            if timeout_expired { " (timeout)" } else { "" }
+        ))
+        .into());
     }
 
     // VMAF の下準備としての処理は全て完了した
@@ -253,7 +256,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // vmaf コマンドを実行
     eprintln!("# Run vmaf command");
-    let vmaf_output_file_path = args.root_dir.join(args.vmaf_output_file_path);
+    let vmaf_output_file_path = args
+        .vmaf_output_file_path
+        .unwrap_or_else(|| args.root_dir.join("vmaf-output.json"));
     run_vmaf_evaluation(
         &reference_yuv_file_path,
         &distorted_yuv_file_path,
@@ -445,6 +450,7 @@ impl MediaProcessor for FrameCountLimiter {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::other("frame-count-limiter"),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }
 
@@ -497,7 +503,8 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress-bar"),
+            stats: ProcessorStats::other("progress_bar"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

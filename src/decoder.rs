@@ -12,7 +12,10 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     media::{MediaSample, MediaStreamId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
     video::{VideoFormat, VideoFrame},
@@ -63,6 +66,7 @@ impl MediaProcessor for AudioDecoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::AudioDecoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::AUDIO_DECODER,
         }
     }
 
@@ -184,6 +188,7 @@ impl MediaProcessor for VideoDecoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::VideoDecoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::VIDEO_DECODER,
         }
     }
 
@@ -228,6 +233,7 @@ impl MediaProcessor for VideoDecoder {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
@@ -250,7 +256,7 @@ impl VideoDecoderInner {
             Self::Initial { options } => match frame.format {
                 #[cfg(target_os = "macos")]
                 VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
-                    *self = VideoToolboxDecoder::new_h264(&frame)
+                    *self = VideoToolboxDecoder::new_h264(frame)
                         .or_fail()
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);
@@ -271,7 +277,7 @@ impl VideoDecoderInner {
                 }
                 #[cfg(target_os = "macos")]
                 VideoFormat::H265 => {
-                    *self = VideoToolboxDecoder::new_h265(&frame)
+                    *self = VideoToolboxDecoder::new_h265(frame)
                         .or_fail()
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);

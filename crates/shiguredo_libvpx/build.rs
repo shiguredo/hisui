@@ -64,6 +64,7 @@ fn main() {
     // 依存ライブラリをビルドする
     let success = Command::new("./configure")
         .arg("--disable-shared")
+        .arg("--enable-vp9-highbitdepth")
         .arg(format!("--prefix={}", src_dir.display()))
         .current_dir(&src_dir)
         .status()

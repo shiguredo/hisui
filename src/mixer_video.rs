@@ -7,14 +7,17 @@ use std::{
 use orfail::OrFail;
 
 use crate::{
-    layout::Layout,
+    layout::{Layout, Resolution, TrimSpans},
     layout_region::Region,
     media::MediaStreamId,
     metadata::SourceId,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{ProcessorStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
-    video::{VideoFormat, VideoFrame},
+    video::{FrameRate, VideoFormat, VideoFrame},
 };
 
 // 入力がこの期間更新されなかった場合には、以後は合成ではなく
@@ -33,13 +36,15 @@ const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60
 struct ResizeCachedVideoFrame {
     original: Arc<VideoFrame>,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
+    resize_filter_mode: shiguredo_libyuv::FilterMode,
 }
 
 impl ResizeCachedVideoFrame {
-    fn new(original: Arc<VideoFrame>) -> Self {
+    fn new(original: Arc<VideoFrame>, resize_filter_mode: shiguredo_libyuv::FilterMode) -> Self {
         Self {
             original,
             resized: Vec::new(),
+            resize_filter_mode,
         }
     }
 
@@ -56,7 +61,7 @@ impl ResizeCachedVideoFrame {
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> orfail::Result<&VideoFrame> {
-        if self.original.width == width && self.original.height == height {
+        if self.original.width == width.get() && self.original.height == height.get() {
             // リサイズ不要
             return Ok(&self.original);
         }
@@ -65,9 +70,13 @@ impl ResizeCachedVideoFrame {
         // resized の要素数は、通常は 1 で多くても 2~3 である想定なので線形探索で十分
         if !self.resized.iter().any(|x| x.0 == (width, height)) {
             // キャッシュにないので新規リサイズが必要
-            let mut frame = (*self.original).clone(); // TODO: remove clone() (make resize() return the new instance)
-            frame.resize(width, height).or_fail()?;
-            self.resized.push(((width, height), frame));
+            if let Some(resized) = self
+                .original
+                .resize(width, height, self.resize_filter_mode)
+                .or_fail()?
+            {
+                self.resized.push(((width, height), resized));
+            }
         }
 
         // キャッシュから対応するサイズのフレームを取得する
@@ -98,42 +107,39 @@ impl Canvas {
 
     fn draw_frame(&mut self, position: PixelPosition, frame: &VideoFrame) -> orfail::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
-        (frame.width <= self.width).or_fail()?;
-        (frame.height <= self.height).or_fail()?;
+        (frame.width <= self.width.get()).or_fail()?;
+        (frame.height <= self.height.get()).or_fail()?;
+
+        // セルの解像度は偶数前提なので、奇数になることはない
+        // (入力が奇数の場合でもリサイズによって常に偶数解像度になる）
+        frame.width.is_multiple_of(2).or_fail()?;
+        frame.height.is_multiple_of(2).or_fail()?;
 
         // Y成分の描画
         let offset_x = position.x.get();
         let offset_y = position.y.get();
-        let y_size = frame.width.get() * frame.height.get();
+        let y_size = frame.width * frame.height;
         let y_data = &frame.data[..y_size];
-        for y in 0..frame.height.get() {
-            let i = y * frame.width.get();
-            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame.width.get()]);
+        for y in 0..frame.height {
+            let i = y * frame.width;
+            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame.width]);
         }
 
         // U成分の描画
         let offset_x = position.x.get() / 2;
         let offset_y = position.y.get() / 2;
-        let u_size = (frame.width.get() / 2) * (frame.height.get() / 2);
+        let u_size = (frame.width / 2) * (frame.height / 2);
         let u_data = &frame.data[y_size..][..u_size];
-        for y in 0..frame.height.get() / 2 {
-            let i = y * (frame.width.get() / 2);
-            self.draw_u_line(
-                offset_x,
-                offset_y + y,
-                &u_data[i..][..frame.width.get() / 2],
-            );
+        for y in 0..frame.height / 2 {
+            let i = y * (frame.width / 2);
+            self.draw_u_line(offset_x, offset_y + y, &u_data[i..][..frame.width / 2]);
         }
 
         // V成分の描画
         let v_data = &frame.data[y_size + u_size..][..u_size];
-        for y in 0..frame.height.get() / 2 {
-            let i = y * (frame.width.get() / 2);
-            self.draw_v_line(
-                offset_x,
-                offset_y + y,
-                &v_data[i..][..frame.width.get() / 2],
-            );
+        for y in 0..frame.height / 2 {
+            let i = y * (frame.width / 2);
+            self.draw_v_line(offset_x, offset_y + y, &v_data[i..][..frame.width / 2]);
         }
 
         Ok(())
@@ -160,9 +166,30 @@ impl Canvas {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct VideoMixerSpec {
+    pub regions: Vec<Region>,
+    pub frame_rate: FrameRate,
+    pub resolution: Resolution,
+    pub trim_spans: TrimSpans,
+    pub resize_filter_mode: shiguredo_libyuv::FilterMode,
+}
+
+impl VideoMixerSpec {
+    pub fn from_layout(layout: &Layout) -> Self {
+        Self {
+            regions: layout.video_regions.clone(),
+            frame_rate: layout.frame_rate,
+            resolution: layout.resolution,
+            trim_spans: layout.trim_spans.clone(),
+            resize_filter_mode: shiguredo_libyuv::FilterMode::Box,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct VideoMixer {
-    layout: Layout,
+    spec: VideoMixerSpec,
     input_streams: HashMap<MediaStreamId, InputStream>,
     output_stream_id: MediaStreamId,
     last_mixed_frame: Option<VideoFrame>,
@@ -171,13 +198,13 @@ pub struct VideoMixer {
 
 impl VideoMixer {
     pub fn new(
-        layout: Layout,
+        spec: VideoMixerSpec,
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_id: MediaStreamId,
     ) -> Self {
-        let resolution = layout.resolution;
+        let resolution = spec.resolution;
         Self {
-            layout,
+            spec,
             input_streams: input_stream_ids
                 .into_iter()
                 .map(|id| (id, InputStream::default()))
@@ -208,8 +235,8 @@ impl VideoMixer {
 
     // フレーム数に対応するタイムスタンプを求める
     fn frames_to_timestamp(&self, frames: u64) -> Duration {
-        Duration::from_secs(frames * self.layout.frame_rate.denumerator.get() as u64)
-            / self.layout.frame_rate.numerator.get() as u32
+        Duration::from_secs(frames * self.spec.frame_rate.denumerator.get() as u64)
+            / self.spec.frame_rate.numerator.get() as u32
     }
 
     fn next_output_timestamp(&self) -> Duration {
@@ -232,12 +259,9 @@ impl VideoMixer {
         let timestamp = self.next_output_timestamp();
         let duration = self.next_output_duration();
 
-        let mut canvas = Canvas::new(
-            self.layout.resolution.width(),
-            self.layout.resolution.height(),
-        );
+        let mut canvas = Canvas::new(self.spec.resolution.width(), self.spec.resolution.height());
 
-        for region in &self.layout.video_regions {
+        for region in &self.spec.regions {
             Self::mix_region(&mut canvas, region, &mut self.input_streams, now).or_fail()?;
         }
 
@@ -254,8 +278,8 @@ impl VideoMixer {
             // 可変値
             timestamp,
             duration,
-            width: self.layout.resolution.width(),
-            height: self.layout.resolution.height(),
+            width: self.spec.resolution.width().get(),
+            height: self.spec.resolution.height().get(),
             data: canvas.data,
         })
     }
@@ -340,6 +364,7 @@ impl MediaProcessor for VideoMixer {
             input_stream_ids: self.input_streams.keys().copied().collect(),
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::VideoMixer(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::VIDEO_MIXER,
         }
     }
 
@@ -352,7 +377,10 @@ impl MediaProcessor for VideoMixer {
 
             input_stream
                 .frame_queue
-                .push_back(ResizeCachedVideoFrame::new(frame));
+                .push_back(ResizeCachedVideoFrame::new(
+                    frame,
+                    self.spec.resize_filter_mode,
+                ));
             self.stats.total_input_video_frame_count.add(1);
         } else {
             input_stream.eos = true;
@@ -365,7 +393,7 @@ impl MediaProcessor for VideoMixer {
             let mut now = self.next_input_timestamp();
 
             // トリム対象期間ならその分はスキップする
-            while self.layout.is_in_trim_span(now) {
+            while self.spec.trim_spans.contains(now) {
                 self.stats.total_trimmed_video_frame_count.add(1);
                 now = self.next_input_timestamp();
             }

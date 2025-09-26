@@ -7,11 +7,11 @@ use std::{
 };
 
 use hisui::{
-    layout::{AggregatedSourceInfo, Layout, Resolution},
+    layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     layout_region::{Grid, Region},
     media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
-    mixer_video::VideoMixer,
+    mixer_video::{VideoMixer, VideoMixerSpec},
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
@@ -90,8 +90,8 @@ fn mix_single_source() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), size.width);
-        assert_eq!(frame.height.get(), size.height);
+        assert_eq!(frame.width, size.width);
+        assert_eq!(frame.height, size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -169,8 +169,8 @@ fn mix_single_source_with_offset() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), output_size.width);
-        assert_eq!(frame.height.get(), output_size.height);
+        assert_eq!(frame.width, output_size.width);
+        assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -296,8 +296,8 @@ fn single_source_multiple_regions() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), output_size.width);
-        assert_eq!(frame.height.get(), output_size.height);
+        assert_eq!(frame.width, output_size.width);
+        assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -422,8 +422,8 @@ fn single_source_multiple_regions_with_resize() {
     // 残りの合成結果を取得する
     for i in 1..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width.get(), output_size.width);
-        assert_eq!(frame.height.get(), output_size.height);
+        assert_eq!(frame.width, output_size.width);
+        assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
         assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
@@ -659,13 +659,18 @@ fn mix_multiple_cells() -> orfail::Result<()> {
     region.top_border_pixels = EvenUsize::truncating_new(2);
     region.left_border_pixels = EvenUsize::truncating_new(2);
 
+    let mut spec = layout(
+        &[region],
+        &[&source0, &source1, &source2, &source3],
+        region_size,
+        None,
+    );
+
+    // リサイズによる入力画像の変化を最小限に抑えるために None を指定する
+    spec.resize_filter_mode = shiguredo_libyuv::FilterMode::None;
+
     let mut mixer = VideoMixer::new(
-        layout(
-            &[region],
-            &[&source0, &source1, &source2, &source3],
-            region_size,
-            None,
-        ),
+        spec,
         vec![
             input_stream_id0,
             input_stream_id1,
@@ -1130,13 +1135,13 @@ fn layout(
     sources: &[&SourceInfo],
     size: Size,
     trim_span: Option<(Duration, Duration)>,
-) -> Layout {
-    Layout {
-        trim_spans: if let Some((start, end)) = trim_span {
+) -> VideoMixerSpec {
+    let layout = Layout {
+        trim_spans: TrimSpans::new(if let Some((start, end)) = trim_span {
             [(start, end)].into_iter().collect()
         } else {
             BTreeMap::new()
-        },
+        }),
         video_regions: video_regions.to_vec(),
         sources: sources
             .iter()
@@ -1166,7 +1171,8 @@ fn layout(
         audio_bitrate: None,
         video_bitrate: None,
         encode_params: Default::default(),
-    }
+    };
+    VideoMixerSpec::from_layout(&layout)
 }
 
 fn region(region_size: Size, cell_size: Size) -> Region {
@@ -1226,8 +1232,8 @@ fn video_frame(
             .collect(),
         format: VideoFormat::I420,
         keyframe: true,
-        width: EvenUsize::new(size.width).unwrap(),
-        height: EvenUsize::new(size.height).unwrap(),
+        width: size.width,
+        height: size.height,
         timestamp,
         duration,
         sample_entry: None,

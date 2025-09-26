@@ -13,7 +13,6 @@
   },
   "video_toolbox_h265_encode_params": {
     "max_key_frame_interval": 300,
-    "prioritize_speed_over_quality": null,
     "real_time": null,
     "maximize_power_efficiency": null,
     "allow_temporal_compression": null,

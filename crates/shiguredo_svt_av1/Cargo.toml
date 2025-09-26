@@ -1,6 +1,6 @@
 [package]
 name = "shiguredo_svt_av1"
-version = "2025.1.0-canary.2"
+version = "2025.1.0-canary.4"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Shiguredo Inc."]
@@ -21,4 +21,4 @@ toml = "0.9.0"
 # 以降は外部ライブラリビルド用のメタデータ
 # (この内容は build.rs の中からのみ参照される)
 [package.metadata.external-dependencies]
-SVT-AV1 = { git = "https://gitlab.com/AOMediaCodec/SVT-AV1.git", version = "v3.1.0" }
+SVT-AV1 = { git = "https://gitlab.com/AOMediaCodec/SVT-AV1.git", version = "v3.1.2" }

@@ -24,17 +24,38 @@ pub struct Error {
     code: sys::vpx_codec_err_t,
     function: &'static str,
     reason: Option<&'static str>,
+    detail: Option<String>,
 }
 
 impl Error {
-    fn check(code: sys::vpx_codec_err_t, function: &'static str) -> Result<(), Self> {
+    fn check(
+        code: sys::vpx_codec_err_t,
+        function: &'static str,
+        ctx: Option<&sys::vpx_codec_ctx>,
+    ) -> Result<(), Self> {
         if code == sys::vpx_codec_err_t_VPX_CODEC_OK {
             Ok(())
         } else {
+            let detail = unsafe {
+                if let Some(ctx) = ctx {
+                    let detail_ptr = sys::vpx_codec_error_detail(ctx);
+                    if detail_ptr.is_null() {
+                        None
+                    } else {
+                        CStr::from_ptr(detail_ptr)
+                            .to_str()
+                            .ok()
+                            .map(|s| s.to_owned())
+                    }
+                } else {
+                    None
+                }
+            };
             Err(Self {
                 code,
                 function,
                 reason: None,
+                detail,
             })
         }
     }
@@ -48,6 +69,7 @@ impl Error {
             code,
             function,
             reason: Some(reason),
+            detail: None,
         }
     }
 
@@ -67,15 +89,14 @@ impl Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}() failed: code={}", self.function, self.code)?;
         if let Some(reason) = self.reason() {
-            write!(
-                f,
-                "{}() failed: code={}, reason={}",
-                self.function, self.code, reason
-            )
-        } else {
-            write!(f, "{}() failed: code={}", self.function, self.code)
+            write!(f, ", reason={reason}")?;
         }
+        if let Some(detail) = &self.detail {
+            write!(f, ", detail={detail}")?;
+        }
+        Ok(())
     }
 }
 
@@ -114,9 +135,9 @@ impl Decoder {
                 0,                // flags
                 sys::VPX_DECODER_ABI_VERSION as i32,
             );
-            Error::check(code, "vpx_codec_dec_init_ver")?;
-
             let ctx = ctx.assume_init();
+            Error::check(code, "vpx_codec_dec_init_ver", Some(&ctx))?;
+
             Ok(Self {
                 ctx,
                 iter: std::ptr::null(),
@@ -145,7 +166,7 @@ impl Decoder {
                 0, // deadline (ドキュメントによると、値は無視されるので常に 0 を指定しろとのこと）
             )
         };
-        Error::check(code, "vpx_codec_decode")?;
+        Error::check(code, "vpx_codec_decode", Some(&self.ctx))?;
         Ok(())
     }
 
@@ -170,7 +191,7 @@ impl Decoder {
                 0,
             )
         };
-        Error::check(code, "vpx_codec_decode")?;
+        Error::check(code, "vpx_codec_decode", Some(&self.ctx))?;
         Ok(())
     }
 
@@ -187,8 +208,15 @@ impl Decoder {
             }
             let image = &*image;
 
-            // 画像フォーマットは I420 である前提
-            assert_eq!(image.fmt, sys::vpx_img_fmt_VPX_IMG_FMT_I420);
+            // 画像フォーマットは I420 または high-depth バージョンである前提
+            assert!(
+                matches!(
+                    image.fmt,
+                    sys::vpx_img_fmt_VPX_IMG_FMT_I420 | sys::vpx_img_fmt_VPX_IMG_FMT_I42016
+                ),
+                "unexpected image format: {:?}",
+                image.fmt
+            );
 
             Some(DecodedFrame(image))
         }
@@ -215,6 +243,18 @@ impl std::fmt::Debug for Decoder {
 pub struct DecodedFrame<'a>(&'a sys::vpx_image);
 
 impl DecodedFrame<'_> {
+    /// フレームが高ビット深度（16ビット）かどうかを返す
+    //
+    // libvpx での高ビット深度フォーマットについてのメモ：
+    // - libvpx は VP9 の 10-bit プロファイル（Profile 2 など）をサポート
+    // - 高ビット深度データは 16-bit リトルエンディアン形式で格納される
+    // - 実際の値範囲は 10-bit (0-1023) だが、上位6ビットは未使用
+    // - YUV420 サブサンプリングは通常の 8-bit と同様に適用される
+    // - ストライドは 16-bit 単位（バイト数は width * 2）で計算される
+    pub fn is_high_depth(&self) -> bool {
+        self.0.fmt == sys::vpx_img_fmt_VPX_IMG_FMT_I42016
+    }
+
     /// フレームの Y 成分のデータを返す
     pub fn y_plane(&self) -> &[u8] {
         unsafe {
@@ -525,7 +565,7 @@ impl Encoder {
             let iface = sys::vpx_codec_vp8_cx();
             let usage = 0; // ドキュメントでは、常に 0 を指定しろ、とのこと
             let code = sys::vpx_codec_enc_config_default(iface, cfg.as_mut_ptr(), usage);
-            Error::check(code, "vpx_codec_enc_config_default")?;
+            Error::check(code, "vpx_codec_enc_config_default", None)?;
 
             let cfg = cfg.assume_init();
             Self::new(config, cfg, iface, false) // VP8の場合はfalse
@@ -539,7 +579,7 @@ impl Encoder {
             let iface = sys::vpx_codec_vp9_cx();
             let usage = 0; // ドキュメントでは、常に 0 を指定しろ、とのこと
             let code = sys::vpx_codec_enc_config_default(iface, cfg.as_mut_ptr(), usage);
-            Error::check(code, "vpx_codec_enc_config_default")?;
+            Error::check(code, "vpx_codec_enc_config_default", None)?;
 
             let cfg = cfg.assume_init();
             Self::new(config, cfg, iface, true) // VP9の場合はtrue
@@ -599,7 +639,7 @@ impl Encoder {
                 0, // flags
                 sys::VPX_ENCODER_ABI_VERSION as i32,
             );
-            Error::check(code, "vpx_codec_enc_init_ver")?;
+            Error::check(code, "vpx_codec_enc_init_ver", None)?;
 
             let mut img = MaybeUninit::zeroed();
             sys::vpx_img_alloc(
@@ -629,7 +669,7 @@ impl Encoder {
                 sys::vp8e_enc_control_id_VP8E_SET_CQ_LEVEL as c_int,
                 encoder_config.cq_level as c_uint,
             );
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&this.ctx))?;
 
             // CPU使用率設定
             if let Some(cpu_used) = encoder_config.cpu_used {
@@ -638,7 +678,7 @@ impl Encoder {
                     sys::vp8e_enc_control_id_VP8E_SET_CPUUSED as c_int,
                     cpu_used,
                 );
-                Error::check(code, "vpx_codec_control_")?;
+                Error::check(code, "vpx_codec_control_", Some(&this.ctx))?;
             }
 
             if is_vp9 && let Some(vp9_config) = &encoder_config.vp9_config {
@@ -663,7 +703,7 @@ impl Encoder {
                     aq_mode,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // デノイザー設定
@@ -675,7 +715,7 @@ impl Encoder {
                     noise_sensitivity,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // タイル列数
@@ -687,7 +727,7 @@ impl Encoder {
                     tile_columns,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // タイル行数
@@ -699,7 +739,7 @@ impl Encoder {
                     tile_rows,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // 行マルチスレッド
@@ -711,7 +751,7 @@ impl Encoder {
                     1,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // フレーム並列デコード
@@ -723,7 +763,7 @@ impl Encoder {
                     1,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // コンテンツタイプ最適化
@@ -739,7 +779,7 @@ impl Encoder {
                     content_type as c_int,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         Ok(())
@@ -755,7 +795,7 @@ impl Encoder {
                     noise_sensitivity,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // 静的閾値
@@ -767,7 +807,7 @@ impl Encoder {
                     static_threshold,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // トークンパーティション数
@@ -779,7 +819,7 @@ impl Encoder {
                     token_partitions,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // 最大イントラビットレート率
@@ -791,7 +831,7 @@ impl Encoder {
                     max_intra_bitrate_pct,
                 )
             };
-            Error::check(code, "vpx_codec_control_")?;
+            Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
         }
 
         // ARNRフィルタ設定
@@ -811,7 +851,7 @@ impl Encoder {
                 1,
             )
         };
-        Error::check(code, "vpx_codec_control_")?;
+        Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
 
         // ARNR最大フレーム数
         let code = unsafe {
@@ -821,7 +861,7 @@ impl Encoder {
                 arnr_config.max_frames,
             )
         };
-        Error::check(code, "vpx_codec_control_")?;
+        Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
 
         // ARNR強度
         let code = unsafe {
@@ -831,7 +871,7 @@ impl Encoder {
                 arnr_config.strength,
             )
         };
-        Error::check(code, "vpx_codec_control_")?;
+        Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
 
         // ARNRタイプ
         let code = unsafe {
@@ -841,7 +881,7 @@ impl Encoder {
                 arnr_config.filter_type,
             )
         };
-        Error::check(code, "vpx_codec_control_")?;
+        Error::check(code, "vpx_codec_control_", Some(&self.ctx))?;
 
         Ok(())
     }
@@ -890,7 +930,7 @@ impl Encoder {
                 deadline as sys::vpx_enc_deadline_t,
             )
         };
-        Error::check(code, "vpx_codec_encode")?;
+        Error::check(code, "vpx_codec_encode", Some(&self.ctx))?;
         self.frame_count += 1;
         Ok(())
     }
@@ -917,7 +957,7 @@ impl Encoder {
                 sys::VPX_DL_REALTIME as sys::vpx_enc_deadline_t,
             )
         };
-        Error::check(code, "vpx_codec_encode")?;
+        Error::check(code, "vpx_codec_encode", Some(&self.ctx))?;
         Ok(())
     }
 
@@ -1162,7 +1202,7 @@ mod tests {
 
     #[test]
     fn error_reason() {
-        let e = Error::check(sys::vpx_codec_err_t_VPX_CODEC_MEM_ERROR, "test")
+        let e = Error::check(sys::vpx_codec_err_t_VPX_CODEC_MEM_ERROR, "test", None)
             .expect_err("not an error");
         assert!(e.reason().is_some());
     }

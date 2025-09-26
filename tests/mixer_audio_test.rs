@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
-    layout::{AggregatedSourceInfo, Layout, Resolution},
+    layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     media::{MediaSample, MediaStreamId},
     metadata::{SourceId, SourceInfo},
     mixer_audio::AudioMixer,
@@ -16,7 +16,7 @@ const OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(100);
 
 #[test]
 fn start_noop_audio_mixer() {
-    let mut mixer = AudioMixer::new(layout(&[], None), Vec::new(), OUTPUT_STREAM_ID);
+    let mut mixer = AudioMixer::new(layout(&[], None).trim_spans, Vec::new(), OUTPUT_STREAM_ID);
 
     // ミキサーへの入力が空なので、出力も空
     assert!(matches!(
@@ -34,7 +34,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
     let (source2, input_stream_id2) = source(2, 200, 300); // 範囲: 200 ms ~ 300 ms
 
     let mut mixer = AudioMixer::new(
-        layout(&[source0.clone(), source1.clone(), source2.clone()], None),
+        layout(&[source0.clone(), source1.clone(), source2.clone()], None).trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
     );
@@ -139,7 +139,8 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
         layout(
             &[source0.clone(), source1.clone(), source2.clone()],
             Some(trim_span),
-        ),
+        )
+        .trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
     );
@@ -230,7 +231,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
     let (source2, input_stream_id2) = source(2, 0, 100);
 
     let mut mixer = AudioMixer::new(
-        layout(&[source0.clone(), source1.clone(), source2.clone()], None),
+        layout(&[source0.clone(), source1.clone(), source2.clone()], None).trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
     );
@@ -298,7 +299,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
 fn non_pcm_audio_input_error() -> orfail::Result<()> {
     let (source, input_stream_id) = source(0, 0, 100);
     let mut mixer = AudioMixer::new(
-        layout(&[source.clone()], None),
+        layout(&[source.clone()], None).trim_spans,
         vec![input_stream_id],
         OUTPUT_STREAM_ID,
     );
@@ -337,11 +338,11 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
 
 fn layout(audio_sources: &[SourceInfo], trim_span: Option<(Duration, Duration)>) -> Layout {
     Layout {
-        trim_spans: if let Some((start, end)) = trim_span {
+        trim_spans: TrimSpans::new(if let Some((start, end)) = trim_span {
             [(start, end)].into_iter().collect()
         } else {
             BTreeMap::new()
-        },
+        }),
         audio_source_ids: audio_sources.iter().map(|s| s.id.clone()).collect(),
         sources: audio_sources
             .iter()

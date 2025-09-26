@@ -3,10 +3,7 @@ use std::collections::VecDeque;
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
-use crate::{
-    types::EvenUsize,
-    video::{VideoFormat, VideoFrame},
-};
+use crate::video::{VideoFormat, VideoFrame};
 
 #[derive(Debug)]
 pub struct Openh264Decoder {
@@ -83,8 +80,8 @@ impl Openh264Decoder {
     ) -> orfail::Result<VideoFrame> {
         Ok(VideoFrame::new_i420(
             input_frame,
-            EvenUsize::new(frame.width()).or_fail()?,
-            EvenUsize::new(frame.height()).or_fail()?,
+            frame.width(),
+            frame.height(),
             frame.y_plane(),
             frame.u_plane(),
             frame.v_plane(),

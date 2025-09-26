@@ -1,0 +1,15 @@
+{
+  "audio_sources": [
+    "*-noise.json"
+  ],
+  "trim": false,
+  "resolution": "16x16",
+  "video_layout": {
+    "gird": {
+      "max_columns": 1,
+      "video_sources": [
+        "*-noise.json"
+      ]
+    }
+  }
+}

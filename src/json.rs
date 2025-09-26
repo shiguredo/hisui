@@ -21,7 +21,7 @@ pub fn parse_str<T>(json: &str) -> orfail::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
-    parse(json, Path::new(""), false).or_fail()
+    parse(json, Path::new(""), true).or_fail()
 }
 
 fn parse<T>(text: &str, path: &Path, enable_jsonc: bool) -> orfail::Result<T>

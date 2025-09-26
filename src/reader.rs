@@ -8,7 +8,10 @@ use crate::{
     layout::AggregatedSourceInfo,
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     stats::{
@@ -119,6 +122,7 @@ impl MediaProcessor for AudioReader {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
             stats: self.inner.stats(),
+            workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }
 
@@ -135,6 +139,8 @@ impl MediaProcessor for AudioReader {
                     if !self.start_next_input_file().or_fail()? {
                         return Ok(MediaProcessorOutput::Finished);
                     }
+                    self.timestamp_offset = self.next_timestamp_offset;
+                    self.inner.set_timestamp_offset(self.timestamp_offset);
                 }
                 Some(Err(e)) => return Err(e),
                 Some(Ok(mut data)) => {
@@ -161,6 +167,13 @@ impl AudioReaderInner {
         match self {
             Self::Mp4(r) => ProcessorStats::Mp4AudioReader(r.stats().clone()),
             Self::Webm(r) => ProcessorStats::WebmAudioReader(r.stats().clone()),
+        }
+    }
+
+    fn set_timestamp_offset(&self, offset: Duration) {
+        match self {
+            Self::Mp4(r) => r.stats().track_duration_offset.set(offset),
+            Self::Webm(r) => r.stats().track_duration_offset.set(offset),
         }
     }
 }
@@ -274,6 +287,7 @@ impl MediaProcessor for VideoReader {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
             stats: self.inner.stats(),
+            workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }
 
@@ -290,6 +304,8 @@ impl MediaProcessor for VideoReader {
                     if !self.start_next_input_file().or_fail()? {
                         return Ok(MediaProcessorOutput::Finished);
                     }
+                    self.timestamp_offset = self.next_timestamp_offset;
+                    self.inner.set_timestamp_offset(self.timestamp_offset);
                 }
                 Some(Err(e)) => return Err(e),
                 Some(Ok(mut frame)) => {
@@ -306,6 +322,7 @@ impl MediaProcessor for VideoReader {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum VideoReaderInner {
     Mp4(Mp4VideoReader),
     Webm(WebmVideoReader),
@@ -316,6 +333,13 @@ impl VideoReaderInner {
         match self {
             Self::Mp4(r) => ProcessorStats::Mp4VideoReader(r.stats().clone()),
             Self::Webm(r) => ProcessorStats::WebmVideoReader(r.stats().clone()),
+        }
+    }
+
+    fn set_timestamp_offset(&self, offset: Duration) {
+        match self {
+            Self::Mp4(r) => r.stats().track_duration_offset.set(offset),
+            Self::Webm(r) => r.stats().track_duration_offset.set(offset),
         }
     }
 }

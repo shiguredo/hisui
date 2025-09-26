@@ -1,16 +1,38 @@
 use crate::json::JsonObject;
+use crate::layout::DEFAULT_LAYOUT_JSON;
 
 pub fn parse_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_openh264::EncoderConfig, nojson::JsonParseError> {
+    let mut config = shiguredo_openh264::EncoderConfig::default();
+
+    // デフォルトレイアウトの設定を反映
+    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
+    let params = JsonObject::new(
+        default
+            .value()
+            .to_member("openh264_encode_params")?
+            .required()?,
+    )?;
+    update_encode_params(params, &mut config)?;
+
+    // 実際のレイアウトの設定を反映
+    let params = JsonObject::new(value)?;
+    update_encode_params(params, &mut config)?;
+
+    Ok(config)
+}
+
+fn update_encode_params(
+    params: JsonObject<'_, '_>,
+    config: &mut shiguredo_openh264::EncoderConfig,
+) -> Result<(), nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
     // - width
     // - height
     // - fps_numerator
     // - fps_denominator
     // - target_bitrate
-    let params = JsonObject::new(value)?;
-    let mut config = shiguredo_openh264::EncoderConfig::default();
 
     // 基本的なエンコーダーパラメーター
     config.max_qp = params.get("max_qp")?.unwrap_or(config.max_qp);
@@ -29,7 +51,9 @@ pub fn parse_encode_params(
         .unwrap_or(config.complexity_mode);
 
     // エントロピー符号化モード
-    config.entropy_coding = params.get("entropy_coding")?.unwrap_or_default();
+    config.entropy_coding = params
+        .get("entropy_coding")?
+        .unwrap_or(config.entropy_coding);
 
     // 参照フレーム数
     config.ref_frame_count = params
@@ -66,12 +90,22 @@ pub fn parse_encode_params(
         .unwrap_or(config.rate_control_mode);
 
     // 前処理機能設定
-    config.denoise = params.get("denoise")?.unwrap_or_default();
-    config.background_detection = params.get("background_detection")?.unwrap_or_default();
-    config.adaptive_quantization = params.get("adaptive_quantization")?.unwrap_or_default();
-    config.scene_change_detection = params.get("scene_change_detection")?.unwrap_or_default();
-    config.deblocking_filter = params.get("deblocking_filter")?.unwrap_or_default();
-    config.long_term_reference = params.get("long_term_reference")?.unwrap_or_default();
+    config.denoise = params.get("denoise")?.unwrap_or(config.denoise);
+    config.background_detection = params
+        .get("background_detection")?
+        .unwrap_or(config.background_detection);
+    config.adaptive_quantization = params
+        .get("adaptive_quantization")?
+        .unwrap_or(config.adaptive_quantization);
+    config.scene_change_detection = params
+        .get("scene_change_detection")?
+        .unwrap_or(config.scene_change_detection);
+    config.deblocking_filter = params
+        .get("deblocking_filter")?
+        .unwrap_or(config.deblocking_filter);
+    config.long_term_reference = params
+        .get("long_term_reference")?
+        .unwrap_or(config.long_term_reference);
 
     // スライスモード
     config.slice_mode = params
@@ -93,5 +127,5 @@ pub fn parse_encode_params(
         })?
         .unwrap_or(config.slice_mode);
 
-    Ok(config)
+    Ok(())
 }

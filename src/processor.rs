@@ -1,3 +1,8 @@
+use std::collections::{BinaryHeap, HashMap};
+use std::time::{Duration, Instant};
+
+use orfail::OrFail;
+
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::stats::ProcessorStats;
@@ -43,10 +48,52 @@ impl MediaProcessor for BoxedMediaProcessor {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaProcessorWorkloadHint {
+    /// I/O集約的なプロセッサ
+    IoIntensive,
+
+    /// CPU集約的なプロセッサ
+    CpuIntensive {
+        /// プロセッサの処理の重さの目安
+        cost: std::num::NonZeroUsize,
+    },
+}
+
+impl MediaProcessorWorkloadHint {
+    // 各処理毎のワークロードヒントの値。
+    //
+    // これはヒューリスティックな値であって、実際のコストは入力やレイアウトによって
+    // 大きく変動する可能性がある。
+    //
+    // そういったケースにも対応するためには、プログラムの実行時に動的に値を決定するか、
+    // ワークスティールのように実際の負荷状況を考慮してのリバランシングが必要となる。
+    //
+    // そういった手法は実装も大変で、効果が見合うかどうかが不明なので、まずは
+    // 今のようなヒューリスティックな値を使って運用してみて、様子を見ることにする。
+    pub const READER: Self = Self::IoIntensive;
+    pub const WRITER: Self = Self::IoIntensive;
+    pub const CPU_MISC: Self = Self::cpu_intensive(1);
+    pub const AUDIO_DECODER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_MIXER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_ENCODER: Self = Self::cpu_intensive(1);
+    pub const VIDEO_DECODER: Self = Self::cpu_intensive(2);
+    pub const VIDEO_MIXER: Self = Self::cpu_intensive(10);
+    pub const VIDEO_ENCODER: Self = Self::cpu_intensive(10);
+    pub const PLUGIN: Self = Self::cpu_intensive(1); // TODO(atode): プラグイン側から取得するようにする
+
+    const fn cpu_intensive(cost: usize) -> Self {
+        Self::CpuIntensive {
+            cost: std::num::NonZeroUsize::new(cost).expect("bug"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
+    pub workload_hint: MediaProcessorWorkloadHint,
     pub stats: ProcessorStats,
 }
 
@@ -146,5 +193,132 @@ impl MediaProcessorOutput {
             stream_id,
             sample: MediaSample::video_frame(frame),
         }
+    }
+}
+
+#[derive(Debug)]
+struct PacerQueueItem(MediaStreamId, MediaSample);
+
+impl PartialEq for PacerQueueItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.1.timestamp() == other.1.timestamp()
+    }
+}
+
+impl Eq for PacerQueueItem {}
+
+impl PartialOrd for PacerQueueItem {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PacerQueueItem {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Note: BinaryHeap is a max-heap, so we reverse the comparison
+        // to get earliest timestamps first
+        other.1.timestamp().cmp(&self.1.timestamp())
+    }
+}
+
+#[derive(Debug)]
+pub struct RealtimePacer {
+    stream_ids: HashMap<MediaStreamId, MediaStreamId>,
+    stream_timestamps: HashMap<MediaStreamId, Duration>,
+    queue: BinaryHeap<PacerQueueItem>,
+    start_time: Option<Instant>,
+}
+
+impl RealtimePacer {
+    pub fn new(
+        input_stream_ids: Vec<MediaStreamId>,
+        output_stream_ids: Vec<MediaStreamId>,
+    ) -> orfail::Result<Self> {
+        (input_stream_ids.len() == output_stream_ids.len()).or_fail()?;
+        Ok(Self {
+            stream_ids: input_stream_ids
+                .iter()
+                .copied()
+                .zip(output_stream_ids)
+                .collect(),
+            stream_timestamps: input_stream_ids
+                .iter()
+                .copied()
+                .zip(std::iter::repeat(Duration::ZERO))
+                .collect(),
+            queue: BinaryHeap::new(),
+            start_time: None,
+        })
+    }
+
+    fn elapsed(&mut self) -> Duration {
+        if let Some(t) = self.start_time {
+            t.elapsed()
+        } else {
+            let t = Instant::now();
+            self.start_time = Some(t);
+            t.elapsed()
+        }
+    }
+}
+
+impl MediaProcessor for RealtimePacer {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.stream_ids.keys().copied().collect(),
+            output_stream_ids: self.stream_ids.values().copied().collect(),
+            stats: ProcessorStats::other("realtime_pacer"),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        let output_stream_id = self.stream_ids.get(&input.stream_id).copied().or_fail()?;
+        if let Some(sample) = input.sample {
+            self.stream_timestamps
+                .insert(input.stream_id, sample.timestamp());
+
+            // TODO(atode): キューはストリーム毎に管理すべき
+            self.queue.push(PacerQueueItem(output_stream_id, sample));
+        } else {
+            self.stream_ids.remove(&input.stream_id);
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        let Some(PacerQueueItem(stream_id, sample)) = self.queue.pop() else {
+            if self.stream_ids.is_empty() {
+                return Ok(MediaProcessorOutput::Finished);
+            } else {
+                return Ok(MediaProcessorOutput::awaiting_any());
+            }
+        };
+
+        let now = self.elapsed();
+        let Some(time_to_wait) = sample
+            .timestamp()
+            .checked_sub(now)
+            .take_if(|d| !d.is_zero())
+        else {
+            return Ok(MediaProcessorOutput::Processed { stream_id, sample });
+        };
+
+        // TODO(atode): ハードコーディングをやめる
+        if self.queue.len() < 10 {
+            self.queue.push(PacerQueueItem(stream_id, sample));
+
+            if let Some((input_stream_id, _)) =
+                self.stream_timestamps.iter().min_by_key(|(_, t)| *t)
+            {
+                return Ok(MediaProcessorOutput::pending(*input_stream_id));
+            } else {
+                return Ok(MediaProcessorOutput::awaiting_any());
+            }
+        }
+
+        // TODO(atode): sleep はやめる
+        std::thread::sleep(time_to_wait);
+        Ok(MediaProcessorOutput::Processed { stream_id, sample })
     }
 }

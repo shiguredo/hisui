@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
@@ -9,7 +9,7 @@ use hisui::{
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
-    writer_mp4::Mp4Writer,
+    writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
 use orfail::OrFail;
 use shiguredo_mp4::{
@@ -29,7 +29,7 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
     // ライターを作成する
     let mut writer = Mp4Writer::new(
         output_file_path.path(),
-        &layout,
+        &Mp4WriterOptions::from_layout(&layout),
         Some(AUDIO_STREAM_ID),
         None,
     )
@@ -86,7 +86,7 @@ fn write_video_only_mp4() -> orfail::Result<()> {
     // ライターを作成する
     let mut writer = Mp4Writer::new(
         output_file_path.path(),
-        &layout,
+        &Mp4WriterOptions::from_layout(&layout),
         None,
         Some(VIDEO_STREAM_ID),
     )
@@ -144,7 +144,7 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
     // ライターを作成する
     let mut writer = Mp4Writer::new(
         output_file_path.path(),
-        &layout,
+        &Mp4WriterOptions::from_layout(&layout),
         Some(AUDIO_STREAM_ID),
         Some(VIDEO_STREAM_ID),
     )
@@ -214,7 +214,13 @@ fn no_video_and_audio_mp4() -> orfail::Result<()> {
     let layout = layout(&[], &[]);
 
     // ライターを作成する
-    let mut writer = Mp4Writer::new(output_file_path.path(), &layout, None, None).or_fail()?;
+    let mut writer = Mp4Writer::new(
+        output_file_path.path(),
+        &Mp4WriterOptions::from_layout(&layout),
+        None,
+        None,
+    )
+    .or_fail()?;
 
     // 最後まで書き込む
     while !matches!(
@@ -267,7 +273,7 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
         frame_rate: FrameRate::FPS_1,
 
         // 以下のフィールドはテストで使われないので、適当な値を設定しておく
-        trim_spans: BTreeMap::new(),
+        trim_spans: Default::default(),
         base_path: PathBuf::from(""),
         resolution: Resolution::new(16, 16).expect("infallible"),
         audio_codec: CodecName::Opus,
@@ -355,8 +361,8 @@ fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame 
         data: vec![0], // 中身はなんでもいい
         format: VideoFormat::I420,
         keyframe: i % 2 == 0,
-        width: EvenUsize::MIN_CELL_SIZE,
-        height: EvenUsize::MIN_CELL_SIZE,
+        width: EvenUsize::MIN_CELL_SIZE.get(),
+        height: EvenUsize::MIN_CELL_SIZE.get(),
         timestamp: source.start_timestamp + duration * i as u32,
         duration,
         sample_entry: if i == 0 {

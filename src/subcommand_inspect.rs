@@ -4,7 +4,10 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     stats::ProcessorStats,
@@ -146,8 +149,8 @@ struct VideoSampleInfo {
 impl VideoSampleInfo {
     fn update(&mut self, decoded: &VideoFrame) {
         self.decoded_data_size = Some(decoded.data.len());
-        self.width = Some(decoded.width.get());
-        self.height = Some(decoded.height.get());
+        self.width = Some(decoded.width);
+        self.height = Some(decoded.height);
     }
 }
 
@@ -289,7 +292,8 @@ impl MediaProcessor for OutputPrinter {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("output-printer"),
+            stats: ProcessorStats::other("output_printer"),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

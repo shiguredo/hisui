@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -8,8 +8,8 @@ use orfail::OrFail;
 
 use crate::{
     json::JsonObject,
-    layout::{self, AggregatedSourceInfo, AssignedSource, Resolution},
-    metadata::SourceId,
+    layout::{AggregatedSourceInfo, AssignedSource, Resolution},
+    metadata::{SourceId, SourceInfo},
     types::{EvenUsize, PixelPosition},
     video::VideoFrame,
 };
@@ -34,8 +34,8 @@ pub struct Region {
 
 impl Region {
     pub fn decide_frame_size(&self, frame: &VideoFrame) -> (EvenUsize, EvenUsize) {
-        let width_ratio = self.grid.cell_width.get() as f64 / frame.width.get() as f64;
-        let height_ratio = self.grid.cell_height.get() as f64 / frame.height.get() as f64;
+        let width_ratio = self.grid.cell_width.get() as f64 / frame.width as f64;
+        let height_ratio = self.grid.cell_height.get() as f64 / frame.height as f64;
         let ratio = if width_ratio < height_ratio {
             // 横に合わせて上下に黒帯を入れる
             width_ratio
@@ -44,8 +44,8 @@ impl Region {
             height_ratio
         };
         (
-            EvenUsize::truncating_new((frame.width.get() as f64 * ratio).floor() as usize),
-            EvenUsize::truncating_new((frame.height.get() as f64 * ratio).floor() as usize),
+            EvenUsize::truncating_new((frame.width as f64 * ratio).floor() as usize),
+            EvenUsize::truncating_new((frame.height as f64 * ratio).floor() as usize),
         )
     }
 
@@ -72,8 +72,8 @@ pub struct RawRegion {
     video_sources: Vec<std::path::PathBuf>,
     video_sources_excluded: Vec<std::path::PathBuf>,
     width: usize,
-    cell_width: usize,  // TODO: ユニットテスト追加
-    cell_height: usize, // TODO: ユニットテスト追加
+    cell_width: usize,
+    cell_height: usize,
     x_pos: usize,
     y_pos: usize,
     z_pos: isize,
@@ -113,30 +113,30 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawRegion {
 }
 
 impl RawRegion {
-    pub fn into_region(
+    pub fn into_region<F>(
         mut self,
         base_path: &Path,
         sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
         resolution: Option<Resolution>,
-    ) -> orfail::Result<Region> {
+        resolve: F,
+    ) -> orfail::Result<Region>
+    where
+        F: Fn(&Path, &[PathBuf], &[PathBuf]) -> orfail::Result<Vec<(SourceInfo, PathBuf)>>,
+    {
         if self.width != 0 && self.cell_width != 0 {
             return Err(orfail::Failure::new(
-                "Cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
+                "cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
             ));
         }
 
         if self.height != 0 && self.cell_height != 0 {
             return Err(orfail::Failure::new(
-                "Cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
+                "cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
             ));
         }
 
-        let resolved = layout::resolve_source_and_media_path_pairs(
-            base_path,
-            &self.video_sources,
-            &self.video_sources_excluded,
-        )
-        .or_fail()?;
+        let resolved =
+            resolve(base_path, &self.video_sources, &self.video_sources_excluded).or_fail()?;
 
         let mut source_ids = BTreeSet::new();
         for (source, media_path) in resolved {

@@ -33,7 +33,7 @@ jobs:
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
       - run: cargo check --workspace --exclude shiguredo_fdk_aac
-      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac -- --deny warnings
       - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264
 
       - name: Slack Notification

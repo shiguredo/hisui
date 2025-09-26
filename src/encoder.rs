@@ -18,11 +18,15 @@ use crate::{
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
+    layout_encode_params::LayoutEncodeParams,
     media::{MediaSample, MediaStreamId},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
-    types::{CodecName, EngineName},
-    video::VideoFrame,
+    types::{CodecName, EngineName, EvenUsize},
+    video::{FrameRate, VideoFrame},
 };
 
 #[derive(Debug)]
@@ -37,33 +41,26 @@ pub struct AudioEncoder {
 
 impl AudioEncoder {
     pub fn new(
-        layout: &Layout,
+        codec: CodecName,
+        bitrate: NonZeroUsize,
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
     ) -> orfail::Result<Self> {
-        match layout.audio_codec {
+        match codec {
             #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => AudioEncoder::new_fdk_aac(
-                input_stream_id,
-                output_stream_id,
-                layout.audio_bitrate_bps(),
-            )
-            .or_fail(),
+            CodecName::Aac => {
+                AudioEncoder::new_fdk_aac(input_stream_id, output_stream_id, bitrate).or_fail()
+            }
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
-            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
-                input_stream_id,
-                output_stream_id,
-                layout.audio_bitrate_bps(),
-            )
-            .or_fail(),
+            CodecName::Aac => {
+                AudioEncoder::new_audio_toolbox_aac(input_stream_id, output_stream_id, bitrate)
+                    .or_fail()
+            }
             #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
             CodecName::Aac => Err(orfail::Failure::new("AAC output is not supported")),
-            CodecName::Opus => AudioEncoder::new_opus(
-                input_stream_id,
-                output_stream_id,
-                layout.audio_bitrate_bps(),
-            )
-            .or_fail(),
+            CodecName::Opus => {
+                AudioEncoder::new_opus(input_stream_id, output_stream_id, bitrate).or_fail()
+            }
             _ => unreachable!(),
         }
     }
@@ -164,6 +161,7 @@ impl MediaProcessor for AudioEncoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::AudioEncoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::AUDIO_ENCODER,
         }
     }
 
@@ -246,6 +244,29 @@ impl AudioEncoderInner {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct VideoEncoderOptions {
+    pub codec: CodecName,
+    pub bitrate: usize,
+    pub width: EvenUsize,
+    pub height: EvenUsize,
+    pub frame_rate: FrameRate,
+    pub encode_params: LayoutEncodeParams,
+}
+
+impl VideoEncoderOptions {
+    pub fn from_layout(layout: &Layout) -> Self {
+        Self {
+            codec: layout.video_codec,
+            bitrate: layout.video_bitrate_bps(),
+            width: layout.resolution.width(),
+            height: layout.resolution.height(),
+            frame_rate: layout.frame_rate,
+            encode_params: layout.encode_params.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct VideoEncoder {
     input_stream_id: MediaStreamId,
@@ -258,17 +279,17 @@ pub struct VideoEncoder {
 
 impl VideoEncoder {
     pub fn new(
-        layout: &Layout,
+        options: &VideoEncoderOptions,
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
-        let inner = match layout.video_codec {
-            CodecName::Vp8 => VideoEncoderInner::new_vp8(layout).or_fail()?,
-            CodecName::Vp9 => VideoEncoderInner::new_vp9(layout).or_fail()?,
+        let inner = match options.codec {
+            CodecName::Vp8 => VideoEncoderInner::new_vp8(options).or_fail()?,
+            CodecName::Vp9 => VideoEncoderInner::new_vp9(options).or_fail()?,
             #[cfg(target_os = "macos")]
             CodecName::H264 if openh264_lib.is_none() => {
-                VideoEncoderInner::new_video_toolbox_h264(layout).or_fail()?
+                VideoEncoderInner::new_video_toolbox_h264(options).or_fail()?
             }
             CodecName::H264 => {
                 let lib = openh264_lib.or_fail_with(|()| {
@@ -277,13 +298,13 @@ impl VideoEncoder {
                         "Please specify the library path using --openh264 command line argument or ",
                         "HISUI_OPENH264_PATH environment variable.").to_owned()
                 })?;
-                VideoEncoderInner::new_openh264(lib, layout).or_fail()?
+                VideoEncoderInner::new_openh264(lib, options).or_fail()?
             }
             #[cfg(target_os = "macos")]
-            CodecName::H265 => VideoEncoderInner::new_video_toolbox_h265(layout).or_fail()?,
+            CodecName::H265 => VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?,
             #[cfg(not(target_os = "macos"))]
             CodecName::H265 => return Err(orfail::Failure::new("no available H.265 encoder")),
-            CodecName::Av1 => VideoEncoderInner::new_svt_av1(layout).or_fail()?,
+            CodecName::Av1 => VideoEncoderInner::new_svt_av1(options).or_fail()?,
             _ => unreachable!(),
         };
 
@@ -347,6 +368,7 @@ impl MediaProcessor for VideoEncoder {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
             stats: ProcessorStats::VideoEncoder(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::VIDEO_ENCODER,
         }
     }
 
@@ -393,35 +415,35 @@ enum VideoEncoderInner {
 }
 
 impl VideoEncoderInner {
-    fn new_vp8(layout: &Layout) -> orfail::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp8(layout).or_fail()?;
+    fn new_vp8(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp8(options).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 
-    fn new_vp9(layout: &Layout) -> orfail::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp9(layout).or_fail()?;
+    fn new_vp9(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp9(options).or_fail()?;
         Ok(Self::Libvpx(encoder))
     }
 
-    fn new_openh264(lib: Openh264Library, layout: &Layout) -> orfail::Result<Self> {
-        let encoder = Openh264Encoder::new(lib, layout).or_fail()?;
+    fn new_openh264(lib: Openh264Library, options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder = Openh264Encoder::new(lib, options).or_fail()?;
         Ok(Self::Openh264(encoder))
     }
 
-    fn new_svt_av1(layout: &Layout) -> orfail::Result<Self> {
-        let encoder = SvtAv1Encoder::new(layout).or_fail()?;
+    fn new_svt_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder = SvtAv1Encoder::new(options).or_fail()?;
         Ok(Self::SvtAv1(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    fn new_video_toolbox_h264(layout: &Layout) -> orfail::Result<Self> {
-        let encoder = VideoToolboxEncoder::new_h264(layout).or_fail()?;
+    fn new_video_toolbox_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder = VideoToolboxEncoder::new_h264(options).or_fail()?;
         Ok(Self::VideoToolbox(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    fn new_video_toolbox_h265(layout: &Layout) -> orfail::Result<Self> {
-        let encoder = VideoToolboxEncoder::new_h265(layout).or_fail()?;
+    fn new_video_toolbox_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder = VideoToolboxEncoder::new_h265(options).or_fail()?;
         Ok(Self::VideoToolbox(encoder))
     }
 

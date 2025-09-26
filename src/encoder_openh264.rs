@@ -7,8 +7,7 @@ use shiguredo_mp4::{
 };
 
 use crate::{
-    layout::Layout,
-    types::EvenUsize,
+    encoder::VideoEncoderOptions,
     video::{self, VideoFormat, VideoFrame},
     video_h264::{
         H264_LEVEL_3_1, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SEI, H264_NALU_TYPE_SPS,
@@ -24,16 +23,19 @@ pub struct Openh264Encoder {
 }
 
 impl Openh264Encoder {
-    pub fn new(lib: shiguredo_openh264::Openh264Library, layout: &Layout) -> orfail::Result<Self> {
-        let width = layout.resolution.width().get();
-        let height = layout.resolution.height().get();
+    pub fn new(
+        lib: shiguredo_openh264::Openh264Library,
+        options: &VideoEncoderOptions,
+    ) -> orfail::Result<Self> {
+        let width = options.width.get();
+        let height = options.height.get();
         let config = shiguredo_openh264::EncoderConfig {
-            fps_numerator: layout.frame_rate.numerator.get(),
-            fps_denominator: layout.frame_rate.denumerator.get(),
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denumerator.get(),
             width,
             height,
-            target_bitrate: layout.video_bitrate_bps(),
-            ..layout.encode_params.openh264.clone().unwrap_or_default()
+            target_bitrate: options.bitrate,
+            ..options.encode_params.openh264.clone()
         };
         let inner = shiguredo_openh264::Encoder::new(lib, &config).or_fail()?;
         Ok(Self {
@@ -97,7 +99,7 @@ impl Openh264Encoder {
     }
 }
 
-fn sample_entry(width: EvenUsize, height: EvenUsize, data: &[u8]) -> orfail::Result<SampleEntry> {
+fn sample_entry(width: usize, height: usize, data: &[u8]) -> orfail::Result<SampleEntry> {
     // H.264 ストリームから SPS と PPS と取り出す
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();

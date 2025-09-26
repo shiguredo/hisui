@@ -5,20 +5,18 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{
     composer::Composer,
-    layout::Layout,
+    layout::{DEFAULT_LAYOUT_JSON, Layout},
     stats::{ProcessorStats, Stats},
 };
-
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.json");
 
 #[derive(Debug)]
 struct Args {
     layout_file_path: Option<PathBuf>,
-    output_file_path: PathBuf,
+    output_file_path: Option<PathBuf>,
     stats_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
     no_progress_bar: bool,
-    max_cpu_cores: Option<NonZeroUsize>,
+    worker_threads: NonZeroUsize,
     root_dir: PathBuf,
 }
 
@@ -29,36 +27,21 @@ impl Args {
                 .short('l')
                 .ty("PATH")
                 .env("HISUI_LAYOUT_FILE_PATH")
-                .doc(concat!(
-                    "合成に使用するレイアウトファイルを指定します\n",
-                    "\n",
-                    "省略された場合には ",
-                    "hisui/layout-examples/compose-default.json の内容が使用されます",
-                ))
+                .default("HISUI_REPO/layout-examples/compose-default.jsonc")
+                .doc("合成に使用するレイアウトファイルを指定します")
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             output_file_path: noargs::opt("output-file")
                 .short('o')
                 .ty("PATH")
-                .default("output.mp4")
-                .doc(concat!(
-                    "合成結果を保存するファイルを指定します\n",
-                    "\n",
-                    "この引数が未指定の場合には ROOT_DIR 引数で\n",
-                    "指定したディレクトリに `output.mp4` という名前で保存されます\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .default("ROOT_DIR/output.mp4")
+                .doc("合成結果を保存するファイルを指定します")
                 .take(raw_args)
-                .then(|a| a.value().parse())?,
+                .then(crate::arg_utils::parse_non_default_opt)?,
             stats_file_path: noargs::opt("stats-file")
                 .short('s')
                 .ty("PATH")
-                .doc(concat!(
-                    "合成中に収集した統計情報 (JSON) を保存するファイルを指定します\n",
-                    "\n",
-                    "相対パスの場合は ROOT_DIR が起点となります"
-                ))
+                .doc("合成中に収集した統計情報 (JSON) を保存するファイルを指定します")
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
             openh264: noargs::opt("openh264")
@@ -72,18 +55,19 @@ impl Args {
                 .doc("指定された場合は、合成の進捗を非表示にします")
                 .take(raw_args)
                 .is_present(),
-            max_cpu_cores: noargs::opt("max-cpu-cores")
-                .short('c')
+            worker_threads: noargs::opt("worker-threads")
+                .short('T')
                 .ty("INTEGER")
-                .env("HISUI_MAX_CPU_CORES")
+                .default("1")
+                .env("HISUI_WORKER_THREADS")
                 .doc(concat!(
-                    "合成処理を行うプロセスが使用するコア数の上限を指定します\n",
-                    "（未指定時には上限なし）\n",
+                    "合成処理に使用するワーカースレッド数を指定します\n",
                     "\n",
-                    "NOTE: macOS ではこの引数は無視されます",
+                    "なおこれはあくまでも Hisui 自体が起動するスレッドの数であり、\n",
+                    "各エンコーダーやデコーダーが内部で起動するスレッドには関与しません",
                 ))
                 .take(raw_args)
-                .present_and_then(|a| a.value().parse())?,
+                .then(|a| a.value().parse())?,
             root_dir: noargs::arg("ROOT_DIR")
                 .example("/path/to/archive/RECORDING_ID/")
                 .doc(concat!(
@@ -124,14 +108,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     };
 
     // 出力ファイルパスを決定
-    let output_file_path = args.root_dir.join(args.output_file_path);
+    let output_file_path = args
+        .output_file_path
+        .unwrap_or_else(|| args.root_dir.join("output.mp4"));
 
     // Composer を作成して設定
     let mut composer = Composer::new(layout);
     composer.openh264_lib = openh264_lib;
     composer.show_progress_bar = !args.no_progress_bar;
-    composer.max_cpu_cores = args.max_cpu_cores;
-    composer.stats_file_path = args.stats_file_path.map(|path| args.root_dir.join(path));
+    composer.worker_threads = args.worker_threads;
+    composer.stats_file_path = args.stats_file_path;
 
     // 合成を実行
     let result = composer.compose(&output_file_path).or_fail()?;
@@ -180,7 +166,7 @@ fn print_input_stats_summary(
         })
         .count();
     if count > 0 {
-        f.member("input_audio_file_count", count)?;
+        f.member("input_audio_source_count", count)?;
     }
 
     let count = stats
@@ -194,7 +180,7 @@ fn print_input_stats_summary(
         })
         .count();
     if count > 0 {
-        f.member("input_video_file_count", count)?;
+        f.member("input_video_source_count", count)?;
     }
 
     Ok(())

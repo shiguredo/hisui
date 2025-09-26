@@ -16,7 +16,9 @@ const VMAF_COMMAND: noargs::CmdSpec =
 const TUNE_COMMAND: noargs::CmdSpec =
     noargs::cmd("tune").doc("Optuna を用いた映像エンコードパラメーターの調整を行います");
 const LEGACY_COMMAND: noargs::CmdSpec =
-    noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです（省略可能）");
+    noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです");
+const PIPELINE_COMMAND: noargs::CmdSpec =
+    noargs::cmd("pipeline").doc("ユーザー定義のパイプラインを実行します（実験的機能）");
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
@@ -50,15 +52,10 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_tune::run(args)?;
-    } else if args.metadata().help_mode {
-        // help_mode=true なので `Ok(None)` が返されることはない
-        let help = args.finish()?.expect("infallible");
+    } else if PIPELINE_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_pipeline::run(args)?;
+    } else if let Some(help) = args.finish()? {
         print!("{help}");
-        return Ok(());
-    } else {
-        // サブコマンドが指定されておらず、ヘルプ表示モードでもないなら
-        // legacy コマンド指定の場合と同じ挙動にする
-        hisui::subcommand_legacy::run(args)?;
     }
 
     Ok(())

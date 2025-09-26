@@ -23,9 +23,12 @@ use crate::{
     layout::{Layout, Resolution},
     media::{MediaSample, MediaStreamId},
     mixer_audio::MIXED_AUDIO_DATA_DURATION,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec},
+    processor::{
+        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
+        MediaProcessorWorkloadHint,
+    },
     stats::{Mp4WriterStats, ProcessorStats},
-    video::VideoFrame,
+    video::{FrameRate, VideoFrame},
 };
 
 // Hisui では出力 MP4 のタイムスケールはマイクロ秒固定にする
@@ -33,6 +36,23 @@ const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
 // 映像・音声混在時のチャンクの尺の最大値（映像か音声の片方だけの場合はチャンクは一つだけ）
 const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Clone)]
+pub struct Mp4WriterOptions {
+    pub resolution: Resolution,
+    pub duration: Duration,
+    pub frame_rate: FrameRate,
+}
+
+impl Mp4WriterOptions {
+    pub fn from_layout(layout: &Layout) -> Self {
+        Self {
+            resolution: layout.resolution,
+            duration: layout.duration(),
+            frame_rate: layout.frame_rate,
+        }
+    }
+}
 
 /// 合成結果を含んだ MP4 ファイルを書き出すための構造体
 #[derive(Debug)]
@@ -59,7 +79,7 @@ impl Mp4Writer {
     /// [`Mp4Writer`] インスタンスを生成する
     pub fn new<P: AsRef<Path>>(
         path: P,
-        layout: &Layout,
+        options: &Mp4WriterOptions,
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
     ) -> orfail::Result<Self> {
@@ -72,7 +92,7 @@ impl Mp4Writer {
         let mut this = Self {
             file: BufWriter::new(file),
             file_size: 0,
-            resolution: layout.resolution,
+            resolution: options.resolution,
             moov_box_offset: 0,
             mdat_box_offset: 0,
             audio_chunks: Vec::new(),
@@ -87,7 +107,7 @@ impl Mp4Writer {
             appending_video_chunk: true,
             stats: Mp4WriterStats::default(),
         };
-        this.init(layout).or_fail()?;
+        this.init(options).or_fail()?;
 
         Ok(this)
     }
@@ -483,13 +503,13 @@ impl Mp4Writer {
     }
 
     // 実際にメディアデータを書き込む前の MP4 ファイルの初期化処理
-    fn init(&mut self, layout: &Layout) -> orfail::Result<()> {
+    fn init(&mut self, options: &Mp4WriterOptions) -> orfail::Result<()> {
         // ftyp ボックスを書きこむ
         self.write_ftyp_box().or_fail()?;
 
         // 最終的な moov ボックスを保持可能なサイズの free ボックスを書きこむ
         // (先頭付近に moov ボックスを配置することで、動画プレイヤーの再生開始までに掛かる時間を短縮できる)
-        self.write_free_box(layout).or_fail()?;
+        self.write_free_box(options).or_fail()?;
 
         // 可変長の mdat ボックスのヘッダーを書きこむ
         self.mdat_box_offset = self.file_size;
@@ -528,12 +548,12 @@ impl Mp4Writer {
         Ok(())
     }
 
-    fn write_free_box(&mut self, layout: &Layout) -> orfail::Result<()> {
+    fn write_free_box(&mut self, options: &Mp4WriterOptions) -> orfail::Result<()> {
         self.moov_box_offset = self.file_size;
 
         // faststart 用にダミーの moov を事前に構築する (必要なサイズの計測用)
         // かなり余裕をみた計算方法になっているので、これで足りないことはまずないはず
-        let moov_box = self.build_dummy_moov_box(layout);
+        let moov_box = self.build_dummy_moov_box(options);
         let max_moov_box_size = moov_box.box_size().get();
         self.stats.reserved_moov_box_size.set(max_moov_box_size);
         log::debug!("reserved moov box size: {max_moov_box_size}");
@@ -547,7 +567,7 @@ impl Mp4Writer {
         Ok(())
     }
 
-    fn build_dummy_moov_box(&self, layout: &Layout) -> MoovBox {
+    fn build_dummy_moov_box(&self, options: &Mp4WriterOptions) -> MoovBox {
         let mvhd_box = MvhdBox {
             // フィールドの値はなんでもいいのでテキトウに設定しておく
             creation_time: Mp4FileTime::default(),
@@ -560,17 +580,17 @@ impl Mp4Writer {
             next_track_id: 1,
         };
 
-        let duration = layout.duration();
+        let duration = options.duration;
         let mut trak_boxes = Vec::new();
-        if layout.has_audio() {
+        if self.input_audio_stream_id.is_some() {
             let audio_sample_count =
                 (duration.as_micros() / MIXED_AUDIO_DATA_DURATION.as_micros()) as usize;
             trak_boxes.push(self.build_dummy_trak_box(audio_sample_count));
         }
-        if layout.has_video() {
+        if self.input_video_stream_id.is_some() {
             let video_sample_count = duration.as_secs() as usize
-                * layout.frame_rate.numerator.get()
-                / layout.frame_rate.denumerator.get();
+                * options.frame_rate.numerator.get()
+                / options.frame_rate.denumerator.get();
             trak_boxes.push(self.build_dummy_trak_box(video_sample_count));
         }
 
@@ -706,6 +726,7 @@ impl MediaProcessor for Mp4Writer {
                 .collect(),
             output_stream_ids: Vec::new(),
             stats: ProcessorStats::Mp4Writer(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
 

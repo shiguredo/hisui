@@ -85,7 +85,7 @@ $ hisui list-codecs
       "repository": "https://github.com/cisco/openh264.git",
       "shared_library_path": "/usr/local/lib/libopenh264.dylib",
       "build_version": "v2.6.0",
-      "runtime_version": "v2.5.0"
+      "runtime_version": "v2.6.0"
     },
     {
       "name": "opus",

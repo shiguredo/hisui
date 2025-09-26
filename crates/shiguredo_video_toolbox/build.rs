@@ -78,9 +78,19 @@ fn main() {
                 .display()
                 .to_string(),
         )
+        // ターゲット判定がうまくいかないことがあるので、明示的に指定する
+        // ちゃんとやるなら TargetConditionals.h をインクルードするようにした方がいいかもしれない
+        .clang_arg("-DTARGET_OS_OSX=1")
         // Video Toolbox 側のコメントが誤ってテスト対象と認識されてしまいエラーとなることがあるので、
         // コメントは生成しないようにしている。
         .generate_comments(false)
+        // 以下の構造体はビルド時にエラーになることがあって、Hisui では不要なのでブラックリストに登録する
+        // "error[E0588]: packed type cannot transitively contain a `#[repr(align)]` type"
+        .blocklist_type("HFSCatalogFolder")
+        .blocklist_type("HFSPlusCatalogFolder")
+        .blocklist_type("HFSCatalogFile")
+        .blocklist_type("HFSPlusCatalogFile")
+        .blocklist_type("FndrOpaqueInfo")
         .generate()
         .expect("failed to generate bindings")
         .write_to_file(output_bindings_path)

@@ -6,10 +6,9 @@ use shiguredo_mp4::{
     Uint,
     boxes::{Avc1Box, AvccBox, Hev1Box, HvccBox, HvccNalUintArray, SampleEntry},
 };
-use shiguredo_video_toolbox::{EncoderConfig, ProfileLevel};
 
 use crate::{
-    layout::Layout,
+    encoder::VideoEncoderOptions,
     types::{CodecName, EvenUsize},
     video::{self, FrameRate, VideoFormat, VideoFrame},
     video_h264::{
@@ -31,20 +30,16 @@ pub struct VideoToolboxEncoder {
 }
 
 impl VideoToolboxEncoder {
-    pub fn new_h264(layout: &Layout) -> orfail::Result<Self> {
-        let width = layout.resolution.width();
-        let height = layout.resolution.height();
+    pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width;
+        let height = options.height;
         let config = shiguredo_video_toolbox::EncoderConfig {
             width: width.get(),
             height: height.get(),
-            target_bitrate: layout.video_bitrate_bps(),
-            fps_numerator: layout.frame_rate.numerator.get(),
-            fps_denominator: layout.frame_rate.denumerator.get(),
-            ..layout
-                .encode_params
-                .video_toolbox_h264
-                .clone()
-                .unwrap_or_default()
+            target_bitrate: options.bitrate,
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denumerator.get(),
+            ..options.encode_params.video_toolbox_h264.clone()
         };
         let inner = shiguredo_video_toolbox::Encoder::new_h264(&config).or_fail()?;
         Ok(Self {
@@ -55,28 +50,20 @@ impl VideoToolboxEncoder {
             width,
             height,
             format: VideoFormat::H264,
-            fps: layout.frame_rate,
+            fps: options.frame_rate,
         })
     }
 
-    pub fn new_h265(layout: &Layout) -> orfail::Result<Self> {
-        let width = layout.resolution.width();
-        let height = layout.resolution.height();
-        let default = EncoderConfig {
-            profile_level: ProfileLevel::H265Main,
-            ..Default::default()
-        };
+    pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width;
+        let height = options.height;
         let config = shiguredo_video_toolbox::EncoderConfig {
             width: width.get(),
             height: height.get(),
-            target_bitrate: layout.video_bitrate_bps(),
-            fps_numerator: layout.frame_rate.numerator.get(),
-            fps_denominator: layout.frame_rate.denumerator.get(),
-            ..layout
-                .encode_params
-                .video_toolbox_h265
-                .clone()
-                .unwrap_or(default)
+            target_bitrate: options.bitrate,
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denumerator.get(),
+            ..options.encode_params.video_toolbox_h265.clone()
         };
         let inner = shiguredo_video_toolbox::Encoder::new_h265(&config).or_fail()?;
         Ok(Self {
@@ -87,7 +74,7 @@ impl VideoToolboxEncoder {
             width,
             height,
             format: VideoFormat::H265,
-            fps: layout.frame_rate,
+            fps: options.frame_rate,
         })
     }
 
@@ -160,8 +147,8 @@ impl VideoToolboxEncoder {
                 data: frame.data,
                 format: self.format,
                 keyframe: frame.keyframe,
-                width: self.width,
-                height: self.height,
+                width: self.width.get(),
+                height: self.height.get(),
                 timestamp: input_frame.timestamp,
                 duration: input_frame.duration,
                 sample_entry,
@@ -178,7 +165,7 @@ fn h264_sample_entry(
     pps_list: Vec<Vec<u8>>,
 ) -> orfail::Result<SampleEntry> {
     Ok(SampleEntry::Avc1(Avc1Box {
-        visual: video::sample_entry_visual_fields(width, height),
+        visual: video::sample_entry_visual_fields(width.get(), height.get()),
         avcc_box: AvccBox {
             // 実際のエンコードストリームに合わせた値
             sps_list,
@@ -207,7 +194,7 @@ fn h265_sample_entry(
     pps_list: Vec<Vec<u8>>,
 ) -> orfail::Result<SampleEntry> {
     Ok(SampleEntry::Hev1(Hev1Box {
-        visual: video::sample_entry_visual_fields(width, height),
+        visual: video::sample_entry_visual_fields(width.get(), height.get()),
         hvcc_box: HvccBox {
             // 以下はSora の録画ファイルに合わせた値（必要に応じて調整すること）
             general_profile_compatibility_flags: 0x60000000,

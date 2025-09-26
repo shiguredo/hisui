@@ -7,7 +7,7 @@
 Ubuntu の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
 ```
-$ sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+$ sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake clang
 ```
 
 ### macOS の場合
@@ -21,6 +21,8 @@ $ brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
 ## Hisui 本体のビルド方法
 
 Hisui は Rust のビルドツールである [Cargo](https://doc.rust-lang.org/cargo/) を使って以下のようにビルドします。
+
+なお、必要な Rust バージョンは [`Cargo.toml`](../Cargo.toml) の `rust-version` を参照してください。
 
 ```console
 // crates.io からビルドする場合（まだ canary リリースしかないのでバージョン指定が必須）
@@ -65,9 +67,10 @@ Commands:
   inspect     録画ファイルの情報を取得します
   list-codecs 利用可能なコーデック一覧を表示します
   compose     録画ファイルの合成を行います
-  legacy      レガシー Hisui との互換性維持用のコマンドです（省略可能）
+  legacy      レガシー Hisui との互換性維持用のコマンドです
   vmaf        VMAF を用いた映像エンコード品質の評価を行います
   tune        Optuna を用いた映像エンコードパラメーターの調整を行います
+  pipeline    ユーザー定義のパイプラインを実行します（実験的機能）
 
 Options:
   -h, --help    このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)

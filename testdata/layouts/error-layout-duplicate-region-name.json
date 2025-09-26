@@ -1,0 +1,44 @@
+{
+  "audio_sources": [
+    "./archive-*.json"
+  ],
+  "video_layout": {
+    "main": {
+      "z_pos": 1,
+      "video_sources": [
+        "./archive-QGB72PXZR178HCC8V6GDFY753R.json"
+      ]
+    },
+    "pip": {
+      "z_pos": 2,
+      "x_pos": 1000,
+      "y_pos": 30,
+      "width": 240,
+      "height": 180,
+      "video_sources": [
+        "./archive-YTWEHKQ8ZN2KHF86H23FQG3GAM.json"
+      ]
+    },
+    "main": {
+      "z_pos": 3,
+      "x_pos": 40,
+      "y_pos": 10,
+      "width": 190,
+      "height": 700,
+      "max_rows": 5,
+      "max_columns": 1,
+      "reuse": "show_newest",
+      "video_sources": [
+        "./archive-2BRWK3KV9H01HDD53N1MP4ZK20.json",
+        "./archive-7XRNEPGE8S42H0X7J5EATRG6TM.json",
+        "./archive-NKEY1K0XRX6M9276ZW32TNEX9M.json",
+        "./archive-PDRAR1R3G108781B492Z4STJRC.json"
+      ]
+    }
+  },
+  "trim": true,
+  "format": "mp4",
+  "reuse": "show_oldest",
+  "resolution": "1280x720",
+  "bitrate": 3000
+}
