@@ -1,11 +1,5 @@
 // Video Codec SDK のヘッダは third_party 以下のものを参照する（NVDIA からのダウンロードはログインしていないとできないため）
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
-
-// 依存ライブラリの名前
-const LIB_NAME: &str = "nvcodec";
+use std::path::PathBuf;
 
 fn main() {
     // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
