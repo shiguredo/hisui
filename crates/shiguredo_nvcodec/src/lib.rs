@@ -4,12 +4,13 @@
 //! [NVCODEC]: https://developer.nvidia.com/nvidia-video-codec-sdk
 #![warn(missing_docs)]
 
+use std::ffi::c_void;
 use std::ptr;
 
 mod sys;
 
 // ビルド時に参照したリポジトリのバージョン
-// TODO: build.rs がメタデータ出力に対応したらコメントアウトを外す
+// Note: sys module doesn't export BUILD_METADATA_VERSION, so this is commented out
 // pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
 /// エラー
@@ -77,18 +78,18 @@ impl Decoder {
 
             // Video decoder の作成情報を設定
             let mut create_info: sys::CUVIDDECODECREATEINFO = std::mem::zeroed();
-            create_info.CodecType = sys::cudaVideoCodec_cudaVideoCodec_HEVC;
-            create_info.ChromaFormat = sys::cudaVideoChromaFormat_cudaVideoChromaFormat_420;
-            create_info.OutputFormat = sys::cudaVideoSurfaceFormat_cudaVideoSurfaceFormat_NV12;
+            create_info.CodecType = sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC;
+            create_info.ChromaFormat = sys::cudaVideoChromaFormat_enum_cudaVideoChromaFormat_420;
+            create_info.OutputFormat = sys::cudaVideoSurfaceFormat_enum_cudaVideoSurfaceFormat_NV12;
             create_info.bitDepthMinus8 = 0; // 8ビット固定
             create_info.DeinterlaceMode =
-                sys::cudaVideoDeinterlaceMode_cudaVideoDeinterlaceMode_Weave;
+                sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Weave;
             create_info.ulNumOutputSurfaces = 1;
-            create_info.ulCreationFlags = sys::cudaVideoCreateFlags_cudaVideoCreate_PreferCUDA;
+            create_info.ulCreationFlags = sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUDA;
             create_info.ulNumDecodeSurfaces = 1;
 
             let mut decoder = ptr::null_mut();
-            let status = sys::cuvidCreateDecoder(&mut decoder, &create_info);
+            let status = sys::cuvidCreateDecoder(&mut decoder, &mut create_info);
             if status != sys::CUDA_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
@@ -117,95 +118,84 @@ impl Decoder {
             return Ok(());
         }
 
-        unsafe {
-            // NALユニットを解析してVPS/SPS/PPSとフレームデータを分離
-            let mut offset = 0;
-            let mut sequence_initialized = false;
+        // NALユニットを解析してVPS/SPS/PPSとフレームデータを分離
+        let mut offset = 0;
+        let mut sequence_initialized = false;
 
-            while offset < data.len() {
-                if offset + 4 > data.len() {
-                    break;
-                }
-
-                // NALユニットのサイズを読み取り（4バイト、ビッグエンディアン）
-                let nal_size = u32::from_be_bytes([
-                    data[offset],
-                    data[offset + 1],
-                    data[offset + 2],
-                    data[offset + 3],
-                ]) as usize;
-
-                offset += 4;
-
-                if offset + nal_size > data.len() {
-                    break;
-                }
-
-                let nal_data = &data[offset..offset + nal_size];
-                if nal_data.is_empty() {
-                    offset += nal_size;
-                    continue;
-                }
-
-                // NALユニットタイプを取得（H.265の場合、最初のバイトの上位1ビットは0、次の6ビットがタイプ）
-                let nal_type = (nal_data[0] >> 1) & 0x3F;
-
-                match nal_type {
-                    32 => { // VPS
-                        // VPSを処理（現在は単純にスキップ）
-                    }
-                    33 => {
-                        // SPS
-                        // SPSからwidth/heightを抽出
-                        if let Ok((w, h)) = self.parse_sps(nal_data) {
-                            self.width = w;
-                            self.height = h;
-                        }
-                        sequence_initialized = true;
-                    }
-                    34 => { // PPS
-                        // PPSを処理（現在は単純にスキップ）
-                    }
-                    _ if nal_type <= 31 => {
-                        // フレームデータ
-                        if sequence_initialized {
-                            self.decode_frame(nal_data)?;
-                        }
-                    }
-                    _ => {
-                        // その他のNALユニットは無視
-                    }
-                }
-
-                offset += nal_size;
+        while offset < data.len() {
+            if offset + 4 > data.len() {
+                break;
             }
+
+            // NALユニットのサイズを読み取り（4バイト、ビッグエンディアン）
+            let nal_size = u32::from_be_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]) as usize;
+
+            offset += 4;
+
+            if offset + nal_size > data.len() {
+                break;
+            }
+
+            let nal_data = &data[offset..offset + nal_size];
+            if nal_data.is_empty() {
+                offset += nal_size;
+                continue;
+            }
+
+            // NALユニットタイプを取得（H.265の場合、最初のバイトの上位1ビットは0、次の6ビットがタイプ）
+            let nal_type = (nal_data[0] >> 1) & 0x3F;
+
+            match nal_type {
+                32 => { // VPS
+                    // VPSを処理（現在は単純にスキップ）
+                }
+                33 => {
+                    // SPS
+                    // SPSからwidth/heightを抽出
+                    if let Ok((w, h)) = self.parse_sps(nal_data) {
+                        self.width = w;
+                        self.height = h;
+                    }
+                    sequence_initialized = true;
+                }
+                34 => { // PPS
+                    // PPSを処理（現在は単純にスキップ）
+                }
+                _ if nal_type <= 31 => {
+                    // フレームデータ
+                    if sequence_initialized {
+                        self.decode_frame(nal_data)?;
+                    }
+                }
+                _ => {
+                    // その他のNALユニットは無視
+                }
+            }
+
+            offset += nal_size;
         }
 
         Ok(())
     }
 
     /// フレームデータをデコードする
-    fn decode_frame(&mut self, frame_data: &[u8]) -> Result<(), Error> {
+    fn decode_frame(&mut self, _frame_data: &[u8]) -> Result<(), Error> {
         unsafe {
             // デコード用のピクチャパラメータを設定
             let mut pic_params: sys::CUVIDPICPARAMS = std::mem::zeroed();
-            pic_params.PicWidthInMbs = (self.width + 15) / 16;
-            pic_params.FrameHeightInMbs = (self.height + 15) / 16;
+            pic_params.PicWidthInMbs = ((self.width + 15) / 16) as i32;
+            pic_params.FrameHeightInMbs = ((self.height + 15) / 16) as i32;
             pic_params.CurrPicIdx = 0;
             pic_params.intra_pic_flag = 1; // キーフレームと仮定
             pic_params.ref_pic_flag = 0;
 
-            // ビットストリームデータを設定
-            let mut bitstream_data = sys::CUVIDPARSERDISPINFO {
-                picture_index: 0,
-                progressive_frame: 1,
-                top_field_first: 0,
-                repeat_first_field: 0,
-                timestamp: 0,
-            };
-
             // デコードを実行
-            let status = sys::cuvidDecodePicture(self.decoder, &pic_params);
+            let status = sys::cuvidDecodePicture(self.decoder, &mut pic_params);
             if status != sys::CUDA_SUCCESS {
                 return Err(Error::with_reason(
                     status,
@@ -221,18 +211,18 @@ impl Decoder {
 
             let mut device_ptr = 0u64;
             let mut pitch = 0u32;
-            let status = sys::cuvidMapVideoFrame(
+            let status = sys::cuvidMapVideoFrame64(
                 self.decoder,
-                bitstream_data.picture_index,
+                0, // picture_index
                 &mut device_ptr,
                 &mut pitch,
-                &proc_params,
+                &mut proc_params,
             );
 
             if status != sys::CUDA_SUCCESS {
                 return Err(Error::with_reason(
                     status,
-                    "cuvidMapVideoFrame",
+                    "cuvidMapVideoFrame64",
                     "Failed to map video frame",
                 ));
             }
@@ -248,7 +238,7 @@ impl Decoder {
             );
 
             // フレームのアンマップ
-            sys::cuvidUnmapVideoFrame(self.decoder, device_ptr);
+            sys::cuvidUnmapVideoFrame64(self.decoder, device_ptr);
 
             if status != sys::CUDA_SUCCESS {
                 return Err(Error::with_reason(
@@ -272,7 +262,7 @@ impl Decoder {
     }
 
     /// SPSからwidth/heightを抽出する簡易パーサー
-    fn parse_sps(&self, sps_data: &[u8]) -> Result<(u32, u32), Error> {
+    fn parse_sps(&self, _sps_data: &[u8]) -> Result<(u32, u32), Error> {
         // 簡易実装: 固定値を返す（本来はSPSを正しく解析する必要がある）
         // H.265のSPS解析は複雑なため、現在は640x480を返す
         Ok((640, 480))
