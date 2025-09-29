@@ -233,7 +233,8 @@ jobs:
       - uses: actions/checkout@v5
       - run: rustup update stable
       - run: rustup default stable
-      - run: cargo doc --workspace --exclude hisui
+      # TODO: `--exclude shiguredo_nvcodec` はあとで削除する
+      - run: cargo doc --workspace --exclude hisui  --exclude shiguredo_nvcodec
 
   slack_notify_failed:
     needs: [check, clippy, test, test-fdk-aac, test-openh264, valgrind, docs_rs]
