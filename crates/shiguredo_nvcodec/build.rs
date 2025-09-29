@@ -113,6 +113,5 @@ fn main() {
 
     // CUDA と NVENC ライブラリのリンク設定
     println!("cargo::rustc-link-lib=dylib=cuda");
-    println!("cargo::rustc-link-lib=dylib=nvencodeapi");
     println!("cargo::rustc-link-lib=dylib=nvcuvid");
 }
