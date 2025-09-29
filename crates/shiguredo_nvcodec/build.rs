@@ -88,7 +88,12 @@ fn main() {
     bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
-        .header("cuda.h") // システムにインストールされているcuda.hを使用
+        .header(
+            PathBuf::from(cuda_include_path)
+                .join("cuda.h")
+                .display()
+                .to_string(),
+        )
         // CUDA include pathを追加
         .clang_arg(format!("-I{}", cuda_include_path))
         // third_party include pathも追加
