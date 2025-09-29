@@ -1,4 +1,3 @@
-// Video Codec SDK のヘッダは third_party 以下のものを参照する（NVDIA からのダウンロードはログインしていないとできないため）
 use std::path::PathBuf;
 
 fn main() {
@@ -6,14 +5,19 @@ fn main() {
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed=build.rs");
     // third_party のヘッダファイルが更新されたら再ビルドする
-    println!("cargo::rerun-if-changed=third_party/nvcodec/include/");
+    println!("cargo::rerun-if-changed=../../third_party/nvcodec/include/");
 
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("infallible"));
     let output_bindings_path = out_dir.join("bindings.rs");
 
     // third_party にあるヘッダファイルのパス
-    let third_party_header_dir = PathBuf::from("third_party/nvcodec/include");
+    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("infallible"));
+    let third_party_header_dir = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("failed to get project root")
+        .join("third_party/nvcodec/include");
 
     if std::env::var("DOCS_RS").is_ok() {
         // Docs.rs 向けのビルドでは外部ファイルのダウンロードができないので build.rs の処理はスキップして、
