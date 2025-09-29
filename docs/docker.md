@@ -101,7 +101,7 @@ cat recordings/RECORDING_ID/stats.json
 docker run --rm \
   -v $(pwd)/recordings:/recordings \
   ghcr.io/shiguredo/hisui:latest \
-  inspect /recordings/RECORDING_ID/
+  inspect /recordings/RECORDING_ID/archive-CONNECTION_ID.mp4
 ```
 
 ## 注意事項
