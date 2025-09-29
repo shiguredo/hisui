@@ -85,12 +85,13 @@ impl Decoder {
             create_info.DeinterlaceMode =
                 sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Weave;
             create_info.ulNumOutputSurfaces = 1;
-            create_info.ulCreationFlags = sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUDA;
+            create_info.ulCreationFlags =
+                sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUDA as u64;
             create_info.ulNumDecodeSurfaces = 1;
 
             let mut decoder = ptr::null_mut();
             let status = sys::cuvidCreateDecoder(&mut decoder, &mut create_info);
-            if status != sys::CUDA_SUCCESS {
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
                     status,
@@ -196,7 +197,7 @@ impl Decoder {
 
             // デコードを実行
             let status = sys::cuvidDecodePicture(self.decoder, &mut pic_params);
-            if status != sys::CUDA_SUCCESS {
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::with_reason(
                     status,
                     "cuvidDecodePicture",
@@ -219,7 +220,7 @@ impl Decoder {
                 &mut proc_params,
             );
 
-            if status != sys::CUDA_SUCCESS {
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::with_reason(
                     status,
                     "cuvidMapVideoFrame64",
@@ -240,7 +241,7 @@ impl Decoder {
             // フレームのアンマップ
             sys::cuvidUnmapVideoFrame64(self.decoder, device_ptr);
 
-            if status != sys::CUDA_SUCCESS {
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::with_reason(
                     status,
                     "cuMemcpyDtoH_v2",
