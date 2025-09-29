@@ -283,6 +283,14 @@ impl Decoder {
         // フラッシュ処理（現在は何もしない）
         Ok(())
     }
+
+    /// デコード済みのフレームを取り出す
+    ///
+    /// [`Decoder::decode()`] や [`Decoder::finish()`] の後には、
+    /// このメソッドを、結果が `None` になるまで呼び出し続ける必要がある
+    pub fn next_frame(&mut self) -> Option<DecodedFrame> {
+        self.decoded_frames.pop()
+    }
 }
 
 unsafe impl Send for Decoder {}
