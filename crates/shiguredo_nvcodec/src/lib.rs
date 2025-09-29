@@ -9,7 +9,7 @@ use std::ptr;
 mod sys;
 
 // ビルド時に参照したリポジトリのバージョン
-// TDOO:
+// TODO: build.rs がメタデータ出力に対応したらコメントアウトを外す
 // pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
 /// エラー
@@ -263,7 +263,6 @@ impl Decoder {
                 width: self.width,
                 height: self.height,
                 data: host_data,
-                is_high_depth: false, // 常にfalse
             };
 
             self.decoded_frames.push(decoded_frame);
@@ -464,7 +463,6 @@ mod tests {
 
         assert_eq!(frame.width(), 640);
         assert_eq!(frame.height(), 480);
-        assert!(!frame.is_high_depth());
 
         // Y平面とUV平面のデータサイズを確認
         assert_eq!(frame.y_plane().len(), 640 * 480);
