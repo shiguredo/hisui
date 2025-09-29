@@ -55,4 +55,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           trigger_phrase: "!sonnet"
           claude_args: |
-            --model claude-sonnet-4-20250514
+            --model claude-sonnet-4-5-20250929
