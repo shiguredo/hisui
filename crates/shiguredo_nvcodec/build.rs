@@ -71,11 +71,28 @@ fn main() {
         panic!("cuviddec.h not found at {:?}", cuvid_header);
     }
 
+    // CUDA include path を検出
+    let cuda_include_paths = vec![
+        "/usr/lib/cuda/include",
+        "/usr/local/cuda/include",
+        "/opt/cuda/include",
+        "/usr/include/cuda",
+    ];
+
+    let cuda_include_path = cuda_include_paths
+        .iter()
+        .find(|&&path| PathBuf::from(path).join("cuda.h").exists())
+        .expect("CUDA headers not found. Please install CUDA toolkit.");
+
     // バインディングを生成する
     bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
         .header("cuda.h") // システムにインストールされているcuda.hを使用
+        // CUDA include pathを追加
+        .clang_arg(format!("-I{}", cuda_include_path))
+        // third_party include pathも追加
+        .clang_arg(format!("-I{}", third_party_header_dir.display()))
         // CUDA のバージョン定義を追加
         .clang_arg("-DCUDA_VERSION=13000")
         // 不要な警告を抑制
