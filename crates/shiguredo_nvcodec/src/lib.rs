@@ -64,6 +64,17 @@ impl Decoder {
     /// H.265 用のデコーダーインスタンスを生成する
     pub fn new_hevc() -> Result<Self, Error> {
         unsafe {
+            // CUDA ドライバーの初期化
+            // TODO: 一回だけ呼ぶようにする？
+            let status = sys::cuInit(0);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuInit",
+                    "Failed to initialize CUDA driver",
+                ));
+            }
+
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
