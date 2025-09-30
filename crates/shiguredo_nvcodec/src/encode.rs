@@ -210,6 +210,192 @@ impl Encoder {
             Ok(())
         }
     }
+
+    /// Encode a single frame in NV12 format
+    pub fn encode_frame(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+        let state = self.state.lock().unwrap();
+        let expected_size = (state.width * state.height * 3 / 2) as usize;
+
+        if nv12_data.len() != expected_size {
+            return Err(Error::with_reason(
+                sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
+                "encode_frame",
+                "Invalid NV12 data size",
+            ));
+        }
+
+        unsafe {
+            // Push CUDA context
+            let status = sys::cuCtxPushCurrent_v2(self.ctx);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxPushCurrent_v2",
+                    "Failed to push CUDA context",
+                ));
+            }
+
+            // Allocate device memory for input
+            let mut device_input = 0u64;
+            let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                return Err(Error::with_reason(
+                    status,
+                    "cuMemAlloc_v2",
+                    "Failed to allocate device memory",
+                ));
+            }
+
+            // Copy data to device
+            let status = sys::cuMemcpyHtoD_v2(
+                device_input,
+                nv12_data.as_ptr() as *const c_void,
+                nv12_data.len(),
+            );
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                sys::cuMemFree_v2(device_input);
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                return Err(Error::with_reason(
+                    status,
+                    "cuMemcpyHtoD_v2",
+                    "Failed to copy data to device",
+                ));
+            }
+
+            // Allocate output bitstream buffer
+            let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
+            create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
+
+            let mut output_buffer = ptr::null_mut();
+            let status = (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
+                self.h_encoder,
+                &mut create_bitstream,
+            );
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                sys::cuMemFree_v2(device_input);
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncCreateBitstreamBuffer",
+                    "Failed to create bitstream buffer",
+                ));
+            }
+            output_buffer = create_bitstream.bitstreamBuffer;
+
+            // Setup encode picture parameters
+            let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+            pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
+            pic_params.inputWidth = state.width;
+            pic_params.inputHeight = state.height;
+            pic_params.inputPitch = state.width;
+            pic_params.inputBuffer = device_input as *mut c_void;
+            pic_params.outputBitstream = output_buffer;
+            pic_params.bufferFmt = state.buffer_format;
+            pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
+
+            drop(state); // Release lock before encoding
+
+            // Encode picture
+            let status =
+                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+
+            // Clean up device memory
+            sys::cuMemFree_v2(device_input);
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
+
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                if !output_buffer.is_null() {
+                    (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(
+                        self.h_encoder,
+                        output_buffer,
+                    );
+                }
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncEncodePicture",
+                    "Failed to encode picture",
+                ));
+            }
+
+            // Lock bitstream to read encoded data
+            let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
+            lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
+            lock_bitstream.outputBitstream = output_buffer;
+
+            let status =
+                (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream);
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncLockBitstream",
+                    "Failed to lock bitstream",
+                ));
+            }
+
+            // Copy encoded data
+            let encoded_data = std::slice::from_raw_parts(
+                lock_bitstream.bitstreamBufferPtr as *const u8,
+                lock_bitstream.bitstreamSizeInBytes as usize,
+            )
+            .to_vec();
+
+            // Unlock bitstream
+            let status = (self.encoder.nvEncUnlockBitstream.unwrap())(
+                self.h_encoder,
+                lock_bitstream.outputBitstream,
+            );
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncUnlockBitstream",
+                    "Failed to unlock bitstream",
+                ));
+            }
+
+            // Store encoded packet
+            let mut state = self.state.lock().unwrap();
+            state.encoded_packets.push(EncodedPacket {
+                data: encoded_data,
+                timestamp: lock_bitstream.outputTimeStamp,
+                picture_type: lock_bitstream.pictureType,
+            });
+
+            // Destroy bitstream buffer
+            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+
+            Ok(())
+        }
+    }
+
+    /// Flush encoder and get remaining packets
+    pub fn flush(&mut self) -> Result<(), Error> {
+        unsafe {
+            let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+            pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
+            pic_params.encodePicFlags = sys::NV_ENC_PIC_FLAG_EOS;
+
+            let status =
+                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncEncodePicture",
+                    "Failed to flush encoder",
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    /// Get all encoded packets
+    pub fn get_encoded_packets(&mut self) -> Vec<EncodedPacket> {
+        let mut state = self.state.lock().unwrap();
+        std::mem::take(&mut state.encoded_packets)
+    }
 }
 
 impl Drop for Encoder {
@@ -241,5 +427,60 @@ mod tests {
     fn init_hevc_encoder() {
         let _encoder = Encoder::new_hevc(640, 480).expect("Failed to initialize HEVC encoder");
         println!("HEVC encoder initialized successfully");
+    }
+
+    #[test]
+    fn test_encode_black_frame() {
+        let width = 640;
+        let height = 480;
+
+        // Create encoder
+        let mut encoder = Encoder::new_hevc(width, height).expect("Failed to create HEVC encoder");
+
+        // Prepare black frame in NV12 format
+        // Y plane: 16 (black in YUV)
+        // UV plane: 128 (neutral chroma)
+        let y_size = (width * height) as usize;
+        let uv_size = (width * height / 2) as usize;
+
+        let mut frame_data = vec![16u8; y_size + uv_size];
+        // Set UV plane to 128 (neutral chroma)
+        frame_data[y_size..].fill(128);
+
+        // Encode the frame
+        encoder
+            .encode_frame(&frame_data)
+            .expect("Failed to encode black frame");
+
+        // Flush encoder
+        encoder.flush().expect("Failed to flush encoder");
+
+        // Get encoded packets
+        let packets = encoder.get_encoded_packets();
+
+        // Verify we got at least one packet
+        assert!(!packets.is_empty(), "No encoded packets received");
+
+        // Verify the first packet is a keyframe (IDR)
+        let first_packet = &packets[0];
+        assert!(
+            matches!(
+                first_packet.picture_type,
+                sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_I | sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_IDR
+            ),
+            "First frame should be a keyframe"
+        );
+
+        // Verify packet has data
+        assert!(
+            !first_packet.data.is_empty(),
+            "Encoded packet should have data"
+        );
+
+        println!(
+            "Successfully encoded black frame: {} packets, first packet size: {} bytes",
+            packets.len(),
+            first_packet.data.len()
+        );
     }
 }
