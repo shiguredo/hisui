@@ -15,7 +15,7 @@ mod sys;
 // pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
 // Missing constant from CUVID
-const CUVID_PKT_ENDOFSTREAM: u32 = 0x02;
+const CUVID_PKT_ENDOFSTREAM: u64 = 0x02;
 
 /// エラー
 #[derive(Debug)]
@@ -207,7 +207,7 @@ impl Decoder {
 
     /// デコード済みのフレームを取り出す
     pub fn next_frame(&mut self) -> Option<DecodedFrame> {
-        let mut state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap();
         if state.decoded_frames.is_empty() {
             None
         } else {
