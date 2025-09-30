@@ -1,7 +1,7 @@
 //! NVENC GUID constants
 //!
 //! These GUIDs are defined as constants instead of extern static to avoid linking issues.
-
+#![expect(dead_code)]
 use crate::sys::GUID;
 
 // Codec GUIDs

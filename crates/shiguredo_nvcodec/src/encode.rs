@@ -54,10 +54,10 @@ impl Encoder {
             }
 
             // Load NVENC API
-            let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = unsafe { std::mem::zeroed() };
+            let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
             encoder_api.version = sys::NVENCAPI_VERSION;
 
-            let status = unsafe { sys::NvEncodeAPICreateInstance(&mut encoder_api) };
+            let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
