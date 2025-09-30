@@ -10,6 +10,15 @@ fn main() {
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("infallible"));
     let output_bindings_path = out_dir.join("bindings.rs");
+    let output_metadata_path = out_dir.join("metadata.rs");
+
+    // 各種メタデータを書き込む
+    let version = get_version();
+    std::fs::write(
+        output_metadata_path,
+        format!("pub const BUILD_METADATA_VERSION: &str={:?};\n", version),
+    )
+    .expect("failed to write metadata file");
 
     // third_party にあるヘッダファイルのパス
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("infallible"));
@@ -204,4 +213,24 @@ pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
     println!("cargo::rustc-link-lib=dylib=cuda");
     println!("cargo::rustc-link-lib=dylib=nvcuvid");
     println!("cargo::rustc-link-lib=dylib=nvidia-encode");
+}
+
+// Cargo.toml から依存ライブラリのバージョンを取得する
+fn get_version() -> String {
+    let cargo_toml: toml::Value =
+        toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml");
+    if let Some(version) = cargo_toml
+        .get("package")
+        .and_then(|v| v.get("metadata"))
+        .and_then(|v| v.get("external-dependencies"))
+        .and_then(|v| v.get("nvcodec"))
+        .and_then(|v| v.get("version"))
+        .and_then(|s| s.as_str())
+    {
+        version.to_string()
+    } else {
+        panic!(
+            "Cargo.toml does not contain a valid [package.metadata.external-dependencies.nvcodec] version"
+        );
+    }
 }
