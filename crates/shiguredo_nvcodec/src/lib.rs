@@ -7,8 +7,10 @@
 use std::sync::Once;
 
 mod decode;
+mod encode;
 mod sys;
 
+pub use decode::Encoder;
 pub use decode::{DecodedFrame, Decoder};
 
 // ビルド時に参照したリポジトリのバージョン
