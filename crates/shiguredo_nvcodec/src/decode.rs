@@ -273,7 +273,7 @@ unsafe extern "C" fn handle_video_sequence(
         let status = unsafe { sys::cuvidCreateDecoder(&mut decoder, &mut create_info) };
 
         // Always pop context
-        unsafe { sys::cuCtxoPopCurrent_v2(ptr::null_mut()) };
+        unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
 
         if status != sys::cudaError_enum_CUDA_SUCCESS {
             return Err(Error::with_reason(
