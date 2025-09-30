@@ -213,7 +213,6 @@ impl Encoder {
 
     /// Encode a single frame in NV12 format
     pub fn encode_frame(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
-        dbg!("encode_frame-1");
         let state = self.state.lock().unwrap();
         let expected_size = (state.width * state.height * 3 / 2) as usize;
 
@@ -225,7 +224,6 @@ impl Encoder {
             ));
         }
 
-        dbg!("encode_frame-2");
         unsafe {
             // Push CUDA context
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
@@ -236,8 +234,6 @@ impl Encoder {
                     "Failed to push CUDA context",
                 ));
             }
-
-            dbg!("encode_frame-3");
 
             // Allocate device memory for input
             let mut device_input = 0u64;
@@ -251,7 +247,6 @@ impl Encoder {
                 ));
             }
 
-            dbg!("encode_frame-4");
             // Copy data to device
             let status = sys::cuMemcpyHtoD_v2(
                 device_input,
@@ -268,17 +263,73 @@ impl Encoder {
                 ));
             }
 
+            // Register the CUDA device memory as an input resource
+            let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = std::mem::zeroed();
+            register_resource.version = sys::NV_ENC_REGISTER_RESOURCE_VER;
+            register_resource.resourceType =
+                sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
+            register_resource.resourceToRegister = device_input as *mut c_void;
+            register_resource.width = state.width;
+            register_resource.height = state.height;
+            register_resource.pitch = state.width;
+            register_resource.bufferFormat = state.buffer_format;
+            register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
+
+            let status = (self.encoder.nvEncRegisterResource.unwrap())(
+                self.h_encoder,
+                &mut register_resource,
+            );
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                sys::cuMemFree_v2(device_input);
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncRegisterResource",
+                    "Failed to register input resource",
+                ));
+            }
+
+            let registered_resource = register_resource.registeredResource;
+
+            // Map the registered resource
+            let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = std::mem::zeroed();
+            map_input_resource.version = sys::NV_ENC_MAP_INPUT_RESOURCE_VER;
+            map_input_resource.registeredResource = registered_resource;
+
+            let status = (self.encoder.nvEncMapInputResource.unwrap())(
+                self.h_encoder,
+                &mut map_input_resource,
+            );
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
+                sys::cuMemFree_v2(device_input);
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncMapInputResource",
+                    "Failed to map input resource",
+                ));
+            }
+
+            let mapped_resource = map_input_resource.mappedResource;
+
             // Allocate output bitstream buffer
             let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
             create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
 
-            dbg!("encode_frame-5");
-            let output_buffer = ptr::null_mut();
             let status = (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
                 self.h_encoder,
                 &mut create_bitstream,
             );
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
                 sys::cuMemFree_v2(device_input);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 return Err(Error::with_reason(
@@ -287,9 +338,7 @@ impl Encoder {
                     "Failed to create bitstream buffer",
                 ));
             }
-            output_buffer = create_bitstream.bitstreamBuffer;
-
-            dbg!("encode_frame-6");
+            let output_buffer = create_bitstream.bitstreamBuffer;
 
             // Setup encode picture parameters
             let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
@@ -297,7 +346,7 @@ impl Encoder {
             pic_params.inputWidth = state.width;
             pic_params.inputHeight = state.height;
             pic_params.inputPitch = state.width;
-            pic_params.inputBuffer = device_input as *mut c_void;
+            pic_params.inputBuffer = mapped_resource; // Use mapped resource, not device pointer!
             pic_params.outputBitstream = output_buffer;
             pic_params.bufferFmt = state.buffer_format;
             pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
@@ -308,27 +357,21 @@ impl Encoder {
             let status =
                 (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
 
-            dbg!("encode_frame-7");
-
-            // Clean up device memory
-            sys::cuMemFree_v2(device_input);
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
-
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                if !output_buffer.is_null() {
-                    (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(
-                        self.h_encoder,
-                        output_buffer,
-                    );
-                }
+                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
+                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+                sys::cuMemFree_v2(device_input);
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 return Err(Error::with_reason(
                     status,
                     "nvEncEncodePicture",
                     "Failed to encode picture",
                 ));
             }
-
-            dbg!("encode_frame-8");
 
             // Lock bitstream to read encoded data
             let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
@@ -338,15 +381,20 @@ impl Encoder {
             let status =
                 (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream);
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
                 (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+                sys::cuMemFree_v2(device_input);
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 return Err(Error::with_reason(
                     status,
                     "nvEncLockBitstream",
                     "Failed to lock bitstream",
                 ));
             }
-
-            dbg!("encode_frame-9");
 
             // Copy encoded data
             let encoded_data = std::slice::from_raw_parts(
@@ -356,20 +404,25 @@ impl Encoder {
             .to_vec();
 
             // Unlock bitstream
-            let status = (self.encoder.nvEncUnlockBitstream.unwrap())(
+            (self.encoder.nvEncUnlockBitstream.unwrap())(
                 self.h_encoder,
                 lock_bitstream.outputBitstream,
             );
-            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
-                return Err(Error::with_reason(
-                    status,
-                    "nvEncUnlockBitstream",
-                    "Failed to unlock bitstream",
-                ));
-            }
 
-            dbg!("encode_frame-10");
+            // Unmap input resource
+            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+
+            // Unregister resource
+            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+
+            // Destroy bitstream buffer
+            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+
+            // Free device memory
+            sys::cuMemFree_v2(device_input);
+
+            // Pop context
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             // Store encoded packet
             let mut state = self.state.lock().unwrap();
@@ -378,9 +431,6 @@ impl Encoder {
                 timestamp: lock_bitstream.outputTimeStamp,
                 picture_type: lock_bitstream.pictureType,
             });
-
-            // Destroy bitstream buffer
-            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
 
             Ok(())
         }
