@@ -95,7 +95,7 @@ fn main() {
         builder = builder.header(nvcuvid_header.display().to_string());
     }
 
-    builder
+    let bindings = builder
         .header(
             PathBuf::from(cuda_include_path)
                 .join("cuda.h")
@@ -140,9 +140,27 @@ fn main() {
         .derive_debug(false)
         .derive_default(false)
         .generate()
-        .expect("failed to generate bindings")
-        .write_to_file(output_bindings_path)
-        .expect("failed to write bindings");
+        .expect("failed to generate bindings");
+
+    // Add version constants that are defined as macros in the header
+    let version_constants = r#"
+
+// Version constants from nvEncodeAPI.h
+// These are macros in C, so bindgen doesn't generate them automatically
+const NVENCAPI_STRUCT_VERSION_BASE: u32 = (0x7 << 28);
+
+pub const NV_ENCODE_API_FUNCTION_LIST_VER: u32 = (NVENCAPI_VERSION | (2 << 16) | NVENCAPI_STRUCT_VERSION_BASE);
+pub const NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER: u32 = (NVENCAPI_VERSION | (1 << 16) | NVENCAPI_STRUCT_VERSION_BASE);
+pub const NV_ENC_PRESET_CONFIG_VER: u32 = (NVENCAPI_VERSION | (5 << 16) | NVENCAPI_STRUCT_VERSION_BASE | (1 << 31));
+pub const NV_ENC_CONFIG_VER: u32 = (NVENCAPI_VERSION | (9 << 16) | NVENCAPI_STRUCT_VERSION_BASE | (1 << 31));
+pub const NV_ENC_INITIALIZE_PARAMS_VER: u32 = (NVENCAPI_VERSION | (7 << 16) | NVENCAPI_STRUCT_VERSION_BASE | (1 << 31));
+"#;
+
+    // Write bindings with version constants appended
+    let mut bindings_content = bindings.to_string();
+    bindings_content.push_str(version_constants);
+
+    std::fs::write(&output_bindings_path, bindings_content).expect("failed to write bindings");
 
     // CUDA と NVENC/NVCUVID ライブラリのリンク設定
     println!("cargo::rustc-link-lib=dylib=cuda");
