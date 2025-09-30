@@ -6,7 +6,7 @@
 
 use std::ffi::c_void;
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 
 mod sys;
 
@@ -14,8 +14,33 @@ mod sys;
 // Note: sys module doesn't export BUILD_METADATA_VERSION, so this is commented out
 // pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
+/// CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
+static CUDA_INIT: Once = Once::new();
+static mut CUDA_INIT_RESULT: Option<Result<(), Error>> = None;
+
+/// CUDA ドライバーを初期化する（内部使用）
+fn ensure_cuda_initialized() -> Result<(), Error> {
+    unsafe {
+        CUDA_INIT.call_once(|| {
+            let status = sys::cuInit(0);
+            CUDA_INIT_RESULT = Some(if status == sys::cudaError_enum_CUDA_SUCCESS {
+                Ok(())
+            } else {
+                Err(Error::with_reason(
+                    status,
+                    "cuInit",
+                    "Failed to initialize CUDA driver",
+                ))
+            });
+        });
+
+        // CUDA_INIT_RESULT は call_once の中で必ず初期化されるため unwrap は安全
+        CUDA_INIT_RESULT.as_ref().unwrap().clone()
+    }
+}
+
 /// エラー
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Error {
     status: u32, // NVENCSTATUS は u32 型
     function: &'static str,
@@ -73,17 +98,10 @@ struct DecoderState {
 impl Decoder {
     /// H.265 用のデコーダーインスタンスを生成する
     pub fn new_hevc() -> Result<Self, Error> {
-        unsafe {
-            // CUDA ドライバーの初期化
-            let status = sys::cuInit(0);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
-                    status,
-                    "cuInit",
-                    "Failed to initialize CUDA driver",
-                ));
-            }
+        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行）
+        ensure_cuda_initialized()?;
 
+        unsafe {
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
@@ -586,6 +604,14 @@ mod tests {
     fn init_hevc_decoder() {
         let _decoder = Decoder::new_hevc().expect("Failed to initialize HEVC decoder");
         println!("HEVC decoder initialized successfully");
+    }
+
+    #[test]
+    fn test_multiple_decoders() {
+        // CUDA初期化が1回だけ実行されることを確認するため、複数のデコーダーを作成
+        let _decoder1 = Decoder::new_hevc().expect("Failed to initialize first HEVC decoder");
+        let _decoder2 = Decoder::new_hevc().expect("Failed to initialize second HEVC decoder");
+        println!("Multiple HEVC decoders initialized successfully");
     }
 
     #[test]
