@@ -13,7 +13,7 @@ mod sys;
 pub use decode::{DecodedFrame, Decoder};
 pub use encode::Encoder;
 
-// ビルド時に参照したバージョン
+/// ビルド時に参照したバージョン
 pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
 /// CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）

@@ -89,7 +89,7 @@ fn main() {
         .expect("CUDA headers not found. Please install CUDA toolkit.");
 
     // バインディングを生成する
-    let mut builder = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
         .header(nvcuvid_header.display().to_string());
