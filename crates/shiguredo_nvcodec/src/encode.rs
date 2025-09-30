@@ -15,8 +15,11 @@ pub struct Encoder {
 struct EncoderState {
     width: u32,
     height: u32,
+    #[allow(dead_code)]
     input_buffers: Vec<sys::NV_ENC_REGISTERED_PTR>,
+    #[allow(dead_code)]
     output_buffers: Vec<sys::NV_ENC_OUTPUT_PTR>,
+    #[allow(dead_code)]
     buffer_format: sys::NV_ENC_BUFFER_FORMAT,
     encoded_packets: Vec<EncodedPacket>,
 }
@@ -51,11 +54,11 @@ impl Encoder {
             }
 
             // Load NVENC API
-            let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
-            encoder_api.version = sys::NVENCAPI_VERSION;
+            let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = unsafe { std::mem::zeroed() };
+            encoder_api.version = sys::NVENCAPI_VERSION;^O^P
 
-            let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
-            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+            let status = unsafe { sys::NvEncodeAPICreateInstance(&mut encoder_api) };
+            if status != sys::l_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
                     status,
@@ -66,17 +69,19 @@ impl Encoder {
 
             // Open encode session
             let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
-                std::mem::zeroed();
+                unsafe { std::mem::zeroed() };
             open_session_params.version = sys::NVENCAPI_VERSION;
             open_session_params.deviceType = sys::_NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
             open_session_params.device = ctx as *mut c_void;
             open_session_params.apiVersion = sys::NVENCAPI_VERSION;
 
             let mut h_encoder = ptr::null_mut();
-            let status = (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
-                &mut open_session_params,
-                &mut h_encoder,
-            );
+            let status = unsafe {
+                (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
+                    &mut open_session_params,
+                    &mut h_encoder,
+                )
+            };
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
@@ -111,12 +116,12 @@ impl Encoder {
 
     unsafe fn initialize_encoder(&mut self) -> Result<(), Error> {
         // Initialize encoder parameters
-        let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
-        let mut config: sys::NV_ENC_CONFIG = std::mem::zeroed();
+        let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = unsafe { std::mem::zeroed() };
+        let mut config: sys::NV_ENC_CONFIG = unsafe { std::mem::zeroed() };
 
         init_params.version = sys::NVENCAPI_VERSION;
-        init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
-        init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID;
+        init_params.encodeGUID = unsafe { sys::NV_ENC_CODEC_HEVC_GUID };
+        init_params.presetGUID = unsafe { sys::NV_ENC_PRESET_P4_GUID };
         init_params.encodeWidth = self.state.lock().unwrap().width;
         init_params.encodeHeight = self.state.lock().unwrap().height;
         init_params.darWidth = self.state.lock().unwrap().width;
@@ -127,13 +132,14 @@ impl Encoder {
         init_params.encodeConfig = &mut config;
 
         config.version = sys::NVENCAPI_VERSION;
-        config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID;
+        config.profileGUID = unsafe { sys::NV_ENC_HEVC_PROFILE_MAIN_GUID };
         config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
         config.frameIntervalP = 1;
 
         // Initialize encoder
-        let status =
-            (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params);
+        let status = unsafe {
+            (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params)
+        };
         if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
             return Err(Error::with_reason(
                 status,
@@ -195,3 +201,4 @@ mod tests {
         println!("HEVC encoder initialized successfully");
     }
 }
+
