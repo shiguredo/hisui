@@ -213,6 +213,7 @@ impl Encoder {
 
     /// Encode a single frame in NV12 format
     pub fn encode_frame(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+        dbg!("encode_frame-1");
         let state = self.state.lock().unwrap();
         let expected_size = (state.width * state.height * 3 / 2) as usize;
 
@@ -224,6 +225,7 @@ impl Encoder {
             ));
         }
 
+        dbg!("encode_frame-2");
         unsafe {
             // Push CUDA context
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
@@ -234,6 +236,8 @@ impl Encoder {
                     "Failed to push CUDA context",
                 ));
             }
+
+            dbg!("encode_frame-3");
 
             // Allocate device memory for input
             let mut device_input = 0u64;
@@ -247,6 +251,7 @@ impl Encoder {
                 ));
             }
 
+            dbg!("encode_frame-4");
             // Copy data to device
             let status = sys::cuMemcpyHtoD_v2(
                 device_input,
@@ -267,7 +272,8 @@ impl Encoder {
             let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
             create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
 
-            let mut output_buffer = ptr::null_mut();
+            dbg!("encode_frame-5");
+            let output_buffer = ptr::null_mut();
             let status = (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
                 self.h_encoder,
                 &mut create_bitstream,
@@ -282,6 +288,8 @@ impl Encoder {
                 ));
             }
             output_buffer = create_bitstream.bitstreamBuffer;
+
+            dbg!("encode_frame-6");
 
             // Setup encode picture parameters
             let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
@@ -299,6 +307,8 @@ impl Encoder {
             // Encode picture
             let status =
                 (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+
+            dbg!("encode_frame-7");
 
             // Clean up device memory
             sys::cuMemFree_v2(device_input);
@@ -318,6 +328,8 @@ impl Encoder {
                 ));
             }
 
+            dbg!("encode_frame-8");
+
             // Lock bitstream to read encoded data
             let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
             lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
@@ -333,6 +345,8 @@ impl Encoder {
                     "Failed to lock bitstream",
                 ));
             }
+
+            dbg!("encode_frame-9");
 
             // Copy encoded data
             let encoded_data = std::slice::from_raw_parts(
@@ -354,6 +368,8 @@ impl Encoder {
                     "Failed to unlock bitstream",
                 ));
             }
+
+            dbg!("encode_frame-10");
 
             // Store encoded packet
             let mut state = self.state.lock().unwrap();
