@@ -569,47 +569,6 @@ impl DecodedFrame {
     }
 }
 
-/// エンコーダーに指定する設定
-#[derive(Debug, Clone)]
-pub struct EncoderConfig {
-    /// 入出力画像の幅
-    pub width: usize,
-    /// 入出力画像の高さ
-    pub height: usize,
-    /// FPS の分子
-    pub fps_numerator: usize,
-    /// FPS の分母
-    pub fps_denominator: usize,
-    /// エンコードビットレート (bps 単位)
-    pub target_bitrate: usize,
-}
-
-impl Default for EncoderConfig {
-    fn default() -> Self {
-        Self {
-            width: 1920,
-            height: 1080,
-            fps_numerator: 30,
-            fps_denominator: 1,
-            target_bitrate: 2_000_000,
-        }
-    }
-}
-
-/// H.265 エンコーダー（未実装）
-pub struct Encoder;
-
-impl Encoder {
-    /// H.265 用のエンコーダーインスタンスを生成する（未実装）
-    pub fn new_hevc(_config: &EncoderConfig) -> Result<Self, Error> {
-        Err(Error::with_reason(
-            sys::_NVENCSTATUS_NV_ENC_ERR_UNIMPLEMENTED,
-            "Encoder::new_hevc",
-            "Encoder not yet implemented",
-        ))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
