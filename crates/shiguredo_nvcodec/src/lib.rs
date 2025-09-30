@@ -35,7 +35,12 @@ fn ensure_cuda_initialized() -> Result<(), Error> {
         });
 
         // CUDA_INIT_RESULT は call_once の中で必ず初期化されるため unwrap は安全
-        CUDA_INIT_RESULT.as_ref().unwrap().clone()
+        // Use raw pointer instead of reference to avoid static_mut_refs lint
+        std::ptr::addr_of!(CUDA_INIT_RESULT)
+            .read()
+            .as_ref()
+            .unwrap()
+            .clone()
     }
 }
 
