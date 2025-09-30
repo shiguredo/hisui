@@ -7,7 +7,7 @@ use crate::{Error, ensure_cuda_initialized, sys};
 /// H.265 エンコーダー
 pub struct Encoder {
     ctx: sys::CUcontext,
-    encoder: sys::NV_ENC_ENCODE_API_FUNCTION_LIST,
+    encoder: sys::NV_ENCODE_API_FUNCTION_LIST,
     h_encoder: *mut c_void,
     state: Arc<Mutex<EncoderState>>,
 }
@@ -51,8 +51,8 @@ impl Encoder {
             }
 
             // Load NVENC API
-            let mut encoder_api: sys::NV_ENC_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
-            encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
+            let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
+            encoder_api.version = sys::NVENCAPI_VERSION;
 
             let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
@@ -67,8 +67,8 @@ impl Encoder {
             // Open encode session
             let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
                 std::mem::zeroed();
-            open_session_params.version = sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
-            open_session_params.deviceType = sys::NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
+            open_session_params.version = sys::NVENCAPI_VERSION;
+            open_session_params.deviceType = sys::_NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
             open_session_params.device = ctx as *mut c_void;
             open_session_params.apiVersion = sys::NVENCAPI_VERSION;
 
@@ -91,7 +91,7 @@ impl Encoder {
                 height,
                 input_buffers: Vec::new(),
                 output_buffers: Vec::new(),
-                buffer_format: sys::NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
+                buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
                 encoded_packets: Vec::new(),
             }));
 
@@ -114,7 +114,7 @@ impl Encoder {
         let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
         let mut config: sys::NV_ENC_CONFIG = std::mem::zeroed();
 
-        init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
+        init_params.version = sys::NVENCAPI_VERSION;
         init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
         init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID;
         init_params.encodeWidth = self.state.lock().unwrap().width;
@@ -126,7 +126,7 @@ impl Encoder {
         init_params.enablePTD = 1;
         init_params.encodeConfig = &mut config;
 
-        config.version = sys::NV_ENC_CONFIG_VER;
+        config.version = sys::NVENCAPI_VERSION;
         config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID;
         config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
         config.frameIntervalP = 1;
@@ -146,7 +146,7 @@ impl Encoder {
     }
 
     /// NV12フォーマットのフレームをエンコードする
-    pub fn encode_frame(&mut self, y_plane: &[u8], uv_plane: &[u8]) -> Result<(), Error> {
+    pub fn encode_frame(&mut self, _y_plane: &[u8], _uv_plane: &[u8]) -> Result<(), Error> {
         // Implementation would handle frame encoding
         // This is a simplified version
         Ok(())

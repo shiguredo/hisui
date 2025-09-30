@@ -10,8 +10,8 @@ mod decode;
 mod encode;
 mod sys;
 
-pub use decode::Encoder;
 pub use decode::{DecodedFrame, Decoder};
+pub use encode::Encoder;
 
 // ビルド時に参照したリポジトリのバージョン
 // Note: sys module doesn't export BUILD_METADATA_VERSION, so this is commented out
