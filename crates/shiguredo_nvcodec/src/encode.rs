@@ -113,68 +113,70 @@ impl Encoder {
     }
 
     unsafe fn initialize_encoder(&mut self) -> Result<(), Error> {
-        // Get preset configuration first
-        let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
-        preset_config.version = sys::NVENCAPI_VERSION;
-        preset_config.presetCfg.version = sys::NVENCAPI_VERSION;
+        unsafe {
+            // Get preset configuration first
+            let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
+            preset_config.version = sys::NVENCAPI_VERSION;
+            preset_config.presetCfg.version = sys::NVENCAPI_VERSION;
 
-        let status = (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
-            self.h_encoder,
-            crate::guid::NV_ENC_CODEC_HEVC_GUID,
-            crate::guid::NV_ENC_PRESET_P4_GUID,
-            sys::_NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_UNDEFINED,
-            &mut preset_config,
-        );
-        if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            return Err(Error::with_reason(
-                status,
-                "nvEncGetEncodePresetConfigEx",
-                "Failed to get preset configuration",
-            ));
+            let status = (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
+                self.h_encoder,
+                crate::guid::NV_ENC_CODEC_HEVC_GUID,
+                crate::guid::NV_ENC_PRESET_P4_GUID,
+                sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_UNDEFINED,
+                &mut preset_config,
+            );
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncGetEncodePresetConfigEx",
+                    "Failed to get preset configuration",
+                ));
+            }
+
+            // Initialize encoder parameters
+            let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
+            let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
+
+            let state = self.state.lock().unwrap();
+
+            init_params.version = sys::NVENCAPI_VERSION;
+            init_params.encodeGUID = crate::guid::NV_ENC_CODEC_HEVC_GUID;
+            init_params.presetGUID = crate::guid::NV_ENC_PRESET_P4_GUID;
+            init_params.encodeWidth = state.width;
+            init_params.encodeHeight = state.height;
+            init_params.darWidth = state.width;
+            init_params.darHeight = state.height;
+            init_params.frameRateNum = 30;
+            init_params.frameRateDen = 1;
+            init_params.enablePTD = 1;
+            init_params.encodeConfig = &mut config;
+            init_params.maxEncodeWidth = state.width;
+            init_params.maxEncodeHeight = state.height;
+
+            config.version = sys::NVENCAPI_VERSION;
+            config.profileGUID = crate::guid::NV_ENC_HEVC_PROFILE_MAIN_GUID;
+            config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
+            config.frameIntervalP = 1;
+
+            // Set HEVC-specific configuration
+            config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
+
+            drop(state); // Release lock before calling encoder
+
+            // Initialize encoder
+            let status =
+                (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params);
+            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "nvEncInitializeEncoder",
+                    "Failed to initialize encoder",
+                ));
+            }
+
+            Ok(())
         }
-
-        // Initialize encoder parameters
-        let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
-        let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
-
-        let state = self.state.lock().unwrap();
-
-        init_params.version = sys::NVENCAPI_VERSION;
-        init_params.encodeGUID = crate::guid::NV_ENC_CODEC_HEVC_GUID;
-        init_params.presetGUID = crate::guid::NV_ENC_PRESET_P4_GUID;
-        init_params.encodeWidth = state.width;
-        init_params.encodeHeight = state.height;
-        init_params.darWidth = state.width;
-        init_params.darHeight = state.height;
-        init_params.frameRateNum = 30;
-        init_params.frameRateDen = 1;
-        init_params.enablePTD = 1;
-        init_params.encodeConfig = &mut config;
-        init_params.maxEncodeWidth = state.width;
-        init_params.maxEncodeHeight = state.height;
-
-        config.version = sys::NVENCAPI_VERSION;
-        config.profileGUID = crate::guid::NV_ENC_HEVC_PROFILE_MAIN_GUID;
-        config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
-        config.frameIntervalP = 1;
-
-        // Set HEVC-specific configuration
-        config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
-
-        drop(state); // Release lock before calling encoder
-
-        // Initialize encoder
-        let status =
-            (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params);
-        if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            return Err(Error::with_reason(
-                status,
-                "nvEncInitializeEncoder",
-                "Failed to initialize encoder",
-            ));
-        }
-
-        Ok(())
     }
 
     /// NV12フォーマットのフレームをエンコードする
