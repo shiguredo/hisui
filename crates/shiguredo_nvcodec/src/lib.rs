@@ -95,13 +95,36 @@ impl Decoder {
             create_info.bitDepthMinus8 = 0; // 8ビット固定
             create_info.DeinterlaceMode =
                 sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Weave;
-            create_info.ulNumOutputSurfaces = 1;
+            create_info.ulNumOutputSurfaces = 2;
+            // With PreferCUVID, JPEG is still decoded by CUDA while video is decoded by NVDEC hardware
             create_info.ulCreationFlags =
-                sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUDA as u64;
-            create_info.ulNumDecodeSurfaces = 1;
+                sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUVID as u64;
+            create_info.ulNumDecodeSurfaces = 20; // Increased from 1 to match C++ default
+            create_info.ulWidth = 1920; // Set reasonable default dimensions
+            create_info.ulHeight = 1080;
+            create_info.ulMaxWidth = 4096; // Set max dimensions
+            create_info.ulMaxHeight = 4096;
+            create_info.ulTargetWidth = 1920;
+            create_info.ulTargetHeight = 1080;
 
             let mut decoder = ptr::null_mut();
+
+            // Push CUDA context before creating decoder
+            let status = sys::cuCtxPushCurrent_v2(ctx);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                sys::cuCtxDestroy_v2(ctx);
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxPushCurrent_v2",
+                    "Failed to push CUDA context",
+                ));
+            }
+
             let status = sys::cuvidCreateDecoder(&mut decoder, &mut create_info);
+
+            // Always pop context
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
+
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
