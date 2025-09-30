@@ -70,6 +70,17 @@ struct DecoderState {
     surface_height: u32,
     decoded_frames: Vec<DecodedFrame>,
     ctx: sys::CUcontext,
+    ctx_lock: sys::CUvideoctxlock,
+}
+
+struct DecoderState {
+    decoder: sys::CUvideodecoder,
+    width: u32,
+    height: u32,
+    surface_width: u32,
+    surface_height: u32,
+    decoded_frames: Vec<DecodedFrame>,
+    ctx: sys::CUcontext,
 }
 
 impl Decoder {
@@ -119,6 +130,7 @@ impl Decoder {
                 surface_height: 0,
                 decoded_frames: Vec::new(),
                 ctx,
+                ctx_lock,
             }));
 
             // Create video parser
@@ -290,27 +302,14 @@ unsafe extern "C" fn handle_video_sequence(
         create_info.ulTargetWidth = format.coded_width as u64;
         create_info.ulTargetHeight = format.coded_height as u64;
 
-        // Get context lock from the parent Decoder
-        // We need to pass ctx_lock through user_data or store it in DecoderState
-        // For now, create it here (not ideal, but works)
-        let mut ctx_lock = ptr::null_mut();
-        let status = unsafe { sys::cuvidCtxLockCreate(&mut ctx_lock, state.ctx) };
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::with_reason(
-                status,
-                "cuvidCtxLockCreate",
-                "Failed to create context lock in sequence callback",
-            ));
-        }
-
-        create_info.vidLock = ctx_lock;
+        // Use the context lock from the state (shared with parser)
+        create_info.vidLock = state.ctx_lock;
 
         let mut decoder = ptr::null_mut();
 
         // Push CUDA context before creating decoder
         let status = unsafe { sys::cuCtxPushCurrent_v2(state.ctx) };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            unsafe { sys::cuvidCtxLockDestroy(ctx_lock) };
             return Err(Error::with_reason(
                 status,
                 "cuCtxPushCurrent_v2",
@@ -324,7 +323,6 @@ unsafe extern "C" fn handle_video_sequence(
         unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
 
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            unsafe { sys::cuvidCtxLockDestroy(ctx_lock) };
             return Err(Error::with_reason(
                 status,
                 "cuvidCreateDecoder",
