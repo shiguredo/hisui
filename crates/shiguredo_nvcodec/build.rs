@@ -110,6 +110,31 @@ fn main() {
         .clang_arg("-DCUDA_VERSION=13000")
         // 不要な警告を抑制
         .clang_arg("-Wno-everything")
+        // Block GUID extern static declarations
+        .blocklist_item("NV_ENC_CODEC_H264_GUID")
+        .blocklist_item("NV_ENC_CODEC_HEVC_GUID")
+        .blocklist_item("NV_ENC_CODEC_AV1_GUID")
+        .blocklist_item("NV_ENC_CODEC_PROFILE_AUTOSELECT_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_BASELINE_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_MAIN_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_HIGH_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_HIGH_10_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_HIGH_422_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_HIGH_444_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_STEREO_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_PROGRESSIVE_HIGH_GUID")
+        .blocklist_item("NV_ENC_H264_PROFILE_CONSTRAINED_HIGH_GUID")
+        .blocklist_item("NV_ENC_HEVC_PROFILE_MAIN_GUID")
+        .blocklist_item("NV_ENC_HEVC_PROFILE_MAIN10_GUID")
+        .blocklist_item("NV_ENC_HEVC_PROFILE_FREXT_GUID")
+        .blocklist_item("NV_ENC_AV1_PROFILE_MAIN_GUID")
+        .blocklist_item("NV_ENC_PRESET_P1_GUID")
+        .blocklist_item("NV_ENC_PRESET_P2_GUID")
+        .blocklist_item("NV_ENC_PRESET_P3_GUID")
+        .blocklist_item("NV_ENC_PRESET_P4_GUID")
+        .blocklist_item("NV_ENC_PRESET_P5_GUID")
+        .blocklist_item("NV_ENC_PRESET_P6_GUID")
+        .blocklist_item("NV_ENC_PRESET_P7_GUID")
         // 関数ポインタの生成を有効化
         .generate_comments(false)
         .derive_debug(false)
@@ -124,5 +149,6 @@ fn main() {
     println!("cargo::rustc-link-lib=dylib=nvcuvid");
 
     // nvidia-encodeライブラリを追加（実際のNVENCの実装が含まれている）
+    // TODO: delete if not needed
     println!("cargo::rustc-link-lib=dylib=nvidia-encode");
 }

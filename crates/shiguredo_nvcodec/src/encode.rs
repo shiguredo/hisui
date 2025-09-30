@@ -120,8 +120,8 @@ impl Encoder {
         let mut config: sys::NV_ENC_CONFIG = unsafe { std::mem::zeroed() };
 
         init_params.version = sys::NVENCAPI_VERSION;
-        init_params.encodeGUID = unsafe { sys::NV_ENC_CODEC_HEVC_GUID };
-        init_params.presetGUID = unsafe { sys::NV_ENC_PRESET_P4_GUID };
+        init_params.encodeGUID = crate::guid::NV_ENC_CODEC_HEVC_GUID;
+        init_params.presetGUID = crate::guid::NV_ENC_PRESET_P4_GUID;
         init_params.encodeWidth = self.state.lock().unwrap().width;
         init_params.encodeHeight = self.state.lock().unwrap().height;
         init_params.darWidth = self.state.lock().unwrap().width;
@@ -132,7 +132,7 @@ impl Encoder {
         init_params.encodeConfig = &mut config;
 
         config.version = sys::NVENCAPI_VERSION;
-        config.profileGUID = unsafe { sys::NV_ENC_HEVC_PROFILE_MAIN_GUID };
+        config.profileGUID = crate::guid::NV_ENC_HEVC_PROFILE_MAIN_GUID;
         config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
         config.frameIntervalP = 1;
 
