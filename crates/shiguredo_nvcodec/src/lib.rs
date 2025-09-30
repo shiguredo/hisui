@@ -175,14 +175,14 @@ impl Decoder {
 
             // Decode the H.265 data directly
             let mut pic_params: sys::CUVIDPICPARAMS = std::mem::zeroed();
-            pic_params.nBitstreamDataLen = data.len() as i32;
+            pic_params.nBitstreamDataLen = data.len() as u32;
             pic_params.pBitstreamData = data.as_ptr();
             pic_params.CurrPicIdx = 0;
             pic_params.field_pic_flag = 0;
             pic_params.bottom_field_flag = 0;
             pic_params.second_field = 0;
 
-            let status = sys::cuvidDecodePicture(self.decoder, &pic_params);
+            let status = sys::cuvidDecodePicture(self.decoder, &mut pic_params);
 
             // Pop context
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
@@ -204,7 +204,7 @@ impl Decoder {
 
     /// Retrieve the decoded frame from the decoder
     unsafe fn retrieve_decoded_frame(&mut self) -> Result<(), Error> {
-        let status = sys::cuCtxPushCurrent_v2(self.ctx);
+        let status = unsafe { sys::cuCtxPushCurrent_v2(self.ctx) };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
             return Err(Error::with_reason(
                 status,
@@ -214,7 +214,7 @@ impl Decoder {
         }
 
         // Set up video processing parameters
-        let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
+        let mut proc_params: sys::CUVIDPROCPARAMS = unsafe { std::mem::zeroed() };
         proc_params.progressive_frame = 1;
         proc_params.top_field_first = 0;
         proc_params.second_field = 0;
@@ -223,16 +223,18 @@ impl Decoder {
         // Map the decoded frame
         let mut device_ptr = 0u64;
         let mut pitch = 0u32;
-        let status = sys::cuvidMapVideoFrame64(
-            self.decoder,
-            0, // picture index
-            &mut device_ptr,
-            &mut pitch,
-            &mut proc_params,
-        );
+        let status = unsafe {
+            sys::cuvidMapVideoFrame64(
+                self.decoder,
+                0, // picture index
+                &mut device_ptr,
+                &mut pitch,
+                &mut proc_params,
+            )
+        };
 
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
+            unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
             return Err(Error::with_reason(
                 status,
                 "cuvidMapVideoFrame64",
@@ -249,16 +251,18 @@ impl Decoder {
         let mut host_data = vec![0u8; frame_size];
 
         // Copy frame data from device to host
-        let status = sys::cuMemcpyDtoH_v2(
-            host_data.as_mut_ptr() as *mut c_void,
-            device_ptr,
-            frame_size,
-        );
+        let status = unsafe {
+            sys::cuMemcpyDtoH_v2(
+                host_data.as_mut_ptr() as *mut c_void,
+                device_ptr,
+                frame_size,
+            )
+        };
 
         // Unmap the video frame
-        sys::cuvidUnmapVideoFrame64(self.decoder, device_ptr);
+        unsafe { sys::cuvidUnmapVideoFrame64(self.decoder, device_ptr) };
 
-        sys::cuCtxPopCurrent_v2(ptr::null_mut());
+        unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
 
         if status != sys::cudaError_enum_CUDA_SUCCESS {
             return Err(Error::with_reason(
@@ -288,7 +292,11 @@ impl Decoder {
 
     /// デコード済みのフレームを取り出す
     pub fn next_frame(&mut self) -> Option<DecodedFrame> {
-        self.decoded_frames.pop()
+        if self.decoded_frames.is_empty() {
+            None
+        } else {
+            Some(self.decoded_frames.remove(0))
+        }
     }
 }
 
