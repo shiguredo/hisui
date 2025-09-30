@@ -157,7 +157,6 @@ impl Decoder {
 
     /// 圧縮された映像フレームをデコードする
     pub fn decode(&mut self, data: &[u8]) -> Result<(), Error> {
-        dbg!("decode");
         if data.is_empty() {
             return Ok(());
         }
@@ -185,7 +184,6 @@ impl Decoder {
 
     /// これ以上データが来ないことをデコーダーに伝える
     pub fn finish(&mut self) -> Result<(), Error> {
-        dbg!("finish");
         unsafe {
             // Send end of stream packet
             let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
@@ -232,7 +230,6 @@ impl Decoder {
 
     /// デコード済みのフレームを取り出す
     pub fn next_frame(&mut self) -> Option<DecodedFrame> {
-        dbg!("next_frame");
         let mut state = self.state.lock().unwrap();
         if state.decoded_frames.is_empty() {
             None
@@ -276,7 +273,6 @@ unsafe extern "C" fn handle_video_sequence(
     user_data: *mut c_void,
     format: *mut sys::CUVIDEOFORMAT,
 ) -> i32 {
-    dbg!("handle_video_sequence");
     if user_data.is_null() || format.is_null() {
         return 0;
     }
@@ -364,7 +360,6 @@ unsafe extern "C" fn handle_picture_decode(
     user_data: *mut c_void,
     pic_params: *mut sys::CUVIDPICPARAMS,
 ) -> i32 {
-    dbg!("handle_picture_decode");
     if user_data.is_null() || pic_params.is_null() {
         return 0;
     }
@@ -420,7 +415,6 @@ unsafe extern "C" fn handle_picture_display(
     user_data: *mut c_void,
     disp_info: *mut sys::CUVIDPARSERDISPINFO,
 ) -> i32 {
-    dbg!("handle_picture_display");
     if user_data.is_null() || disp_info.is_null() {
         return 0;
     }
