@@ -149,7 +149,7 @@ impl Encoder {
                 self.h_encoder,
                 crate::guid::NV_ENC_CODEC_HEVC_GUID,
                 crate::guid::NV_ENC_PRESET_P4_GUID,
-                sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_UNDEFINED,
+                sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY, // TODO: make configurable
                 &mut preset_config,
             );
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
@@ -180,6 +180,7 @@ impl Encoder {
             init_params.encodeConfig = &mut config;
             init_params.maxEncodeWidth = state.width;
             init_params.maxEncodeHeight = state.height;
+            init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY; // TODO: make configurable
 
             config.version = sys::NV_ENC_CONFIG_VER;
             config.profileGUID = crate::guid::NV_ENC_HEVC_PROFILE_MAIN_GUID;
