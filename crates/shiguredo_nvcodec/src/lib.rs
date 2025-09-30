@@ -8,6 +8,7 @@ use std::sync::Once;
 
 mod decode;
 mod encode;
+mod guid;
 mod sys;
 
 pub use decode::{DecodedFrame, Decoder};

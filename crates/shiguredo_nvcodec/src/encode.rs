@@ -69,19 +69,17 @@ impl Encoder {
 
             // Open encode session
             let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
-                unsafe { std::mem::zeroed() };
+                std::mem::zeroed();
             open_session_params.version = sys::NVENCAPI_VERSION;
             open_session_params.deviceType = sys::_NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
             open_session_params.device = ctx as *mut c_void;
             open_session_params.apiVersion = sys::NVENCAPI_VERSION;
 
             let mut h_encoder = ptr::null_mut();
-            let status = unsafe {
-                (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
-                    &mut open_session_params,
-                    &mut h_encoder,
-                )
-            };
+            let status = (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
+                &mut open_session_params,
+                &mut h_encoder,
+            );
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
