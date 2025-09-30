@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
 fn main() {
-    // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
+    // Cargo.toml か build.rs か third_party のヘッダファイルが更新されたら、バインディングファイルを再生成する
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed=build.rs");
-    // third_party のヘッダファイルが更新されたら再ビルドする
     println!("cargo::rerun-if-changed=../../third_party/nvcodec/include/");
 
     // 各種変数やビルドディレクトリのセットアップ
@@ -72,6 +71,9 @@ fn main() {
     if !cuvid_header.exists() {
         panic!("cuviddec.h not found at {:?}", cuvid_header);
     }
+    if !nvcuvid_header.exists() {
+        panic!("nvcuvid.h not found at {:?}", nvcuvid_header);
+    }
 
     // CUDA include path を検出
     let cuda_include_paths = vec![
@@ -89,12 +91,8 @@ fn main() {
     // バインディングを生成する
     let mut builder = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
-        .header(cuvid_header.display().to_string());
-
-    // nvcuvid.h があれば追加
-    if nvcuvid_header.exists() {
-        builder = builder.header(nvcuvid_header.display().to_string());
-    }
+        .header(cuvid_header.display().to_string())
+        .header(nvcuvid_header.display().to_string());
 
     let bindings = builder
         .header(
