@@ -122,4 +122,7 @@ fn main() {
     // CUDA と NVENC/NVCUVID ライブラリのリンク設定
     println!("cargo::rustc-link-lib=dylib=cuda");
     println!("cargo::rustc-link-lib=dylib=nvcuvid");
+
+    // nvidia-encodeライブラリを追加（実際のNVENCの実装が含まれている）
+    println!("cargo::rustc-link-lib=dylib=nvidia-encode");
 }
