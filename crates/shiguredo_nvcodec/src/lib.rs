@@ -662,12 +662,16 @@ mod tests {
         assert_eq!(frame.height(), 480);
 
         // Y平面とUV平面のデータサイズを確認
-        assert_eq!(frame.y_plane().len(), 640 * 480);
-        assert_eq!(frame.uv_plane().len(), 640 * 240);
+        // Note: The actual data size uses pitch (stride), not width, due to GPU alignment
+        assert_eq!(frame.y_plane().len(), frame.y_stride() * frame.height());
+        assert_eq!(
+            frame.uv_plane().len(),
+            frame.uv_stride() * frame.height() / 2
+        );
 
-        // ストライドが正しいことを確認
-        assert_eq!(frame.y_stride(), 640);
-        assert_eq!(frame.uv_stride(), 640);
+        // ストライドが幅以上であることを確認（GPUアラインメントのため）
+        assert!(frame.y_stride() >= frame.width());
+        assert!(frame.uv_stride() >= frame.width());
 
         // 黒画面なので、Y成分は16付近、UV成分は128付近の値になることを確認
         let y_data = frame.y_plane();
@@ -690,9 +694,10 @@ mod tests {
         );
 
         println!(
-            "Successfully decoded H.265 black frame: {}x{}",
+            "Successfully decoded H.265 black frame: {}x{} (stride: {})",
             frame.width(),
-            frame.height()
+            frame.height(),
+            frame.y_stride()
         );
         println!("Y average: {}, UV average: {}", y_avg, uv_avg);
     }
