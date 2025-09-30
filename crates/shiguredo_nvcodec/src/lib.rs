@@ -13,9 +13,8 @@ mod sys;
 pub use decode::{DecodedFrame, Decoder};
 pub use encode::Encoder;
 
-// ビルド時に参照したリポジトリのバージョン
-// Note: sys module doesn't export BUILD_METADATA_VERSION, so this is commented out
-// pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
+// ビルド時に参照したバージョン
+pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
 /// CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
 static CUDA_INIT: Once = Once::new();
