@@ -413,6 +413,48 @@ impl Drop for Decoder {
     }
 }
 
+/// デコードされた映像フレーム (NV12 形式)
+pub struct DecodedFrame {
+    width: u32,
+    height: u32,
+    data: Vec<u8>,
+}
+
+impl DecodedFrame {
+    /// フレームの Y 成分のデータを返す
+    pub fn y_plane(&self) -> &[u8] {
+        let y_size = self.width as usize * self.height as usize;
+        &self.data[..y_size]
+    }
+
+    /// フレームの UV 成分のデータを返す（NV12はインターリーブ形式）
+    pub fn uv_plane(&self) -> &[u8] {
+        let y_size = self.width as usize * self.height as usize;
+        let uv_size = self.width as usize * (self.height as usize / 2);
+        &self.data[y_size..y_size + uv_size]
+    }
+
+    /// フレームの Y 成分のストライドを返す
+    pub fn y_stride(&self) -> usize {
+        self.width as usize
+    }
+
+    /// フレームの UV 成分のストライドを返す
+    pub fn uv_stride(&self) -> usize {
+        self.width as usize
+    }
+
+    /// フレームの幅を返す
+    pub fn width(&self) -> usize {
+        self.width as usize
+    }
+
+    /// フレームの高さを返す
+    pub fn height(&self) -> usize {
+        self.height as usize
+    }
+}
+
 /// エンコーダーに指定する設定
 #[derive(Debug, Clone)]
 pub struct EncoderConfig {
