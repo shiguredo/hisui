@@ -54,7 +54,6 @@ impl std::error::Error for Error {}
 pub struct Decoder {
     ctx: sys::CUcontext,
     decoder: sys::CUvideodecoder,
-    parser: sys::CUvideoparser,
     width: u32,
     height: u32,
     decoded_frames: Vec<DecodedFrame>,
@@ -147,50 +146,9 @@ impl Decoder {
                 ));
             }
 
-            // Create video parser
-            let mut parser_params: sys::CUVIDPARSERPARAMS = std::mem::zeroed();
-            parser_params.CodecType = sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC;
-            parser_params.ulMaxNumDecodeSurfaces = 20;
-            parser_params.ulMaxDisplayDelay = 0; // Low latency
-            parser_params.ulClockRate = 0;
-
-            // Create a box to hold the decoder state and pass raw pointer to C callbacks
-            let decoder_state = Box::new(DecoderState {
-                decoder,
-                ctx,
-                width: 0,
-                height: 0,
-                decoded_frames: Vec::new(),
-            });
-            let state_ptr = Box::into_raw(decoder_state);
-
-            parser_params.pUserData = state_ptr as *mut c_void;
-            parser_params.pfnSequenceCallback = Some(handle_video_sequence_callback);
-            parser_params.pfnDecodePicture = Some(handle_picture_decode_callback);
-            parser_params.pfnDisplayPicture = Some(handle_picture_display_callback);
-
-            let mut parser = ptr::null_mut();
-            let status = sys::cuvidCreateVideoParser(&mut parser, &parser_params);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                // Clean up decoder state
-                let _ = Box::from_raw(state_ptr);
-                sys::cuvidDestroyDecoder(decoder);
-                sys::cuvidCtxLockDestroy(ctx_lock);
-                sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::with_reason(
-                    status,
-                    "cuvidCreateVideoParser",
-                    "Failed to create video parser",
-                ));
-            }
-
-            // Retrieve the boxed state back (we'll manage it manually)
-            let mut decoder_state = Box::from_raw(state_ptr);
-
             Ok(Self {
                 ctx,
                 decoder,
-                parser,
                 width: 0,
                 height: 0,
                 decoded_frames: Vec::new(),
@@ -205,13 +163,7 @@ impl Decoder {
         }
 
         unsafe {
-            let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
-            packet.payload = data.as_ptr();
-            packet.payload_size = data.len() as u64;
-            packet.flags = 0;
-            packet.timestamp = 0;
-
-            // Push CUDA context before parsing
+            // Push CUDA context before decoding
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::with_reason(
@@ -221,8 +173,16 @@ impl Decoder {
                 ));
             }
 
-            // Parse the video data - this will internally call the callbacks
-            let status = sys::cuvidParseVideoData(self.parser, &packet);
+            // Decode the H.265 data directly
+            let mut pic_params: sys::CUVIDPICPARAMS = std::mem::zeroed();
+            pic_params.nBitstreamDataLen = data.len() as i32;
+            pic_params.pBitstreamData = data.as_ptr();
+            pic_params.CurrPicIdx = 0;
+            pic_params.field_pic_flag = 0;
+            pic_params.bottom_field_flag = 0;
+            pic_params.second_field = 0;
+
+            let status = sys::cuvidDecodePicture(self.decoder, &pic_params);
 
             // Pop context
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
@@ -230,43 +190,99 @@ impl Decoder {
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::with_reason(
                     status,
-                    "cuvidParseVideoData",
-                    "Failed to parse video data",
+                    "cuvidDecodePicture",
+                    "Failed to decode picture",
                 ));
             }
+
+            // After successful decode, map and retrieve the frame
+            self.retrieve_decoded_frame()?;
         }
+
+        Ok(())
+    }
+
+    /// Retrieve the decoded frame from the decoder
+    unsafe fn retrieve_decoded_frame(&mut self) -> Result<(), Error> {
+        let status = sys::cuCtxPushCurrent_v2(self.ctx);
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            return Err(Error::with_reason(
+                status,
+                "cuCtxPushCurrent_v2",
+                "Failed to push CUDA context",
+            ));
+        }
+
+        // Set up video processing parameters
+        let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
+        proc_params.progressive_frame = 1;
+        proc_params.top_field_first = 0;
+        proc_params.second_field = 0;
+        proc_params.output_stream = ptr::null_mut();
+
+        // Map the decoded frame
+        let mut device_ptr = 0u64;
+        let mut pitch = 0u32;
+        let status = sys::cuvidMapVideoFrame64(
+            self.decoder,
+            0, // picture index
+            &mut device_ptr,
+            &mut pitch,
+            &mut proc_params,
+        );
+
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
+            return Err(Error::with_reason(
+                status,
+                "cuvidMapVideoFrame64",
+                "Failed to map video frame",
+            ));
+        }
+
+        // Calculate frame size (NV12 format: Y plane + UV plane)
+        let y_size = pitch as usize * self.height as usize;
+        let uv_size = pitch as usize * (self.height as usize / 2);
+        let frame_size = y_size + uv_size;
+
+        // Allocate host memory for the frame
+        let mut host_data = vec![0u8; frame_size];
+
+        // Copy frame data from device to host
+        let status = sys::cuMemcpyDtoH_v2(
+            host_data.as_mut_ptr() as *mut c_void,
+            device_ptr,
+            frame_size,
+        );
+
+        // Unmap the video frame
+        sys::cuvidUnmapVideoFrame64(self.decoder, device_ptr);
+
+        sys::cuCtxPopCurrent_v2(ptr::null_mut());
+
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            return Err(Error::with_reason(
+                status,
+                "cuMemcpyDtoH_v2",
+                "Failed to copy frame data",
+            ));
+        }
+
+        // Store the decoded frame
+        let decoded_frame = DecodedFrame {
+            width: self.width,
+            height: self.height,
+            data: host_data,
+        };
+
+        self.decoded_frames.push(decoded_frame);
 
         Ok(())
     }
 
     /// これ以上データが来ないことをデコーダーに伝える
     pub fn finish(&mut self) -> Result<(), Error> {
-        unsafe {
-            // Send end-of-stream packet
-            let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
-            packet.flags = sys::CUVID_PKT_ENDOFSTREAM;
-
-            let status = sys::cuCtxPushCurrent_v2(self.ctx);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
-                    status,
-                    "cuCtxPushCurrent_v2",
-                    "Failed to push CUDA context",
-                ));
-            }
-
-            let status = sys::cuvidParseVideoData(self.parser, &packet);
-
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
-
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
-                    status,
-                    "cuvidParseVideoData",
-                    "Failed to send end-of-stream",
-                ));
-            }
-        }
+        // No-op for now since we're decoding directly
         Ok(())
     }
 
@@ -276,131 +292,9 @@ impl Decoder {
     }
 }
 
-// Helper struct to hold decoder state for callbacks
-struct DecoderState {
-    decoder: sys::CUvideodecoder,
-    ctx: sys::CUcontext,
-    width: u32,
-    height: u32,
-    decoded_frames: Vec<DecodedFrame>,
-}
-
-// Callback for video sequence changes
-unsafe extern "C" fn handle_video_sequence_callback(
-    user_data: *mut c_void,
-    video_format: *mut sys::CUVIDEOFORMAT,
-) -> i32 {
-    if user_data.is_null() || video_format.is_null() {
-        return 0;
-    }
-
-    let state = &mut *(user_data as *mut DecoderState);
-    let format = &*video_format;
-
-    // Update width and height from video format
-    state.width = format.coded_width;
-    state.height = format.coded_height;
-
-    // Return the number of decode surfaces (must be >= min_num_decode_surfaces)
-    format.min_num_decode_surfaces as i32
-}
-
-// Callback for picture decode
-unsafe extern "C" fn handle_picture_decode_callback(
-    user_data: *mut c_void,
-    pic_params: *mut sys::CUVIDPICPARAMS,
-) -> i32 {
-    if user_data.is_null() || pic_params.is_null() {
-        return 0;
-    }
-
-    let state = &*(user_data as *mut DecoderState);
-    let params = &*pic_params;
-
-    // Decode the picture
-    let status = sys::cuvidDecodePicture(state.decoder, pic_params);
-    if status != sys::cudaError_enum_CUDA_SUCCESS {
-        return 0;
-    }
-
-    1 // Success
-}
-
-// Callback for picture display
-unsafe extern "C" fn handle_picture_display_callback(
-    user_data: *mut c_void,
-    disp_info: *mut sys::CUVIDPARSERDISPINFO,
-) -> i32 {
-    if user_data.is_null() || disp_info.is_null() {
-        return 0;
-    }
-
-    let state = &mut *(user_data as *mut DecoderState);
-    let info = &*disp_info;
-
-    // Set up video processing parameters
-    let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
-    proc_params.progressive_frame = info.progressive_frame as i32;
-    proc_params.top_field_first = info.top_field_first as i32;
-    proc_params.second_field = 0;
-    proc_params.output_stream = ptr::null_mut();
-
-    // Map the decoded frame
-    let mut device_ptr = 0u64;
-    let mut pitch = 0u32;
-    let status = sys::cuvidMapVideoFrame64(
-        state.decoder,
-        info.picture_index,
-        &mut device_ptr,
-        &mut pitch,
-        &mut proc_params,
-    );
-
-    if status != sys::cudaError_enum_CUDA_SUCCESS {
-        return 0;
-    }
-
-    // Calculate frame size (NV12 format: Y plane + UV plane)
-    let y_size = pitch as usize * state.height as usize;
-    let uv_size = pitch as usize * (state.height as usize / 2);
-    let frame_size = y_size + uv_size;
-
-    // Allocate host memory for the frame
-    let mut host_data = vec![0u8; frame_size];
-
-    // Copy frame data from device to host
-    let status = sys::cuMemcpyDtoH_v2(
-        host_data.as_mut_ptr() as *mut c_void,
-        device_ptr,
-        frame_size,
-    );
-
-    // Unmap the video frame
-    sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-
-    if status != sys::cudaError_enum_CUDA_SUCCESS {
-        return 0;
-    }
-
-    // Store the decoded frame
-    let decoded_frame = DecodedFrame {
-        width: state.width,
-        height: state.height,
-        data: host_data,
-    };
-
-    state.decoded_frames.push(decoded_frame);
-
-    1 // Success
-}
-
 impl Drop for Decoder {
     fn drop(&mut self) {
         unsafe {
-            // Destroy parser first
-            if !self.parser.is_null() {
-                sys::cuvidDestroyVideoParser(self.parser);
-            }
             // Destroy decoder
             if !self.decoder.is_null() {
                 sys::cuvidDestroyDecoder(self.decoder);
@@ -520,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_decode_black_frame() {
-        // H.265の黒フレームデータ
+        // H.265の黒フレームデータ (Annex B format with start codes)
         let vps = vec![
             64, 1, 12, 1, 255, 255, 1, 96, 0, 0, 3, 0, 144, 0, 0, 3, 0, 0, 3, 0, 90, 149, 152, 9,
         ];
@@ -537,23 +431,24 @@ mod tests {
             0, 104, 192, 0, 0, 3, 0, 0, 3, 0, 0, 3, 1, 223, 0, 0, 3, 0, 9, 248,
         ];
 
-        // NALユニットを結合（サイズプレフィックス付き）
+        // NALユニットを結合（Annex B形式: start code 0x00000001 を使用）
         let mut h265_data = Vec::new();
+        let start_code = [0u8, 0, 0, 1];
 
         // VPS
-        h265_data.extend_from_slice(&(vps.len() as u32).to_be_bytes());
+        h265_data.extend_from_slice(&start_code);
         h265_data.extend_from_slice(&vps);
 
         // SPS
-        h265_data.extend_from_slice(&(sps.len() as u32).to_be_bytes());
+        h265_data.extend_from_slice(&start_code);
         h265_data.extend_from_slice(&sps);
 
         // PPS
-        h265_data.extend_from_slice(&(pps.len() as u32).to_be_bytes());
+        h265_data.extend_from_slice(&start_code);
         h265_data.extend_from_slice(&pps);
 
         // Frame data
-        h265_data.extend_from_slice(&(frame_data.len() as u32).to_be_bytes());
+        h265_data.extend_from_slice(&start_code);
         h265_data.extend_from_slice(&frame_data);
 
         let mut decoder = Decoder::new_hevc().expect("Failed to create HEVC decoder");
