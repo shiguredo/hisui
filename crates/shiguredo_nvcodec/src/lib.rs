@@ -205,6 +205,30 @@ impl Decoder {
                     "Failed to finish decoding",
                 ));
             }
+
+            // Important: The parser processes data asynchronously. We need to ensure
+            // the CUDA context is synchronized to wait for all decode operations to complete.
+            let status = sys::cuCtxPushCurrent_v2(self.ctx);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxPushCurrent_v2",
+                    "Failed to push CUDA context",
+                ));
+            }
+
+            // Synchronize to ensure all decoding is complete
+            let status = sys::cuCtxSynchronize();
+
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
+
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxSynchronize",
+                    "Failed to synchronize CUDA context",
+                ));
+            }
         }
         Ok(())
     }
