@@ -221,7 +221,10 @@ jobs:
           bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
       - run: cargo install cargo-valgrind || echo 'already installed'
-      - run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox -- --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
+      - name: Run valgrind tests
+        env:
+          VALGRINDFLAGS: --leak-check=full --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
+        run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
 
   docs_rs:
     runs-on: ubuntu-24.04
