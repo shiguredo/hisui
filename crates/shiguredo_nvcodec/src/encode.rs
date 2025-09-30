@@ -147,8 +147,8 @@ impl Encoder {
 
             let status = (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
                 self.h_encoder,
-                crate::guid::NV_ENC_CODEC_HEVC_GUID,
-                crate::guid::NV_ENC_PRESET_P4_GUID,
+                sys::NV_ENC_CODEC_HEVC_GUID,
+                sys::NV_ENC_PRESET_P4_GUID,
                 sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY, // TODO: make configurable
                 &mut preset_config,
             );
@@ -168,8 +168,8 @@ impl Encoder {
             let state = self.state.lock().unwrap();
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
-            init_params.encodeGUID = crate::guid::NV_ENC_CODEC_HEVC_GUID;
-            init_params.presetGUID = crate::guid::NV_ENC_PRESET_P4_GUID;
+            init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
+            init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID;
             init_params.encodeWidth = state.width;
             init_params.encodeHeight = state.height;
             init_params.darWidth = state.width;
@@ -183,7 +183,7 @@ impl Encoder {
             init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY; // TODO: make configurable
 
             config.version = sys::NV_ENC_CONFIG_VER;
-            config.profileGUID = crate::guid::NV_ENC_HEVC_PROFILE_MAIN_GUID;
+            config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID;
             config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
             config.frameIntervalP = 1;
 

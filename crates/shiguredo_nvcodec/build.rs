@@ -142,8 +142,8 @@ fn main() {
         .generate()
         .expect("failed to generate bindings");
 
-    // Add version constants that are defined as macros in the header
-    let version_constants = r#"
+    // Add version constants and GUID definitions
+    let additional_definitions = r#"
 
 // Version constants from nvEncodeAPI.h
 // These are macros in C, so bindgen doesn't generate them automatically
@@ -162,11 +162,41 @@ pub const NV_ENC_MAP_INPUT_RESOURCE_VER: u32 = NVENCAPI_VERSION | (4 << 16) | NV
 
 // Picture flags
 pub const NV_ENC_PIC_FLAG_EOS: u32 = 0x8;
+
+// NVENC GUID constants used in the crate
+// These GUIDs are defined as constants instead of extern static to avoid linking issues.
+
+// Codec GUID: NV_ENC_CODEC_HEVC_GUID
+// {790CDC88-4522-4d7b-9425-BDA9975F7603}
+pub const NV_ENC_CODEC_HEVC_GUID: GUID = GUID {
+    Data1: 0x790cdc88,
+    Data2: 0x4522,
+    Data3: 0x4d7b,
+    Data4: [0x94, 0x25, 0xbd, 0xa9, 0x97, 0x5f, 0x76, 0x03],
+};
+
+// Preset GUID: NV_ENC_PRESET_P4_GUID
+// {90A7B826-DF06-4862-B9D2-CD6D73A08681}
+pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
+    Data1: 0x90a7b826,
+    Data2: 0xdf06,
+    Data3: 0x4862,
+    Data4: [0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81],
+};
+
+// Profile GUID: NV_ENC_HEVC_PROFILE_MAIN_GUID
+// {B514C39A-B55B-40fa-878F-F1253B4DFDEC}
+pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
+    Data1: 0xb514c39a,
+    Data2: 0xb55b,
+    Data3: 0x40fa,
+    Data4: [0x87, 0x8f, 0xf1, 0x25, 0x3b, 0x4d, 0xfd, 0xec],
+};
 "#;
 
-    // Write bindings with version constants appended
+    // Write bindings with additional definitions appended
     let mut bindings_content = bindings.to_string();
-    bindings_content.push_str(version_constants);
+    bindings_content.push_str(additional_definitions);
 
     std::fs::write(&output_bindings_path, bindings_content).expect("failed to write bindings");
 
