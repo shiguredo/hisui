@@ -14,9 +14,6 @@ mod sys;
 // Note: sys module doesn't export BUILD_METADATA_VERSION, so this is commented out
 // pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
-// Missing constant from CUVID
-const CUVID_PKT_ENDOFSTREAM: u64 = 0x02;
-
 /// エラー
 #[derive(Debug)]
 pub struct Error {
@@ -194,7 +191,7 @@ impl Decoder {
             let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
             packet.payload = ptr::null();
             packet.payload_size = 0;
-            packet.flags = CUVID_PKT_ENDOFSTREAM;
+            packet.flags = sys::CUvideopacketflags_CUVID_PKT_ENDOFSTREAM as u64;
             packet.timestamp = 0;
 
             let status = sys::cuvidParseVideoData(self.parser, &mut packet);
