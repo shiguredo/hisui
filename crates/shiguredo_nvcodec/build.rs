@@ -63,6 +63,7 @@ fn main() {
 
     let nvenc_header = third_party_header_dir.join("nvEncodeAPI.h");
     let cuvid_header = third_party_header_dir.join("cuviddec.h");
+    let nvcuvid_header = third_party_header_dir.join("nvcuvid.h");
 
     if !nvenc_header.exists() {
         panic!("nvEncodeAPI.h not found at {:?}", nvenc_header);
@@ -85,9 +86,16 @@ fn main() {
         .expect("CUDA headers not found. Please install CUDA toolkit.");
 
     // バインディングを生成する
-    bindgen::Builder::default()
+    let mut builder = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
-        .header(cuvid_header.display().to_string())
+        .header(cuvid_header.display().to_string());
+
+    // nvcuvid.h があれば追加
+    if nvcuvid_header.exists() {
+        builder = builder.header(nvcuvid_header.display().to_string());
+    }
+
+    builder
         .header(
             PathBuf::from(cuda_include_path)
                 .join("cuda.h")
@@ -111,7 +119,7 @@ fn main() {
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    // CUDA と NVENC ライブラリのリンク設定
+    // CUDA と NVENC/NVCUVID ライブラリのリンク設定
     println!("cargo::rustc-link-lib=dylib=cuda");
     println!("cargo::rustc-link-lib=dylib=nvcuvid");
 }
