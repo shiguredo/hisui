@@ -53,12 +53,24 @@ impl Encoder {
                 ));
             }
 
+            // Activate CUDA context for NVENC operations
+            let status = sys::cuCtxPushCurrent_v2(ctx);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                sys::cuCtxDestroy_v2(ctx);
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxPushCurrent_v2",
+                    "Failed to push CUDA context",
+                ));
+            }
+
             // Load NVENC API
             let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
-            encoder_api.version = sys::NVENCAPI_VERSION;
+            encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
 
             let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
                     status,
@@ -70,7 +82,7 @@ impl Encoder {
             // Open encode session
             let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
                 std::mem::zeroed();
-            open_session_params.version = sys::NVENCAPI_VERSION;
+            open_session_params.version = sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
             open_session_params.deviceType = sys::_NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
             open_session_params.device = ctx as *mut c_void;
             open_session_params.apiVersion = sys::NVENCAPI_VERSION;
@@ -81,6 +93,7 @@ impl Encoder {
                 &mut h_encoder,
             );
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::with_reason(
                     status,
@@ -88,6 +101,9 @@ impl Encoder {
                     "Failed to open encode session",
                 ));
             }
+
+            // Pop context after initialization
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             let state = Arc::new(Mutex::new(EncoderState {
                 width,
@@ -114,10 +130,20 @@ impl Encoder {
 
     unsafe fn initialize_encoder(&mut self) -> Result<(), Error> {
         unsafe {
+            // Push CUDA context
+            let status = sys::cuCtxPushCurrent_v2(self.ctx);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxPushCurrent_v2",
+                    "Failed to push CUDA context",
+                ));
+            }
+
             // Get preset configuration first
             let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
-            preset_config.version = sys::NVENCAPI_VERSION;
-            preset_config.presetCfg.version = sys::NVENCAPI_VERSION;
+            preset_config.version = sys::NV_ENC_PRESET_CONFIG_VER;
+            preset_config.presetCfg.version = sys::NV_ENC_CONFIG_VER;
 
             let status = (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
                 self.h_encoder,
@@ -127,6 +153,7 @@ impl Encoder {
                 &mut preset_config,
             );
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 return Err(Error::with_reason(
                     status,
                     "nvEncGetEncodePresetConfigEx",
@@ -140,7 +167,7 @@ impl Encoder {
 
             let state = self.state.lock().unwrap();
 
-            init_params.version = sys::NVENCAPI_VERSION;
+            init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
             init_params.encodeGUID = crate::guid::NV_ENC_CODEC_HEVC_GUID;
             init_params.presetGUID = crate::guid::NV_ENC_PRESET_P4_GUID;
             init_params.encodeWidth = state.width;
@@ -154,7 +181,7 @@ impl Encoder {
             init_params.maxEncodeWidth = state.width;
             init_params.maxEncodeHeight = state.height;
 
-            config.version = sys::NVENCAPI_VERSION;
+            config.version = sys::NV_ENC_CONFIG_VER;
             config.profileGUID = crate::guid::NV_ENC_HEVC_PROFILE_MAIN_GUID;
             config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
             config.frameIntervalP = 1;
@@ -167,6 +194,10 @@ impl Encoder {
             // Initialize encoder
             let status =
                 (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params);
+
+            // Pop context after initialization
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
+
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 return Err(Error::with_reason(
                     status,
@@ -178,38 +209,20 @@ impl Encoder {
             Ok(())
         }
     }
-
-    /// NV12フォーマットのフレームをエンコードする
-    pub fn encode_frame(&mut self, _y_plane: &[u8], _uv_plane: &[u8]) -> Result<(), Error> {
-        // Implementation would handle frame encoding
-        // This is a simplified version
-        Ok(())
-    }
-
-    /// エンコード済みパケットを取得する
-    pub fn get_encoded_packet(&mut self) -> Option<EncodedPacket> {
-        let mut state = self.state.lock().unwrap();
-        if state.encoded_packets.is_empty() {
-            None
-        } else {
-            Some(state.encoded_packets.remove(0))
-        }
-    }
-
-    /// エンコードを終了する
-    pub fn finish(&mut self) -> Result<(), Error> {
-        // Flush encoder
-        Ok(())
-    }
 }
 
 impl Drop for Encoder {
     fn drop(&mut self) {
         unsafe {
             if !self.h_encoder.is_null() {
+                // Activate context before cleanup
+                let _ = sys::cuCtxPushCurrent_v2(self.ctx);
+
                 if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
                     destroy_fn(self.h_encoder);
                 }
+
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
             }
 
             if !self.ctx.is_null() {
