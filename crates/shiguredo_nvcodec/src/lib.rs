@@ -14,6 +14,9 @@ mod sys;
 // Note: sys module doesn't export BUILD_METADATA_VERSION, so this is commented out
 // pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
+// Missing constant from CUVID
+const CUVID_PKT_ENDOFSTREAM: u32 = 0x02;
+
 /// エラー
 #[derive(Debug)]
 pub struct Error {
@@ -187,7 +190,7 @@ impl Decoder {
             let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
             packet.payload = ptr::null();
             packet.payload_size = 0;
-            packet.flags = sys::CUVID_PKT_ENDOFSTREAM;
+            packet.flags = CUVID_PKT_ENDOFSTREAM;
             packet.timestamp = 0;
 
             let status = sys::cuvidParseVideoData(self.parser, &mut packet);
@@ -251,10 +254,10 @@ unsafe extern "C" fn handle_video_sequence(
         return 0;
     }
 
-    let state_arc = Arc::from_raw(user_data as *const Mutex<DecoderState>);
+    let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
     let result = (|| {
         let mut state = state_arc.lock().unwrap();
-        let format = &*format;
+        let format = unsafe { &*format };
 
         // デコーダーが既に作成されている場合はスキップ
         if !state.decoder.is_null() {
@@ -262,11 +265,11 @@ unsafe extern "C" fn handle_video_sequence(
         }
 
         // デコーダーの作成情報を設定
-        let mut create_info: sys::CUVIDDECODECREATEINFO = std::mem::zeroed();
+        let mut create_info: sys::CUVIDDECODECREATEINFO = unsafe { std::mem::zeroed() };
         create_info.CodecType = format.codec;
         create_info.ChromaFormat = format.chroma_format;
         create_info.OutputFormat = sys::cudaVideoSurfaceFormat_enum_cudaVideoSurfaceFormat_NV12;
-        create_info.bitDepthMinus8 = format.bit_depth_luma_minus8;
+        create_info.bitDepthMinus8 = format.bit_depth_luma_minus8 as u64;
         create_info.DeinterlaceMode = if format.progressive_sequence != 0 {
             sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Weave
         } else {
@@ -275,19 +278,19 @@ unsafe extern "C" fn handle_video_sequence(
         create_info.ulNumOutputSurfaces = 2;
         create_info.ulCreationFlags =
             sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUVID as u64;
-        create_info.ulNumDecodeSurfaces = format.min_num_decode_surfaces;
-        create_info.ulWidth = format.coded_width;
-        create_info.ulHeight = format.coded_height;
-        create_info.ulMaxWidth = format.coded_width;
-        create_info.ulMaxHeight = format.coded_height;
-        create_info.ulTargetWidth = format.coded_width;
-        create_info.ulTargetHeight = format.coded_height;
+        create_info.ulNumDecodeSurfaces = format.min_num_decode_surfaces as u64;
+        create_info.ulWidth = format.coded_width as u64;
+        create_info.ulHeight = format.coded_height as u64;
+        create_info.ulMaxWidth = format.coded_width as u64;
+        create_info.ulMaxHeight = format.coded_height as u64;
+        create_info.ulTargetWidth = format.coded_width as u64;
+        create_info.ulTargetHeight = format.coded_height as u64;
 
         // Get context lock from the parent Decoder
         // We need to pass ctx_lock through user_data or store it in DecoderState
         // For now, create it here (not ideal, but works)
         let mut ctx_lock = ptr::null_mut();
-        let status = sys::cuvidCtxLockCreate(&mut ctx_lock, state.ctx);
+        let status = unsafe { sys::cuvidCtxLockCreate(&mut ctx_lock, state.ctx) };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
             return Err(Error::with_reason(
                 status,
@@ -301,9 +304,9 @@ unsafe extern "C" fn handle_video_sequence(
         let mut decoder = ptr::null_mut();
 
         // Push CUDA context before creating decoder
-        let status = sys::cuCtxPushCurrent_v2(state.ctx);
+        let status = unsafe { sys::cuCtxPushCurrent_v2(state.ctx) };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            sys::cuvidCtxLockDestroy(ctx_lock);
+            unsafe { sys::cuvidCtxLockDestroy(ctx_lock) };
             return Err(Error::with_reason(
                 status,
                 "cuCtxPushCurrent_v2",
@@ -311,13 +314,13 @@ unsafe extern "C" fn handle_video_sequence(
             ));
         }
 
-        let status = sys::cuvidCreateDecoder(&mut decoder, &mut create_info);
+        let status = unsafe { sys::cuvidCreateDecoder(&mut decoder, &mut create_info) };
 
         // Always pop context
-        sys::cuCtxPopCurrent_v2(ptr::null_mut());
+        unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
 
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            sys::cuvidCtxLockDestroy(ctx_lock);
+            unsafe { sys::cuvidCtxLockDestroy(ctx_lock) };
             return Err(Error::with_reason(
                 status,
                 "cuvidCreateDecoder",
@@ -326,8 +329,8 @@ unsafe extern "C" fn handle_video_sequence(
         }
 
         state.decoder = decoder;
-        state.width = format.display_area.right - format.display_area.left;
-        state.height = format.display_area.bottom - format.display_area.top;
+        state.width = (format.display_area.right - format.display_area.left) as u32;
+        state.height = (format.display_area.bottom - format.display_area.top) as u32;
         state.surface_width = format.coded_width;
         state.surface_height = format.coded_height;
 
@@ -352,7 +355,7 @@ unsafe extern "C" fn handle_picture_decode(
         return 0;
     }
 
-    let state_arc = Arc::from_raw(user_data as *const Mutex<DecoderState>);
+    let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
     let result = (|| {
         let state = state_arc.lock().unwrap();
 
@@ -364,25 +367,27 @@ unsafe extern "C" fn handle_picture_decode(
             ));
         }
 
-        let status = sys::cuCtxPushCurrent_v2(state.ctx);
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::with_reason(
-                status,
-                "cuCtxPushCurrent_v2",
-                "Failed to push CUDA context",
-            ));
-        }
+        unsafe {
+            let status = sys::cuCtxPushCurrent_v2(state.ctx);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxPushCurrent_v2",
+                    "Failed to push CUDA context",
+                ));
+            }
 
-        let status = sys::cuvidDecodePicture(state.decoder, pic_params);
+            let status = sys::cuvidDecodePicture(state.decoder, pic_params);
 
-        sys::cuCtxPopCurrent_v2(ptr::null_mut());
+            sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::with_reason(
-                status,
-                "cuvidDecodePicture",
-                "Failed to decode picture",
-            ));
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuvidDecodePicture",
+                    "Failed to decode picture",
+                ));
+            }
         }
 
         Ok(())
@@ -405,10 +410,10 @@ unsafe extern "C" fn handle_picture_display(
         return 0;
     }
 
-    let state_arc = Arc::from_raw(user_data as *const Mutex<DecoderState>);
+    let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
     let result = (|| {
         let mut state = state_arc.lock().unwrap();
-        let disp_info = &*disp_info;
+        let disp_info = unsafe { &*disp_info };
 
         if state.decoder.is_null() {
             return Err(Error::with_reason(
@@ -418,95 +423,97 @@ unsafe extern "C" fn handle_picture_display(
             ));
         }
 
-        let status = sys::cuCtxPushCurrent_v2(state.ctx);
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::with_reason(
-                status,
-                "cuCtxPushCurrent_v2",
-                "Failed to push CUDA context",
-            ));
-        }
+        unsafe {
+            let status = sys::cuCtxPushCurrent_v2(state.ctx);
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuCtxPushCurrent_v2",
+                    "Failed to push CUDA context",
+                ));
+            }
 
-        // Set up video processing parameters
-        let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
-        proc_params.progressive_frame = disp_info.progressive_frame;
-        proc_params.top_field_first = disp_info.top_field_first;
-        proc_params.second_field = (disp_info.repeat_first_field + 1) as i32;
-        proc_params.output_stream = ptr::null_mut();
+            // Set up video processing parameters
+            let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
+            proc_params.progressive_frame = disp_info.progressive_frame;
+            proc_params.top_field_first = disp_info.top_field_first;
+            proc_params.second_field = (disp_info.repeat_first_field + 1) as i32;
+            proc_params.output_stream = ptr::null_mut();
 
-        // Map the decoded frame
-        let mut device_ptr = 0u64;
-        let mut pitch = 0u32;
-        let status = sys::cuvidMapVideoFrame64(
-            state.decoder,
-            disp_info.picture_index,
-            &mut device_ptr,
-            &mut pitch,
-            &mut proc_params,
-        );
+            // Map the decoded frame
+            let mut device_ptr = 0u64;
+            let mut pitch = 0u32;
+            let status = sys::cuvidMapVideoFrame64(
+                state.decoder,
+                disp_info.picture_index,
+                &mut device_ptr,
+                &mut pitch,
+                &mut proc_params,
+            );
 
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
-            return Err(Error::with_reason(
-                status,
-                "cuvidMapVideoFrame64",
-                "Failed to map video frame",
-            ));
-        }
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                return Err(Error::with_reason(
+                    status,
+                    "cuvidMapVideoFrame64",
+                    "Failed to map video frame",
+                ));
+            }
 
-        // Calculate frame size (NV12 format: Y plane + UV plane)
-        // Note: NVDEC aligns luma height by 2
-        let aligned_height = (state.surface_height + 1) & !1;
-        let y_size = pitch as usize * state.height as usize;
-        let uv_size = pitch as usize * (state.height as usize / 2);
-        let frame_size = y_size + uv_size;
+            // Calculate frame size (NV12 format: Y plane + UV plane)
+            // Note: NVDEC aligns luma height by 2
+            let aligned_height = (state.surface_height + 1) & !1;
+            let y_size = pitch as usize * state.height as usize;
+            let uv_size = pitch as usize * (state.height as usize / 2);
+            let frame_size = y_size + uv_size;
 
-        // Allocate host memory for the frame
-        let mut host_data = vec![0u8; frame_size];
+            // Allocate host memory for the frame
+            let mut host_data = vec![0u8; frame_size];
 
-        // Copy Y plane
-        let status =
-            sys::cuMemcpyDtoH_v2(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size);
+            // Copy Y plane
+            let status =
+                sys::cuMemcpyDtoH_v2(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size);
 
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
+                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                return Err(Error::with_reason(
+                    status,
+                    "cuMemcpyDtoH_v2",
+                    "Failed to copy Y plane data",
+                ));
+            }
+
+            // Copy UV plane
+            let uv_offset = pitch as u64 * aligned_height as u64;
+            let status = sys::cuMemcpyDtoH_v2(
+                host_data[y_size..].as_mut_ptr() as *mut c_void,
+                device_ptr + uv_offset,
+                uv_size,
+            );
+
+            // Unmap the video frame
             sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
-            return Err(Error::with_reason(
-                status,
-                "cuMemcpyDtoH_v2",
-                "Failed to copy Y plane data",
-            ));
+
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                return Err(Error::with_reason(
+                    status,
+                    "cuMemcpyDtoH_v2",
+                    "Failed to copy UV plane data",
+                ));
+            }
+
+            // Store the decoded frame
+            let decoded_frame = DecodedFrame {
+                width: state.width,
+                height: state.height,
+                pitch: pitch as usize,
+                data: host_data,
+            };
+
+            state.decoded_frames.push(decoded_frame);
         }
-
-        // Copy UV plane
-        let uv_offset = pitch as u64 * aligned_height as u64;
-        let status = sys::cuMemcpyDtoH_v2(
-            host_data[y_size..].as_mut_ptr() as *mut c_void,
-            device_ptr + uv_offset,
-            uv_size,
-        );
-
-        // Unmap the video frame
-        sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-        sys::cuCtxPopCurrent_v2(ptr::null_mut());
-
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::with_reason(
-                status,
-                "cuMemcpyDtoH_v2",
-                "Failed to copy UV plane data",
-            ));
-        }
-
-        // Store the decoded frame
-        let decoded_frame = DecodedFrame {
-            width: state.width,
-            height: state.height,
-            pitch: pitch as usize,
-            data: host_data,
-        };
-
-        state.decoded_frames.push(decoded_frame);
 
         Ok(())
     })();
