@@ -73,16 +73,6 @@ struct DecoderState {
     ctx_lock: sys::CUvideoctxlock,
 }
 
-struct DecoderState {
-    decoder: sys::CUvideodecoder,
-    width: u32,
-    height: u32,
-    surface_width: u32,
-    surface_height: u32,
-    decoded_frames: Vec<DecodedFrame>,
-    ctx: sys::CUcontext,
-}
-
 impl Decoder {
     /// H.265 用のデコーダーインスタンスを生成する
     pub fn new_hevc() -> Result<Self, Error> {
