@@ -387,6 +387,11 @@ fn handle_picture_display_inner(
         );
         Error::check(status, "cuvidMapVideoFrame64", "failed to map video frame")?;
 
+        // 確実にフレームをアンマップするためのガードを作成
+        let _unmap_guard = crate::ReleaseGuard::new(|| {
+            sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
+        });
+
         // フレームサイズを計算 (NV12 形式: Y プレーン + UV プレーン)
         // 注意: NVDEC は輝度の高さを 2 でアライメントする
         let aligned_height = (state.surface_height + 1) & !1;
@@ -400,10 +405,7 @@ fn handle_picture_display_inner(
         // Y プレーンをコピー
         let status =
             sys::cuMemcpyDtoH_v2(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size);
-        if let Err(e) = Error::check(status, "cuMemcpyDtoH_v2", "failed to copy Y plane data") {
-            sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-            return Err(e);
-        }
+        Error::check(status, "cuMemcpyDtoH_v2", "failed to copy Y plane data")?;
 
         // UV プレーンをコピー
         let uv_offset = pitch as u64 * aligned_height as u64;
@@ -412,9 +414,6 @@ fn handle_picture_display_inner(
             device_ptr + uv_offset,
             uv_size,
         );
-
-        // ビデオフレームをアンマップ
-        sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
         Error::check(status, "cuMemcpyDtoH_v2", "failed to copy UV plane data")?;
 
         // デコード済みフレームを作成
