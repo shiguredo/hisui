@@ -289,31 +289,40 @@ unsafe extern "C" fn handle_picture_decode(
         return 0;
     }
 
-    let state_arc = unsafe { &*(user_data as *const Mutex<DecoderState>) };
-    let result = (|| {
-        let state = state_arc.lock().unwrap();
+    let state = unsafe { &*(user_data as *const Mutex<DecoderState>) };
+    let Ok(mut state) = state.lock() else {
+        // このケースは next_frame() の中でハンドリングされているので、ここでは何もする必要がない
+        return 0;
+    };
 
-        if state.decoder.is_null() {
-            let err = Error::new(1, "handle_picture_decode", "Decoder not initialized");
-            let _ = state.frame_tx.send(Err(err.clone()));
-            return Err(err);
-        }
-
-        crate::with_cuda_context(state.ctx, || unsafe {
-            let status = sys::cuvidDecodePicture(state.decoder, pic_params);
-            Error::check(status, "cuvidDecodePicture", "Failed to decode picture")
-        })
-        .inspect_err(|e| {
-            let _ = state.frame_tx.send(Err(e.clone()));
-        })?;
-
-        Ok(())
-    })();
-
+    let result = handle_picture_decode_inner(&mut state, unsafe { &*pic_params });
     match result {
         Ok(_) => 1,
-        Err(_) => 0,
+        Err(e) => {
+            let _ = state.frame_tx.send(Err(e));
+            0
+        }
     }
+}
+
+fn handle_picture_decode_inner(
+    state: &mut DecoderState,
+    pic_params: &sys::CUVIDPICPARAMS,
+) -> Result<(), Error> {
+    if state.decoder.is_null() {
+        return Err(Error::new(
+            sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+            "handle_picture_decode",
+            "decoder not initialized",
+        ));
+    }
+
+    crate::with_cuda_context(state.ctx, || unsafe {
+        let status = sys::cuvidDecodePicture(state.decoder, pic_params as *const _ as *mut _);
+        Error::check(status, "cuvidDecodePicture", "failed to decode picture")
+    })?;
+
+    Ok(())
 }
 
 // デコード済みフレームを表示する時に呼ばれるコールバック
