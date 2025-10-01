@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use crate::{Error, ensure_cuda_initialized, sys};
@@ -10,6 +11,7 @@ pub struct Decoder {
     ctx_lock: sys::CUvideoctxlock,
     parser: sys::CUvideoparser,
     state: Arc<Mutex<DecoderState>>,
+    frame_rx: Receiver<DecodedFrame>,
 }
 
 impl Decoder {
@@ -39,6 +41,9 @@ impl Decoder {
                 sys::cuCtxDestroy_v2(ctx);
             })?;
 
+            // チャンネルを作成
+            let (frame_tx, frame_rx) = mpsc::channel();
+
             // デコーダーの状態を作成
             let state = Arc::new(Mutex::new(DecoderState {
                 decoder: ptr::null_mut(),
@@ -46,7 +51,7 @@ impl Decoder {
                 height: 0,
                 surface_width: 0,
                 surface_height: 0,
-                decoded_frames: Vec::new(),
+                frame_tx,
                 ctx,
                 ctx_lock,
             }));
@@ -81,6 +86,7 @@ impl Decoder {
                 ctx_lock,
                 parser,
                 state,
+                frame_rx,
             })
         }
     }
@@ -133,12 +139,7 @@ impl Decoder {
 
     /// デコード済みのフレームを取り出す
     pub fn next_frame(&mut self) -> Option<DecodedFrame> {
-        let mut state = self.state.lock().unwrap();
-        if state.decoded_frames.is_empty() {
-            None
-        } else {
-            Some(state.decoded_frames.remove(0))
-        }
+        self.frame_rx.try_recv().ok()
     }
 }
 
@@ -178,7 +179,7 @@ struct DecoderState {
     height: u32,
     surface_width: u32,
     surface_height: u32,
-    decoded_frames: Vec<DecodedFrame>,
+    frame_tx: Sender<DecodedFrame>,
     ctx: sys::CUcontext,
     ctx_lock: sys::CUvideoctxlock,
 }
@@ -305,7 +306,7 @@ unsafe extern "C" fn handle_picture_display(
 
     let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
     let result = (|| {
-        let mut state = state_arc.lock().unwrap();
+        let state = state_arc.lock().unwrap();
         let disp_info = unsafe { &*disp_info };
 
         if state.decoder.is_null() {
@@ -377,7 +378,8 @@ unsafe extern "C" fn handle_picture_display(
                 data: host_data,
             };
 
-            state.decoded_frames.push(decoded_frame);
+            // Send through channel (ignore send errors as receiver might be dropped)
+            let _ = state.frame_tx.send(decoded_frame);
             Ok(())
         })?;
 
