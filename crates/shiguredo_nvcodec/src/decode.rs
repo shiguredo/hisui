@@ -15,19 +15,21 @@ pub struct Decoder {
 impl Decoder {
     /// H.265 用のデコーダーインスタンスを生成する
     pub fn new_h265() -> Result<Self, Error> {
-        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行）
+        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
         ensure_cuda_initialized()?;
 
         unsafe {
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
-            let status = sys::cuCtxCreate_v2(&mut ctx, 0, 0);
+            let ctx_flags = 0; // デフォルトのコンテキストフラグ
+            let device_id = 0; // プライマリGPUデバイスを使用
+            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::new(
                     status,
                     "cuCtxCreate_v2",
-                    "Failed to create CUDA context",
+                    "failed to create CUDA context",
                 ));
             }
 
