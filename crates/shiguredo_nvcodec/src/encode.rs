@@ -1,15 +1,14 @@
 use std::ffi::c_void;
 use std::ptr;
-use std::sync::{Arc, Mutex};
 
 use crate::{Error, ensure_cuda_initialized, sys};
 
-/// H.265 エンコーダー
+/// エンコーダー
 pub struct Encoder {
     ctx: sys::CUcontext,
     encoder: sys::NV_ENCODE_API_FUNCTION_LIST,
     h_encoder: *mut c_void,
-    state: Arc<Mutex<EncoderState>>,
+    state: EncoderState,
 }
 
 struct EncoderState {
@@ -100,12 +99,12 @@ impl Encoder {
             // 初期化後に context を pop
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
-            let state = Arc::new(Mutex::new(EncoderState {
+            let state = EncoderState {
                 width,
                 height,
                 buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
                 encoded_packets: Vec::new(),
-            }));
+            };
 
             let mut encoder = Self {
                 ctx,
@@ -159,21 +158,19 @@ impl Encoder {
             let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = unsafe { std::mem::zeroed() };
             let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
-            let state = self.state.lock().unwrap();
-
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
             init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
             init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID;
-            init_params.encodeWidth = state.width;
-            init_params.encodeHeight = state.height;
-            init_params.darWidth = state.width;
-            init_params.darHeight = state.height;
+            init_params.encodeWidth = self.state.width;
+            init_params.encodeHeight = self.state.height;
+            init_params.darWidth = self.state.width;
+            init_params.darHeight = self.state.height;
             init_params.frameRateNum = 30;
             init_params.frameRateDen = 1;
             init_params.enablePTD = 1;
             init_params.encodeConfig = &mut config;
-            init_params.maxEncodeWidth = state.width;
-            init_params.maxEncodeHeight = state.height;
+            init_params.maxEncodeWidth = self.state.width;
+            init_params.maxEncodeHeight = self.state.height;
             init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY;
 
             config.version = sys::NV_ENC_CONFIG_VER;
@@ -183,8 +180,6 @@ impl Encoder {
 
             // HEVC 固有の設定
             config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
-
-            drop(state); // エンコーダー呼び出し前にロックを解放
 
             // エンコーダーを初期化
             let status = unsafe {
@@ -210,8 +205,7 @@ impl Encoder {
 
     /// NV12 形式の1フレームをエンコードする
     pub fn encode_frame(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
-        let state = self.state.lock().unwrap();
-        let expected_size = (state.width * state.height * 3 / 2) as usize;
+        let expected_size = (self.state.width * self.state.height * 3 / 2) as usize;
 
         if nv12_data.len() != expected_size {
             return Err(Error::new(
@@ -220,7 +214,6 @@ impl Encoder {
                 "Invalid NV12 data size",
             ));
         }
-        drop(state);
 
         unsafe {
             // CUDA context を push
@@ -243,8 +236,6 @@ impl Encoder {
     }
 
     unsafe fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
-        let state = self.state.lock().unwrap();
-
         // 入力用のデバイスメモリを割り当て
         let mut device_input = 0u64;
         let status = unsafe { sys::cuMemAlloc_v2(&mut device_input, nv12_data.len()) };
@@ -279,10 +270,10 @@ impl Encoder {
         register_resource.resourceType =
             sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
         register_resource.resourceToRegister = device_input as *mut c_void;
-        register_resource.width = state.width;
-        register_resource.height = state.height;
-        register_resource.pitch = state.width;
-        register_resource.bufferFormat = state.buffer_format;
+        register_resource.width = self.state.width;
+        register_resource.height = self.state.height;
+        register_resource.pitch = self.state.width;
+        register_resource.bufferFormat = self.state.buffer_format;
         register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
 
         let status = unsafe {
@@ -355,15 +346,13 @@ impl Encoder {
         // エンコードピクチャパラメータを設定
         let mut pic_params: sys::NV_ENC_PIC_PARAMS = unsafe { std::mem::zeroed() };
         pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
-        pic_params.inputWidth = state.width;
-        pic_params.inputHeight = state.height;
-        pic_params.inputPitch = state.width;
+        pic_params.inputWidth = self.state.width;
+        pic_params.inputHeight = self.state.height;
+        pic_params.inputPitch = self.state.width;
         pic_params.inputBuffer = mapped_resource;
         pic_params.outputBitstream = output_buffer;
-        pic_params.bufferFmt = state.buffer_format;
+        pic_params.bufferFmt = self.state.buffer_format;
         pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
-
-        drop(state); // エンコード前にロックを解放
 
         // ピクチャをエンコード
         let status =
@@ -420,6 +409,9 @@ impl Encoder {
             .to_vec()
         };
 
+        let timestamp = lock_bitstream.outputTimeStamp;
+        let picture_type = lock_bitstream.pictureType;
+
         // ビットストリームをアンロック
         unsafe {
             (self.encoder.nvEncUnlockBitstream.unwrap())(
@@ -449,11 +441,10 @@ impl Encoder {
         }
 
         // エンコード済みパケットを保存
-        let mut state = self.state.lock().unwrap();
-        state.encoded_packets.push(EncodedPacket {
+        self.state.encoded_packets.push(EncodedPacket {
             data: encoded_data,
-            timestamp: lock_bitstream.outputTimeStamp,
-            picture_type: lock_bitstream.pictureType,
+            timestamp,
+            picture_type,
         });
 
         Ok(())
@@ -482,8 +473,7 @@ impl Encoder {
 
     /// すべてのエンコード済みパケットを取得する
     pub fn get_encoded_packets(&mut self) -> Vec<EncodedPacket> {
-        let mut state = self.state.lock().unwrap();
-        std::mem::take(&mut state.encoded_packets)
+        std::mem::take(&mut self.state.encoded_packets)
     }
 }
 
