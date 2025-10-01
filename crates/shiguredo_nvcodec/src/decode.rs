@@ -202,7 +202,9 @@ struct DecoderState {
     ctx_lock: sys::CUvideoctxlock,
 }
 
-// Callback: パーサーがシーケンスヘッダーを検出した時に呼ばれる
+fn handle_video_sequence_inner(state: Mutex<DecoderState>) {}
+
+// パーサーがシーケンスヘッダーを検出した時に呼ばれるコールバック
 unsafe extern "C" fn handle_video_sequence(
     user_data: *mut c_void,
     format: *mut sys::CUVIDEOFORMAT,
@@ -275,7 +277,7 @@ unsafe extern "C" fn handle_video_sequence(
     }
 }
 
-// Callback: デコードすべきピクチャーがある時に呼ばれる
+// デコードすべきピクチャーがある時に呼ばれるコールバック
 unsafe extern "C" fn handle_picture_decode(
     user_data: *mut c_void,
     pic_params: *mut sys::CUVIDPICPARAMS,
@@ -313,7 +315,7 @@ unsafe extern "C" fn handle_picture_decode(
     }
 }
 
-// Callback: デコード済みフレームを表示する時に呼ばれる
+// デコード済みフレームを表示する時に呼ばれるコールバック
 unsafe extern "C" fn handle_picture_display(
     user_data: *mut c_void,
     disp_info: *mut sys::CUVIDPARSERDISPINFO,
