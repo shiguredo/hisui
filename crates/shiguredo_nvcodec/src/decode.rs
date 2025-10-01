@@ -11,7 +11,7 @@ pub struct Decoder {
     ctx_lock: sys::CUvideoctxlock,
     parser: sys::CUvideoparser,
     state: Arc<Mutex<DecoderState>>,
-    frame_rx: Receiver<DecodedFrame>,
+    frame_rx: Receiver<Result<DecodedFrame, Error>>,
 }
 
 impl Decoder {
@@ -138,7 +138,7 @@ impl Decoder {
     }
 
     /// デコード済みのフレームを取り出す
-    pub fn next_frame(&mut self) -> Option<DecodedFrame> {
+    pub fn next_frame(&mut self) -> Option<Result<DecodedFrame, Error>> {
         self.frame_rx.try_recv().ok()
     }
 }
@@ -146,26 +146,24 @@ impl Decoder {
 impl Drop for Decoder {
     fn drop(&mut self) {
         unsafe {
-            // Destroy parser first
             if !self.parser.is_null() {
                 sys::cuvidDestroyVideoParser(self.parser);
             }
 
-            // Destroy decoder
-            let state = self.state.lock().unwrap();
-            if !state.decoder.is_null() {
-                let _ = crate::with_cuda_context(self.ctx, || {
-                    sys::cuvidDestroyDecoder(state.decoder);
-                    Ok(())
-                });
+            // ここでロック確保に失敗してもできることはないので、成功時にだけ処理を行う
+            if let Ok(state) = self.state.lock() {
+                if !state.decoder.is_null() {
+                    let _ = crate::with_cuda_context(self.ctx, || {
+                        sys::cuvidDestroyDecoder(state.decoder);
+                        Ok(())
+                    });
+                }
             }
 
-            // Destroy context lock
             if !self.ctx_lock.is_null() {
                 sys::cuvidCtxLockDestroy(self.ctx_lock);
             }
 
-            // Destroy context
             if !self.ctx.is_null() {
                 sys::cuCtxDestroy_v2(self.ctx);
             }
@@ -179,7 +177,7 @@ struct DecoderState {
     height: u32,
     surface_width: u32,
     surface_height: u32,
-    frame_tx: Sender<DecodedFrame>,
+    frame_tx: Sender<Result<DecodedFrame, Error>>,
     ctx: sys::CUcontext,
     ctx_lock: sys::CUvideoctxlock,
 }
@@ -230,7 +228,6 @@ unsafe extern "C" fn handle_video_sequence(
 
         let mut decoder = ptr::null_mut();
 
-        // Push CUDA context before creating decoder
         crate::with_cuda_context(state.ctx, || {
             let status = unsafe { sys::cuvidCreateDecoder(&mut decoder, &mut create_info) };
             Error::check(
@@ -272,16 +269,17 @@ unsafe extern "C" fn handle_picture_decode(
         let state = state_arc.lock().unwrap();
 
         if state.decoder.is_null() {
-            return Err(Error::new(
-                1,
-                "handle_picture_decode",
-                "Decoder not initialized",
-            ));
+            let err = Error::new(1, "handle_picture_decode", "Decoder not initialized");
+            let _ = state.frame_tx.send(Err(err.clone()));
+            return Err(err);
         }
 
         crate::with_cuda_context(state.ctx, || unsafe {
             let status = sys::cuvidDecodePicture(state.decoder, pic_params);
             Error::check(status, "cuvidDecodePicture", "Failed to decode picture")
+        })
+        .inspect_err(|e| {
+            let _ = state.frame_tx.send(Err(e.clone()));
         })?;
 
         Ok(())
@@ -310,14 +308,12 @@ unsafe extern "C" fn handle_picture_display(
         let disp_info = unsafe { &*disp_info };
 
         if state.decoder.is_null() {
-            return Err(Error::new(
-                1,
-                "handle_picture_display",
-                "Decoder not initialized",
-            ));
+            let err = Error::new(1, "handle_picture_display", "Decoder not initialized");
+            let _ = state.frame_tx.send(Err(err.clone()));
+            return Err(err);
         }
 
-        crate::with_cuda_context(state.ctx, || unsafe {
+        let decoded_frame = crate::with_cuda_context(state.ctx, || unsafe {
             // Set up video processing parameters
             let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
             proc_params.progressive_frame = disp_info.progressive_frame;
@@ -371,18 +367,19 @@ unsafe extern "C" fn handle_picture_display(
             Error::check(status, "cuMemcpyDtoH_v2", "Failed to copy UV plane data")?;
 
             // Store the decoded frame
-            let decoded_frame = DecodedFrame {
+            Ok(DecodedFrame {
                 width: state.width,
                 height: state.height,
                 pitch: pitch as usize,
                 data: host_data,
-            };
-
-            // Send through channel (ignore send errors as receiver might be dropped)
-            let _ = state.frame_tx.send(decoded_frame);
-            Ok(())
+            })
+        })
+        .inspect_err(|e| {
+            let _ = state.frame_tx.send(Err(e.clone()));
         })?;
 
+        // Send through channel (ignore send errors as receiver might be dropped)
+        let _ = state.frame_tx.send(Ok(decoded_frame));
         Ok(())
     })();
 
@@ -505,7 +502,10 @@ mod tests {
         decoder.finish().expect("Failed to finish decoding");
 
         // デコード済みフレームを取得
-        let frame = decoder.next_frame().expect("No decoded frame available");
+        let frame = decoder
+            .next_frame()
+            .expect("No decoded frame available")
+            .expect("Decoding error occurred");
 
         assert_eq!(frame.width(), 640);
         assert_eq!(frame.height(), 480);
