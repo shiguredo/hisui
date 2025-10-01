@@ -76,13 +76,14 @@ fn main() {
     }
 
     // バインディングを生成する
-    let bindings = bindgen::Builder::default()
+    let mut bindings = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
         .header(nvcuvid_header.display().to_string())
         .generate_comments(false)
         .derive_debug(false)
         .derive_default(false)
+        // GUID は bindgen で正しく生成されないため、ここではブラックリストに登録して、後で手動で定義する
         .blocklist_item("NV_ENC_CODEC_H264_GUID")
         .blocklist_item("NV_ENC_CODEC_HEVC_GUID")
         .blocklist_item("NV_ENC_CODEC_AV1_GUID")
@@ -110,11 +111,11 @@ fn main() {
         .generate()
         .expect("failed to generate bindings");
 
-    // Add version constants and GUID definitions
+    // バージョン定数と GUID 定義を追加する
     let additional_definitions = r#"
 
-// Version constants from nvEncodeAPI.h
-// These are macros in C, so bindgen doesn't generate them automatically
+// nvEncodeAPI.h のバージョン定数
+// これらは C のマクロなので、bindgen は自動的に生成しない
 const NVENCAPI_STRUCT_VERSION_BASE: u32 = 0x7 << 28;
 
 pub const NV_ENCODE_API_FUNCTION_LIST_VER: u32 = NVENCAPI_VERSION | (2 << 16) | NVENCAPI_STRUCT_VERSION_BASE;
@@ -128,13 +129,13 @@ pub const NV_ENC_LOCK_BITSTREAM_VER: u32 = NVENCAPI_VERSION | (2 << 16) | NVENCA
 pub const NV_ENC_REGISTER_RESOURCE_VER: u32 = NVENCAPI_VERSION | (5 << 16) | NVENCAPI_STRUCT_VERSION_BASE;
 pub const NV_ENC_MAP_INPUT_RESOURCE_VER: u32 = NVENCAPI_VERSION | (4 << 16) | NVENCAPI_STRUCT_VERSION_BASE;
 
-// Picture flags
+// ピクチャーフラグ
 pub const NV_ENC_PIC_FLAG_EOS: u32 = 0x8;
 
-// NVENC GUID constants used in the crate
-// These GUIDs are defined as constants instead of extern static to avoid linking issues.
+// crate で使用される NVENC GUID 定数
+// これらの GUID はリンクの問題を避けるために extern static ではなく定数として定義されている。
 
-// Codec GUID: NV_ENC_CODEC_HEVC_GUID
+// コーデック GUID: NV_ENC_CODEC_HEVC_GUID
 // {790CDC88-4522-4d7b-9425-BDA9975F7603}
 pub const NV_ENC_CODEC_HEVC_GUID: GUID = GUID {
     Data1: 0x790cdc88,
@@ -143,7 +144,7 @@ pub const NV_ENC_CODEC_HEVC_GUID: GUID = GUID {
     Data4: [0x94, 0x25, 0xbd, 0xa9, 0x97, 0x5f, 0x76, 0x03],
 };
 
-// Preset GUID: NV_ENC_PRESET_P4_GUID
+// プリセット GUID: NV_ENC_PRESET_P4_GUID
 // {90A7B826-DF06-4862-B9D2-CD6D73A08681}
 pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
     Data1: 0x90a7b826,
@@ -152,7 +153,7 @@ pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
     Data4: [0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81],
 };
 
-// Profile GUID: NV_ENC_HEVC_PROFILE_MAIN_GUID
+// プロファイル GUID: NV_ENC_HEVC_PROFILE_MAIN_GUID
 // {B514C39A-B55B-40fa-878F-F1253B4DFDEC}
 pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
     Data1: 0xb514c39a,
@@ -162,11 +163,10 @@ pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
 };
 "#;
 
-    // Write bindings with additional definitions appended
-    let mut bindings_content = bindings.to_string();
-    bindings_content.push_str(additional_definitions);
+    // 追加の定義を付加してバインディングを書き込む
+    bindings.push_str(additional_definitions);
 
-    std::fs::write(&output_bindings_path, bindings_content).expect("failed to write bindings");
+    std::fs::write(&output_bindings_path, bindings).expect("failed to write bindings");
 
     // CUDA と NVENC/NVCUVID ライブラリのリンク設定
     println!("cargo::rustc-link-lib=dylib=cuda");
