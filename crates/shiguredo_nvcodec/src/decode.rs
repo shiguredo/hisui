@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 
 use crate::{Error, ensure_cuda_initialized, sys};
 
@@ -10,7 +10,7 @@ pub struct Decoder {
     ctx: sys::CUcontext,
     ctx_lock: sys::CUvideoctxlock,
     parser: sys::CUvideoparser,
-    state: Arc<Mutex<DecoderState>>,
+    state: Mutex<DecoderState>,
     frame_rx: Receiver<Result<DecodedFrame, Error>>,
 }
 
@@ -45,7 +45,7 @@ impl Decoder {
             let (frame_tx, frame_rx) = mpsc::channel();
 
             // デコーダーの状態を作成
-            let state = Arc::new(Mutex::new(DecoderState {
+            let state = Mutex::new(DecoderState {
                 decoder: ptr::null_mut(),
                 width: 0,
                 height: 0,
@@ -54,16 +54,14 @@ impl Decoder {
                 frame_tx,
                 ctx,
                 ctx_lock,
-            }));
+            });
 
             // 映像パーサーを作成する
-            let state_ptr = Arc::into_raw(state.clone()) as *mut c_void;
-
             let mut parser_params: sys::CUVIDPARSERPARAMS = std::mem::zeroed();
             parser_params.CodecType = sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC;
             parser_params.ulMaxNumDecodeSurfaces = 20; // TODO: 後続の PR で外から設定可能にする
             parser_params.ulMaxDisplayDelay = 0; // TODO: 後続の PR で外から設定可能にする
-            parser_params.pUserData = state_ptr;
+            parser_params.pUserData = (&state).cast();
             parser_params.pfnSequenceCallback = Some(handle_video_sequence);
             parser_params.pfnDecodePicture = Some(handle_picture_decode);
             parser_params.pfnDisplayPicture = Some(handle_picture_display);
@@ -76,7 +74,6 @@ impl Decoder {
                 "failed to create video parser",
             )
             .inspect_err(|_| {
-                let _ = Arc::from_raw(state_ptr as *const Mutex<DecoderState>);
                 sys::cuvidCtxLockDestroy(ctx_lock);
                 sys::cuCtxDestroy_v2(ctx);
             })?;
@@ -213,7 +210,7 @@ unsafe extern "C" fn handle_video_sequence(
         return 0;
     }
 
-    let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
+    let state_arc = unsafe { user_data as *const Mutex<DecoderState> };
     let result: Result<_, Error> = (|| {
         let mut state = state_arc.lock().unwrap();
         let format = unsafe { &*format };
@@ -268,9 +265,6 @@ unsafe extern "C" fn handle_video_sequence(
         Ok(format.min_num_decode_surfaces as i32)
     })();
 
-    // Important: Don't drop the Arc, just forget our reference
-    std::mem::forget(state_arc);
-
     match result {
         Ok(num_surfaces) => num_surfaces,
         Err(_) => 0,
@@ -286,7 +280,7 @@ unsafe extern "C" fn handle_picture_decode(
         return 0;
     }
 
-    let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
+    let state_arc = unsafe { user_data as *const Mutex<DecoderState> };
     let result = (|| {
         let state = state_arc.lock().unwrap();
 
@@ -307,8 +301,6 @@ unsafe extern "C" fn handle_picture_decode(
         Ok(())
     })();
 
-    std::mem::forget(state_arc);
-
     match result {
         Ok(_) => 1,
         Err(_) => 0,
@@ -324,7 +316,7 @@ unsafe extern "C" fn handle_picture_display(
         return 0;
     }
 
-    let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
+    let state_arc = unsafe { user_data as *const Mutex<DecoderState> };
     let result = (|| {
         let state = state_arc.lock().unwrap();
         let disp_info = unsafe { &*disp_info };
@@ -404,8 +396,6 @@ unsafe extern "C" fn handle_picture_display(
         let _ = state.frame_tx.send(Ok(decoded_frame));
         Ok(())
     })();
-
-    std::mem::forget(state_arc);
 
     match result {
         Ok(_) => 1,
