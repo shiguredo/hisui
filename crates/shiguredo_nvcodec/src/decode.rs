@@ -35,7 +35,7 @@ impl Decoder {
             // CUDA context の初期化
             let status = sys::cuCtxCreate_v2(&mut ctx, 0, 0);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxCreate_v2",
                     "Failed to create CUDA context",
@@ -47,7 +47,7 @@ impl Decoder {
             let status = sys::cuvidCtxLockCreate(&mut ctx_lock, ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuvidCtxLockCreate",
                     "Failed to create context lock",
@@ -85,7 +85,7 @@ impl Decoder {
                 let _ = Arc::from_raw(state_ptr as *const Mutex<DecoderState>);
                 sys::cuvidCtxLockDestroy(ctx_lock);
                 sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuvidCreateVideoParser",
                     "Failed to create video parser",
@@ -117,7 +117,7 @@ impl Decoder {
 
             let status = sys::cuvidParseVideoData(self.parser, &mut packet);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuvidParseVideoData",
                     "Failed to parse video data",
@@ -140,7 +140,7 @@ impl Decoder {
 
             let status = sys::cuvidParseVideoData(self.parser, &mut packet);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuvidParseVideoData",
                     "Failed to finish decoding",
@@ -151,7 +151,7 @@ impl Decoder {
             // the CUDA context is synchronized to wait for all decode operations to complete.
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxPushCurrent_v2",
                     "Failed to push CUDA context",
@@ -164,7 +164,7 @@ impl Decoder {
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxSynchronize",
                     "Failed to synchronize CUDA context",
@@ -263,7 +263,7 @@ unsafe extern "C" fn handle_video_sequence(
         // Push CUDA context before creating decoder
         let status = unsafe { sys::cuCtxPushCurrent_v2(state.ctx) };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::with_reason(
+            return Err(Error::new(
                 status,
                 "cuCtxPushCurrent_v2",
                 "Failed to push CUDA context",
@@ -276,7 +276,7 @@ unsafe extern "C" fn handle_video_sequence(
         unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
 
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::with_reason(
+            return Err(Error::new(
                 status,
                 "cuvidCreateDecoder",
                 "Failed to create video decoder",
@@ -315,7 +315,7 @@ unsafe extern "C" fn handle_picture_decode(
         let state = state_arc.lock().unwrap();
 
         if state.decoder.is_null() {
-            return Err(Error::with_reason(
+            return Err(Error::new(
                 1,
                 "handle_picture_decode",
                 "Decoder not initialized",
@@ -325,7 +325,7 @@ unsafe extern "C" fn handle_picture_decode(
         unsafe {
             let status = sys::cuCtxPushCurrent_v2(state.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxPushCurrent_v2",
                     "Failed to push CUDA context",
@@ -337,7 +337,7 @@ unsafe extern "C" fn handle_picture_decode(
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuvidDecodePicture",
                     "Failed to decode picture",
@@ -371,7 +371,7 @@ unsafe extern "C" fn handle_picture_display(
         let disp_info = unsafe { &*disp_info };
 
         if state.decoder.is_null() {
-            return Err(Error::with_reason(
+            return Err(Error::new(
                 1,
                 "handle_picture_display",
                 "Decoder not initialized",
@@ -381,7 +381,7 @@ unsafe extern "C" fn handle_picture_display(
         unsafe {
             let status = sys::cuCtxPushCurrent_v2(state.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxPushCurrent_v2",
                     "Failed to push CUDA context",
@@ -408,7 +408,7 @@ unsafe extern "C" fn handle_picture_display(
 
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuvidMapVideoFrame64",
                     "Failed to map video frame",
@@ -432,7 +432,7 @@ unsafe extern "C" fn handle_picture_display(
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuMemcpyDtoH_v2",
                     "Failed to copy Y plane data",
@@ -452,7 +452,7 @@ unsafe extern "C" fn handle_picture_display(
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuMemcpyDtoH_v2",
                     "Failed to copy UV plane data",

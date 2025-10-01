@@ -46,7 +46,7 @@ impl Encoder {
             // CUDA context の初期化
             let status = sys::cuCtxCreate_v2(&mut ctx, 0, 0);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxCreate_v2",
                     "Failed to create CUDA context",
@@ -57,7 +57,7 @@ impl Encoder {
             let status = sys::cuCtxPushCurrent_v2(ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxPushCurrent_v2",
                     "Failed to push CUDA context",
@@ -72,7 +72,7 @@ impl Encoder {
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "NvEncodeAPICreateInstance",
                     "Failed to create NVENC API instance",
@@ -95,7 +95,7 @@ impl Encoder {
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncOpenEncodeSessionEx",
                     "Failed to open encode session",
@@ -133,7 +133,7 @@ impl Encoder {
             // Push CUDA context
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxPushCurrent_v2",
                     "Failed to push CUDA context",
@@ -154,7 +154,7 @@ impl Encoder {
             );
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncGetEncodePresetConfigEx",
                     "Failed to get preset configuration",
@@ -200,7 +200,7 @@ impl Encoder {
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncInitializeEncoder",
                     "Failed to initialize encoder",
@@ -217,7 +217,7 @@ impl Encoder {
         let expected_size = (state.width * state.height * 3 / 2) as usize;
 
         if nv12_data.len() != expected_size {
-            return Err(Error::with_reason(
+            return Err(Error::new(
                 sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
                 "encode_frame",
                 "Invalid NV12 data size",
@@ -228,7 +228,7 @@ impl Encoder {
             // Push CUDA context
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuCtxPushCurrent_v2",
                     "Failed to push CUDA context",
@@ -240,7 +240,7 @@ impl Encoder {
             let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuMemAlloc_v2",
                     "Failed to allocate device memory",
@@ -256,7 +256,7 @@ impl Encoder {
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuMemFree_v2(device_input);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "cuMemcpyHtoD_v2",
                     "Failed to copy data to device",
@@ -282,7 +282,7 @@ impl Encoder {
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 sys::cuMemFree_v2(device_input);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncRegisterResource",
                     "Failed to register input resource",
@@ -307,7 +307,7 @@ impl Encoder {
                 );
                 sys::cuMemFree_v2(device_input);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncMapInputResource",
                     "Failed to map input resource",
@@ -332,7 +332,7 @@ impl Encoder {
                 );
                 sys::cuMemFree_v2(device_input);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncCreateBitstreamBuffer",
                     "Failed to create bitstream buffer",
@@ -366,7 +366,7 @@ impl Encoder {
                 (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
                 sys::cuMemFree_v2(device_input);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncEncodePicture",
                     "Failed to encode picture",
@@ -389,7 +389,7 @@ impl Encoder {
                 (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
                 sys::cuMemFree_v2(device_input);
                 sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncLockBitstream",
                     "Failed to lock bitstream",
@@ -446,7 +446,7 @@ impl Encoder {
             let status =
                 (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                return Err(Error::with_reason(
+                return Err(Error::new(
                     status,
                     "nvEncEncodePicture",
                     "Failed to flush encoder",

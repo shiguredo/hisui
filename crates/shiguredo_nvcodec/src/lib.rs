@@ -24,7 +24,7 @@ fn ensure_cuda_initialized() -> Result<(), Error> {
         if status == sys::cudaError_enum_CUDA_SUCCESS {
             Ok(())
         } else {
-            Err(Error::with_reason(
+            Err(Error::new(
                 status,
                 "cuInit",
                 "failed to initialize CUDA driver",
@@ -40,32 +40,26 @@ fn ensure_cuda_initialized() -> Result<(), Error> {
 pub struct Error {
     status: u32, // NVENCSTATUS は u32 型
     function: &'static str,
-    reason: Option<&'static str>,
-    detail: Option<String>,
+    reason: &'static str,
 }
 
 impl Error {
-    fn with_reason(status: u32, function: &'static str, reason: &'static str) -> Self {
+    fn new(status: u32, function: &'static str, reason: &'static str) -> Self {
         Self {
             status,
             function,
-            reason: Some(reason),
-            detail: None,
+            reason,
         }
-    }
-
-    fn reason(&self) -> &str {
-        self.reason.unwrap_or("Unknown NVCODEC error")
     }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}() failed: status={}", self.function, self.status)?;
-        write!(f, ", reason={}", self.reason())?;
-        if let Some(detail) = &self.detail {
-            write!(f, ", detail={detail}")?;
-        }
+        write!(
+            f,
+            "{}() failed: status={}, reason={}",
+            self.function, self.status, self.reason
+        )?;
         Ok(())
     }
 }
@@ -78,7 +72,7 @@ mod tests {
 
     #[test]
     fn error_display() {
-        let e = Error::with_reason(
+        let e = Error::new(
             sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
             "test_function",
             "test error",
