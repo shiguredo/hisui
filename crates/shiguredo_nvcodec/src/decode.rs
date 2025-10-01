@@ -334,91 +334,97 @@ unsafe extern "C" fn handle_picture_display(
         return 0;
     }
 
-    let state_arc = unsafe { &*(user_data as *const Mutex<DecoderState>) };
-    let result = (|| {
-        let state = state_arc.lock().unwrap();
-        let disp_info = unsafe { &*disp_info };
+    let state = unsafe { &*(user_data as *const Mutex<DecoderState>) };
+    let Ok(state) = state.lock() else {
+        // このケースは next_frame() の中でハンドリングされているので、ここでは何もする必要がない
+        return 0;
+    };
 
-        if state.decoder.is_null() {
-            let err = Error::new(1, "handle_picture_display", "Decoder not initialized");
-            let _ = state.frame_tx.send(Err(err.clone()));
-            return Err(err);
-        }
-
-        let decoded_frame = crate::with_cuda_context(state.ctx, || unsafe {
-            // Set up video processing parameters
-            let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
-            proc_params.progressive_frame = disp_info.progressive_frame;
-            proc_params.top_field_first = disp_info.top_field_first;
-            proc_params.second_field = (disp_info.repeat_first_field + 1) as i32;
-            proc_params.output_stream = ptr::null_mut();
-
-            // Map the decoded frame
-            let mut device_ptr = 0u64;
-            let mut pitch = 0u32;
-            let status = sys::cuvidMapVideoFrame64(
-                state.decoder,
-                disp_info.picture_index,
-                &mut device_ptr,
-                &mut pitch,
-                &mut proc_params,
-            );
-
-            Error::check(status, "cuvidMapVideoFrame64", "Failed to map video frame")?;
-
-            // Calculate frame size (NV12 format: Y plane + UV plane)
-            // Note: NVDEC aligns luma height by 2
-            let aligned_height = (state.surface_height + 1) & !1;
-            let y_size = pitch as usize * state.height as usize;
-            let uv_size = pitch as usize * (state.height as usize / 2);
-            let frame_size = y_size + uv_size;
-
-            // Allocate host memory for the frame
-            let mut host_data = vec![0u8; frame_size];
-
-            // Copy Y plane
-            let status =
-                sys::cuMemcpyDtoH_v2(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size);
-
-            if let Err(e) = Error::check(status, "cuMemcpyDtoH_v2", "Failed to copy Y plane data") {
-                sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-                return Err(e);
-            }
-
-            // Copy UV plane
-            let uv_offset = pitch as u64 * aligned_height as u64;
-            let status = sys::cuMemcpyDtoH_v2(
-                host_data[y_size..].as_mut_ptr() as *mut c_void,
-                device_ptr + uv_offset,
-                uv_size,
-            );
-
-            // Unmap the video frame
-            sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-
-            Error::check(status, "cuMemcpyDtoH_v2", "Failed to copy UV plane data")?;
-
-            // Store the decoded frame
-            Ok(DecodedFrame {
-                width: state.width,
-                height: state.height,
-                pitch: pitch as usize,
-                data: host_data,
-            })
-        })
-        .inspect_err(|e| {
-            let _ = state.frame_tx.send(Err(e.clone()));
-        })?;
-
-        // Send through channel (ignore send errors as receiver might be dropped)
-        let _ = state.frame_tx.send(Ok(decoded_frame));
-        Ok(())
-    })();
-
+    let result = handle_picture_display_inner(&state, unsafe { &*disp_info });
     match result {
         Ok(_) => 1,
-        Err(_) => 0,
+        Err(e) => {
+            let _ = state.frame_tx.send(Err(e));
+            0
+        }
     }
+}
+
+fn handle_picture_display_inner(
+    state: &DecoderState,
+    disp_info: &sys::CUVIDPARSERDISPINFO,
+) -> Result<(), Error> {
+    if state.decoder.is_null() {
+        return Err(Error::new(
+            sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+            "handle_picture_display",
+            "decoder not initialized",
+        ));
+    }
+
+    let decoded_frame = crate::with_cuda_context(state.ctx, || unsafe {
+        // ビデオ処理パラメーターを設定
+        let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
+        proc_params.progressive_frame = disp_info.progressive_frame;
+        proc_params.top_field_first = disp_info.top_field_first;
+        proc_params.second_field = (disp_info.repeat_first_field + 1) as i32;
+        proc_params.output_stream = ptr::null_mut();
+
+        // デコード済みフレームをマップ
+        let mut device_ptr = 0u64;
+        let mut pitch = 0u32;
+        let status = sys::cuvidMapVideoFrame64(
+            state.decoder,
+            disp_info.picture_index,
+            &mut device_ptr,
+            &mut pitch,
+            &mut proc_params,
+        );
+        Error::check(status, "cuvidMapVideoFrame64", "failed to map video frame")?;
+
+        // フレームサイズを計算 (NV12 形式: Y プレーン + UV プレーン)
+        // 注意: NVDEC は輝度の高さを 2 でアライメントする
+        let aligned_height = (state.surface_height + 1) & !1;
+        let y_size = pitch as usize * state.height as usize;
+        let uv_size = pitch as usize * (state.height as usize / 2);
+        let frame_size = y_size + uv_size;
+
+        // フレーム用のホストメモリを割り当て
+        let mut host_data = vec![0u8; frame_size];
+
+        // Y プレーンをコピー
+        let status =
+            sys::cuMemcpyDtoH_v2(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size);
+        if let Err(e) = Error::check(status, "cuMemcpyDtoH_v2", "failed to copy Y plane data") {
+            sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
+            return Err(e);
+        }
+
+        // UV プレーンをコピー
+        let uv_offset = pitch as u64 * aligned_height as u64;
+        let status = sys::cuMemcpyDtoH_v2(
+            host_data[y_size..].as_mut_ptr() as *mut c_void,
+            device_ptr + uv_offset,
+            uv_size,
+        );
+
+        // ビデオフレームをアンマップ
+        sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
+        Error::check(status, "cuMemcpyDtoH_v2", "failed to copy UV plane data")?;
+
+        // デコード済みフレームを作成
+        Ok(DecodedFrame {
+            width: state.width,
+            height: state.height,
+            pitch: pitch as usize,
+            data: host_data,
+        })
+    })?;
+
+    // チャンネル経由で送信 (受信側が破棄されている場合の送信エラーは無視)
+    let _ = state.frame_tx.send(Ok(decoded_frame));
+
+    Ok(())
 }
 
 /// デコードされた映像フレーム (NV12 形式)
