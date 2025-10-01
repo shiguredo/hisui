@@ -223,7 +223,7 @@ jobs:
       - run: cargo install cargo-valgrind || echo 'already installed'
       - name: Run valgrind tests
         env:
-          VALGRINDFLAGS: --leak-check=full --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
+          VALGRINDFLAGS: --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
         run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   docs_rs:

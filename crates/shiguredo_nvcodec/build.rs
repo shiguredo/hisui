@@ -166,7 +166,7 @@ pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
     // 追加の定義を付加してバインディングを書き込む
     std::fs::write(
         &output_bindings_path,
-        format!("{bindings}_{additional_definitions}"),
+        format!("{bindings}\n{additional_definitions}"),
     )
     .expect("failed to write bindings");
 
