@@ -298,6 +298,26 @@ impl Encoder {
 
         Ok(())
     }
+
+    /// エンコーダーをフラッシュし、残りのパケットを取得する
+    pub fn flush(&mut self) -> Result<(), Error> {
+        unsafe {
+            let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+            pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
+            pic_params.encodePicFlags = sys::NV_ENC_PIC_FLAG_EOS;
+
+            let status =
+                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+            Error::check(status, "nvEncEncodePicture", "Failed to flush encoder")?;
+
+            Ok(())
+        }
+    }
+
+    /// すべてのエンコード済みパケットを取得する
+    pub fn get_encoded_packets(&mut self) -> Vec<EncodedPacket> {
+        std::mem::take(&mut self.encoded_packets)
+    }
 }
 
 impl Drop for Encoder {
