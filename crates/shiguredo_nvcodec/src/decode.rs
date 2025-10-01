@@ -29,20 +29,20 @@ impl Decoder {
             let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
             Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 
-            let ctx_owned = crate::OwnedWithCleanup::new(ctx, |ctx| {
+            let ctx_guard = crate::ReleaseGuard::new(|| {
                 sys::cuCtxDestroy_v2(ctx);
             });
 
             // デコーダー用のコンテキストロックを作成
             let mut ctx_lock = ptr::null_mut();
-            let status = sys::cuvidCtxLockCreate(&mut ctx_lock, *ctx_owned.get());
+            let status = sys::cuvidCtxLockCreate(&mut ctx_lock, ctx);
             Error::check(
                 status,
                 "cuvidCtxLockCreate",
                 "failed to create context lock",
             )?;
 
-            let ctx_lock_owned = crate::OwnedWithCleanup::new(ctx_lock, |ctx_lock| {
+            let ctx_lock_guard = crate::ReleaseGuard::new(|| {
                 sys::cuvidCtxLockDestroy(ctx_lock);
             });
 
@@ -57,8 +57,8 @@ impl Decoder {
                 surface_width: 0,
                 surface_height: 0,
                 frame_tx,
-                ctx: *ctx_owned.get(),
-                ctx_lock: *ctx_lock_owned.get(),
+                ctx,
+                ctx_lock,
             }));
 
             // 映像パーサーを作成する
@@ -79,9 +79,13 @@ impl Decoder {
                 "failed to create video parser",
             )?;
 
+            // 成功したのでクリーンアップをキャンセル
+            ctx_guard.cancel();
+            ctx_lock_guard.cancel();
+
             Ok(Self {
-                ctx: ctx_owned.into_inner(),
-                ctx_lock: ctx_lock_owned.into_inner(),
+                ctx,
+                ctx_lock,
                 parser,
                 state,
                 frame_rx,

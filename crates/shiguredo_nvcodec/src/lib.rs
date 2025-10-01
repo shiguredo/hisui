@@ -97,44 +97,29 @@ where
     }
 }
 
-/// ドロップ時に自動でクリーンアップ処理を実行する構造体
-struct OwnedWithCleanup<T, F: FnOnce(T)> {
-    value: Option<T>,
+/// エラー時にリソースを確実に解放するための構造体
+struct ReleaseGuard<F: FnOnce()> {
     cleanup: Option<F>,
 }
 
-impl<T, F: FnOnce(T)> OwnedWithCleanup<T, F> {
-    /// 新しい OwnedWithCleanup を作成する
-    fn new(value: T, cleanup: F) -> Self {
+impl<F: FnOnce()> ReleaseGuard<F> {
+    /// 新しい ReleaseGuard を作成する
+    fn new(cleanup: F) -> Self {
         Self {
-            value: Some(value),
             cleanup: Some(cleanup),
         }
     }
 
-    /// 値への参照を取得する
-    fn get(&self) -> &T {
-        self.value.as_ref().expect("value should be present")
-    }
-
-    /// 値への可変参照を取得する
-    fn get_mut(&mut self) -> &mut T {
-        self.value.as_mut().expect("value should be present")
-    }
-
-    /// クリーンアップ処理をキャンセルし、値の所有権を取得する
-    /// （リソースの所有権が移転した場合などに使用）
-    fn into_inner(mut self) -> T {
-        let value = self.value.take().expect("value should be present");
+    /// クリーンアップ処理をキャンセルする（リソースの所有権が移転した場合などに使用）
+    fn cancel(mut self) {
         self.cleanup = None;
-        value
     }
 }
 
-impl<T, F: FnOnce(T)> Drop for OwnedWithCleanup<T, F> {
+impl<F: FnOnce()> Drop for ReleaseGuard<F> {
     fn drop(&mut self) {
-        if let (Some(value), Some(cleanup)) = (self.value.take(), self.cleanup.take()) {
-            cleanup(value);
+        if let Some(cleanup) = self.cleanup.take() {
+            cleanup();
         }
     }
 }
