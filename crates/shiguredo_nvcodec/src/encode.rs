@@ -35,7 +35,8 @@ impl Encoder {
             // NVENC 操作のために CUDA context をアクティブ化し、エンコードセッションを開く
             let (encoder_api, h_encoder) = crate::with_cuda_context(ctx, || {
                 // NVENC API をロード
-                let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
+                let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST =
+                    unsafe { std::mem::zeroed() };
                 encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
 
                 let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
@@ -47,17 +48,19 @@ impl Encoder {
 
                 // エンコードセッションを開く
                 let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
-                    std::mem::zeroed();
+                    unsafe { std::mem::zeroed() };
                 open_session_params.version = sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
                 open_session_params.deviceType = sys::_NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
                 open_session_params.device = ctx as *mut c_void;
                 open_session_params.apiVersion = sys::NVENCAPI_VERSION;
 
                 let mut h_encoder = ptr::null_mut();
-                let status = (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
-                    &mut open_session_params,
-                    &mut h_encoder,
-                );
+                let status = unsafe {
+                    (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
+                        &mut open_session_params,
+                        &mut h_encoder,
+                    )
+                };
                 Error::check(
                     status,
                     "nvEncOpenEncodeSessionEx",
@@ -90,17 +93,19 @@ impl Encoder {
     unsafe fn initialize_encoder(&mut self) -> Result<(), Error> {
         crate::with_cuda_context(self.ctx, || {
             // プリセット設定を取得
-            let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
+            let mut preset_config: sys::NV_ENC_PRESET_CONFIG = unsafe { std::mem::zeroed() };
             preset_config.version = sys::NV_ENC_PRESET_CONFIG_VER;
             preset_config.presetCfg.version = sys::NV_ENC_CONFIG_VER;
 
-            let status = (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
-                self.h_encoder,
-                sys::NV_ENC_CODEC_HEVC_GUID,
-                sys::NV_ENC_PRESET_P4_GUID,
-                sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
-                &mut preset_config,
-            );
+            let status = unsafe {
+                (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
+                    self.h_encoder,
+                    sys::NV_ENC_CODEC_HEVC_GUID,
+                    sys::NV_ENC_PRESET_P4_GUID,
+                    sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
+                    &mut preset_config,
+                )
+            };
             Error::check(
                 status,
                 "nvEncGetEncodePresetConfigEx",
@@ -108,7 +113,7 @@ impl Encoder {
             )?;
 
             // エンコーダーパラメータを初期化
-            let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
+            let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = unsafe { std::mem::zeroed() };
             let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
@@ -135,8 +140,9 @@ impl Encoder {
             config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
 
             // エンコーダーを初期化
-            let status =
-                (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params);
+            let status = unsafe {
+                (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params)
+            };
             Error::check(
                 status,
                 "nvEncInitializeEncoder",
@@ -162,27 +168,28 @@ impl Encoder {
         unsafe { crate::with_cuda_context(self.ctx, || self.encode_frame_inner(nv12_data)) }
     }
 
-    // encode_frame_inner remains unchanged
     unsafe fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         // 入力用のデバイスメモリを割り当て
         let mut device_input = 0u64;
-        let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
+        let status = unsafe { sys::cuMemAlloc_v2(&mut device_input, nv12_data.len()) };
         Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
 
-        let _device_guard = crate::ReleaseGuard::new(|| {
+        let _device_guard = crate::ReleaseGuard::new(|| unsafe {
             sys::cuMemFree_v2(device_input);
         });
 
         // データをデバイスにコピー
-        let status = sys::cuMemcpyHtoD_v2(
-            device_input,
-            nv12_data.as_ptr() as *const c_void,
-            nv12_data.len(),
-        );
+        let status = unsafe {
+            sys::cuMemcpyHtoD_v2(
+                device_input,
+                nv12_data.as_ptr() as *const c_void,
+                nv12_data.len(),
+            )
+        };
         Error::check(status, "cuMemcpyHtoD_v2", "failed to copy data to device")?;
 
         // CUDA デバイスメモリを入力リソースとして登録
-        let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = std::mem::zeroed();
+        let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = unsafe { std::mem::zeroed() };
         register_resource.version = sys::NV_ENC_REGISTER_RESOURCE_VER;
         register_resource.resourceType =
             sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
@@ -193,8 +200,9 @@ impl Encoder {
         register_resource.bufferFormat = self.buffer_format;
         register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
 
-        let status =
-            (self.encoder.nvEncRegisterResource.unwrap())(self.h_encoder, &mut register_resource);
+        let status = unsafe {
+            (self.encoder.nvEncRegisterResource.unwrap())(self.h_encoder, &mut register_resource)
+        };
         Error::check(
             status,
             "nvEncRegisterResource",
@@ -203,17 +211,18 @@ impl Encoder {
 
         let registered_resource = register_resource.registeredResource;
 
-        let _registered_guard = crate::ReleaseGuard::new(|| {
+        let _registered_guard = crate::ReleaseGuard::new(|| unsafe {
             (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
         });
 
         // 登録したリソースをマップ
-        let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = std::mem::zeroed();
+        let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = unsafe { std::mem::zeroed() };
         map_input_resource.version = sys::NV_ENC_MAP_INPUT_RESOURCE_VER;
         map_input_resource.registeredResource = registered_resource;
 
-        let status =
-            (self.encoder.nvEncMapInputResource.unwrap())(self.h_encoder, &mut map_input_resource);
+        let status = unsafe {
+            (self.encoder.nvEncMapInputResource.unwrap())(self.h_encoder, &mut map_input_resource)
+        };
         Error::check(
             status,
             "nvEncMapInputResource",
@@ -222,18 +231,21 @@ impl Encoder {
 
         let mapped_resource = map_input_resource.mappedResource;
 
-        let _mapped_guard = crate::ReleaseGuard::new(|| {
+        let _mapped_guard = crate::ReleaseGuard::new(|| unsafe {
             (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
         });
 
         // 出力ビットストリームバッファを割り当て
-        let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
+        let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER =
+            unsafe { std::mem::zeroed() };
         create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
 
-        let status = (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
-            self.h_encoder,
-            &mut create_bitstream,
-        );
+        let status = unsafe {
+            (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
+                self.h_encoder,
+                &mut create_bitstream,
+            )
+        };
         Error::check(
             status,
             "nvEncCreateBitstreamBuffer",
@@ -242,12 +254,12 @@ impl Encoder {
 
         let output_buffer = create_bitstream.bitstreamBuffer;
 
-        let _bitstream_guard = crate::ReleaseGuard::new(|| {
+        let _bitstream_guard = crate::ReleaseGuard::new(|| unsafe {
             (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
         });
 
         // エンコードピクチャパラメータを設定
-        let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+        let mut pic_params: sys::NV_ENC_PIC_PARAMS = unsafe { std::mem::zeroed() };
         pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
         pic_params.inputWidth = self.width;
         pic_params.inputHeight = self.height;
@@ -258,19 +270,21 @@ impl Encoder {
         pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
 
         // ピクチャをエンコード
-        let status = (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+        let status =
+            unsafe { (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params) };
         Error::check(status, "nvEncEncodePicture", "failed to encode picture")?;
 
         // ビットストリームをロックしてエンコード済みデータを読み取る
-        let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
+        let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = unsafe { std::mem::zeroed() };
         lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
         lock_bitstream.outputBitstream = output_buffer;
 
-        let status =
-            (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream);
+        let status = unsafe {
+            (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream)
+        };
         Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
 
-        let _lock_guard = crate::ReleaseGuard::new(|| {
+        let _lock_guard = crate::ReleaseGuard::new(|| unsafe {
             (self.encoder.nvEncUnlockBitstream.unwrap())(
                 self.h_encoder,
                 lock_bitstream.outputBitstream,
@@ -278,10 +292,12 @@ impl Encoder {
         });
 
         // エンコード済みデータをコピー
-        let encoded_data = std::slice::from_raw_parts(
-            lock_bitstream.bitstreamBufferPtr as *const u8,
-            lock_bitstream.bitstreamSizeInBytes as usize,
-        )
+        let encoded_data = unsafe {
+            std::slice::from_raw_parts(
+                lock_bitstream.bitstreamBufferPtr as *const u8,
+                lock_bitstream.bitstreamSizeInBytes as usize,
+            )
+        }
         .to_vec();
 
         let timestamp = lock_bitstream.outputTimeStamp;
@@ -300,12 +316,13 @@ impl Encoder {
     /// エンコーダーをフラッシュし、残りのフレームを取得する
     pub fn flush(&mut self) -> Result<(), Error> {
         unsafe {
-            let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+            let mut pic_params: sys::NV_ENC_PIC_PARAMS = unsafe { std::mem::zeroed() };
             pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
             pic_params.encodePicFlags = sys::NV_ENC_PIC_FLAG_EOS;
 
-            let status =
-                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+            let status = unsafe {
+                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params)
+            };
             Error::check(status, "nvEncEncodePicture", "failed to flush encoder")?;
 
             Ok(())
@@ -325,7 +342,7 @@ impl Drop for Encoder {
                 // クリーンアップ前に context をアクティブ化
                 let _ = crate::with_cuda_context(self.ctx, || {
                     if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
-                        destroy_fn(self.h_encoder);
+                        unsafe { destroy_fn(self.h_encoder) };
                     }
                     Ok::<(), Error>(())
                 });
