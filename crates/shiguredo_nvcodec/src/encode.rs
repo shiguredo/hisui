@@ -103,8 +103,6 @@ impl Encoder {
             let state = Arc::new(Mutex::new(EncoderState {
                 width,
                 height,
-                input_buffers: Vec::new(),
-                output_buffers: Vec::new(),
                 buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
                 encoded_packets: Vec::new(),
             }));
