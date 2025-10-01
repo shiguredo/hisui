@@ -10,7 +10,7 @@ pub struct Decoder {
     ctx: sys::CUcontext,
     ctx_lock: sys::CUvideoctxlock,
     parser: sys::CUvideoparser,
-    state: Mutex<DecoderState>,
+    state: Box<Mutex<DecoderState>>,
     frame_rx: Receiver<Result<DecodedFrame, Error>>,
 }
 
@@ -45,7 +45,7 @@ impl Decoder {
             let (frame_tx, frame_rx) = mpsc::channel();
 
             // デコーダーの状態を作成
-            let state = Mutex::new(DecoderState {
+            let state = Box::new(Mutex::new(DecoderState {
                 decoder: ptr::null_mut(),
                 width: 0,
                 height: 0,
@@ -54,14 +54,14 @@ impl Decoder {
                 frame_tx,
                 ctx,
                 ctx_lock,
-            });
+            }));
 
             // 映像パーサーを作成する
             let mut parser_params: sys::CUVIDPARSERPARAMS = std::mem::zeroed();
             parser_params.CodecType = sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC;
             parser_params.ulMaxNumDecodeSurfaces = 20; // TODO: 後続の PR で外から設定可能にする
             parser_params.ulMaxDisplayDelay = 0; // TODO: 後続の PR で外から設定可能にする
-            parser_params.pUserData = (&state).cast();
+            parser_params.pUserData = (&*state) as *const _ as *mut c_void;
             parser_params.pfnSequenceCallback = Some(handle_video_sequence);
             parser_params.pfnDecodePicture = Some(handle_picture_decode);
             parser_params.pfnDisplayPicture = Some(handle_picture_display);
@@ -210,7 +210,7 @@ unsafe extern "C" fn handle_video_sequence(
         return 0;
     }
 
-    let state_arc = unsafe { user_data as *const Mutex<DecoderState> };
+    let state_arc = unsafe { &*(user_data as *const Mutex<DecoderState>) };
     let result: Result<_, Error> = (|| {
         let mut state = state_arc.lock().unwrap();
         let format = unsafe { &*format };
@@ -280,7 +280,7 @@ unsafe extern "C" fn handle_picture_decode(
         return 0;
     }
 
-    let state_arc = unsafe { user_data as *const Mutex<DecoderState> };
+    let state_arc = unsafe { &*(user_data as *const Mutex<DecoderState>) };
     let result = (|| {
         let state = state_arc.lock().unwrap();
 
@@ -316,7 +316,7 @@ unsafe extern "C" fn handle_picture_display(
         return 0;
     }
 
-    let state_arc = unsafe { user_data as *const Mutex<DecoderState> };
+    let state_arc = unsafe { &*(user_data as *const Mutex<DecoderState>) };
     let result = (|| {
         let state = state_arc.lock().unwrap();
         let disp_info = unsafe { &*disp_info };
