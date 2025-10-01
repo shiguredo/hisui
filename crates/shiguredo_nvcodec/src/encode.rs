@@ -123,7 +123,7 @@ impl Encoder {
 
     unsafe fn initialize_encoder(&mut self) -> Result<(), Error> {
         // CUDA context を push
-        let status = sys::cuCtxPushCurrent_v2(self.ctx);
+        let status = unsafe { sys::cuCtxPushCurrent_v2(self.ctx) };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
             return Err(Error::new(
                 status,
@@ -134,17 +134,19 @@ impl Encoder {
 
         let result = (|| {
             // プリセット設定を取得
-            let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
+            let mut preset_config: sys::NV_ENC_PRESET_CONFIG = unsafe { std::mem::zeroed() };
             preset_config.version = sys::NV_ENC_PRESET_CONFIG_VER;
             preset_config.presetCfg.version = sys::NV_ENC_CONFIG_VER;
 
-            let status = (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
-                self.h_encoder,
-                sys::NV_ENC_CODEC_HEVC_GUID,
-                sys::NV_ENC_PRESET_P4_GUID,
-                sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
-                &mut preset_config,
-            );
+            let status = unsafe {
+                (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
+                    self.h_encoder,
+                    sys::NV_ENC_CODEC_HEVC_GUID,
+                    sys::NV_ENC_PRESET_P4_GUID,
+                    sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
+                    &mut preset_config,
+                )
+            };
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 return Err(Error::new(
                     status,
@@ -154,7 +156,7 @@ impl Encoder {
             }
 
             // エンコーダーパラメータを初期化
-            let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
+            let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = unsafe { std::mem::zeroed() };
             let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
             let state = self.state.lock().unwrap();
@@ -185,8 +187,9 @@ impl Encoder {
             drop(state); // エンコーダー呼び出し前にロックを解放
 
             // エンコーダーを初期化
-            let status =
-                (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params);
+            let status = unsafe {
+                (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params)
+            };
 
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 return Err(Error::new(
@@ -200,7 +203,7 @@ impl Encoder {
         })();
 
         // 初期化後に context を pop
-        sys::cuCtxPopCurrent_v2(ptr::null_mut());
+        unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
 
         result
     }
@@ -244,7 +247,7 @@ impl Encoder {
 
         // 入力用のデバイスメモリを割り当て
         let mut device_input = 0u64;
-        let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
+        let status = unsafe { sys::cuMemAlloc_v2(&mut device_input, nv12_data.len()) };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
             return Err(Error::new(
                 status,
@@ -254,13 +257,15 @@ impl Encoder {
         }
 
         // データをデバイスにコピー
-        let status = sys::cuMemcpyHtoD_v2(
-            device_input,
-            nv12_data.as_ptr() as *const c_void,
-            nv12_data.len(),
-        );
+        let status = unsafe {
+            sys::cuMemcpyHtoD_v2(
+                device_input,
+                nv12_data.as_ptr() as *const c_void,
+                nv12_data.len(),
+            )
+        };
         if status != sys::cudaError_enum_CUDA_SUCCESS {
-            sys::cuMemFree_v2(device_input);
+            unsafe { sys::cuMemFree_v2(device_input) };
             return Err(Error::new(
                 status,
                 "cuMemcpyHtoD_v2",
@@ -269,7 +274,7 @@ impl Encoder {
         }
 
         // CUDA デバイスメモリを入力リソースとして登録
-        let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = std::mem::zeroed();
+        let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = unsafe { std::mem::zeroed() };
         register_resource.version = sys::NV_ENC_REGISTER_RESOURCE_VER;
         register_resource.resourceType =
             sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
@@ -280,10 +285,11 @@ impl Encoder {
         register_resource.bufferFormat = state.buffer_format;
         register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
 
-        let status =
-            (self.encoder.nvEncRegisterResource.unwrap())(self.h_encoder, &mut register_resource);
+        let status = unsafe {
+            (self.encoder.nvEncRegisterResource.unwrap())(self.h_encoder, &mut register_resource)
+        };
         if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            sys::cuMemFree_v2(device_input);
+            unsafe { sys::cuMemFree_v2(device_input) };
             return Err(Error::new(
                 status,
                 "nvEncRegisterResource",
@@ -294,15 +300,21 @@ impl Encoder {
         let registered_resource = register_resource.registeredResource;
 
         // 登録したリソースをマップ
-        let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = std::mem::zeroed();
+        let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = unsafe { std::mem::zeroed() };
         map_input_resource.version = sys::NV_ENC_MAP_INPUT_RESOURCE_VER;
         map_input_resource.registeredResource = registered_resource;
 
-        let status =
-            (self.encoder.nvEncMapInputResource.unwrap())(self.h_encoder, &mut map_input_resource);
+        let status = unsafe {
+            (self.encoder.nvEncMapInputResource.unwrap())(self.h_encoder, &mut map_input_resource)
+        };
         if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
-            sys::cuMemFree_v2(device_input);
+            unsafe {
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
+                sys::cuMemFree_v2(device_input);
+            }
             return Err(Error::new(
                 status,
                 "nvEncMapInputResource",
@@ -313,17 +325,25 @@ impl Encoder {
         let mapped_resource = map_input_resource.mappedResource;
 
         // 出力ビットストリームバッファを割り当て
-        let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
+        let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER =
+            unsafe { std::mem::zeroed() };
         create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
 
-        let status = (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
-            self.h_encoder,
-            &mut create_bitstream,
-        );
+        let status = unsafe {
+            (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
+                self.h_encoder,
+                &mut create_bitstream,
+            )
+        };
         if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
-            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
-            sys::cuMemFree_v2(device_input);
+            unsafe {
+                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
+                sys::cuMemFree_v2(device_input);
+            }
             return Err(Error::new(
                 status,
                 "nvEncCreateBitstreamBuffer",
@@ -333,7 +353,7 @@ impl Encoder {
         let output_buffer = create_bitstream.bitstreamBuffer;
 
         // エンコードピクチャパラメータを設定
-        let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+        let mut pic_params: sys::NV_ENC_PIC_PARAMS = unsafe { std::mem::zeroed() };
         pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
         pic_params.inputWidth = state.width;
         pic_params.inputHeight = state.height;
@@ -346,13 +366,19 @@ impl Encoder {
         drop(state); // エンコード前にロックを解放
 
         // ピクチャをエンコード
-        let status = (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+        let status =
+            unsafe { (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params) };
 
         if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
-            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
-            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
-            sys::cuMemFree_v2(device_input);
+            unsafe {
+                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
+                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+                sys::cuMemFree_v2(device_input);
+            }
             return Err(Error::new(
                 status,
                 "nvEncEncodePicture",
@@ -361,17 +387,23 @@ impl Encoder {
         }
 
         // ビットストリームをロックしてエンコード済みデータを読み取る
-        let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
+        let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = unsafe { std::mem::zeroed() };
         lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
         lock_bitstream.outputBitstream = output_buffer;
 
-        let status =
-            (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream);
+        let status = unsafe {
+            (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream)
+        };
         if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
-            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
-            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
-            sys::cuMemFree_v2(device_input);
+            unsafe {
+                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+                (self.encoder.nvEncUnregisterResource.unwrap())(
+                    self.h_encoder,
+                    registered_resource,
+                );
+                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+                sys::cuMemFree_v2(device_input);
+            }
             return Err(Error::new(
                 status,
                 "nvEncLockBitstream",
@@ -380,29 +412,41 @@ impl Encoder {
         }
 
         // エンコード済みデータをコピー
-        let encoded_data = std::slice::from_raw_parts(
-            lock_bitstream.bitstreamBufferPtr as *const u8,
-            lock_bitstream.bitstreamSizeInBytes as usize,
-        )
-        .to_vec();
+        let encoded_data = unsafe {
+            std::slice::from_raw_parts(
+                lock_bitstream.bitstreamBufferPtr as *const u8,
+                lock_bitstream.bitstreamSizeInBytes as usize,
+            )
+            .to_vec()
+        };
 
         // ビットストリームをアンロック
-        (self.encoder.nvEncUnlockBitstream.unwrap())(
-            self.h_encoder,
-            lock_bitstream.outputBitstream,
-        );
+        unsafe {
+            (self.encoder.nvEncUnlockBitstream.unwrap())(
+                self.h_encoder,
+                lock_bitstream.outputBitstream,
+            );
+        }
 
         // 入力リソースをアンマップ
-        (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+        unsafe {
+            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+        }
 
         // リソースを登録解除
-        (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+        unsafe {
+            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+        }
 
         // ビットストリームバッファを破棄
-        (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+        unsafe {
+            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+        }
 
         // デバイスメモリを解放
-        sys::cuMemFree_v2(device_input);
+        unsafe {
+            sys::cuMemFree_v2(device_input);
+        }
 
         // エンコード済みパケットを保存
         let mut state = self.state.lock().unwrap();
