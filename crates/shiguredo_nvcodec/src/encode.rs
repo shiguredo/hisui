@@ -37,7 +37,7 @@ pub struct EncodedPacket {
 impl Encoder {
     /// H.265 エンコーダーインスタンスを生成する
     pub fn new_hevc(width: u32, height: u32) -> Result<Self, Error> {
-        // CUDA ドライバーの初期化
+        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行）
         ensure_cuda_initialized()?;
 
         unsafe {
@@ -53,7 +53,7 @@ impl Encoder {
                 ));
             }
 
-            // Activate CUDA context for NVENC operations
+            // NVENC 操作のために CUDA context をアクティブ化
             let status = sys::cuCtxPushCurrent_v2(ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuCtxDestroy_v2(ctx);
@@ -64,7 +64,7 @@ impl Encoder {
                 ));
             }
 
-            // Load NVENC API
+            // NVENC API をロード
             let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
             encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
 
@@ -79,7 +79,7 @@ impl Encoder {
                 ));
             }
 
-            // Open encode session
+            // エンコードセッションを開く
             let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
                 std::mem::zeroed();
             open_session_params.version = sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
@@ -102,7 +102,7 @@ impl Encoder {
                 ));
             }
 
-            // Pop context after initialization
+            // 初期化後に context を pop
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             let state = Arc::new(Mutex::new(EncoderState {
@@ -121,7 +121,7 @@ impl Encoder {
                 state,
             };
 
-            // Initialize encoder with default parameters
+            // デフォルトパラメータでエンコーダーを初期化
             encoder.initialize_encoder()?;
 
             Ok(encoder)
@@ -129,18 +129,18 @@ impl Encoder {
     }
 
     unsafe fn initialize_encoder(&mut self) -> Result<(), Error> {
-        unsafe {
-            // Push CUDA context
-            let status = sys::cuCtxPushCurrent_v2(self.ctx);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuCtxPushCurrent_v2",
-                    "Failed to push CUDA context",
-                ));
-            }
+        // CUDA context を push
+        let status = sys::cuCtxPushCurrent_v2(self.ctx);
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            return Err(Error::new(
+                status,
+                "cuCtxPushCurrent_v2",
+                "Failed to push CUDA context",
+            ));
+        }
 
-            // Get preset configuration first
+        let result = (|| {
+            // プリセット設定を取得
             let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
             preset_config.version = sys::NV_ENC_PRESET_CONFIG_VER;
             preset_config.presetCfg.version = sys::NV_ENC_CONFIG_VER;
@@ -149,11 +149,10 @@ impl Encoder {
                 self.h_encoder,
                 sys::NV_ENC_CODEC_HEVC_GUID,
                 sys::NV_ENC_PRESET_P4_GUID,
-                sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY, // TODO: make configurable
+                sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
                 &mut preset_config,
             );
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 return Err(Error::new(
                     status,
                     "nvEncGetEncodePresetConfigEx",
@@ -161,7 +160,7 @@ impl Encoder {
                 ));
             }
 
-            // Initialize encoder parameters
+            // エンコーダーパラメータを初期化
             let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
             let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
@@ -180,24 +179,21 @@ impl Encoder {
             init_params.encodeConfig = &mut config;
             init_params.maxEncodeWidth = state.width;
             init_params.maxEncodeHeight = state.height;
-            init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY; // TODO: make configurable
+            init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY;
 
             config.version = sys::NV_ENC_CONFIG_VER;
             config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID;
             config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
             config.frameIntervalP = 1;
 
-            // Set HEVC-specific configuration
+            // HEVC 固有の設定
             config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
 
-            drop(state); // Release lock before calling encoder
+            drop(state); // エンコーダー呼び出し前にロックを解放
 
-            // Initialize encoder
+            // エンコーダーを初期化
             let status =
                 (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params);
-
-            // Pop context after initialization
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
                 return Err(Error::new(
@@ -208,10 +204,15 @@ impl Encoder {
             }
 
             Ok(())
-        }
+        })();
+
+        // 初期化後に context を pop
+        sys::cuCtxPopCurrent_v2(ptr::null_mut());
+
+        result
     }
 
-    /// Encode a single frame in NV12 format
+    /// NV12 形式の1フレームをエンコードする
     pub fn encode_frame(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         let state = self.state.lock().unwrap();
         let expected_size = (state.width * state.height * 3 / 2) as usize;
@@ -223,9 +224,10 @@ impl Encoder {
                 "Invalid NV12 data size",
             ));
         }
+        drop(state);
 
         unsafe {
-            // Push CUDA context
+            // CUDA context を push
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::new(
@@ -235,208 +237,192 @@ impl Encoder {
                 ));
             }
 
-            // Allocate device memory for input
-            let mut device_input = 0u64;
-            let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::new(
-                    status,
-                    "cuMemAlloc_v2",
-                    "Failed to allocate device memory",
-                ));
-            }
+            let result = self.encode_frame_inner(nv12_data);
 
-            // Copy data to device
-            let status = sys::cuMemcpyHtoD_v2(
-                device_input,
-                nv12_data.as_ptr() as *const c_void,
-                nv12_data.len(),
-            );
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                sys::cuMemFree_v2(device_input);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::new(
-                    status,
-                    "cuMemcpyHtoD_v2",
-                    "Failed to copy data to device",
-                ));
-            }
-
-            // Register the CUDA device memory as an input resource
-            let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = std::mem::zeroed();
-            register_resource.version = sys::NV_ENC_REGISTER_RESOURCE_VER;
-            register_resource.resourceType =
-                sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
-            register_resource.resourceToRegister = device_input as *mut c_void;
-            register_resource.width = state.width;
-            register_resource.height = state.height;
-            register_resource.pitch = state.width;
-            register_resource.bufferFormat = state.buffer_format;
-            register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
-
-            let status = (self.encoder.nvEncRegisterResource.unwrap())(
-                self.h_encoder,
-                &mut register_resource,
-            );
-            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                sys::cuMemFree_v2(device_input);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::new(
-                    status,
-                    "nvEncRegisterResource",
-                    "Failed to register input resource",
-                ));
-            }
-
-            let registered_resource = register_resource.registeredResource;
-
-            // Map the registered resource
-            let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = std::mem::zeroed();
-            map_input_resource.version = sys::NV_ENC_MAP_INPUT_RESOURCE_VER;
-            map_input_resource.registeredResource = registered_resource;
-
-            let status = (self.encoder.nvEncMapInputResource.unwrap())(
-                self.h_encoder,
-                &mut map_input_resource,
-            );
-            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                (self.encoder.nvEncUnregisterResource.unwrap())(
-                    self.h_encoder,
-                    registered_resource,
-                );
-                sys::cuMemFree_v2(device_input);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::new(
-                    status,
-                    "nvEncMapInputResource",
-                    "Failed to map input resource",
-                ));
-            }
-
-            let mapped_resource = map_input_resource.mappedResource;
-
-            // Allocate output bitstream buffer
-            let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
-            create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
-
-            let status = (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
-                self.h_encoder,
-                &mut create_bitstream,
-            );
-            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
-                (self.encoder.nvEncUnregisterResource.unwrap())(
-                    self.h_encoder,
-                    registered_resource,
-                );
-                sys::cuMemFree_v2(device_input);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::new(
-                    status,
-                    "nvEncCreateBitstreamBuffer",
-                    "Failed to create bitstream buffer",
-                ));
-            }
-            let output_buffer = create_bitstream.bitstreamBuffer;
-
-            // Setup encode picture parameters
-            let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
-            pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
-            pic_params.inputWidth = state.width;
-            pic_params.inputHeight = state.height;
-            pic_params.inputPitch = state.width;
-            pic_params.inputBuffer = mapped_resource; // Use mapped resource, not device pointer!
-            pic_params.outputBitstream = output_buffer;
-            pic_params.bufferFmt = state.buffer_format;
-            pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
-
-            drop(state); // Release lock before encoding
-
-            // Encode picture
-            let status =
-                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
-
-            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
-                (self.encoder.nvEncUnregisterResource.unwrap())(
-                    self.h_encoder,
-                    registered_resource,
-                );
-                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
-                sys::cuMemFree_v2(device_input);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::new(
-                    status,
-                    "nvEncEncodePicture",
-                    "Failed to encode picture",
-                ));
-            }
-
-            // Lock bitstream to read encoded data
-            let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
-            lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
-            lock_bitstream.outputBitstream = output_buffer;
-
-            let status =
-                (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream);
-            if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-                (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
-                (self.encoder.nvEncUnregisterResource.unwrap())(
-                    self.h_encoder,
-                    registered_resource,
-                );
-                (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
-                sys::cuMemFree_v2(device_input);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
-                return Err(Error::new(
-                    status,
-                    "nvEncLockBitstream",
-                    "Failed to lock bitstream",
-                ));
-            }
-
-            // Copy encoded data
-            let encoded_data = std::slice::from_raw_parts(
-                lock_bitstream.bitstreamBufferPtr as *const u8,
-                lock_bitstream.bitstreamSizeInBytes as usize,
-            )
-            .to_vec();
-
-            // Unlock bitstream
-            (self.encoder.nvEncUnlockBitstream.unwrap())(
-                self.h_encoder,
-                lock_bitstream.outputBitstream,
-            );
-
-            // Unmap input resource
-            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
-
-            // Unregister resource
-            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
-
-            // Destroy bitstream buffer
-            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
-
-            // Free device memory
-            sys::cuMemFree_v2(device_input);
-
-            // Pop context
+            // context を pop
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
-            // Store encoded packet
-            let mut state = self.state.lock().unwrap();
-            state.encoded_packets.push(EncodedPacket {
-                data: encoded_data,
-                timestamp: lock_bitstream.outputTimeStamp,
-                picture_type: lock_bitstream.pictureType,
-            });
-
-            Ok(())
+            result
         }
     }
 
-    /// Flush encoder and get remaining packets
+    unsafe fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+        let state = self.state.lock().unwrap();
+
+        // 入力用のデバイスメモリを割り当て
+        let mut device_input = 0u64;
+        let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            return Err(Error::new(
+                status,
+                "cuMemAlloc_v2",
+                "Failed to allocate device memory",
+            ));
+        }
+
+        // データをデバイスにコピー
+        let status = sys::cuMemcpyHtoD_v2(
+            device_input,
+            nv12_data.as_ptr() as *const c_void,
+            nv12_data.len(),
+        );
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            sys::cuMemFree_v2(device_input);
+            return Err(Error::new(
+                status,
+                "cuMemcpyHtoD_v2",
+                "Failed to copy data to device",
+            ));
+        }
+
+        // CUDA デバイスメモリを入力リソースとして登録
+        let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = std::mem::zeroed();
+        register_resource.version = sys::NV_ENC_REGISTER_RESOURCE_VER;
+        register_resource.resourceType =
+            sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
+        register_resource.resourceToRegister = device_input as *mut c_void;
+        register_resource.width = state.width;
+        register_resource.height = state.height;
+        register_resource.pitch = state.width;
+        register_resource.bufferFormat = state.buffer_format;
+        register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
+
+        let status =
+            (self.encoder.nvEncRegisterResource.unwrap())(self.h_encoder, &mut register_resource);
+        if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+            sys::cuMemFree_v2(device_input);
+            return Err(Error::new(
+                status,
+                "nvEncRegisterResource",
+                "Failed to register input resource",
+            ));
+        }
+
+        let registered_resource = register_resource.registeredResource;
+
+        // 登録したリソースをマップ
+        let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = std::mem::zeroed();
+        map_input_resource.version = sys::NV_ENC_MAP_INPUT_RESOURCE_VER;
+        map_input_resource.registeredResource = registered_resource;
+
+        let status =
+            (self.encoder.nvEncMapInputResource.unwrap())(self.h_encoder, &mut map_input_resource);
+        if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+            sys::cuMemFree_v2(device_input);
+            return Err(Error::new(
+                status,
+                "nvEncMapInputResource",
+                "Failed to map input resource",
+            ));
+        }
+
+        let mapped_resource = map_input_resource.mappedResource;
+
+        // 出力ビットストリームバッファを割り当て
+        let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
+        create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
+
+        let status = (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
+            self.h_encoder,
+            &mut create_bitstream,
+        );
+        if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+            sys::cuMemFree_v2(device_input);
+            return Err(Error::new(
+                status,
+                "nvEncCreateBitstreamBuffer",
+                "Failed to create bitstream buffer",
+            ));
+        }
+        let output_buffer = create_bitstream.bitstreamBuffer;
+
+        // エンコードピクチャパラメータを設定
+        let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+        pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
+        pic_params.inputWidth = state.width;
+        pic_params.inputHeight = state.height;
+        pic_params.inputPitch = state.width;
+        pic_params.inputBuffer = mapped_resource;
+        pic_params.outputBitstream = output_buffer;
+        pic_params.bufferFmt = state.buffer_format;
+        pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
+
+        drop(state); // エンコード前にロックを解放
+
+        // ピクチャをエンコード
+        let status = (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+
+        if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+            sys::cuMemFree_v2(device_input);
+            return Err(Error::new(
+                status,
+                "nvEncEncodePicture",
+                "Failed to encode picture",
+            ));
+        }
+
+        // ビットストリームをロックしてエンコード済みデータを読み取る
+        let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
+        lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
+        lock_bitstream.outputBitstream = output_buffer;
+
+        let status =
+            (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream);
+        if status != sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+            sys::cuMemFree_v2(device_input);
+            return Err(Error::new(
+                status,
+                "nvEncLockBitstream",
+                "Failed to lock bitstream",
+            ));
+        }
+
+        // エンコード済みデータをコピー
+        let encoded_data = std::slice::from_raw_parts(
+            lock_bitstream.bitstreamBufferPtr as *const u8,
+            lock_bitstream.bitstreamSizeInBytes as usize,
+        )
+        .to_vec();
+
+        // ビットストリームをアンロック
+        (self.encoder.nvEncUnlockBitstream.unwrap())(
+            self.h_encoder,
+            lock_bitstream.outputBitstream,
+        );
+
+        // 入力リソースをアンマップ
+        (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+
+        // リソースを登録解除
+        (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+
+        // ビットストリームバッファを破棄
+        (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+
+        // デバイスメモリを解放
+        sys::cuMemFree_v2(device_input);
+
+        // エンコード済みパケットを保存
+        let mut state = self.state.lock().unwrap();
+        state.encoded_packets.push(EncodedPacket {
+            data: encoded_data,
+            timestamp: lock_bitstream.outputTimeStamp,
+            picture_type: lock_bitstream.pictureType,
+        });
+
+        Ok(())
+    }
+
+    /// エンコーダーをフラッシュし、残りのパケットを取得する
     pub fn flush(&mut self) -> Result<(), Error> {
         unsafe {
             let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
@@ -457,7 +443,7 @@ impl Encoder {
         }
     }
 
-    /// Get all encoded packets
+    /// すべてのエンコード済みパケットを取得する
     pub fn get_encoded_packets(&mut self) -> Vec<EncodedPacket> {
         let mut state = self.state.lock().unwrap();
         std::mem::take(&mut state.encoded_packets)
@@ -468,7 +454,7 @@ impl Drop for Encoder {
     fn drop(&mut self) {
         unsafe {
             if !self.h_encoder.is_null() {
-                // Activate context before cleanup
+                // クリーンアップ前に context をアクティブ化
                 let _ = sys::cuCtxPushCurrent_v2(self.ctx);
 
                 if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
@@ -500,34 +486,34 @@ mod tests {
         let width = 640;
         let height = 480;
 
-        // Create encoder
+        // エンコーダーを作成
         let mut encoder = Encoder::new_hevc(width, height).expect("Failed to create HEVC encoder");
 
-        // Prepare black frame in NV12 format
-        // Y plane: 16 (black in YUV)
-        // UV plane: 128 (neutral chroma)
+        // NV12 形式の黒フレームを準備
+        // Y プレーン: 16 (YUV での黒)
+        // UV プレーン: 128 (ニュートラルなクロマ)
         let y_size = (width * height) as usize;
         let uv_size = (width * height / 2) as usize;
 
         let mut frame_data = vec![16u8; y_size + uv_size];
-        // Set UV plane to 128 (neutral chroma)
+        // UV プレーンを 128 に設定（ニュートラルなクロマ）
         frame_data[y_size..].fill(128);
 
-        // Encode the frame
+        // フレームをエンコード
         encoder
             .encode_frame(&frame_data)
             .expect("Failed to encode black frame");
 
-        // Flush encoder
+        // エンコーダーをフラッシュ
         encoder.flush().expect("Failed to flush encoder");
 
-        // Get encoded packets
+        // エンコード済みパケットを取得
         let packets = encoder.get_encoded_packets();
 
-        // Verify we got at least one packet
+        // 少なくとも1つのパケットを取得したことを確認
         assert!(!packets.is_empty(), "No encoded packets received");
 
-        // Verify the first packet is a keyframe (IDR)
+        // 最初のパケットがキーフレーム（IDR）であることを確認
         let first_packet = &packets[0];
         assert!(
             matches!(
@@ -537,7 +523,7 @@ mod tests {
             "First frame should be a keyframe"
         );
 
-        // Verify packet has data
+        // パケットにデータがあることを確認
         assert!(
             !first_packet.data.is_empty(),
             "Encoded packet should have data"
