@@ -8,10 +8,6 @@ pub struct Encoder {
     ctx: sys::CUcontext,
     encoder: sys::NV_ENCODE_API_FUNCTION_LIST,
     h_encoder: *mut c_void,
-    state: EncoderState,
-}
-
-struct EncoderState {
     width: u32,
     height: u32,
     buffer_format: sys::NV_ENC_BUFFER_FORMAT,
@@ -86,18 +82,14 @@ impl Encoder {
             // 初期化後に context を pop
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
-            let state = EncoderState {
-                width,
-                height,
-                buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
-                encoded_packets: Vec::new(),
-            };
-
             let mut encoder = Self {
                 ctx,
                 encoder: encoder_api,
                 h_encoder,
-                state,
+                width,
+                height,
+                buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
+                encoded_packets: Vec::new(),
             };
 
             // デフォルトパラメータでエンコーダーを初期化
@@ -147,16 +139,16 @@ impl Encoder {
         init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
         init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
         init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID;
-        init_params.encodeWidth = self.state.width;
-        init_params.encodeHeight = self.state.height;
-        init_params.darWidth = self.state.width;
-        init_params.darHeight = self.state.height;
+        init_params.encodeWidth = self.width;
+        init_params.encodeHeight = self.height;
+        init_params.darWidth = self.width;
+        init_params.darHeight = self.height;
         init_params.frameRateNum = 30;
         init_params.frameRateDen = 1;
         init_params.enablePTD = 1;
         init_params.encodeConfig = &mut config;
-        init_params.maxEncodeWidth = self.state.width;
-        init_params.maxEncodeHeight = self.state.height;
+        init_params.maxEncodeWidth = self.width;
+        init_params.maxEncodeHeight = self.height;
         init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY;
 
         config.version = sys::NV_ENC_CONFIG_VER;
@@ -182,7 +174,7 @@ impl Encoder {
 
     /// NV12 形式の1フレームをエンコードする
     pub fn encode_frame(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
-        let expected_size = (self.state.width * self.state.height * 3 / 2) as usize;
+        let expected_size = (self.width * self.height * 3 / 2) as usize;
 
         if nv12_data.len() != expected_size {
             return Err(Error::new(
@@ -229,10 +221,10 @@ impl Encoder {
         register_resource.resourceType =
             sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
         register_resource.resourceToRegister = device_input as *mut c_void;
-        register_resource.width = self.state.width;
-        register_resource.height = self.state.height;
-        register_resource.pitch = self.state.width;
-        register_resource.bufferFormat = self.state.buffer_format;
+        register_resource.width = self.width;
+        register_resource.height = self.height;
+        register_resource.pitch = self.width;
+        register_resource.bufferFormat = self.buffer_format;
         register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
 
         let status =
@@ -291,12 +283,12 @@ impl Encoder {
         // エンコードピクチャパラメータを設定
         let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
         pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
-        pic_params.inputWidth = self.state.width;
-        pic_params.inputHeight = self.state.height;
-        pic_params.inputPitch = self.state.width;
+        pic_params.inputWidth = self.width;
+        pic_params.inputHeight = self.height;
+        pic_params.inputPitch = self.width;
         pic_params.inputBuffer = mapped_resource;
         pic_params.outputBitstream = output_buffer;
-        pic_params.bufferFmt = self.state.buffer_format;
+        pic_params.bufferFmt = self.buffer_format;
         pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
 
         // ピクチャをエンコード
@@ -330,7 +322,7 @@ impl Encoder {
         let picture_type = lock_bitstream.pictureType;
 
         // エンコード済みパケットを保存
-        self.state.encoded_packets.push(EncodedPacket {
+        self.encoded_packets.push(EncodedPacket {
             data: encoded_data,
             timestamp,
             picture_type,
@@ -356,7 +348,7 @@ impl Encoder {
 
     /// すべてのエンコード済みパケットを取得する
     pub fn get_encoded_packets(&mut self) -> Vec<EncodedPacket> {
-        std::mem::take(&mut self.state.encoded_packets)
+        std::mem::take(&mut self.encoded_packets)
     }
 }
 
