@@ -25,13 +25,7 @@ impl Decoder {
             let ctx_flags = 0; // デフォルトのコンテキストフラグ
             let device_id = 0; // プライマリGPUデバイスを使用
             let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuCtxCreate_v2",
-                    "failed to create CUDA context",
-                ));
-            }
+            Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 
             // デコーダー用のコンテキストロックを作成
             let mut ctx_lock = ptr::null_mut();
@@ -135,29 +129,16 @@ impl Decoder {
                 ));
             }
 
-            // 重要: パーサーは非同期でデータを処理する。すべてのデコード操作が
-            // 完了するまで待機するため、CUDA コンテキストを同期する必要がある
-            let status = sys::cuCtxPushCurrent_v2(self.ctx);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuCtxPushCurrent_v2",
-                    "failed to push CUDA context",
-                ));
-            }
-
-            // すべてのデコードが完了したことを確認するために同期する
-            let status = sys::cuCtxSynchronize();
-
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
-
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
+            // パーサーは非同期でデータを処理するので、
+            // すべてのデコード操作が完了するまでここで待機（同期）する
+            crate::with_cuda_context(self.ctx, || {
+                let status = sys::cuCtxSynchronize();
+                Error::check(
                     status,
                     "cuCtxSynchronize",
                     "failed to synchronize CUDA context",
-                ));
-            }
+                )
+            })?;
         }
         Ok(())
     }
@@ -184,9 +165,10 @@ impl Drop for Decoder {
             // Destroy decoder
             let state = self.state.lock().unwrap();
             if !state.decoder.is_null() {
-                sys::cuCtxPushCurrent_v2(self.ctx);
-                sys::cuvidDestroyDecoder(state.decoder);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
+                let _ = crate::with_cuda_context(self.ctx, || {
+                    sys::cuvidDestroyDecoder(state.decoder);
+                    Ok(())
+                });
             }
 
             // Destroy context lock
@@ -260,27 +242,14 @@ unsafe extern "C" fn handle_video_sequence(
         let mut decoder = ptr::null_mut();
 
         // Push CUDA context before creating decoder
-        let status = unsafe { sys::cuCtxPushCurrent_v2(state.ctx) };
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::new(
-                status,
-                "cuCtxPushCurrent_v2",
-                "Failed to push CUDA context",
-            ));
-        }
-
-        let status = unsafe { sys::cuvidCreateDecoder(&mut decoder, &mut create_info) };
-
-        // Always pop context
-        unsafe { sys::cuCtxPopCurrent_v2(ptr::null_mut()) };
-
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::new(
+        crate::with_cuda_context(state.ctx, || {
+            let status = unsafe { sys::cuvidCreateDecoder(&mut decoder, &mut create_info) };
+            Error::check(
                 status,
                 "cuvidCreateDecoder",
                 "Failed to create video decoder",
-            ));
-        }
+            )
+        })?;
 
         state.decoder = decoder;
         state.width = (format.display_area.right - format.display_area.left) as u32;
@@ -321,28 +290,10 @@ unsafe extern "C" fn handle_picture_decode(
             ));
         }
 
-        unsafe {
-            let status = sys::cuCtxPushCurrent_v2(state.ctx);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuCtxPushCurrent_v2",
-                    "Failed to push CUDA context",
-                ));
-            }
-
+        crate::with_cuda_context(state.ctx, || unsafe {
             let status = sys::cuvidDecodePicture(state.decoder, pic_params);
-
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
-
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuvidDecodePicture",
-                    "Failed to decode picture",
-                ));
-            }
-        }
+            Error::check(status, "cuvidDecodePicture", "Failed to decode picture")
+        })?;
 
         Ok(())
     })();
@@ -377,16 +328,7 @@ unsafe extern "C" fn handle_picture_display(
             ));
         }
 
-        unsafe {
-            let status = sys::cuCtxPushCurrent_v2(state.ctx);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuCtxPushCurrent_v2",
-                    "Failed to push CUDA context",
-                ));
-            }
-
+        crate::with_cuda_context(state.ctx, || unsafe {
             // Set up video processing parameters
             let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
             proc_params.progressive_frame = disp_info.progressive_frame;
@@ -406,7 +348,6 @@ unsafe extern "C" fn handle_picture_display(
             );
 
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 return Err(Error::new(
                     status,
                     "cuvidMapVideoFrame64",
@@ -430,7 +371,6 @@ unsafe extern "C" fn handle_picture_display(
 
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-                sys::cuCtxPopCurrent_v2(ptr::null_mut());
                 return Err(Error::new(
                     status,
                     "cuMemcpyDtoH_v2",
@@ -448,7 +388,6 @@ unsafe extern "C" fn handle_picture_display(
 
             // Unmap the video frame
             sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-            sys::cuCtxPopCurrent_v2(ptr::null_mut());
 
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::new(
@@ -467,7 +406,8 @@ unsafe extern "C" fn handle_picture_display(
             };
 
             state.decoded_frames.push(decoded_frame);
-        }
+            Ok(())
+        })?;
 
         Ok(())
     })();

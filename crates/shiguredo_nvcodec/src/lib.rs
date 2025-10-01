@@ -35,6 +35,29 @@ fn ensure_cuda_initialized() -> Result<(), Error> {
     CUDA_INIT_RESULT.clone()
 }
 
+// CUDA context を push して、クロージャを実行し、自動的に pop する
+fn with_cuda_context<F, R>(ctx: sys::CUcontext, f: F) -> Result<R, Error>
+where
+    F: FnOnce() -> Result<R, Error>,
+{
+    unsafe {
+        let status = sys::cuCtxPushCurrent_v2(ctx);
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            return Err(Error::new(
+                status,
+                "cuCtxPushCurrent_v2",
+                "failed to push CUDA context",
+            ));
+        }
+
+        let result = f();
+
+        sys::cuCtxPopCurrent_v2(std::ptr::null_mut());
+
+        result
+    }
+}
+
 /// エラー
 #[derive(Debug, Clone)]
 pub struct Error {
@@ -49,6 +72,14 @@ impl Error {
             status,
             function,
             reason,
+        }
+    }
+
+    fn check(status: u32, function: &'static str, reason: &'static str) -> Result<(), Error> {
+        if status == sys::cudaError_enum_CUDA_SUCCESS {
+            Ok(())
+        } else {
+            Err(Self::new(status, function, reason))
         }
     }
 }
