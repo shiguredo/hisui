@@ -15,11 +15,6 @@ pub struct Encoder {
 struct EncoderState {
     width: u32,
     height: u32,
-    #[allow(dead_code)]
-    input_buffers: Vec<sys::NV_ENC_REGISTERED_PTR>,
-    #[allow(dead_code)]
-    output_buffers: Vec<sys::NV_ENC_OUTPUT_PTR>,
-    #[allow(dead_code)]
     buffer_format: sys::NV_ENC_BUFFER_FORMAT,
     encoded_packets: Vec<EncodedPacket>,
 }
