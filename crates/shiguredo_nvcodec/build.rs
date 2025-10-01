@@ -76,7 +76,7 @@ fn main() {
     }
 
     // バインディングを生成する
-    let mut bindings = bindgen::Builder::default()
+    let bindings = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
         .header(nvcuvid_header.display().to_string())
@@ -164,9 +164,11 @@ pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
 "#;
 
     // 追加の定義を付加してバインディングを書き込む
-    bindings.push_str(additional_definitions);
-
-    std::fs::write(&output_bindings_path, bindings).expect("failed to write bindings");
+    std::fs::write(
+        &output_bindings_path,
+        format!("{bindings}_{additional_definitions}"),
+    )
+    .expect("failed to write bindings");
 
     // CUDA と NVENC/NVCUVID ライブラリのリンク設定
     println!("cargo::rustc-link-lib=dylib=cuda");
