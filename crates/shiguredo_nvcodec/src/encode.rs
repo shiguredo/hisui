@@ -35,8 +35,7 @@ impl Encoder {
             // NVENC 操作のために CUDA context をアクティブ化し、エンコードセッションを開く
             let (encoder_api, h_encoder) = crate::with_cuda_context(ctx, || {
                 // NVENC API をロード
-                let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST =
-                    unsafe { std::mem::zeroed() };
+                let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
                 encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
 
                 let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
@@ -48,19 +47,17 @@ impl Encoder {
 
                 // エンコードセッションを開く
                 let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
-                    unsafe { std::mem::zeroed() };
+                    std::mem::zeroed();
                 open_session_params.version = sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
                 open_session_params.deviceType = sys::_NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
                 open_session_params.device = ctx as *mut c_void;
                 open_session_params.apiVersion = sys::NVENCAPI_VERSION;
 
                 let mut h_encoder = ptr::null_mut();
-                let status = unsafe {
-                    (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
-                        &mut open_session_params,
-                        &mut h_encoder,
-                    )
-                };
+                let status = (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
+                    &mut open_session_params,
+                    &mut h_encoder,
+                );
                 Error::check(
                     status,
                     "nvEncOpenEncodeSessionEx",
@@ -90,7 +87,7 @@ impl Encoder {
         }
     }
 
-    unsafe fn initialize_encoder(&mut self) -> Result<(), Error> {
+    fn initialize_encoder(&mut self) -> Result<(), Error> {
         crate::with_cuda_context(self.ctx, || {
             // プリセット設定を取得
             let mut preset_config: sys::NV_ENC_PRESET_CONFIG = unsafe { std::mem::zeroed() };
@@ -168,7 +165,7 @@ impl Encoder {
         unsafe { crate::with_cuda_context(self.ctx, || self.encode_frame_inner(nv12_data)) }
     }
 
-    unsafe fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+    fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         // 入力用のデバイスメモリを割り当て
         let mut device_input = 0u64;
         let status = unsafe { sys::cuMemAlloc_v2(&mut device_input, nv12_data.len()) };
@@ -316,13 +313,12 @@ impl Encoder {
     /// エンコーダーをフラッシュし、残りのフレームを取得する
     pub fn flush(&mut self) -> Result<(), Error> {
         unsafe {
-            let mut pic_params: sys::NV_ENC_PIC_PARAMS = unsafe { std::mem::zeroed() };
+            let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
             pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
             pic_params.encodePicFlags = sys::NV_ENC_PIC_FLAG_EOS;
 
-            let status = unsafe {
-                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params)
-            };
+            let status =
+                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
             Error::check(status, "nvEncEncodePicture", "failed to flush encoder")?;
 
             Ok(())
