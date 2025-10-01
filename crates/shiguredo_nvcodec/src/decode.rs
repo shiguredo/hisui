@@ -7,8 +7,8 @@ use crate::{Error, ensure_cuda_initialized, sys};
 /// デコーダー
 pub struct Decoder {
     ctx: sys::CUcontext,
-    parser: sys::CUvideoparser,
     ctx_lock: sys::CUvideoctxlock,
+    parser: sys::CUvideoparser,
     state: Arc<Mutex<DecoderState>>,
 }
 
@@ -33,7 +33,7 @@ impl Decoder {
                 ));
             }
 
-            // Create a context lock for the decoder
+            // デコーダー用のコンテキストロックを作成
             let mut ctx_lock = ptr::null_mut();
             let status = sys::cuvidCtxLockCreate(&mut ctx_lock, ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
@@ -41,11 +41,11 @@ impl Decoder {
                 return Err(Error::new(
                     status,
                     "cuvidCtxLockCreate",
-                    "Failed to create context lock",
+                    "failed to create context lock",
                 ));
             }
 
-            // Create decoder state
+            // デコーダーの状態を作成
             let state = Arc::new(Mutex::new(DecoderState {
                 decoder: ptr::null_mut(),
                 width: 0,
@@ -57,13 +57,13 @@ impl Decoder {
                 ctx_lock,
             }));
 
-            // Create video parser
-            let state_ptr = Arc::into_raw(Arc::clone(&state)) as *mut c_void;
+            // 映像パーサーを作成する
+            let state_ptr = Arc::into_raw(state.clone()) as *mut c_void;
 
             let mut parser_params: sys::CUVIDPARSERPARAMS = std::mem::zeroed();
             parser_params.CodecType = sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC;
-            parser_params.ulMaxNumDecodeSurfaces = 20;
-            parser_params.ulMaxDisplayDelay = 0;
+            parser_params.ulMaxNumDecodeSurfaces = 20; // TODO: 後続の PR で外から設定可能にする
+            parser_params.ulMaxDisplayDelay = 0; // TODO: 後続の PR で外から設定可能にする
             parser_params.pUserData = state_ptr;
             parser_params.pfnSequenceCallback = Some(handle_video_sequence);
             parser_params.pfnDecodePicture = Some(handle_picture_decode);
@@ -72,21 +72,20 @@ impl Decoder {
             let mut parser = ptr::null_mut();
             let status = sys::cuvidCreateVideoParser(&mut parser, &mut parser_params);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
-                // Clean up the Arc reference we created
                 let _ = Arc::from_raw(state_ptr as *const Mutex<DecoderState>);
                 sys::cuvidCtxLockDestroy(ctx_lock);
                 sys::cuCtxDestroy_v2(ctx);
                 return Err(Error::new(
                     status,
                     "cuvidCreateVideoParser",
-                    "Failed to create video parser",
+                    "failed to create video parser",
                 ));
             }
 
             Ok(Self {
                 ctx,
-                parser,
                 ctx_lock,
+                parser,
                 state,
             })
         }
@@ -94,12 +93,7 @@ impl Decoder {
 
     /// 圧縮された映像フレームをデコードする
     pub fn decode(&mut self, data: &[u8]) -> Result<(), Error> {
-        if data.is_empty() {
-            return Ok(());
-        }
-
         unsafe {
-            // Use the parser to decode the data
             let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
             packet.payload = data.as_ptr();
             packet.payload_size = data.len() as u64;
