@@ -218,6 +218,7 @@ unsafe extern "C" fn handle_video_sequence(
     let format = unsafe { &*format };
     let state = unsafe { &*(user_data as *const Mutex<DecoderState>) };
     let Ok(mut state) = state.lock() else {
+        // このケースは next_frame() の中でハンドリングされているので、ここでは何もする必要がない
         return 0;
     };
 
@@ -251,8 +252,8 @@ fn handle_video_sequence_inner(
     } else {
         sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Adaptive
     };
-    create_info.ulNumOutputSurfaces = 2;
-    create_info.ulCreationFlags = sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUVID as u64;
+    create_info.ulNumOutputSurfaces = 2; // 出力サーフェスの数（ダブルバッファリング用に2を指定）
+    create_info.ulCreationFlags = sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUVID as u64; // CUVID ハードウェアデコーダーの使用を優先するフラグ
     create_info.ulNumDecodeSurfaces = format.min_num_decode_surfaces as u64;
     create_info.ulWidth = format.coded_width as u64;
     create_info.ulHeight = format.coded_height as u64;
@@ -261,20 +262,16 @@ fn handle_video_sequence_inner(
     create_info.ulTargetWidth = format.coded_width as u64;
     create_info.ulTargetHeight = format.coded_height as u64;
 
-    // Use the context lock from the state (shared with parser)
+    // パーサーと共有するコンテキストロックを使用
     create_info.vidLock = state.ctx_lock;
-
-    let mut decoder = ptr::null_mut();
 
     crate::with_cuda_context(state.ctx, || unsafe {
         Error::check(
-            sys::cuvidCreateDecoder(&mut decoder, &mut create_info),
+            sys::cuvidCreateDecoder(&mut state.decoder, &mut create_info),
             "cuvidCreateDecoder",
             "failed to create video decoder",
         )
     })?;
-
-    state.decoder = decoder;
     state.width = (format.display_area.right - format.display_area.left) as u32;
     state.height = (format.display_area.bottom - format.display_area.top) as u32;
     state.surface_width = format.coded_width;
