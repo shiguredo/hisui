@@ -136,6 +136,13 @@ impl Decoder {
 
     /// デコード済みのフレームを取り出す
     pub fn next_frame(&mut self) -> Option<Result<DecodedFrame, Error>> {
+        if self.state.is_poisoned() {
+            return Some(Err(Error::new(
+                sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+                "next_frame",
+                "decoder state is poisoned (a thread panicked while holding the lock)",
+            )));
+        }
         self.frame_rx.try_recv().ok()
     }
 }
@@ -199,8 +206,6 @@ struct DecoderState {
     ctx_lock: sys::CUvideoctxlock,
 }
 
-fn handle_video_sequence_inner(state: Mutex<DecoderState>) {}
-
 // パーサーがシーケンスヘッダーを検出した時に呼ばれるコールバック
 unsafe extern "C" fn handle_video_sequence(
     user_data: *mut c_void,
@@ -210,65 +215,72 @@ unsafe extern "C" fn handle_video_sequence(
         return 0;
     }
 
-    let state_arc = unsafe { &*(user_data as *const Mutex<DecoderState>) };
-    let result: Result<_, Error> = (|| {
-        let mut state = state_arc.lock().unwrap();
-        let format = unsafe { &*format };
+    let format = unsafe { &*format };
+    let state = unsafe { &*(user_data as *const Mutex<DecoderState>) };
+    let Ok(mut state) = state.lock() else {
+        return 0;
+    };
 
-        // デコーダーが既に作成されている場合はスキップ
-        if !state.decoder.is_null() {
-            return Ok(format.min_num_decode_surfaces as i32);
-        }
-
-        // デコーダーの作成情報を設定
-        let mut create_info: sys::CUVIDDECODECREATEINFO = unsafe { std::mem::zeroed() };
-        create_info.CodecType = format.codec;
-        create_info.ChromaFormat = format.chroma_format;
-        create_info.OutputFormat = sys::cudaVideoSurfaceFormat_enum_cudaVideoSurfaceFormat_NV12;
-        create_info.bitDepthMinus8 = format.bit_depth_luma_minus8 as u64;
-        create_info.DeinterlaceMode = if format.progressive_sequence != 0 {
-            sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Weave
-        } else {
-            sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Adaptive
-        };
-        create_info.ulNumOutputSurfaces = 2;
-        create_info.ulCreationFlags =
-            sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUVID as u64;
-        create_info.ulNumDecodeSurfaces = format.min_num_decode_surfaces as u64;
-        create_info.ulWidth = format.coded_width as u64;
-        create_info.ulHeight = format.coded_height as u64;
-        create_info.ulMaxWidth = format.coded_width as u64;
-        create_info.ulMaxHeight = format.coded_height as u64;
-        create_info.ulTargetWidth = format.coded_width as u64;
-        create_info.ulTargetHeight = format.coded_height as u64;
-
-        // Use the context lock from the state (shared with parser)
-        create_info.vidLock = state.ctx_lock;
-
-        let mut decoder = ptr::null_mut();
-
-        crate::with_cuda_context(state.ctx, || {
-            let status = unsafe { sys::cuvidCreateDecoder(&mut decoder, &mut create_info) };
-            Error::check(
-                status,
-                "cuvidCreateDecoder",
-                "Failed to create video decoder",
-            )
-        })?;
-
-        state.decoder = decoder;
-        state.width = (format.display_area.right - format.display_area.left) as u32;
-        state.height = (format.display_area.bottom - format.display_area.top) as u32;
-        state.surface_width = format.coded_width;
-        state.surface_height = format.coded_height;
-
-        Ok(format.min_num_decode_surfaces as i32)
-    })();
-
+    let result = handle_video_sequence_inner(&mut state, format);
     match result {
         Ok(num_surfaces) => num_surfaces,
-        Err(_) => 0,
+        Err(e) => {
+            let _ = state.frame_tx.send(Err(e));
+            0
+        }
     }
+}
+
+fn handle_video_sequence_inner(
+    state: &mut DecoderState,
+    format: &sys::CUVIDEOFORMAT,
+) -> Result<i32, Error> {
+    // デコーダーが既に作成されている場合はスキップ
+    if !state.decoder.is_null() {
+        return Ok(format.min_num_decode_surfaces as i32);
+    }
+
+    // デコーダーの作成情報を設定
+    let mut create_info: sys::CUVIDDECODECREATEINFO = unsafe { std::mem::zeroed() };
+    create_info.CodecType = format.codec;
+    create_info.ChromaFormat = format.chroma_format;
+    create_info.OutputFormat = sys::cudaVideoSurfaceFormat_enum_cudaVideoSurfaceFormat_NV12;
+    create_info.bitDepthMinus8 = format.bit_depth_luma_minus8 as u64;
+    create_info.DeinterlaceMode = if format.progressive_sequence != 0 {
+        sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Weave
+    } else {
+        sys::cudaVideoDeinterlaceMode_enum_cudaVideoDeinterlaceMode_Adaptive
+    };
+    create_info.ulNumOutputSurfaces = 2;
+    create_info.ulCreationFlags = sys::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUVID as u64;
+    create_info.ulNumDecodeSurfaces = format.min_num_decode_surfaces as u64;
+    create_info.ulWidth = format.coded_width as u64;
+    create_info.ulHeight = format.coded_height as u64;
+    create_info.ulMaxWidth = format.coded_width as u64;
+    create_info.ulMaxHeight = format.coded_height as u64;
+    create_info.ulTargetWidth = format.coded_width as u64;
+    create_info.ulTargetHeight = format.coded_height as u64;
+
+    // Use the context lock from the state (shared with parser)
+    create_info.vidLock = state.ctx_lock;
+
+    let mut decoder = ptr::null_mut();
+
+    crate::with_cuda_context(state.ctx, || unsafe {
+        Error::check(
+            sys::cuvidCreateDecoder(&mut decoder, &mut create_info),
+            "cuvidCreateDecoder",
+            "failed to create video decoder",
+        )
+    })?;
+
+    state.decoder = decoder;
+    state.width = (format.display_area.right - format.display_area.left) as u32;
+    state.height = (format.display_area.bottom - format.display_area.top) as u32;
+    state.surface_width = format.coded_width;
+    state.surface_height = format.coded_height;
+
+    Ok(format.min_num_decode_surfaces as i32)
 }
 
 // デコードすべきピクチャーがある時に呼ばれるコールバック
