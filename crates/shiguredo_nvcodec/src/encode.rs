@@ -1,4 +1,4 @@
-// TODO: use crate::with_cuda_context() instead of manula push / pop
+use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr;
 
@@ -12,7 +12,7 @@ pub struct Encoder {
     width: u32,
     height: u32,
     buffer_format: sys::NV_ENC_BUFFER_FORMAT,
-    encoded_packets: Vec<EncodedPacket>,
+    encoded_frames: VecDeque<EncodedFrame>,
 }
 
 impl Encoder {
@@ -75,7 +75,7 @@ impl Encoder {
                 width,
                 height,
                 buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
-                encoded_packets: Vec::new(),
+                encoded_frames: VecDeque::new(),
             };
 
             // デフォルトパラメータでエンコーダーを初期化
@@ -165,7 +165,6 @@ impl Encoder {
 
     // encode_frame_inner remains unchanged
     unsafe fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
-        // ... (same implementation as before)
         // 入力用のデバイスメモリを割り当て
         let mut device_input = 0u64;
         let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
@@ -289,8 +288,8 @@ impl Encoder {
         let timestamp = lock_bitstream.outputTimeStamp;
         let picture_type = lock_bitstream.pictureType;
 
-        // エンコード済みパケットを保存
-        self.encoded_packets.push(EncodedPacket {
+        // エンコード済みフレームを保存
+        self.encoded_frames.push_back(EncodedFrame {
             data: encoded_data,
             timestamp,
             picture_type,
@@ -299,7 +298,7 @@ impl Encoder {
         Ok(())
     }
 
-    /// エンコーダーをフラッシュし、残りのパケットを取得する
+    /// エンコーダーをフラッシュし、残りのフレームを取得する
     pub fn flush(&mut self) -> Result<(), Error> {
         unsafe {
             let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
@@ -314,9 +313,17 @@ impl Encoder {
         }
     }
 
-    /// すべてのエンコード済みパケットを取得する
-    pub fn get_encoded_packets(&mut self) -> Vec<EncodedPacket> {
-        std::mem::take(&mut self.encoded_packets)
+    /// 次のエンコード済みフレームを取得する（デコーダーの API と同様のパターン）
+    pub fn next_frame(&mut self) -> Option<EncodedFrame> {
+        self.encoded_frames.pop_front()
+    }
+
+    /// すべてのエンコード済みフレームを取得する
+    ///
+    /// Note: 後方互換性のために残していますが、`next_frame()` の使用を推奨します
+    #[deprecated(since = "0.1.0", note = "Use `next_frame()` instead")]
+    pub fn get_encoded_packets(&mut self) -> Vec<EncodedFrame> {
+        self.encoded_frames.drain(..).collect()
     }
 }
 
@@ -348,14 +355,13 @@ impl std::fmt::Debug for Encoder {
             .field("width", &self.width)
             .field("height", &self.height)
             .field("buffer_format", &self.buffer_format)
-            .field("encoded_packets_count", &self.encoded_packets.len())
             .finish()
     }
 }
 
-/// エンコード済みパケット
+/// エンコード済みフレーム
 #[derive(Debug, Clone)]
-pub struct EncodedPacket {
+pub struct EncodedFrame {
     /// エンコードされたデータ
     pub data: Vec<u8>,
     /// タイムスタンプ
@@ -400,32 +406,35 @@ mod tests {
         // エンコーダーをフラッシュ
         encoder.flush().expect("Failed to flush encoder");
 
-        // エンコード済みパケットを取得
-        let packets = encoder.get_encoded_packets();
+        // エンコード済みフレームを取得
+        let mut frames = Vec::new();
+        while let Some(frame) = encoder.next_frame() {
+            frames.push(frame);
+        }
 
-        // 少なくとも1つのパケットを取得したことを確認
-        assert!(!packets.is_empty(), "No encoded packets received");
+        // 少なくとも1つのフレームを取得したことを確認
+        assert!(!frames.is_empty(), "No encoded frames received");
 
-        // 最初のパケットがキーフレーム（IDR）であることを確認
-        let first_packet = &packets[0];
+        // 最初のフレームがキーフレーム（IDR）であることを確認
+        let first_frame = &frames[0];
         assert!(
             matches!(
-                first_packet.picture_type,
+                first_frame.picture_type,
                 sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_I | sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_IDR
             ),
             "First frame should be a keyframe"
         );
 
-        // パケットにデータがあることを確認
+        // フレームにデータがあることを確認
         assert!(
-            !first_packet.data.is_empty(),
-            "Encoded packet should have data"
+            !first_frame.data.is_empty(),
+            "Encoded frame should have data"
         );
 
         println!(
-            "Successfully encoded black frame: {} packets, first packet size: {} bytes",
-            packets.len(),
-            first_packet.data.len()
+            "Successfully encoded black frame: {} frames, first frame size: {} bytes",
+            frames.len(),
+            first_frame.data.len()
         );
     }
 }
