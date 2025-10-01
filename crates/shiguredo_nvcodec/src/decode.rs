@@ -35,7 +35,9 @@ impl Decoder {
                 "cuvidCtxLockCreate",
                 "failed to create context lock",
             )
-            .inspect_err(|_| sys::cuCtxDestroy_v2(ctx))?;
+            .inspect_err(|_| {
+                sys::cuCtxDestroy_v2(ctx);
+            })?;
 
             // デコーダーの状態を作成
             let state = Arc::new(Mutex::new(DecoderState {
