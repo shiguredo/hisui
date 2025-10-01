@@ -30,14 +30,12 @@ impl Decoder {
             // デコーダー用のコンテキストロックを作成
             let mut ctx_lock = ptr::null_mut();
             let status = sys::cuvidCtxLockCreate(&mut ctx_lock, ctx);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::new(
-                    status,
-                    "cuvidCtxLockCreate",
-                    "failed to create context lock",
-                ));
-            }
+            Error::check(
+                status,
+                "cuvidCtxLockCreate",
+                "failed to create context lock",
+            )
+            .inspect_err(|_| sys::cuCtxDestroy_v2(ctx))?;
 
             // デコーダーの状態を作成
             let state = Arc::new(Mutex::new(DecoderState {
@@ -65,16 +63,16 @@ impl Decoder {
 
             let mut parser = ptr::null_mut();
             let status = sys::cuvidCreateVideoParser(&mut parser, &mut parser_params);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
+            Error::check(
+                status,
+                "cuvidCreateVideoParser",
+                "failed to create video parser",
+            )
+            .inspect_err(|_| {
                 let _ = Arc::from_raw(state_ptr as *const Mutex<DecoderState>);
                 sys::cuvidCtxLockDestroy(ctx_lock);
                 sys::cuCtxDestroy_v2(ctx);
-                return Err(Error::new(
-                    status,
-                    "cuvidCreateVideoParser",
-                    "failed to create video parser",
-                ));
-            }
+            })?;
 
             Ok(Self {
                 ctx,
@@ -98,13 +96,7 @@ impl Decoder {
             packet.timestamp = 0;
 
             let status = sys::cuvidParseVideoData(self.parser, &mut packet);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuvidParseVideoData",
-                    "failed to parse video data",
-                ));
-            }
+            Error::check(status, "cuvidParseVideoData", "failed to parse video data")?;
         }
 
         Ok(())
@@ -121,13 +113,7 @@ impl Decoder {
             packet.timestamp = 0;
 
             let status = sys::cuvidParseVideoData(self.parser, &mut packet);
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuvidParseVideoData",
-                    "failed to finish decoding",
-                ));
-            }
+            Error::check(status, "cuvidParseVideoData", "failed to finish decoding")?;
 
             // パーサーは非同期でデータを処理するので、
             // すべてのデコード操作が完了するまでここで待機（同期）する
@@ -205,7 +191,7 @@ unsafe extern "C" fn handle_video_sequence(
     }
 
     let state_arc = unsafe { Arc::from_raw(user_data as *const Mutex<DecoderState>) };
-    let result = (|| {
+    let result: Result<_, Error> = (|| {
         let mut state = state_arc.lock().unwrap();
         let format = unsafe { &*format };
 
@@ -347,13 +333,7 @@ unsafe extern "C" fn handle_picture_display(
                 &mut proc_params,
             );
 
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuvidMapVideoFrame64",
-                    "Failed to map video frame",
-                ));
-            }
+            Error::check(status, "cuvidMapVideoFrame64", "Failed to map video frame")?;
 
             // Calculate frame size (NV12 format: Y plane + UV plane)
             // Note: NVDEC aligns luma height by 2
@@ -369,13 +349,9 @@ unsafe extern "C" fn handle_picture_display(
             let status =
                 sys::cuMemcpyDtoH_v2(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size);
 
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
+            if let Err(e) = Error::check(status, "cuMemcpyDtoH_v2", "Failed to copy Y plane data") {
                 sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
-                return Err(Error::new(
-                    status,
-                    "cuMemcpyDtoH_v2",
-                    "Failed to copy Y plane data",
-                ));
+                return Err(e);
             }
 
             // Copy UV plane
@@ -389,13 +365,7 @@ unsafe extern "C" fn handle_picture_display(
             // Unmap the video frame
             sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
 
-            if status != sys::cudaError_enum_CUDA_SUCCESS {
-                return Err(Error::new(
-                    status,
-                    "cuMemcpyDtoH_v2",
-                    "Failed to copy UV plane data",
-                ));
-            }
+            Error::check(status, "cuMemcpyDtoH_v2", "Failed to copy UV plane data")?;
 
             // Store the decoded frame
             let decoded_frame = DecodedFrame {
