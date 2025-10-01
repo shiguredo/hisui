@@ -14,16 +14,6 @@ pub struct Encoder {
     encoded_packets: Vec<EncodedPacket>,
 }
 
-/// エンコード済みパケット
-pub struct EncodedPacket {
-    /// エンコードされたデータ
-    pub data: Vec<u8>,
-    /// タイムスタンプ
-    pub timestamp: u64,
-    /// ピクチャータイプ
-    pub picture_type: sys::NV_ENC_PIC_TYPE,
-}
-
 impl Encoder {
     /// H.265 エンコーダーインスタンスを生成する
     pub fn new_hevc(width: u32, height: u32) -> Result<Self, Error> {
@@ -371,6 +361,30 @@ impl Drop for Encoder {
             }
         }
     }
+}
+
+impl std::fmt::Debug for Encoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Encoder")
+            .field("ctx", &format_args!("{:p}", self.ctx))
+            .field("h_encoder", &format_args!("{:p}", self.h_encoder))
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("buffer_format", &self.buffer_format)
+            .field("encoded_packets_count", &self.encoded_packets.len())
+            .finish()
+    }
+}
+
+/// エンコード済みパケット
+#[derive(Debug, Clone)]
+pub struct EncodedPacket {
+    /// エンコードされたデータ
+    pub data: Vec<u8>,
+    /// タイムスタンプ
+    pub timestamp: u64,
+    /// ピクチャータイプ
+    pub picture_type: sys::NV_ENC_PIC_TYPE,
 }
 
 #[cfg(test)]
