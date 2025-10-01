@@ -171,6 +171,26 @@ impl Drop for Decoder {
     }
 }
 
+impl std::fmt::Debug for Decoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.state.lock().ok();
+
+        f.debug_struct("Decoder")
+            .field("ctx", &format_args!("{:p}", self.ctx))
+            .field("ctx_lock", &format_args!("{:p}", self.ctx_lock))
+            .field("parser", &format_args!("{:p}", self.parser))
+            .field(
+                "decoder",
+                &state.as_ref().map(|s| format!("{:p}", s.decoder)),
+            )
+            .field("width", &state.as_ref().map(|s| s.width))
+            .field("height", &state.as_ref().map(|s| s.height))
+            .field("surface_width", &state.as_ref().map(|s| s.surface_width))
+            .field("surface_height", &state.as_ref().map(|s| s.surface_height))
+            .finish()
+    }
+}
+
 struct DecoderState {
     decoder: sys::CUvideodecoder,
     width: u32,
@@ -392,6 +412,7 @@ unsafe extern "C" fn handle_picture_display(
 }
 
 /// デコードされた映像フレーム (NV12 形式)
+#[derive(Debug, Clone)]
 pub struct DecodedFrame {
     width: u32,
     height: u32,
