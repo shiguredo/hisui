@@ -75,41 +75,14 @@ fn main() {
         panic!("nvcuvid.h not found at {:?}", nvcuvid_header);
     }
 
-    // CUDA include path を検出
-    let cuda_include_paths = vec![
-        "/usr/lib/cuda/include",
-        "/usr/local/cuda/include",
-        "/opt/cuda/include",
-        "/usr/include/cuda",
-    ];
-
-    let cuda_include_path = cuda_include_paths
-        .iter()
-        .find(|&&path| PathBuf::from(path).join("cuda.h").exists())
-        .expect("CUDA headers not found. Please install CUDA toolkit.");
-
     // バインディングを生成する
-    let builder = bindgen::Builder::default()
+    let bindings = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
-        .header(nvcuvid_header.display().to_string());
-
-    let bindings = builder
-        .header(
-            PathBuf::from(cuda_include_path)
-                .join("cuda.h")
-                .display()
-                .to_string(),
-        )
-        // CUDA include pathを追加
-        .clang_arg(format!("-I{}", cuda_include_path))
-        // third_party include pathも追加
-        .clang_arg(format!("-I{}", third_party_header_dir.display()))
-        // CUDA のバージョン定義を追加
-        .clang_arg("-DCUDA_VERSION=13000")
-        // 不要な警告を抑制
-        .clang_arg("-Wno-everything")
-        // Block GUID extern static declarations
+        .header(nvcuvid_header.display().to_string())
+        .generate_comments(false)
+        .derive_debug(false)
+        .derive_default(false)
         .blocklist_item("NV_ENC_CODEC_H264_GUID")
         .blocklist_item("NV_ENC_CODEC_HEVC_GUID")
         .blocklist_item("NV_ENC_CODEC_AV1_GUID")
@@ -134,10 +107,6 @@ fn main() {
         .blocklist_item("NV_ENC_PRESET_P5_GUID")
         .blocklist_item("NV_ENC_PRESET_P6_GUID")
         .blocklist_item("NV_ENC_PRESET_P7_GUID")
-        // 関数ポインタの生成を有効化
-        .generate_comments(false)
-        .derive_debug(false)
-        .derive_default(false)
         .generate()
         .expect("failed to generate bindings");
 
