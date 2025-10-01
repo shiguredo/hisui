@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{Error, ensure_cuda_initialized, sys};
 
-/// H.265 デコーダー
+/// デコーダー
 pub struct Decoder {
     ctx: sys::CUcontext,
     parser: sys::CUvideoparser,
@@ -12,20 +12,9 @@ pub struct Decoder {
     state: Arc<Mutex<DecoderState>>,
 }
 
-struct DecoderState {
-    decoder: sys::CUvideodecoder,
-    width: u32,
-    height: u32,
-    surface_width: u32,
-    surface_height: u32,
-    decoded_frames: Vec<DecodedFrame>,
-    ctx: sys::CUcontext,
-    ctx_lock: sys::CUvideoctxlock,
-}
-
 impl Decoder {
     /// H.265 用のデコーダーインスタンスを生成する
-    pub fn new_hevc() -> Result<Self, Error> {
+    pub fn new_h265() -> Result<Self, Error> {
         // CUDA ドライバーの初期化（プロセスごとに1回だけ実行）
         ensure_cuda_initialized()?;
 
@@ -212,6 +201,17 @@ impl Drop for Decoder {
             }
         }
     }
+}
+
+struct DecoderState {
+    decoder: sys::CUvideodecoder,
+    width: u32,
+    height: u32,
+    surface_width: u32,
+    surface_height: u32,
+    decoded_frames: Vec<DecodedFrame>,
+    ctx: sys::CUcontext,
+    ctx_lock: sys::CUvideoctxlock,
 }
 
 // Callback: パーサーがシーケンスヘッダーを検出した時に呼ばれる
@@ -529,17 +529,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn init_hevc_decoder() {
-        let _decoder = Decoder::new_hevc().expect("Failed to initialize HEVC decoder");
-        println!("HEVC decoder initialized successfully");
+    fn init_h265_decoder() {
+        let _decoder = Decoder::new_h265().expect("Failed to initialize h265 decoder");
+        println!("h265 decoder initialized successfully");
     }
 
     #[test]
     fn test_multiple_decoders() {
         // CUDA初期化が1回だけ実行されることを確認するため、複数のデコーダーを作成
-        let _decoder1 = Decoder::new_hevc().expect("Failed to initialize first HEVC decoder");
-        let _decoder2 = Decoder::new_hevc().expect("Failed to initialize second HEVC decoder");
-        println!("Multiple HEVC decoders initialized successfully");
+        let _decoder1 = Decoder::new_h265().expect("Failed to initialize first h265 decoder");
+        let _decoder2 = Decoder::new_h265().expect("Failed to initialize second h265 decoder");
+        println!("Multiple h265 decoders initialized successfully");
     }
 
     #[test]
@@ -581,7 +581,7 @@ mod tests {
         h265_data.extend_from_slice(&start_code);
         h265_data.extend_from_slice(&frame_data);
 
-        let mut decoder = Decoder::new_hevc().expect("Failed to create HEVC decoder");
+        let mut decoder = Decoder::new_h265().expect("Failed to create h265 decoder");
 
         // デコードを実行
         decoder
