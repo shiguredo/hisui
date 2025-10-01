@@ -17,7 +17,7 @@ pub struct Encoder {
 
 impl Encoder {
     /// H.265 エンコーダーインスタンスを生成する
-    pub fn new_hevc(width: u32, height: u32) -> Result<Self, Error> {
+    pub fn new_h265(width: u32, height: u32) -> Result<Self, Error> {
         // CUDA ドライバーの初期化（プロセスごとに1回だけ実行）
         ensure_cuda_initialized()?;
 
@@ -349,9 +349,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn init_hevc_encoder() {
-        let _encoder = Encoder::new_hevc(640, 480).expect("Failed to initialize HEVC encoder");
-        println!("HEVC encoder initialized successfully");
+    fn init_h265_encoder() {
+        let _encoder = Encoder::new_h265(640, 480).expect("Failed to initialize h265 encoder");
+        println!("h265 encoder initialized successfully");
     }
 
     #[test]
@@ -360,7 +360,7 @@ mod tests {
         let height = 480;
 
         // エンコーダーを作成
-        let mut encoder = Encoder::new_hevc(width, height).expect("Failed to create HEVC encoder");
+        let mut encoder = Encoder::new_h265(width, height).expect("Failed to create h265 encoder");
 
         // NV12 形式の黒フレームを準備
         // Y プレーン: 16 (YUV での黒)
