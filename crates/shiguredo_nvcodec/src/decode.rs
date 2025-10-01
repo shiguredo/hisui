@@ -93,6 +93,9 @@ impl Decoder {
 
     /// 圧縮された映像フレームをデコードする
     pub fn decode(&mut self, data: &[u8]) -> Result<(), Error> {
+        // [NOTE]
+        // cuvidParseVideoData は内部でデータをコピーまたは即座に処理するため、
+        // このメソッドの呼び出し直後に data を破棄しても安全
         unsafe {
             let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
             packet.payload = data.as_ptr();
@@ -105,7 +108,7 @@ impl Decoder {
                 return Err(Error::new(
                     status,
                     "cuvidParseVideoData",
-                    "Failed to parse video data",
+                    "failed to parse video data",
                 ));
             }
         }
@@ -116,7 +119,7 @@ impl Decoder {
     /// これ以上データが来ないことをデコーダーに伝える
     pub fn finish(&mut self) -> Result<(), Error> {
         unsafe {
-            // Send end of stream packet
+            // EOS をデコーダーに伝える
             let mut packet: sys::CUVIDSOURCEDATAPACKET = std::mem::zeroed();
             packet.payload = ptr::null();
             packet.payload_size = 0;
@@ -128,22 +131,22 @@ impl Decoder {
                 return Err(Error::new(
                     status,
                     "cuvidParseVideoData",
-                    "Failed to finish decoding",
+                    "failed to finish decoding",
                 ));
             }
 
-            // Important: The parser processes data asynchronously. We need to ensure
-            // the CUDA context is synchronized to wait for all decode operations to complete.
+            // 重要: パーサーは非同期でデータを処理する。すべてのデコード操作が
+            // 完了するまで待機するため、CUDA コンテキストを同期する必要がある
             let status = sys::cuCtxPushCurrent_v2(self.ctx);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 return Err(Error::new(
                     status,
                     "cuCtxPushCurrent_v2",
-                    "Failed to push CUDA context",
+                    "failed to push CUDA context",
                 ));
             }
 
-            // Synchronize to ensure all decoding is complete
+            // すべてのデコードが完了したことを確認するために同期する
             let status = sys::cuCtxSynchronize();
 
             sys::cuCtxPopCurrent_v2(ptr::null_mut());
@@ -152,7 +155,7 @@ impl Decoder {
                 return Err(Error::new(
                     status,
                     "cuCtxSynchronize",
-                    "Failed to synchronize CUDA context",
+                    "failed to synchronize CUDA context",
                 ));
             }
         }
