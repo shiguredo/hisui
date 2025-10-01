@@ -26,7 +26,7 @@ impl Encoder {
 
             // CUDA context の初期化
             let status = sys::cuCtxCreate_v2(&mut ctx, 0, 0);
-            Error::check(status, "cuCtxCreate_v2", "Failed to create CUDA context")?;
+            Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 
             let ctx_guard = crate::ReleaseGuard::new(|| {
                 sys::cuCtxDestroy_v2(ctx);
@@ -43,7 +43,7 @@ impl Encoder {
                 Error::check(
                     status,
                     "NvEncodeAPICreateInstance",
-                    "Failed to create NVENC API instance",
+                    "failed to create NVENC API instance",
                 )?;
 
                 // エンコードセッションを開く
@@ -62,7 +62,7 @@ impl Encoder {
                 Error::check(
                     status,
                     "nvEncOpenEncodeSessionEx",
-                    "Failed to open encode session",
+                    "failed to open encode session",
                 )?;
 
                 Ok((encoder_api, h_encoder))
@@ -105,7 +105,7 @@ impl Encoder {
             Error::check(
                 status,
                 "nvEncGetEncodePresetConfigEx",
-                "Failed to get preset configuration",
+                "failed to get preset configuration",
             )?;
 
             // エンコーダーパラメータを初期化
@@ -141,7 +141,7 @@ impl Encoder {
             Error::check(
                 status,
                 "nvEncInitializeEncoder",
-                "Failed to initialize encoder",
+                "failed to initialize encoder",
             )?;
 
             Ok(())
@@ -168,7 +168,7 @@ impl Encoder {
         // 入力用のデバイスメモリを割り当て
         let mut device_input = 0u64;
         let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
-        Error::check(status, "cuMemAlloc_v2", "Failed to allocate device memory")?;
+        Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
 
         let _device_guard = crate::ReleaseGuard::new(|| {
             sys::cuMemFree_v2(device_input);
@@ -180,7 +180,7 @@ impl Encoder {
             nv12_data.as_ptr() as *const c_void,
             nv12_data.len(),
         );
-        Error::check(status, "cuMemcpyHtoD_v2", "Failed to copy data to device")?;
+        Error::check(status, "cuMemcpyHtoD_v2", "failed to copy data to device")?;
 
         // CUDA デバイスメモリを入力リソースとして登録
         let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = std::mem::zeroed();
@@ -199,7 +199,7 @@ impl Encoder {
         Error::check(
             status,
             "nvEncRegisterResource",
-            "Failed to register input resource",
+            "failed to register input resource",
         )?;
 
         let registered_resource = register_resource.registeredResource;
@@ -218,7 +218,7 @@ impl Encoder {
         Error::check(
             status,
             "nvEncMapInputResource",
-            "Failed to map input resource",
+            "failed to map input resource",
         )?;
 
         let mapped_resource = map_input_resource.mappedResource;
@@ -238,7 +238,7 @@ impl Encoder {
         Error::check(
             status,
             "nvEncCreateBitstreamBuffer",
-            "Failed to create bitstream buffer",
+            "failed to create bitstream buffer",
         )?;
 
         let output_buffer = create_bitstream.bitstreamBuffer;
@@ -260,7 +260,7 @@ impl Encoder {
 
         // ピクチャをエンコード
         let status = (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
-        Error::check(status, "nvEncEncodePicture", "Failed to encode picture")?;
+        Error::check(status, "nvEncEncodePicture", "failed to encode picture")?;
 
         // ビットストリームをロックしてエンコード済みデータを読み取る
         let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
@@ -269,7 +269,7 @@ impl Encoder {
 
         let status =
             (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream);
-        Error::check(status, "nvEncLockBitstream", "Failed to lock bitstream")?;
+        Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
 
         let _lock_guard = crate::ReleaseGuard::new(|| {
             (self.encoder.nvEncUnlockBitstream.unwrap())(
@@ -307,23 +307,15 @@ impl Encoder {
 
             let status =
                 (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
-            Error::check(status, "nvEncEncodePicture", "Failed to flush encoder")?;
+            Error::check(status, "nvEncEncodePicture", "failed to flush encoder")?;
 
             Ok(())
         }
     }
 
-    /// 次のエンコード済みフレームを取得する（デコーダーの API と同様のパターン）
+    /// 次のエンコード済みフレームを取得する
     pub fn next_frame(&mut self) -> Option<EncodedFrame> {
         self.encoded_frames.pop_front()
-    }
-
-    /// すべてのエンコード済みフレームを取得する
-    ///
-    /// Note: 後方互換性のために残していますが、`next_frame()` の使用を推奨します
-    #[deprecated(since = "0.1.0", note = "Use `next_frame()` instead")]
-    pub fn get_encoded_packets(&mut self) -> Vec<EncodedFrame> {
-        self.encoded_frames.drain(..).collect()
     }
 }
 
@@ -376,7 +368,7 @@ mod tests {
 
     #[test]
     fn init_h265_encoder() {
-        let _encoder = Encoder::new_h265(640, 480).expect("Failed to initialize h265 encoder");
+        let _encoder = Encoder::new_h265(640, 480).expect("failed to initialize h265 encoder");
         println!("h265 encoder initialized successfully");
     }
 
@@ -386,7 +378,7 @@ mod tests {
         let height = 480;
 
         // エンコーダーを作成
-        let mut encoder = Encoder::new_h265(width, height).expect("Failed to create h265 encoder");
+        let mut encoder = Encoder::new_h265(width, height).expect("failed to create h265 encoder");
 
         // NV12 形式の黒フレームを準備
         // Y プレーン: 16 (YUV での黒)
@@ -401,10 +393,10 @@ mod tests {
         // フレームをエンコード
         encoder
             .encode_frame(&frame_data)
-            .expect("Failed to encode black frame");
+            .expect("failed to encode black frame");
 
         // エンコーダーをフラッシュ
-        encoder.flush().expect("Failed to flush encoder");
+        encoder.flush().expect("failed to flush encoder");
 
         // エンコード済みフレームを取得
         let mut frames = Vec::new();
