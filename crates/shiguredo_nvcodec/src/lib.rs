@@ -1,10 +1,10 @@
 //! [Hisui] 用の [NVCODEC] エンコーダーとデコーダー
 //!
 //! [Hisui]: https://github.com/shiguredo/hisui
-//! [NVCODEC]: https://developer.nvidia.com/nvidia-video-codec-sdk
+//! [NVCODEC]: https://developer.nvidia.com/video-codec-sdk
 #![warn(missing_docs)]
 
-use std::sync::Once;
+use std::sync::LazyLock;
 
 mod decode;
 mod encode;
@@ -16,34 +16,23 @@ pub use encode::Encoder;
 /// ビルド時に参照したバージョン
 pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
 
-/// CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
-static CUDA_INIT: Once = Once::new();
-static mut CUDA_INIT_RESULT: Option<Result<(), Error>> = None;
-
-/// CUDA ドライバーを初期化する（内部使用）
+/// CUDA ドライバーをプロセスごとに1回だけ初期化する
 fn ensure_cuda_initialized() -> Result<(), Error> {
-    unsafe {
-        CUDA_INIT.call_once(|| {
-            let status = sys::cuInit(0);
-            CUDA_INIT_RESULT = Some(if status == sys::cudaError_enum_CUDA_SUCCESS {
-                Ok(())
-            } else {
-                Err(Error::with_reason(
-                    status,
-                    "cuInit",
-                    "Failed to initialize CUDA driver",
-                ))
-            });
-        });
+    static CUDA_INIT_RESULT: LazyLock<Result<(), Error>> = LazyLock::new(|| {
+        let flags = 0;
+        let status = unsafe { sys::cuInit(flags) };
+        if status == sys::cudaError_enum_CUDA_SUCCESS {
+            Ok(())
+        } else {
+            Err(Error::with_reason(
+                status,
+                "cuInit",
+                "failed to initialize CUDA driver",
+            ))
+        }
+    });
 
-        // CUDA_INIT_RESULT は call_once の中で必ず初期化されるため unwrap は安全
-        // Use raw pointer instead of reference to avoid static_mut_refs lint
-        std::ptr::addr_of!(CUDA_INIT_RESULT)
-            .read()
-            .as_ref()
-            .unwrap()
-            .clone()
-    }
+    CUDA_INIT_RESULT.clone()
 }
 
 /// エラー
