@@ -18,7 +18,7 @@ pub struct Encoder {
 impl Encoder {
     /// H.265 エンコーダーインスタンスを生成する
     pub fn new_h265(width: u32, height: u32) -> Result<Self, Error> {
-        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行）
+        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
         ensure_cuda_initialized()?;
 
         unsafe {
@@ -32,8 +32,7 @@ impl Encoder {
                 sys::cuCtxDestroy_v2(ctx);
             });
 
-            // NVENC 操作のために CUDA context をアクティブ化し、
-            // エンコードセッションを開く
+            // NVENC 操作のために CUDA context をアクティブ化し、エンコードセッションを開く
             let (encoder_api, h_encoder) = crate::with_cuda_context(ctx, || {
                 // NVENC API をロード
                 let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
