@@ -162,7 +162,7 @@ impl Encoder {
             ));
         }
 
-        unsafe { crate::with_cuda_context(self.ctx, || self.encode_frame_inner(nv12_data)) }
+        crate::with_cuda_context(self.ctx, || self.encode_frame_inner(nv12_data))
     }
 
     fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
@@ -338,7 +338,7 @@ impl Drop for Encoder {
                 // クリーンアップ前に context をアクティブ化
                 let _ = crate::with_cuda_context(self.ctx, || {
                     if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
-                        unsafe { destroy_fn(self.h_encoder) };
+                        destroy_fn(self.h_encoder);
                     }
                     Ok::<(), Error>(())
                 });
