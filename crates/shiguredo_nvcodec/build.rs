@@ -40,6 +40,7 @@ fn main() {
                 "pub struct CUVIDEOFORMAT;",
                 "pub struct CUVIDPICPARAMS;",
                 "pub struct CUVIDPARSERDISPINFO;",
+                "pub struct CUdeviceptr;",
                 "pub struct CUvideoparser;",
                 "pub struct CUvideodecoder;",
                 "pub struct CUcontext;",
