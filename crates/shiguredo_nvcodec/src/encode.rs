@@ -301,6 +301,75 @@ impl Encoder {
         }
     }
 
+    fn encode_picture(
+        &mut self,
+        mapped_resource: sys::NV_ENC_INPUT_PTR,
+        output_buffer: sys::NV_ENC_OUTPUT_PTR,
+    ) -> Result<(), Error> {
+        unsafe {
+            let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
+            pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
+            pic_params.inputWidth = self.width;
+            pic_params.inputHeight = self.height;
+            pic_params.inputPitch = self.width;
+            pic_params.inputBuffer = mapped_resource;
+            pic_params.outputBitstream = output_buffer;
+            pic_params.bufferFmt = self.buffer_format;
+            pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
+
+            let status = self
+                .encoder
+                .nvEncEncodePicture
+                .map(|f| f(self.h_encoder, &mut pic_params))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
+            Error::check(status, "nvEncEncodePicture", "failed to encode picture")?;
+
+            Ok(())
+        }
+    }
+
+    fn lock_and_copy_bitstream(
+        &mut self,
+        output_buffer: sys::NV_ENC_OUTPUT_PTR,
+    ) -> Result<EncodedFrame, Error> {
+        unsafe {
+            let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = std::mem::zeroed();
+            lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
+            lock_bitstream.outputBitstream = output_buffer;
+
+            let status = self
+                .encoder
+                .nvEncLockBitstream
+                .map(|f| f(self.h_encoder, &mut lock_bitstream))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
+            Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
+
+            // 自動アンロックのためのガードを作成
+            let output_bitstream = lock_bitstream.outputBitstream;
+            let _lock_guard = ReleaseGuard::new(|| {
+                self.encoder
+                    .nvEncUnlockBitstream
+                    .map(|f| f(self.h_encoder, output_bitstream));
+            });
+
+            // ビットストリームがロックされている間にエンコード済みデータをコピー
+            let encoded_data = std::slice::from_raw_parts(
+                lock_bitstream.bitstreamBufferPtr as *const u8,
+                lock_bitstream.bitstreamSizeInBytes as usize,
+            )
+            .to_vec();
+
+            let timestamp = lock_bitstream.outputTimeStamp;
+            let picture_type = PictureType::new(lock_bitstream.pictureType);
+
+            Ok(EncodedFrame {
+                data: encoded_data,
+                timestamp,
+                picture_type,
+            })
+        }
+    }
+
     fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         // 入力データをデバイスにコピー
         let (device_input, _device_guard) = self.copy_input_data_to_device(nv12_data)?;
@@ -315,64 +384,14 @@ impl Encoder {
         // 出力ビットストリームバッファを割り当て
         let (output_buffer, _bitstream_guard) = self.create_output_bitstream_buffer()?;
 
-        // TODO: factor out this code to a method as the methods above do.
-        // エンコードピクチャパラメータを設定
-        let mut pic_params: sys::NV_ENC_PIC_PARAMS = unsafe { std::mem::zeroed() };
-        pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
-        pic_params.inputWidth = self.width;
-        pic_params.inputHeight = self.height;
-        pic_params.inputPitch = self.width;
-        pic_params.inputBuffer = mapped_resource;
-        pic_params.outputBitstream = output_buffer;
-        pic_params.bufferFmt = self.buffer_format;
-        pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
-
         // ピクチャをエンコード
-        let status = unsafe {
-            self.encoder
-                .nvEncEncodePicture
-                .map(|f| f(self.h_encoder, &mut pic_params))
-                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
-        };
-        Error::check(status, "nvEncEncodePicture", "failed to encode picture")?;
+        self.encode_picture(mapped_resource, output_buffer)?;
 
-        // ビットストリームをロックしてエンコード済みデータを読み取る
-        let mut lock_bitstream: sys::NV_ENC_LOCK_BITSTREAM = unsafe { std::mem::zeroed() };
-        lock_bitstream.version = sys::NV_ENC_LOCK_BITSTREAM_VER;
-        lock_bitstream.outputBitstream = output_buffer;
-
-        let status = unsafe {
-            self.encoder
-                .nvEncLockBitstream
-                .map(|f| f(self.h_encoder, &mut lock_bitstream))
-                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
-        };
-        Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
-
-        let _lock_guard = ReleaseGuard::new(|| unsafe {
-            self.encoder
-                .nvEncUnlockBitstream
-                .map(|f| f(self.h_encoder, lock_bitstream.outputBitstream));
-        });
-
-        // エンコード済みデータをコピー
-        let encoded_data = unsafe {
-            std::slice::from_raw_parts(
-                lock_bitstream.bitstreamBufferPtr as *const u8,
-                lock_bitstream.bitstreamSizeInBytes as usize,
-            )
-        }
-        .to_vec();
-
-        let timestamp = lock_bitstream.outputTimeStamp;
-        let picture_type = PictureType::new(lock_bitstream.pictureType);
+        // ビットストリームをロックしてエンコード済みデータをコピー
+        let encoded_frame = self.lock_and_copy_bitstream(output_buffer)?;
 
         // エンコード済みフレームを保存
-        self.encoded_frames.push_back(EncodedFrame {
-            data: encoded_data,
-            timestamp,
-            picture_type,
-        });
+        self.encoded_frames.push_back(encoded_frame);
 
         Ok(())
     }
