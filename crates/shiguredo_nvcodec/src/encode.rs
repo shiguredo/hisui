@@ -56,10 +56,10 @@ impl Encoder {
                 open_session_params.apiVersion = sys::NVENCAPI_VERSION;
 
                 let mut h_encoder = ptr::null_mut();
-                let status = (encoder_api.nvEncOpenEncodeSessionEx.unwrap())(
-                    &mut open_session_params,
-                    &mut h_encoder,
-                );
+                let status = encoder_api
+                    .nvEncOpenEncodeSessionEx
+                    .map(|f| f(&mut open_session_params, &mut h_encoder))
+                    .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
                 Error::check(
                     status,
                     "nvEncOpenEncodeSessionEx",
@@ -97,13 +97,18 @@ impl Encoder {
             preset_config.presetCfg.version = sys::NV_ENC_CONFIG_VER;
 
             let status = unsafe {
-                (self.encoder.nvEncGetEncodePresetConfigEx.unwrap())(
-                    self.h_encoder,
-                    sys::NV_ENC_CODEC_HEVC_GUID,
-                    sys::NV_ENC_PRESET_P4_GUID,
-                    sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
-                    &mut preset_config,
-                )
+                self.encoder
+                    .nvEncGetEncodePresetConfigEx
+                    .map(|f| {
+                        f(
+                            self.h_encoder,
+                            sys::NV_ENC_CODEC_HEVC_GUID,
+                            sys::NV_ENC_PRESET_P4_GUID,
+                            sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
+                            &mut preset_config,
+                        )
+                    })
+                    .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
             };
             Error::check(
                 status,
@@ -140,7 +145,10 @@ impl Encoder {
 
             // エンコーダーを初期化
             let status = unsafe {
-                (self.encoder.nvEncInitializeEncoder.unwrap())(self.h_encoder, &mut init_params)
+                self.encoder
+                    .nvEncInitializeEncoder
+                    .map(|f| f(self.h_encoder, &mut init_params))
+                    .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
             };
             Error::check(
                 status,
@@ -200,7 +208,10 @@ impl Encoder {
         register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
 
         let status = unsafe {
-            (self.encoder.nvEncRegisterResource.unwrap())(self.h_encoder, &mut register_resource)
+            self.encoder
+                .nvEncRegisterResource
+                .map(|f| f(self.h_encoder, &mut register_resource))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
         };
         Error::check(
             status,
@@ -211,7 +222,9 @@ impl Encoder {
         let registered_resource = register_resource.registeredResource;
 
         let _registered_guard = crate::ReleaseGuard::new(|| unsafe {
-            (self.encoder.nvEncUnregisterResource.unwrap())(self.h_encoder, registered_resource);
+            self.encoder
+                .nvEncUnregisterResource
+                .map(|f| f(self.h_encoder, registered_resource));
         });
 
         // 登録したリソースをマップ
@@ -220,7 +233,10 @@ impl Encoder {
         map_input_resource.registeredResource = registered_resource;
 
         let status = unsafe {
-            (self.encoder.nvEncMapInputResource.unwrap())(self.h_encoder, &mut map_input_resource)
+            self.encoder
+                .nvEncMapInputResource
+                .map(|f| f(self.h_encoder, &mut map_input_resource))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
         };
         Error::check(
             status,
@@ -231,7 +247,9 @@ impl Encoder {
         let mapped_resource = map_input_resource.mappedResource;
 
         let _mapped_guard = crate::ReleaseGuard::new(|| unsafe {
-            (self.encoder.nvEncUnmapInputResource.unwrap())(self.h_encoder, mapped_resource);
+            self.encoder
+                .nvEncUnmapInputResource
+                .map(|f| f(self.h_encoder, mapped_resource));
         });
 
         // 出力ビットストリームバッファを割り当て
@@ -240,10 +258,10 @@ impl Encoder {
         create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
 
         let status = unsafe {
-            (self.encoder.nvEncCreateBitstreamBuffer.unwrap())(
-                self.h_encoder,
-                &mut create_bitstream,
-            )
+            self.encoder
+                .nvEncCreateBitstreamBuffer
+                .map(|f| f(self.h_encoder, &mut create_bitstream))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
         };
         Error::check(
             status,
@@ -254,7 +272,9 @@ impl Encoder {
         let output_buffer = create_bitstream.bitstreamBuffer;
 
         let _bitstream_guard = crate::ReleaseGuard::new(|| unsafe {
-            (self.encoder.nvEncDestroyBitstreamBuffer.unwrap())(self.h_encoder, output_buffer);
+            self.encoder
+                .nvEncDestroyBitstreamBuffer
+                .map(|f| f(self.h_encoder, output_buffer));
         });
 
         // エンコードピクチャパラメータを設定
@@ -269,8 +289,12 @@ impl Encoder {
         pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
 
         // ピクチャをエンコード
-        let status =
-            unsafe { (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params) };
+        let status = unsafe {
+            self.encoder
+                .nvEncEncodePicture
+                .map(|f| f(self.h_encoder, &mut pic_params))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
+        };
         Error::check(status, "nvEncEncodePicture", "failed to encode picture")?;
 
         // ビットストリームをロックしてエンコード済みデータを読み取る
@@ -279,15 +303,17 @@ impl Encoder {
         lock_bitstream.outputBitstream = output_buffer;
 
         let status = unsafe {
-            (self.encoder.nvEncLockBitstream.unwrap())(self.h_encoder, &mut lock_bitstream)
+            self.encoder
+                .nvEncLockBitstream
+                .map(|f| f(self.h_encoder, &mut lock_bitstream))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
         };
         Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
 
         let _lock_guard = crate::ReleaseGuard::new(|| unsafe {
-            (self.encoder.nvEncUnlockBitstream.unwrap())(
-                self.h_encoder,
-                lock_bitstream.outputBitstream,
-            );
+            self.encoder
+                .nvEncUnlockBitstream
+                .map(|f| f(self.h_encoder, lock_bitstream.outputBitstream));
         });
 
         // エンコード済みデータをコピー
@@ -319,8 +345,11 @@ impl Encoder {
             pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
             pic_params.encodePicFlags = sys::NV_ENC_PIC_FLAG_EOS;
 
-            let status =
-                (self.encoder.nvEncEncodePicture.unwrap())(self.h_encoder, &mut pic_params);
+            let status = self
+                .encoder
+                .nvEncEncodePicture
+                .map(|f| f(self.h_encoder, &mut pic_params))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
             Error::check(status, "nvEncEncodePicture", "failed to flush encoder")?;
 
             Ok(())
