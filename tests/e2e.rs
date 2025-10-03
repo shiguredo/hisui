@@ -48,20 +48,11 @@ fn empty_source() -> noargs::Result<()> {
     Ok(())
 }
 
-/// 単一のソースをそのまま変換する場合
-/// - 入力;
-///   - 映像:
-///     - VP9
-///     - 30 fps
-///     - 320x240
-///     - 赤一色
-///   - 音声:
-///     - OPUS
-///     - ホワイトノイズ
-/// - 出力:
-///   - VP9, OPUS, 25 fps, 320x240
-#[test]
-fn simple_single_source() -> noargs::Result<()> {
+// 共通のテスト関数
+fn test_simple_single_source_common(
+    report_path: &str,
+    expected_codec: CodecName,
+) -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
     let args = Args::parse(noargs::RawArgs::new(
@@ -69,7 +60,7 @@ fn simple_single_source() -> noargs::Result<()> {
             "hisui",
             "--show-progress-bar=false",
             "-f",
-            "testdata/e2e/simple_single_source/report.json",
+            report_path,
             "--out-file",
             &out_file.path().display().to_string(),
         ]
@@ -102,7 +93,7 @@ fn simple_single_source() -> noargs::Result<()> {
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec.get(), Some(expected_codec));
     assert_eq!(
         video_stats
             .resolutions
@@ -152,6 +143,47 @@ fn simple_single_source() -> noargs::Result<()> {
     check_decoded_frames(&mut decoder).or_fail()?;
 
     Ok(())
+}
+
+/// 単一のソースをそのまま変換する場合
+/// - 入力:
+///   - 映像:
+///     - VP9
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+fn simple_single_source() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source/report.json",
+        CodecName::Vp9,
+    )
+}
+
+/// 単一のソースをそのまま変換する場合 (H.265版)
+/// - 入力:
+///   - 映像:
+///     - H.265
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+#[cfg(any(feature = "nvcodec", target_os = "macos"))]
+fn simple_single_source_h265() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_h265/report.json",
+        CodecName::Vp9,
+    )
 }
 
 /// 単一のソースをそのまま変換する場合（奇数解像度版）
