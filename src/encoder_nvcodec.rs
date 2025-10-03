@@ -82,10 +82,13 @@ impl NvcodecEncoder {
                 shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
             );
 
+            // annex.b 形式から MP4 形式に変換する(サイズバイトは 4 前提)
+            let mp4_data = convert_annexb_to_mp4(encoded_frame.data(), 4).or_fail()?;
+
             // H.265 VideoFrame を作成
             self.output_queue.push_back(VideoFrame {
                 source_id: input_frame.source_id.clone(),
-                data: encoded_frame.data().to_vec(),
+                data: mp4_data,
                 format: VideoFormat::H265,
                 keyframe,
                 width: input_frame.width,
@@ -101,4 +104,56 @@ impl NvcodecEncoder {
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
     }
+}
+
+/// Annex B 形式から MP4 形式への変換
+///
+/// Annex B 形式: スタートコード (0x00000001 or 0x000001) + NALU データ
+/// MP4 形式: サイズ (4バイト) + NALU データ
+fn convert_annexb_to_mp4(annexb_data: &[u8], size_length: usize) -> orfail::Result<Vec<u8>> {
+    (size_length == 4).or_fail_with(|| "Only 4-byte size length is supported")?;
+
+    let mut mp4_data = Vec::new();
+    let mut pos = 0;
+
+    while pos < annexb_data.len() {
+        // スタートコードを探す (0x00000001 or 0x000001)
+        let start_code_len =
+            if pos + 4 <= annexb_data.len() && annexb_data[pos..pos + 4] == [0, 0, 0, 1] {
+                4
+            } else if pos + 3 <= annexb_data.len() && annexb_data[pos..pos + 3] == [0, 0, 1] {
+                3
+            } else if pos == 0 {
+                return Err(orfail::Failure::new("No start code found at beginning"));
+            } else {
+                break;
+            };
+
+        pos += start_code_len;
+
+        // 次のスタートコードまたはデータ終端を探す
+        let nalu_start = pos;
+        let mut nalu_end = annexb_data.len();
+
+        for i in (pos + 3)..annexb_data.len() {
+            if i + 4 <= annexb_data.len() && annexb_data[i..i + 4] == [0, 0, 0, 1] {
+                nalu_end = i;
+                break;
+            }
+            if i + 3 <= annexb_data.len() && annexb_data[i..i + 3] == [0, 0, 1] {
+                nalu_end = i;
+                break;
+            }
+        }
+
+        let nalu_size = nalu_end - nalu_start;
+
+        // MP4 形式: 4バイトのサイズ + NALU データ
+        mp4_data.extend_from_slice(&(nalu_size as u32).to_be_bytes());
+        mp4_data.extend_from_slice(&annexb_data[nalu_start..nalu_end]);
+
+        pos = nalu_end;
+    }
+
+    Ok(mp4_data)
 }
