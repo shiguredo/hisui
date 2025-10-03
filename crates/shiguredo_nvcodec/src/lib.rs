@@ -91,7 +91,14 @@ where
 
         let result = f();
 
-        sys::cuCtxPopCurrent_v2(std::ptr::null_mut());
+        let status = sys::cuCtxPopCurrent_v2(std::ptr::null_mut());
+        if status != sys::cudaError_enum_CUDA_SUCCESS {
+            return Err(Error::new(
+                pop_status,
+                "cuCtxPopCurrent_v2",
+                "failed to pop CUDA context",
+            ));
+        }
 
         result
     }
