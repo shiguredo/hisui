@@ -1,4 +1,3 @@
-use orfail::OrFail;
 use shiguredo_mp4::boxes::{Hev1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
