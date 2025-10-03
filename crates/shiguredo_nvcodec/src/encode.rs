@@ -330,7 +330,7 @@ impl Encoder {
         self.encoded_frames.push_back(EncodedFrame {
             data: encoded_data,
             timestamp,
-            picture_type,
+            picture_type: picture_type.into(),
         });
 
         Ok(())
@@ -502,10 +502,7 @@ mod tests {
         // 最初のフレームがキーフレーム（IDR）であることを確認
         let first_frame = &frames[0];
         assert!(
-            matches!(
-                first_frame.picture_type,
-                sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_I | sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_IDR
-            ),
+            matches!(first_frame.picture_type, PictureType::I || PictureType::Idr),
             "First frame should be a keyframe"
         );
 
