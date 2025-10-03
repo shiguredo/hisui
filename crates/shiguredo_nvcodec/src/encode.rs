@@ -176,9 +176,8 @@ impl Encoder {
     fn copy_input_data_to_device(
         &mut self,
         nv12_data: &[u8],
-    ) -> Result<(sys::CUdeviceptr, crate::ReleaseGuard<impl FnOnce()>), Error> {
+    ) -> Result<(sys::CUdeviceptr, crate::ReleaseGuard<impl FnOnce() + use<>>), Error> {
         unsafe {
-            // 入力用のデバイスメモリを割り当て
             let mut device_input: sys::CUdeviceptr = 0;
             let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
             Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
@@ -187,7 +186,6 @@ impl Encoder {
                 sys::cuMemFree_v2(device_input);
             });
 
-            // データをデバイスにコピー
             let status =
                 sys::cuMemcpyHtoD_v2(device_input, nv12_data.as_ptr().cast(), nv12_data.len());
             Error::check(status, "cuMemcpyHtoD_v2", "failed to copy data to device")?;
@@ -196,7 +194,52 @@ impl Encoder {
         }
     }
 
+    fn register_input_resource(
+        &mut self,
+        device_input: sys::CUdeviceptr,
+    ) -> Result<
+        (
+            sys::NV_ENC_REGISTERED_PTR,
+            crate::ReleaseGuard<impl FnOnce() + use<>>,
+        ),
+        Error,
+    > {
+        unsafe {
+            let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = std::mem::zeroed();
+            register_resource.version = sys::NV_ENC_REGISTER_RESOURCE_VER;
+            register_resource.resourceType =
+                sys::_NV_ENC_INPUT_RESOURCE_TYPE_NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
+            register_resource.resourceToRegister = device_input as *mut c_void;
+            register_resource.width = self.width;
+            register_resource.height = self.height;
+            register_resource.pitch = self.width;
+            register_resource.bufferFormat = self.buffer_format;
+            register_resource.bufferUsage = sys::_NV_ENC_BUFFER_USAGE_NV_ENC_INPUT_IMAGE;
+
+            let status = self
+                .encoder
+                .nvEncRegisterResource
+                .map(|f| f(self.h_encoder, &mut register_resource))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
+            Error::check(
+                status,
+                "nvEncRegisterResource",
+                "failed to register input resource",
+            )?;
+
+            let registered_resource = register_resource.registeredResource;
+            let registered_guard = crate::ReleaseGuard::new(|| unsafe {
+                self.encoder
+                    .nvEncUnregisterResource
+                    .map(|f| f(self.h_encoder, registered_resource));
+            });
+
+            Ok((registered_resource, registered_guard))
+        }
+    }
+
     fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+        // 入力データをデバイスにコピー
         let (device_input, _device_guard) = self.copy_input_data_to_device(nv12_data)?;
 
         // CUDA デバイスメモリを入力リソースとして登録
