@@ -11,7 +11,7 @@ mod encode;
 mod sys;
 
 pub use decode::{DecodedFrame, Decoder};
-pub use encode::Encoder;
+pub use encode::{EncodedFrame, Encoder, PictureType};
 
 /// ビルド時に参照したバージョン
 pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
