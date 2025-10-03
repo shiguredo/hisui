@@ -81,24 +81,12 @@ where
 {
     unsafe {
         let status = sys::cuCtxPushCurrent_v2(ctx);
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::new(
-                status,
-                "cuCtxPushCurrent_v2",
-                "failed to push CUDA context",
-            ));
-        }
+        Error::check(status, "cuCtxPushCurrent_v2", "failed to push CUDA context")?;
 
         let result = f();
 
         let status = sys::cuCtxPopCurrent_v2(std::ptr::null_mut());
-        if status != sys::cudaError_enum_CUDA_SUCCESS {
-            return Err(Error::new(
-                pop_status,
-                "cuCtxPopCurrent_v2",
-                "failed to pop CUDA context",
-            ));
-        }
+        Error::check(status, "cuCtxPopCurrent_v2", "failed to pop CUDA context")?;
 
         result
     }
