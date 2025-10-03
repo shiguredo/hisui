@@ -37,7 +37,7 @@ impl NvcodecDecoder {
     }
 
     fn handle_decoded_frames(&mut self) -> orfail::Result<()> {
-        while let Some(nv12_frame) = self.inner.next_frame() {
+        while let Some(nv12_frame) = self.inner.next_frame().or_fail()? {
             let input_frame = self.input_queue.pop_front().or_fail()?;
 
             // NV12 から I420 への変換

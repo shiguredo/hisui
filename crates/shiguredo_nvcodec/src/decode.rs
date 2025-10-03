@@ -140,15 +140,15 @@ impl Decoder {
     }
 
     /// デコード済みのフレームを取り出す
-    pub fn next_frame(&mut self) -> Option<Result<DecodedFrame, Error>> {
+    pub fn next_frame(&mut self) -> Result<Option<DecodedFrame, Error>> {
         if self.state.is_poisoned() {
-            return Some(Err(Error::new(
+            return Err(Error::new(
                 sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
                 "next_frame",
                 "decoder state is poisoned (a thread panicked while holding the lock)",
-            )));
+            ));
         }
-        self.frame_rx.try_recv().ok()
+        self.frame_rx.try_recv().ok().map(Ok)
     }
 }
 
@@ -545,8 +545,8 @@ mod tests {
         // デコード済みフレームを取得
         let frame = decoder
             .next_frame()
-            .expect("No decoded frame available")
-            .expect("Decoding error occurred");
+            .expect("Decoding error occurred")
+            .expect("No decoded frame available");
 
         assert_eq!(frame.width(), 640);
         assert_eq!(frame.height(), 480);
