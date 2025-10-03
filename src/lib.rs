@@ -56,5 +56,6 @@ pub mod subcommand_vmaf;
 pub mod types;
 pub mod video;
 pub mod video_h264;
+pub mod video_h265;
 pub mod writer_mp4;
 pub mod writer_yuv;
