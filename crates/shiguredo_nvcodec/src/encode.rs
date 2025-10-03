@@ -158,7 +158,7 @@ impl Encoder {
         }
     }
 
-    /// NV12 形式の1フレームをエンコードする
+    /// NV12 形式のフレームをエンコードする
     pub fn encode(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         let expected_size = (self.width * self.height * 3 / 2) as usize;
 
@@ -166,32 +166,38 @@ impl Encoder {
             return Err(Error::new(
                 sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
                 "encode",
-                "Invalid NV12 data size",
+                "invalid NV12 data size",
             ));
         }
 
         crate::with_cuda_context(self.ctx, || self.encode_inner(nv12_data))
     }
 
+    fn copy_input_data_to_device(
+        &mut self,
+        nv12_data: &[u8],
+    ) -> Result<(sys::CUdeviceptr, crate::ReleaseGuard<impl FnOnce()>), Error> {
+        unsafe {
+            // 入力用のデバイスメモリを割り当て
+            let mut device_input: sys::CUdeviceptr = 0;
+            let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
+            Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
+
+            let device_guard = crate::ReleaseGuard::new(|| {
+                sys::cuMemFree_v2(device_input);
+            });
+
+            // データをデバイスにコピー
+            let status =
+                sys::cuMemcpyHtoD_v2(device_input, nv12_data.as_ptr().cast(), nv12_data.len());
+            Error::check(status, "cuMemcpyHtoD_v2", "failed to copy data to device")?;
+
+            Ok((device_input, device_guard))
+        }
+    }
+
     fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
-        // 入力用のデバイスメモリを割り当て
-        let mut device_input = 0u64;
-        let status = unsafe { sys::cuMemAlloc_v2(&mut device_input, nv12_data.len()) };
-        Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
-
-        let _device_guard = crate::ReleaseGuard::new(|| unsafe {
-            sys::cuMemFree_v2(device_input);
-        });
-
-        // データをデバイスにコピー
-        let status = unsafe {
-            sys::cuMemcpyHtoD_v2(
-                device_input,
-                nv12_data.as_ptr() as *const c_void,
-                nv12_data.len(),
-            )
-        };
-        Error::check(status, "cuMemcpyHtoD_v2", "failed to copy data to device")?;
+        let (device_input, _device_guard) = self.copy_input_data_to_device(nv12_data)?;
 
         // CUDA デバイスメモリを入力リソースとして登録
         let mut register_resource: sys::NV_ENC_REGISTER_RESOURCE = unsafe { std::mem::zeroed() };
