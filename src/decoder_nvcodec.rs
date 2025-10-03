@@ -24,7 +24,22 @@ impl NvcodecDecoder {
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
         (frame.format == VideoFormat::H265).or_fail()?;
 
-        self.inner.decode(&frame.data).or_fail()?;
+        // Annex.B 形式に変換する
+        let mut data = &frame.data[..];
+        let mut data_annexb = Vec::new();
+        while !data.is_empty() {
+            (data.len() > 3).or_fail()?;
+            let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+            data = &data[4..];
+
+            (data.len() >= n).or_fail()?;
+            data_annexb.extend_from_slice(&[0, 0, 0, 1]);
+            data_annexb.extend_from_slice(&data[..n]);
+
+            data = &data[n..];
+        }
+
+        self.inner.decode(&data_annexb).or_fail()?;
         self.input_queue.push_back(frame.to_stripped());
         self.handle_decoded_frames().or_fail()?;
         Ok(())
