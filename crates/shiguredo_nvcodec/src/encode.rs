@@ -271,6 +271,36 @@ impl Encoder {
         }
     }
 
+    fn create_output_bitstream_buffer(
+        &mut self,
+    ) -> Result<(sys::NV_ENC_OUTPUT_PTR, ReleaseGuard<impl FnOnce() + use<>>), Error> {
+        unsafe {
+            let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER = std::mem::zeroed();
+            create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
+
+            let status = self
+                .encoder
+                .nvEncCreateBitstreamBuffer
+                .map(|f| f(self.h_encoder, &mut create_bitstream))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
+            Error::check(
+                status,
+                "nvEncCreateBitstreamBuffer",
+                "failed to create bitstream buffer",
+            )?;
+
+            let output_buffer = create_bitstream.bitstreamBuffer;
+
+            let destroy = self.encoder.nvEncDestroyBitstreamBuffer;
+            let h_encoder = self.h_encoder;
+            let bitstream_guard = ReleaseGuard::new(move || {
+                destroy.map(|f| f(h_encoder, output_buffer));
+            });
+
+            Ok((output_buffer, bitstream_guard))
+        }
+    }
+
     fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         // 入力データをデバイスにコピー
         let (device_input, _device_guard) = self.copy_input_data_to_device(nv12_data)?;
@@ -283,30 +313,9 @@ impl Encoder {
         let (mapped_resource, _mapped_guard) = self.map_input_resource(registered_resource)?;
 
         // 出力ビットストリームバッファを割り当て
-        let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER =
-            unsafe { std::mem::zeroed() };
-        create_bitstream.version = sys::NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
+        let (output_buffer, _bitstream_guard) = self.create_output_bitstream_buffer()?;
 
-        let status = unsafe {
-            self.encoder
-                .nvEncCreateBitstreamBuffer
-                .map(|f| f(self.h_encoder, &mut create_bitstream))
-                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
-        };
-        Error::check(
-            status,
-            "nvEncCreateBitstreamBuffer",
-            "failed to create bitstream buffer",
-        )?;
-
-        let output_buffer = create_bitstream.bitstreamBuffer;
-
-        let _bitstream_guard = ReleaseGuard::new(|| unsafe {
-            self.encoder
-                .nvEncDestroyBitstreamBuffer
-                .map(|f| f(self.h_encoder, output_buffer));
-        });
-
+        // TODO: factor out this code to a method as the methods above do.
         // エンコードピクチャパラメータを設定
         let mut pic_params: sys::NV_ENC_PIC_PARAMS = unsafe { std::mem::zeroed() };
         pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
