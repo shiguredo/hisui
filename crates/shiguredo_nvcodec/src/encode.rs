@@ -502,7 +502,7 @@ mod tests {
         // 最初のフレームがキーフレーム（IDR）であることを確認
         let first_frame = &frames[0];
         assert!(
-            matches!(first_frame.picture_type, PictureType::I || PictureType::Idr),
+            matches!(first_frame.picture_type, PictureType::I | PictureType::Idr),
             "First frame should be a keyframe"
         );
 
