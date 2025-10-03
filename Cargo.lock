@@ -155,6 +155,7 @@ dependencies = [
  "shiguredo_libvpx",
  "shiguredo_libyuv",
  "shiguredo_mp4",
+ "shiguredo_nvcodec",
  "shiguredo_openh264",
  "shiguredo_opus",
  "shiguredo_svt_av1",
@@ -444,6 +445,14 @@ name = "shiguredo_mp4"
 version = "2025.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "531b351cb6aa06e9e8ea5d55367ee1b634120f0d430f65e5a10ab135e151b164"
+
+[[package]]
+name = "shiguredo_nvcodec"
+version = "2025.1.0"
+dependencies = [
+ "bindgen",
+ "toml",
+]
 
 [[package]]
 name = "shiguredo_openh264"

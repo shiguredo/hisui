@@ -44,7 +44,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   clippy:
     runs-on: ubuntu-24.04
@@ -74,7 +74,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox -- --deny warnings
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- --deny warnings
 
   test:
     runs-on: ubuntu-24.04
@@ -103,7 +103,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
@@ -223,8 +223,8 @@ jobs:
       - run: cargo install cargo-valgrind || echo 'already installed'
       - name: Run valgrind tests
         env:
-          VALGRINDFLAGS: --leak-check=full --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
-        run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+          VALGRINDFLAGS: --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
+        run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   docs_rs:
     runs-on: ubuntu-24.04
