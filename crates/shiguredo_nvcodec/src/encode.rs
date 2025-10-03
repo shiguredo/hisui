@@ -83,7 +83,7 @@ impl Encoder {
             };
 
             // デフォルトパラメータでエンコーダーを初期化
-            crate::with_cuda_context(self.ctx, || encoder.initialize_encoder())?;
+            crate::with_cuda_context(ctx, || encoder.initialize_encoder())?;
 
             Ok(encoder)
         }
