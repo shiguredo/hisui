@@ -36,6 +36,7 @@ fn main() {
             output_bindings_path,
             concat!(
                 "pub struct NV_ENC_BUFFER_FORMAT;",
+                "pub struct NV_ENC_INPUT_PTR;",
                 "pub struct NV_ENC_OUTPUT_PTR;",
                 "pub struct CUVIDEOFORMAT;",
                 "pub struct CUVIDPICPARAMS;",

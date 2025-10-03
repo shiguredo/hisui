@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr;
 
-use crate::{Error, ensure_cuda_initialized, sys};
+use crate::{Error, ReleaseGuard, ensure_cuda_initialized, sys};
 
 /// エンコーダー
 pub struct Encoder {
@@ -30,7 +30,7 @@ impl Encoder {
             let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
             Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 
-            let ctx_guard = crate::ReleaseGuard::new(|| {
+            let ctx_guard = ReleaseGuard::new(|| {
                 sys::cuCtxDestroy_v2(ctx);
             });
 
@@ -176,13 +176,13 @@ impl Encoder {
     fn copy_input_data_to_device(
         &mut self,
         nv12_data: &[u8],
-    ) -> Result<(sys::CUdeviceptr, crate::ReleaseGuard<impl FnOnce() + use<>>), Error> {
+    ) -> Result<(sys::CUdeviceptr, ReleaseGuard<impl FnOnce() + use<>>), Error> {
         unsafe {
             let mut device_input: sys::CUdeviceptr = 0;
             let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
             Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
 
-            let device_guard = crate::ReleaseGuard::new(move || {
+            let device_guard = ReleaseGuard::new(move || {
                 sys::cuMemFree_v2(device_input);
             });
 
@@ -200,7 +200,7 @@ impl Encoder {
     ) -> Result<
         (
             sys::NV_ENC_REGISTERED_PTR,
-            crate::ReleaseGuard<impl FnOnce() + use<>>,
+            ReleaseGuard<impl FnOnce() + use<>>,
         ),
         Error,
     > {
@@ -231,11 +231,43 @@ impl Encoder {
 
             let unregister = self.encoder.nvEncUnregisterResource;
             let h_encoder = self.h_encoder;
-            let registered_guard = crate::ReleaseGuard::new(move || {
+            let registered_guard = ReleaseGuard::new(move || {
                 unregister.map(|f| f(h_encoder, registered_resource));
             });
 
             Ok((registered_resource, registered_guard))
+        }
+    }
+
+    fn map_input_resource(
+        &mut self,
+        registered_resource: sys::NV_ENC_REGISTERED_PTR,
+    ) -> Result<(sys::NV_ENC_INPUT_PTR, ReleaseGuard<impl FnOnce() + use<>>), Error> {
+        unsafe {
+            let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = std::mem::zeroed();
+            map_input_resource.version = sys::NV_ENC_MAP_INPUT_RESOURCE_VER;
+            map_input_resource.registeredResource = registered_resource;
+
+            let status = self
+                .encoder
+                .nvEncMapInputResource
+                .map(|f| f(self.h_encoder, &mut map_input_resource))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
+            Error::check(
+                status,
+                "nvEncMapInputResource",
+                "failed to map input resource",
+            )?;
+
+            let mapped_resource = map_input_resource.mappedResource;
+
+            let unmap = self.encoder.nvEncUnmapInputResource;
+            let h_encoder = self.h_encoder;
+            let mapped_guard = ReleaseGuard::new(move || {
+                unmap.map(|f| f(h_encoder, mapped_resource));
+            });
+
+            Ok((mapped_resource, mapped_guard))
         }
     }
 
@@ -248,29 +280,7 @@ impl Encoder {
             self.register_input_resource(device_input)?;
 
         // 登録したリソースをマップ
-        let mut map_input_resource: sys::NV_ENC_MAP_INPUT_RESOURCE = unsafe { std::mem::zeroed() };
-        map_input_resource.version = sys::NV_ENC_MAP_INPUT_RESOURCE_VER;
-        map_input_resource.registeredResource = registered_resource;
-
-        let status = unsafe {
-            self.encoder
-                .nvEncMapInputResource
-                .map(|f| f(self.h_encoder, &mut map_input_resource))
-                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
-        };
-        Error::check(
-            status,
-            "nvEncMapInputResource",
-            "failed to map input resource",
-        )?;
-
-        let mapped_resource = map_input_resource.mappedResource;
-
-        let _mapped_guard = crate::ReleaseGuard::new(|| unsafe {
-            self.encoder
-                .nvEncUnmapInputResource
-                .map(|f| f(self.h_encoder, mapped_resource));
-        });
+        let (mapped_resource, _mapped_guard) = self.map_input_resource(registered_resource)?;
 
         // 出力ビットストリームバッファを割り当て
         let mut create_bitstream: sys::NV_ENC_CREATE_BITSTREAM_BUFFER =
@@ -291,7 +301,7 @@ impl Encoder {
 
         let output_buffer = create_bitstream.bitstreamBuffer;
 
-        let _bitstream_guard = crate::ReleaseGuard::new(|| unsafe {
+        let _bitstream_guard = ReleaseGuard::new(|| unsafe {
             self.encoder
                 .nvEncDestroyBitstreamBuffer
                 .map(|f| f(self.h_encoder, output_buffer));
@@ -330,7 +340,7 @@ impl Encoder {
         };
         Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
 
-        let _lock_guard = crate::ReleaseGuard::new(|| unsafe {
+        let _lock_guard = ReleaseGuard::new(|| unsafe {
             self.encoder
                 .nvEncUnlockBitstream
                 .map(|f| f(self.h_encoder, lock_bitstream.outputBitstream));
