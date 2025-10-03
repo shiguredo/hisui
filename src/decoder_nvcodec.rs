@@ -137,15 +137,14 @@ fn extract_parameter_sets_annexb(
     use shiguredo_mp4::boxes::SampleEntry;
 
     let hevc_config = match sample_entry {
-        SampleEntry::Hev1(entry) => &entry.hevc_decoder_configuration_record,
-        SampleEntry::Hvc1(entry) => &entry.hevc_decoder_configuration_record,
+        SampleEntry::Hev1(entry) => &entry.hvcc_box,
         _ => return Err(orfail::Failure::new("Sample entry is not HEVC (hev1/hvc1)")),
     };
 
     let mut annexb_data = Vec::new();
 
     // 各 NAL unit array からパラメータセットを抽出
-    for array in &hevc_config.arrays {
+    for array in &hevc_config.nalu_arrays {
         for nalu in &array.nalus {
             // Annex.B start code を追加
             annexb_data.extend_from_slice(&[0, 0, 0, 1]);
