@@ -173,6 +173,32 @@ impl Encoder {
         crate::with_cuda_context(self.ctx, || self.encode_inner(nv12_data))
     }
 
+    fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+        // 入力データをデバイスにコピー
+        let (device_input, _device_guard) = self.copy_input_data_to_device(nv12_data)?;
+
+        // CUDA デバイスメモリを入力リソースとして登録
+        let (registered_resource, _registered_guard) =
+            self.register_input_resource(device_input)?;
+
+        // 登録したリソースをマップ
+        let (mapped_resource, _mapped_guard) = self.map_input_resource(registered_resource)?;
+
+        // 出力ビットストリームバッファを割り当て
+        let (output_buffer, _bitstream_guard) = self.create_output_bitstream_buffer()?;
+
+        // ピクチャをエンコード
+        self.encode_picture(mapped_resource, output_buffer)?;
+
+        // ビットストリームをロックしてエンコード済みデータをコピー
+        let encoded_frame = self.lock_and_copy_bitstream(output_buffer)?;
+
+        // エンコード済みフレームを保存
+        self.encoded_frames.push_back(encoded_frame);
+
+        Ok(())
+    }
+
     fn copy_input_data_to_device(
         &mut self,
         nv12_data: &[u8],
@@ -368,32 +394,6 @@ impl Encoder {
                 picture_type,
             })
         }
-    }
-
-    fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
-        // 入力データをデバイスにコピー
-        let (device_input, _device_guard) = self.copy_input_data_to_device(nv12_data)?;
-
-        // CUDA デバイスメモリを入力リソースとして登録
-        let (registered_resource, _registered_guard) =
-            self.register_input_resource(device_input)?;
-
-        // 登録したリソースをマップ
-        let (mapped_resource, _mapped_guard) = self.map_input_resource(registered_resource)?;
-
-        // 出力ビットストリームバッファを割り当て
-        let (output_buffer, _bitstream_guard) = self.create_output_bitstream_buffer()?;
-
-        // ピクチャをエンコード
-        self.encode_picture(mapped_resource, output_buffer)?;
-
-        // ビットストリームをロックしてエンコード済みデータをコピー
-        let encoded_frame = self.lock_and_copy_bitstream(output_buffer)?;
-
-        // エンコード済みフレームを保存
-        self.encoded_frames.push_back(encoded_frame);
-
-        Ok(())
     }
 
     /// エンコーダーをフラッシュし、残りのフレームを取得する
