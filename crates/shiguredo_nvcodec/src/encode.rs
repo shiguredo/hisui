@@ -363,19 +363,14 @@ impl Encoder {
 impl Drop for Encoder {
     fn drop(&mut self) {
         unsafe {
-            if !self.h_encoder.is_null() {
-                // クリーンアップ前に context をアクティブ化
-                let _ = crate::with_cuda_context(self.ctx, || {
-                    if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
-                        destroy_fn(self.h_encoder);
-                    }
-                    Ok::<(), Error>(())
-                });
-            }
+            let _ = crate::with_cuda_context(self.ctx, || {
+                if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
+                    destroy_fn(self.h_encoder);
+                }
+                Ok(())
+            });
 
-            if !self.ctx.is_null() {
-                sys::cuCtxDestroy_v2(self.ctx);
-            }
+            sys::cuCtxDestroy_v2(self.ctx);
         }
     }
 }
@@ -392,15 +387,71 @@ impl std::fmt::Debug for Encoder {
     }
 }
 
+/// ピクチャータイプ
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PictureType {
+    /// P フレーム
+    P,
+    /// B フレーム
+    B,
+    /// I フレーム
+    I,
+    /// IDR フレーム
+    Idr,
+    /// BI フレーム
+    Bi,
+    /// スキップされたフレーム
+    Skipped,
+    /// イントラリフレッシュフレーム
+    IntraRefresh,
+    /// 非参照 P フレーム
+    NonRefP,
+    /// スイッチフレーム
+    Switch,
+    /// 不明なフレームタイプ
+    Unknown,
+}
+
+impl From<sys::NV_ENC_PIC_TYPE> for PictureType {
+    fn from(pic_type: sys::NV_ENC_PIC_TYPE) -> Self {
+        match pic_type {
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_P => PictureType::P,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_B => PictureType::B,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_I => PictureType::I,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_IDR => PictureType::Idr,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_BI => PictureType::Bi,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_SKIPPED => PictureType::Skipped,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_INTRA_REFRESH => PictureType::IntraRefresh,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_NONREF_P => PictureType::NonRefP,
+            sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_SWITCH => PictureType::Switch,
+            _ => PictureType::Unknown,
+        }
+    }
+}
+
 /// エンコード済みフレーム
 #[derive(Debug, Clone)]
 pub struct EncodedFrame {
-    /// エンコードされたデータ
-    pub data: Vec<u8>,
-    /// タイムスタンプ
-    pub timestamp: u64,
-    /// ピクチャータイプ
-    pub picture_type: sys::NV_ENC_PIC_TYPE,
+    data: Vec<u8>,
+    timestamp: u64,
+    picture_type: PictureType,
+}
+
+impl EncodedFrame {
+    /// エンコードされたデータを取得する
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// タイムスタンプを取得する
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    /// ピクチャータイプを取得する
+    pub fn picture_type(&self) -> PictureType {
+        self.picture_type
+    }
 }
 
 #[cfg(test)]
