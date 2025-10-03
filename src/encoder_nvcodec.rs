@@ -143,7 +143,7 @@ impl NvcodecEncoder {
 /// Annex B 形式: スタートコード (0x00000001 or 0x000001) + NALU データ
 /// MP4 形式: サイズ (4バイト) + NALU データ
 fn convert_annexb_to_mp4(annexb_data: &[u8], size_length: usize) -> orfail::Result<Vec<u8>> {
-    (size_length == 4).or_fail_with(|| "Only 4-byte size length is supported")?;
+    (size_length == 4).or_fail_with(|()| "Only 4-byte size length is supported")?;
 
     let mut mp4_data = Vec::new();
     let mut pos = 0;
