@@ -4,6 +4,8 @@ pub mod composer;
 pub mod decoder;
 pub mod decoder_dav1d;
 pub mod decoder_libvpx;
+#[cfg(feature = "nvcodec")]
+pub mod decoder_nvcodec;
 pub mod decoder_openh264;
 pub mod decoder_opus;
 #[cfg(target_os = "macos")]
@@ -15,6 +17,8 @@ pub mod encoder_audio_toolbox;
 pub mod encoder_fdk_aac;
 pub mod encoder_libvpx;
 pub mod encoder_libvpx_params;
+#[cfg(feature = "nvcodec")]
+pub mod encoder_nvcodec;
 pub mod encoder_openh264;
 pub mod encoder_openh264_params;
 pub mod encoder_opus;

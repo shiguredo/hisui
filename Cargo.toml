@@ -12,6 +12,7 @@ readme = "README.md"
 
 [features]
 fdk-aac = ["shiguredo_fdk_aac"]
+nvcodec = ["shiguredo_nvcodec"]
 
 [dependencies]
 indicatif = "0.18.0"
