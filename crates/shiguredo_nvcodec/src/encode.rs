@@ -396,8 +396,8 @@ impl Encoder {
         }
     }
 
-    /// エンコーダーをフラッシュし、残りのフレームを取得する
-    pub fn flush(&mut self) -> Result<(), Error> {
+    /// エンコーダーを終了し、残りのフレームを取得する
+    pub fn finish(&mut self) -> Result<(), Error> {
         unsafe {
             let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
             pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
@@ -408,7 +408,7 @@ impl Encoder {
                 .nvEncEncodePicture
                 .map(|f| f(self.h_encoder, &mut pic_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(status, "nvEncEncodePicture", "failed to flush encoder")?;
+            Error::check(status, "nvEncEncodePicture", "failed to finish encoder")?;
 
             Ok(())
         }
@@ -546,9 +546,7 @@ mod tests {
         encoder
             .encode(&frame_data)
             .expect("failed to encode black frame");
-
-        // エンコーダーをフラッシュ
-        encoder.flush().expect("failed to flush encoder");
+        encoder.finish().expect("failed to finish encoder");
 
         // エンコード済みフレームを取得
         let mut frames = Vec::new();
