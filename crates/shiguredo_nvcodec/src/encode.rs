@@ -370,20 +370,18 @@ impl Encoder {
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
             Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
 
-            // 自動アンロックのためのガードを作成
-            let output_bitstream = lock_bitstream.outputBitstream;
-            let _lock_guard = ReleaseGuard::new(|| {
-                self.encoder
-                    .nvEncUnlockBitstream
-                    .map(|f| f(self.h_encoder, output_bitstream));
-            });
-
             // ビットストリームがロックされている間にエンコード済みデータをコピー
             let encoded_data = std::slice::from_raw_parts(
                 lock_bitstream.bitstreamBufferPtr as *const u8,
                 lock_bitstream.bitstreamSizeInBytes as usize,
             )
             .to_vec();
+
+            let status = self
+                .encoder
+                .nvEncUnlockBitstream
+                .map(|f| f(self.h_encoder, lock_bitstream.output_bitstream));
+            Error::check(status, "nvEncUnlockBitstream", "failed to unlock bitstream")?;
 
             let timestamp = lock_bitstream.outputTimeStamp;
             let picture_type = PictureType::new(lock_bitstream.pictureType);
