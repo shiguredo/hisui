@@ -283,7 +283,7 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(all(feature = "nvcodec"))]
+                #[cfg(feature = "nvcodec")]
                 VideoFormat::H265 => {
                     *self = NvcodecDecoder::new_h265().or_fail().map(Self::Nvcodec)?;
                     stats.engine.set(EngineName::Nvcodec);
