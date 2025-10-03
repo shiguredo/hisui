@@ -69,6 +69,9 @@ impl Encoder {
                 Ok((encoder_api, h_encoder))
             })?;
 
+            // ここまで成功したらクリーンアップをキャンセル（あとはDrop に任せる）
+            ctx_guard.cancel();
+
             let mut encoder = Self {
                 ctx,
                 encoder: encoder_api,
@@ -80,36 +83,32 @@ impl Encoder {
             };
 
             // デフォルトパラメータでエンコーダーを初期化
-            encoder.initialize_encoder()?;
-
-            // 成功したのでクリーンアップをキャンセル
-            ctx_guard.cancel();
+            crate::with_cuda_context(self.ctx, || encoder.initialize_encoder())?;
 
             Ok(encoder)
         }
     }
 
     fn initialize_encoder(&mut self) -> Result<(), Error> {
-        crate::with_cuda_context(self.ctx, || {
+        unsafe {
             // プリセット設定を取得
-            let mut preset_config: sys::NV_ENC_PRESET_CONFIG = unsafe { std::mem::zeroed() };
+            let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
             preset_config.version = sys::NV_ENC_PRESET_CONFIG_VER;
             preset_config.presetCfg.version = sys::NV_ENC_CONFIG_VER;
 
-            let status = unsafe {
-                self.encoder
-                    .nvEncGetEncodePresetConfigEx
-                    .map(|f| {
-                        f(
-                            self.h_encoder,
-                            sys::NV_ENC_CODEC_HEVC_GUID,
-                            sys::NV_ENC_PRESET_P4_GUID,
-                            sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
-                            &mut preset_config,
-                        )
-                    })
-                    .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
-            };
+            let status = self
+                .encoder
+                .nvEncGetEncodePresetConfigEx
+                .map(|f| {
+                    f(
+                        self.h_encoder,
+                        sys::NV_ENC_CODEC_HEVC_GUID,
+                        sys::NV_ENC_PRESET_P4_GUID, // TODO(atode): make configurable
+                        sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY, // TODO(atode): make configurable
+                        &mut preset_config,
+                    )
+                })
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
             Error::check(
                 status,
                 "nvEncGetEncodePresetConfigEx",
@@ -117,18 +116,18 @@ impl Encoder {
             )?;
 
             // エンコーダーパラメータを初期化
-            let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = unsafe { std::mem::zeroed() };
+            let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
             let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
             init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
-            init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID;
+            init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID; // TODO(atode): make configurable
             init_params.encodeWidth = self.width;
             init_params.encodeHeight = self.height;
             init_params.darWidth = self.width;
             init_params.darHeight = self.height;
-            init_params.frameRateNum = 30;
-            init_params.frameRateDen = 1;
+            init_params.frameRateNum = 30; // TODO(atode): make configurable
+            init_params.frameRateDen = 1; // TODO(atode): make configurable
             init_params.enablePTD = 1;
             init_params.encodeConfig = &mut config;
             init_params.maxEncodeWidth = self.width;
@@ -136,20 +135,19 @@ impl Encoder {
             init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY;
 
             config.version = sys::NV_ENC_CONFIG_VER;
-            config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID;
+            config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID; // TODO(atode): make configurable
             config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
             config.frameIntervalP = 1;
 
             // HEVC 固有の設定
-            config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
+            config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength; // TODO(atode): make configurable
 
             // エンコーダーを初期化
-            let status = unsafe {
-                self.encoder
-                    .nvEncInitializeEncoder
-                    .map(|f| f(self.h_encoder, &mut init_params))
-                    .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR)
-            };
+            let status = self
+                .encoder
+                .nvEncInitializeEncoder
+                .map(|f| f(self.h_encoder, &mut init_params))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
             Error::check(
                 status,
                 "nvEncInitializeEncoder",
@@ -157,7 +155,7 @@ impl Encoder {
             )?;
 
             Ok(())
-        })
+        }
     }
 
     /// NV12 形式の1フレームをエンコードする
