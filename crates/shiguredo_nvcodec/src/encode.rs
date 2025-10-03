@@ -159,21 +159,21 @@ impl Encoder {
     }
 
     /// NV12 形式の1フレームをエンコードする
-    pub fn encode_frame(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+    pub fn encode(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         let expected_size = (self.width * self.height * 3 / 2) as usize;
 
         if nv12_data.len() != expected_size {
             return Err(Error::new(
                 sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
-                "encode_frame",
+                "encode",
                 "Invalid NV12 data size",
             ));
         }
 
-        crate::with_cuda_context(self.ctx, || self.encode_frame_inner(nv12_data))
+        crate::with_cuda_context(self.ctx, || self.encode_inner(nv12_data))
     }
 
-    fn encode_frame_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
+    fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         // 入力用のデバイスメモリを割り当て
         let mut device_input = 0u64;
         let status = unsafe { sys::cuMemAlloc_v2(&mut device_input, nv12_data.len()) };
@@ -324,13 +324,13 @@ impl Encoder {
         .to_vec();
 
         let timestamp = lock_bitstream.outputTimeStamp;
-        let picture_type = lock_bitstream.pictureType;
+        let picture_type = PictureType::new(lock_bitstream.pictureType);
 
         // エンコード済みフレームを保存
         self.encoded_frames.push_back(EncodedFrame {
             data: encoded_data,
             timestamp,
-            picture_type: picture_type.into(),
+            picture_type,
         });
 
         Ok(())
@@ -412,8 +412,8 @@ pub enum PictureType {
     Unknown,
 }
 
-impl From<sys::NV_ENC_PIC_TYPE> for PictureType {
-    fn from(pic_type: sys::NV_ENC_PIC_TYPE) -> Self {
+impl PictureType {
+    fn new(pic_type: sys::NV_ENC_PIC_TYPE) -> Self {
         match pic_type {
             sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_P => PictureType::P,
             sys::_NV_ENC_PIC_TYPE_NV_ENC_PIC_TYPE_B => PictureType::B,
@@ -484,7 +484,7 @@ mod tests {
 
         // フレームをエンコード
         encoder
-            .encode_frame(&frame_data)
+            .encode(&frame_data)
             .expect("failed to encode black frame");
 
         // エンコーダーをフラッシュ
