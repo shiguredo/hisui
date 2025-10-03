@@ -2,13 +2,17 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 
-use crate::video::{VideoFormat, VideoFrame};
+use crate::{
+    video::{VideoFormat, VideoFrame},
+    video_h265,
+};
 
 #[derive(Debug)]
 pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
+    is_first_keyframe: bool,
 }
 
 impl NvcodecEncoder {
@@ -18,6 +22,7 @@ impl NvcodecEncoder {
             inner: shiguredo_nvcodec::Encoder::new_h265(width as u32, height as u32).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            is_first_keyframe: true,
         })
     }
 
@@ -85,6 +90,33 @@ impl NvcodecEncoder {
             // annex.b 形式から MP4 形式に変換する(サイズバイトは 4 前提)
             let mp4_data = convert_annexb_to_mp4(encoded_frame.data(), 4).or_fail()?;
 
+            // H.265 sample entry を生成（最初のキーフレームのみ）
+            let sample_entry = if keyframe && self.is_first_keyframe {
+                self.is_first_keyframe = false;
+
+                // VPS, SPS, PPS を抽出
+                let (vps_list, sps_list, pps_list) =
+                    video_h265::extract_h265_parameter_sets(&mp4_data).or_fail()?;
+
+                if !vps_list.is_empty() && !sps_list.is_empty() && !pps_list.is_empty() {
+                    let width = crate::types::EvenUsize::new(input_frame.width).or_fail()?;
+                    let height = crate::types::EvenUsize::new(input_frame.height).or_fail()?;
+                    // TODO: フレームレートを適切に設定する
+                    let fps = crate::video::FrameRate::FPS_25;
+
+                    Some(
+                        video_h265::h265_sample_entry(
+                            width, height, fps, vps_list, sps_list, pps_list,
+                        )
+                        .or_fail()?,
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             // H.265 VideoFrame を作成
             self.output_queue.push_back(VideoFrame {
                 source_id: input_frame.source_id.clone(),
@@ -95,7 +127,7 @@ impl NvcodecEncoder {
                 height: input_frame.height,
                 timestamp: input_frame.timestamp,
                 duration: input_frame.duration,
-                sample_entry: None, // TODO: H.265 sample entry の生成
+                sample_entry,
             });
         }
         Ok(())
