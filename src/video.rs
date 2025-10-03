@@ -42,6 +42,117 @@ impl VideoFrame {
         (width.div_ceil(2), height.div_ceil(2))
     }
 
+    /// NV12 形式のデータから I420 VideoFrame を作成
+    pub fn from_nv12_data(
+        nv12_data: &[u8],
+        width: EvenUsize,
+        height: EvenUsize,
+        timestamp: Duration,
+        duration: Duration,
+    ) -> orfail::Result<Self> {
+        let width_val = width.get();
+        let height_val = height.get();
+
+        let y_size = width_val * height_val;
+        let uv_size = y_size / 2; // NV12 の UV プレーンは Y の半分のサイズ
+        let expected_size = y_size + uv_size;
+
+        if nv12_data.len() != expected_size {
+            return Err(orfail::Failure::new(format!(
+                "NV12 data size mismatch: expected {}, got {}",
+                expected_size,
+                nv12_data.len()
+            )));
+        }
+
+        // libyuv を使って NV12 から I420 に変換
+        let (i420_y_size, i420_u_size, _) = Self::i420_plane_sizes(width_val, height_val);
+        let mut i420_data = vec![0u8; Self::i420_total_size(width_val, height_val)];
+
+        let (dst_y, rest) = i420_data.split_at_mut(i420_y_size);
+        let (dst_u, dst_v) = rest.split_at_mut(i420_u_size);
+
+        let (uv_width, _) = Self::i420_uv_dimensions(width_val, height_val);
+
+        let src = shiguredo_libyuv::Nv12Planes {
+            y: &nv12_data[..y_size],
+            y_stride: width_val,
+            uv: &nv12_data[y_size..],
+            uv_stride: width_val,
+        };
+
+        let mut dst = shiguredo_libyuv::I420PlanesMut {
+            y: dst_y,
+            y_stride: width_val,
+            u: dst_u,
+            u_stride: uv_width,
+            v: dst_v,
+            v_stride: uv_width,
+        };
+
+        shiguredo_libyuv::nv12_to_i420(
+            &src,
+            &mut dst,
+            shiguredo_libyuv::ImageSize::new(width_val, height_val),
+        )
+        .or_fail()?;
+
+        Ok(Self {
+            source_id: None,
+            data: i420_data,
+            format: VideoFormat::I420,
+            keyframe: true,
+            width: width_val,
+            height: height_val,
+            timestamp,
+            duration,
+            sample_entry: None,
+        })
+    }
+
+    /// I420 フレームを NV12 形式のデータに変換
+    pub fn to_nv12_data(&self) -> orfail::Result<Vec<u8>> {
+        (self.format == VideoFormat::I420).or_fail()?;
+
+        let width = self.width;
+        let height = self.height;
+        let y_size = width * height;
+
+        // NV12 データサイズ: Y プレーン + インターリーブされた UV プレーン
+        let nv12_size = y_size + (y_size / 2);
+        let mut nv12_data = vec![0u8; nv12_size];
+
+        let (src_y, src_u, src_v) = self.as_yuv_planes().or_fail()?;
+        let (uv_width, _) = Self::i420_uv_dimensions(width, height);
+
+        let (dst_y, dst_uv) = nv12_data.split_at_mut(y_size);
+
+        let src = shiguredo_libyuv::I420Planes {
+            y: src_y,
+            y_stride: width,
+            u: src_u,
+            u_stride: uv_width,
+            v: src_v,
+            v_stride: uv_width,
+        };
+
+        let mut dst = shiguredo_libyuv::Nv12PlanesMut {
+            y: dst_y,
+            y_stride: width,
+            uv: dst_uv,
+            uv_stride: width,
+        };
+
+        shiguredo_libyuv::i420_to_nv12(
+            &src,
+            &mut dst,
+            shiguredo_libyuv::ImageSize::new(width, height),
+        )
+        .or_fail()?;
+
+        Ok(nv12_data)
+    }
+
     pub fn from_bgr_data(
         bgr_data: &[u8],
         width: EvenUsize,

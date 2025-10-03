@@ -363,3 +363,167 @@ pub fn set_plane(
 
     Ok(())
 }
+
+/// NV12 画像の各プレーン情報
+#[derive(Debug)]
+pub struct Nv12Planes<'a> {
+    /// Y プレーンデータ
+    pub y: &'a [u8],
+    /// Y プレーンのストライド（行あたりのバイト数）
+    pub y_stride: usize,
+    /// UV プレーンデータ（インターリーブ）
+    pub uv: &'a [u8],
+    /// UV プレーンのストライド
+    pub uv_stride: usize,
+}
+
+/// NV12 画像の各プレーン情報（可変）
+#[derive(Debug)]
+pub struct Nv12PlanesMut<'a> {
+    /// Y プレーンデータ
+    pub y: &'a mut [u8],
+    /// Y プレーンのストライド（行あたりのバイト数）
+    pub y_stride: usize,
+    /// UV プレーンデータ（インターリーブ）
+    pub uv: &'a mut [u8],
+    /// UV プレーンのストライド
+    pub uv_stride: usize,
+}
+
+/// NV12 から I420 への変換
+pub fn nv12_to_i420(
+    src: &Nv12Planes<'_>,
+    dst: &mut I420PlanesMut<'_>,
+    size: ImageSize,
+) -> Result<(), Error> {
+    // バッファサイズの検証
+    let src_y_size = src.y_stride * size.height;
+    let src_uv_size = src.uv_stride * size.height.div_ceil(2);
+    let dst_y_size = dst.y_stride * size.height;
+    let dst_u_size = dst.u_stride * size.height.div_ceil(2);
+    let dst_v_size = dst.v_stride * size.height.div_ceil(2);
+
+    if src.y.len() < src_y_size {
+        return Err(Error::with_reason(
+            -1,
+            "NV12ToI420",
+            "source Y buffer too small",
+        ));
+    }
+    if src.uv.len() < src_uv_size {
+        return Err(Error::with_reason(
+            -1,
+            "NV12ToI420",
+            "source UV buffer too small",
+        ));
+    }
+    if dst.y.len() < dst_y_size {
+        return Err(Error::with_reason(
+            -1,
+            "NV12ToI420",
+            "destination Y buffer too small",
+        ));
+    }
+    if dst.u.len() < dst_u_size {
+        return Err(Error::with_reason(
+            -1,
+            "NV12ToI420",
+            "destination U buffer too small",
+        ));
+    }
+    if dst.v.len() < dst_v_size {
+        return Err(Error::with_reason(
+            -1,
+            "NV12ToI420",
+            "destination V buffer too small",
+        ));
+    }
+
+    let result = unsafe {
+        sys::NV12ToI420(
+            src.y.as_ptr(),
+            src.y_stride as c_int,
+            src.uv.as_ptr(),
+            src.uv_stride as c_int,
+            dst.y.as_mut_ptr(),
+            dst.y_stride as c_int,
+            dst.u.as_mut_ptr(),
+            dst.u_stride as c_int,
+            dst.v.as_mut_ptr(),
+            dst.v_stride as c_int,
+            size.width as c_int,
+            size.height as c_int,
+        )
+    };
+
+    Error::check(result, "NV12ToI420")
+}
+
+/// I420 から NV12 への変換
+pub fn i420_to_nv12(
+    src: &I420Planes<'_>,
+    dst: &mut Nv12PlanesMut<'_>,
+    size: ImageSize,
+) -> Result<(), Error> {
+    // バッファサイズの検証
+    let src_y_size = src.y_stride * size.height;
+    let src_u_size = src.u_stride * size.height.div_ceil(2);
+    let src_v_size = src.v_stride * size.height.div_ceil(2);
+    let dst_y_size = dst.y_stride * size.height;
+    let dst_uv_size = dst.uv_stride * size.height.div_ceil(2);
+
+    if src.y.len() < src_y_size {
+        return Err(Error::with_reason(
+            -1,
+            "I420ToNV12",
+            "source Y buffer too small",
+        ));
+    }
+    if src.u.len() < src_u_size {
+        return Err(Error::with_reason(
+            -1,
+            "I420ToNV12",
+            "source U buffer too small",
+        ));
+    }
+    if src.v.len() < src_v_size {
+        return Err(Error::with_reason(
+            -1,
+            "I420ToNV12",
+            "source V buffer too small",
+        ));
+    }
+    if dst.y.len() < dst_y_size {
+        return Err(Error::with_reason(
+            -1,
+            "I420ToNV12",
+            "destination Y buffer too small",
+        ));
+    }
+    if dst.uv.len() < dst_uv_size {
+        return Err(Error::with_reason(
+            -1,
+            "I420ToNV12",
+            "destination UV buffer too small",
+        ));
+    }
+
+    let result = unsafe {
+        sys::I420ToNV12(
+            src.y.as_ptr(),
+            src.y_stride as c_int,
+            src.u.as_ptr(),
+            src.u_stride as c_int,
+            src.v.as_ptr(),
+            src.v_stride as c_int,
+            dst.y.as_mut_ptr(),
+            dst.y_stride as c_int,
+            dst.uv.as_mut_ptr(),
+            dst.uv_stride as c_int,
+            size.width as c_int,
+            size.height as c_int,
+        )
+    };
+
+    Error::check(result, "I420ToNV12")
+}
