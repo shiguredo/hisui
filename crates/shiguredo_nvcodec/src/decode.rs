@@ -200,6 +200,8 @@ impl std::fmt::Debug for Decoder {
     }
 }
 
+unsafe impl Send for Decoder {}
+
 struct DecoderState {
     decoder: sys::CUvideodecoder,
     width: u32,

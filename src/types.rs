@@ -103,6 +103,12 @@ impl EngineName {
     }
 }
 
+impl nojson::DisplayJson for EngineName {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.as_str())
+    }
+}
+
 /// 画像内でのピクセル位置を表現するための構造体
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PixelPosition {
