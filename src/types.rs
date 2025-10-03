@@ -74,23 +74,17 @@ impl FromStr for CodecName {
     }
 }
 
-/// エンジン名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EngineName {
     AudioToolbox,
     Dav1d,
     FdkAac,
     Libvpx,
+    Nvcodec,
     Openh264,
     Opus,
     SvtAv1,
     VideoToolbox,
-}
-
-impl nojson::DisplayJson for EngineName {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(self.as_str())
-    }
 }
 
 impl EngineName {
@@ -100,6 +94,7 @@ impl EngineName {
             EngineName::Dav1d => "dav1d",
             EngineName::FdkAac => "fdk_aac",
             EngineName::Libvpx => "libvpx",
+            EngineName::Nvcodec => "nvcodec",
             EngineName::Openh264 => "openh264",
             EngineName::Opus => "opus",
             EngineName::SvtAv1 => "svt_av1",
