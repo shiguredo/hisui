@@ -148,7 +148,7 @@ impl Decoder {
                 "decoder state is poisoned (a thread panicked while holding the lock)",
             ));
         }
-        self.frame_rx.try_recv().ok().map(Ok)
+        Ok(self.frame_rx.try_recv().ok())
     }
 }
 
