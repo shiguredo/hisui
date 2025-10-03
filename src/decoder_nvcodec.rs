@@ -9,6 +9,7 @@ pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
+    parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
 impl NvcodecDecoder {
@@ -18,15 +19,33 @@ impl NvcodecDecoder {
             inner: shiguredo_nvcodec::Decoder::new_h265().or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            parameter_sets: None,
         })
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
         (frame.format == VideoFormat::H265).or_fail()?;
 
+        // サンプルエントリから VPS/SPS/PPS を抽出してキャッシュ
+        if self.parameter_sets.is_none() {
+            if let Some(sample_entry) = &frame.sample_entry {
+                self.parameter_sets = Some(extract_parameter_sets_annexb(sample_entry).or_fail()?);
+            }
+        }
+
         // Annex.B 形式に変換する
         let mut data = &frame.data[..];
         let mut data_annexb = Vec::new();
+
+        // キーフレームで、かつパラメータセットがデータに含まれていない場合は先頭に追加
+        if frame.keyframe {
+            if let Some(parameter_sets) = &self.parameter_sets {
+                if !contains_parameter_sets(data) {
+                    data_annexb.extend_from_slice(parameter_sets);
+                }
+            }
+        }
+
         while !data.is_empty() {
             (data.len() > 3).or_fail()?;
             let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
@@ -109,4 +128,44 @@ impl NvcodecDecoder {
     pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
     }
+}
+
+/// サンプルエントリから VPS/SPS/PPS を Annex.B 形式で抽出
+fn extract_parameter_sets_annexb(
+    sample_entry: &shiguredo_mp4::boxes::SampleEntry,
+) -> orfail::Result<Vec<u8>> {
+    use shiguredo_mp4::boxes::SampleEntry;
+
+    let hevc_config = match sample_entry {
+        SampleEntry::Hev1(entry) => &entry.hevc_decoder_configuration_record,
+        SampleEntry::Hvc1(entry) => &entry.hevc_decoder_configuration_record,
+        _ => return Err(orfail::Failure::new("Sample entry is not HEVC (hev1/hvc1)")),
+    };
+
+    let mut annexb_data = Vec::new();
+
+    // 各 NAL unit array からパラメータセットを抽出
+    for array in &hevc_config.arrays {
+        for nalu in &array.nalus {
+            // Annex.B start code を追加
+            annexb_data.extend_from_slice(&[0, 0, 0, 1]);
+            annexb_data.extend_from_slice(nalu);
+        }
+    }
+
+    Ok(annexb_data)
+}
+
+/// データの先頭にパラメータセット（VPS/SPS/PPS）が含まれているかチェック
+fn contains_parameter_sets(data: &[u8]) -> bool {
+    if data.len() < 5 {
+        return false;
+    }
+
+    // 最初の NAL unit の type をチェック
+    // H.265 の NAL unit type は 2バイト目の上位6ビット
+    let nal_unit_type = (data[4] >> 1) & 0x3F;
+
+    // VPS=32, SPS=33, PPS=34
+    matches!(nal_unit_type, 32 | 33 | 34)
 }
