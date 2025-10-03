@@ -140,7 +140,7 @@ impl Decoder {
     }
 
     /// デコード済みのフレームを取り出す
-    pub fn next_frame(&mut self) -> Result<Option<DecodedFrame, Error>> {
+    pub fn next_frame(&mut self) -> Result<Option<DecodedFrame>, Error> {
         if self.state.is_poisoned() {
             return Err(Error::new(
                 sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
