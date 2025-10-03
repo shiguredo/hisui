@@ -25,7 +25,7 @@ impl Decoder {
 
             // CUDA context の初期化
             let ctx_flags = 0; // デフォルトのコンテキストフラグ
-            let device_id = 0; // プライマリGPUデバイスを使用
+            let device_id = 0; // プライマリGPUデバイスを使用 // TODO(atode): make configurable
             let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
             Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 

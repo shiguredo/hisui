@@ -25,7 +25,9 @@ impl Encoder {
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
-            let status = sys::cuCtxCreate_v2(&mut ctx, 0, 0);
+            let ctx_flags = 0; // デフォルトのコンテキストフラグ
+            let device_id = 0; // プライマリGPUデバイスを使用 // TODO(atode): make configurable
+            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
             Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 
             let ctx_guard = crate::ReleaseGuard::new(|| {
@@ -50,7 +52,7 @@ impl Encoder {
                     std::mem::zeroed();
                 open_session_params.version = sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
                 open_session_params.deviceType = sys::_NV_ENC_DEVICE_TYPE_NV_ENC_DEVICE_TYPE_CUDA;
-                open_session_params.device = ctx as *mut c_void;
+                open_session_params.device = ctx.cast();
                 open_session_params.apiVersion = sys::NVENCAPI_VERSION;
 
                 let mut h_encoder = ptr::null_mut();
