@@ -39,7 +39,7 @@ impl NvcodecEncoder {
         let y_size = width * height;
         let uv_width = width.div_ceil(2);
         let uv_height = height.div_ceil(2);
-        let uv_size = uv_width * uv_height * 2; // インターリーブなので 2 倍
+        let uv_size = uv_width * uv_height * 2; // U と V が交互に配置されているため
         let total_size = y_size + uv_size;
 
         let mut nv12_data = vec![0u8; total_size];
