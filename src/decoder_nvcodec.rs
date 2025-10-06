@@ -3,6 +3,9 @@ use std::collections::VecDeque;
 use orfail::OrFail;
 
 use crate::video::{VideoFormat, VideoFrame};
+use crate::video_h265::{
+    H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
+};
 
 #[derive(Debug)]
 pub struct NvcodecDecoder {
@@ -157,14 +160,15 @@ fn extract_parameter_sets_annexb(
 
 /// データの先頭にパラメータセット（VPS/SPS/PPS）が含まれているかチェック
 fn contains_parameter_sets(data: &[u8]) -> bool {
-    if data.len() < 5 {
+    if data.len() < NALU_HEADER_LENGTH + 1 {
         return false;
     }
 
     // 最初の NAL unit の type をチェック
     // H.265 の NAL unit type は 2バイト目の上位6ビット
-    let nal_unit_type = (data[4] >> 1) & 0x3F;
-
-    // VPS=32, SPS=33, PPS=34
-    matches!(nal_unit_type, 32 | 33 | 34)
+    let nal_unit_type = (data[NALU_HEADER_LENGTH] >> 1) & 0x3F;
+    matches!(
+        nal_unit_type,
+        H265_NALU_TYPE_PPS | H265_NALU_TYPE_SPS | H265_NALU_TYPE_VPS
+    )
 }
