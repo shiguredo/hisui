@@ -348,7 +348,7 @@ impl VideoEncoder {
                 if is_openh264_available {
                     engines.push(EngineName::Openh264);
                 }
-                #[cfg(target_os = "nvcodec")]
+                #[cfg(feature = "nvcodec")]
                 {
                     engines.push(EngineName::Nvcodec);
                 }
