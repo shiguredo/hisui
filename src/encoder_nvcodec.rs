@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use orfail::OrFail;
+use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     video::{VideoFormat, VideoFrame},
