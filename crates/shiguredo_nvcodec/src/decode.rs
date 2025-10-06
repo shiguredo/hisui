@@ -503,6 +503,18 @@ mod tests {
     }
 
     #[test]
+    fn init_h264_decoder() {
+        let _decoder = Decoder::new_h264().expect("Failed to initialize h264 decoder");
+        println!("h264 decoder initialized successfully");
+    }
+
+    #[test]
+    fn init_av1_decoder() {
+        let _decoder = Decoder::new_av1().expect("Failed to initialize av1 decoder");
+        println!("av1 decoder initialized successfully");
+    }
+
+    #[test]
     fn test_multiple_decoders() {
         // CUDA初期化が1回だけ実行されることを確認するため、複数のデコーダーを作成
         let _decoder1 = Decoder::new_h265().expect("Failed to initialize first h265 decoder");
@@ -511,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_black_frame() {
+    fn test_decode_h265_black_frame() {
         // H.265の黒フレームデータ (Annex B format with start codes)
         let vps = vec![
             64, 1, 12, 1, 255, 255, 1, 96, 0, 0, 3, 0, 144, 0, 0, 3, 0, 0, 3, 0, 90, 149, 152, 9,
