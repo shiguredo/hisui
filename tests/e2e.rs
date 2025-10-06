@@ -1,13 +1,17 @@
 use std::time::Duration;
 
 use hisui::{
+    decoder::{VideoDecoder, VideoDecoderOptions},
     decoder_libvpx::LibvpxDecoder,
     decoder_opus::OpusDecoder,
+    media::MediaStreamId,
     metadata::SourceId,
+    processor::{MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
     subcommand_legacy::{Args, Runner},
     types::CodecName,
+    video::VideoFrame,
 };
 use orfail::OrFail;
 
@@ -123,26 +127,49 @@ fn test_simple_single_source_common(
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
-        while let Some(decoded) = decoder.next_decoded_frame() {
-            // 画像が赤一色かどうかの確認する
-            let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
-            y_plane
-                .iter()
-                .for_each(|x| assert!(matches!(x, 80..=82), "y={x}"));
-            u_plane.iter().for_each(|x| assert_eq!(*x, 90));
-            v_plane.iter().for_each(|x| assert_eq!(*x, 240));
-        }
+    const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+    const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+
+    let check_decoded_frame = |decoded: &VideoFrame| -> orfail::Result<()> {
+        // 画像が赤一色かどうかの確認する
+        let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
+        y_plane
+            .iter()
+            .for_each(|x| assert!(matches!(x, 80..=82), "y={x}"));
+        u_plane.iter().for_each(|x| assert_eq!(*x, 90));
+        v_plane.iter().for_each(|x| assert_eq!(*x, 240));
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    let mut decoder = VideoDecoder::new(
+        DECODER_INPUT_STREAM_ID,
+        DECODER_OUTPUT_STREAM_ID,
+        VideoDecoderOptions::default(),
+    );
+
     for frame in video_samples {
-        decoder.decode(&frame).or_fail()?;
-        check_decoded_frames(&mut decoder).or_fail()?;
+        decoder
+            .process_input(MediaProcessorInput::video_frame(
+                DECODER_INPUT_STREAM_ID,
+                frame,
+            ))
+            .or_fail()?;
+        while let MediaProcessorOutput::Processed { sample, .. } =
+            decoder.process_output().or_fail()?
+        {
+            let decoded = sample.expect_video_frame().or_fail()?;
+            check_decoded_frame(&decoded).or_fail()?;
+        }
     }
-    decoder.finish().or_fail()?;
-    check_decoded_frames(&mut decoder).or_fail()?;
+
+    decoder
+        .process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))
+        .or_fail()?;
+
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
+        let decoded = sample.expect_video_frame().or_fail()?;
+        check_decoded_frame(&decoded).or_fail()?;
+    }
 
     Ok(())
 }
