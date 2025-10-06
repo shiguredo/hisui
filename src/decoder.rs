@@ -276,6 +276,7 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
                 }
+                #[cfg(target_os = "macos")]
                 VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
                     *self = VideoToolboxDecoder::new_h264(frame)
                         .or_fail()
@@ -285,7 +286,6 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(all(not(feature = "nvcodec"), not(target_os = "macos")))]
                 VideoFormat::H264 | VideoFormat::H264AnnexB => {
                     let lib = options
                         .openh264_lib
