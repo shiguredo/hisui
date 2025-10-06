@@ -61,6 +61,8 @@ fn test_simple_single_source_common(
             "--show-progress-bar=false",
             "-f",
             report_path,
+            "--out-video-codec",
+            &expected_codec.to_string(),
             "--out-file",
             &out_file.path().display().to_string(),
         ]
@@ -182,7 +184,7 @@ fn simple_single_source() -> noargs::Result<()> {
 fn simple_single_source_h265() -> noargs::Result<()> {
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_h265/report.json",
-        CodecName::Vp9,
+        CodecName::H265,
     )
 }
 
