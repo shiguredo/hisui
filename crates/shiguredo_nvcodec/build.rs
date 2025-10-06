@@ -87,7 +87,7 @@ fn main() {
         .generate_comments(false)
         .derive_debug(false)
         .derive_default(false)
-        .derive_eq(true)
+        .parse_callbacks(Box::new(CustomCallbacks))
         // GUID は bindgen で正しく生成されないため、ここではブラックリストに登録して、後で手動で定義する
         .blocklist_item("NV_ENC_CODEC_H264_GUID")
         .blocklist_item("NV_ENC_CODEC_HEVC_GUID")
@@ -234,5 +234,18 @@ fn get_version() -> String {
         panic!(
             "Cargo.toml does not contain a valid [package.metadata.external-dependencies.nvcodec] version"
         );
+    }
+}
+
+struct CustomCallbacks;
+
+impl bindgen::callbacks::ParseCallbacks for CustomCallbacks {
+    fn add_derives(&self, info: &bindgen::callbacks::DeriveInfo<'_>) -> Vec<String> {
+        // "_GUID" に PartialEq と Eq を導出
+        if info.name == "_GUID" {
+            vec!["PartialEq".to_string(), "Eq".to_string()]
+        } else {
+            vec![]
+        }
     }
 }
