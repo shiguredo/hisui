@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::VecDeque;
 
 use orfail::OrFail;
@@ -48,10 +49,9 @@ impl NvcodecDecoder {
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
-        // TODO: AnnexB 対応
         matches!(
             frame.format,
-            VideoFormat::H264 | VideoFormat::H265 | VideoFormat::Av1
+            VideoFormat::H264 | VideoFormat::H264AnnexB | VideoFormat::H265 | VideoFormat::Av1
         )
         .or_fail()?;
 
@@ -63,9 +63,12 @@ impl NvcodecDecoder {
                 Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
         }
 
-        // AV1 の場合は Annex B 形式への変換は不要なので、そのままデータを使用
-        let data_annexb = if frame.format == VideoFormat::Av1 {
-            frame.data.clone()
+        let data = if frame.format == VideoFormat::Av1 {
+            // AV1 の場合は Annex B 形式への変換は不要なので、そのままデータを使用
+            Cow::Borrowed(&frame.data)
+        } else if frame.format == VideoFormat::H264AnnexB {
+            // すでに Annex B 形式の場合はそのまま使用
+            Cow::Borrowed(&frame.data)
         } else {
             // Annex.B 形式に変換する (H264/H265)
             let mut data = &frame.data[..];
@@ -91,10 +94,10 @@ impl NvcodecDecoder {
                 data = &data[n..];
             }
 
-            data_annexb
+            Cow::Owned(data_annexb)
         };
 
-        self.inner.decode(&data_annexb).or_fail()?;
+        self.inner.decode(&data).or_fail()?;
         self.input_queue.push_back(frame.to_stripped());
         self.handle_decoded_frames().or_fail()?;
         Ok(())
