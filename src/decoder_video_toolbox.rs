@@ -3,10 +3,8 @@ use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use crate::{
     video::{VideoFormat, VideoFrame},
-    video_h264::{
-        H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, H265_NALU_TYPE_PPS,
-        H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
-    },
+    video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, NALU_HEADER_LENGTH},
+    video_h265::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS},
 };
 
 #[derive(Debug)]

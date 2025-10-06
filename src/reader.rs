@@ -231,9 +231,9 @@ impl VideoReader {
                     start_time: timestamp_offset,
                     ..Default::default()
                 };
-                VideoReaderInner::Mp4(
+                VideoReaderInner::Mp4(Box::new(
                     Mp4VideoReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                )
+                ))
             }
             ContainerFormat::Webm => {
                 let stats = WebmVideoReaderStats {
@@ -242,9 +242,9 @@ impl VideoReader {
                     start_time: timestamp_offset,
                     ..Default::default()
                 };
-                VideoReaderInner::Webm(
+                VideoReaderInner::Webm(Box::new(
                     WebmVideoReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                )
+                ))
             }
         };
         Ok(Self {
@@ -266,7 +266,7 @@ impl VideoReader {
                 inner.stats().clone(),
                 Mp4VideoReader::new,
             )
-            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .map(|reader| reader.map(|reader| *inner = Box::new(reader)).is_some())
             .or_fail(),
             VideoReaderInner::Webm(inner) => start_next_input_file(
                 &mut self.remaining_input_files,
@@ -275,7 +275,7 @@ impl VideoReader {
                 inner.stats().clone(),
                 WebmVideoReader::new,
             )
-            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .map(|reader| reader.map(|reader| *inner = Box::new(reader)).is_some())
             .or_fail(),
         }
     }
@@ -321,11 +321,11 @@ impl MediaProcessor for VideoReader {
     }
 }
 
+// Box は clippy::large_enum_variant 対策
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 enum VideoReaderInner {
-    Mp4(Mp4VideoReader),
-    Webm(WebmVideoReader),
+    Mp4(Box<Mp4VideoReader>),
+    Webm(Box<WebmVideoReader>),
 }
 
 impl VideoReaderInner {

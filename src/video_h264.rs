@@ -1,6 +1,6 @@
 use orfail::OrFail;
 
-// H.264 / H.265 の NAL ユニット前に付与されるサイズのバイト数
+// H.264 の NAL ユニット前に付与されるサイズのバイト数
 // Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい
 pub const NALU_HEADER_LENGTH: usize = 4;
 
@@ -13,11 +13,6 @@ pub const H264_NALU_TYPE_IDR: u8 = 5;
 pub const H264_NALU_TYPE_SEI: u8 = 6;
 pub const H264_NALU_TYPE_SPS: u8 = 7;
 pub const H264_NALU_TYPE_PPS: u8 = 8;
-
-// H.265 の NAL ユニットタイプ
-pub const H265_NALU_TYPE_VPS: u8 = 32;
-pub const H265_NALU_TYPE_SPS: u8 = 33;
-pub const H265_NALU_TYPE_PPS: u8 = 34;
 
 /// Annex.B 形式の H.264 をパースして、含まれている NAL ユニットを走査するためのイテレーター
 #[derive(Debug)]

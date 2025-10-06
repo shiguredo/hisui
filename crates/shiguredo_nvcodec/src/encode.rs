@@ -380,8 +380,10 @@ impl Encoder {
             let status = self
                 .encoder
                 .nvEncUnlockBitstream
-                .map(|f| f(self.h_encoder, lock_bitstream.output_bitstream));
-            Error::check(status, "nvEncUnlockBitstream", "failed to unlock bitstream")?;
+                .map(|f| f(self.h_encoder, lock_bitstream.outputBitstream));
+            if let Some(status) = status {
+                Error::check(status, "nvEncUnlockBitstream", "failed to unlock bitstream")?;
+            }
 
             let timestamp = lock_bitstream.outputTimeStamp;
             let picture_type = PictureType::new(lock_bitstream.pictureType);
@@ -444,6 +446,8 @@ impl std::fmt::Debug for Encoder {
             .finish()
     }
 }
+
+unsafe impl Send for Encoder {}
 
 /// ピクチャータイプ
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

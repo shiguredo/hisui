@@ -9,6 +9,8 @@ use shiguredo_openh264::Openh264Library;
 use crate::encoder_audio_toolbox::AudioToolboxEncoder;
 #[cfg(feature = "fdk-aac")]
 use crate::encoder_fdk_aac::FdkAacEncoder;
+#[cfg(feature = "nvcodec")]
+use crate::encoder_nvcodec::NvcodecEncoder;
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
@@ -300,9 +302,11 @@ impl VideoEncoder {
                 })?;
                 VideoEncoderInner::new_openh264(lib, options).or_fail()?
             }
+            #[cfg(feature = "nvcodec")]
+            CodecName::H265 => VideoEncoderInner::new_nvcodec_h265(options).or_fail()?,
             #[cfg(target_os = "macos")]
             CodecName::H265 => VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?,
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(all(not(target_os = "macos"), not(feature = "nvcodec")))]
             CodecName::H265 => return Err(orfail::Failure::new("no available H.265 encoder")),
             CodecName::Av1 => VideoEncoderInner::new_svt_av1(options).or_fail()?,
             _ => unreachable!(),
@@ -344,6 +348,10 @@ impl VideoEncoder {
                 }
             }
             CodecName::H265 => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    engines.push(EngineName::Nvcodec);
+                }
                 #[cfg(target_os = "macos")]
                 {
                     engines.push(EngineName::VideoToolbox);
@@ -412,6 +420,8 @@ enum VideoEncoderInner {
     SvtAv1(SvtAv1Encoder),
     #[cfg(target_os = "macos")]
     VideoToolbox(VideoToolboxEncoder),
+    #[cfg(feature = "nvcodec")]
+    Nvcodec(Box<NvcodecEncoder>), // Box は clippy::large_enum_variant 対策
 }
 
 impl VideoEncoderInner {
@@ -447,6 +457,13 @@ impl VideoEncoderInner {
         Ok(Self::VideoToolbox(encoder))
     }
 
+    #[cfg(feature = "nvcodec")]
+    fn new_nvcodec_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder =
+            NvcodecEncoder::new_h265(options.width.get(), options.height.get()).or_fail()?;
+        Ok(Self::Nvcodec(Box::new(encoder)))
+    }
+
     fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
         match self {
             Self::Libvpx(encoder) => encoder.encode(frame).or_fail(),
@@ -454,6 +471,8 @@ impl VideoEncoderInner {
             Self::SvtAv1(encoder) => encoder.encode(frame).or_fail(),
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.encode(frame).or_fail(),
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(encoder) => encoder.encode(&frame).or_fail(),
         }
     }
 
@@ -464,6 +483,8 @@ impl VideoEncoderInner {
             Self::SvtAv1(encoder) => encoder.finish().or_fail(),
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.finish().or_fail(),
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(encoder) => encoder.finish().or_fail(),
         }
     }
 
@@ -474,6 +495,8 @@ impl VideoEncoderInner {
             Self::SvtAv1(encoder) => encoder.next_encoded_frame(),
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.next_encoded_frame(),
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(encoder) => encoder.next_encoded_frame(),
         }
     }
 
@@ -484,6 +507,8 @@ impl VideoEncoderInner {
             Self::SvtAv1(_) => EngineName::SvtAv1,
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(_) => EngineName::VideoToolbox,
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(_) => EngineName::Nvcodec,
         }
     }
 
@@ -494,6 +519,8 @@ impl VideoEncoderInner {
             Self::SvtAv1(_) => CodecName::Av1,
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.codec(),
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(_) => CodecName::H265,
         }
     }
 }

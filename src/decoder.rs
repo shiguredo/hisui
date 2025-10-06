@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
+#[cfg(feature = "nvcodec")]
+use crate::decoder_nvcodec::NvcodecDecoder;
 #[cfg(target_os = "macos")]
 use crate::decoder_video_toolbox::VideoToolboxDecoder;
 use crate::{
@@ -168,6 +170,10 @@ impl VideoDecoder {
                 }
             }
             CodecName::H265 => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    engines.push(EngineName::Nvcodec);
+                }
                 #[cfg(target_os = "macos")]
                 {
                     engines.push(EngineName::VideoToolbox);
@@ -233,7 +239,6 @@ impl MediaProcessor for VideoDecoder {
 }
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
@@ -242,7 +247,9 @@ enum VideoDecoderInner {
     Openh264(Openh264Decoder),
     Dav1d(Dav1dDecoder),
     #[cfg(target_os = "macos")]
-    VideoToolbox(VideoToolboxDecoder),
+    VideoToolbox(Box<VideoToolboxDecoder>), // Box は clippy::large_enum_variant 対策
+    #[cfg(feature = "nvcodec")]
+    Nvcodec(NvcodecDecoder),
 }
 
 impl VideoDecoderInner {
@@ -258,6 +265,7 @@ impl VideoDecoderInner {
                 VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
                     *self = VideoToolboxDecoder::new_h264(frame)
                         .or_fail()
+                        .map(Box::new)
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);
                     stats.codec.set(CodecName::H264);
@@ -275,16 +283,24 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
                 }
+                #[cfg(feature = "nvcodec")]
+                VideoFormat::H265 => {
+                    *self = NvcodecDecoder::new_h265().or_fail().map(Self::Nvcodec)?;
+                    stats.engine.set(EngineName::Nvcodec);
+                    stats.codec.set(CodecName::H265);
+                    self.decode(frame, stats).or_fail()
+                }
                 #[cfg(target_os = "macos")]
                 VideoFormat::H265 => {
                     *self = VideoToolboxDecoder::new_h265(frame)
                         .or_fail()
+                        .map(Box::new)
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);
                     stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(all(not(target_os = "macos"), not(feature = "nvcodec")))]
                 VideoFormat::H265 => Err(orfail::Failure::new("no available H.265 decoder")),
                 VideoFormat::Vp8 => {
                     *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
@@ -317,6 +333,8 @@ impl VideoDecoderInner {
             Self::Dav1d(decoder) => decoder.decode(frame).or_fail(),
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(decoder) => decoder.decode(frame).or_fail(),
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(decoder) => decoder.decode(frame).or_fail(),
         }
     }
 
@@ -328,6 +346,8 @@ impl VideoDecoderInner {
             Self::Dav1d(decoder) => decoder.finish().or_fail()?,
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(_decoder) => {}
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(decoder) => decoder.finish().or_fail()?,
         }
         Ok(())
     }
@@ -340,6 +360,8 @@ impl VideoDecoderInner {
             Self::Dav1d(decoder) => decoder.next_decoded_frame(),
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(decoder) => decoder.next_decoded_frame(),
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(decoder) => decoder.next_decoded_frame(),
         }
     }
 }

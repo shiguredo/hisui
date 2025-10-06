@@ -74,23 +74,17 @@ impl FromStr for CodecName {
     }
 }
 
-/// エンジン名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EngineName {
     AudioToolbox,
     Dav1d,
     FdkAac,
     Libvpx,
+    Nvcodec,
     Openh264,
     Opus,
     SvtAv1,
     VideoToolbox,
-}
-
-impl nojson::DisplayJson for EngineName {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(self.as_str())
-    }
 }
 
 impl EngineName {
@@ -100,11 +94,18 @@ impl EngineName {
             EngineName::Dav1d => "dav1d",
             EngineName::FdkAac => "fdk_aac",
             EngineName::Libvpx => "libvpx",
+            EngineName::Nvcodec => "nvcodec",
             EngineName::Openh264 => "openh264",
             EngineName::Opus => "opus",
             EngineName::SvtAv1 => "svt_av1",
             EngineName::VideoToolbox => "video_toolbox",
         }
+    }
+}
+
+impl nojson::DisplayJson for EngineName {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.as_str())
     }
 }
 
@@ -123,15 +124,27 @@ impl EvenUsize {
     pub const MIN_CELL_SIZE: Self = Self(16);
 
     pub const fn new(n: usize) -> Option<Self> {
-        if n.is_multiple_of(2) { Some(Self(n)) } else { None }
+        if n.is_multiple_of(2) {
+            Some(Self(n))
+        } else {
+            None
+        }
     }
 
     pub const fn truncating_new(n: usize) -> Self {
-        if n.is_multiple_of(2) { Self(n) } else { Self(n - 1) }
+        if n.is_multiple_of(2) {
+            Self(n)
+        } else {
+            Self(n - 1)
+        }
     }
 
     pub const fn ceiling_new(n: usize) -> Self {
-        if n.is_multiple_of(2) { Self(n) } else { Self(n + 1) }
+        if n.is_multiple_of(2) {
+            Self(n)
+        } else {
+            Self(n + 1)
+        }
     }
 
     pub const fn get(self) -> usize {

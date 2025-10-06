@@ -1,4 +1,4 @@
-name: CI-macOS
+name: CI-NVCodec
 
 on:
   workflow_dispatch:
@@ -17,24 +17,18 @@ jobs:
   test:
     runs-on:
       group: Self
-      labels: [self-hosted, macOS, ARM64]
+      labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - name: 🍺 Set up Homebrew
-        uses: Homebrew/actions/setup-homebrew@master
       - name: Install rustup
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
       - name: Update PATH
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - name: Install packages to build external dependencies
-        run: |
-          brew update
-          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec
-      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec -- --deny warnings
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_openh264
+      - run: cargo check --features nvcodec -p hisui -p shiguredo_nvcodec
+      - run: cargo clippy --features nvcodec -p hisui -p shiguredo_nvcodec -- --deny warnings
+      - run: cargo test --features nvcodec -p hisui -p shiguredo_nvcodec 
 
   slack_notify_failed:
     needs: [test]
@@ -49,3 +43,4 @@ jobs:
           SLACK_TITLE: "FAILED"
           SLACK_ICON_EMOJI: ":japanese_ogre:"
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
