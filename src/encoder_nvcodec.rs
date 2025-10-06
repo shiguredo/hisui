@@ -88,8 +88,7 @@ impl NvcodecEncoder {
                 shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
             );
 
-            // Annex B 形式から length-prefixed 形式 (MP4/HVCC) に変換する(サイズバイトは 4 前提)
-            let mp4_data = convert_annexb_to_mp4(encoded_frame.data(), 4).or_fail()?;
+            let mp4_data = convert_annexb_to_mp4(encoded_frame.data()).or_fail()?;
 
             // H.265 sample entry を生成（最初のキーフレームのみ）
             let sample_entry = self
@@ -158,9 +157,7 @@ impl NvcodecEncoder {
 ///
 /// Annex B 形式: スタートコード (0x00000001 or 0x000001) + NALU データ
 /// MP4 形式: サイズ (4バイト) + NALU データ
-fn convert_annexb_to_mp4(annexb_data: &[u8], size_length: usize) -> orfail::Result<Vec<u8>> {
-    (size_length == 4).or_fail_with(|()| "Only 4-byte size length is supported".to_owned())?;
-
+fn convert_annexb_to_mp4(annexb_data: &[u8]) -> orfail::Result<Vec<u8>> {
     let mut mp4_data = Vec::new();
     let mut pos = 0;
 
@@ -196,7 +193,7 @@ fn convert_annexb_to_mp4(annexb_data: &[u8], size_length: usize) -> orfail::Resu
 
         let nalu_size = nalu_end - nalu_start;
 
-        // MP4 形式: 4バイトのサイズ + NALU データ
+        // MP4 形式: 4 バイトのサイズ + NALU データ
         mp4_data.extend_from_slice(&(nalu_size as u32).to_be_bytes());
         mp4_data.extend_from_slice(&annexb_data[nalu_start..nalu_end]);
 

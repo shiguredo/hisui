@@ -3,10 +3,18 @@ use shiguredo_mp4::boxes::{Hev1Box, HvccBox, HvccNalUintArray, SampleEntry};
 use crate::{
     types::EvenUsize,
     video::{self, FrameRate},
-    video_h264::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH},
 };
 
 pub type NalUnitArray = Vec<Vec<u8>>;
+
+// H.265 の NAL ユニット前に付与されるサイズのバイト数
+// Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい（H.264と同様）
+pub use crate::video_h264::NALU_HEADER_LENGTH;
+
+// H.265 の NAL ユニットタイプ
+pub const H265_NALU_TYPE_VPS: u8 = 32;
+pub const H265_NALU_TYPE_SPS: u8 = 33;
+pub const H265_NALU_TYPE_PPS: u8 = 34;
 
 /// H.265 sample entry を生成する
 pub fn h265_sample_entry(
