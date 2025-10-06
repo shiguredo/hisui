@@ -62,7 +62,7 @@ fn test_simple_single_source_common(
             "-f",
             report_path,
             "--out-video-codec",
-            &expected_codec.to_string(),
+            expected_codec.as_str(),
             "--out-file",
             &out_file.path().display().to_string(),
         ]
