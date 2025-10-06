@@ -15,8 +15,23 @@ pub struct Decoder {
 }
 
 impl Decoder {
+    /// H.264 用のデコーダーインスタンスを生成する
+    pub fn new_h264() -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_H264)
+    }
+
     /// H.265 用のデコーダーインスタンスを生成する
     pub fn new_h265() -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC)
+    }
+
+    /// AV1 用のデコーダーインスタンスを生成する
+    pub fn new_av1() -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_AV1)
+    }
+
+    /// 指定されたコーデックタイプでデコーダーインスタンスを生成する
+    fn new_with_codec(codec_type: sys::cudaVideoCodec) -> Result<Self, Error> {
         // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
         ensure_cuda_initialized()?;
 
@@ -63,7 +78,7 @@ impl Decoder {
 
             // 映像パーサーを作成する
             let mut parser_params: sys::CUVIDPARSERPARAMS = std::mem::zeroed();
-            parser_params.CodecType = sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC;
+            parser_params.CodecType = codec_type;
             parser_params.ulMaxNumDecodeSurfaces = 20; // TODO: 後続の PR で外から設定可能にする
             parser_params.ulMaxDisplayDelay = 0; // TODO: 後続の PR で外から設定可能にする
             parser_params.pUserData = (&*state) as *const _ as *mut c_void;
