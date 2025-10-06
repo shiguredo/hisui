@@ -45,8 +45,8 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
   - WebM での出力形式は非対応です
 - AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
 - Intel VPL に非対応です
+- NVIDIA Video Codec に対応しています
 - [Optuna](https://optuna.org/) を利用したエンコーダーパラメータの自動調整機能を利用できます
--
 
 詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。
 
@@ -87,6 +87,7 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 - [dav1d](https://code.videolan.org/videolan/dav1d/) を利用した AV1 のソフトウェアによるデコードに対応しています
 - [OpenH264](https://github.com/cisco/openh264) を利用した H.264 のデコード/エンコードに対応しています
 - [Apple Video Toolbox](https://developer.apple.com/documentation/videotoolbox) を利用したハードウェアアクセラレーターによる H.264 / H.265 のデコード/エンコードに対応しています
+- [NVIDIA Video Codec](https://developer.nvidia.com/nvidia-video-codec-sdk) を利用したハードウェアアクセラレーターによる AV1 / H.264 / H.265 のデコード/エンコードに対応しています
 
 ### FDK-AAC
 
@@ -133,7 +134,6 @@ Hisui のビルド方法は [build.md](docs/build.md) をご確認ください�
 
 ### 優先実装が可能な機能一覧
 
-- NVIDIA Video Codec 対応
 - Intel VPL 対応
 - AMD AMF 対応
 - NETINT Quadra 対応
