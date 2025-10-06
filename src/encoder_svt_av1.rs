@@ -2,15 +2,12 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use orfail::OrFail;
-use shiguredo_mp4::{
-    Uint,
-    boxes::{Av01Box, Av1cBox, SampleEntry},
-};
+use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     encoder::VideoEncoderOptions,
     types::EvenUsize,
-    video::{self, VideoFormat, VideoFrame},
+    video::{VideoFormat, VideoFrame},
     video_av1,
 };
 
