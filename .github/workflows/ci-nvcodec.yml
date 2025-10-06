@@ -30,9 +30,9 @@ jobs:
         run: |
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec
-      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec -- --deny warnings
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_openh264
+      - run: cargo check --features nvcodec -p hisui -p shiguredo_nvcodec
+      - run: cargo clippy --features nvcodec -p hisui -p shiguredo_nvcodec -- --deny warnings
+      - run: cargo test --features nvcodec -p hisui -p shiguredo_nvcodec 
 
       - name: Slack Notification
         if: failure()
