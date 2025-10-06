@@ -6,14 +6,16 @@ use crate::{
     video_h264::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH},
 };
 
+pub type NalUnitArray = Vec<Vec<u8>>;
+
 /// H.265 sample entry を生成する
 pub fn h265_sample_entry(
     width: EvenUsize,
     height: EvenUsize,
     fps: FrameRate,
-    vps_list: Vec<Vec<u8>>,
-    sps_list: Vec<Vec<u8>>,
-    pps_list: Vec<Vec<u8>>,
+    vps_list: NalUnitArray,
+    sps_list: NalUnitArray,
+    pps_list: NalUnitArray,
 ) -> orfail::Result<SampleEntry> {
     Ok(SampleEntry::Hev1(Hev1Box {
         visual: video::sample_entry_visual_fields(width.get(), height.get()),
@@ -57,7 +59,7 @@ pub fn h265_sample_entry(
     }))
 }
 
-fn hvcc_nalu_array(nalu_type: u8, nalus: Vec<Vec<u8>>) -> HvccNalUintArray {
+fn hvcc_nalu_array(nalu_type: u8, nalus: NalUnitArray) -> HvccNalUintArray {
     HvccNalUintArray {
         array_completeness: shiguredo_mp4::Uint::new(1), // true
         nal_unit_type: shiguredo_mp4::Uint::new(nalu_type),
@@ -70,7 +72,7 @@ fn hvcc_nalu_array(nalu_type: u8, nalus: Vec<Vec<u8>>) -> HvccNalUintArray {
 /// MP4 形式: サイズ (4バイト) + NALU データ
 pub fn extract_h265_parameter_sets(
     mp4_data: &[u8],
-) -> orfail::Result<(Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>)> {
+) -> orfail::Result<(NalUnitArray, NalUnitArray, NalUnitArray)> {
     let mut vps_list = Vec::new();
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
