@@ -63,29 +63,36 @@ impl NvcodecDecoder {
                 Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
         }
 
-        // Annex.B 形式に変換する
-        let mut data = &frame.data[..];
-        let mut data_annexb = Vec::new();
+        // AV1 の場合は Annex B 形式への変換は不要なので、そのままデータを使用
+        let data_annexb = if frame.format == VideoFormat::Av1 {
+            frame.data.clone()
+        } else {
+            // Annex.B 形式に変換する (H264/H265)
+            let mut data = &frame.data[..];
+            let mut data_annexb = Vec::new();
 
-        // キーフレームで、かつパラメータセットがデータに含まれていない場合は先頭に追加
-        if frame.keyframe
-            && let Some(parameter_sets) = &self.parameter_sets
-            && !contains_parameter_sets(data, frame.format)
-        {
-            data_annexb.extend_from_slice(parameter_sets);
-        }
+            // キーフレームで、かつパラメータセットがデータに含まれていない場合は先頭に追加
+            if frame.keyframe
+                && let Some(parameter_sets) = &self.parameter_sets
+                && !contains_parameter_sets(data, frame.format)
+            {
+                data_annexb.extend_from_slice(parameter_sets);
+            }
 
-        while !data.is_empty() {
-            (data.len() >= NALU_HEADER_LENGTH).or_fail()?;
-            let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
-            data = &data[NALU_HEADER_LENGTH..];
+            while !data.is_empty() {
+                (data.len() >= NALU_HEADER_LENGTH).or_fail()?;
+                let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                data = &data[NALU_HEADER_LENGTH..];
 
-            (data.len() >= n).or_fail()?;
-            data_annexb.extend_from_slice(&[0, 0, 0, 1]);
-            data_annexb.extend_from_slice(&data[..n]);
+                (data.len() >= n).or_fail()?;
+                data_annexb.extend_from_slice(&[0, 0, 0, 1]);
+                data_annexb.extend_from_slice(&data[..n]);
 
-            data = &data[n..];
-        }
+                data = &data[n..];
+            }
+
+            data_annexb
+        };
 
         self.inner.decode(&data_annexb).or_fail()?;
         self.input_queue.push_back(frame.to_stripped());
