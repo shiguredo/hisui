@@ -621,4 +621,165 @@ mod tests {
         );
         println!("Y average: {}, UV average: {}", y_avg, uv_avg);
     }
+
+    #[test]
+    fn test_decode_h264_black_frame() {
+        // H.264の黒フレームデータ (NAL units with size prefix)
+        let sps = vec![
+            103, 100, 0, 30, 172, 217, 64, 160, 61, 176, 17, 0, 0, 3, 0, 1, 0, 0, 3, 0, 50, 15, 22,
+            45, 150,
+        ];
+        let pps = vec![104, 235, 227, 203, 34, 192];
+        let frame_data = vec![
+            101, 136, 132, 0, 43, 255, 254, 246, 115, 124, 10, 107, 109, 176, 149, 46, 5, 118, 247,
+            102, 163, 229, 208, 146, 229, 251, 16, 96, 250, 208, 0, 0, 3, 0, 0, 3, 0, 0, 16, 15,
+            210, 222, 245, 204, 98, 91, 229, 32, 0, 0, 9, 216, 2, 56, 13, 16, 118, 133, 116, 69,
+            196, 32, 71, 6, 120, 150, 16, 161, 210, 50, 128, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0,
+            0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 37, 225,
+        ];
+
+        // NALユニットを結合（Annex B形式: start code 0x00000001 を使用）
+        let mut h264_data = Vec::new();
+        let start_code = [0u8, 0, 0, 1];
+
+        // SPS
+        h264_data.extend_from_slice(&start_code);
+        h264_data.extend_from_slice(&sps);
+
+        // PPS
+        h264_data.extend_from_slice(&start_code);
+        h264_data.extend_from_slice(&pps);
+
+        // Frame data
+        h264_data.extend_from_slice(&start_code);
+        h264_data.extend_from_slice(&frame_data);
+
+        let mut decoder = Decoder::new_h264().expect("Failed to create h264 decoder");
+
+        // デコードを実行
+        decoder
+            .decode(&h264_data)
+            .expect("Failed to decode H.264 data");
+
+        // フィニッシュ処理をテスト
+        decoder.finish().expect("Failed to finish decoding");
+
+        // デコード済みフレームを取得
+        let frame = decoder
+            .next_frame()
+            .expect("Decoding error occurred")
+            .expect("No decoded frame available");
+
+        assert_eq!(frame.width(), 640);
+        assert_eq!(frame.height(), 480);
+
+        // Y平面とUV平面のデータサイズを確認
+        assert_eq!(frame.y_plane().len(), frame.y_stride() * frame.height());
+        assert_eq!(
+            frame.uv_plane().len(),
+            frame.uv_stride() * frame.height() / 2
+        );
+
+        // ストライドが幅以上であることを確認（GPUアラインメントのため）
+        assert!(frame.y_stride() >= frame.width());
+        assert!(frame.uv_stride() >= frame.width());
+
+        // 黒画面なので、Y成分は16付近、UV成分は128付近の値になることを確認
+        let y_data = frame.y_plane();
+        let uv_data = frame.uv_plane();
+
+        // Y成分の平均値をチェック（完全な黒は16）
+        let y_avg = y_data.iter().map(|&x| x as u32).sum::<u32>() / y_data.len() as u32;
+        assert!(
+            y_avg >= 10 && y_avg <= 30,
+            "Y average should be around 16 for black, got {}",
+            y_avg
+        );
+
+        // UV成分の平均値をチェック
+        let uv_avg = uv_data.iter().map(|&x| x as u32).sum::<u32>() / uv_data.len() as u32;
+        assert!(
+            uv_avg >= 70 && uv_avg <= 140,
+            "UV average should be in reasonable range for the encoded frame, got {}",
+            uv_avg
+        );
+
+        println!(
+            "Successfully decoded H.264 black frame: {}x{} (stride: {})",
+            frame.width(),
+            frame.height(),
+            frame.y_stride()
+        );
+        println!("Y average: {}, UV average: {}", y_avg, uv_avg);
+    }
+
+    #[test]
+    fn test_decode_av1_black_frame() {
+        // AV1の黒フレームデータ (OBU format)
+        // OBU_TYPE=1 (sequence header) と OBU_TYPE=6 (frame) を含む
+        let av1_data = vec![
+            // TYPE=1 (Sequence Header OBU)
+            10, 11, 0, 0, 0, 36, 196, 255, 223, 63, 254, 96, 16, // TYPE=6 (Frame OBU)
+            50, 35, 16, 0, 144, 0, 0, 0, 160, 0, 0, 128, 1, 197, 120, 80, 103, 179, 239, 241, 100,
+            76, 173, 116, 93, 183, 31, 101, 221, 87, 90, 233, 219, 28, 199, 243, 128,
+        ];
+
+        let mut decoder = Decoder::new_av1().expect("Failed to create av1 decoder");
+
+        // デコードを実行
+        decoder
+            .decode(&av1_data)
+            .expect("Failed to decode AV1 data");
+
+        // フィニッシュ処理をテスト
+        decoder.finish().expect("Failed to finish decoding");
+
+        // デコード済みフレームを取得
+        let frame = decoder
+            .next_frame()
+            .expect("Decoding error occurred")
+            .expect("No decoded frame available");
+
+        assert_eq!(frame.width(), 640);
+        assert_eq!(frame.height(), 480);
+
+        // Y平面とUV平面のデータサイズを確認
+        assert_eq!(frame.y_plane().len(), frame.y_stride() * frame.height());
+        assert_eq!(
+            frame.uv_plane().len(),
+            frame.uv_stride() * frame.height() / 2
+        );
+
+        // ストライドが幅以上であることを確認（GPUアラインメントのため）
+        assert!(frame.y_stride() >= frame.width());
+        assert!(frame.uv_stride() >= frame.width());
+
+        // 黒画面なので、Y成分は16付近、UV成分は128付近の値になることを確認
+        let y_data = frame.y_plane();
+        let uv_data = frame.uv_plane();
+
+        // Y成分の平均値をチェック（完全な黒は16）
+        let y_avg = y_data.iter().map(|&x| x as u32).sum::<u32>() / y_data.len() as u32;
+        assert!(
+            y_avg >= 10 && y_avg <= 30,
+            "Y average should be around 16 for black, got {}",
+            y_avg
+        );
+
+        // UV成分の平均値をチェック
+        let uv_avg = uv_data.iter().map(|&x| x as u32).sum::<u32>() / uv_data.len() as u32;
+        assert!(
+            uv_avg >= 70 && uv_avg <= 140,
+            "UV average should be in reasonable range for the encoded frame, got {}",
+            uv_avg
+        );
+
+        println!(
+            "Successfully decoded AV1 black frame: {}x{} (stride: {})",
+            frame.width(),
+            frame.height(),
+            frame.y_stride()
+        );
+        println!("Y average: {}, UV average: {}", y_avg, uv_avg);
+    }
 }
