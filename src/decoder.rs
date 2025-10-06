@@ -253,7 +253,7 @@ enum VideoDecoderInner {
     },
     Libvpx(LibvpxDecoder),
     Openh264(Openh264Decoder),
-    #[cfg_if(feature = "nvcodec", expect(dead_code))]
+    #[cfg_attr(feature = "nvcodec", expect(dead_code))]
     Dav1d(Dav1dDecoder),
     #[cfg(target_os = "macos")]
     VideoToolbox(Box<VideoToolboxDecoder>), // Box は clippy::large_enum_variant 対策
