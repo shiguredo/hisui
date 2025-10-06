@@ -227,12 +227,13 @@ impl Encoder {
             // シーケンスパラメータを格納するバッファを確保
             // NV_MAX_SEQ_HDR_LEN は 512 バイト
             let mut payload_buffer = vec![0u8; sys::NV_MAX_SEQ_HDR_LEN as usize];
+            let mut out_size: u32 = 0; // 実際のサイズを受け取る変数
 
             let mut seq_params: sys::NV_ENC_SEQUENCE_PARAM_PAYLOAD = std::mem::zeroed();
             seq_params.version = sys::NV_ENC_SEQUENCE_PARAM_PAYLOAD_VER;
             seq_params.spsppsBuffer = payload_buffer.as_mut_ptr() as *mut std::ffi::c_void;
             seq_params.inBufferSize = sys::NV_MAX_SEQ_HDR_LEN;
-            seq_params.outSPSPPSPayloadSize = std::ptr::null_mut();
+            seq_params.outSPSPPSPayloadSize = &mut out_size;
 
             let status = self
                 .encoder
@@ -247,7 +248,7 @@ impl Encoder {
             )?;
 
             // 実際に書き込まれたサイズに合わせてバッファをリサイズ
-            payload_buffer.truncate(seq_params.outSPSPPSPayloadSize as usize);
+            payload_buffer.truncate(out_size as usize);
 
             Ok(payload_buffer)
         }
