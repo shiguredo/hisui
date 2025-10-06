@@ -38,6 +38,7 @@ fn main() {
                 "pub struct NV_ENC_BUFFER_FORMAT;",
                 "pub struct NV_ENC_INPUT_PTR;",
                 "pub struct NV_ENC_OUTPUT_PTR;",
+                "pub struct cudaVideoCodec;",
                 "pub struct CUVIDEOFORMAT;",
                 "pub struct CUVIDPICPARAMS;",
                 "pub struct CUVIDPARSERDISPINFO;",
@@ -137,6 +138,15 @@ pub const NV_ENC_PIC_FLAG_EOS: u32 = 0x8;
 // crate で使用される NVENC GUID 定数
 // これらの GUID はリンクの問題を避けるために extern static ではなく定数として定義されている。
 
+// コーデック GUID: NV_ENC_CODEC_H264_GUID
+// {6BC82762-4E63-4ca4-AA85-1E50F321F6BF}
+pub const NV_ENC_CODEC_H264_GUID: GUID = GUID {
+    Data1: 0x6bc82762,
+    Data2: 0x4e63,
+    Data3: 0x4ca4,
+    Data4: [0xaa, 0x85, 0x1e, 0x50, 0xf3, 0x21, 0xf6, 0xbf],
+};
+
 // コーデック GUID: NV_ENC_CODEC_HEVC_GUID
 // {790CDC88-4522-4d7b-9425-BDA9975F7603}
 pub const NV_ENC_CODEC_HEVC_GUID: GUID = GUID {
@@ -145,6 +155,25 @@ pub const NV_ENC_CODEC_HEVC_GUID: GUID = GUID {
     Data3: 0x4d7b,
     Data4: [0x94, 0x25, 0xbd, 0xa9, 0x97, 0x5f, 0x76, 0x03],
 };
+
+// コーデック GUID: NV_ENC_CODEC_AV1_GUID
+// {0A352289-0AA7-4759-862D-5D15CD16D254}
+pub const NV_ENC_CODEC_AV1_GUID: GUID = GUID {
+    Data1: 0x0a352289,
+    Data2: 0x0aa7,
+    Data3: 0x4759,
+    Data4: [0x86, 0x2d, 0x5d, 0x15, 0xcd, 0x16, 0xd2, 0x54],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_MAIN_GUID
+// {60B5C1D4-67FE-4790-94D5-C4726D7B6E6D}
+pub const NV_ENC_H264_PROFILE_MAIN_GUID: GUID = GUID {
+    Data1: 0x60b5c1d4,
+    Data2: 0x67fe,
+    Data3: 0x4790,
+    Data4: [0x94, 0xd5, 0xc4, 0x72, 0x6d, 0x7b, 0x6e, 0x6d],
+};
+
 
 // プリセット GUID: NV_ENC_PRESET_P4_GUID
 // {90A7B826-DF06-4862-B9D2-CD6D73A08681}

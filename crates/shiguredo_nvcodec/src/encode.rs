@@ -16,8 +16,43 @@ pub struct Encoder {
 }
 
 impl Encoder {
+    /// H.264 エンコーダーインスタンスを生成する
+    pub fn new_h264(width: u32, height: u32) -> Result<Self, Error> {
+        Self::new_with_codec(
+            width,
+            height,
+            sys::NV_ENC_CODEC_H264_GUID,
+            sys::NV_ENC_H264_PROFILE_MAIN_GUID,
+        )
+    }
+
     /// H.265 エンコーダーインスタンスを生成する
     pub fn new_h265(width: u32, height: u32) -> Result<Self, Error> {
+        Self::new_with_codec(
+            width,
+            height,
+            sys::NV_ENC_CODEC_HEVC_GUID,
+            sys::NV_ENC_HEVC_PROFILE_MAIN_GUID,
+        )
+    }
+
+    /// AV1 エンコーダーインスタンスを生成する
+    pub fn new_av1(width: u32, height: u32) -> Result<Self, Error> {
+        Self::new_with_codec(
+            width,
+            height,
+            sys::NV_ENC_CODEC_AV1_GUID,
+            sys::NV_ENC_AV1_PROFILE_MAIN_GUID,
+        )
+    }
+
+    /// 指定されたコーデックタイプでエンコーダーインスタンスを生成する
+    fn new_with_codec(
+        width: u32,
+        height: u32,
+        codec_guid: sys::GUID,
+        profile_guid: sys::GUID,
+    ) -> Result<Self, Error> {
         // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
         ensure_cuda_initialized()?;
 
@@ -83,13 +118,17 @@ impl Encoder {
             };
 
             // デフォルトパラメータでエンコーダーを初期化
-            crate::with_cuda_context(ctx, || encoder.initialize_encoder())?;
+            crate::with_cuda_context(ctx, || encoder.initialize_encoder(codec_guid, profile_guid))?;
 
             Ok(encoder)
         }
     }
 
-    fn initialize_encoder(&mut self) -> Result<(), Error> {
+    fn initialize_encoder(
+        &mut self,
+        codec_guid: sys::GUID,
+        profile_guid: sys::GUID,
+    ) -> Result<(), Error> {
         unsafe {
             // プリセット設定を取得
             let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
@@ -102,7 +141,7 @@ impl Encoder {
                 .map(|f| {
                     f(
                         self.h_encoder,
-                        sys::NV_ENC_CODEC_HEVC_GUID,
+                        codec_guid,
                         sys::NV_ENC_PRESET_P4_GUID, // TODO(atode): make configurable
                         sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY, // TODO(atode): make configurable
                         &mut preset_config,
@@ -120,7 +159,7 @@ impl Encoder {
             let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
-            init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
+            init_params.encodeGUID = codec_guid;
             init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID; // TODO(atode): make configurable
             init_params.encodeWidth = self.width;
             init_params.encodeHeight = self.height;
@@ -135,12 +174,18 @@ impl Encoder {
             init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY;
 
             config.version = sys::NV_ENC_CONFIG_VER;
-            config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID; // TODO(atode): make configurable
+            config.profileGUID = profile_guid;
             config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
             config.frameIntervalP = 1;
 
-            // HEVC 固有の設定
-            config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength; // TODO(atode): make configurable
+            // コーデック固有の設定
+            if codec_guid == sys::NV_ENC_CODEC_HEVC_GUID {
+                config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
+            } else if codec_guid == sys::NV_ENC_CODEC_H264_GUID {
+                config.encodeCodecConfig.h264Config.idrPeriod = config.gopLength;
+            } else if codec_guid == sys::NV_ENC_CODEC_AV1_GUID {
+                config.encodeCodecConfig.av1Config.idrPeriod = config.gopLength;
+            }
 
             // エンコーダーを初期化
             let status = self
