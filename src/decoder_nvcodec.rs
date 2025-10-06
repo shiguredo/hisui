@@ -51,7 +51,7 @@ impl NvcodecDecoder {
         // フォーマット検証を拡張
         matches!(
             frame.format,
-            VideoFormat::H264 | VideoFormat::H265 | VideoFormat::AV1
+            VideoFormat::H264 | VideoFormat::H265 | VideoFormat::Av1
         )
         .or_fail()?;
 
@@ -180,18 +180,18 @@ fn extract_parameter_sets_annexb(
         (SampleEntry::Avc1(entry), VideoFormat::H264) => {
             let mut annexb_data = Vec::new();
             // SPS
-            for sps in &entry.avcc_box.sps {
+            for sps in &entry.avcc_box.sps_list {
                 annexb_data.extend_from_slice(&[0, 0, 0, 1]);
                 annexb_data.extend_from_slice(sps);
             }
             // PPS
-            for pps in &entry.avcc_box.pps {
+            for pps in &entry.avcc_box.pps_list {
                 annexb_data.extend_from_slice(&[0, 0, 0, 1]);
                 annexb_data.extend_from_slice(pps);
             }
             Ok(annexb_data)
         }
-        (SampleEntry::Av01(_entry), VideoFormat::AV1) => {
+        (SampleEntry::Av01(_entry), VideoFormat::Av1) => {
             // AV1はパラメータセットを個別に送る必要がないため空のVecを返す
             Ok(Vec::new())
         }
@@ -221,7 +221,7 @@ fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
             let nal_unit_type = data[NALU_HEADER_LENGTH] & 0x1F;
             matches!(nal_unit_type, H264_NALU_TYPE_SPS | H264_NALU_TYPE_PPS)
         }
-        VideoFormat::AV1 => {
+        VideoFormat::Av1 => {
             // AV1はパラメータセットの概念が異なるため常にfalse
             false
         }
