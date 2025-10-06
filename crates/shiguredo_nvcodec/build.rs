@@ -237,6 +237,7 @@ fn get_version() -> String {
     }
 }
 
+#[derive(Debug)]
 struct CustomCallbacks;
 
 impl bindgen::callbacks::ParseCallbacks for CustomCallbacks {
