@@ -26,10 +26,6 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
       - name: Update PATH
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - name: Install packages to build external dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
       - run: cargo check --features nvcodec -p hisui -p shiguredo_nvcodec
       - run: cargo clippy --features nvcodec -p hisui -p shiguredo_nvcodec -- --deny warnings
       - run: cargo test --features nvcodec -p hisui -p shiguredo_nvcodec 
