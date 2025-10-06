@@ -192,12 +192,8 @@ impl NvcodecEncoder {
                     .or_fail()?
             }
             VideoFormat::Av1 => {
-                // nvenc の get_sequence_params() を利用して AV1 sequence header を取得
                 let seq_params = self.inner.get_sequence_params().or_fail()?;
-                let sequence_header =
-                    video_av1::extract_av1_sequence_header(&seq_params).or_fail()?;
-
-                video_av1::av1_sample_entry(width, height, fps, &sequence_header).or_fail()?
+                video_av1::sample_entry(width, height, fps, &seq_params).or_fail()?
             }
             _ => {
                 return Err(orfail::Failure::new(format!(

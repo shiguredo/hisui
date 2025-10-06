@@ -11,6 +11,7 @@ use crate::{
     encoder::VideoEncoderOptions,
     types::EvenUsize,
     video::{self, VideoFormat, VideoFrame},
+    video_av1,
 };
 
 #[derive(Debug)]
@@ -36,7 +37,7 @@ impl SvtAv1Encoder {
             ..options.encode_params.svt_av1.clone()
         };
         let inner = shiguredo_svt_av1::Encoder::new(&config).or_fail()?;
-        let sample_entry = sample_entry(width, height, inner.extra_data());
+        let sample_entry = video_av1::sample_entry(width, height, inner.extra_data());
 
         Ok(Self {
             inner,
@@ -88,24 +89,4 @@ impl SvtAv1Encoder {
         }
         Ok(())
     }
-}
-
-fn sample_entry(width: EvenUsize, height: EvenUsize, config_obus: &[u8]) -> SampleEntry {
-    SampleEntry::Av01(Av01Box {
-        visual: video::sample_entry_visual_fields(width.get(), height.get()),
-        av1c_box: Av1cBox {
-            seq_profile: Uint::new(0),            // Main profile
-            seq_level_idx_0: Uint::new(0),        // Default level (unrestricted)
-            seq_tier_0: Uint::new(0),             // Main tier
-            high_bitdepth: Uint::new(0),          // false
-            twelve_bit: Uint::new(0),             // false
-            monochrome: Uint::new(0),             // false
-            chroma_subsampling_x: Uint::new(1),   // 4:2:0 subsampling
-            chroma_subsampling_y: Uint::new(1),   // 4:2:0 subsampling
-            chroma_sample_position: Uint::new(0), // Colocated with luma (0, 0)
-            initial_presentation_delay_minus_one: None,
-            config_obus: config_obus.to_vec(),
-        },
-        unknown_boxes: Vec::new(),
-    })
 }
