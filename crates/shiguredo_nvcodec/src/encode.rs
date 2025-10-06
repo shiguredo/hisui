@@ -231,7 +231,7 @@ impl Encoder {
             seq_params.version = sys::NV_ENC_SEQUENCE_PARAM_PAYLOAD_VER;
             seq_params.spsppsBuffer = payload_buffer.as_mut_ptr() as *mut std::ffi::c_void;
             seq_params.inBufferSize = sys::NV_MAX_SEQ_HDR_LEN;
-            seq_params.outSPSPPSPayloadSize = 0;
+            seq_params.outSPSPPSPayloadSize = std::ptr::null_mut();
 
             let status = self
                 .encoder
