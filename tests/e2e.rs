@@ -6,7 +6,7 @@ use hisui::{
     decoder_opus::OpusDecoder,
     media::MediaStreamId,
     metadata::SourceId,
-    processor::{MediaProcessorInput, MediaProcessorOutput},
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
     subcommand_legacy::{Args, Runner},
