@@ -116,7 +116,7 @@ impl NvcodecEncoder {
 
             // Sample entry を生成（最初のキーフレームのみ）
             let sample_entry = self
-                .create_sample_entry_if_first_keyframe(keyframe, &input_frame, &mp4_data)
+                .create_sample_entry_if_first_keyframe(keyframe, &input_frame)
                 .or_fail()?;
 
             // VideoFrame を作成
@@ -143,7 +143,6 @@ impl NvcodecEncoder {
         &mut self,
         keyframe: bool,
         input_frame: &VideoFrame,
-        mp4_data: &[u8],
     ) -> orfail::Result<Option<SampleEntry>> {
         if !keyframe || !self.is_first_keyframe {
             return Ok(None);
@@ -159,7 +158,7 @@ impl NvcodecEncoder {
         let sample_entry = match self.encoded_format {
             VideoFormat::H264 => {
                 let seq_params = self.inner.get_sequence_params().or_fail()?;
-                video_h264::h264_sample_entry_from_annexb(width, height, fps, &seq_params)
+                video_h264::h264_sample_entry_from_annexb(width.get(), height.get(), &seq_params)
                     .or_fail()?
             }
             VideoFormat::H265 => {
@@ -181,7 +180,7 @@ impl NvcodecEncoder {
             }
             VideoFormat::Av1 => {
                 let seq_params = self.inner.get_sequence_params().or_fail()?;
-                Ok(video_av1::av1_sample_entry(width, height, &seq_params))
+                video_av1::av1_sample_entry(width, height, &seq_params)
             }
             _ => {
                 return Err(orfail::Failure::new(format!(
