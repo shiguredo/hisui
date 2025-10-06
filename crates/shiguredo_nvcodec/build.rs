@@ -87,6 +87,7 @@ fn main() {
         .generate_comments(false)
         .derive_debug(false)
         .derive_default(false)
+        .derive_eq(true)
         // GUID は bindgen で正しく生成されないため、ここではブラックリストに登録して、後で手動で定義する
         .blocklist_item("NV_ENC_CODEC_H264_GUID")
         .blocklist_item("NV_ENC_CODEC_HEVC_GUID")
@@ -175,6 +176,23 @@ pub const NV_ENC_H264_PROFILE_MAIN_GUID: GUID = GUID {
     Data4: [0x94, 0xd5, 0xc4, 0x72, 0x6d, 0x7b, 0x6e, 0x6d],
 };
 
+// プロファイル GUID: NV_ENC_HEVC_PROFILE_MAIN_GUID
+// {B514C39A-B55B-40fa-878F-F1253B4DFDEC}
+pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
+    Data1: 0xb514c39a,
+    Data2: 0xb55b,
+    Data3: 0x40fa,
+    Data4: [0x87, 0x8f, 0xf1, 0x25, 0x3b, 0x4d, 0xfd, 0xec],
+};
+
+// プロファイル GUID: NV_ENC_AV1_PROFILE_MAIN_GUID
+// {5f2a39f5-f14e-4f95-9a9e-b76d568fcf97}
+pub const NV_ENC_AV1_PROFILE_MAIN_GUID: GUID = GUID {
+    Data1: 0x5f2a39f5,
+    Data2: 0xf14e,
+    Data3: 0x4f95,
+    Data4: [0x9a, 0x9e, 0xb7, 0x6d, 0x56, 0x8f, 0xcf, 0x97],
+};
 
 // プリセット GUID: NV_ENC_PRESET_P4_GUID
 // {90A7B826-DF06-4862-B9D2-CD6D73A08681}
@@ -183,15 +201,6 @@ pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
     Data2: 0xdf06,
     Data3: 0x4862,
     Data4: [0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81],
-};
-
-// プロファイル GUID: NV_ENC_HEVC_PROFILE_MAIN_GUID
-// {B514C39A-B55B-40fa-878F-F1253B4DFDEC}
-pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
-    Data1: 0xb514c39a,
-    Data2: 0xb55b,
-    Data3: 0x40fa,
-    Data4: [0x87, 0x8f, 0xf1, 0x25, 0x3b, 0x4d, 0xfd, 0xec],
 };
 "#;
 
