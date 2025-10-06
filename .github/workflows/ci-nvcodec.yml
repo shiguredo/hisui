@@ -28,8 +28,8 @@ jobs:
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
       - name: Install packages to build external dependencies
         run: |
-          brew update
-          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
       - run: cargo check --features nvcodec -p hisui -p shiguredo_nvcodec
       - run: cargo clippy --features nvcodec -p hisui -p shiguredo_nvcodec -- --deny warnings
       - run: cargo test --features nvcodec -p hisui -p shiguredo_nvcodec 
