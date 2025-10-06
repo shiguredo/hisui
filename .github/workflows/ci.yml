@@ -105,6 +105,44 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
       - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
+  test-nvidia-video-codec:
+    runs-on:
+      group: Self
+      labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - run: cargo check --features nvcodec -p hisui -p shiguredo_nvcodec
+      - run: cargo clippy --features nvcodec -p hisui -p shiguredo_nvcodec -- --deny warnings
+      - run: cargo test --features nvcodec -p hisui -p shiguredo_nvcodec
+
+  test-apple-toolbox:
+    runs-on:
+      group: Self
+      labels: [self-hosted, macOS, ARM64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: 🍺 Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec -- --deny warnings
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_openh264
+
   test-fdk-aac:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -239,7 +277,16 @@ jobs:
       - run: cargo doc --workspace --exclude hisui
 
   slack_notify_failed:
-    needs: [check, clippy, test, test-fdk-aac, test-openh264, valgrind, docs_rs]
+    needs:
+      - check
+      - clippy
+      - test
+      - test-nvidia-video-codec
+      - test-apple-toolbox
+      - test-fdk-aac
+      - test-openh264
+      - valgrind
+      - docs_rs
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     if: failure()
@@ -253,4 +300,3 @@ jobs:
           SLACK_TITLE: "FAILED"
           SLACK_MESSAGE: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{github.event.head_commit.message }}>
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
