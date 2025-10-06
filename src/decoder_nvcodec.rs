@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use orfail::OrFail;
 
 use crate::video::{VideoFormat, VideoFrame};
+use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video_h265::{
     H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
 };
@@ -16,6 +17,16 @@ pub struct NvcodecDecoder {
 }
 
 impl NvcodecDecoder {
+    pub fn new_h264() -> orfail::Result<Self> {
+        log::debug!("create nvcodec(H264) decoder");
+        Ok(Self {
+            inner: shiguredo_nvcodec::Decoder::new_h264().or_fail()?,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new(),
+            parameter_sets: None,
+        })
+    }
+
     pub fn new_h265() -> orfail::Result<Self> {
         log::debug!("create nvcodec(H265) decoder");
         Ok(Self {
@@ -26,14 +37,30 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
-        (frame.format == VideoFormat::H265).or_fail()?;
+    pub fn new_av1() -> orfail::Result<Self> {
+        log::debug!("create nvcodec(AV1) decoder");
+        Ok(Self {
+            inner: shiguredo_nvcodec::Decoder::new_av1().or_fail()?,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new(),
+            parameter_sets: None,
+        })
+    }
 
-        // サンプルエントリから VPS/SPS/PPS を抽出してキャッシュ
+    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+        // フォーマット検証を拡張
+        matches!(
+            frame.format,
+            VideoFormat::H264 | VideoFormat::H265 | VideoFormat::AV1
+        )
+        .or_fail()?;
+
+        // サンプルエントリからパラメータセットを抽出してキャッシュ
         if self.parameter_sets.is_none()
             && let Some(sample_entry) = &frame.sample_entry
         {
-            self.parameter_sets = Some(extract_parameter_sets_annexb(sample_entry).or_fail()?);
+            self.parameter_sets =
+                Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
         }
 
         // Annex.B 形式に変換する
@@ -43,7 +70,7 @@ impl NvcodecDecoder {
         // キーフレームで、かつパラメータセットがデータに含まれていない場合は先頭に追加
         if frame.keyframe
             && let Some(parameter_sets) = &self.parameter_sets
-            && !contains_parameter_sets(data)
+            && !contains_parameter_sets(data, frame.format)
         {
             data_annexb.extend_from_slice(parameter_sets);
         }
@@ -132,42 +159,72 @@ impl NvcodecDecoder {
     }
 }
 
-/// サンプルエントリから VPS/SPS/PPS を Annex.B 形式で抽出
+/// サンプルエントリからパラメータセットを Annex.B 形式で抽出
 fn extract_parameter_sets_annexb(
     sample_entry: &shiguredo_mp4::boxes::SampleEntry,
+    format: VideoFormat,
 ) -> orfail::Result<Vec<u8>> {
     use shiguredo_mp4::boxes::SampleEntry;
 
-    let hevc_config = match sample_entry {
-        SampleEntry::Hev1(entry) => &entry.hvcc_box,
-        _ => return Err(orfail::Failure::new("Sample entry is not HEVC (hev1/hvc1)")),
-    };
-
-    let mut annexb_data = Vec::new();
-
-    // 各 NAL unit array からパラメータセットを抽出
-    for array in &hevc_config.nalu_arrays {
-        for nalu in &array.nalus {
-            // Annex.B start code を追加
-            annexb_data.extend_from_slice(&[0, 0, 0, 1]);
-            annexb_data.extend_from_slice(nalu);
+    match (sample_entry, format) {
+        (SampleEntry::Hev1(entry), VideoFormat::H265) => {
+            let mut annexb_data = Vec::new();
+            for array in &entry.hvcc_box.nalu_arrays {
+                for nalu in &array.nalus {
+                    annexb_data.extend_from_slice(&[0, 0, 0, 1]);
+                    annexb_data.extend_from_slice(nalu);
+                }
+            }
+            Ok(annexb_data)
         }
+        (SampleEntry::Avc1(entry), VideoFormat::H264) => {
+            let mut annexb_data = Vec::new();
+            // SPS
+            for sps in &entry.avcc_box.sps {
+                annexb_data.extend_from_slice(&[0, 0, 0, 1]);
+                annexb_data.extend_from_slice(sps);
+            }
+            // PPS
+            for pps in &entry.avcc_box.pps {
+                annexb_data.extend_from_slice(&[0, 0, 0, 1]);
+                annexb_data.extend_from_slice(pps);
+            }
+            Ok(annexb_data)
+        }
+        (SampleEntry::Av01(_entry), VideoFormat::AV1) => {
+            // AV1はパラメータセットを個別に送る必要がないため空のVecを返す
+            Ok(Vec::new())
+        }
+        _ => Err(orfail::Failure::new(
+            "Sample entry format mismatch or unsupported codec",
+        )),
     }
-
-    Ok(annexb_data)
 }
 
-/// データの先頭にパラメータセット（VPS/SPS/PPS）が含まれているかチェック
-fn contains_parameter_sets(data: &[u8]) -> bool {
+/// データの先頭にパラメータセットが含まれているかチェック
+fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
     if data.len() < NALU_HEADER_LENGTH + 1 {
         return false;
     }
 
-    // 最初の NAL unit の type をチェック
-    // H.265 の NAL unit type は 2バイト目の上位6ビット
-    let nal_unit_type = (data[NALU_HEADER_LENGTH] >> 1) & 0x3F;
-    matches!(
-        nal_unit_type,
-        H265_NALU_TYPE_PPS | H265_NALU_TYPE_SPS | H265_NALU_TYPE_VPS
-    )
+    match format {
+        VideoFormat::H265 => {
+            // H.265 の NAL unit type は 2バイト目の上位6ビット
+            let nal_unit_type = (data[NALU_HEADER_LENGTH] >> 1) & 0x3F;
+            matches!(
+                nal_unit_type,
+                H265_NALU_TYPE_PPS | H265_NALU_TYPE_SPS | H265_NALU_TYPE_VPS
+            )
+        }
+        VideoFormat::H264 => {
+            // H.264 の NAL unit type は下位5ビット
+            let nal_unit_type = data[NALU_HEADER_LENGTH] & 0x1F;
+            matches!(nal_unit_type, H264_NALU_TYPE_SPS | H264_NALU_TYPE_PPS)
+        }
+        VideoFormat::AV1 => {
+            // AV1はパラメータセットの概念が異なるため常にfalse
+            false
+        }
+        _ => false,
+    }
 }
