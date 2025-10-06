@@ -414,6 +414,7 @@ impl MediaProcessor for VideoEncoder {
 }
 
 #[derive(Debug)]
+#[expect(clippy::large_enum_variant)]
 enum VideoEncoderInner {
     Libvpx(LibvpxEncoder),
     Openh264(Openh264Encoder),

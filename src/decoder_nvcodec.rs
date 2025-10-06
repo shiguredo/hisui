@@ -30,10 +30,10 @@ impl NvcodecDecoder {
         (frame.format == VideoFormat::H265).or_fail()?;
 
         // サンプルエントリから VPS/SPS/PPS を抽出してキャッシュ
-        if self.parameter_sets.is_none() {
-            if let Some(sample_entry) = &frame.sample_entry {
-                self.parameter_sets = Some(extract_parameter_sets_annexb(sample_entry).or_fail()?);
-            }
+        if self.parameter_sets.is_none()
+            && let Some(sample_entry) = &frame.sample_entry
+        {
+            self.parameter_sets = Some(extract_parameter_sets_annexb(sample_entry).or_fail()?);
         }
 
         // Annex.B 形式に変換する
@@ -41,11 +41,11 @@ impl NvcodecDecoder {
         let mut data_annexb = Vec::new();
 
         // キーフレームで、かつパラメータセットがデータに含まれていない場合は先頭に追加
-        if frame.keyframe {
-            if let Some(parameter_sets) = &self.parameter_sets {
-                if !contains_parameter_sets(data) {
-                    data_annexb.extend_from_slice(parameter_sets);
-                }
+        if frame.keyframe
+            && let Some(parameter_sets) = &self.parameter_sets
+        {
+            if !contains_parameter_sets(data) {
+                data_annexb.extend_from_slice(parameter_sets);
             }
         }
 
