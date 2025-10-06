@@ -239,7 +239,6 @@ impl MediaProcessor for VideoDecoder {
 }
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
@@ -248,7 +247,7 @@ enum VideoDecoderInner {
     Openh264(Openh264Decoder),
     Dav1d(Dav1dDecoder),
     #[cfg(target_os = "macos")]
-    VideoToolbox(VideoToolboxDecoder),
+    VideoToolbox(Box<VideoToolboxDecoder>), // Box は clippy::large_enum_variant 対策
     #[cfg(feature = "nvcodec")]
     Nvcodec(NvcodecDecoder),
 }
@@ -266,6 +265,7 @@ impl VideoDecoderInner {
                 VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
                     *self = VideoToolboxDecoder::new_h264(frame)
                         .or_fail()
+                        .map(Box::new)
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);
                     stats.codec.set(CodecName::H264);
@@ -294,6 +294,7 @@ impl VideoDecoderInner {
                 VideoFormat::H265 => {
                     *self = VideoToolboxDecoder::new_h265(frame)
                         .or_fail()
+                        .map(Box::new)
                         .map(Self::VideoToolbox)?;
                     stats.engine.set(EngineName::VideoToolbox);
                     stats.codec.set(CodecName::H265);

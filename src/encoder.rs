@@ -414,7 +414,6 @@ impl MediaProcessor for VideoEncoder {
 }
 
 #[derive(Debug)]
-#[expect(clippy::large_enum_variant)]
 enum VideoEncoderInner {
     Libvpx(LibvpxEncoder),
     Openh264(Openh264Encoder),
@@ -422,7 +421,7 @@ enum VideoEncoderInner {
     #[cfg(target_os = "macos")]
     VideoToolbox(VideoToolboxEncoder),
     #[cfg(feature = "nvcodec")]
-    Nvcodec(NvcodecEncoder),
+    Nvcodec(Box<NvcodecEncoder>), // Box は clippy::large_enum_variant 対策
 }
 
 impl VideoEncoderInner {
