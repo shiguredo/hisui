@@ -38,7 +38,7 @@ impl NvcodecEncoder {
         let y_size = width * height;
         let uv_width = width.div_ceil(2);
         let uv_height = height.div_ceil(2);
-        let uv_size = uv_width * uv_height * 2; // インターリーブなので2倍
+        let uv_size = uv_width * uv_height * 2; // インターリーブなので 2 倍
         let total_size = y_size + uv_size;
 
         let mut nv12_data = vec![0u8; total_size];
@@ -58,7 +58,7 @@ impl NvcodecEncoder {
             y: nv12_y,
             y_stride: width,
             uv: nv12_uv,
-            uv_stride: width, // NV12 の UV プレーンは横幅と同じストライド
+            uv_stride: width,
         };
 
         let size = shiguredo_libyuv::ImageSize::new(width, height);
@@ -87,35 +87,13 @@ impl NvcodecEncoder {
                 shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
             );
 
-            // annex.b 形式から MP4 形式に変換する(サイズバイトは 4 前提)
+            // Annex B 形式から length-prefixed 形式 (MP4/HVCC) に変換する(サイズバイトは 4 前提)
             let mp4_data = convert_annexb_to_mp4(encoded_frame.data(), 4).or_fail()?;
 
             // H.265 sample entry を生成（最初のキーフレームのみ）
-            let sample_entry = if keyframe && self.is_first_keyframe {
-                self.is_first_keyframe = false;
-
-                // VPS, SPS, PPS を抽出
-                let (vps_list, sps_list, pps_list) =
-                    video_h265::extract_h265_parameter_sets(&mp4_data).or_fail()?;
-
-                if !vps_list.is_empty() && !sps_list.is_empty() && !pps_list.is_empty() {
-                    let width = crate::types::EvenUsize::new(input_frame.width).or_fail()?;
-                    let height = crate::types::EvenUsize::new(input_frame.height).or_fail()?;
-                    // TODO: フレームレートを適切に設定する
-                    let fps = crate::video::FrameRate::FPS_25;
-
-                    Some(
-                        video_h265::h265_sample_entry(
-                            width, height, fps, vps_list, sps_list, pps_list,
-                        )
-                        .or_fail()?,
-                    )
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let sample_entry = self
+                .create_sample_entry_if_first_keyframe(keyframe, &input_frame, &mp4_data)
+                .or_fail()?;
 
             // H.265 VideoFrame を作成
             self.output_queue.push_back(VideoFrame {
@@ -135,6 +113,43 @@ impl NvcodecEncoder {
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
+    }
+
+    fn create_sample_entry_if_first_keyframe(
+        &mut self,
+        keyframe: bool,
+        input_frame: &VideoFrame,
+        mp4_data: &[u8],
+    ) -> orfail::Result<Option<Vec<u8>>> {
+        if !keyframe || !self.is_first_keyframe {
+            return Ok(None);
+        }
+
+        self.is_first_keyframe = false;
+
+        // VPS, SPS, PPS を抽出
+        let (vps_list, sps_list, pps_list) =
+            video_h265::extract_h265_parameter_sets(mp4_data).or_fail()?;
+
+        if vps_list.is_empty() || sps_list.is_empty() || pps_list.is_empty() {
+            return Err(orfail::Failure::new(format!(
+                "missing required H.265 parameter sets (VPS: {}, SPS: {}, PPS: {})",
+                vps_list.len(),
+                sps_list.len(),
+                pps_list.len()
+            )));
+        }
+
+        let width = crate::types::EvenUsize::new(input_frame.width).or_fail()?;
+        let height = crate::types::EvenUsize::new(input_frame.height).or_fail()?;
+        // TODO: フレームレートを適切に設定する
+        let fps = crate::video::FrameRate::FPS_25;
+
+        let sample_entry =
+            video_h265::h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
+                .or_fail()?;
+
+        Ok(Some(sample_entry))
     }
 }
 
