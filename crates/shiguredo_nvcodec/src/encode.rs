@@ -447,6 +447,8 @@ impl std::fmt::Debug for Encoder {
     }
 }
 
+unsafe impl Send for Encoder {}
+
 /// ピクチャータイプ
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PictureType {
