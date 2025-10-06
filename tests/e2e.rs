@@ -215,6 +215,47 @@ fn simple_single_source_h265() -> noargs::Result<()> {
     )
 }
 
+/// 単一のソースをそのまま変換する場合 (H.264 版)
+/// - 入力:
+///   - 映像:
+///     - H.264
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+#[cfg(any(feature = "nvcodec", target_os = "macos"))]
+fn simple_single_source_h264() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_h264/report.json",
+        CodecName::H264,
+    )
+}
+
+/// 単一のソースをそのまま変換する場合 (AV1 版)
+/// - 入力:
+///   - 映像:
+///     - AV1
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+fn simple_single_source_av1() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_av1/report.json",
+        CodecName::H265,
+    )
+}
+
 /// 単一のソースをそのまま変換する場合（奇数解像度版）
 /// - 入力:
 ///   - 映像:
