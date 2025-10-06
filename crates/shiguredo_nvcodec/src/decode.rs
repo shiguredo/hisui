@@ -160,13 +160,13 @@ impl Drop for Decoder {
             }
 
             // ここでロック確保に失敗してもできることはないので、成功時にだけ処理を行う
-            if let Ok(state) = self.state.lock() {
-                if !state.decoder.is_null() {
-                    let _ = crate::with_cuda_context(self.ctx, || {
-                        sys::cuvidDestroyDecoder(state.decoder);
-                        Ok(())
-                    });
-                }
+            if let Ok(state) = self.state.lock()
+                && !state.decoder.is_null()
+            {
+                let _ = crate::with_cuda_context(self.ctx, || {
+                    sys::cuvidDestroyDecoder(state.decoder);
+                    Ok(())
+                });
             }
 
             if !self.ctx_lock.is_null() {
@@ -374,7 +374,7 @@ fn handle_picture_display_inner(
         let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
         proc_params.progressive_frame = disp_info.progressive_frame;
         proc_params.top_field_first = disp_info.top_field_first;
-        proc_params.second_field = (disp_info.repeat_first_field + 1) as i32;
+        proc_params.second_field = disp_info.repeat_first_field + 1;
         proc_params.output_stream = ptr::null_mut();
 
         // デコード済みフレームをマップ
