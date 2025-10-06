@@ -232,7 +232,7 @@ fn simple_single_source_h265() -> noargs::Result<()> {
 fn simple_single_source_h264() -> noargs::Result<()> {
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_h264/report.json",
-        CodecName::VP9, // TODO: H264 にする
+        CodecName::Vp9, // TODO: H264 にする
     )
 }
 
@@ -252,7 +252,7 @@ fn simple_single_source_h264() -> noargs::Result<()> {
 fn simple_single_source_av1() -> noargs::Result<()> {
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_av1/report.json",
-        CodecName::AV1,
+        CodecName::Av1,
     )
 }
 
