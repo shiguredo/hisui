@@ -179,12 +179,23 @@ impl Encoder {
             config.frameIntervalP = 1;
 
             // コーデック固有の設定
-            if codec_guid == sys::NV_ENC_CODEC_HEVC_GUID {
-                config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength;
-            } else if codec_guid == sys::NV_ENC_CODEC_H264_GUID {
-                config.encodeCodecConfig.h264Config.idrPeriod = config.gopLength;
-            } else if codec_guid == sys::NV_ENC_CODEC_AV1_GUID {
-                config.encodeCodecConfig.av1Config.idrPeriod = config.gopLength;
+            match codec_guid {
+                sys::NV_ENC_CODEC_HEVC_GUID => {
+                    config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength
+                }
+                sys::NV_ENC_CODEC_H264_GUID => {
+                    config.encodeCodecConfig.h264Config.idrPeriod = config.gopLength
+                }
+                sys::NV_ENC_CODEC_AV1_GUID => {
+                    config.encodeCodecConfig.av1Config.idrPeriod = config.gopLength
+                }
+                _ => {
+                    return Err(Error::new(
+                        sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
+                        "initialize_encoder",
+                        "unsupported codec GUID",
+                    ));
+                }
             }
 
             // エンコーダーを初期化

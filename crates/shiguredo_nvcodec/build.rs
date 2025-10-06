@@ -47,6 +47,7 @@ fn main() {
                 "pub struct CUvideodecoder;",
                 "pub struct CUcontext;",
                 "pub struct CUvideoctxlock;",
+                "pub struct GUID;",
                 "pub struct NV_ENCODE_API_FUNCTION_LIST;",
                 "pub struct NV_ENC_REGISTERED_PTR;",
                 "pub struct NV_ENC_PIC_TYPE;",
