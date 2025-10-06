@@ -253,6 +253,7 @@ enum VideoDecoderInner {
     },
     Libvpx(LibvpxDecoder),
     Openh264(Openh264Decoder),
+    #[cfg_if(feature = "nvcodec", expect(dead_code))]
     Dav1d(Dav1dDecoder),
     #[cfg(target_os = "macos")]
     VideoToolbox(Box<VideoToolboxDecoder>), // Box は clippy::large_enum_variant 対策
@@ -270,7 +271,7 @@ impl VideoDecoderInner {
         match self {
             Self::Initial { options } => match frame.format {
                 #[cfg(feature = "nvcodec")]
-                VideoFormat::H264 | VideoFormat::H264AnnexB => {
+                VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
                     *self = NvcodecDecoder::new_h264().or_fail().map(Self::Nvcodec)?;
                     stats.engine.set(EngineName::Nvcodec);
                     stats.codec.set(CodecName::H264);
