@@ -47,7 +47,7 @@ impl NvcodecEncoder {
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             is_first_keyframe: true,
-            codec: VideoFormat::Av1,
+            encoded_format: VideoFormat::Av1,
         })
     }
 
@@ -156,7 +156,7 @@ impl NvcodecEncoder {
         // TODO: フレームレートを適切に設定する
         let fps = crate::video::FrameRate::FPS_25;
 
-        let sample_entry = match self.codec {
+        let sample_entry = match self.encoded_format {
             VideoFormat::H264 => {
                 // SPS, PPS を抽出
                 let (sps_list, pps_list) =
