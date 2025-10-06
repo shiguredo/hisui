@@ -50,9 +50,9 @@ impl NvcodecDecoder {
         }
 
         while !data.is_empty() {
-            (data.len() > 3).or_fail()?;
+            (data.len() >= NALU_HEADER_LENGTH).or_fail()?;
             let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
-            data = &data[4..];
+            data = &data[NALU_HEADER_LENGTH..];
 
             (data.len() >= n).or_fail()?;
             data_annexb.extend_from_slice(&[0, 0, 0, 1]);
