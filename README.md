@@ -181,7 +181,7 @@ limitations under the License.
 "OpenH264 Video Codec provided by Cisco Systems, Inc."
 ```
 
-## NVIDIA Video Codec
+## NVIDIA Video Codec SDK
 
 <https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/index.html>
 
