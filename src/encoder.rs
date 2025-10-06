@@ -289,6 +289,10 @@ impl VideoEncoder {
         let inner = match options.codec {
             CodecName::Vp8 => VideoEncoderInner::new_vp8(options).or_fail()?,
             CodecName::Vp9 => VideoEncoderInner::new_vp9(options).or_fail()?,
+            #[cfg(feature = "nvcodec")]
+            CodecName::H264 if openh264_lib.is_none() => {
+                VideoEncoderInner::new_nvcodec_h264(options).or_fail()?
+            }
             #[cfg(target_os = "macos")]
             CodecName::H264 if openh264_lib.is_none() => {
                 VideoEncoderInner::new_video_toolbox_h264(options).or_fail()?
@@ -308,6 +312,8 @@ impl VideoEncoder {
             CodecName::H265 => VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?,
             #[cfg(all(not(target_os = "macos"), not(feature = "nvcodec")))]
             CodecName::H265 => return Err(orfail::Failure::new("no available H.265 encoder")),
+            #[cfg(feature = "nvcodec")]
+            CodecName::Av1 => VideoEncoderInner::new_nvcodec_av1(options).or_fail()?,
             CodecName::Av1 => VideoEncoderInner::new_svt_av1(options).or_fail()?,
             _ => unreachable!(),
         };
@@ -342,6 +348,10 @@ impl VideoEncoder {
                 if is_openh264_available {
                     engines.push(EngineName::Openh264);
                 }
+                #[cfg(target_os = "nvcodec")]
+                {
+                    engines.push(EngineName::Nvcodec);
+                }
                 #[cfg(target_os = "macos")]
                 {
                     engines.push(EngineName::VideoToolbox);
@@ -358,6 +368,10 @@ impl VideoEncoder {
                 }
             }
             CodecName::Av1 => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    engines.push(EngineName::Nvcodec);
+                }
                 engines.push(EngineName::SvtAv1);
             }
             _ => unreachable!(),
@@ -417,6 +431,7 @@ impl MediaProcessor for VideoEncoder {
 enum VideoEncoderInner {
     Libvpx(LibvpxEncoder),
     Openh264(Openh264Encoder),
+    #[cfg_attr(feature = "nvcodec", expect(dead_code))]
     SvtAv1(SvtAv1Encoder),
     #[cfg(target_os = "macos")]
     VideoToolbox(VideoToolboxEncoder),
@@ -461,6 +476,20 @@ impl VideoEncoderInner {
     fn new_nvcodec_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let encoder =
             NvcodecEncoder::new_h265(options.width.get(), options.height.get()).or_fail()?;
+        Ok(Self::Nvcodec(Box::new(encoder)))
+    }
+
+    #[cfg(feature = "nvcodec")]
+    fn new_nvcodec_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder =
+            NvcodecEncoder::new_h264(options.width.get(), options.height.get()).or_fail()?;
+        Ok(Self::Nvcodec(Box::new(encoder)))
+    }
+
+    #[cfg(feature = "nvcodec")]
+    fn new_nvcodec_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let encoder =
+            NvcodecEncoder::new_av1(options.width.get(), options.height.get()).or_fail()?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
