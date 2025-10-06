@@ -181,6 +181,14 @@ limitations under the License.
 "OpenH264 Video Codec provided by Cisco Systems, Inc."
 ```
 
+## NVIDIA Video Codec
+
+<https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/index.html>
+
+```text
+“This software contains source code provided by NVIDIA Corporation.”
+```
+
 ## H.264 (AVC) と H.265 (HEVC) のライセンスについて
 
 **時雨堂が提供する Hisui のビルド済みバイナリには H.264 と H.265 のコーデックは含まれていません**
