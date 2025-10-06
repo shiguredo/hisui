@@ -43,10 +43,9 @@ impl NvcodecDecoder {
         // キーフレームで、かつパラメータセットがデータに含まれていない場合は先頭に追加
         if frame.keyframe
             && let Some(parameter_sets) = &self.parameter_sets
+            && !contains_parameter_sets(data)
         {
-            if !contains_parameter_sets(data) {
-                data_annexb.extend_from_slice(parameter_sets);
-            }
+            data_annexb.extend_from_slice(parameter_sets);
         }
 
         while !data.is_empty() {
