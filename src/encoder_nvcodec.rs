@@ -158,23 +158,11 @@ impl NvcodecEncoder {
 
         let sample_entry = match self.encoded_format {
             VideoFormat::H264 => {
-                // nvenc の get_sequence_params() を利用して SPS/PPS を取得
                 let seq_params = self.inner.get_sequence_params().or_fail()?;
-                let (sps_list, pps_list) =
-                    video_h264::extract_h264_parameter_sets(&seq_params).or_fail()?;
-
-                if sps_list.is_empty() || pps_list.is_empty() {
-                    return Err(orfail::Failure::new(format!(
-                        "missing required H.264 parameter sets (SPS: {}, PPS: {})",
-                        sps_list.len(),
-                        pps_list.len()
-                    )));
-                }
-
-                video_h264::h264_sample_entry(width, height, fps, sps_list, pps_list).or_fail()?
+                video_h264::h264_sample_entry_from_annexb(width, height, fps, &seq_params)
+                    .or_fail()?
             }
             VideoFormat::H265 => {
-                // nvenc の get_sequence_params() を利用して VPS/SPS/PPS を取得
                 let seq_params = self.inner.get_sequence_params().or_fail()?;
                 let (vps_list, sps_list, pps_list) =
                     video_h265::extract_h265_parameter_sets(&seq_params).or_fail()?;
