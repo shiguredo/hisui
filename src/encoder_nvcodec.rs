@@ -158,10 +158,10 @@ impl NvcodecEncoder {
 
         let sample_entry = match self.encoded_format {
             VideoFormat::H264 => {
-                // SPS, PPS を抽出
-                // TODO: 自前で取り出すのは手間なので、nvenc 自体がこの情報を提供していないかを調べる
+                // nvenc の get_sequence_params() を利用して SPS/PPS を取得
+                let seq_params = self.inner.get_sequence_params().or_fail()?;
                 let (sps_list, pps_list) =
-                    video_h264::extract_h264_parameter_sets(mp4_data).or_fail()?;
+                    video_h264::extract_h264_parameter_sets(&seq_params).or_fail()?;
 
                 if sps_list.is_empty() || pps_list.is_empty() {
                     return Err(orfail::Failure::new(format!(
@@ -174,10 +174,10 @@ impl NvcodecEncoder {
                 video_h264::h264_sample_entry(width, height, fps, sps_list, pps_list).or_fail()?
             }
             VideoFormat::H265 => {
-                // VPS, SPS, PPS を抽出
-                // TODO: 自前で取り出すのは手間なので、nvenc 自体がこの情報を提供していないかを調べる
+                // nvenc の get_sequence_params() を利用して VPS/SPS/PPS を取得
+                let seq_params = self.inner.get_sequence_params().or_fail()?;
                 let (vps_list, sps_list, pps_list) =
-                    video_h265::extract_h265_parameter_sets(mp4_data).or_fail()?;
+                    video_h265::extract_h265_parameter_sets(&seq_params).or_fail()?;
 
                 if vps_list.is_empty() || sps_list.is_empty() || pps_list.is_empty() {
                     return Err(orfail::Failure::new(format!(
@@ -192,16 +192,17 @@ impl NvcodecEncoder {
                     .or_fail()?
             }
             VideoFormat::Av1 => {
-                // AV1 sequence header を抽出
-                // TODO: 自前で取り出すのは手間なので、nvenc 自体がこの情報を提供していないかを調べるz
-                let sequence_header = video_av1::extract_av1_sequence_header(mp4_data).or_fail()?;
+                // nvenc の get_sequence_params() を利用して AV1 sequence header を取得
+                let seq_params = self.inner.get_sequence_params().or_fail()?;
+                let sequence_header =
+                    video_av1::extract_av1_sequence_header(&seq_params).or_fail()?;
 
                 video_av1::av1_sample_entry(width, height, fps, &sequence_header).or_fail()?
             }
             _ => {
                 return Err(orfail::Failure::new(format!(
                     "unsupported codec format: {:?}",
-                    self.codec
+                    self.encoded_format
                 )));
             }
         };

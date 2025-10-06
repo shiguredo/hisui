@@ -217,7 +217,6 @@ impl Encoder {
     /// シーケンスパラメータ（SPS/PPS または Sequence Header OBU）を取得する
     ///
     /// H.264/HEVC の場合は SPS/PPS、AV1 の場合は Sequence Header OBU を取得します。
-    // TODO: Add basic test cases for this method
     pub fn get_sequence_params(&mut self) -> Result<Vec<u8>, Error> {
         crate::with_cuda_context(self.ctx, || self.get_sequence_params_inner())
     }
