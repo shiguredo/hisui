@@ -46,6 +46,63 @@ impl Encoder {
         )
     }
 
+    #[test]
+    fn test_get_sequence_params_h264() {
+        // H.264 エンコーダーを作成
+        let mut encoder = Encoder::new_h264(640, 480).expect("failed to create h264 encoder");
+
+        // シーケンスパラメータを取得
+        let seq_params = encoder
+            .get_sequence_params()
+            .expect("failed to get sequence parameters");
+
+        // シーケンスパラメータが空でないことを確認
+        assert!(
+            !seq_params.is_empty(),
+            "Sequence parameters should not be empty"
+        );
+
+        println!("H.264 sequence parameters size: {} bytes", seq_params.len());
+    }
+
+    #[test]
+    fn test_get_sequence_params_h265() {
+        // H.265 エンコーダーを作成
+        let mut encoder = Encoder::new_h265(640, 480).expect("failed to create h265 encoder");
+
+        // シーケンスパラメータを取得
+        let seq_params = encoder
+            .get_sequence_params()
+            .expect("failed to get sequence parameters");
+
+        // シーケンスパラメータが空でないことを確認
+        assert!(
+            !seq_params.is_empty(),
+            "Sequence parameters should not be empty"
+        );
+
+        println!("H.265 sequence parameters size: {} bytes", seq_params.len());
+    }
+
+    #[test]
+    fn test_get_sequence_params_av1() {
+        // AV1 エンコーダーを作成
+        let mut encoder = Encoder::new_av1(640, 480).expect("failed to create av1 encoder");
+
+        // シーケンスパラメータを取得
+        let seq_params = encoder
+            .get_sequence_params()
+            .expect("failed to get sequence parameters");
+
+        // シーケンスパラメータが空でないことを確認
+        assert!(
+            !seq_params.is_empty(),
+            "Sequence parameters should not be empty"
+        );
+
+        println!("AV1 sequence header size: {} bytes", seq_params.len());
+    }
+
     /// 指定されたコーデックタイプでエンコーダーインスタンスを生成する
     fn new_with_codec(
         width: u32,
@@ -217,6 +274,7 @@ impl Encoder {
     /// シーケンスパラメータ（SPS/PPS または Sequence Header OBU）を取得する
     ///
     /// H.264/HEVC の場合は SPS/PPS、AV1 の場合は Sequence Header OBU を取得します。
+    // TODO: Add basic test cases for this method
     pub fn get_sequence_params(&mut self) -> Result<Vec<u8>, Error> {
         crate::with_cuda_context(self.ctx, || self.get_sequence_params_inner())
     }
