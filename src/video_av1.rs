@@ -5,7 +5,7 @@ use shiguredo_mp4::{
 
 use crate::{types::EvenUsize, video};
 
-pub fn sample_entry(width: EvenUsize, height: EvenUsize, config_obus: &[u8]) -> SampleEntry {
+pub fn av1_sample_entry(width: EvenUsize, height: EvenUsize, config_obus: &[u8]) -> SampleEntry {
     SampleEntry::Av01(Av01Box {
         visual: video::sample_entry_visual_fields(width.get(), height.get()),
         av1c_box: Av1cBox {

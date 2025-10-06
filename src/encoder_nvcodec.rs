@@ -193,7 +193,7 @@ impl NvcodecEncoder {
             }
             VideoFormat::Av1 => {
                 let seq_params = self.inner.get_sequence_params().or_fail()?;
-                video_av1::sample_entry(width, height, fps, &seq_params).or_fail()?
+                Ok(video_av1::av1_sample_entry(width, height, &seq_params))
             }
             _ => {
                 return Err(orfail::Failure::new(format!(

@@ -34,7 +34,7 @@ impl SvtAv1Encoder {
             ..options.encode_params.svt_av1.clone()
         };
         let inner = shiguredo_svt_av1::Encoder::new(&config).or_fail()?;
-        let sample_entry = video_av1::sample_entry(width, height, inner.extra_data());
+        let sample_entry = video_av1::av1_sample_entry(width, height, inner.extra_data());
 
         Ok(Self {
             inner,
