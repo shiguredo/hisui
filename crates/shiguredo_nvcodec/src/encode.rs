@@ -583,12 +583,130 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_black_frame() {
+    fn init_h264_encoder() {
+        let _encoder = Encoder::new_h264(640, 480).expect("failed to initialize h264 encoder");
+        println!("h264 encoder initialized successfully");
+    }
+
+    #[test]
+    fn init_av1_encoder() {
+        let _encoder = Encoder::new_av1(640, 480).expect("failed to initialize av1 encoder");
+        println!("av1 encoder initialized successfully");
+    }
+
+    #[test]
+    fn test_encode_h265_black_frame() {
         let width = 640;
         let height = 480;
 
         // エンコーダーを作成
         let mut encoder = Encoder::new_h265(width, height).expect("failed to create h265 encoder");
+
+        // NV12 形式の黒フレームを準備
+        // Y プレーン: 16 (YUV での黒)
+        // UV プレーン: 128 (ニュートラルなクロマ)
+        let y_size = (width * height) as usize;
+        let uv_size = (width * height / 2) as usize;
+
+        let mut frame_data = vec![16u8; y_size + uv_size];
+        // UV プレーンを 128 に設定（ニュートラルなクロマ）
+        frame_data[y_size..].fill(128);
+
+        // フレームをエンコード
+        encoder
+            .encode(&frame_data)
+            .expect("failed to encode black frame");
+        encoder.finish().expect("failed to finish encoder");
+
+        // エンコード済みフレームを取得
+        let mut frames = Vec::new();
+        while let Some(frame) = encoder.next_frame() {
+            frames.push(frame);
+        }
+
+        // 少なくとも1つのフレームを取得したことを確認
+        assert!(!frames.is_empty(), "No encoded frames received");
+
+        // 最初のフレームがキーフレーム（IDR）であることを確認
+        let first_frame = &frames[0];
+        assert!(
+            matches!(first_frame.picture_type, PictureType::I | PictureType::Idr),
+            "First frame should be a keyframe"
+        );
+
+        // フレームにデータがあることを確認
+        assert!(
+            !first_frame.data.is_empty(),
+            "Encoded frame should have data"
+        );
+
+        println!(
+            "Successfully encoded black frame: {} frames, first frame size: {} bytes",
+            frames.len(),
+            first_frame.data.len()
+        );
+    }
+
+    #[test]
+    fn test_encode_h264_black_frame() {
+        let width = 640;
+        let height = 480;
+
+        // エンコーダーを作成
+        let mut encoder = Encoder::new_h264(width, height).expect("failed to create h264 encoder");
+
+        // NV12 形式の黒フレームを準備
+        // Y プレーン: 16 (YUV での黒)
+        // UV プレーン: 128 (ニュートラルなクロマ)
+        let y_size = (width * height) as usize;
+        let uv_size = (width * height / 2) as usize;
+
+        let mut frame_data = vec![16u8; y_size + uv_size];
+        // UV プレーンを 128 に設定（ニュートラルなクロマ）
+        frame_data[y_size..].fill(128);
+
+        // フレームをエンコード
+        encoder
+            .encode(&frame_data)
+            .expect("failed to encode black frame");
+        encoder.finish().expect("failed to finish encoder");
+
+        // エンコード済みフレームを取得
+        let mut frames = Vec::new();
+        while let Some(frame) = encoder.next_frame() {
+            frames.push(frame);
+        }
+
+        // 少なくとも1つのフレームを取得したことを確認
+        assert!(!frames.is_empty(), "No encoded frames received");
+
+        // 最初のフレームがキーフレーム（IDR）であることを確認
+        let first_frame = &frames[0];
+        assert!(
+            matches!(first_frame.picture_type, PictureType::I | PictureType::Idr),
+            "First frame should be a keyframe"
+        );
+
+        // フレームにデータがあることを確認
+        assert!(
+            !first_frame.data.is_empty(),
+            "Encoded frame should have data"
+        );
+
+        println!(
+            "Successfully encoded black frame: {} frames, first frame size: {} bytes",
+            frames.len(),
+            first_frame.data.len()
+        );
+    }
+
+    #[test]
+    fn test_encode_av1_black_frame() {
+        let width = 640;
+        let height = 480;
+
+        // エンコーダーを作成
+        let mut encoder = Encoder::new_av1(width, height).expect("failed to create av1 encoder");
 
         // NV12 形式の黒フレームを準備
         // Y プレーン: 16 (YUV での黒)
