@@ -120,7 +120,7 @@ impl NvcodecEncoder {
         keyframe: bool,
         input_frame: &VideoFrame,
         mp4_data: &[u8],
-    ) -> orfail::Result<Option<Vec<u8>>> {
+    ) -> orfail::Result<Option<SampleEntry>> {
         if !keyframe || !self.is_first_keyframe {
             return Ok(None);
         }
