@@ -461,7 +461,7 @@ impl VideoEncoderInner {
     fn new_nvcodec_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let encoder =
             NvcodecEncoder::new_h265(options.width.get(), options.height.get()).or_fail()?;
-        Ok(Self::Nvcodec(encoder))
+        Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
     fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
