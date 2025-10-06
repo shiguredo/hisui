@@ -48,7 +48,7 @@ impl NvcodecDecoder {
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
-        // フォーマット検証を拡張
+        // TODO: AnnexB 対応
         matches!(
             frame.format,
             VideoFormat::H264 | VideoFormat::H265 | VideoFormat::Av1
