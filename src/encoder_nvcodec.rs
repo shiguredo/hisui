@@ -159,6 +159,7 @@ impl NvcodecEncoder {
         let sample_entry = match self.encoded_format {
             VideoFormat::H264 => {
                 // SPS, PPS を抽出
+                // TODO: 自前で取り出すのは手間なので、nvenc 自体がこの情報を提供していないかを調べる
                 let (sps_list, pps_list) =
                     video_h264::extract_h264_parameter_sets(mp4_data).or_fail()?;
 
@@ -174,6 +175,7 @@ impl NvcodecEncoder {
             }
             VideoFormat::H265 => {
                 // VPS, SPS, PPS を抽出
+                // TODO: 自前で取り出すのは手間なので、nvenc 自体がこの情報を提供していないかを調べる
                 let (vps_list, sps_list, pps_list) =
                     video_h265::extract_h265_parameter_sets(mp4_data).or_fail()?;
 
@@ -191,6 +193,7 @@ impl NvcodecEncoder {
             }
             VideoFormat::Av1 => {
                 // AV1 sequence header を抽出
+                // TODO: 自前で取り出すのは手間なので、nvenc 自体がこの情報を提供していないかを調べるz
                 let sequence_header = video_av1::extract_av1_sequence_header(mp4_data).or_fail()?;
 
                 video_av1::av1_sample_entry(width, height, fps, &sequence_header).or_fail()?

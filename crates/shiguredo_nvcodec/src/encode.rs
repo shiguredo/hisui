@@ -214,6 +214,44 @@ impl Encoder {
         }
     }
 
+    /// シーケンスパラメータ（SPS/PPS または Sequence Header OBU）を取得する
+    ///
+    /// H.264/HEVC の場合は SPS/PPS、AV1 の場合は Sequence Header OBU を取得します。
+    pub fn get_sequence_params(&mut self) -> Result<Vec<u8>, Error> {
+        crate::with_cuda_context(self.ctx, || self.get_sequence_params_inner())
+    }
+
+    fn get_sequence_params_inner(&mut self) -> Result<Vec<u8>, Error> {
+        unsafe {
+            // シーケンスパラメータを格納するバッファを確保
+            // NV_MAX_SEQ_HDR_LEN は 512 バイト
+            let mut payload_buffer = vec![0u8; sys::NV_MAX_SEQ_HDR_LEN as usize];
+
+            let mut seq_params: sys::NV_ENC_SEQUENCE_PARAM_PAYLOAD = std::mem::zeroed();
+            seq_params.version = sys::NV_ENC_SEQUENCE_PARAM_PAYLOAD_VER;
+            seq_params.spsppsBuffer = payload_buffer.as_mut_ptr() as *mut std::ffi::c_void;
+            seq_params.inBufferSize = sys::NV_MAX_SEQ_HDR_LEN;
+            seq_params.outSPSPPSPayloadSize = 0;
+
+            let status = self
+                .encoder
+                .nvEncGetSequenceParams
+                .map(|f| f(self.h_encoder, &mut seq_params))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
+
+            Error::check(
+                status,
+                "nvEncGetSequenceParams",
+                "failed to get sequence parameters",
+            )?;
+
+            // 実際に書き込まれたサイズに合わせてバッファをリサイズ
+            payload_buffer.truncate(seq_params.outSPSPPSPayloadSize as usize);
+
+            Ok(payload_buffer)
+        }
+    }
+
     /// NV12 形式のフレームをエンコードする
     pub fn encode(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
         let expected_size = (self.width * self.height * 3 / 2) as usize;
