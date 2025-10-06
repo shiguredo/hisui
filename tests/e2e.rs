@@ -232,7 +232,7 @@ fn simple_single_source_h265() -> noargs::Result<()> {
 fn simple_single_source_h264() -> noargs::Result<()> {
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_h264/report.json",
-        CodecName::Vp9, // TODO: H264 にする
+        CodecName::H264,
     )
 }
 
