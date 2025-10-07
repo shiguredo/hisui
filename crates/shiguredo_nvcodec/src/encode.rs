@@ -600,6 +600,11 @@ impl EncodedFrame {
         &self.data
     }
 
+    /// エンコードされたデータを取得する（所有権を移動）
+    pub fn into_data(self) -> Vec<u8> {
+        self.data
+    }
+
     /// タイムスタンプを取得する
     pub fn timestamp(&self) -> u64 {
         self.timestamp

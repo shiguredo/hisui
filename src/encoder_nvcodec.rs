@@ -158,12 +158,24 @@ impl NvcodecEncoder {
                 shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
             );
 
-            let mp4_data = convert_annexb_to_mp4(encoded_frame.data()).or_fail()?;
+            // AV1 の場合は変換不要、H.264/H.265 の場合は Annex B から MP4 形式に変換
+            let frame_data = match self.encoded_format {
+                VideoFormat::Av1 => encoded_frame.into_data(),
+                VideoFormat::H264 | VideoFormat::H265 => {
+                    convert_annexb_to_mp4(encoded_frame.data()).or_fail()?
+                }
+                _ => {
+                    return Err(orfail::Failure::new(format!(
+                        "unsupported video format: {:?}",
+                        self.encoded_format
+                    )));
+                }
+            };
 
             // VideoFrame を作成
             self.output_queue.push_back(VideoFrame {
                 source_id: input_frame.source_id.clone(),
-                data: mp4_data,
+                data: frame_data,
                 format: self.encoded_format,
                 keyframe,
                 width: input_frame.width,
