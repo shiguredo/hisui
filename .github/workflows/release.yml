@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - '*'
+      - "*"
 
 jobs:
   github-release:
-    name: 'Create GitHub Release'
+    name: "Create GitHub Release"
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}
@@ -32,7 +32,7 @@ jobs:
           echo "release-id=$release_id" >> $GITHUB_OUTPUT
 
   ubuntu-binary:
-    name: 'Upload Binary for Ubuntu'
+    name: "Upload Binary for Ubuntu"
     strategy:
       matrix:
         platform:
@@ -70,8 +70,15 @@ jobs:
             hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz
 
   macos-binary:
-    name: 'Upload Binary for MacOS'
-    runs-on: macos-15
+    name: "Upload Binary for MacOS"
+    strategy:
+      matrix:
+        platform:
+          - name: macos-26_arm64
+            runs-on: macos-26
+          - name: macos-15_arm64
+            runs-on: macos-15
+    runs-on: ${{ matrix.platform.runs-on }}
     needs: github-release
     steps:
       - name: Checkout sources
@@ -85,19 +92,19 @@ jobs:
           brew install meson nasm yasm automake autoconf libtool pkg-config
       - run: cargo build --release
       - run: |
-          mkdir -p hisui-${{ needs.github-release.outputs.version }}_macos_arm64
-          cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_macos_arm64/
-          tar -czf hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz \
-            hisui-${{ needs.github-release.outputs.version }}_macos_arm64
+          mkdir -p hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
+          cp target/release/hisui hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}/
+          tar -czf hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
+            hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ needs.github-release.outputs.version }} \
-            hisui-${{ needs.github-release.outputs.version }}_macos_arm64.tar.gz
+            hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz
 
   docker-image:
-    name: 'Build and Push Docker Image'
+    name: "Build and Push Docker Image"
     runs-on: ubuntu-24.04
     needs: [github-release, ubuntu-binary]
     steps:
