@@ -159,17 +159,10 @@ impl NvcodecEncoder {
             );
 
             // AV1 の場合は変換不要、H.264/H.265 の場合は Annex B から MP4 形式に変換
-            let frame_data = match self.encoded_format {
-                VideoFormat::Av1 => encoded_frame.into_data(),
-                VideoFormat::H264 | VideoFormat::H265 => {
-                    convert_annexb_to_mp4(encoded_frame.data()).or_fail()?
-                }
-                _ => {
-                    return Err(orfail::Failure::new(format!(
-                        "unsupported video format: {:?}",
-                        self.encoded_format
-                    )));
-                }
+            let frame_data = if self.encoded_format == VideoFormat::Av1 {
+                encoded_frame.into_data()
+            } else {
+                convert_annexb_to_mp4(encoded_frame.data()).or_fail()?
             };
 
             // VideoFrame を作成
