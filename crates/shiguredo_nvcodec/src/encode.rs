@@ -4,6 +4,94 @@ use std::ptr;
 
 use crate::{Error, ReleaseGuard, ensure_cuda_initialized, sys};
 
+/// エンコーダーに指定する設定
+#[derive(Debug, Clone)]
+pub struct EncoderConfig {
+    /// 入出力画像の幅
+    pub width: u32,
+
+    /// 入出力画像の高さ
+    pub height: u32,
+
+    /// FPS の分子
+    pub fps_numerator: u32,
+
+    /// FPS の分母
+    pub fps_denominator: u32,
+
+    /// ビットレート (bps 単位)
+    pub target_bitrate: u32,
+
+    /// プリセット GUID (品質と速度のバランス)
+    pub preset_guid: sys::GUID,
+
+    /// チューニング情報
+    pub tuning_info: sys::NV_ENC_TUNING_INFO,
+
+    /// レート制御モード
+    pub rate_control_mode: RateControlMode,
+
+    /// GOP長 (NVENC_INFINITE_GOPLENGTH で無限)
+    pub gop_length: u32,
+
+    /// IDRフレーム間隔
+    pub idr_period: u32,
+
+    /// Pフレーム間隔
+    pub frame_interval_p: u32,
+
+    /// デバイスID (使用するGPU)
+    pub device_id: i32,
+
+    /// 最大エンコード幅
+    pub max_encode_width: u32,
+
+    /// 最大エンコード高さ
+    pub max_encode_height: u32,
+}
+
+/// レート制御モード
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateControlMode {
+    /// Constant QP mode
+    ConstQp,
+    /// Variable bitrate mode
+    Vbr,
+    /// Constant bitrate mode
+    Cbr,
+}
+
+impl Default for EncoderConfig {
+    fn default() -> Self {
+        Self {
+            width: 640,
+            height: 480,
+            fps_numerator: 30,
+            fps_denominator: 1,
+            target_bitrate: 5_000_000,               // 5 Mbps
+            preset_guid: sys::NV_ENC_PRESET_P4_GUID, // バランスの良いプリセット
+            tuning_info: sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
+            rate_control_mode: RateControlMode::Vbr,
+            gop_length: sys::NVENC_INFINITE_GOPLENGTH,
+            idr_period: sys::NVENC_INFINITE_GOPLENGTH,
+            frame_interval_p: 1,
+            device_id: 0, // プライマリGPU
+            max_encode_width: 1920,
+            max_encode_height: 1080,
+        }
+    }
+}
+
+impl RateControlMode {
+    fn to_sys(&self) -> sys::NV_ENC_PARAMS_RC_MODE {
+        match self {
+            RateControlMode::ConstQp => sys::_NV_ENC_PARAMS_RC_MODE_NV_ENC_PARAMS_RC_CONSTQP,
+            RateControlMode::Vbr => sys::_NV_ENC_PARAMS_RC_MODE_NV_ENC_PARAMS_RC_VBR,
+            RateControlMode::Cbr => sys::_NV_ENC_PARAMS_RC_MODE_NV_ENC_PARAMS_RC_CBR,
+        }
+    }
+}
+
 /// エンコーダー
 pub struct Encoder {
     ctx: sys::CUcontext,
@@ -17,30 +105,27 @@ pub struct Encoder {
 
 impl Encoder {
     /// H.264 エンコーダーインスタンスを生成する
-    pub fn new_h264(width: u32, height: u32) -> Result<Self, Error> {
+    pub fn new_h264(config: EncoderConfig) -> Result<Self, Error> {
         Self::new_with_codec(
-            width,
-            height,
+            config,
             sys::NV_ENC_CODEC_H264_GUID,
             sys::NV_ENC_H264_PROFILE_MAIN_GUID,
         )
     }
 
     /// H.265 エンコーダーインスタンスを生成する
-    pub fn new_h265(width: u32, height: u32) -> Result<Self, Error> {
+    pub fn new_h265(config: EncoderConfig) -> Result<Self, Error> {
         Self::new_with_codec(
-            width,
-            height,
+            config,
             sys::NV_ENC_CODEC_HEVC_GUID,
             sys::NV_ENC_HEVC_PROFILE_MAIN_GUID,
         )
     }
 
     /// AV1 エンコーダーインスタンスを生成する
-    pub fn new_av1(width: u32, height: u32) -> Result<Self, Error> {
+    pub fn new_av1(config: EncoderConfig) -> Result<Self, Error> {
         Self::new_with_codec(
-            width,
-            height,
+            config,
             sys::NV_ENC_CODEC_AV1_GUID,
             sys::NV_ENC_AV1_PROFILE_MAIN_GUID,
         )
@@ -48,8 +133,7 @@ impl Encoder {
 
     /// 指定されたコーデックタイプでエンコーダーインスタンスを生成する
     fn new_with_codec(
-        width: u32,
-        height: u32,
+        config: EncoderConfig,
         codec_guid: sys::GUID,
         profile_guid: sys::GUID,
     ) -> Result<Self, Error> {
@@ -61,8 +145,7 @@ impl Encoder {
 
             // CUDA context の初期化
             let ctx_flags = 0; // デフォルトのコンテキストフラグ
-            let device_id = 0; // プライマリGPUデバイスを使用 // TODO(atode): make configurable
-            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
+            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, config.device_id);
             Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 
             let ctx_guard = ReleaseGuard::new(|| {
@@ -111,14 +194,16 @@ impl Encoder {
                 ctx,
                 encoder: encoder_api,
                 h_encoder,
-                width,
-                height,
+                width: config.width,
+                height: config.height,
                 buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
                 encoded_frames: VecDeque::new(),
             };
 
             // デフォルトパラメータでエンコーダーを初期化
-            crate::with_cuda_context(ctx, || encoder.initialize_encoder(codec_guid, profile_guid))?;
+            crate::with_cuda_context(ctx, || {
+                encoder.initialize_encoder(config, codec_guid, profile_guid)
+            })?;
 
             Ok(encoder)
         }
@@ -126,6 +211,7 @@ impl Encoder {
 
     fn initialize_encoder(
         &mut self,
+        config: &EncoderConfig,
         codec_guid: sys::GUID,
         profile_guid: sys::GUID,
     ) -> Result<(), Error> {
@@ -142,8 +228,8 @@ impl Encoder {
                     f(
                         self.h_encoder,
                         codec_guid,
-                        sys::NV_ENC_PRESET_P4_GUID, // TODO(atode): make configurable
-                        sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY, // TODO(atode): make configurable
+                        config.preset_guid,
+                        config.tuning_info,
                         &mut preset_config,
                     )
                 })
@@ -156,38 +242,45 @@ impl Encoder {
 
             // エンコーダーパラメータを初期化
             let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
-            let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
+            let mut encode_config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
             init_params.encodeGUID = codec_guid;
-            init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID; // TODO(atode): make configurable
-            init_params.encodeWidth = self.width;
-            init_params.encodeHeight = self.height;
-            init_params.darWidth = self.width;
-            init_params.darHeight = self.height;
-            init_params.frameRateNum = 30; // TODO(atode): make configurable
-            init_params.frameRateDen = 1; // TODO(atode): make configurable
+            init_params.presetGUID = config.preset_guid;
+            init_params.encodeWidth = config.width;
+            init_params.encodeHeight = config.height;
+            init_params.darWidth = config.width;
+            init_params.darHeight = config.height;
+            init_params.frameRateNum = config.fps_numerator;
+            init_params.frameRateDen = config.fps_denominator;
             init_params.enablePTD = 1;
-            init_params.encodeConfig = &mut config;
-            init_params.maxEncodeWidth = self.width;
-            init_params.maxEncodeHeight = self.height;
-            init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY;
+            init_params.encodeConfig = &mut encode_config;
+            init_params.maxEncodeWidth = config.max_encode_width;
+            init_params.maxEncodeHeight = config.max_encode_height;
+            init_params.tuningInfo = config.tuning_info;
 
-            config.version = sys::NV_ENC_CONFIG_VER;
-            config.profileGUID = profile_guid;
-            config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
-            config.frameIntervalP = 1;
+            encode_config.version = sys::NV_ENC_CONFIG_VER;
+            encode_config.profileGUID = profile_guid;
+            encode_config.gopLength = config.gop_length;
+            encode_config.frameIntervalP = config.frame_interval_p;
+            encode_config.rcParams.rateControlMode = config.rate_control_mode.to_sys();
+
+            // ビットレート設定
+            if config.rate_control_mode != RateControlMode::ConstQp {
+                encode_config.rcParams.averageBitRate = config.target_bitrate;
+                encode_config.rcParams.maxBitRate = config.target_bitrate;
+            }
 
             // コーデック固有の設定
             match codec_guid {
                 sys::NV_ENC_CODEC_HEVC_GUID => {
-                    config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength
+                    encode_config.encodeCodecConfig.hevcConfig.idrPeriod = config.idr_period;
                 }
                 sys::NV_ENC_CODEC_H264_GUID => {
-                    config.encodeCodecConfig.h264Config.idrPeriod = config.gopLength
+                    encode_config.encodeCodecConfig.h264Config.idrPeriod = config.idr_period;
                 }
                 sys::NV_ENC_CODEC_AV1_GUID => {
-                    config.encodeCodecConfig.av1Config.idrPeriod = config.gopLength
+                    encode_config.encodeCodecConfig.av1Config.idrPeriod = config.idr_period;
                 }
                 _ => {
                     return Err(Error::new(
@@ -614,33 +707,36 @@ impl EncodedFrame {
         self.picture_type
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn init_h265_encoder() {
-        let _encoder = Encoder::new_h265(640, 480).expect("failed to initialize h265 encoder");
+        let _encoder =
+            Encoder::new_h265(EncoderConfig::default()).expect("failed to initialize h265 encoder");
         println!("h265 encoder initialized successfully");
     }
 
     #[test]
     fn init_h264_encoder() {
-        let _encoder = Encoder::new_h264(640, 480).expect("failed to initialize h264 encoder");
+        let _encoder =
+            Encoder::new_h264(EncoderConfig::default()).expect("failed to initialize h264 encoder");
         println!("h264 encoder initialized successfully");
     }
 
     #[test]
     fn init_av1_encoder() {
-        let _encoder = Encoder::new_av1(640, 480).expect("failed to initialize av1 encoder");
+        let _encoder =
+            Encoder::new_av1(EncoderConfig::default()).expect("failed to initialize av1 encoder");
         println!("av1 encoder initialized successfully");
     }
 
     #[test]
     fn test_get_sequence_params_h264() {
         // H.264 エンコーダーを作成
-        let mut encoder = Encoder::new_h264(640, 480).expect("failed to create h264 encoder");
+        let mut encoder =
+            Encoder::new_h264(EncoderConfig::default()).expect("failed to create h264 encoder");
 
         // シーケンスパラメータを取得
         let seq_params = encoder
@@ -659,7 +755,8 @@ mod tests {
     #[test]
     fn test_get_sequence_params_h265() {
         // H.265 エンコーダーを作成
-        let mut encoder = Encoder::new_h265(640, 480).expect("failed to create h265 encoder");
+        let mut encoder =
+            Encoder::new_h265(EncoderConfig::default()).expect("failed to create h265 encoder");
 
         // シーケンスパラメータを取得
         let seq_params = encoder
@@ -678,7 +775,8 @@ mod tests {
     #[test]
     fn test_get_sequence_params_av1() {
         // AV1 エンコーダーを作成
-        let mut encoder = Encoder::new_av1(640, 480).expect("failed to create av1 encoder");
+        let mut encoder =
+            Encoder::new_av1(EncoderConfig::default()).expect("failed to create av1 encoder");
 
         // シーケンスパラメータを取得
         let seq_params = encoder
@@ -696,11 +794,12 @@ mod tests {
 
     #[test]
     fn test_encode_h265_black_frame() {
-        let width = 640;
-        let height = 480;
+        let config = EncoderConfig::default();
+        let width = config.width;
+        let height = config.heigth;
 
         // エンコーダーを作成
-        let mut encoder = Encoder::new_h265(width, height).expect("failed to create h265 encoder");
+        let mut encoder = Encoder::new_h265(config).expect("failed to create h265 encoder");
 
         // NV12 形式の黒フレームを準備
         // Y プレーン: 16 (YUV での黒)
@@ -749,11 +848,12 @@ mod tests {
 
     #[test]
     fn test_encode_h264_black_frame() {
-        let width = 640;
-        let height = 480;
+        let config = EncoderConfig::default();
+        let width = config.width;
+        let height = config.heigth;
 
         // エンコーダーを作成
-        let mut encoder = Encoder::new_h264(width, height).expect("failed to create h264 encoder");
+        let mut encoder = Encoder::new_h264(config).expect("failed to create h264 encoder");
 
         // NV12 形式の黒フレームを準備
         // Y プレーン: 16 (YUV での黒)
@@ -802,11 +902,12 @@ mod tests {
 
     #[test]
     fn test_encode_av1_black_frame() {
-        let width = 640;
-        let height = 480;
+        let config = EncoderConfig::default();
+        let width = config.width;
+        let height = config.heigth;
 
         // エンコーダーを作成
-        let mut encoder = Encoder::new_av1(width, height).expect("failed to create av1 encoder");
+        let mut encoder = Encoder::new_av1(config).expect("failed to create av1 encoder");
 
         // NV12 形式の黒フレームを準備
         // Y プレーン: 16 (YUV での黒)
