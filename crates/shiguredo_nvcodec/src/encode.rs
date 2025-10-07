@@ -30,7 +30,7 @@ impl PresetGuid {
     /// P7プリセット（最高品質）
     pub const P7: Self = Self(sys::NV_ENC_PRESET_P7_GUID);
 
-    fn to_sys(&self) -> sys::GUID {
+    fn to_sys(self) -> sys::GUID {
         self.0
     }
 }
@@ -53,7 +53,7 @@ impl TuningInfo {
     /// ロスレス
     pub const LOSSLESS: Self = Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_LOSSLESS);
 
-    fn to_sys(&self) -> sys::NV_ENC_TUNING_INFO {
+    fn to_sys(self) -> sys::NV_ENC_TUNING_INFO {
         self.0
     }
 }
@@ -144,7 +144,7 @@ impl Default for EncoderConfig {
 }
 
 impl RateControlMode {
-    fn to_sys(&self) -> sys::NV_ENC_PARAMS_RC_MODE {
+    fn to_sys(self) -> sys::NV_ENC_PARAMS_RC_MODE {
         match self {
             RateControlMode::ConstQp => sys::_NV_ENC_PARAMS_RC_MODE_NV_ENC_PARAMS_RC_CONSTQP,
             RateControlMode::Vbr => sys::_NV_ENC_PARAMS_RC_MODE_NV_ENC_PARAMS_RC_VBR,
