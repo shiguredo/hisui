@@ -27,7 +27,7 @@
   // デフォルトでは合成後の映像を VP9 でエンコードする
   "video_codec": "VP9",
 
-  // 以降は各エンコーダーでデフォルトで使用されるエンコードパラメーター
+  // 以降は各エンコーダーでデフォルトで使用されるパラメーター
   //
   // 仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_encode_params.md
   "libvpx_vp8_encode_params": {
@@ -160,5 +160,24 @@
     "frame_interval_p": 1,
     "profile": "main",
     "device_id": 0,
+  },
+
+  // 以降は各デコーダーでデフォルトで使用されるパラメーター
+  //
+  // 仕様: https://github.com/shiguredo/hisui/blob/main/docs/layout_decode_params.md
+  "nvcodec_h264_decode_params": {
+    "device_id": 0,
+    "max_num_decode_surfaces": 20,
+    "max_display_delay": 0,
+  },
+  "nvcodec_h265_decode_params": {
+    "device_id": 0,
+    "max_num_decode_surfaces": 20,
+    "max_display_delay": 0,
+  },
+  "nvcodec_av1_decode_params": {
+    "device_id": 0,
+    "max_num_decode_surfaces": 20,
+    "max_display_delay": 0,
   },
 }

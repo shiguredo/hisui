@@ -6,6 +6,8 @@ pub mod decoder_dav1d;
 pub mod decoder_libvpx;
 #[cfg(feature = "nvcodec")]
 pub mod decoder_nvcodec;
+#[cfg(feature = "nvcodec")]
+pub mod decoder_nvcodec_params;
 pub mod decoder_openh264;
 pub mod decoder_opus;
 #[cfg(target_os = "macos")]
