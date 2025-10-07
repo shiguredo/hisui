@@ -52,20 +52,8 @@ impl NvcodecEncoder {
             shiguredo_nvcodec::Encoder::new_h265(width.get() as u32, height.get() as u32)
                 .or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
-        let (vps_list, sps_list, pps_list) =
-            video_h265::extract_h265_parameter_sets(&seq_params).or_fail()?;
-
-        if vps_list.is_empty() || sps_list.is_empty() || pps_list.is_empty() {
-            return Err(orfail::Failure::new(format!(
-                "missing required H.265 parameter sets (VPS: {}, SPS: {}, PPS: {})",
-                vps_list.len(),
-                sps_list.len(),
-                pps_list.len()
-            )));
-        }
-
         let sample_entry =
-            video_h265::h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
+            video_h265::h265_sample_entry_from_annexb(width.get(), height.get(), fps, &seq_params)
                 .or_fail()?;
 
         Ok(Self {

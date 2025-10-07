@@ -1,3 +1,4 @@
+use orfail::OrFail;
 use shiguredo_mp4::boxes::{Hev1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
@@ -75,44 +76,76 @@ fn hvcc_nalu_array(nalu_type: u8, nalus: NalUnitArray) -> HvccNalUintArray {
     }
 }
 
-/// MP4 形式の H.265 データから VPS, SPS, PPS を抽出する
-///
-/// MP4 形式: サイズ (4バイト) + NALU データ
-pub fn extract_h265_parameter_sets(
-    mp4_data: &[u8],
-) -> orfail::Result<(NalUnitArray, NalUnitArray, NalUnitArray)> {
+/// Annex B 形式の H.265 データから VPS, SPS, PPS を抽出して sample entry を生成する
+pub fn h265_sample_entry_from_annexb(
+    width: usize,
+    height: usize,
+    fps: FrameRate,
+    data: &[u8],
+) -> orfail::Result<SampleEntry> {
+    // H.265 ストリームから VPS, SPS, PPS を取り出す
     let mut vps_list = Vec::new();
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
+
     let mut pos = 0;
+    while pos < data.len() {
+        // スタートコードを探す (0x00000001 or 0x000001)
+        let start_code_len = if pos + 4 <= data.len() && data[pos..pos + 4] == [0, 0, 0, 1] {
+            4
+        } else if pos + 3 <= data.len() && data[pos..pos + 3] == [0, 0, 1] {
+            3
+        } else if pos == 0 {
+            return Err(orfail::Failure::new(
+                "No H.265 start code found at beginning",
+            ));
+        } else {
+            break;
+        };
 
-    while pos + 4 <= mp4_data.len() {
-        let size = u32::from_be_bytes([
-            mp4_data[pos],
-            mp4_data[pos + 1],
-            mp4_data[pos + 2],
-            mp4_data[pos + 3],
-        ]) as usize;
-        pos += 4;
+        pos += start_code_len;
 
-        if pos + size > mp4_data.len() {
+        if pos >= data.len() {
             break;
         }
 
-        let nalu = &mp4_data[pos..pos + size];
+        // 次のスタートコードまたはデータ終端を探す
+        let nalu_start = pos;
+        let mut nalu_end = data.len();
+
+        for i in (pos + 3)..data.len() {
+            if i + 4 <= data.len() && data[i..i + 4] == [0, 0, 0, 1] {
+                nalu_end = i;
+                break;
+            }
+            if i + 3 <= data.len() && data[i..i + 3] == [0, 0, 1] {
+                nalu_end = i;
+                break;
+            }
+        }
+
+        let nalu = &data[nalu_start..nalu_end];
         if !nalu.is_empty() {
             // H.265 NAL unit type は最初のバイトの上位6ビット（bit 1-6）
-            let nalu_type = (nalu[0] >> 1) & 0x3F;
+            let nal_unit_type = (nalu[0] >> 1) & 0x3F;
 
-            match nalu_type {
+            match nal_unit_type {
                 H265_NALU_TYPE_VPS => vps_list.push(nalu.to_vec()),
                 H265_NALU_TYPE_SPS => sps_list.push(nalu.to_vec()),
                 H265_NALU_TYPE_PPS => pps_list.push(nalu.to_vec()),
                 _ => {}
             }
         }
-        pos += size;
+
+        pos = nalu_end;
     }
 
-    Ok((vps_list, sps_list, pps_list))
+    (!vps_list.is_empty()).or_fail()?;
+    (!sps_list.is_empty()).or_fail()?;
+    (!pps_list.is_empty()).or_fail()?;
+
+    let width = EvenUsize::new(width).or_fail()?;
+    let height = EvenUsize::new(height).or_fail()?;
+
+    h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
 }
