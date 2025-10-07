@@ -19,6 +19,8 @@ pub mod encoder_libvpx;
 pub mod encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 pub mod encoder_nvcodec;
+#[cfg(feature = "nvcodec")]
+pub mod encoder_nvcodec_params;
 pub mod encoder_openh264;
 pub mod encoder_openh264_params;
 pub mod encoder_opus;
