@@ -4,8 +4,9 @@ use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
-    video::{VideoFormat, VideoFrame},
-    video_h265,
+    types::EvenUsize,
+    video::{FrameRate, VideoFormat, VideoFrame},
+    video_av1, video_h264, video_h265,
 };
 
 #[derive(Debug)]
@@ -13,17 +14,74 @@ pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    is_first_keyframe: bool,
+    sample_entry: Option<SampleEntry>,
+    encoded_format: VideoFormat,
 }
 
 impl NvcodecEncoder {
-    pub fn new_h265(width: usize, height: usize) -> orfail::Result<Self> {
-        log::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
+    pub fn new_h264(width: usize, height: usize) -> orfail::Result<Self> {
+        log::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
+        let width = EvenUsize::new(width).or_fail()?;
+        let height = EvenUsize::new(height).or_fail()?;
+
+        let mut inner =
+            shiguredo_nvcodec::Encoder::new_h264(width.get() as u32, height.get() as u32)
+                .or_fail()?;
+        let seq_params = inner.get_sequence_params().or_fail()?;
+        let sample_entry =
+            video_h264::h264_sample_entry_from_annexb(width.get(), height.get(), &seq_params)
+                .or_fail()?;
+
         Ok(Self {
-            inner: shiguredo_nvcodec::Encoder::new_h265(width as u32, height as u32).or_fail()?,
+            inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            is_first_keyframe: true,
+            sample_entry: Some(sample_entry),
+            encoded_format: VideoFormat::H264,
+        })
+    }
+
+    pub fn new_h265(width: usize, height: usize) -> orfail::Result<Self> {
+        log::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
+        let width = EvenUsize::new(width).or_fail()?;
+        let height = EvenUsize::new(height).or_fail()?;
+        // TODO: フレームレートを適切に設定する
+        let fps = FrameRate::FPS_25;
+
+        let mut inner =
+            shiguredo_nvcodec::Encoder::new_h265(width.get() as u32, height.get() as u32)
+                .or_fail()?;
+        let seq_params = inner.get_sequence_params().or_fail()?;
+        let sample_entry =
+            video_h265::h265_sample_entry_from_annexb(width.get(), height.get(), fps, &seq_params)
+                .or_fail()?;
+
+        Ok(Self {
+            inner,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new(),
+            sample_entry: Some(sample_entry),
+            encoded_format: VideoFormat::H265,
+        })
+    }
+
+    pub fn new_av1(width: usize, height: usize) -> orfail::Result<Self> {
+        log::debug!("create nvcodec(AV1) encoder: {}x{}", width, height);
+        let width = EvenUsize::new(width).or_fail()?;
+        let height = EvenUsize::new(height).or_fail()?;
+
+        let mut inner =
+            shiguredo_nvcodec::Encoder::new_av1(width.get() as u32, height.get() as u32)
+                .or_fail()?;
+        let seq_params = inner.get_sequence_params().or_fail()?;
+        let sample_entry = video_av1::av1_sample_entry(width, height, &seq_params);
+
+        Ok(Self {
+            inner,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new(),
+            sample_entry: Some(sample_entry),
+            encoded_format: VideoFormat::Av1,
         })
     }
 
@@ -88,24 +146,24 @@ impl NvcodecEncoder {
                 shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
             );
 
-            let mp4_data = convert_annexb_to_mp4(encoded_frame.data()).or_fail()?;
+            // AV1 の場合は変換不要、H.264/H.265 の場合は Annex B から MP4 形式に変換
+            let frame_data = if self.encoded_format == VideoFormat::Av1 {
+                encoded_frame.into_data()
+            } else {
+                convert_annexb_to_mp4(encoded_frame.data()).or_fail()?
+            };
 
-            // H.265 sample entry を生成（最初のキーフレームのみ）
-            let sample_entry = self
-                .create_sample_entry_if_first_keyframe(keyframe, &input_frame, &mp4_data)
-                .or_fail()?;
-
-            // H.265 VideoFrame を作成
+            // VideoFrame を作成
             self.output_queue.push_back(VideoFrame {
                 source_id: input_frame.source_id.clone(),
-                data: mp4_data,
-                format: VideoFormat::H265,
+                data: frame_data,
+                format: self.encoded_format,
                 keyframe,
                 width: input_frame.width,
                 height: input_frame.height,
                 timestamp: input_frame.timestamp,
                 duration: input_frame.duration,
-                sample_entry,
+                sample_entry: self.sample_entry.take(),
             });
         }
         Ok(())
@@ -113,43 +171,6 @@ impl NvcodecEncoder {
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
-    }
-
-    fn create_sample_entry_if_first_keyframe(
-        &mut self,
-        keyframe: bool,
-        input_frame: &VideoFrame,
-        mp4_data: &[u8],
-    ) -> orfail::Result<Option<SampleEntry>> {
-        if !keyframe || !self.is_first_keyframe {
-            return Ok(None);
-        }
-
-        self.is_first_keyframe = false;
-
-        // VPS, SPS, PPS を抽出
-        let (vps_list, sps_list, pps_list) =
-            video_h265::extract_h265_parameter_sets(mp4_data).or_fail()?;
-
-        if vps_list.is_empty() || sps_list.is_empty() || pps_list.is_empty() {
-            return Err(orfail::Failure::new(format!(
-                "missing required H.265 parameter sets (VPS: {}, SPS: {}, PPS: {})",
-                vps_list.len(),
-                sps_list.len(),
-                pps_list.len()
-            )));
-        }
-
-        let width = crate::types::EvenUsize::new(input_frame.width).or_fail()?;
-        let height = crate::types::EvenUsize::new(input_frame.height).or_fail()?;
-        // TODO: フレームレートを適切に設定する
-        let fps = crate::video::FrameRate::FPS_25;
-
-        let sample_entry =
-            video_h265::h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
-                .or_fail()?;
-
-        Ok(Some(sample_entry))
     }
 }
 

@@ -16,8 +16,43 @@ pub struct Encoder {
 }
 
 impl Encoder {
+    /// H.264 エンコーダーインスタンスを生成する
+    pub fn new_h264(width: u32, height: u32) -> Result<Self, Error> {
+        Self::new_with_codec(
+            width,
+            height,
+            sys::NV_ENC_CODEC_H264_GUID,
+            sys::NV_ENC_H264_PROFILE_MAIN_GUID,
+        )
+    }
+
     /// H.265 エンコーダーインスタンスを生成する
     pub fn new_h265(width: u32, height: u32) -> Result<Self, Error> {
+        Self::new_with_codec(
+            width,
+            height,
+            sys::NV_ENC_CODEC_HEVC_GUID,
+            sys::NV_ENC_HEVC_PROFILE_MAIN_GUID,
+        )
+    }
+
+    /// AV1 エンコーダーインスタンスを生成する
+    pub fn new_av1(width: u32, height: u32) -> Result<Self, Error> {
+        Self::new_with_codec(
+            width,
+            height,
+            sys::NV_ENC_CODEC_AV1_GUID,
+            sys::NV_ENC_AV1_PROFILE_MAIN_GUID,
+        )
+    }
+
+    /// 指定されたコーデックタイプでエンコーダーインスタンスを生成する
+    fn new_with_codec(
+        width: u32,
+        height: u32,
+        codec_guid: sys::GUID,
+        profile_guid: sys::GUID,
+    ) -> Result<Self, Error> {
         // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
         ensure_cuda_initialized()?;
 
@@ -83,13 +118,17 @@ impl Encoder {
             };
 
             // デフォルトパラメータでエンコーダーを初期化
-            crate::with_cuda_context(ctx, || encoder.initialize_encoder())?;
+            crate::with_cuda_context(ctx, || encoder.initialize_encoder(codec_guid, profile_guid))?;
 
             Ok(encoder)
         }
     }
 
-    fn initialize_encoder(&mut self) -> Result<(), Error> {
+    fn initialize_encoder(
+        &mut self,
+        codec_guid: sys::GUID,
+        profile_guid: sys::GUID,
+    ) -> Result<(), Error> {
         unsafe {
             // プリセット設定を取得
             let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
@@ -102,7 +141,7 @@ impl Encoder {
                 .map(|f| {
                     f(
                         self.h_encoder,
-                        sys::NV_ENC_CODEC_HEVC_GUID,
+                        codec_guid,
                         sys::NV_ENC_PRESET_P4_GUID, // TODO(atode): make configurable
                         sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY, // TODO(atode): make configurable
                         &mut preset_config,
@@ -120,7 +159,7 @@ impl Encoder {
             let mut config: sys::NV_ENC_CONFIG = preset_config.presetCfg;
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
-            init_params.encodeGUID = sys::NV_ENC_CODEC_HEVC_GUID;
+            init_params.encodeGUID = codec_guid;
             init_params.presetGUID = sys::NV_ENC_PRESET_P4_GUID; // TODO(atode): make configurable
             init_params.encodeWidth = self.width;
             init_params.encodeHeight = self.height;
@@ -135,12 +174,29 @@ impl Encoder {
             init_params.tuningInfo = sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY;
 
             config.version = sys::NV_ENC_CONFIG_VER;
-            config.profileGUID = sys::NV_ENC_HEVC_PROFILE_MAIN_GUID; // TODO(atode): make configurable
+            config.profileGUID = profile_guid;
             config.gopLength = sys::NVENC_INFINITE_GOPLENGTH;
             config.frameIntervalP = 1;
 
-            // HEVC 固有の設定
-            config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength; // TODO(atode): make configurable
+            // コーデック固有の設定
+            match codec_guid {
+                sys::NV_ENC_CODEC_HEVC_GUID => {
+                    config.encodeCodecConfig.hevcConfig.idrPeriod = config.gopLength
+                }
+                sys::NV_ENC_CODEC_H264_GUID => {
+                    config.encodeCodecConfig.h264Config.idrPeriod = config.gopLength
+                }
+                sys::NV_ENC_CODEC_AV1_GUID => {
+                    config.encodeCodecConfig.av1Config.idrPeriod = config.gopLength
+                }
+                _ => {
+                    return Err(Error::new(
+                        sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
+                        "initialize_encoder",
+                        "unsupported codec GUID",
+                    ));
+                }
+            }
 
             // エンコーダーを初期化
             let status = self
@@ -155,6 +211,44 @@ impl Encoder {
             )?;
 
             Ok(())
+        }
+    }
+
+    /// シーケンスパラメータ（SPS/PPS または Sequence Header OBU）を取得する
+    ///
+    /// H.264/HEVC の場合は SPS/PPS、AV1 の場合は Sequence Header OBU を取得します。
+    pub fn get_sequence_params(&mut self) -> Result<Vec<u8>, Error> {
+        crate::with_cuda_context(self.ctx, || self.get_sequence_params_inner())
+    }
+
+    fn get_sequence_params_inner(&mut self) -> Result<Vec<u8>, Error> {
+        unsafe {
+            // シーケンスパラメータを格納するバッファを確保
+            let mut payload_buffer = vec![0u8; sys::NV_MAX_SEQ_HDR_LEN as usize];
+            let mut out_size: u32 = 0; // 実際のサイズを受け取る変数
+
+            let mut seq_params: sys::NV_ENC_SEQUENCE_PARAM_PAYLOAD = std::mem::zeroed();
+            seq_params.version = sys::NV_ENC_SEQUENCE_PARAM_PAYLOAD_VER;
+            seq_params.spsppsBuffer = payload_buffer.as_mut_ptr() as *mut std::ffi::c_void;
+            seq_params.inBufferSize = sys::NV_MAX_SEQ_HDR_LEN;
+            seq_params.outSPSPPSPayloadSize = &mut out_size;
+
+            let status = self
+                .encoder
+                .nvEncGetSequenceParams
+                .map(|f| f(self.h_encoder, &mut seq_params))
+                .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
+
+            Error::check(
+                status,
+                "nvEncGetSequenceParams",
+                "failed to get sequence parameters",
+            )?;
+
+            // 実際に書き込まれたサイズに合わせてバッファをリサイズ
+            payload_buffer.truncate(out_size as usize);
+
+            Ok(payload_buffer)
         }
     }
 
@@ -505,6 +599,11 @@ impl EncodedFrame {
         &self.data
     }
 
+    /// エンコードされたデータを取得する（所有権を移動）
+    pub fn into_data(self) -> Vec<u8> {
+        self.data
+    }
+
     /// タイムスタンプを取得する
     pub fn timestamp(&self) -> u64 {
         self.timestamp
@@ -527,12 +626,187 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_black_frame() {
+    fn init_h264_encoder() {
+        let _encoder = Encoder::new_h264(640, 480).expect("failed to initialize h264 encoder");
+        println!("h264 encoder initialized successfully");
+    }
+
+    #[test]
+    fn init_av1_encoder() {
+        let _encoder = Encoder::new_av1(640, 480).expect("failed to initialize av1 encoder");
+        println!("av1 encoder initialized successfully");
+    }
+
+    #[test]
+    fn test_get_sequence_params_h264() {
+        // H.264 エンコーダーを作成
+        let mut encoder = Encoder::new_h264(640, 480).expect("failed to create h264 encoder");
+
+        // シーケンスパラメータを取得
+        let seq_params = encoder
+            .get_sequence_params()
+            .expect("failed to get sequence parameters");
+
+        // シーケンスパラメータが空でないことを確認
+        assert!(
+            !seq_params.is_empty(),
+            "Sequence parameters should not be empty"
+        );
+
+        println!("H.264 sequence parameters size: {} bytes", seq_params.len());
+    }
+
+    #[test]
+    fn test_get_sequence_params_h265() {
+        // H.265 エンコーダーを作成
+        let mut encoder = Encoder::new_h265(640, 480).expect("failed to create h265 encoder");
+
+        // シーケンスパラメータを取得
+        let seq_params = encoder
+            .get_sequence_params()
+            .expect("failed to get sequence parameters");
+
+        // シーケンスパラメータが空でないことを確認
+        assert!(
+            !seq_params.is_empty(),
+            "Sequence parameters should not be empty"
+        );
+
+        println!("H.265 sequence parameters size: {} bytes", seq_params.len());
+    }
+
+    #[test]
+    fn test_get_sequence_params_av1() {
+        // AV1 エンコーダーを作成
+        let mut encoder = Encoder::new_av1(640, 480).expect("failed to create av1 encoder");
+
+        // シーケンスパラメータを取得
+        let seq_params = encoder
+            .get_sequence_params()
+            .expect("failed to get sequence parameters");
+
+        // シーケンスパラメータが空でないことを確認
+        assert!(
+            !seq_params.is_empty(),
+            "Sequence parameters should not be empty"
+        );
+
+        println!("AV1 sequence header size: {} bytes", seq_params.len());
+    }
+
+    #[test]
+    fn test_encode_h265_black_frame() {
         let width = 640;
         let height = 480;
 
         // エンコーダーを作成
         let mut encoder = Encoder::new_h265(width, height).expect("failed to create h265 encoder");
+
+        // NV12 形式の黒フレームを準備
+        // Y プレーン: 16 (YUV での黒)
+        // UV プレーン: 128 (ニュートラルなクロマ)
+        let y_size = (width * height) as usize;
+        let uv_size = (width * height / 2) as usize;
+
+        let mut frame_data = vec![16u8; y_size + uv_size];
+        // UV プレーンを 128 に設定（ニュートラルなクロマ）
+        frame_data[y_size..].fill(128);
+
+        // フレームをエンコード
+        encoder
+            .encode(&frame_data)
+            .expect("failed to encode black frame");
+        encoder.finish().expect("failed to finish encoder");
+
+        // エンコード済みフレームを取得
+        let mut frames = Vec::new();
+        while let Some(frame) = encoder.next_frame() {
+            frames.push(frame);
+        }
+
+        // 少なくとも1つのフレームを取得したことを確認
+        assert!(!frames.is_empty(), "No encoded frames received");
+
+        // 最初のフレームがキーフレーム（IDR）であることを確認
+        let first_frame = &frames[0];
+        assert!(
+            matches!(first_frame.picture_type, PictureType::I | PictureType::Idr),
+            "First frame should be a keyframe"
+        );
+
+        // フレームにデータがあることを確認
+        assert!(
+            !first_frame.data.is_empty(),
+            "Encoded frame should have data"
+        );
+
+        println!(
+            "Successfully encoded black frame: {} frames, first frame size: {} bytes",
+            frames.len(),
+            first_frame.data.len()
+        );
+    }
+
+    #[test]
+    fn test_encode_h264_black_frame() {
+        let width = 640;
+        let height = 480;
+
+        // エンコーダーを作成
+        let mut encoder = Encoder::new_h264(width, height).expect("failed to create h264 encoder");
+
+        // NV12 形式の黒フレームを準備
+        // Y プレーン: 16 (YUV での黒)
+        // UV プレーン: 128 (ニュートラルなクロマ)
+        let y_size = (width * height) as usize;
+        let uv_size = (width * height / 2) as usize;
+
+        let mut frame_data = vec![16u8; y_size + uv_size];
+        // UV プレーンを 128 に設定（ニュートラルなクロマ）
+        frame_data[y_size..].fill(128);
+
+        // フレームをエンコード
+        encoder
+            .encode(&frame_data)
+            .expect("failed to encode black frame");
+        encoder.finish().expect("failed to finish encoder");
+
+        // エンコード済みフレームを取得
+        let mut frames = Vec::new();
+        while let Some(frame) = encoder.next_frame() {
+            frames.push(frame);
+        }
+
+        // 少なくとも1つのフレームを取得したことを確認
+        assert!(!frames.is_empty(), "No encoded frames received");
+
+        // 最初のフレームがキーフレーム（IDR）であることを確認
+        let first_frame = &frames[0];
+        assert!(
+            matches!(first_frame.picture_type, PictureType::I | PictureType::Idr),
+            "First frame should be a keyframe"
+        );
+
+        // フレームにデータがあることを確認
+        assert!(
+            !first_frame.data.is_empty(),
+            "Encoded frame should have data"
+        );
+
+        println!(
+            "Successfully encoded black frame: {} frames, first frame size: {} bytes",
+            frames.len(),
+            first_frame.data.len()
+        );
+    }
+
+    #[test]
+    fn test_encode_av1_black_frame() {
+        let width = 640;
+        let height = 480;
+
+        // エンコーダーを作成
+        let mut encoder = Encoder::new_av1(width, height).expect("failed to create av1 encoder");
 
         // NV12 形式の黒フレームを準備
         // Y プレーン: 16 (YUV での黒)

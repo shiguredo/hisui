@@ -1,4 +1,10 @@
 use orfail::OrFail;
+use shiguredo_mp4::{
+    Uint,
+    boxes::{Avc1Box, AvccBox, SampleEntry},
+};
+
+use crate::video;
 
 // H.264 の NAL ユニット前に付与されるサイズのバイト数
 // Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい
@@ -71,4 +77,44 @@ impl<'a> Iterator for H264AnnexBNalUnits<'a> {
 pub struct H264NalUnit<'a> {
     pub ty: u8,
     pub data: &'a [u8],
+}
+
+pub fn h264_sample_entry_from_annexb(
+    width: usize,
+    height: usize,
+    data: &[u8],
+) -> orfail::Result<SampleEntry> {
+    // H.264 ストリームから SPS と PPS と取り出す
+    let mut sps_list = Vec::new();
+    let mut pps_list = Vec::new();
+    for nalu in H264AnnexBNalUnits::new(data) {
+        let nalu = nalu.or_fail()?;
+        match nalu.ty {
+            H264_NALU_TYPE_SPS => sps_list.push(nalu.data.to_vec()),
+            H264_NALU_TYPE_PPS => pps_list.push(nalu.data.to_vec()),
+            _ => {}
+        }
+    }
+    (!sps_list.is_empty()).or_fail()?;
+    (!pps_list.is_empty()).or_fail()?;
+
+    Ok(SampleEntry::Avc1(Avc1Box {
+        visual: video::sample_entry_visual_fields(width, height),
+        avcc_box: AvccBox {
+            // 実際のエンコードストリームに合わせた値
+            sps_list,
+            pps_list,
+
+            // 以下は Hisui では固定値
+            avc_profile_indication: H264_PROFILE_BASELINE, // TODO: 実際の値に合わせる
+            avc_level_indication: H264_LEVEL_3_1,          // TODO: 実際の値に合わせる
+            profile_compatibility: 0, // いったん 0 を指定しているが、もし支障があれば調整する
+            length_size_minus_one: Uint::new(NALU_HEADER_LENGTH as u8 - 1),
+            chroma_format: None,
+            bit_depth_luma_minus8: None,
+            bit_depth_chroma_minus8: None,
+            sps_ext_list: Vec::new(),
+        },
+        unknown_boxes: Vec::new(),
+    }))
 }

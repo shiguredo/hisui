@@ -38,6 +38,7 @@ fn main() {
                 "pub struct NV_ENC_BUFFER_FORMAT;",
                 "pub struct NV_ENC_INPUT_PTR;",
                 "pub struct NV_ENC_OUTPUT_PTR;",
+                "pub struct cudaVideoCodec;",
                 "pub struct CUVIDEOFORMAT;",
                 "pub struct CUVIDPICPARAMS;",
                 "pub struct CUVIDPARSERDISPINFO;",
@@ -46,6 +47,7 @@ fn main() {
                 "pub struct CUvideodecoder;",
                 "pub struct CUcontext;",
                 "pub struct CUvideoctxlock;",
+                "pub struct GUID;",
                 "pub struct NV_ENCODE_API_FUNCTION_LIST;",
                 "pub struct NV_ENC_REGISTERED_PTR;",
                 "pub struct NV_ENC_PIC_TYPE;",
@@ -85,6 +87,7 @@ fn main() {
         .generate_comments(false)
         .derive_debug(false)
         .derive_default(false)
+        .parse_callbacks(Box::new(CustomCallbacks))
         // GUID は bindgen で正しく生成されないため、ここではブラックリストに登録して、後で手動で定義する
         .blocklist_item("NV_ENC_CODEC_H264_GUID")
         .blocklist_item("NV_ENC_CODEC_HEVC_GUID")
@@ -130,12 +133,22 @@ pub const NV_ENC_PIC_PARAMS_VER: u32 = NVENCAPI_VERSION | (7 << 16) | NVENCAPI_S
 pub const NV_ENC_LOCK_BITSTREAM_VER: u32 = NVENCAPI_VERSION | (2 << 16) | NVENCAPI_STRUCT_VERSION_BASE | (1 << 31);
 pub const NV_ENC_REGISTER_RESOURCE_VER: u32 = NVENCAPI_VERSION | (5 << 16) | NVENCAPI_STRUCT_VERSION_BASE;
 pub const NV_ENC_MAP_INPUT_RESOURCE_VER: u32 = NVENCAPI_VERSION | (4 << 16) | NVENCAPI_STRUCT_VERSION_BASE;
+pub const NV_ENC_SEQUENCE_PARAM_PAYLOAD_VER: u32 = NVENCAPI_VERSION | (1 << 16) | NVENCAPI_STRUCT_VERSION_BASE;
 
 // ピクチャーフラグ
 pub const NV_ENC_PIC_FLAG_EOS: u32 = 0x8;
 
 // crate で使用される NVENC GUID 定数
 // これらの GUID はリンクの問題を避けるために extern static ではなく定数として定義されている。
+
+// コーデック GUID: NV_ENC_CODEC_H264_GUID
+// {6BC82762-4E63-4ca4-AA85-1E50F321F6BF}
+pub const NV_ENC_CODEC_H264_GUID: GUID = GUID {
+    Data1: 0x6bc82762,
+    Data2: 0x4e63,
+    Data3: 0x4ca4,
+    Data4: [0xaa, 0x85, 0x1e, 0x50, 0xf3, 0x21, 0xf6, 0xbf],
+};
 
 // コーデック GUID: NV_ENC_CODEC_HEVC_GUID
 // {790CDC88-4522-4d7b-9425-BDA9975F7603}
@@ -146,13 +159,22 @@ pub const NV_ENC_CODEC_HEVC_GUID: GUID = GUID {
     Data4: [0x94, 0x25, 0xbd, 0xa9, 0x97, 0x5f, 0x76, 0x03],
 };
 
-// プリセット GUID: NV_ENC_PRESET_P4_GUID
-// {90A7B826-DF06-4862-B9D2-CD6D73A08681}
-pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
-    Data1: 0x90a7b826,
-    Data2: 0xdf06,
-    Data3: 0x4862,
-    Data4: [0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81],
+// コーデック GUID: NV_ENC_CODEC_AV1_GUID
+// {0A352289-0AA7-4759-862D-5D15CD16D254}
+pub const NV_ENC_CODEC_AV1_GUID: GUID = GUID {
+    Data1: 0x0a352289,
+    Data2: 0x0aa7,
+    Data3: 0x4759,
+    Data4: [0x86, 0x2d, 0x5d, 0x15, 0xcd, 0x16, 0xd2, 0x54],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_MAIN_GUID
+// {60B5C1D4-67FE-4790-94D5-C4726D7B6E6D}
+pub const NV_ENC_H264_PROFILE_MAIN_GUID: GUID = GUID {
+    Data1: 0x60b5c1d4,
+    Data2: 0x67fe,
+    Data3: 0x4790,
+    Data4: [0x94, 0xd5, 0xc4, 0x72, 0x6d, 0x7b, 0x6e, 0x6d],
 };
 
 // プロファイル GUID: NV_ENC_HEVC_PROFILE_MAIN_GUID
@@ -162,6 +184,24 @@ pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
     Data2: 0xb55b,
     Data3: 0x40fa,
     Data4: [0x87, 0x8f, 0xf1, 0x25, 0x3b, 0x4d, 0xfd, 0xec],
+};
+
+// プロファイル GUID: NV_ENC_AV1_PROFILE_MAIN_GUID
+// {5f2a39f5-f14e-4f95-9a9e-b76d568fcf97}
+pub const NV_ENC_AV1_PROFILE_MAIN_GUID: GUID = GUID {
+    Data1: 0x5f2a39f5,
+    Data2: 0xf14e,
+    Data3: 0x4f95,
+    Data4: [0x9a, 0x9e, 0xb7, 0x6d, 0x56, 0x8f, 0xcf, 0x97],
+};
+
+// プリセット GUID: NV_ENC_PRESET_P4_GUID
+// {90A7B826-DF06-4862-B9D2-CD6D73A08681}
+pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
+    Data1: 0x90a7b826,
+    Data2: 0xdf06,
+    Data3: 0x4862,
+    Data4: [0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81],
 };
 "#;
 
@@ -195,5 +235,19 @@ fn get_version() -> String {
         panic!(
             "Cargo.toml does not contain a valid [package.metadata.external-dependencies.nvcodec] version"
         );
+    }
+}
+
+#[derive(Debug)]
+struct CustomCallbacks;
+
+impl bindgen::callbacks::ParseCallbacks for CustomCallbacks {
+    fn add_derives(&self, info: &bindgen::callbacks::DeriveInfo<'_>) -> Vec<String> {
+        // "_GUID" に PartialEq と Eq を導出
+        if info.name == "_GUID" {
+            vec!["PartialEq".to_string(), "Eq".to_string()]
+        } else {
+            vec![]
+        }
     }
 }

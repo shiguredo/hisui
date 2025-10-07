@@ -164,6 +164,10 @@ impl VideoDecoder {
                 if is_openh264_available {
                     engines.push(EngineName::Openh264);
                 }
+                #[cfg(feature = "nvcodec")]
+                {
+                    engines.push(EngineName::Nvcodec);
+                }
                 #[cfg(target_os = "macos")]
                 {
                     engines.push(EngineName::VideoToolbox);
@@ -180,6 +184,10 @@ impl VideoDecoder {
                 }
             }
             CodecName::Av1 => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    engines.push(EngineName::Nvcodec);
+                }
                 engines.push(EngineName::Dav1d);
             }
             _ => unreachable!(),
@@ -245,6 +253,7 @@ enum VideoDecoderInner {
     },
     Libvpx(LibvpxDecoder),
     Openh264(Openh264Decoder),
+    #[cfg_attr(feature = "nvcodec", expect(dead_code))]
     Dav1d(Dav1dDecoder),
     #[cfg(target_os = "macos")]
     VideoToolbox(Box<VideoToolboxDecoder>), // Box は clippy::large_enum_variant 対策
@@ -261,6 +270,13 @@ impl VideoDecoderInner {
     fn decode(&mut self, frame: &VideoFrame, stats: &mut VideoDecoderStats) -> orfail::Result<()> {
         match self {
             Self::Initial { options } => match frame.format {
+                #[cfg(feature = "nvcodec")]
+                VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
+                    *self = NvcodecDecoder::new_h264().or_fail().map(Self::Nvcodec)?;
+                    stats.engine.set(EngineName::Nvcodec);
+                    stats.codec.set(CodecName::H264);
+                    self.decode(frame, stats).or_fail()
+                }
                 #[cfg(target_os = "macos")]
                 VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
                     *self = VideoToolboxDecoder::new_h264(frame)
@@ -290,7 +306,7 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(target_os = "macos")]
+                #[cfg(all(not(feature = "nvcodec"), target_os = "macos"))]
                 VideoFormat::H265 => {
                     *self = VideoToolboxDecoder::new_h265(frame)
                         .or_fail()
@@ -314,6 +330,14 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::Vp9);
                     self.decode(frame, stats).or_fail()
                 }
+                #[cfg(feature = "nvcodec")]
+                VideoFormat::Av1 => {
+                    *self = NvcodecDecoder::new_av1().or_fail().map(Self::Nvcodec)?;
+                    stats.engine.set(EngineName::Nvcodec);
+                    stats.codec.set(CodecName::Av1);
+                    self.decode(frame, stats).or_fail()
+                }
+                #[cfg(not(feature = "nvcodec"))]
                 VideoFormat::Av1 => {
                     *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
                     stats.engine.set(EngineName::Dav1d);

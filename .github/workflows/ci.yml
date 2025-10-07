@@ -119,7 +119,7 @@ jobs:
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
       - run: cargo check --features nvcodec -p hisui -p shiguredo_nvcodec
       - run: cargo clippy --features nvcodec -p hisui -p shiguredo_nvcodec -- --deny warnings
-      - run: cargo test --features nvcodec -p hisui -p shiguredo_nvcodec
+      - run: cargo test --features nvcodec -p hisui -p shiguredo_nvcodec -- --test-threads=1
 
   test-apple-toolbox:
     runs-on:
