@@ -164,42 +164,6 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 
 なお、デフォルトで使用されるエンコードパラメーターは [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) にも記載されています。
 
-### nvcodecエンコーダーのパラメーターのデフォルト値について
-
-nvcodecエンコーダーのパラメーターのデフォルト値は以下の通りです：
-
-```json
-{
-  "nvcodec_h264_encode_params": {
-    "preset": "p4",
-    "tuning_info": "low_latency",
-    "rate_control_mode": "vbr",
-    "gop_length": 300,
-    "frame_interval_p": 1,
-    "profile": "main",
-    "device_id": 0
-  },
-  "nvcodec_h265_encode_params": {
-    "preset": "p4",
-    "tuning_info": "low_latency", 
-    "rate_control_mode": "vbr",
-    "gop_length": 300,
-    "frame_interval_p": 1,
-    "profile": "main",
-    "device_id": 0
-  },
-  "nvcodec_av1_encode_params": {
-    "preset": "p4",
-    "tuning_info": "low_latency",
-    "rate_control_mode": "vbr", 
-    "gop_length": 300,
-    "frame_interval_p": 1,
-    "profile": "main",
-    "device_id": 0
-  }
-}
-```
-
 ### `libvpx_vp8_encode_params` で指定可能なパラメーターセット
 
 `libvpx` で VP8 エンコードを行う際に指定可能なパラメーターは以下の通りです。
@@ -723,12 +687,12 @@ nvcodecエンコーダーでは、H.264、H.265、AV1の全てのコーデック
 
 - `gop_length` (整数値): GOPの長さ（フレーム数）
   - デフォルト値: `300`
-  - 指定可能な範囲: 1 〜 600
+  - 指定可能な範囲: 整数値
 
-- `frame_interval_p` (整数値): Pフレーム間隔
-  - デフォルト値: `1`
-  - 指定可能な範囲: 1 〜 16
-  - 1に設定するとIPPPP...、2に設定するとIBPBP...の構造になります
+- `idr_period` (整数値): IDR フレームの周期（フレーム数）
+  - デフォルト値: なし（省略可能）
+  - 指定可能な範囲: 整数値
+  - 省略時は gop_length と同じ値が使用されます
 
 #### デバイス制御パラメーター
 
