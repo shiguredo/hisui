@@ -524,30 +524,30 @@ mod tests {
     #[test]
     fn init_h265_decoder() {
         let _decoder =
-            Decoder::new_h265(DecoderConfig::deafult()).expect("Failed to initialize h265 decoder");
+            Decoder::new_h265(DecoderConfig::default()).expect("Failed to initialize h265 decoder");
         println!("h265 decoder initialized successfully");
     }
 
     #[test]
     fn init_h264_decoder() {
         let _decoder =
-            Decoder::new_h264(DecoderConfig::deafult()).expect("Failed to initialize h264 decoder");
+            Decoder::new_h264(DecoderConfig::default()).expect("Failed to initialize h264 decoder");
         println!("h264 decoder initialized successfully");
     }
 
     #[test]
     fn init_av1_decoder() {
         let _decoder =
-            Decoder::new_av1(DecoderConfig::deafult()).expect("Failed to initialize av1 decoder");
+            Decoder::new_av1(DecoderConfig::default()).expect("Failed to initialize av1 decoder");
         println!("av1 decoder initialized successfully");
     }
 
     #[test]
     fn test_multiple_decoders() {
         // CUDA初期化が1回だけ実行されることを確認するため、複数のデコーダーを作成
-        let _decoder1 = Decoder::new_h265(DecoderConfig::deafult())
+        let _decoder1 = Decoder::new_h265(DecoderConfig::default())
             .expect("Failed to initialize first h265 decoder");
-        let _decoder2 = Decoder::new_h265(DecoderConfig::deafult())
+        let _decoder2 = Decoder::new_h265(DecoderConfig::default())
             .expect("Failed to initialize second h265 decoder");
         println!("Multiple h265 decoders initialized successfully");
     }
@@ -592,7 +592,7 @@ mod tests {
         h265_data.extend_from_slice(&frame_data);
 
         let mut decoder =
-            Decoder::new_h265(DecoderConfig::deafult()).expect("Failed to create h265 decoder");
+            Decoder::new_h265(DecoderConfig::default()).expect("Failed to create h265 decoder");
 
         // デコードを実行
         decoder
@@ -686,7 +686,7 @@ mod tests {
         h264_data.extend_from_slice(&frame_data);
 
         let mut decoder =
-            Decoder::new_h264(DecoderConfig::deafult()).expect("Failed to create h264 decoder");
+            Decoder::new_h264(DecoderConfig::default()).expect("Failed to create h264 decoder");
 
         // デコードを実行
         decoder
@@ -757,7 +757,7 @@ mod tests {
         ];
 
         let mut decoder =
-            Decoder::new_av1(DecoderConfig::deafult()).expect("Failed to create av1 decoder");
+            Decoder::new_av1(DecoderConfig::default()).expect("Failed to create av1 decoder");
 
         // デコードを実行
         decoder
