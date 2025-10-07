@@ -13,6 +13,7 @@ use crate::{
     decoder_libvpx::LibvpxDecoder,
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
+    layout_decode_params::LayoutDecodeParams,
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -125,6 +126,7 @@ impl AudioDecoderInner {
 #[derive(Debug, Default, Clone)]
 pub struct VideoDecoderOptions {
     pub openh264_lib: Option<Openh264Library>,
+    pub decode_params: LayoutDecodeParams,
 }
 
 #[derive(Debug)]
@@ -272,7 +274,9 @@ impl VideoDecoderInner {
             Self::Initial { options } => match frame.format {
                 #[cfg(feature = "nvcodec")]
                 VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
-                    *self = NvcodecDecoder::new_h264().or_fail().map(Self::Nvcodec)?;
+                    *self = NvcodecDecoder::new_h264(&options.decode_params)
+                        .or_fail()
+                        .map(Self::Nvcodec)?;
                     stats.engine.set(EngineName::Nvcodec);
                     stats.codec.set(CodecName::H264);
                     self.decode(frame, stats).or_fail()
@@ -301,7 +305,9 @@ impl VideoDecoderInner {
                 }
                 #[cfg(feature = "nvcodec")]
                 VideoFormat::H265 => {
-                    *self = NvcodecDecoder::new_h265().or_fail().map(Self::Nvcodec)?;
+                    *self = NvcodecDecoder::new_h265(&options.decode_params)
+                        .or_fail()
+                        .map(Self::Nvcodec)?;
                     stats.engine.set(EngineName::Nvcodec);
                     stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
@@ -332,7 +338,9 @@ impl VideoDecoderInner {
                 }
                 #[cfg(feature = "nvcodec")]
                 VideoFormat::Av1 => {
-                    *self = NvcodecDecoder::new_av1().or_fail().map(Self::Nvcodec)?;
+                    *self = NvcodecDecoder::new_av1(&options.decode_params)
+                        .or_fail()
+                        .map(Self::Nvcodec)?;
                     stats.engine.set(EngineName::Nvcodec);
                     stats.codec.set(CodecName::Av1);
                     self.decode(frame, stats).or_fail()

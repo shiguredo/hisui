@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 
 use orfail::OrFail;
 
+use crate::layout_decode_params::LayoutDecodeParams;
 use crate::video::{VideoFormat, VideoFrame};
 use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video_h265::{
@@ -18,9 +19,9 @@ pub struct NvcodecDecoder {
 }
 
 impl NvcodecDecoder {
-    pub fn new_h264() -> orfail::Result<Self> {
+    pub fn new_h264(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(H264) decoder");
-        let config = shiguredo_nvcodec::DecoderConfig::default(); // TODO: デフォルト以外を指定可能にする
+        let config = params.nvcodec_h264.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_h264(config).or_fail()?,
             input_queue: VecDeque::new(),
@@ -29,9 +30,9 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_h265() -> orfail::Result<Self> {
+    pub fn new_h265(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(H265) decoder");
-        let config = shiguredo_nvcodec::DecoderConfig::default(); // TODO: デフォルト以外を指定可能にする
+        let config = params.nvcodec_h265.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_h265(config).or_fail()?,
             input_queue: VecDeque::new(),
@@ -40,9 +41,9 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_av1() -> orfail::Result<Self> {
+    pub fn new_av1(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(AV1) decoder");
-        let config = shiguredo_nvcodec::DecoderConfig::default(); // TODO: デフォルト以外を指定可能にする
+        let config = params.nvcodec_av1.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_av1(config).or_fail()?,
             input_queue: VecDeque::new(),
