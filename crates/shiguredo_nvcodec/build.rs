@@ -195,6 +195,33 @@ pub const NV_ENC_AV1_PROFILE_MAIN_GUID: GUID = GUID {
     Data4: [0x9a, 0x9e, 0xb7, 0x6d, 0x56, 0x8f, 0xcf, 0x97],
 };
 
+// プリセット GUID: NV_ENC_PRESET_P1_GUID
+// {FC0A8D3E-45F8-4CF8-80C7-298871590EBF}
+pub const NV_ENC_PRESET_P1_GUID: GUID = GUID {
+    Data1: 0xfc0a8d3e,
+    Data2: 0x45f8,
+    Data3: 0x4cf8,
+    Data4: [0x80, 0xc7, 0x29, 0x88, 0x71, 0x59, 0x0e, 0xbf],
+};
+
+// プリセット GUID: NV_ENC_PRESET_P2_GUID
+// {F581CFB8-88D6-4381-93F0-DF13F9C27DAB}
+pub const NV_ENC_PRESET_P2_GUID: GUID = GUID {
+    Data1: 0xf581cfb8,
+    Data2: 0x88d6,
+    Data3: 0x4381,
+    Data4: [0x93, 0xf0, 0xdf, 0x13, 0xf9, 0xc2, 0x7d, 0xab],
+};
+
+// プリセット GUID: NV_ENC_PRESET_P3_GUID
+// {36850110-3A07-441F-94D5-3670631F91F6}
+pub const NV_ENC_PRESET_P3_GUID: GUID = GUID {
+    Data1: 0x36850110,
+    Data2: 0x3a07,
+    Data3: 0x441f,
+    Data4: [0x94, 0xd5, 0x36, 0x70, 0x63, 0x1f, 0x91, 0xf6],
+};
+
 // プリセット GUID: NV_ENC_PRESET_P4_GUID
 // {90A7B826-DF06-4862-B9D2-CD6D73A08681}
 pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
@@ -202,6 +229,33 @@ pub const NV_ENC_PRESET_P4_GUID: GUID = GUID {
     Data2: 0xdf06,
     Data3: 0x4862,
     Data4: [0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81],
+};
+
+// プリセット GUID: NV_ENC_PRESET_P5_GUID
+// {21C6E6B4-297A-4CBA-998F-B6CBDE72ADE3}
+pub const NV_ENC_PRESET_P5_GUID: GUID = GUID {
+    Data1: 0x21c6e6b4,
+    Data2: 0x297a,
+    Data3: 0x4cba,
+    Data4: [0x99, 0x8f, 0xb6, 0xcb, 0xde, 0x72, 0xad, 0xe3],
+};
+
+// プリセット GUID: NV_ENC_PRESET_P6_GUID
+// {8E75C279-6299-4AB6-8302-0B215A335CF5}
+pub const NV_ENC_PRESET_P6_GUID: GUID = GUID {
+    Data1: 0x8e75c279,
+    Data2: 0x6299,
+    Data3: 0x4ab6,
+    Data4: [0x83, 0x02, 0x0b, 0x21, 0x5a, 0x33, 0x5c, 0xf5],
+};
+
+// プリセット GUID: NV_ENC_PRESET_P7_GUID
+// {84848C12-6F71-4C13-931B-53E283F57974}
+pub const NV_ENC_PRESET_P7_GUID: GUID = GUID {
+    Data1: 0x84848c12,
+    Data2: 0x6f71,
+    Data3: 0x4c13,
+    Data4: [0x93, 0x1b, 0x53, 0xe2, 0x83, 0xf5, 0x79, 0x74],
 };
 "#;
 
