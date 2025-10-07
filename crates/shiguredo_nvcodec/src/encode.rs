@@ -4,6 +4,51 @@ use std::ptr;
 
 use crate::{Error, ReleaseGuard, ensure_cuda_initialized, sys};
 
+/// プリセット GUID
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PresetGuid(sys::GUID);
+
+impl PresetGuid {
+    /// P1プリセット（最高速）
+    pub const P1: Self = Self(sys::NV_ENC_PRESET_P1_GUID);
+    /// P2プリセット
+    pub const P2: Self = Self(sys::NV_ENC_PRESET_P2_GUID);
+    /// P3プリセット
+    pub const P3: Self = Self(sys::NV_ENC_PRESET_P3_GUID);
+    /// P4プリセット（バランス型）
+    pub const P4: Self = Self(sys::NV_ENC_PRESET_P4_GUID);
+    /// P5プリセット
+    pub const P5: Self = Self(sys::NV_ENC_PRESET_P5_GUID);
+    /// P6プリセット
+    pub const P6: Self = Self(sys::NV_ENC_PRESET_P6_GUID);
+    /// P7プリセット（最高品質）
+    pub const P7: Self = Self(sys::NV_ENC_PRESET_P7_GUID);
+
+    pub(crate) fn to_sys(&self) -> sys::GUID {
+        self.0
+    }
+}
+
+/// チューニング情報
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TuningInfo(sys::NV_ENC_TUNING_INFO);
+
+impl TuningInfo {
+    /// 高品質
+    pub const HIGH_QUALITY: Self = Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY);
+    /// 低遅延
+    pub const LOW_LATENCY: Self = Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_LOW_LATENCY);
+    /// 超低遅延
+    pub const ULTRA_LOW_LATENCY: Self =
+        Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY);
+    /// ロスレス
+    pub const LOSSLESS: Self = Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_LOSSLESS);
+
+    pub(crate) fn to_sys(&self) -> sys::NV_ENC_TUNING_INFO {
+        self.0
+    }
+}
+
 /// エンコーダーに指定する設定
 #[derive(Debug, Clone)]
 pub struct EncoderConfig {
@@ -23,10 +68,10 @@ pub struct EncoderConfig {
     pub target_bitrate: u32,
 
     /// プリセット GUID (品質と速度のバランス)
-    pub preset_guid: sys::GUID,
+    pub preset_guid: PresetGuid,
 
     /// チューニング情報
-    pub tuning_info: sys::NV_ENC_TUNING_INFO,
+    pub tuning_info: TuningInfo,
 
     /// レート制御モード
     pub rate_control_mode: RateControlMode,
@@ -68,9 +113,9 @@ impl Default for EncoderConfig {
             height: 480,
             fps_numerator: 30,
             fps_denominator: 1,
-            target_bitrate: 5_000_000,               // 5 Mbps
-            preset_guid: sys::NV_ENC_PRESET_P4_GUID, // バランスの良いプリセット
-            tuning_info: sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY,
+            target_bitrate: 5_000_000,   // 5 Mbps
+            preset_guid: PresetGuid::P4, // バランスの良いプリセット
+            tuning_info: TuningInfo::HIGH_QUALITY,
             rate_control_mode: RateControlMode::Vbr,
             gop_length: sys::NVENC_INFINITE_GOPLENGTH,
             idr_period: sys::NVENC_INFINITE_GOPLENGTH,
@@ -202,7 +247,7 @@ impl Encoder {
 
             // デフォルトパラメータでエンコーダーを初期化
             crate::with_cuda_context(ctx, || {
-                encoder.initialize_encoder(config, codec_guid, profile_guid)
+                encoder.initialize_encoder(&config, codec_guid, profile_guid)
             })?;
 
             Ok(encoder)
@@ -228,8 +273,8 @@ impl Encoder {
                     f(
                         self.h_encoder,
                         codec_guid,
-                        config.preset_guid,
-                        config.tuning_info,
+                        config.preset_guid.to_sys(),
+                        config.tuning_info.to_sys(),
                         &mut preset_config,
                     )
                 })
@@ -246,7 +291,7 @@ impl Encoder {
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
             init_params.encodeGUID = codec_guid;
-            init_params.presetGUID = config.preset_guid;
+            init_params.presetGUID = config.preset_guid.to_sys();
             init_params.encodeWidth = config.width;
             init_params.encodeHeight = config.height;
             init_params.darWidth = config.width;
@@ -257,7 +302,7 @@ impl Encoder {
             init_params.encodeConfig = &mut encode_config;
             init_params.maxEncodeWidth = config.max_encode_width;
             init_params.maxEncodeHeight = config.max_encode_height;
-            init_params.tuningInfo = config.tuning_info;
+            init_params.tuningInfo = config.tuning_info.to_sys();
 
             encode_config.version = sys::NV_ENC_CONFIG_VER;
             encode_config.profileGUID = profile_guid;
@@ -707,6 +752,7 @@ impl EncodedFrame {
         self.picture_type
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
