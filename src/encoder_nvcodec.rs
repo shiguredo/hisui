@@ -4,6 +4,7 @@ use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
+    encoder::VideoEncoderOptions,
     types::EvenUsize,
     video::{FrameRate, VideoFormat, VideoFrame},
     video_av1, video_h264, video_h265,
@@ -19,23 +20,24 @@ pub struct NvcodecEncoder {
 }
 
 impl NvcodecEncoder {
-    pub fn new_h264(width: usize, height: usize) -> orfail::Result<Self> {
+    pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width.get();
+        let height = options.height.get();
         log::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
-        let width = EvenUsize::new(width).or_fail()?;
-        let height = EvenUsize::new(height).or_fail()?;
 
-        // TODO: レイアウトから情報を取得して設定する
         let config = shiguredo_nvcodec::EncoderConfig {
-            width: width.get() as u32,
-            height: height.get() as u32,
+            width: width as u32,
+            height: height as u32,
+            fps_numerator: options.frame_rate.numerator.get() as u32,
+            fps_denominator: options.frame_rate.denumerator.get() as u32,
+            target_bitrate: Some(options.bitrate.get() as u32),
             ..Default::default()
         };
 
         let mut inner = shiguredo_nvcodec::Encoder::new_h264(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
         let sample_entry =
-            video_h264::h264_sample_entry_from_annexb(width.get(), height.get(), &seq_params)
-                .or_fail()?;
+            video_h264::h264_sample_entry_from_annexb(width, height, &seq_params).or_fail()?;
 
         Ok(Self {
             inner,
@@ -46,24 +48,29 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn new_h265(width: usize, height: usize) -> orfail::Result<Self> {
+    pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width.get();
+        let height = options.height.get();
         log::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
-        let width = EvenUsize::new(width).or_fail()?;
-        let height = EvenUsize::new(height).or_fail()?;
-        // TODO: フレームレートを適切に設定する
-        let fps = FrameRate::FPS_25;
 
         let config = shiguredo_nvcodec::EncoderConfig {
-            width: width.get() as u32,
-            height: height.get() as u32,
+            width: width as u32,
+            height: height as u32,
+            fps_numerator: options.frame_rate.numerator.get() as u32,
+            fps_denominator: options.frame_rate.denumerator.get() as u32,
+            target_bitrate: Some(options.bitrate.get() as u32),
             ..Default::default()
         };
 
         let mut inner = shiguredo_nvcodec::Encoder::new_h265(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
-        let sample_entry =
-            video_h265::h265_sample_entry_from_annexb(width.get(), height.get(), fps, &seq_params)
-                .or_fail()?;
+        let sample_entry = video_h265::h265_sample_entry_from_annexb(
+            width,
+            height,
+            options.frame_rate,
+            &seq_params,
+        )
+        .or_fail()?;
 
         Ok(Self {
             inner,
@@ -74,14 +81,21 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn new_av1(width: usize, height: usize) -> orfail::Result<Self> {
-        log::debug!("create nvcodec(AV1) encoder: {}x{}", width, height);
-        let width = EvenUsize::new(width).or_fail()?;
-        let height = EvenUsize::new(height).or_fail()?;
+    pub fn new_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+        let width = options.width;
+        let height = options.height;
+        log::debug!(
+            "create nvcodec(AV1) encoder: {}x{}",
+            width.get(),
+            height.get()
+        );
 
         let config = shiguredo_nvcodec::EncoderConfig {
             width: width.get() as u32,
             height: height.get() as u32,
+            fps_numerator: options.frame_rate.numerator.get() as u32,
+            fps_denominator: options.frame_rate.denumerator.get() as u32,
+            target_bitrate: Some(options.bitrate.get() as u32),
             ..Default::default()
         };
 
