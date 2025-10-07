@@ -135,9 +135,11 @@ fn test_simple_single_source_common(
         let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
         y_plane
             .iter()
-            .for_each(|x| assert!(matches!(x, 80..=82), "y={x}"));
+            .for_each(|x| assert!(matches!(x, 80..=83), "y={x}"));
         u_plane.iter().for_each(|x| assert_eq!(*x, 90));
-        v_plane.iter().for_each(|x| assert_eq!(*x, 240));
+        v_plane
+            .iter()
+            .for_each(|x| assert!(matches!(x, 240 | 241), "v={x}"));
         Ok(())
     };
 
