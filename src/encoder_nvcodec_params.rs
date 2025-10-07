@@ -198,9 +198,6 @@ fn update_common_encode_params(
     // GOP設定
     config.gop_length = params.get("gop_length")?.or(config.gop_length);
     config.idr_period = params.get("idr_period")?.or(config.idr_period);
-    config.frame_interval_p = params
-        .get("frame_interval_p")?
-        .unwrap_or(config.frame_interval_p);
 
     // デバイスID
     config.device_id = params.get("device_id")?.unwrap_or(config.device_id);

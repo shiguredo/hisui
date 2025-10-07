@@ -416,10 +416,6 @@
     "min": 1,
     "max": 600
   },
-  "nvcodec_h264_encode_params.frame_interval_p": {
-    "min": 1,
-    "max": 16
-  },
   "nvcodec_h264_encode_params.profile": [
     "baseline",
     "main",
@@ -456,10 +452,6 @@
     "min": 1,
     "max": 600
   },
-  "nvcodec_h265_encode_params.frame_interval_p": {
-    "min": 1,
-    "max": 16
-  },
   "nvcodec_h265_encode_params.profile": [
     "main",
     "main10",
@@ -492,10 +484,6 @@
   "nvcodec_av1_encode_params.idr_period": {
     "min": 1,
     "max": 600
-  },
-  "nvcodec_av1_encode_params.frame_interval_p": {
-    "min": 1,
-    "max": 16
   },
   "nvcodec_av1_encode_params.profile": [
     "main"
