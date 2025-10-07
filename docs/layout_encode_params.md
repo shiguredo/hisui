@@ -85,10 +85,20 @@ FDK-AAC を利用する場合は、[ビルド方法](build.md) を参考にし�
 
 - **macOS 用にビルドされた Hisui**: Apple Video Toolbox の H.264 エンコーダーが使用されます
 - **OpenH264 オプション指定時**: [`hisui compose`](command_compose.md) などのコマンドで `--openh264` オプションや `HISUI_OPENH264_PATH` 環境変数が指定された場合
+- **nvcodec 対応時**: nvcodec に対応してビルドされた Hisui では NVIDIA Video Codec SDK の H.264 エンコーダーが使用されます
 
-`"H265"` は、以下の条件を満たしている場合にのみ指定可能です：
+`"H265"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です：
 
 - **macOS 用にビルドされた Hisui**: Apple Video Toolbox の H.265 エンコーダーが使用されます
+- **nvcodec 対応時**: nvcodec に対応してビルドされた Hisui では NVIDIA Video Codec SDK の H.265 エンコーダーが使用されます
+
+`"AV1"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です：
+
+- **SVT-AV1 対応時**: SVT-AV1 に対応してビルドされた Hisui では SVT-AV1 エンコーダーが使用されます
+- **nvcodec 対応時**: nvcodec に対応してビルドされた Hisui では NVIDIA Video Codec SDK の AV1 エンコーダーが使用されます
+
+なお nvcodec は、GitHub で提供されているビルド済みバイナリや Docker には含まれておらず、デフォルトでは無効になっています。
+nvcodec を利用する場合は、[ビルド方法](build.md) を参考にして、nvcodec を有効にした自前でのビルドを行ってください 。
 
 ## 映像エンコードビットレートの指定
 
@@ -120,6 +130,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - **OpenH264**: H.264 用のエンコーダー
 - **SVT-AV1**: AV1 用のエンコーダー
 - **Apple Video Toolbox**: macOS で利用可能な H.264 / H.265 用のエンコーダー
+- **NVIDIA Video Codec SDK**: CUDA対応GPU で利用可能な H.264 / H.265 / AV1 用のハードウェアエンコーダー
 
 映像エンコーダーの種類とエンコードコーデックの組み合わせによって、指定可能なパラメーターセットは変わります。
 
@@ -145,10 +156,49 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `svt_av1_encode_params`: SVT-AV1 で AV1 エンコードを行う際のパラメーターセット
 - `video_toolbox_h264_encode_params`: Apple Video Toolbox で H.264 エンコードを行う際のパラメーターセット
 - `video_toolbox_h265_encode_params`: Apple Video Toolbox で H.265 エンコードを行う際のパラメーターセット
+- `nvcodec_h264_encode_params`: NVIDIA Video Codec SDK で H.264 エンコードを行う際のパラメーターセット
+- `nvcodec_h265_encode_params`: NVIDIA Video Codec SDK で H.265 エンコードを行う際のパラメーターセット
+- `nvcodec_av1_encode_params`: NVIDIA Video Codec SDK で AV1 エンコードを行う際のパラメーターセット
 
 以降では、それぞれの詳細を説明します。
 
 なお、デフォルトで使用されるエンコードパラメーターは [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) にも記載されています。
+
+### nvcodecエンコーダーのパラメーターのデフォルト値について
+
+nvcodecエンコーダーのパラメーターのデフォルト値は以下の通りです：
+
+```json
+{
+  "nvcodec_h264_encode_params": {
+    "preset": "p4",
+    "tuning_info": "low_latency",
+    "rate_control_mode": "vbr",
+    "gop_length": 300,
+    "frame_interval_p": 1,
+    "profile": "main",
+    "device_id": 0
+  },
+  "nvcodec_h265_encode_params": {
+    "preset": "p4",
+    "tuning_info": "low_latency", 
+    "rate_control_mode": "vbr",
+    "gop_length": 300,
+    "frame_interval_p": 1,
+    "profile": "main",
+    "device_id": 0
+  },
+  "nvcodec_av1_encode_params": {
+    "preset": "p4",
+    "tuning_info": "low_latency",
+    "rate_control_mode": "vbr", 
+    "gop_length": 300,
+    "frame_interval_p": 1,
+    "profile": "main",
+    "device_id": 0
+  }
+}
+```
 
 ### `libvpx_vp8_encode_params` で指定可能なパラメーターセット
 
@@ -627,3 +677,108 @@ H.265 エンコーダーは H.264 と多くの共通点がありますが、い�
 
 - `use_parallelization` (真偽値): 並列処理の使用
   - デフォルト値: `true`
+
+## NVIDIA Video Codec SDK エンコーダーパラメーター
+
+NVIDIA Video Codec SDK（nvcodec）は、CUDA対応GPUを利用したハードウェア加速エンコーダーです。
+H.264、H.265、AV1の各コーデックに対応しており、高い処理性能を提供します。
+
+### 利用条件
+
+nvcodecエンコーダーを利用するには、以下の条件を満たしている必要があります：
+
+- CUDA対応のNVIDIA GPU
+- 適切なNVIDIA GPUドライバー
+- nvcodecに対応してビルドされたHisui
+
+### 共通パラメーター
+
+nvcodecエンコーダーでは、H.264、H.265、AV1の全てのコーデックで共通して利用できるパラメーターがあります。
+
+#### エンコード品質・速度制御パラメーター
+
+- `preset` (文字列): エンコードプリセット
+  - デフォルト値: `"p4"`
+  - 指定可能な値: `"p1"`, `"p2"`, `"p3"`, `"p4"`, `"p5"`, `"p6"`, `"p7"`
+  - `"p1"`: 最高品質（最低速）、`"p7"`: 最高速（最低品質）
+
+- `tuning_info` (文字列): チューニング情報
+  - デフォルト値: `"low_latency"`
+  - 指定可能な値:
+    - `"high_quality"`: 高品質優先
+    - `"low_latency"`: 低遅延優先
+    - `"ultra_low_latency"`: 超低遅延優先
+    - `"lossless"`: 無劣化圧縮
+
+#### レート制御パラメーター
+
+- `rate_control_mode` (文字列): レート制御モード
+  - デフォルト値: `"vbr"`
+  - 指定可能な値:
+    - `"const_qp"`: 固定量子化パラメーター
+    - `"vbr"`: 可変ビットレート
+    - `"cbr"`: 固定ビットレート
+
+#### GOP・フレーム構造パラメーター
+
+- `gop_length` (整数値): GOPの長さ（フレーム数）
+  - デフォルト値: `300`
+  - 指定可能な範囲: 1 〜 600
+
+- `frame_interval_p` (整数値): Pフレーム間隔
+  - デフォルト値: `1`
+  - 指定可能な範囲: 1 〜 16
+  - 1に設定するとIPPPP...、2に設定するとIBPBP...の構造になります
+
+#### デバイス制御パラメーター
+
+- `device_id` (整数値): 使用するCUDAデバイスのID
+  - デフォルト値: `0`
+  - 指定可能な範囲: 0以上の値（システムの利用可能GPU数による）
+
+- `max_encode_width` (整数値): 最大エンコード幅（ピクセル）
+  - デフォルト値: なし（省略可能）
+  - 動的解像度変更を行う場合に指定
+
+- `max_encode_height` (整数値): 最大エンコード高さ（ピクセル）
+  - デフォルト値: なし（省略可能）
+  - 動的解像度変更を行う場合に指定
+
+### `nvcodec_h264_encode_params` で指定可能なパラメーターセット
+
+NVIDIA Video Codec SDK で H.264 エンコードを行う際に指定可能なパラメーターは、上記の共通パラメーターに加えて、以下のH.264固有のパラメーターがあります。
+
+#### H.264固有パラメーター
+
+- `profile` (文字列): H.264プロファイル
+  - デフォルト値: `"main"`
+  - 指定可能な値:
+    - `"baseline"`: Baseline Profile
+    - `"main"`: Main Profile
+    - `"high"`: High Profile
+    - `"high_10"`: High 10 Profile
+    - `"high_422"`: High 4:2:2 Profile
+    - `"high_444"`: High 4:4:4 Profile
+
+### `nvcodec_h265_encode_params` で指定可能なパラメーターセット
+
+NVIDIA Video Codec SDK で H.265 エンコードを行う際に指定可能なパラメーターは、上記の共通パラメーターに加えて、以下のH.265固有のパラメーターがあります。
+
+#### H.265固有パラメーター
+
+- `profile` (文字列): H.265プロファイル
+  - デフォルト値: `"main"`
+  - 指定可能な値:
+    - `"main"`: Main Profile
+    - `"main10"`: Main 10 Profile
+    - `"frext"`: Format Range Extensions Profile
+
+### `nvcodec_av1_encode_params` で指定可能なパラメーターセット
+
+NVIDIA Video Codec SDK で AV1 エンコードを行う際に指定可能なパラメーターは、上記の共通パラメーターに加えて、以下のAV1固有のパラメーターがあります。
+
+#### AV1固有パラメーター
+
+- `profile` (文字列): AV1プロファイル
+  - デフォルト値: `"main"`
+  - 指定可能な値: `"main"`（現在はMainプロファイルのみサポート）
