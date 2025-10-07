@@ -212,6 +212,7 @@ pub struct Encoder {
     height: u32,
     buffer_format: sys::NV_ENC_BUFFER_FORMAT,
     encoded_frames: VecDeque<EncodedFrame>,
+    fps_denominator: u64,
     frame_count: u64,
 }
 
@@ -310,6 +311,7 @@ impl Encoder {
                 height: config.height,
                 buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
                 encoded_frames: VecDeque::new(),
+                fps_denominator: config.fps_denominator as u64,
                 frame_count: 0,
             };
 
@@ -659,7 +661,7 @@ impl Encoder {
             pic_params.outputBitstream = output_buffer;
             pic_params.bufferFmt = self.buffer_format;
             pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
-            pic_params.inputTimeStamp = self.frame_count;
+            pic_params.inputTimeStamp = self.frame_count * self.fps_denominator;
 
             self.frame_count += 1;
 
