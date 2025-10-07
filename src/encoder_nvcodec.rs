@@ -30,7 +30,7 @@ impl NvcodecEncoder {
             height: height as u32,
             fps_numerator: options.frame_rate.numerator.get() as u32,
             fps_denominator: options.frame_rate.denumerator.get() as u32,
-            target_bitrate: Some(options.bitrate.get() as u32),
+            target_bitrate: Some(options.bitrate as u32),
             ..Default::default()
         };
 
@@ -58,7 +58,7 @@ impl NvcodecEncoder {
             height: height as u32,
             fps_numerator: options.frame_rate.numerator.get() as u32,
             fps_denominator: options.frame_rate.denumerator.get() as u32,
-            target_bitrate: Some(options.bitrate.get() as u32),
+            target_bitrate: Some(options.bitrate as u32),
             ..Default::default()
         };
 
@@ -95,7 +95,7 @@ impl NvcodecEncoder {
             height: height.get() as u32,
             fps_numerator: options.frame_rate.numerator.get() as u32,
             fps_denominator: options.frame_rate.denumerator.get() as u32,
-            target_bitrate: Some(options.bitrate.get() as u32),
+            target_bitrate: Some(options.bitrate as u32),
             ..Default::default()
         };
 
