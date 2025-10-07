@@ -91,7 +91,7 @@ fn update_h264_encode_params(
             "high_444" => Ok(Some(shiguredo_nvcodec::Profile::H264_HIGH_444)),
             _ => Err(v.invalid("unknown 'profile' value for H.264")),
         })?
-        .or(config.profile);
+        .or(Some(config.profile));
 
     Ok(())
 }
@@ -117,7 +117,7 @@ fn update_h265_encode_params(
             "frext" => Ok(Some(shiguredo_nvcodec::Profile::HEVC_FREXT)),
             _ => Err(v.invalid("unknown 'profile' value for H.265")),
         })?
-        .or(config.profile);
+        .or(Some(config.profile));
 
     Ok(())
 }
@@ -141,7 +141,7 @@ fn update_av1_encode_params(
             "main" => Ok(Some(shiguredo_nvcodec::Profile::AV1_MAIN)),
             _ => Err(v.invalid("unknown 'profile' value for AV1")),
         })?
-        .or(config.profile);
+        .or(Some(config.profile));
 
     Ok(())
 }
