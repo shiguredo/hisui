@@ -34,6 +34,7 @@ pub mod encoder_video_toolbox;
 pub mod encoder_video_toolbox_params;
 pub mod json;
 pub mod layout;
+pub mod layout_decode_params;
 pub mod layout_encode_params;
 pub mod layout_region;
 pub mod logger;
