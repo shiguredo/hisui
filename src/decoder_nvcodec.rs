@@ -20,8 +20,9 @@ pub struct NvcodecDecoder {
 impl NvcodecDecoder {
     pub fn new_h264() -> orfail::Result<Self> {
         log::debug!("create nvcodec(H264) decoder");
+        let config = shiguredo_nvcodec::DecoderConfig::default(); // TODO: デフォルト以外を指定可能にする
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h264().or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_h264(config).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -30,8 +31,9 @@ impl NvcodecDecoder {
 
     pub fn new_h265() -> orfail::Result<Self> {
         log::debug!("create nvcodec(H265) decoder");
+        let config = shiguredo_nvcodec::DecoderConfig::default(); // TODO: デフォルト以外を指定可能にする
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h265().or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_h265(config).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -40,8 +42,9 @@ impl NvcodecDecoder {
 
     pub fn new_av1() -> orfail::Result<Self> {
         log::debug!("create nvcodec(AV1) decoder");
+        let config = shiguredo_nvcodec::DecoderConfig::default(); // TODO: デフォルト以外を指定可能にする
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_av1().or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_av1(config).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,

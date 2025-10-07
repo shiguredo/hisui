@@ -5,6 +5,29 @@ use std::sync::mpsc::{self, Receiver, Sender};
 
 use crate::{Error, ensure_cuda_initialized, sys};
 
+/// デコーダーの設定
+#[derive(Debug, Clone)]
+pub struct DecoderConfig {
+    /// 使用する GPU デバイスの ID (デフォルト: 0)
+    pub device_id: i32,
+
+    /// デコード用サーフェスの最大数 (デフォルト: 20)
+    pub max_num_decode_surfaces: u32,
+
+    /// 表示遅延 (デフォルト: 0 = 低遅延)
+    pub max_display_delay: u32,
+}
+
+impl Default for DecoderConfig {
+    fn default() -> Self {
+        Self {
+            device_id: 0,
+            max_num_decode_surfaces: 20,
+            max_display_delay: 0,
+        }
+    }
+}
+
 /// デコーダー
 pub struct Decoder {
     ctx: sys::CUcontext,
@@ -16,22 +39,25 @@ pub struct Decoder {
 
 impl Decoder {
     /// H.264 用のデコーダーインスタンスを生成する
-    pub fn new_h264() -> Result<Self, Error> {
-        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_H264)
+    pub fn new_h264(config: DecoderConfig) -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_H264, config)
     }
 
     /// H.265 用のデコーダーインスタンスを生成する
-    pub fn new_h265() -> Result<Self, Error> {
-        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC)
+    pub fn new_h265(config: DecoderConfig) -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_HEVC, config)
     }
 
     /// AV1 用のデコーダーインスタンスを生成する
-    pub fn new_av1() -> Result<Self, Error> {
-        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_AV1)
+    pub fn new_av1(config: DecoderConfig) -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_AV1, config)
     }
 
     /// 指定されたコーデックタイプでデコーダーインスタンスを生成する
-    fn new_with_codec(codec_type: sys::cudaVideoCodec) -> Result<Self, Error> {
+    fn new_with_codec(
+        codec_type: sys::cudaVideoCodec,
+        config: DecoderConfig,
+    ) -> Result<Self, Error> {
         // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
         ensure_cuda_initialized()?;
 
@@ -40,8 +66,7 @@ impl Decoder {
 
             // CUDA context の初期化
             let ctx_flags = 0; // デフォルトのコンテキストフラグ
-            let device_id = 0; // プライマリGPUデバイスを使用 // TODO(atode): make configurable
-            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, device_id);
+            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, config.device_id);
             Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
 
             let ctx_guard = crate::ReleaseGuard::new(|| {
@@ -79,8 +104,8 @@ impl Decoder {
             // 映像パーサーを作成する
             let mut parser_params: sys::CUVIDPARSERPARAMS = std::mem::zeroed();
             parser_params.CodecType = codec_type;
-            parser_params.ulMaxNumDecodeSurfaces = 20; // TODO: 後続の PR で外から設定可能にする
-            parser_params.ulMaxDisplayDelay = 0; // TODO: 後続の PR で外から設定可能にする
+            parser_params.ulMaxNumDecodeSurfaces = config.max_num_decode_surfaces;
+            parser_params.ulMaxDisplayDelay = config.max_display_delay;
             parser_params.pUserData = (&*state) as *const _ as *mut c_void;
             parser_params.pfnSequenceCallback = Some(handle_video_sequence);
             parser_params.pfnDecodePicture = Some(handle_picture_decode);
@@ -498,27 +523,32 @@ mod tests {
 
     #[test]
     fn init_h265_decoder() {
-        let _decoder = Decoder::new_h265().expect("Failed to initialize h265 decoder");
+        let _decoder =
+            Decoder::new_h265(DecoderConfig::deafult()).expect("Failed to initialize h265 decoder");
         println!("h265 decoder initialized successfully");
     }
 
     #[test]
     fn init_h264_decoder() {
-        let _decoder = Decoder::new_h264().expect("Failed to initialize h264 decoder");
+        let _decoder =
+            Decoder::new_h264(DecoderConfig::deafult()).expect("Failed to initialize h264 decoder");
         println!("h264 decoder initialized successfully");
     }
 
     #[test]
     fn init_av1_decoder() {
-        let _decoder = Decoder::new_av1().expect("Failed to initialize av1 decoder");
+        let _decoder =
+            Decoder::new_av1(DecoderConfig::deafult()).expect("Failed to initialize av1 decoder");
         println!("av1 decoder initialized successfully");
     }
 
     #[test]
     fn test_multiple_decoders() {
         // CUDA初期化が1回だけ実行されることを確認するため、複数のデコーダーを作成
-        let _decoder1 = Decoder::new_h265().expect("Failed to initialize first h265 decoder");
-        let _decoder2 = Decoder::new_h265().expect("Failed to initialize second h265 decoder");
+        let _decoder1 = Decoder::new_h265(DecoderConfig::deafult())
+            .expect("Failed to initialize first h265 decoder");
+        let _decoder2 = Decoder::new_h265(DecoderConfig::deafult())
+            .expect("Failed to initialize second h265 decoder");
         println!("Multiple h265 decoders initialized successfully");
     }
 
@@ -561,7 +591,8 @@ mod tests {
         h265_data.extend_from_slice(&start_code);
         h265_data.extend_from_slice(&frame_data);
 
-        let mut decoder = Decoder::new_h265().expect("Failed to create h265 decoder");
+        let mut decoder =
+            Decoder::new_h265(DecoderConfig::deafult()).expect("Failed to create h265 decoder");
 
         // デコードを実行
         decoder
@@ -654,7 +685,8 @@ mod tests {
         h264_data.extend_from_slice(&start_code);
         h264_data.extend_from_slice(&frame_data);
 
-        let mut decoder = Decoder::new_h264().expect("Failed to create h264 decoder");
+        let mut decoder =
+            Decoder::new_h264(DecoderConfig::deafult()).expect("Failed to create h264 decoder");
 
         // デコードを実行
         decoder
@@ -724,7 +756,8 @@ mod tests {
             76, 173, 116, 93, 183, 31, 101, 221, 87, 90, 233, 219, 28, 199, 243, 128,
         ];
 
-        let mut decoder = Decoder::new_av1().expect("Failed to create av1 decoder");
+        let mut decoder =
+            Decoder::new_av1(DecoderConfig::deafult()).expect("Failed to create av1 decoder");
 
         // デコードを実行
         decoder
