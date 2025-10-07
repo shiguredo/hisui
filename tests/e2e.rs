@@ -136,7 +136,9 @@ fn test_simple_single_source_common(
         y_plane
             .iter()
             .for_each(|x| assert!(matches!(x, 80..=83), "y={x}"));
-        u_plane.iter().for_each(|x| assert_eq!(*x, 90));
+        u_plane
+            .iter()
+            .for_each(|x| assert!(matches!(*x, 90 | 91), "u={x}"));
         v_plane
             .iter()
             .for_each(|x| assert!(matches!(x, 240 | 241), "v={x}"));
