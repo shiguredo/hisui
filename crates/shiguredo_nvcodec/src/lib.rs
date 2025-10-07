@@ -10,8 +10,8 @@ mod decode;
 mod encode;
 mod sys;
 
-pub use decode::{DecodedFrame, Decoder};
-pub use encode::{EncodedFrame, Encoder, PictureType};
+pub use decode::{DecodedFrame, Decoder, DecoderConfig};
+pub use encode::{EncodedFrame, Encoder, EncoderConfig, PictureType};
 
 /// ビルド時に参照したバージョン
 pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
