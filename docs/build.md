@@ -41,6 +41,14 @@ cargo install --path .
 `$HOME/.cargo/bin/hisui` のようなディレクトリに配置されます。
 アンインストールする場合には `cargo uninstall hisui` を実行してください。
 
+### NVIDIA Video Codec を使った H.264 / H.265 / AV1 のデコードおよびエンコードを有効にする場合
+
+CUDA が利用できる環境で、以下のように `--features nvcodec` を指定して Hisui をビルドしてください。
+
+```bash
+cargo install hisui --features nvcodec
+```
+
 ### FDK-AAC を使った AAC エンコードを有効にする場合
 
 Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、

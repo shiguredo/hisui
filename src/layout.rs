@@ -10,6 +10,7 @@ use orfail::OrFail;
 use crate::{
     audio,
     json::JsonObject,
+    layout_decode_params::LayoutDecodeParams,
     layout_encode_params::LayoutEncodeParams,
     layout_region::{self, RawRegion, Region},
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
@@ -55,6 +56,7 @@ pub struct Layout {
     pub audio_bitrate: Option<NonZeroUsize>,
     pub video_bitrate: Option<usize>,
     pub encode_params: LayoutEncodeParams,
+    pub decode_params: LayoutDecodeParams,
     pub frame_rate: FrameRate,
 }
 
@@ -213,6 +215,7 @@ struct RawLayout {
     audio_codec: CodecName,
     video_codec: CodecName,
     encode_params: LayoutEncodeParams,
+    decode_params: LayoutDecodeParams,
     frame_rate: FrameRate,
 }
 
@@ -266,6 +269,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
 
             // エンコードパラメータ群はトップレベルに配置されているので object を経由せずに value を直接変換する
             encode_params: value.try_into()?,
+            decode_params: value.try_into()?,
         })
     }
 }
@@ -344,6 +348,7 @@ impl RawLayout {
             audio_bitrate: self.audio_bitrate,
             video_bitrate: self.video_bitrate,
             encode_params: self.encode_params,
+            decode_params: self.decode_params,
             frame_rate: self.frame_rate,
         })
     }

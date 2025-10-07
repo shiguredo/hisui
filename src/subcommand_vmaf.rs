@@ -157,6 +157,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let mut mixer_input_stream_ids = Vec::new();
     let decoder_options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
+        decode_params: layout.decode_params.clone(),
     };
     for (source_id, source_info) in &layout.sources {
         if layout.video_source_ids().all(|id| id != source_id) {

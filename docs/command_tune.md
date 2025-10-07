@@ -323,6 +323,9 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 - H.264 (OpenH264): [tune-openh264.jsonc](../layout-examples/tune-openh264.jsonc)
 - H.264 (Video Toolbox): [tune-video-toolbox-h264.jsonc](../layout-examples/tune-video-toolbox-h264.jsonc)
 - H.265 (Video Toolbox): [tune-video-toolbox-h265.jsonc](../layout-examples/tune-video-toolbox-h265.jsonc)
+- H.264 (nvcodec): [tune-nvcodec-h264.jsonc](../layout-examples/tune-nvcodec-h264.jsonc)
+- H.265 (nvcodec): [tune-nvcodec-h265.jsonc](../layout-examples/tune-nvcodec-h265.jsonc)
+- AV1 (nvcodec): [tune-nvcodec-av1.jsonc](../layout-examples/tune-nvcodec-av1.jsonc)
 
 これらをベースにした上で、`video_layout` や `resolution` などの項目を各自のユースケースに合わせて修正するのが簡単です。
 

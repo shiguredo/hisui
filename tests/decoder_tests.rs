@@ -108,6 +108,7 @@ where
             eprintln!("no available H.264 decoder");
             return Ok(());
         },
+        decode_params: Default::default(),
     };
 
     // デコードする

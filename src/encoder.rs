@@ -474,22 +474,19 @@ impl VideoEncoderInner {
 
     #[cfg(feature = "nvcodec")]
     fn new_nvcodec_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder =
-            NvcodecEncoder::new_h265(options.width.get(), options.height.get()).or_fail()?;
+        let encoder = NvcodecEncoder::new_h265(options).or_fail()?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
     #[cfg(feature = "nvcodec")]
     fn new_nvcodec_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder =
-            NvcodecEncoder::new_h264(options.width.get(), options.height.get()).or_fail()?;
+        let encoder = NvcodecEncoder::new_h264(options).or_fail()?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
     #[cfg(feature = "nvcodec")]
     fn new_nvcodec_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder =
-            NvcodecEncoder::new_av1(options.width.get(), options.height.get()).or_fail()?;
+        let encoder = NvcodecEncoder::new_av1(options).or_fail()?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 

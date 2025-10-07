@@ -1,3 +1,5 @@
+#[cfg(feature = "nvcodec")]
+use crate::encoder_nvcodec_params;
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox_params;
 use crate::layout::DEFAULT_LAYOUT_JSON;
@@ -13,6 +15,12 @@ pub struct LayoutEncodeParams {
     pub video_toolbox_h264: shiguredo_video_toolbox::EncoderConfig,
     #[cfg(target_os = "macos")]
     pub video_toolbox_h265: shiguredo_video_toolbox::EncoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_h264: shiguredo_nvcodec::EncoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_h265: shiguredo_nvcodec::EncoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_av1: shiguredo_nvcodec::EncoderConfig,
 }
 
 impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodeParams {
@@ -43,6 +51,18 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodePar
                 "video_toolbox_h265_encode_params" => {
                     params.video_toolbox_h265 =
                         encoder_video_toolbox_params::parse_h265_encode_params(value)?;
+                }
+                #[cfg(feature = "nvcodec")]
+                "nvcodec_h264_encode_params" => {
+                    params.nvcodec_h264 = encoder_nvcodec_params::parse_h264_encode_params(value)?;
+                }
+                #[cfg(feature = "nvcodec")]
+                "nvcodec_h265_encode_params" => {
+                    params.nvcodec_h265 = encoder_nvcodec_params::parse_h265_encode_params(value)?;
+                }
+                #[cfg(feature = "nvcodec")]
+                "nvcodec_av1_encode_params" => {
+                    params.nvcodec_av1 = encoder_nvcodec_params::parse_av1_encode_params(value)?;
                 }
                 _ => {}
             }
@@ -86,6 +106,21 @@ impl LayoutEncodeParams {
                 .required()?,
         )?;
 
+        #[cfg(feature = "nvcodec")]
+        let nvcodec_h264 = encoder_nvcodec_params::parse_h264_encode_params(
+            value.to_member("nvcodec_h264_encode_params")?.required()?,
+        )?;
+
+        #[cfg(feature = "nvcodec")]
+        let nvcodec_h265 = encoder_nvcodec_params::parse_h265_encode_params(
+            value.to_member("nvcodec_h265_encode_params")?.required()?,
+        )?;
+
+        #[cfg(feature = "nvcodec")]
+        let nvcodec_av1 = encoder_nvcodec_params::parse_av1_encode_params(
+            value.to_member("nvcodec_av1_encode_params")?.required()?,
+        )?;
+
         Ok(Self {
             libvpx_vp8,
             libvpx_vp9,
@@ -95,6 +130,12 @@ impl LayoutEncodeParams {
             video_toolbox_h264,
             #[cfg(target_os = "macos")]
             video_toolbox_h265,
+            #[cfg(feature = "nvcodec")]
+            nvcodec_h264,
+            #[cfg(feature = "nvcodec")]
+            nvcodec_h265,
+            #[cfg(feature = "nvcodec")]
+            nvcodec_av1,
         })
     }
 }

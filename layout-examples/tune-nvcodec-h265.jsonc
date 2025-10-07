@@ -1,0 +1,21 @@
+{
+  "resolution": "1280x720",
+  "video_codec": "H265",
+  "video_bitrate": 1000000,
+  "frame_rate": 30,
+  "video_layout": {
+    "main": {
+      "max_columns": 3,
+      "video_sources": [
+        "archive*.json"
+      ]
+    }
+  },
+  "nvcodec_h265_encode_params": {
+    "gop_length": 300,
+    "preset": null,
+    "tuning_info": null,
+    "rate_control_mode": null,
+    "profile": null,
+  },
+}

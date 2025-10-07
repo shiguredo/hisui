@@ -6,6 +6,8 @@ pub mod decoder_dav1d;
 pub mod decoder_libvpx;
 #[cfg(feature = "nvcodec")]
 pub mod decoder_nvcodec;
+#[cfg(feature = "nvcodec")]
+pub mod decoder_nvcodec_params;
 pub mod decoder_openh264;
 pub mod decoder_opus;
 #[cfg(target_os = "macos")]
@@ -19,6 +21,8 @@ pub mod encoder_libvpx;
 pub mod encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 pub mod encoder_nvcodec;
+#[cfg(feature = "nvcodec")]
+pub mod encoder_nvcodec_params;
 pub mod encoder_openh264;
 pub mod encoder_openh264_params;
 pub mod encoder_opus;
@@ -30,6 +34,7 @@ pub mod encoder_video_toolbox;
 pub mod encoder_video_toolbox_params;
 pub mod json;
 pub mod layout;
+pub mod layout_decode_params;
 pub mod layout_encode_params;
 pub mod layout_region;
 pub mod logger;

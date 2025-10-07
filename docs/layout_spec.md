@@ -87,6 +87,12 @@
   "svt_av1_encode_params": $PARAMS,
   "video_toolbox_h264_encode_params": $PARAMS,
   "video_toolbox_h265_encode_params": $PARAMS,
+  "nvcodec_h264_encode_params": $PARAMS,
+  "nvcodec_h265_encode_params": $PARAMS,
+  "nvcodec_av1_encode_params": $PARAMS,
+  "nvcodec_h264_decode_params": $PARAMS,
+  "nvcodec_h265_decode_params": $PARAMS,
+  "nvcodec_av1_decode_params": $PARAMS,
   "trim": $BOOLEAN
 }
 ```
@@ -202,10 +208,16 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 
 - macOS 用にビルドされた Hisui（Apple Video Toolboxのエンコーダーが使用されます）
 - [`hisui compose`](command_compose.md)  などのコマンドの引数で `--openh264` オプションが指定された場合
+- nvcodec に対応してビルドされた Hisui（NVIDIA Video Codec SDKのエンコーダーが使用されます）
 
-`"H265"` は、以下の条件を満たしている場合にのみ指定可能です:
+`"H265"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です:
 
 - macOS 用にビルドされた Hisui（Apple Video Toolboxのエンコーダーが使用されます）
+- nvcodec に対応してビルドされた Hisui（NVIDIA Video Codec SDKのエンコーダーが使用されます）
+
+また `"AV1"` は常に指定可能ですが nvcodec に対応してビルドされた Hisui の場合には NVIDIA Video Codec SDKのエンコーダーが優先的に使用されます。
+
+nvcodec デフォルトでは無効になっているので、有効にする場合は [ビルド方法](build.md) を参考にして自前でのビルドを行ってください。
 
 ### `video_bitrate: $BITRATE`
 
@@ -602,6 +614,36 @@ Apple Video Toolbox で H.264 エンコードを行う際のエンコードパ�
 
 Apple Video Toolbox で H.265 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
+
+### `nvcodec_h264_encode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で H.264 エンコードを行う際のエンコードパラメーターを指定します。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
+
+### `nvcodec_h265_encode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で H.265 エンコードを行う際のエンコードパラメーターを指定します。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
+
+### `nvcodec_av1_encode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で AV1 エンコードを行う際のエンコードパラメーターを指定します。
+詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
+
+### `nvcodec_h264_decode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で H.264 デコードを行う際のデコードパラメーターを指定します。
+詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
+
+### `nvcodec_h265_decode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で H.265 デコードを行う際のデコードパラメーターを指定します。
+詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
+
+### `nvcodec_av1_decode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で AV1 デコードを行う際のデコードパラメーターを指定します。
+詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
 ### `trim: $BOOLEAN`
 
