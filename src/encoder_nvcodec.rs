@@ -30,8 +30,9 @@ impl NvcodecEncoder {
             fps_numerator: options.frame_rate.numerator.get() as u32,
             fps_denominator: options.frame_rate.denumerator.get() as u32,
             target_bitrate: Some(options.bitrate as u32),
-            ..Default::default()
+            ..options.encode_params.nvcodec_h264.clone()
         };
+        log::debug!("nvcodec h264 encoder config: {config:?}");
 
         let mut inner = shiguredo_nvcodec::Encoder::new_h264(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
@@ -58,8 +59,9 @@ impl NvcodecEncoder {
             fps_numerator: options.frame_rate.numerator.get() as u32,
             fps_denominator: options.frame_rate.denumerator.get() as u32,
             target_bitrate: Some(options.bitrate as u32),
-            ..Default::default()
+            ..options.encode_params.nvcodec_h265.clone()
         };
+        log::debug!("nvcodec h265 encoder config: {config:?}");
 
         let mut inner = shiguredo_nvcodec::Encoder::new_h265(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
@@ -95,8 +97,9 @@ impl NvcodecEncoder {
             fps_numerator: options.frame_rate.numerator.get() as u32,
             fps_denominator: options.frame_rate.denumerator.get() as u32,
             target_bitrate: Some(options.bitrate as u32),
-            ..Default::default()
+            ..options.encode_params.nvcodec_av1.clone()
         };
+        log::debug!("nvcodec av1 encoder config: {config:?}");
 
         let mut inner = shiguredo_nvcodec::Encoder::new_av1(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
