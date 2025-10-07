@@ -86,6 +86,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             ..EngineInfo::new(EngineName::VideoToolbox)
         });
     }
+    #[cfg(feature = "nvcodec")]
+    {
+        engines.push(EngineInfo {
+            build_version: Some(shiguredo_nvcodec::BUILD_VERSION),
+            ..EngineInfo::new(EngineName::Nvcodec)
+        });
+    }
     if let Some(lib) = openh264_lib {
         engines.push(EngineInfo {
             repository: Some(shiguredo_openh264::BUILD_REPOSITORY),
