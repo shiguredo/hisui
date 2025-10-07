@@ -4,11 +4,11 @@ use std::ptr;
 
 use crate::{Error, ReleaseGuard, ensure_cuda_initialized, sys};
 
-/// プリセット GUID
+/// プリセット
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PresetGuid(sys::GUID);
+pub struct Preset(sys::GUID);
 
-impl PresetGuid {
+impl Preset {
     /// P1プリセット（最高速）
     pub const P1: Self = Self(sys::NV_ENC_PRESET_P1_GUID);
 
@@ -58,6 +58,51 @@ impl TuningInfo {
     }
 }
 
+/// プロファイル
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Profile(sys::GUID);
+
+impl Profile {
+    /// 自動選択プロファイル
+    pub const AUTO_SELECT: Self = Self(sys::NV_ENC_CODEC_PROFILE_AUTOSELECT_GUID);
+
+    // H.264 プロファイル
+    /// H.264 Baseline プロファイル
+    pub const H264_BASELINE: Self = Self(sys::NV_ENC_H264_PROFILE_BASELINE_GUID);
+    /// H.264 Main プロファイル
+    pub const H264_MAIN: Self = Self(sys::NV_ENC_H264_PROFILE_MAIN_GUID);
+    /// H.264 High プロファイル
+    pub const H264_HIGH: Self = Self(sys::NV_ENC_H264_PROFILE_HIGH_GUID);
+    /// H.264 High 10 プロファイル
+    pub const H264_HIGH_10: Self = Self(sys::NV_ENC_H264_PROFILE_HIGH_10_GUID);
+    /// H.264 High 422 プロファイル
+    pub const H264_HIGH_422: Self = Self(sys::NV_ENC_H264_PROFILE_HIGH_422_GUID);
+    /// H.264 High 444 プロファイル
+    pub const H264_HIGH_444: Self = Self(sys::NV_ENC_H264_PROFILE_HIGH_444_GUID);
+    /// H.264 Stereo プロファイル
+    pub const H264_STEREO: Self = Self(sys::NV_ENC_H264_PROFILE_STEREO_GUID);
+    /// H.264 Progressive High プロファイル
+    pub const H264_PROGRESSIVE_HIGH: Self = Self(sys::NV_ENC_H264_PROFILE_PROGRESSIVE_HIGH_GUID);
+    /// H.264 Constrained High プロファイル
+    pub const H264_CONSTRAINED_HIGH: Self = Self(sys::NV_ENC_H264_PROFILE_CONSTRAINED_HIGH_GUID);
+
+    // HEVC プロファイル
+    /// HEVC Main プロファイル
+    pub const HEVC_MAIN: Self = Self(sys::NV_ENC_HEVC_PROFILE_MAIN_GUID);
+    /// HEVC Main10 プロファイル
+    pub const HEVC_MAIN10: Self = Self(sys::NV_ENC_HEVC_PROFILE_MAIN10_GUID);
+    /// HEVC FREXT プロファイル (Main 422/444 8/10 bit)
+    pub const HEVC_FREXT: Self = Self(sys::NV_ENC_HEVC_PROFILE_FREXT_GUID);
+
+    // AV1 プロファイル
+    /// AV1 Main プロファイル
+    pub const AV1_MAIN: Self = Self(sys::NV_ENC_AV1_PROFILE_MAIN_GUID);
+
+    fn to_sys(self) -> sys::GUID {
+        self.0
+    }
+}
+
 /// エンコーダーに指定する設定
 #[derive(Debug, Clone)]
 pub struct EncoderConfig {
@@ -86,7 +131,7 @@ pub struct EncoderConfig {
     pub target_bitrate: Option<u32>,
 
     /// プリセット GUID (品質と速度のバランス)
-    pub preset_guid: PresetGuid,
+    pub preset: Preset,
 
     /// チューニング情報
     pub tuning_info: TuningInfo,
@@ -104,6 +149,10 @@ pub struct EncoderConfig {
 
     /// Pフレーム間隔
     pub frame_interval_p: u32,
+
+    /// プロファイル
+    /// None の場合は自動選択またはコーデックのデフォルトプロファイルが使用される
+    pub profile: Option<Profile>,
 
     /// デバイスID (使用するGPU)
     pub device_id: i32,
@@ -132,12 +181,13 @@ impl Default for EncoderConfig {
             fps_numerator: 30,
             fps_denominator: 1,
             target_bitrate: Some(5_000_000), // 5 Mbps
-            preset_guid: PresetGuid::P4,     // バランスの良いプリセット
+            preset: Preset::P4,              // バランスの良いプリセット
             tuning_info: TuningInfo::LOW_LATENCY,
             rate_control_mode: RateControlMode::Vbr,
             gop_length: None, // 無限GOP
             idr_period: None, // gop_length と同じ
             frame_interval_p: 1,
+            profile: None,
             device_id: 0, // プライマリGPU
         }
     }
@@ -274,9 +324,15 @@ impl Encoder {
         &mut self,
         config: &EncoderConfig,
         codec_guid: sys::GUID,
-        profile_guid: sys::GUID,
+        default_profile: sys::GUID,
     ) -> Result<(), Error> {
         unsafe {
+            // プロファイルの決定: 指定されたプロファイルを優先、なければデフォルトを使用
+            let profile = config
+                .profile
+                .map(|p| p.to_sys())
+                .unwrap_or(default_profile);
+
             // プリセット設定を取得
             let mut preset_config: sys::NV_ENC_PRESET_CONFIG = std::mem::zeroed();
             preset_config.version = sys::NV_ENC_PRESET_CONFIG_VER;
@@ -289,7 +345,7 @@ impl Encoder {
                     f(
                         self.h_encoder,
                         codec_guid,
-                        config.preset_guid.to_sys(),
+                        config.preset.to_sys(),
                         config.tuning_info.to_sys(),
                         &mut preset_config,
                     )
@@ -307,7 +363,7 @@ impl Encoder {
 
             init_params.version = sys::NV_ENC_INITIALIZE_PARAMS_VER;
             init_params.encodeGUID = codec_guid;
-            init_params.presetGUID = config.preset_guid.to_sys();
+            init_params.presetGUID = config.preset.to_sys();
             init_params.encodeWidth = config.width;
             init_params.encodeHeight = config.height;
             init_params.darWidth = config.width;
@@ -321,7 +377,7 @@ impl Encoder {
             init_params.tuningInfo = config.tuning_info.to_sys();
 
             encode_config.version = sys::NV_ENC_CONFIG_VER;
-            encode_config.profileGUID = profile_guid;
+            encode_config.profileGUID = profile;
             encode_config.gopLength = config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH);
             encode_config.frameIntervalP = config.frame_interval_p as i32;
             encode_config.rcParams.rateControlMode = config.rate_control_mode.to_sys();
