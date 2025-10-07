@@ -78,20 +78,20 @@ fn update_h264_encode_params(
     // - fps_denominator
     // - target_bitrate
 
-    update_common_encode_params(params, config)?;
+    update_common_encode_params(&params, config)?;
 
     // H.264固有のプロファイル設定
     config.profile = params
         .get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
-            "baseline" => Ok(Some(shiguredo_nvcodec::Profile::H264_BASELINE)),
-            "main" => Ok(Some(shiguredo_nvcodec::Profile::H264_MAIN)),
-            "high" => Ok(Some(shiguredo_nvcodec::Profile::H264_HIGH)),
-            "high_10" => Ok(Some(shiguredo_nvcodec::Profile::H264_HIGH_10)),
-            "high_422" => Ok(Some(shiguredo_nvcodec::Profile::H264_HIGH_422)),
-            "high_444" => Ok(Some(shiguredo_nvcodec::Profile::H264_HIGH_444)),
+            "baseline" => Ok(shiguredo_nvcodec::Profile::H264_BASELINE),
+            "main" => Ok(shiguredo_nvcodec::Profile::H264_MAIN),
+            "high" => Ok(shiguredo_nvcodec::Profile::H264_HIGH),
+            "high_10" => Ok(shiguredo_nvcodec::Profile::H264_HIGH_10),
+            "high_422" => Ok(shiguredo_nvcodec::Profile::H264_HIGH_422),
+            "high_444" => Ok(shiguredo_nvcodec::Profile::H264_HIGH_444),
             _ => Err(v.invalid("unknown 'profile' value for H.264")),
         })?
-        .or(Some(config.profile));
+        .or(config.profile);
 
     Ok(())
 }
@@ -107,17 +107,17 @@ fn update_h265_encode_params(
     // - fps_denominator
     // - target_bitrate
 
-    update_common_encode_params(params, config)?;
+    update_common_encode_params(&params, config)?;
 
     // H.265固有のプロファイル設定
     config.profile = params
         .get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
-            "main" => Ok(Some(shiguredo_nvcodec::Profile::HEVC_MAIN)),
-            "main10" => Ok(Some(shiguredo_nvcodec::Profile::HEVC_MAIN10)),
-            "frext" => Ok(Some(shiguredo_nvcodec::Profile::HEVC_FREXT)),
+            "main" => Ok(shiguredo_nvcodec::Profile::HEVC_MAIN),
+            "main10" => Ok(shiguredo_nvcodec::Profile::HEVC_MAIN10),
+            "frext" => Ok(shiguredo_nvcodec::Profile::HEVC_FREXT),
             _ => Err(v.invalid("unknown 'profile' value for H.265")),
         })?
-        .or(Some(config.profile));
+        .or(config.profile);
 
     Ok(())
 }
@@ -133,21 +133,21 @@ fn update_av1_encode_params(
     // - fps_denominator
     // - target_bitrate
 
-    update_common_encode_params(params, config)?;
+    update_common_encode_params(&params, config)?;
 
     // AV1固有のプロファイル設定
     config.profile = params
         .get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
-            "main" => Ok(Some(shiguredo_nvcodec::Profile::AV1_MAIN)),
+            "main" => Ok(shiguredo_nvcodec::Profile::AV1_MAIN),
             _ => Err(v.invalid("unknown 'profile' value for AV1")),
         })?
-        .or(Some(config.profile));
+        .or(config.profile);
 
     Ok(())
 }
 
 fn update_common_encode_params(
-    params: JsonObject<'_, '_>,
+    params: &JsonObject<'_, '_>,
     config: &mut shiguredo_nvcodec::EncoderConfig,
 ) -> Result<(), nojson::JsonParseError> {
     // 最大エンコードサイズ（動的解像度変更用）
