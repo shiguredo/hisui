@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "nvcodec"), expect(unused_variables, unused_mut))]
+
 #[cfg(feature = "nvcodec")]
 use crate::decoder_nvcodec_params;
 use crate::layout::DEFAULT_LAYOUT_JSON;

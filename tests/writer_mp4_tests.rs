@@ -281,6 +281,7 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
         audio_bitrate: None,
         video_bitrate: None,
         encode_params: Default::default(),
+        decode_params: Default::default(),
     }
 }
 

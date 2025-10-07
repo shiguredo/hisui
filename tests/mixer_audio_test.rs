@@ -372,6 +372,7 @@ fn layout(audio_sources: &[SourceInfo], trim_span: Option<(Duration, Duration)>)
         audio_bitrate: None,
         video_bitrate: None,
         encode_params: Default::default(),
+        decode_params: Default::default(),
     }
 }
 

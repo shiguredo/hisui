@@ -212,6 +212,7 @@ pub struct Encoder {
     height: u32,
     buffer_format: sys::NV_ENC_BUFFER_FORMAT,
     encoded_frames: VecDeque<EncodedFrame>,
+    frame_count: u64,
 }
 
 impl Encoder {
@@ -309,6 +310,7 @@ impl Encoder {
                 height: config.height,
                 buffer_format: sys::_NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12,
                 encoded_frames: VecDeque::new(),
+                frame_count: 0,
             };
 
             // デフォルトパラメータでエンコーダーを初期化
@@ -657,6 +659,9 @@ impl Encoder {
             pic_params.outputBitstream = output_buffer;
             pic_params.bufferFmt = self.buffer_format;
             pic_params.pictureStruct = sys::_NV_ENC_PIC_STRUCT_NV_ENC_PIC_STRUCT_FRAME;
+            pic_params.inputTimeStamp = self.frame_count;
+
+            self.frame_count += 1;
 
             let status = self
                 .encoder
@@ -717,6 +722,7 @@ impl Encoder {
             let mut pic_params: sys::NV_ENC_PIC_PARAMS = std::mem::zeroed();
             pic_params.version = sys::NV_ENC_PIC_PARAMS_VER;
             pic_params.encodePicFlags = sys::NV_ENC_PIC_FLAG_EOS;
+            pic_params.inputTimeStamp = self.frame_count;
 
             let status = self
                 .encoder
@@ -758,6 +764,7 @@ impl std::fmt::Debug for Encoder {
             .field("width", &self.width)
             .field("height", &self.height)
             .field("buffer_format", &self.buffer_format)
+            .field("frame_count", &self.frame_count)
             .finish()
     }
 }
