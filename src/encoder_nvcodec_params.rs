@@ -150,12 +150,6 @@ fn update_common_encode_params(
     params: &JsonObject<'_, '_>,
     config: &mut shiguredo_nvcodec::EncoderConfig,
 ) -> Result<(), nojson::JsonParseError> {
-    // 最大エンコードサイズ（動的解像度変更用）
-    config.max_encode_width = params.get("max_encode_width")?.or(config.max_encode_width);
-    config.max_encode_height = params
-        .get("max_encode_height")?
-        .or(config.max_encode_height);
-
     // プリセット設定
     config.preset = params
         .get_with("preset", |v| match v.to_unquoted_string_str()?.as_ref() {
