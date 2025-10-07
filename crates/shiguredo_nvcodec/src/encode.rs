@@ -323,7 +323,7 @@ impl Encoder {
             encode_config.version = sys::NV_ENC_CONFIG_VER;
             encode_config.profileGUID = profile_guid;
             encode_config.gopLength = config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH);
-            encode_config.frameIntervalP = config.frame_interval_p;
+            encode_config.frameIntervalP = config.frame_interval_p as i32;
             encode_config.rcParams.rateControlMode = config.rate_control_mode.to_sys();
 
             // ビットレート設定

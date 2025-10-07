@@ -297,9 +297,13 @@ struct CustomCallbacks;
 
 impl bindgen::callbacks::ParseCallbacks for CustomCallbacks {
     fn add_derives(&self, info: &bindgen::callbacks::DeriveInfo<'_>) -> Vec<String> {
-        // "_GUID" に PartialEq と Eq を導出
+        // "_GUID" に各種トレイトを導出
         if info.name == "_GUID" {
-            vec!["PartialEq".to_string(), "Eq".to_string()]
+            vec![
+                "Debug".to_string(),
+                "PartialEq".to_string(),
+                "Eq".to_string(),
+            ]
         } else {
             vec![]
         }
