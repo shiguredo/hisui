@@ -11,20 +11,26 @@ pub struct PresetGuid(sys::GUID);
 impl PresetGuid {
     /// P1プリセット（最高速）
     pub const P1: Self = Self(sys::NV_ENC_PRESET_P1_GUID);
+
     /// P2プリセット
     pub const P2: Self = Self(sys::NV_ENC_PRESET_P2_GUID);
+
     /// P3プリセット
     pub const P3: Self = Self(sys::NV_ENC_PRESET_P3_GUID);
+
     /// P4プリセット（バランス型）
     pub const P4: Self = Self(sys::NV_ENC_PRESET_P4_GUID);
+
     /// P5プリセット
     pub const P5: Self = Self(sys::NV_ENC_PRESET_P5_GUID);
+
     /// P6プリセット
     pub const P6: Self = Self(sys::NV_ENC_PRESET_P6_GUID);
+
     /// P7プリセット（最高品質）
     pub const P7: Self = Self(sys::NV_ENC_PRESET_P7_GUID);
 
-    pub(crate) fn to_sys(&self) -> sys::GUID {
+    fn to_sys(&self) -> sys::GUID {
         self.0
     }
 }
@@ -36,15 +42,18 @@ pub struct TuningInfo(sys::NV_ENC_TUNING_INFO);
 impl TuningInfo {
     /// 高品質
     pub const HIGH_QUALITY: Self = Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_HIGH_QUALITY);
+
     /// 低遅延
     pub const LOW_LATENCY: Self = Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_LOW_LATENCY);
+
     /// 超低遅延
     pub const ULTRA_LOW_LATENCY: Self =
         Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY);
+
     /// ロスレス
     pub const LOSSLESS: Self = Self(sys::NV_ENC_TUNING_INFO_NV_ENC_TUNING_INFO_LOSSLESS);
 
-    pub(crate) fn to_sys(&self) -> sys::NV_ENC_TUNING_INFO {
+    fn to_sys(&self) -> sys::NV_ENC_TUNING_INFO {
         self.0
     }
 }
@@ -58,6 +67,14 @@ pub struct EncoderConfig {
     /// 入出力画像の高さ
     pub height: u32,
 
+    /// 最大エンコード幅（動的解像度変更用）
+    /// None の場合は width と同じ値が使用される
+    pub max_encode_width: Option<u32>,
+
+    /// 最大エンコード高さ（動的解像度変更用）
+    /// None の場合は height と同じ値が使用される
+    pub max_encode_height: Option<u32>,
+
     /// FPS の分子
     pub fps_numerator: u32,
 
@@ -65,7 +82,8 @@ pub struct EncoderConfig {
     pub fps_denominator: u32,
 
     /// ビットレート (bps 単位)
-    pub target_bitrate: u32,
+    /// None の場合はレート制御モードが ConstQp である必要がある
+    pub target_bitrate: Option<u32>,
 
     /// プリセット GUID (品質と速度のバランス)
     pub preset_guid: PresetGuid,
@@ -76,23 +94,19 @@ pub struct EncoderConfig {
     /// レート制御モード
     pub rate_control_mode: RateControlMode,
 
-    /// GOP長 (NVENC_INFINITE_GOPLENGTH で無限)
-    pub gop_length: u32,
+    /// GOP長
+    /// None の場合は無限GOP (NVENC_INFINITE_GOPLENGTH) が使用される
+    pub gop_length: Option<u32>,
 
     /// IDRフレーム間隔
-    pub idr_period: u32,
+    /// None の場合は gop_length と同じ値が使用される
+    pub idr_period: Option<u32>,
 
     /// Pフレーム間隔
     pub frame_interval_p: u32,
 
     /// デバイスID (使用するGPU)
     pub device_id: i32,
-
-    /// 最大エンコード幅
-    pub max_encode_width: u32,
-
-    /// 最大エンコード高さ
-    pub max_encode_height: u32,
 }
 
 /// レート制御モード
@@ -100,8 +114,10 @@ pub struct EncoderConfig {
 pub enum RateControlMode {
     /// Constant QP mode
     ConstQp,
+
     /// Variable bitrate mode
     Vbr,
+
     /// Constant bitrate mode
     Cbr,
 }
@@ -111,18 +127,18 @@ impl Default for EncoderConfig {
         Self {
             width: 640,
             height: 480,
+            max_encode_width: None,
+            max_encode_height: None,
             fps_numerator: 30,
             fps_denominator: 1,
-            target_bitrate: 5_000_000,   // 5 Mbps
-            preset_guid: PresetGuid::P4, // バランスの良いプリセット
-            tuning_info: TuningInfo::HIGH_QUALITY,
+            target_bitrate: Some(5_000_000), // 5 Mbps
+            preset_guid: PresetGuid::P4,     // バランスの良いプリセット
+            tuning_info: TuningInfo::LOW_LATENCY,
             rate_control_mode: RateControlMode::Vbr,
-            gop_length: sys::NVENC_INFINITE_GOPLENGTH,
-            idr_period: sys::NVENC_INFINITE_GOPLENGTH,
+            gop_length: None, // 無限GOP
+            idr_period: None, // gop_length と同じ
             frame_interval_p: 1,
             device_id: 0, // プライマリGPU
-            max_encode_width: 1920,
-            max_encode_height: 1080,
         }
     }
 }
@@ -300,32 +316,43 @@ impl Encoder {
             init_params.frameRateDen = config.fps_denominator;
             init_params.enablePTD = 1;
             init_params.encodeConfig = &mut encode_config;
-            init_params.maxEncodeWidth = config.max_encode_width;
-            init_params.maxEncodeHeight = config.max_encode_height;
+            init_params.maxEncodeWidth = config.max_encode_width.unwrap_or(config.width);
+            init_params.maxEncodeHeight = config.max_encode_height.unwrap_or(config.height);
             init_params.tuningInfo = config.tuning_info.to_sys();
 
             encode_config.version = sys::NV_ENC_CONFIG_VER;
             encode_config.profileGUID = profile_guid;
-            encode_config.gopLength = config.gop_length;
+            encode_config.gopLength = config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH);
             encode_config.frameIntervalP = config.frame_interval_p;
             encode_config.rcParams.rateControlMode = config.rate_control_mode.to_sys();
 
             // ビットレート設定
             if config.rate_control_mode != RateControlMode::ConstQp {
-                encode_config.rcParams.averageBitRate = config.target_bitrate;
-                encode_config.rcParams.maxBitRate = config.target_bitrate;
+                let bitrate = config.target_bitrate.ok_or_else(|| {
+                    Error::new(
+                        sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
+                        "initialize_encoder",
+                        "target_bitrate must be specified when not using ConstQp mode",
+                    )
+                })?;
+                encode_config.rcParams.averageBitRate = bitrate;
+                encode_config.rcParams.maxBitRate = bitrate;
             }
+
+            let idr_period = config
+                .idr_period
+                .unwrap_or_else(|| config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH));
 
             // コーデック固有の設定
             match codec_guid {
                 sys::NV_ENC_CODEC_HEVC_GUID => {
-                    encode_config.encodeCodecConfig.hevcConfig.idrPeriod = config.idr_period;
+                    encode_config.encodeCodecConfig.hevcConfig.idrPeriod = idr_period;
                 }
                 sys::NV_ENC_CODEC_H264_GUID => {
-                    encode_config.encodeCodecConfig.h264Config.idrPeriod = config.idr_period;
+                    encode_config.encodeCodecConfig.h264Config.idrPeriod = idr_period;
                 }
                 sys::NV_ENC_CODEC_AV1_GUID => {
-                    encode_config.encodeCodecConfig.av1Config.idrPeriod = config.idr_period;
+                    encode_config.encodeCodecConfig.av1Config.idrPeriod = idr_period;
                 }
                 _ => {
                     return Err(Error::new(
@@ -842,7 +869,7 @@ mod tests {
     fn test_encode_h265_black_frame() {
         let config = EncoderConfig::default();
         let width = config.width;
-        let height = config.heigth;
+        let height = config.height;
 
         // エンコーダーを作成
         let mut encoder = Encoder::new_h265(config).expect("failed to create h265 encoder");
@@ -896,7 +923,7 @@ mod tests {
     fn test_encode_h264_black_frame() {
         let config = EncoderConfig::default();
         let width = config.width;
-        let height = config.heigth;
+        let height = config.height;
 
         // エンコーダーを作成
         let mut encoder = Encoder::new_h264(config).expect("failed to create h264 encoder");
@@ -950,7 +977,7 @@ mod tests {
     fn test_encode_av1_black_frame() {
         let config = EncoderConfig::default();
         let width = config.width;
-        let height = config.heigth;
+        let height = config.height;
 
         // エンコーダーを作成
         let mut encoder = Encoder::new_av1(config).expect("failed to create av1 encoder");
