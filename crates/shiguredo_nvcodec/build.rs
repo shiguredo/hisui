@@ -183,6 +183,24 @@ pub const NV_ENC_CODEC_AV1_GUID: GUID = GUID {
     Data4: [0x86, 0x2d, 0x5d, 0x15, 0xcd, 0x16, 0xd2, 0x54],
 };
 
+// プロファイル GUID: NV_ENC_CODEC_PROFILE_AUTOSELECT_GUID
+// {BFD6F8E7-233C-4341-8B3E-4818523803F4}
+pub const NV_ENC_CODEC_PROFILE_AUTOSELECT_GUID: GUID = GUID {
+    Data1: 0xbfd6f8e7,
+    Data2: 0x233c,
+    Data3: 0x4341,
+    Data4: [0x8b, 0x3e, 0x48, 0x18, 0x52, 0x38, 0x03, 0xf4],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_BASELINE_GUID
+// {0727BCAA-78C4-4c83-8C2F-EF3DFF267C6A}
+pub const NV_ENC_H264_PROFILE_BASELINE_GUID: GUID = GUID {
+    Data1: 0x0727bcaa,
+    Data2: 0x78c4,
+    Data3: 0x4c83,
+    Data4: [0x8c, 0x2f, 0xef, 0x3d, 0xff, 0x26, 0x7c, 0x6a],
+};
+
 // プロファイル GUID: NV_ENC_H264_PROFILE_MAIN_GUID
 // {60B5C1D4-67FE-4790-94D5-C4726D7B6E6D}
 pub const NV_ENC_H264_PROFILE_MAIN_GUID: GUID = GUID {
@@ -192,6 +210,69 @@ pub const NV_ENC_H264_PROFILE_MAIN_GUID: GUID = GUID {
     Data4: [0x94, 0xd5, 0xc4, 0x72, 0x6d, 0x7b, 0x6e, 0x6d],
 };
 
+// プロファイル GUID: NV_ENC_H264_PROFILE_HIGH_GUID
+// {E7CBC309-4F7A-4b89-AF2A-D537C92BE310}
+pub const NV_ENC_H264_PROFILE_HIGH_GUID: GUID = GUID {
+    Data1: 0xe7cbc309,
+    Data2: 0x4f7a,
+    Data3: 0x4b89,
+    Data4: [0xaf, 0x2a, 0xd5, 0x37, 0xc9, 0x2b, 0xe3, 0x10],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_HIGH_10_GUID
+// {8F0C337E-186C-48E9-A69D-7A8334089758}
+pub const NV_ENC_H264_PROFILE_HIGH_10_GUID: GUID = GUID {
+    Data1: 0x8f0c337e,
+    Data2: 0x186c,
+    Data3: 0x48e9,
+    Data4: [0xa6, 0x9d, 0x7a, 0x83, 0x34, 0x08, 0x97, 0x58],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_HIGH_422_GUID
+// {FF3242E9-613C-4295-A1E8-2A7FE94D8133}
+pub const NV_ENC_H264_PROFILE_HIGH_422_GUID: GUID = GUID {
+    Data1: 0xff3242e9,
+    Data2: 0x613c,
+    Data3: 0x4295,
+    Data4: [0xa1, 0xe8, 0x2a, 0x7f, 0xe9, 0x4d, 0x81, 0x33],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_HIGH_444_GUID
+// {7AC663CB-A598-4960-B844-339B261A7D52}
+pub const NV_ENC_H264_PROFILE_HIGH_444_GUID: GUID = GUID {
+    Data1: 0x7ac663cb,
+    Data2: 0xa598,
+    Data3: 0x4960,
+    Data4: [0xb8, 0x44, 0x33, 0x9b, 0x26, 0x1a, 0x7d, 0x52],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_STEREO_GUID
+// {40847BF5-33F7-4601-9084-E8FE3C1DB8B7}
+pub const NV_ENC_H264_PROFILE_STEREO_GUID: GUID = GUID {
+    Data1: 0x40847bf5,
+    Data2: 0x33f7,
+    Data3: 0x4601,
+    Data4: [0x90, 0x84, 0xe8, 0xfe, 0x3c, 0x1d, 0xb8, 0xb7],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_PROGRESSIVE_HIGH_GUID
+// {B405AFAC-F32B-417B-89C4-9ABEED3E5978}
+pub const NV_ENC_H264_PROFILE_PROGRESSIVE_HIGH_GUID: GUID = GUID {
+    Data1: 0xb405afac,
+    Data2: 0xf32b,
+    Data3: 0x417b,
+    Data4: [0x89, 0xc4, 0x9a, 0xbe, 0xed, 0x3e, 0x59, 0x78],
+};
+
+// プロファイル GUID: NV_ENC_H264_PROFILE_CONSTRAINED_HIGH_GUID
+// {AEC1BD87-E85B-48f2-84C3-98BCA6285072}
+pub const NV_ENC_H264_PROFILE_CONSTRAINED_HIGH_GUID: GUID = GUID {
+    Data1: 0xaec1bd87,
+    Data2: 0xe85b,
+    Data3: 0x48f2,
+    Data4: [0x84, 0xc3, 0x98, 0xbc, 0xa6, 0x28, 0x50, 0x72],
+};
+
 // プロファイル GUID: NV_ENC_HEVC_PROFILE_MAIN_GUID
 // {B514C39A-B55B-40fa-878F-F1253B4DFDEC}
 pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
@@ -199,6 +280,24 @@ pub const NV_ENC_HEVC_PROFILE_MAIN_GUID: GUID = GUID {
     Data2: 0xb55b,
     Data3: 0x40fa,
     Data4: [0x87, 0x8f, 0xf1, 0x25, 0x3b, 0x4d, 0xfd, 0xec],
+};
+
+// プロファイル GUID: NV_ENC_HEVC_PROFILE_MAIN10_GUID
+// {fa4d2b6c-3a5b-411a-8018-0a3f5e3c9be5}
+pub const NV_ENC_HEVC_PROFILE_MAIN10_GUID: GUID = GUID {
+    Data1: 0xfa4d2b6c,
+    Data2: 0x3a5b,
+    Data3: 0x411a,
+    Data4: [0x80, 0x18, 0x0a, 0x3f, 0x5e, 0x3c, 0x9b, 0xe5],
+};
+
+// プロファイル GUID: NV_ENC_HEVC_PROFILE_FREXT_GUID
+// {51ec32b5-1b4c-453c-9cbd-b616bd621341}
+pub const NV_ENC_HEVC_PROFILE_FREXT_GUID: GUID = GUID {
+    Data1: 0x51ec32b5,
+    Data2: 0x1b4c,
+    Data3: 0x453c,
+    Data4: [0x9c, 0xbd, 0xb6, 0x16, 0xbd, 0x62, 0x13, 0x41],
 };
 
 // プロファイル GUID: NV_ENC_AV1_PROFILE_MAIN_GUID
