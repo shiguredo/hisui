@@ -314,6 +314,7 @@ impl VideoEncoder {
             CodecName::H265 => return Err(orfail::Failure::new("no available H.265 encoder")),
             #[cfg(feature = "nvcodec")]
             CodecName::Av1 => VideoEncoderInner::new_nvcodec_av1(options).or_fail()?,
+            #[cfg_attr(feature = "nvcodec", expect(unreachable_patterns))]
             CodecName::Av1 => VideoEncoderInner::new_svt_av1(options).or_fail()?,
             _ => unreachable!(),
         };
@@ -431,7 +432,6 @@ impl MediaProcessor for VideoEncoder {
 enum VideoEncoderInner {
     Libvpx(LibvpxEncoder),
     Openh264(Openh264Encoder),
-    #[cfg_attr(feature = "nvcodec", expect(dead_code))]
     SvtAv1(SvtAv1Encoder),
     #[cfg(target_os = "macos")]
     VideoToolbox(VideoToolboxEncoder),
