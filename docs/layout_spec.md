@@ -215,10 +215,9 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 - macOS 用にビルドされた Hisui（Apple Video Toolboxのエンコーダーが使用されます）
 - nvcodec に対応してビルドされた Hisui（NVIDIA Video Codec SDKのエンコーダーが使用されます）
 
-`"AV1"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です:
+また `"AV1"` は常に指定可能ですが nvcodec に対応してビルドされた Hisui の場合には NVIDIA Video Codec SDKのエンコーダーが優先的に使用されます。
 
-- SVT-AV1 に対応してビルドされた Hisui（SVT-AV1エンコーダーが使用されます）
-- nvcodec に対応してビルドされた Hisui（NVIDIA Video Codec SDKのエンコーダーが使用されます）
+nvcodec デフォルトでは無効になっているので、有効にする場合は [ビルド方法](build.md) を参考にして自前でのビルドを行ってください。
 
 ### `video_bitrate: $BITRATE`
 
