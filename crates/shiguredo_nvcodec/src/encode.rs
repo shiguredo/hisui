@@ -224,7 +224,6 @@ impl Encoder {
     fn get_sequence_params_inner(&mut self) -> Result<Vec<u8>, Error> {
         unsafe {
             // シーケンスパラメータを格納するバッファを確保
-            // NV_MAX_SEQ_HDR_LEN は 512 バイト
             let mut payload_buffer = vec![0u8; sys::NV_MAX_SEQ_HDR_LEN as usize];
             let mut out_size: u32 = 0; // 実際のサイズを受け取る変数
 
