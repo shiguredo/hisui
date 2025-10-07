@@ -24,9 +24,14 @@ impl NvcodecEncoder {
         let width = EvenUsize::new(width).or_fail()?;
         let height = EvenUsize::new(height).or_fail()?;
 
-        let mut inner =
-            shiguredo_nvcodec::Encoder::new_h264(width.get() as u32, height.get() as u32)
-                .or_fail()?;
+        // TODO: レイアウトから情報を取得して設定する
+        let config = shiguredo_nvcodec::EncoderConfig {
+            width: width.get() as u32,
+            height: height.get() as u32,
+            ..Default::default()
+        };
+
+        let mut inner = shiguredo_nvcodec::Encoder::new_h264(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
         let sample_entry =
             video_h264::h264_sample_entry_from_annexb(width.get(), height.get(), &seq_params)
@@ -48,9 +53,13 @@ impl NvcodecEncoder {
         // TODO: フレームレートを適切に設定する
         let fps = FrameRate::FPS_25;
 
-        let mut inner =
-            shiguredo_nvcodec::Encoder::new_h265(width.get() as u32, height.get() as u32)
-                .or_fail()?;
+        let config = shiguredo_nvcodec::EncoderConfig {
+            width: width.get() as u32,
+            height: height.get() as u32,
+            ..Default::default()
+        };
+
+        let mut inner = shiguredo_nvcodec::Encoder::new_h265(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
         let sample_entry =
             video_h265::h265_sample_entry_from_annexb(width.get(), height.get(), fps, &seq_params)
@@ -70,9 +79,13 @@ impl NvcodecEncoder {
         let width = EvenUsize::new(width).or_fail()?;
         let height = EvenUsize::new(height).or_fail()?;
 
-        let mut inner =
-            shiguredo_nvcodec::Encoder::new_av1(width.get() as u32, height.get() as u32)
-                .or_fail()?;
+        let config = shiguredo_nvcodec::EncoderConfig {
+            width: width.get() as u32,
+            height: height.get() as u32,
+            ..Default::default()
+        };
+
+        let mut inner = shiguredo_nvcodec::Encoder::new_av1(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
         let sample_entry = video_av1::av1_sample_entry(width, height, &seq_params);
 
