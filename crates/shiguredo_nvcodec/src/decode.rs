@@ -410,7 +410,7 @@ fn handle_picture_display_inner(
         });
 
         // フレームサイズを計算 (NV12 形式: Y プレーン + UV プレーン)
-        // 注意: NVDEC は輝度の高さを 2 でアライメントする
+        // 注意: NVDEC は高さを 2 でアライメントする
         let aligned_height = (state.surface_height + 1) & !1;
         let y_size = pitch as usize * state.height as usize;
         let uv_size = pitch as usize * (state.height as usize / 2);
