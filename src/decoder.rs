@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
+#[cfg(feature = "libvpx")]
+use crate::decoder_libvpx::LibvpxDecoder;
 #[cfg(feature = "nvcodec")]
 use crate::decoder_nvcodec::NvcodecDecoder;
 #[cfg(target_os = "macos")]
@@ -10,7 +12,6 @@ use crate::decoder_video_toolbox::VideoToolboxDecoder;
 use crate::{
     audio::AudioData,
     decoder_dav1d::Dav1dDecoder,
-    decoder_libvpx::LibvpxDecoder,
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     layout_decode_params::LayoutDecodeParams,
@@ -160,7 +161,10 @@ impl VideoDecoder {
         let mut engines = Vec::new();
         match codec {
             CodecName::Vp8 | CodecName::Vp9 => {
-                engines.push(EngineName::Libvpx);
+                #[cfg(feature = "libvpx")]
+                {
+                    engines.push(EngineName::Libvpx);
+                }
             }
             CodecName::H264 => {
                 if is_openh264_available {
@@ -253,6 +257,7 @@ enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
     },
+    #[cfg(feature = "libvpx")]
     Libvpx(LibvpxDecoder),
     Openh264(Openh264Decoder),
     Dav1d(Dav1dDecoder),
@@ -323,14 +328,14 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(not(target_os = "macos"))]
-                VideoFormat::H265 => Err(orfail::Failure::new("no available H.265 decoder")),
+                #[cfg(feature = "libvpx")]
                 VideoFormat::Vp8 => {
                     *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
                     stats.engine.set(EngineName::Libvpx);
                     stats.codec.set(CodecName::Vp8);
                     self.decode(frame, stats).or_fail()
                 }
+                #[cfg(feature = "libvpx")]
                 VideoFormat::Vp9 => {
                     *self = LibvpxDecoder::new_vp9().or_fail().map(Self::Libvpx)?;
                     stats.engine.set(EngineName::Libvpx);
@@ -359,7 +364,12 @@ impl VideoDecoderInner {
                         frame.format
                     )))
                 }
+                codec => Err(orfail::Failure::new(format!(
+                    "no available {} decoder",
+                    codec.as_str()
+                ))),
             },
+            #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.decode(frame).or_fail(),
             Self::Openh264(decoder) => decoder.decode(frame).or_fail(),
             Self::Dav1d(decoder) => decoder.decode(frame).or_fail(),
@@ -373,6 +383,7 @@ impl VideoDecoderInner {
     fn finish(&mut self) -> orfail::Result<()> {
         match self {
             Self::Initial { .. } => {}
+            #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.finish().or_fail()?,
             Self::Openh264(decoder) => decoder.finish().or_fail()?,
             Self::Dav1d(decoder) => decoder.finish().or_fail()?,
@@ -387,6 +398,7 @@ impl VideoDecoderInner {
     fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
         match self {
             Self::Initial { .. } => None,
+            #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.next_decoded_frame(),
             Self::Openh264(decoder) => decoder.next_decoded_frame(),
             Self::Dav1d(decoder) => decoder.next_decoded_frame(),
