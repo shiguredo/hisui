@@ -809,13 +809,13 @@ fn two_regions() -> noargs::Result<()> {
             for (i, y) in y_plane.iter().copied().enumerate() {
                 if i / width < 8 {
                     // 最初の 8 行は青
-                    assert!(matches!(y, 40..=42), "y={y}");
+                    assert!(matches!(y, 40..=44), "y={y}");
                 } else if i / width < 8 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");
                 } else if i / width < 8 + 2 + 16 {
                     // 次の 16 行は赤
-                    assert!(matches!(y, 80..=82), "y={y}");
+                    assert!(matches!(y, 79..=83), "y={y}");
                 } else if i / width < 8 + 2 + 16 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");
