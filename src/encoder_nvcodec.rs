@@ -5,6 +5,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     encoder::VideoEncoderOptions,
+    types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_av1, video_h264, video_h265,
 };
@@ -200,6 +201,10 @@ impl NvcodecEncoder {
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
+    }
+
+    pub fn codec(&self) -> CodecName {
+        self.encoded_format.codec_name().expect("infallible")
     }
 }
 

@@ -97,8 +97,8 @@ FDK-AAC を利用する場合は、[ビルド方法](build.md) を参考にし�
 - **SVT-AV1 対応時**: SVT-AV1 に対応してビルドされた Hisui では SVT-AV1 エンコーダーが使用されます
 - **nvcodec 対応時**: nvcodec に対応してビルドされた Hisui では NVIDIA Video Codec SDK の AV1 エンコーダーが使用されます
 
-なお nvcodec は、GitHub で提供されているビルド済みバイナリや Docker には含まれておらず、デフォルトでは無効になっています。
-nvcodec を利用する場合は、[ビルド方法](build.md) を参考にして、nvcodec を有効にした自前でのビルドを行ってください 。
+なお自前で Hisui のビルドを行う場合には、nvcodec はデフォルトでは無効になっています。
+有効にする方法は [ビルド方法](build.md) をご参照ください。
 
 ## 映像エンコードビットレートの指定
 

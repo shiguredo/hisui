@@ -217,7 +217,8 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 
 また `"AV1"` は常に指定可能ですが nvcodec に対応してビルドされた Hisui の場合には NVIDIA Video Codec SDKのエンコーダーが優先的に使用されます。
 
-nvcodec デフォルトでは無効になっているので、有効にする場合は [ビルド方法](build.md) を参考にして自前でのビルドを行ってください。
+なお自前で Hisui のビルドを行う場合には、nvcodec はデフォルトでは無効になっています。
+有効にする方法は [ビルド方法](build.md) をご参照ください。
 
 ### `video_bitrate: $BITRATE`
 

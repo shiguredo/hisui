@@ -57,6 +57,26 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// CUDA が利用可能かどうかを判定する
+///
+/// この関数は CUDA ドライバーの初期化を試み、成功すれば true を返します。
+/// 一度初期化に成功すれば、以降の呼び出しでは常に true を返します。
+///
+/// # Examples
+///
+/// ```no_run
+/// use shiguredo_nvcodec::is_cuda_available;
+///
+/// if is_cuda_available() {
+///     println!("CUDA is available");
+/// } else {
+///     println!("CUDA is not available");
+/// }
+/// ```
+pub fn is_cuda_available() -> bool {
+    ensure_cuda_initialized().is_ok()
+}
+
 /// CUDA ドライバーをプロセスごとに1回だけ初期化する
 fn ensure_cuda_initialized() -> Result<(), Error> {
     static CUDA_INIT_RESULT: LazyLock<Result<(), Error>> = LazyLock::new(|| {

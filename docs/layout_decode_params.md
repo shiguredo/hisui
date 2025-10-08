@@ -19,7 +19,9 @@ nvcodec デコーダーを利用するには、以下の条件を満たしてい
 
 - CUDA 対応の NVIDIA GPU
 - 適切な NVIDIA GPU ドライバー
-- nvcodec に対応してビルドされた Hisui（[ビルド方法](./build.md)を参照）
+- nvcodec に対応してビルドされた Hisui
+  - Ubuntu 向けのビルド済みバイナリは nvcodec に対応しています
+  - 自前でビルドした Hisui で nvcodec を有効にする場合には [ビルド方法](./build.md) をご参照ください
 
 ### パラメーター
 
