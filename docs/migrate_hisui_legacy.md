@@ -10,28 +10,16 @@
 
 [hisui-legacy]: https://github.com/shiguredo/hisui-legacy
 
-## `hisui legacy` サブコマンドを用いた移行方法
+## **[2025.1.x のみ]** `hisui legacy` サブコマンドを用いた移行方法
 
 新 Hisui は、サブコマンド方式のコマンドラインインタフェースを採用しています。
 そのため、レガシー Hisui とは異なり、コマンドラインの第一引数はサブコマンドの名前となっています。
 
-レガシー Hisui との互換性維持を目的としたものとしては、[`hisui legacy`](./command_legacy.md) サブコマンドが提供されています。
-通常は以下のように、レガシー Hisui で使用していた引数群の前に `legacy` を付与すれば、新 Hisui でもそのまま動作するはずです。
+新 Hisui の 2025.1.x では、レガシー Hisui との互換性維持を目的とした `hisui legacy` サブコマンドが提供されています。
+レガシー Hisui からの移行コストをできるだけ抑えたい場合には [Hisui の 2025.1.x のマイグレーションガイド](https://github.com/shiguredo/hisui/blob/support/2025.1/docs/migrate_hisui_legacy.md) を参考に `hisui legacy` サブコマンドをお試しください。
 
-```bash
-# レガシー Hisui
-hisui -f /path/to/report.json ...その他の引数...
-
-# 新 Hisui
-# => `hisui` の直後に `legacy` を追加する
-hisui legacy -f /path/to/report.json ...その他の引数...
-```
-
-しかし `hisui legacy` サブコマンドも 100% の互換性が維持されている訳ではないので、注意が必要です。
-本ドキュメントの後半では、レガシー Hisui と新 Hisui の具体的な相違点を記載していますので、そちらもご参照ください。
-
-なお `hisui legacy` サブコマンドは将来的に廃止予定となっているため、
-長期的には、次に説明する `hisui compose` サブコマンドへの移行を推奨しています。
+ただし `hisui legacy` サブコマンドは Hisui 2025.2.0 で廃止されているため、
+基本的には、次に説明する `hisui compose` サブコマンドへの移行を推奨しています。
 
 ## `hisui compose` サブコマンドへの移行方法
 
