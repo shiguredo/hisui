@@ -139,9 +139,9 @@ jobs:
         run: |
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
-      - run: cargo check --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec
-      - run: cargo clippy --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec -- --deny warnings
-      - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_openh264
+      - run: cargo check --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx
+      - run: cargo clippy --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx -- --deny warnings
+      - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx --exclude shiguredo_openh264
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
@@ -173,7 +173,7 @@ jobs:
       - run: cargo test --package shiguredo_fdk_aac
       - run: cargo test --no-default-features --features fdk-aac
 
-      - run: cargo build --features fdk-aac
+      - run: cargo build --no-default-features --features fdk-aac
       - run: ldd target/debug/hisui
       - name: FDK-AAC が動的リンクされることを確認する
         run: ldd target/debug/hisui | grep fdk-aac
