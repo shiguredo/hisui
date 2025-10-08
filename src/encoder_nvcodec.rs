@@ -203,12 +203,7 @@ impl NvcodecEncoder {
     }
 
     pub fn codec(&self) -> CodecName {
-        match self.encoded_format {
-            VideoFormat::H264 => CodecName::H264,
-            VideoFormat::H265 => CodecName::H265,
-            VideoFormat::Av1 => CodecName::Av1,
-            _ => unreachable!("NvcodecEncoder only supports H264, H265, and AV1"),
-        }
+        self.encoded_format.codec_name().expect("infallible")
     }
 }
 
