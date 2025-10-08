@@ -4,7 +4,7 @@ use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 #[cfg(feature = "nvcodec")]
-use crate::decoder_nvcodec::{self, NvcodecDecoder};
+use crate::decoder_nvcodec::NvcodecDecoder;
 #[cfg(target_os = "macos")]
 use crate::decoder_video_toolbox::VideoToolboxDecoder;
 use crate::{

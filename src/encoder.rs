@@ -10,7 +10,7 @@ use crate::encoder_audio_toolbox::AudioToolboxEncoder;
 #[cfg(feature = "fdk-aac")]
 use crate::encoder_fdk_aac::FdkAacEncoder;
 #[cfg(feature = "nvcodec")]
-use crate::encoder_nvcodec::{self, NvcodecEncoder};
+use crate::encoder_nvcodec::NvcodecEncoder;
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
