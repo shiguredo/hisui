@@ -2,8 +2,8 @@ name: build-nvcodec
 
 on:
   push:
-    tags:
-      - "*"
+    branches:
+      - feature/gha-build-nvcodec
 
 jobs:
   ubuntu-binary:
