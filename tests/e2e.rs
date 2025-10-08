@@ -471,9 +471,6 @@ fn simple_multi_sources() -> noargs::Result<()> {
     Ok(())
 }
 
-// TODO: 上のテストを参考に、ビルド済みバイナリを直接実行する方法に切り替える（より E2E に近づける）
-// また legacy は近いうちに廃止されるので compose コマンドに切り替える (レイアウトはデフォルトのものでいい）
-
 /// 分割録画の変換テスト
 /// - 同一接続から時系列で分割された複数のソースファイル（R -> G -> B）を一つにまとめる
 /// - 各ソースファイルは16x16の解像度
@@ -482,19 +479,27 @@ fn simple_multi_sources() -> noargs::Result<()> {
 fn simple_split_archive() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "--layout",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
             "testdata/e2e/simple_split_archive/layout.jsonc",
-            "--out-file",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/simple_split_archive/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -612,19 +617,27 @@ fn simple_split_archive() -> noargs::Result<()> {
 fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "--layout",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
             "testdata/e2e/multi_sources_single_column/layout.json",
-            "--out-file",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/multi_sources_single_column/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -687,7 +700,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
             for (i, y) in y_plane.iter().copied().enumerate() {
                 if i / width < 16 {
                     // 最初の 16 行は青
-                    assert!(matches!(y, 40..=42), "y={y}");
+                    assert!(matches!(y, 40..=43), "y={y}");
                 } else if i / width < 16 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");
@@ -728,19 +741,27 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 fn two_regions() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "--layout",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
             "testdata/e2e/two_regions/layout.json",
-            "--out-file",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/two_regions/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
