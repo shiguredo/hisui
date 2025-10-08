@@ -23,7 +23,6 @@ fn empty_source() -> noargs::Result<()> {
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
-
     let output = std::process::Command::new(hisui_bin)
         .args([
             "compose",
@@ -59,28 +58,36 @@ fn empty_source() -> noargs::Result<()> {
     Ok(())
 }
 
+// TODO: 上のテストを参考に、ビルド済みバイナリを直接実行する方法に切り替える（より E2E に近づける）
+// また legacy は近いうちに廃止されるので compose コマンドに切り替える
 // 共通のテスト関数
 fn test_simple_single_source_common(
-    report_path: &str,
+    test_data_dir: &str,
     expected_codec: CodecName,
 ) -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            report_path,
-            "--out-video-codec",
-            expected_codec.as_str(),
-            "--out-file",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
+            &format!("{test_data_dir}/layout.jsonc"),
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            test_data_dir,
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -199,10 +206,7 @@ fn test_simple_single_source_common(
 ///   - VP9, OPUS, 25 fps, 320x240
 #[test]
 fn simple_single_source() -> noargs::Result<()> {
-    test_simple_single_source_common(
-        "testdata/e2e/simple_single_source/report.json",
-        CodecName::Vp9,
-    )
+    test_simple_single_source_common("testdata/e2e/simple_single_source/", CodecName::Vp9)
 }
 
 /// 単一のソースをそのまま変換する場合 (H.265版)
@@ -220,10 +224,7 @@ fn simple_single_source() -> noargs::Result<()> {
 #[test]
 #[cfg(any(feature = "nvcodec", target_os = "macos"))]
 fn simple_single_source_h265() -> noargs::Result<()> {
-    test_simple_single_source_common(
-        "testdata/e2e/simple_single_source_h265/report.json",
-        CodecName::H265,
-    )
+    test_simple_single_source_common("testdata/e2e/simple_single_source_h265/", CodecName::H265)
 }
 
 /// 単一のソースをそのまま変換する場合 (H.264 版)
@@ -241,10 +242,7 @@ fn simple_single_source_h265() -> noargs::Result<()> {
 #[test]
 #[cfg(any(feature = "nvcodec", target_os = "macos"))]
 fn simple_single_source_h264() -> noargs::Result<()> {
-    test_simple_single_source_common(
-        "testdata/e2e/simple_single_source_h264/report.json",
-        CodecName::H264,
-    )
+    test_simple_single_source_common("testdata/e2e/simple_single_source_h264/", CodecName::H264)
 }
 
 /// 単一のソースをそのまま変換する場合 (AV1 版)
@@ -261,10 +259,7 @@ fn simple_single_source_h264() -> noargs::Result<()> {
 ///   - VP9, OPUS, 25 fps, 320x240
 #[test]
 fn simple_single_source_av1() -> noargs::Result<()> {
-    test_simple_single_source_common(
-        "testdata/e2e/simple_single_source_av1/report.json",
-        CodecName::Av1,
-    )
+    test_simple_single_source_common("testdata/e2e/simple_single_source_av1/", CodecName::Av1)
 }
 
 /// 単一のソースをそのまま変換する場合（奇数解像度版）
