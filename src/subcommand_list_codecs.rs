@@ -87,7 +87,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         });
     }
     #[cfg(feature = "nvcodec")]
-    {
+    if shiguredo_nvcodec::is_cuda_available() {
         engines.push(EngineInfo {
             build_version: Some(shiguredo_nvcodec::BUILD_VERSION),
             ..EngineInfo::new(EngineName::Nvcodec)
