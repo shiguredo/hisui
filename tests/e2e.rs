@@ -58,8 +58,6 @@ fn empty_source() -> noargs::Result<()> {
     Ok(())
 }
 
-// TODO: 上のテストを参考に、ビルド済みバイナリを直接実行する方法に切り替える（より E2E に近づける）
-// また legacy は近いうちに廃止されるので compose コマンドに切り替える
 // 共通のテスト関数
 fn test_simple_single_source_common(
     test_data_dir: &str,
@@ -400,19 +398,25 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 fn simple_multi_sources() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            "testdata/e2e/simple_multi_sources/report.json",
-            "--out-file",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/simple_multi_sources/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -453,7 +457,8 @@ fn simple_multi_sources() -> noargs::Result<()> {
             .into_iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
-        [(320 * 3, 240 * 1)]
+        // NOTE: +4 は枠線用
+        [(320 * 3 + 4, 240 * 1)]
     );
 
     // 一秒分 (25 fps = 40 ms)
@@ -465,6 +470,9 @@ fn simple_multi_sources() -> noargs::Result<()> {
 
     Ok(())
 }
+
+// TODO: 上のテストを参考に、ビルド済みバイナリを直接実行する方法に切り替える（より E2E に近づける）
+// また legacy は近いうちに廃止されるので compose コマンドに切り替える (レイアウトはデフォルトのものでいい）
 
 /// 分割録画の変換テスト
 /// - 同一接続から時系列で分割された複数のソースファイル（R -> G -> B）を一つにまとめる
