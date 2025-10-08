@@ -549,7 +549,7 @@ impl VideoEncoderInner {
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.codec(),
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(_) => CodecName::H265,
+            Self::Nvcodec(encoder) => encoder.codec(),
         }
     }
 }

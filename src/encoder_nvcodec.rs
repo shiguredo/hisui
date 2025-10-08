@@ -201,6 +201,15 @@ impl NvcodecEncoder {
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
     }
+
+    pub fn codec(&self) -> CodecName {
+        match self.encoded_format {
+            VideoFormat::H264 => CodecName::H264,
+            VideoFormat::H265 => CodecName::H265,
+            VideoFormat::Av1 => CodecName::Av1,
+            _ => unreachable!("NvcodecEncoder only supports H264, H265, and AV1"),
+        }
+    }
 }
 
 /// Annex B 形式から MP4 形式への変換
