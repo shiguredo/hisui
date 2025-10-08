@@ -4,7 +4,7 @@ use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 #[cfg(feature = "nvcodec")]
-use crate::decoder_nvcodec::NvcodecDecoder;
+use crate::decoder_nvcodec::{self, NvcodecDecoder};
 #[cfg(target_os = "macos")]
 use crate::decoder_video_toolbox::VideoToolboxDecoder;
 use crate::{
@@ -167,7 +167,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Openh264);
                 }
                 #[cfg(feature = "nvcodec")]
-                {
+                if shiguredo_nvcodec::is_cuda_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -177,7 +177,7 @@ impl VideoDecoder {
             }
             CodecName::H265 => {
                 #[cfg(feature = "nvcodec")]
-                {
+                if shiguredo_nvcodec::is_cuda_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -187,7 +187,7 @@ impl VideoDecoder {
             }
             CodecName::Av1 => {
                 #[cfg(feature = "nvcodec")]
-                {
+                if shiguredo_nvcodec::is_cuda_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 engines.push(EngineName::Dav1d);
@@ -255,7 +255,6 @@ enum VideoDecoderInner {
     },
     Libvpx(LibvpxDecoder),
     Openh264(Openh264Decoder),
-    #[cfg_attr(feature = "nvcodec", expect(dead_code))]
     Dav1d(Dav1dDecoder),
     #[cfg(target_os = "macos")]
     VideoToolbox(Box<VideoToolboxDecoder>), // Box は clippy::large_enum_variant 対策
@@ -273,7 +272,9 @@ impl VideoDecoderInner {
         match self {
             Self::Initial { options } => match frame.format {
                 #[cfg(feature = "nvcodec")]
-                VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
+                VideoFormat::H264 | VideoFormat::H264AnnexB
+                    if options.openh264_lib.is_none() && shiguredo_nvcodec::is_cuda_available() =>
+                {
                     *self = NvcodecDecoder::new_h264(&options.decode_params)
                         .or_fail()
                         .map(Self::Nvcodec)?;
@@ -304,7 +305,7 @@ impl VideoDecoderInner {
                     self.decode(frame, stats).or_fail()
                 }
                 #[cfg(feature = "nvcodec")]
-                VideoFormat::H265 => {
+                VideoFormat::H265 if shiguredo_nvcodec::is_cuda_available() => {
                     *self = NvcodecDecoder::new_h265(&options.decode_params)
                         .or_fail()
                         .map(Self::Nvcodec)?;
@@ -312,7 +313,7 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(all(not(feature = "nvcodec"), target_os = "macos"))]
+                #[cfg(target_os = "macos")]
                 VideoFormat::H265 => {
                     *self = VideoToolboxDecoder::new_h265(frame)
                         .or_fail()
@@ -322,7 +323,7 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(all(not(target_os = "macos"), not(feature = "nvcodec")))]
+                #[cfg(not(target_os = "macos"))]
                 VideoFormat::H265 => Err(orfail::Failure::new("no available H.265 decoder")),
                 VideoFormat::Vp8 => {
                     *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
@@ -337,7 +338,7 @@ impl VideoDecoderInner {
                     self.decode(frame, stats).or_fail()
                 }
                 #[cfg(feature = "nvcodec")]
-                VideoFormat::Av1 => {
+                VideoFormat::Av1 if shiguredo_nvcodec::is_cuda_available() => {
                     *self = NvcodecDecoder::new_av1(&options.decode_params)
                         .or_fail()
                         .map(Self::Nvcodec)?;
@@ -345,7 +346,6 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::Av1);
                     self.decode(frame, stats).or_fail()
                 }
-                #[cfg(not(feature = "nvcodec"))]
                 VideoFormat::Av1 => {
                     *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
                     stats.engine.set(EngineName::Dav1d);
