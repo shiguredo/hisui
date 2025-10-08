@@ -53,7 +53,6 @@ pub mod scheduler;
 pub mod stats;
 pub mod subcommand_compose;
 pub mod subcommand_inspect;
-pub mod subcommand_legacy;
 pub mod subcommand_list_codecs;
 pub mod subcommand_pipeline;
 pub mod subcommand_tune;

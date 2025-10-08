@@ -15,8 +15,6 @@ const VMAF_COMMAND: noargs::CmdSpec =
     noargs::cmd("vmaf").doc("VMAF を用いた映像エンコード品質の評価を行います");
 const TUNE_COMMAND: noargs::CmdSpec =
     noargs::cmd("tune").doc("Optuna を用いた映像エンコードパラメーターの調整を行います");
-const LEGACY_COMMAND: noargs::CmdSpec =
-    noargs::cmd("legacy").doc("レガシー Hisui との互換性維持用のコマンドです");
 const PIPELINE_COMMAND: noargs::CmdSpec =
     noargs::cmd("pipeline").doc("ユーザー定義のパイプラインを実行します（実験的機能）");
 
@@ -46,8 +44,6 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_list_codecs::run(args)?;
     } else if COMPOSE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_compose::run(args)?;
-    } else if LEGACY_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_legacy::run(args)?;
     } else if VMAF_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {
