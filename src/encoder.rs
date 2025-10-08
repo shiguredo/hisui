@@ -10,7 +10,7 @@ use crate::encoder_audio_toolbox::AudioToolboxEncoder;
 #[cfg(feature = "fdk-aac")]
 use crate::encoder_fdk_aac::FdkAacEncoder;
 #[cfg(feature = "nvcodec")]
-use crate::encoder_nvcodec::NvcodecEncoder;
+use crate::encoder_nvcodec::{self, NvcodecEncoder};
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
@@ -290,7 +290,7 @@ impl VideoEncoder {
             CodecName::Vp8 => VideoEncoderInner::new_vp8(options).or_fail()?,
             CodecName::Vp9 => VideoEncoderInner::new_vp9(options).or_fail()?,
             #[cfg(feature = "nvcodec")]
-            CodecName::H264 if openh264_lib.is_none() => {
+            CodecName::H264 if openh264_lib.is_none() && shiguredo_nvcodec::is_cuda_available() => {
                 VideoEncoderInner::new_nvcodec_h264(options).or_fail()?
             }
             #[cfg(target_os = "macos")]
@@ -307,14 +307,17 @@ impl VideoEncoder {
                 VideoEncoderInner::new_openh264(lib, options).or_fail()?
             }
             #[cfg(feature = "nvcodec")]
-            CodecName::H265 => VideoEncoderInner::new_nvcodec_h265(options).or_fail()?,
+            CodecName::H265 if shiguredo_nvcodec::is_cuda_available() => {
+                VideoEncoderInner::new_nvcodec_h265(options).or_fail()?
+            }
             #[cfg(target_os = "macos")]
             CodecName::H265 => VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?,
-            #[cfg(all(not(target_os = "macos"), not(feature = "nvcodec")))]
+            #[cfg(not(target_os = "macos"))]
             CodecName::H265 => return Err(orfail::Failure::new("no available H.265 encoder")),
             #[cfg(feature = "nvcodec")]
-            CodecName::Av1 => VideoEncoderInner::new_nvcodec_av1(options).or_fail()?,
-            #[cfg_attr(feature = "nvcodec", expect(unreachable_patterns))]
+            CodecName::Av1 if shiguredo_nvcodec::is_cuda_available() => {
+                VideoEncoderInner::new_nvcodec_av1(options).or_fail()?
+            }
             CodecName::Av1 => VideoEncoderInner::new_svt_av1(options).or_fail()?,
             _ => unreachable!(),
         };
@@ -350,7 +353,7 @@ impl VideoEncoder {
                     engines.push(EngineName::Openh264);
                 }
                 #[cfg(feature = "nvcodec")]
-                {
+                if shiguredo_nvcodec::is_cuda_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -360,7 +363,7 @@ impl VideoEncoder {
             }
             CodecName::H265 => {
                 #[cfg(feature = "nvcodec")]
-                {
+                if shiguredo_nvcodec::is_cuda_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -370,7 +373,7 @@ impl VideoEncoder {
             }
             CodecName::Av1 => {
                 #[cfg(feature = "nvcodec")]
-                {
+                if shiguredo_nvcodec::is_cuda_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 engines.push(EngineName::SvtAv1);
