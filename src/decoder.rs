@@ -364,9 +364,10 @@ impl VideoDecoderInner {
                         frame.format
                     )))
                 }
+                // feature によってここに到達するかどうかが変わるので expect ではなく allow にしている
+                #[allow(unreachable_patterns)]
                 codec => Err(orfail::Failure::new(format!(
-                    "no available {} decoder",
-                    codec.as_str()
+                    "no available {codec} decoder"
                 ))),
             },
             #[cfg(feature = "libvpx")]
