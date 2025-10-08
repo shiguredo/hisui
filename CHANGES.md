@@ -26,6 +26,7 @@
     - 対応コーデックは H.264 / H.265 / AV1
   - 動作には Linux の NVIDIA GPU 環境が必要 (CUDA ドライバー必須)
   - デフォルトでは無効で feature フラグで `nvcodec` を指定してビルドすると有効になる
+    - ただし Ubuntu 24.04 (x86_64) 向けのビルド済みバイナリでは nvcodec 対応が有効になっている
   - 合わせてレイアウトファイルに以下の項目を追加（詳細はドキュメントを参照）
     - nvcodec_h264_encode_params
     - nvcodec_h265_encode_params
