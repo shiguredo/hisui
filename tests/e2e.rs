@@ -20,19 +20,26 @@ use orfail::OrFail;
 fn empty_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            "testdata/e2e/empty_source/report.json",
-            "--out-file",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/empty_source/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 結果ファイルを確認（映像・音声トラックが存在しない）
     assert!(out_file.path().exists());
