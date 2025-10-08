@@ -1,13 +1,17 @@
+#[cfg(feature = "libvpx")]
+use crate::encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 use crate::encoder_nvcodec_params;
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox_params;
 use crate::layout::DEFAULT_LAYOUT_JSON;
-use crate::{encoder_libvpx_params, encoder_openh264_params, encoder_svt_av1_params};
+use crate::{encoder_openh264_params, encoder_svt_av1_params};
 
 #[derive(Debug, Clone)]
 pub struct LayoutEncodeParams {
+    #[cfg(feature = "libvpx")]
     pub libvpx_vp8: shiguredo_libvpx::EncoderConfig,
+    #[cfg(feature = "libvpx")]
     pub libvpx_vp9: shiguredo_libvpx::EncoderConfig,
     pub openh264: shiguredo_openh264::EncoderConfig,
     pub svt_av1: shiguredo_svt_av1::EncoderConfig,
@@ -30,9 +34,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodePar
         let mut params = Self::default();
         for (key, value) in value.to_object()? {
             match &*key.to_unquoted_string_str()? {
+                #[cfg(feature = "libvpx")]
                 "libvpx_vp8_encode_params" => {
                     params.libvpx_vp8 = encoder_libvpx_params::parse_vp8_encode_params(value)?;
                 }
+                #[cfg(feature = "libvpx")]
                 "libvpx_vp9_encode_params" => {
                     params.libvpx_vp9 = encoder_libvpx_params::parse_vp9_encode_params(value)?;
                 }
@@ -76,10 +82,12 @@ impl LayoutEncodeParams {
         let default_layout = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
         let value = default_layout.value();
 
+        #[cfg(feature = "libvpx")]
         let libvpx_vp8 = encoder_libvpx_params::parse_vp8_encode_params(
             value.to_member("libvpx_vp8_encode_params")?.required()?,
         )?;
 
+        #[cfg(feature = "libvpx")]
         let libvpx_vp9 = encoder_libvpx_params::parse_vp9_encode_params(
             value.to_member("libvpx_vp9_encode_params")?.required()?,
         )?;
@@ -122,7 +130,9 @@ impl LayoutEncodeParams {
         )?;
 
         Ok(Self {
+            #[cfg(feature = "libvpx")]
             libvpx_vp8,
+            #[cfg(feature = "libvpx")]
             libvpx_vp9,
             openh264,
             svt_av1,

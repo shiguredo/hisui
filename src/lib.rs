@@ -3,6 +3,7 @@ pub mod audio;
 pub mod composer;
 pub mod decoder;
 pub mod decoder_dav1d;
+#[cfg(feature = "libvpx")]
 pub mod decoder_libvpx;
 #[cfg(feature = "nvcodec")]
 pub mod decoder_nvcodec;
@@ -17,7 +18,9 @@ pub mod encoder;
 pub mod encoder_audio_toolbox;
 #[cfg(feature = "fdk-aac")]
 pub mod encoder_fdk_aac;
+#[cfg(feature = "libvpx")]
 pub mod encoder_libvpx;
+#[cfg(feature = "libvpx")]
 pub mod encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 pub mod encoder_nvcodec;

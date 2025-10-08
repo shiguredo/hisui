@@ -56,11 +56,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             ..EngineInfo::new(EngineName::Opus)
         },
         EngineInfo {
-            repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
-            build_version: Some(shiguredo_libvpx::BUILD_VERSION),
-            ..EngineInfo::new(EngineName::Libvpx)
-        },
-        EngineInfo {
             repository: Some(shiguredo_dav1d::BUILD_REPOSITORY),
             build_version: Some(shiguredo_dav1d::BUILD_VERSION),
             ..EngineInfo::new(EngineName::Dav1d)
@@ -71,6 +66,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             ..EngineInfo::new(EngineName::SvtAv1)
         },
     ];
+    #[cfg(feature = "libvpx")]
+    {
+        engines.push(EngineInfo {
+            repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
+            build_version: Some(shiguredo_libvpx::BUILD_VERSION),
+            ..EngineInfo::new(EngineName::Libvpx)
+        });
+    }
     #[cfg(feature = "fdk-aac")]
     {
         engines.push(EngineInfo {
