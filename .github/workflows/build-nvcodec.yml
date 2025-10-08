@@ -3,7 +3,7 @@ name: build-nvcodec
 on:
   push:
     branches:
-      - feature/gha-build-nvcodec
+      - feature/gha-build-cuda
 
 jobs:
   ubuntu-binary:
