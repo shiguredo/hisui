@@ -16,6 +16,11 @@
   - 代わりに `hisui compose` サブコマンドを使用すること
   - 詳細は [マイグレーションガイド](./docs/migrate_hisui_legacy.md) を参照
   - @sile
+- [UPDATE] shiguredo_libyuv のバージョンを 2025.2.0 に更新する
+  - nv12 と i420 の相互変換関数が追加された
+  - @sile
+- [ADD] shiguredo_nvcodec を依存に追加する
+  - @sile
 - [ADD] NVIDIA Video Codec 対応を追加する
   - NVIDIA Video Codec SDK 13 を利用したデコードおよびエンコードに対応
     - 対応コーデックは H.264 / H.265 / AV1

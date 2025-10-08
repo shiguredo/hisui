@@ -25,7 +25,7 @@ shiguredo_mp4 = "2025.2.0"
 shiguredo_dav1d = { version = "2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "2025.1.0", path = "crates/shiguredo_fdk_aac/", optional = true }
 shiguredo_libvpx = { version = "2025.1.0", path = "crates/shiguredo_libvpx/" }
-shiguredo_libyuv = { version = "2025.1.0", path = "crates/shiguredo_libyuv/" }
+shiguredo_libyuv = { version = "2025.2.0", path = "crates/shiguredo_libyuv/" }
 shiguredo_nvcodec = { version = "2025.1.0", path = "crates/shiguredo_nvcodec/", optional = true }
 shiguredo_openh264 = { version = "2025.1.0", path = "crates/shiguredo_openh264/" }
 shiguredo_opus = { version = "2025.1.0", path = "crates/shiguredo_opus/" }
