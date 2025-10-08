@@ -11,6 +11,11 @@
 
 ## develop
 
+- [ADD] libvpx feature を追加する
+  - デフォルトで有効
+  - 無効にした場合には libvpx を用いた VP8 / VP9 のエンコードおよびデコードが行えなくなる
+  - 主に CI 環境で、 libvpx が不要なテストのビルド時間短縮用に使用する目的（内部用途）
+  - @sile
 - [CHANGE] legacy サブコマンドを削除する
   - Hisui 2025.1.x で提供されていた `hisui legacy` サブコマンドを削除
   - 代わりに `hisui compose` サブコマンドを使用すること
