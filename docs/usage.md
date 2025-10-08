@@ -66,7 +66,6 @@ Hisui は `compose` 以外にもいろいろなコマンドを提供していま
 利用可能なコマンドとドキュメントは以下になります。目的に合った項目を参照してください。
 
 - [`compose`](command_compose.md) - Sora が保存した録画ファイルを合成するためのコマンド
-- [`legacy`](command_legacy.md) - レガシー版 Hisui との互換性維持用コマンド
 - [`list-codecs`](command_list_codecs.md) - 利用可能なコーデックの一覧を表示するコマンド
 - [`tune`](command_tune.md) - 映像エンコードパラメーターの最適化を行うコマンド
 - [`vmaf`](command_vmaf.md) - 録画ファイルの品質評価（VMAF スコア計算）を行うコマンド

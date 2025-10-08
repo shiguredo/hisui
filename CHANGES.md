@@ -11,6 +11,8 @@
 
 ## develop
 
+- [CHANGE] legacy サブコマンドを削除する
+  - @sile
 - [ADD] NVIDIA Video Codec 対応を追加する
   - NVIDIA Video Codec SDK 13 を利用したデコードおよびエンコードに対応
     - 対応コーデックは H.264 / H.265 / AV1
