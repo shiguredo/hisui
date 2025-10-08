@@ -5,6 +5,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     encoder::VideoEncoderOptions,
+    types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_av1, video_h264, video_h265,
 };
