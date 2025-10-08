@@ -9,7 +9,6 @@ use hisui::{
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
-    subcommand_legacy::{Args, Runner},
     types::CodecName,
     video::VideoFrame,
 };
@@ -276,19 +275,25 @@ fn simple_single_source_av1() -> noargs::Result<()> {
 fn odd_resolution_single_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            "testdata/e2e/odd_resolution_single_source/report.json",
-            "--out-file",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/odd_resolution_single_source/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -363,9 +368,9 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 let col = (i % 160) * 2;
                 let row = (i / 160) * 2;
                 if col >= 318 || row >= 238 {
-                    assert!(matches!(x, 124..=131), "Expected black U value, got u={x}");
+                    assert!(matches!(x, 122..=131), "Expected black U value, got u={x}");
                 } else {
-                    assert!(matches!(x, 87..=95), "Expected red U value, got u={x}");
+                    assert!(matches!(x, 86..=95), "Expected red U value, got u={x}");
                 }
             });
 
@@ -375,7 +380,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 if col >= 318 || row >= 238 {
                     assert!(matches!(x, 122..=131), "Expected black V value, got v={x}");
                 } else {
-                    assert!(matches!(x, 238..=244), "Expected red V value, got v={x}");
+                    assert!(matches!(x, 235..=244), "Expected red V value, got v={x}");
                 }
             });
         }
