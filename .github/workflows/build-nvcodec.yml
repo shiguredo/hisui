@@ -5,6 +5,9 @@ on:
     branches:
       - feature/gha-build-cuda
 
+env:
+  CUDA_VERSION: 13-0
+
 jobs:
   ubuntu-binary:
     name: "Upload Binary for Ubuntu"
@@ -27,11 +30,10 @@ jobs:
       - name: Install CUDA
         if: contains(matrix.platform.name, 'x86_64')
         run: |
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_*all.deb
           sudo apt-get update
-          DEBIAN_FRONTEND=noninteractive sudo apt-get -y install cuda-toolkit-12
-
+          DEBIAN_FRONTEND=noninteractive sudo apt-get -y install cuda-toolkit-${{ env.CUDA_VERSION }}
       - run: rustup update stable
       - run: rustup default stable
 
