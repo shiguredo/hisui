@@ -218,7 +218,7 @@ jobs:
           curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
-      - run: cargo test -p hisui -p shiguredo_openh264
+      - run: cargo test --no-default-features -p hisui -p shiguredo_openh264
 
   valgrind:
     runs-on: ubuntu-24.04
