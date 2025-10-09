@@ -60,7 +60,6 @@ impl Decoder {
         config: DecoderConfig,
     ) -> Result<Self, Error> {
         unsafe {
-            // Load the CUDA library
             let lib = CudaLibrary::load()?;
 
             let mut ctx = ptr::null_mut();

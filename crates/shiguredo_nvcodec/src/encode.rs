@@ -258,7 +258,7 @@ impl Encoder {
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
-            let ctx_flags = 0;
+            let ctx_flags = 0; // デフォルトのコンテキストフラグ
             lib.cu_ctx_create(&mut ctx, ctx_flags, config.device_id)?;
 
             let lib_clone = lib.clone();
@@ -300,7 +300,7 @@ impl Encoder {
             ctx_guard.cancel();
 
             let mut encoder = Self {
-                lib: lib.clone(),
+                lib,
                 ctx,
                 encoder: encoder_api,
                 h_encoder,
