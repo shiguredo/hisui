@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+const DEFAULT_CUDA_INCLUDE_PATH: &str = "/usr/local/cuda/include/";
+const CUDA_INCLUDE_PATH_ENV_KEY: &tr = "CUDA_INCLUDE_PATH";
+
 fn main() {
     // Cargo.toml か build.rs か third_party のヘッダファイルが更新されたら、バインディングファイルを再生成する
     println!("cargo::rerun-if-changed=Cargo.toml");
@@ -112,11 +115,32 @@ fn main() {
         panic!("nvcuvid.h not found at {:?}", nvcuvid_header);
     }
 
+    // CUDA インクルードパスを取得
+    let cuda_include_path = PathBuf::from(
+        std::env::var(CUDA_INCLUDE_PATH_ENV_KEY)
+            .unwrap_or_else(|_| DEFAULT_CUDA_INCLUDE_PATH.to_string()),
+    );
+    if !cuda_include_path.join("cuda.h").exists() {
+        panic!(
+            r#"cuda.h not found in the specified CUDA include directory.
+
+Searched location: {}
+
+To resolve this issue:
+1. Ensure CUDA Toolkit is installed on your system
+2. Set the environment variable {CUDA_INCLUDE_PATH_ENV_KEY} to point to your CUDA include directory
+3. Alternatively, ensure cuda.h exists at the default location: {DEFAULT_CUDA_INCLUDE_PATH}
+"#,
+            cuda_include_path.join("cuda.h").display(),
+        );
+    }
+
     // バインディングを生成する
     let bindings = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
         .header(nvcuvid_header.display().to_string())
+        .clang_arg(format!("-I{cuda_include_path}"))
         .generate_comments(false)
         .derive_debug(false)
         .derive_default(false)
