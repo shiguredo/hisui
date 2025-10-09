@@ -57,18 +57,174 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// CUDA ライブラリのラッパー構造体
+#[derive(Debug, Clone)]
+struct CudaLibrary {
+    lib: Arc<libloading::Library>,
+}
+
+impl CudaLibrary {
+    /// CUDA ライブラリをロードし、必要な関数が利用可能かチェックする
+    fn load() -> Result<Self, Error> {
+        let lib = load_cuda_library()?;
+
+        // 必要な関数が存在するか確認
+        unsafe {
+            // 初期化はロード時に行ってしまう
+            let _: libloading::Symbol<unsafe extern "C" fn(u32) -> u32> = lib
+                .get(b"cuInit")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuInit not found"))?;
+
+            // コンテキスト管理関連
+            let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext, u32, i32) -> u32> =
+                lib.get(b"cuCtxCreate_v2")
+                    .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxCreate_v2 not found"))?;
+
+            let _: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = lib
+                .get(b"cuCtxDestroy_v2")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxDestroy_v2 not found"))?;
+
+            let _: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = lib
+                .get(b"cuCtxPushCurrent_v2")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxPushCurrent_v2 not found"))?;
+
+            let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext) -> u32> = lib
+                .get(b"cuCtxPopCurrent_v2")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxPopCurrent_v2 not found"))?;
+
+            let _: libloading::Symbol<unsafe extern "C" fn() -> u32> = lib
+                .get(b"cuCtxSynchronize")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxSynchronize not found"))?;
+
+            // メモリ管理関連
+            let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUdeviceptr, usize) -> u32> =
+                lib.get(b"cuMemAlloc_v2")
+                    .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemAlloc_v2 not found"))?;
+
+            let _: libloading::Symbol<unsafe extern "C" fn(sys::CUdeviceptr) -> u32> = lib
+                .get(b"cuMemFree_v2")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemFree_v2 not found"))?;
+
+            let _: libloading::Symbol<
+                unsafe extern "C" fn(sys::CUdeviceptr, *const c_void, usize) -> u32,
+            > = lib
+                .get(b"cuMemcpyHtoD_v2")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemcpyHtoD_v2 not found"))?;
+
+            let _: libloading::Symbol<
+                unsafe extern "C" fn(*mut c_void, sys::CUdeviceptr, usize) -> u32,
+            > = lib
+                .get(b"cuMemcpyDtoH_v2")
+                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemcpyDtoH_v2 not found"))?;
+        }
+
+        Ok(Self { lib })
+    }
+
+    /// CUDA コンテキストを作成する
+    unsafe fn cu_ctx_create(&self, ctx: *mut sys::CUcontext, flags: u32, device: i32) -> u32 {
+        let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext, u32, i32) -> u32> =
+            self.lib.get(b"cuCtxCreate_v2").unwrap();
+        f(ctx, flags, device)
+    }
+
+    /// CUDA コンテキストを破棄する
+    unsafe fn cu_ctx_destroy(&self, ctx: sys::CUcontext) -> u32 {
+        let f: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> =
+            self.lib.get(b"cuCtxDestroy_v2").unwrap();
+        f(ctx)
+    }
+
+    /// CUDA コンテキストをスタックにプッシュする
+    unsafe fn cu_ctx_push_current(&self, ctx: sys::CUcontext) -> u32 {
+        let f: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> =
+            self.lib.get(b"cuCtxPushCurrent_v2").unwrap();
+        f(ctx)
+    }
+
+    /// CUDA コンテキストをスタックからポップする
+    unsafe fn cu_ctx_pop_current(&self, ctx: *mut sys::CUcontext) -> u32 {
+        let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext) -> u32> =
+            self.lib.get(b"cuCtxPopCurrent_v2").unwrap();
+        f(ctx)
+    }
+
+    /// CUDA コンテキストを同期する
+    unsafe fn cu_ctx_synchronize(&self) -> u32 {
+        let f: libloading::Symbol<unsafe extern "C" fn() -> u32> =
+            self.lib.get(b"cuCtxSynchronize").unwrap();
+        f()
+    }
+
+    /// デバイスメモリを割り当てる
+    unsafe fn cu_mem_alloc(&self, dptr: *mut sys::CUdeviceptr, bytesize: usize) -> u32 {
+        let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUdeviceptr, usize) -> u32> =
+            self.lib.get(b"cuMemAlloc_v2").unwrap();
+        f(dptr, bytesize)
+    }
+
+    /// デバイスメモリを解放する
+    unsafe fn cu_mem_free(&self, dptr: sys::CUdeviceptr) -> u32 {
+        let f: libloading::Symbol<unsafe extern "C" fn(sys::CUdeviceptr) -> u32> =
+            self.lib.get(b"cuMemFree_v2").unwrap();
+        f(dptr)
+    }
+
+    /// ホストからデバイスへメモリをコピーする
+    unsafe fn cu_memcpy_h_to_d(
+        &self,
+        dst_device: sys::CUdeviceptr,
+        src_host: *const c_void,
+        byte_count: usize,
+    ) -> u32 {
+        let f: libloading::Symbol<
+            unsafe extern "C" fn(sys::CUdeviceptr, *const c_void, usize) -> u32,
+        > = self.lib.get(b"cuMemcpyHtoD_v2").unwrap();
+        f(dst_device, src_host, byte_count)
+    }
+
+    /// デバイスからホストへメモリをコピーする
+    unsafe fn cu_memcpy_d_to_h(
+        &self,
+        dst_host: *mut c_void,
+        src_device: sys::CUdeviceptr,
+        byte_count: usize,
+    ) -> u32 {
+        let f: libloading::Symbol<
+            unsafe extern "C" fn(*mut c_void, sys::CUdeviceptr, usize) -> u32,
+        > = self.lib.get(b"cuMemcpyDtoH_v2").unwrap();
+        f(dst_host, src_device, byte_count)
+    }
+}
+
 /// CUDA ライブラリを動的にロードする
 fn load_cuda_library() -> Result<Arc<libloading::Library>, Error> {
     static CUDA_LIB: LazyLock<Result<Arc<libloading::Library>, Error>> = LazyLock::new(|| unsafe {
-        libloading::Library::new("libcuda.so.1")
+        // ライブラリをロード
+        let lib = libloading::Library::new("libcuda.so.1")
             .map(Arc::new)
             .map_err(|_| {
                 Error::new(
-                    0,
+                    sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
                     "load_cuda_library",
                     "failed to load CUDA library (libcuda.so.1 not found)",
                 )
-            })
+            })?;
+
+        // cuInit を呼び出して CUDA ドライバーを初期化
+        let cu_init: libloading::Symbol<unsafe extern "C" fn(u32) -> u32> =
+            lib.get(b"cuInit").map_err(|_| {
+                Error::new(
+                    sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+                    "load_cuda_library",
+                    "cuInit not found",
+                )
+            })?;
+        let flags = 0;
+        let status = cu_init(flags);
+        Error::check(status, "cuInit", "failed to initialize CUDA driver")?;
+
+        Ok(lib)
     });
 
     CUDA_LIB.clone()
@@ -77,25 +233,6 @@ fn load_cuda_library() -> Result<Arc<libloading::Library>, Error> {
 /// CUDA ライブラリがロード可能かチェックする
 pub fn is_cuda_available() -> bool {
     load_cuda_library().is_ok()
-}
-
-/// CUDA ドライバーをプロセスごとに1回だけ初期化する
-fn ensure_cuda_initialized() -> Result<(), Error> {
-    static CUDA_INIT_RESULT: LazyLock<Result<(), Error>> = LazyLock::new(|| {
-        let flags = 0;
-        let status = unsafe { sys::cuInit(flags) };
-        if status == sys::cudaError_enum_CUDA_SUCCESS {
-            Ok(())
-        } else {
-            Err(Error::new(
-                status,
-                "cuInit",
-                "failed to initialize CUDA driver",
-            ))
-        }
-    });
-
-    CUDA_INIT_RESULT.clone()
 }
 
 // CUDA context を push して、クロージャを実行し、自動的に pop する
