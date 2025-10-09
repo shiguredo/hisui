@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+const DEFAULT_CUDA_INCLUDE_PATH: &str = "/usr/local/cuda/include/";
+const CUDA_INCLUDE_PATH_ENV_KEY: &str = "CUDA_INCLUDE_PATH";
+
 fn main() {
     // Cargo.toml か build.rs か third_party のヘッダファイルが更新されたら、バインディングファイルを再生成する
     println!("cargo::rerun-if-changed=Cargo.toml");
@@ -47,6 +50,10 @@ fn main() {
                 "pub struct CUvideodecoder;\n",
                 "pub struct CUcontext;\n",
                 "pub struct CUvideoctxlock;\n",
+                "pub struct CUVIDPARSERPARAMS;\n",
+                "pub struct CUVIDSOURCEDATAPACKET;\n",
+                "pub struct CUVIDDECODECREATEINFO;\n",
+                "pub struct CUVIDPROCPARAMS;\n",
                 "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n",
                 "pub struct GUID;\n",
                 "pub struct NV_ENCODE_API_FUNCTION_LIST;\n",
@@ -108,11 +115,32 @@ fn main() {
         panic!("nvcuvid.h not found at {:?}", nvcuvid_header);
     }
 
+    // CUDA インクルードパスを取得
+    let cuda_include_path = PathBuf::from(
+        std::env::var(CUDA_INCLUDE_PATH_ENV_KEY)
+            .unwrap_or_else(|_| DEFAULT_CUDA_INCLUDE_PATH.to_string()),
+    );
+    if !cuda_include_path.join("cuda.h").exists() {
+        panic!(
+            r#"cuda.h not found in the specified CUDA include directory.
+
+Searched location: {}
+
+To resolve this issue:
+1. Ensure CUDA Toolkit is installed on your system
+2. Set the environment variable {CUDA_INCLUDE_PATH_ENV_KEY} to point to your CUDA include directory
+3. Alternatively, ensure cuda.h exists at the default location: {DEFAULT_CUDA_INCLUDE_PATH}
+"#,
+            cuda_include_path.join("cuda.h").display(),
+        );
+    }
+
     // バインディングを生成する
     let bindings = bindgen::Builder::default()
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
         .header(nvcuvid_header.display().to_string())
+        .clang_arg(format!("-I{}", cuda_include_path.display()))
         .generate_comments(false)
         .derive_debug(false)
         .derive_default(false)
@@ -393,11 +421,6 @@ pub const NV_ENC_PRESET_P7_GUID: GUID = GUID {
         format!("{bindings}\n{additional_definitions}"),
     )
     .expect("failed to write bindings");
-
-    // CUDA と NVENC/NVCUVID ライブラリのリンク設定
-    println!("cargo::rustc-link-lib=dylib=cuda");
-    println!("cargo::rustc-link-lib=dylib=nvcuvid");
-    println!("cargo::rustc-link-lib=dylib=nvidia-encode");
 }
 
 // Cargo.toml から依存ライブラリのバージョンを取得する

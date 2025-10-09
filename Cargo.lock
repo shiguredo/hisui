@@ -451,6 +451,7 @@ name = "shiguredo_nvcodec"
 version = "2025.1.0"
 dependencies = [
  "bindgen",
+ "libloading",
  "toml",
 ]
 

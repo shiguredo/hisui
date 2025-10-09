@@ -3,7 +3,7 @@ use std::ptr;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use crate::{Error, ensure_cuda_initialized, sys};
+use crate::{CudaLibrary, Error, sys};
 
 /// デコーダーの設定
 #[derive(Debug, Clone)]
@@ -30,6 +30,7 @@ impl Default for DecoderConfig {
 
 /// デコーダー
 pub struct Decoder {
+    lib: CudaLibrary,
     ctx: sys::CUcontext,
     ctx_lock: sys::CUvideoctxlock,
     parser: sys::CUvideoparser,
@@ -58,32 +59,25 @@ impl Decoder {
         codec_type: sys::cudaVideoCodec,
         config: DecoderConfig,
     ) -> Result<Self, Error> {
-        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
-        ensure_cuda_initialized()?;
-
         unsafe {
+            let lib = CudaLibrary::load()?;
+
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
             let ctx_flags = 0; // デフォルトのコンテキストフラグ
-            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, config.device_id);
-            Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
+            lib.cu_ctx_create(&mut ctx, ctx_flags, config.device_id)?;
 
             let ctx_guard = crate::ReleaseGuard::new(|| {
-                sys::cuCtxDestroy_v2(ctx);
+                let _ = lib.cu_ctx_destroy(ctx);
             });
 
             // デコーダー用のコンテキストロックを作成
             let mut ctx_lock = ptr::null_mut();
-            let status = sys::cuvidCtxLockCreate(&mut ctx_lock, ctx);
-            Error::check(
-                status,
-                "cuvidCtxLockCreate",
-                "failed to create context lock",
-            )?;
+            lib.cuvid_ctx_lock_create(&mut ctx_lock, ctx)?;
 
             let ctx_lock_guard = crate::ReleaseGuard::new(|| {
-                sys::cuvidCtxLockDestroy(ctx_lock);
+                let _ = lib.cuvid_ctx_lock_destroy(ctx_lock);
             });
 
             // チャンネルを作成
@@ -91,6 +85,7 @@ impl Decoder {
 
             // デコーダーの状態を作成
             let state = Box::new(Mutex::new(DecoderState {
+                lib: lib.clone(),
                 decoder: ptr::null_mut(),
                 width: 0,
                 height: 0,
@@ -112,18 +107,14 @@ impl Decoder {
             parser_params.pfnDisplayPicture = Some(handle_picture_display);
 
             let mut parser = ptr::null_mut();
-            let status = sys::cuvidCreateVideoParser(&mut parser, &mut parser_params);
-            Error::check(
-                status,
-                "cuvidCreateVideoParser",
-                "failed to create video parser",
-            )?;
+            lib.cuvid_create_video_parser(&mut parser, &mut parser_params)?;
 
             // 成功したのでクリーンアップをキャンセル
             ctx_guard.cancel();
             ctx_lock_guard.cancel();
 
             Ok(Self {
+                lib,
                 ctx,
                 ctx_lock,
                 parser,
@@ -145,8 +136,7 @@ impl Decoder {
             packet.flags = 0;
             packet.timestamp = 0;
 
-            let status = sys::cuvidParseVideoData(self.parser, &mut packet);
-            Error::check(status, "cuvidParseVideoData", "failed to parse video data")?;
+            self.lib.cuvid_parse_video_data(self.parser, &mut packet)?;
         }
 
         Ok(())
@@ -162,19 +152,12 @@ impl Decoder {
             packet.flags = sys::CUvideopacketflags_CUVID_PKT_ENDOFSTREAM as u64;
             packet.timestamp = 0;
 
-            let status = sys::cuvidParseVideoData(self.parser, &mut packet);
-            Error::check(status, "cuvidParseVideoData", "failed to finish decoding")?;
+            self.lib.cuvid_parse_video_data(self.parser, &mut packet)?;
 
             // パーサーは非同期でデータを処理するので、
             // すべてのデコード操作が完了するまでここで待機（同期）する
-            crate::with_cuda_context(self.ctx, || {
-                let status = sys::cuCtxSynchronize();
-                Error::check(
-                    status,
-                    "cuCtxSynchronize",
-                    "failed to synchronize CUDA context",
-                )
-            })?;
+            self.lib
+                .with_context(self.ctx, || self.lib.cu_ctx_synchronize())?;
         }
         Ok(())
     }
@@ -194,28 +177,25 @@ impl Decoder {
 
 impl Drop for Decoder {
     fn drop(&mut self) {
-        unsafe {
-            if !self.parser.is_null() {
-                sys::cuvidDestroyVideoParser(self.parser);
-            }
+        if !self.parser.is_null() {
+            let _ = self.lib.cuvid_destroy_video_parser(self.parser);
+        }
 
-            // ここでロック確保に失敗してもできることはないので、成功時にだけ処理を行う
-            if let Ok(state) = self.state.lock()
-                && !state.decoder.is_null()
-            {
-                let _ = crate::with_cuda_context(self.ctx, || {
-                    sys::cuvidDestroyDecoder(state.decoder);
-                    Ok(())
-                });
-            }
+        // ここでロック確保に失敗してもできることはないので、成功時にだけ処理を行う
+        if let Ok(state) = self.state.lock()
+            && !state.decoder.is_null()
+        {
+            let _ = self
+                .lib
+                .with_context(self.ctx, || self.lib.cuvid_destroy_decoder(state.decoder));
+        }
 
-            if !self.ctx_lock.is_null() {
-                sys::cuvidCtxLockDestroy(self.ctx_lock);
-            }
+        if !self.ctx_lock.is_null() {
+            let _ = self.lib.cuvid_ctx_lock_destroy(self.ctx_lock);
+        }
 
-            if !self.ctx.is_null() {
-                sys::cuCtxDestroy_v2(self.ctx);
-            }
+        if !self.ctx.is_null() {
+            let _ = self.lib.cu_ctx_destroy(self.ctx);
         }
     }
 }
@@ -243,6 +223,7 @@ impl std::fmt::Debug for Decoder {
 unsafe impl Send for Decoder {}
 
 struct DecoderState {
+    lib: CudaLibrary,
     decoder: sys::CUvideodecoder,
     width: u32,
     height: u32,
@@ -312,12 +293,10 @@ fn handle_video_sequence_inner(
     // パーサーと共有するコンテキストロックを使用
     create_info.vidLock = state.ctx_lock;
 
-    crate::with_cuda_context(state.ctx, || unsafe {
-        Error::check(
-            sys::cuvidCreateDecoder(&mut state.decoder, &mut create_info),
-            "cuvidCreateDecoder",
-            "failed to create video decoder",
-        )
+    state.lib.with_context(state.ctx, || {
+        state
+            .lib
+            .cuvid_create_decoder(&mut state.decoder, &mut create_info)
     })?;
     state.width = (format.display_area.right - format.display_area.left) as u32;
     state.height = (format.display_area.bottom - format.display_area.top) as u32;
@@ -364,9 +343,10 @@ fn handle_picture_decode_inner(
         ));
     }
 
-    crate::with_cuda_context(state.ctx, || unsafe {
-        let status = sys::cuvidDecodePicture(state.decoder, pic_params as *const _ as *mut _);
-        Error::check(status, "cuvidDecodePicture", "failed to decode picture")
+    state.lib.with_context(state.ctx, || {
+        state
+            .lib
+            .cuvid_decode_picture(state.decoder, pic_params as *const _ as *mut _)
     })?;
 
     Ok(())
@@ -409,7 +389,7 @@ fn handle_picture_display_inner(
         ));
     }
 
-    let decoded_frame = crate::with_cuda_context(state.ctx, || unsafe {
+    let decoded_frame = state.lib.with_context(state.ctx, || unsafe {
         // ビデオ処理パラメーターを設定
         let mut proc_params: sys::CUVIDPROCPARAMS = std::mem::zeroed();
         proc_params.progressive_frame = disp_info.progressive_frame;
@@ -420,18 +400,17 @@ fn handle_picture_display_inner(
         // デコード済みフレームをマップ
         let mut device_ptr = 0u64;
         let mut pitch = 0u32;
-        let status = sys::cuvidMapVideoFrame64(
+        state.lib.cuvid_map_video_frame(
             state.decoder,
             disp_info.picture_index,
             &mut device_ptr,
             &mut pitch,
             &mut proc_params,
-        );
-        Error::check(status, "cuvidMapVideoFrame64", "failed to map video frame")?;
+        )?;
 
         // 確実にフレームをアンマップするためのガードを作成
         let _unmap_guard = crate::ReleaseGuard::new(|| {
-            sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
+            let _ = state.lib.cuvid_unmap_video_frame(state.decoder, device_ptr);
         });
 
         // フレームサイズを計算 (NV12 形式: Y プレーン + UV プレーン)
@@ -445,18 +424,17 @@ fn handle_picture_display_inner(
         let mut host_data = vec![0u8; frame_size];
 
         // Y プレーンをコピー
-        let status =
-            sys::cuMemcpyDtoH_v2(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size);
-        Error::check(status, "cuMemcpyDtoH_v2", "failed to copy Y plane data")?;
+        state
+            .lib
+            .cu_memcpy_d_to_h(host_data.as_mut_ptr() as *mut c_void, device_ptr, y_size)?;
 
         // UV プレーンをコピー
         let uv_offset = pitch as u64 * aligned_height as u64;
-        let status = sys::cuMemcpyDtoH_v2(
+        state.lib.cu_memcpy_d_to_h(
             host_data[y_size..].as_mut_ptr() as *mut c_void,
             device_ptr + uv_offset,
             uv_size,
-        );
-        Error::check(status, "cuMemcpyDtoH_v2", "failed to copy UV plane data")?;
+        )?;
 
         // デコード済みフレームを作成
         Ok(DecodedFrame {

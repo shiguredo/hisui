@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr;
 
-use crate::{Error, ReleaseGuard, ensure_cuda_initialized, sys};
+use crate::{CudaLibrary, Error, ReleaseGuard, sys};
 
 /// プリセット
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,6 +205,7 @@ impl RateControlMode {
 
 /// エンコーダー
 pub struct Encoder {
+    lib: CudaLibrary,
     ctx: sys::CUcontext,
     encoder: sys::NV_ENCODE_API_FUNCTION_LIST,
     h_encoder: *mut c_void,
@@ -250,33 +251,28 @@ impl Encoder {
         codec_guid: sys::GUID,
         profile_guid: sys::GUID,
     ) -> Result<Self, Error> {
-        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
-        ensure_cuda_initialized()?;
-
         unsafe {
+            // Load the CUDA library
+            let lib = CudaLibrary::load()?;
+
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
             let ctx_flags = 0; // デフォルトのコンテキストフラグ
-            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, config.device_id);
-            Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
+            lib.cu_ctx_create(&mut ctx, ctx_flags, config.device_id)?;
 
-            let ctx_guard = ReleaseGuard::new(|| {
-                sys::cuCtxDestroy_v2(ctx);
+            let lib_clone = lib.clone();
+            let ctx_guard = ReleaseGuard::new(move || {
+                let _ = lib_clone.cu_ctx_destroy(ctx);
             });
 
             // NVENC 操作のために CUDA context をアクティブ化し、エンコードセッションを開く
-            let (encoder_api, h_encoder) = crate::with_cuda_context(ctx, || {
+            let (encoder_api, h_encoder) = lib.with_context(ctx, || {
                 // NVENC API をロード
                 let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
                 encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
 
-                let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
-                Error::check(
-                    status,
-                    "NvEncodeAPICreateInstance",
-                    "failed to create NVENC API instance",
-                )?;
+                lib.nvenc_create_api_instance(&mut encoder_api)?;
 
                 // エンコードセッションを開く
                 let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =
@@ -291,7 +287,7 @@ impl Encoder {
                     .nvEncOpenEncodeSessionEx
                     .map(|f| f(&mut open_session_params, &mut h_encoder))
                     .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-                Error::check(
+                Error::check_nvenc(
                     status,
                     "nvEncOpenEncodeSessionEx",
                     "failed to open encode session",
@@ -304,6 +300,7 @@ impl Encoder {
             ctx_guard.cancel();
 
             let mut encoder = Self {
+                lib: lib.clone(),
                 ctx,
                 encoder: encoder_api,
                 h_encoder,
@@ -316,7 +313,7 @@ impl Encoder {
             };
 
             // デフォルトパラメータでエンコーダーを初期化
-            crate::with_cuda_context(ctx, || {
+            lib.with_context(ctx, || {
                 encoder.initialize_encoder(&config, codec_guid, profile_guid)
             })?;
 
@@ -355,7 +352,7 @@ impl Encoder {
                     )
                 })
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(
+            Error::check_nvenc(
                 status,
                 "nvEncGetEncodePresetConfigEx",
                 "failed to get preset configuration",
@@ -429,7 +426,7 @@ impl Encoder {
                 .nvEncInitializeEncoder
                 .map(|f| f(self.h_encoder, &mut init_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(
+            Error::check_nvenc(
                 status,
                 "nvEncInitializeEncoder",
                 "failed to initialize encoder",
@@ -443,10 +440,11 @@ impl Encoder {
     ///
     /// H.264/HEVC の場合は SPS/PPS、AV1 の場合は Sequence Header OBU を取得します。
     pub fn get_sequence_params(&mut self) -> Result<Vec<u8>, Error> {
-        crate::with_cuda_context(self.ctx, || self.get_sequence_params_inner())
+        self.lib
+            .with_context(self.ctx, || self.get_sequence_params_inner())
     }
 
-    fn get_sequence_params_inner(&mut self) -> Result<Vec<u8>, Error> {
+    fn get_sequence_params_inner(&self) -> Result<Vec<u8>, Error> {
         unsafe {
             // シーケンスパラメータを格納するバッファを確保
             let mut payload_buffer = vec![0u8; sys::NV_MAX_SEQ_HDR_LEN as usize];
@@ -464,7 +462,7 @@ impl Encoder {
                 .map(|f| f(self.h_encoder, &mut seq_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
 
-            Error::check(
+            Error::check_nvenc(
                 status,
                 "nvEncGetSequenceParams",
                 "failed to get sequence parameters",
@@ -489,7 +487,9 @@ impl Encoder {
             ));
         }
 
-        crate::with_cuda_context(self.ctx, || self.encode_inner(nv12_data))
+        self.lib
+            .clone()
+            .with_context(self.ctx, || self.encode_inner(nv12_data))
     }
 
     fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
@@ -522,21 +522,18 @@ impl Encoder {
         &mut self,
         nv12_data: &[u8],
     ) -> Result<(sys::CUdeviceptr, ReleaseGuard<impl FnOnce() + use<>>), Error> {
-        unsafe {
-            let mut device_input: sys::CUdeviceptr = 0;
-            let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
-            Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
+        let mut device_input: sys::CUdeviceptr = 0;
+        self.lib.cu_mem_alloc(&mut device_input, nv12_data.len())?;
 
-            let device_guard = ReleaseGuard::new(move || {
-                sys::cuMemFree_v2(device_input);
-            });
+        let lib = self.lib.clone();
+        let device_guard = ReleaseGuard::new(move || {
+            let _ = lib.cu_mem_free(device_input);
+        });
 
-            let status =
-                sys::cuMemcpyHtoD_v2(device_input, nv12_data.as_ptr().cast(), nv12_data.len());
-            Error::check(status, "cuMemcpyHtoD_v2", "failed to copy data to device")?;
+        self.lib
+            .cu_memcpy_h_to_d(device_input, nv12_data.as_ptr().cast(), nv12_data.len())?;
 
-            Ok((device_input, device_guard))
-        }
+        Ok((device_input, device_guard))
     }
 
     fn register_input_resource(
@@ -566,7 +563,7 @@ impl Encoder {
                 .nvEncRegisterResource
                 .map(|f| f(self.h_encoder, &mut register_resource))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(
+            Error::check_nvenc(
                 status,
                 "nvEncRegisterResource",
                 "failed to register input resource",
@@ -598,7 +595,7 @@ impl Encoder {
                 .nvEncMapInputResource
                 .map(|f| f(self.h_encoder, &mut map_input_resource))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(
+            Error::check_nvenc(
                 status,
                 "nvEncMapInputResource",
                 "failed to map input resource",
@@ -628,7 +625,7 @@ impl Encoder {
                 .nvEncCreateBitstreamBuffer
                 .map(|f| f(self.h_encoder, &mut create_bitstream))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(
+            Error::check_nvenc(
                 status,
                 "nvEncCreateBitstreamBuffer",
                 "failed to create bitstream buffer",
@@ -670,7 +667,7 @@ impl Encoder {
                 .nvEncEncodePicture
                 .map(|f| f(self.h_encoder, &mut pic_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(status, "nvEncEncodePicture", "failed to encode picture")?;
+            Error::check_nvenc(status, "nvEncEncodePicture", "failed to encode picture")?;
 
             Ok(())
         }
@@ -690,7 +687,7 @@ impl Encoder {
                 .nvEncLockBitstream
                 .map(|f| f(self.h_encoder, &mut lock_bitstream))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(status, "nvEncLockBitstream", "failed to lock bitstream")?;
+            Error::check_nvenc(status, "nvEncLockBitstream", "failed to lock bitstream")?;
 
             // ビットストリームがロックされている間にエンコード済みデータをコピー
             let encoded_data = std::slice::from_raw_parts(
@@ -704,7 +701,7 @@ impl Encoder {
                 .nvEncUnlockBitstream
                 .map(|f| f(self.h_encoder, lock_bitstream.outputBitstream));
             if let Some(status) = status {
-                Error::check(status, "nvEncUnlockBitstream", "failed to unlock bitstream")?;
+                Error::check_nvenc(status, "nvEncUnlockBitstream", "failed to unlock bitstream")?;
             }
 
             let timestamp = lock_bitstream.outputTimeStamp;
@@ -731,7 +728,7 @@ impl Encoder {
                 .nvEncEncodePicture
                 .map(|f| f(self.h_encoder, &mut pic_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check(status, "nvEncEncodePicture", "failed to finish encoder")?;
+            Error::check_nvenc(status, "nvEncEncodePicture", "failed to finish encoder")?;
 
             Ok(())
         }
@@ -746,14 +743,14 @@ impl Encoder {
 impl Drop for Encoder {
     fn drop(&mut self) {
         unsafe {
-            let _ = crate::with_cuda_context(self.ctx, || {
+            let _ = self.lib.with_context(self.ctx, || {
                 if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
                     destroy_fn(self.h_encoder);
                 }
                 Ok(())
             });
 
-            sys::cuCtxDestroy_v2(self.ctx);
+            let _ = self.lib.cu_ctx_destroy(self.ctx);
         }
     }
 }
