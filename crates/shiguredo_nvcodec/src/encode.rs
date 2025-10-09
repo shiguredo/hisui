@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr;
 
-use crate::{Error, ReleaseGuard, ensure_cuda_initialized, sys};
+use crate::{CudaLibrary, Error, ReleaseGuard, sys};
 
 /// プリセット
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,6 +205,7 @@ impl RateControlMode {
 
 /// エンコーダー
 pub struct Encoder {
+    lib: CudaLibrary,
     ctx: sys::CUcontext,
     encoder: sys::NV_ENCODE_API_FUNCTION_LIST,
     h_encoder: *mut c_void,
@@ -250,23 +251,23 @@ impl Encoder {
         codec_guid: sys::GUID,
         profile_guid: sys::GUID,
     ) -> Result<Self, Error> {
-        // CUDA ドライバーの初期化（プロセスごとに1回だけ実行される）
-        ensure_cuda_initialized()?;
-
         unsafe {
+            // Load the CUDA library
+            let lib = CudaLibrary::load()?;
+
             let mut ctx = ptr::null_mut();
 
             // CUDA context の初期化
-            let ctx_flags = 0; // デフォルトのコンテキストフラグ
-            let status = sys::cuCtxCreate_v2(&mut ctx, ctx_flags, config.device_id);
-            Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")?;
+            let ctx_flags = 0;
+            lib.cu_ctx_create(&mut ctx, ctx_flags, config.device_id)?;
 
-            let ctx_guard = ReleaseGuard::new(|| {
-                sys::cuCtxDestroy_v2(ctx);
+            let lib_clone = lib.clone();
+            let ctx_guard = ReleaseGuard::new(move || {
+                let _ = lib_clone.cu_ctx_destroy(ctx);
             });
 
             // NVENC 操作のために CUDA context をアクティブ化し、エンコードセッションを開く
-            let (encoder_api, h_encoder) = crate::with_cuda_context(ctx, || {
+            let (encoder_api, h_encoder) = lib.with_context(ctx, || {
                 // NVENC API をロード
                 let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
                 encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
@@ -304,6 +305,7 @@ impl Encoder {
             ctx_guard.cancel();
 
             let mut encoder = Self {
+                lib: lib.clone(),
                 ctx,
                 encoder: encoder_api,
                 h_encoder,
@@ -316,7 +318,7 @@ impl Encoder {
             };
 
             // デフォルトパラメータでエンコーダーを初期化
-            crate::with_cuda_context(ctx, || {
+            lib.with_context(ctx, || {
                 encoder.initialize_encoder(&config, codec_guid, profile_guid)
             })?;
 
@@ -443,7 +445,8 @@ impl Encoder {
     ///
     /// H.264/HEVC の場合は SPS/PPS、AV1 の場合は Sequence Header OBU を取得します。
     pub fn get_sequence_params(&mut self) -> Result<Vec<u8>, Error> {
-        crate::with_cuda_context(self.ctx, || self.get_sequence_params_inner())
+        self.lib
+            .with_context(self.ctx, || self.get_sequence_params_inner())
     }
 
     fn get_sequence_params_inner(&mut self) -> Result<Vec<u8>, Error> {
@@ -489,7 +492,8 @@ impl Encoder {
             ));
         }
 
-        crate::with_cuda_context(self.ctx, || self.encode_inner(nv12_data))
+        self.lib
+            .with_context(self.ctx, || self.encode_inner(nv12_data))
     }
 
     fn encode_inner(&mut self, nv12_data: &[u8]) -> Result<(), Error> {
@@ -524,16 +528,15 @@ impl Encoder {
     ) -> Result<(sys::CUdeviceptr, ReleaseGuard<impl FnOnce() + use<>>), Error> {
         unsafe {
             let mut device_input: sys::CUdeviceptr = 0;
-            let status = sys::cuMemAlloc_v2(&mut device_input, nv12_data.len());
-            Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")?;
+            self.lib.cu_mem_alloc(&mut device_input, nv12_data.len())?;
 
+            let lib = self.lib.clone();
             let device_guard = ReleaseGuard::new(move || {
-                sys::cuMemFree_v2(device_input);
+                let _ = lib.cu_mem_free(device_input);
             });
 
-            let status =
-                sys::cuMemcpyHtoD_v2(device_input, nv12_data.as_ptr().cast(), nv12_data.len());
-            Error::check(status, "cuMemcpyHtoD_v2", "failed to copy data to device")?;
+            self.lib
+                .cu_memcpy_h_to_d(device_input, nv12_data.as_ptr().cast(), nv12_data.len())?;
 
             Ok((device_input, device_guard))
         }
@@ -746,14 +749,14 @@ impl Encoder {
 impl Drop for Encoder {
     fn drop(&mut self) {
         unsafe {
-            let _ = crate::with_cuda_context(self.ctx, || {
+            let _ = self.lib.with_context(self.ctx, || {
                 if let Some(destroy_fn) = self.encoder.nvEncDestroyEncoder {
                     destroy_fn(self.h_encoder);
                 }
                 Ok(())
             });
 
-            sys::cuCtxDestroy_v2(self.ctx);
+            let _ = self.lib.cu_ctx_destroy(self.ctx);
         }
     }
 }
