@@ -5,6 +5,9 @@ on:
     tags:
       - "*"
 
+env:
+  CUDA_VERSION: 13-0
+
 jobs:
   github-release:
     name: "Create GitHub Release"
@@ -26,7 +29,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           release_output=$(gh release create ${{ steps.get_version.outputs.VERSION }} \
-            --title "${{ steps.get_version.outputs.VERSION }}") \
+            --title "${{ steps.get_version.outputs.VERSION }}" \
             --notes "Release ${{ steps.get_version.outputs.VERSION }}")
           release_id=$(echo "$release_output" | grep -o 'releases/[0-9]*' | cut -d'/' -f2)
           echo "release-id=$release_id" >> $GITHUB_OUTPUT
@@ -46,24 +49,6 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      # Ubuntu 24.04 で libtinfo5 が見つからない問題の修正
-      - name: Fix CUDA issues for Ubuntu 24.04
-        if: contains(matrix.platform.name, 'x86_64')
-        run: |
-          sudo tee /etc/apt/sources.list.d/jammy.list << EOF
-          deb http://archive.ubuntu.com/ubuntu/ jammy universe
-          EOF
-
-          sudo tee /etc/apt/preferences.d/pin-jammy <<EOF
-          Package: *
-          Pin: release n=jammy
-          Pin-Priority: -10
-
-          Package: libtinfo5
-          Pin: release n=jammy
-          Pin-Priority: 990
-          EOF
-
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -73,14 +58,10 @@ jobs:
       - name: Install CUDA
         if: contains(matrix.platform.name, 'x86_64')
         run: |
-          # libssl1.1 が必要
-          wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.0g-2ubuntu4_amd64.deb
-          sudo dpkg -i libssl1.1_1.1.0g-2ubuntu4_amd64.deb
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_*all.deb
           sudo apt-get update
-          # CUDA バージョンは適宜調整してください
-          DEBIAN_FRONTEND=noninteractive sudo apt-get -y install cuda-12-4
+          DEBIAN_FRONTEND=noninteractive sudo apt-get -y install cuda-toolkit-${{ env.CUDA_VERSION }}
 
       - run: rustup update stable
       - run: rustup default stable
