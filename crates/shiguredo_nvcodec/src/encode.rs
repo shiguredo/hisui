@@ -449,7 +449,7 @@ impl Encoder {
             .with_context(self.ctx, || self.get_sequence_params_inner())
     }
 
-    fn get_sequence_params_inner(&mut self) -> Result<Vec<u8>, Error> {
+    fn get_sequence_params_inner(&self) -> Result<Vec<u8>, Error> {
         unsafe {
             // シーケンスパラメータを格納するバッファを確保
             let mut payload_buffer = vec![0u8; sys::NV_MAX_SEQ_HDR_LEN as usize];
@@ -493,6 +493,7 @@ impl Encoder {
         }
 
         self.lib
+            .clone()
             .with_context(self.ctx, || self.encode_inner(nv12_data))
     }
 
@@ -526,20 +527,18 @@ impl Encoder {
         &mut self,
         nv12_data: &[u8],
     ) -> Result<(sys::CUdeviceptr, ReleaseGuard<impl FnOnce() + use<>>), Error> {
-        unsafe {
-            let mut device_input: sys::CUdeviceptr = 0;
-            self.lib.cu_mem_alloc(&mut device_input, nv12_data.len())?;
+        let mut device_input: sys::CUdeviceptr = 0;
+        self.lib.cu_mem_alloc(&mut device_input, nv12_data.len())?;
 
-            let lib = self.lib.clone();
-            let device_guard = ReleaseGuard::new(move || {
-                let _ = lib.cu_mem_free(device_input);
-            });
+        let lib = self.lib.clone();
+        let device_guard = ReleaseGuard::new(move || {
+            let _ = lib.cu_mem_free(device_input);
+        });
 
-            self.lib
-                .cu_memcpy_h_to_d(device_input, nv12_data.as_ptr().cast(), nv12_data.len())?;
+        self.lib
+            .cu_memcpy_h_to_d(device_input, nv12_data.as_ptr().cast(), nv12_data.len())?;
 
-            Ok((device_input, device_guard))
-        }
+        Ok((device_input, device_guard))
     }
 
     fn register_input_resource(
