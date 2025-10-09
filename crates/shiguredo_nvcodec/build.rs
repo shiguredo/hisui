@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 const DEFAULT_CUDA_INCLUDE_PATH: &str = "/usr/local/cuda/include/";
-const CUDA_INCLUDE_PATH_ENV_KEY: &tr = "CUDA_INCLUDE_PATH";
+const CUDA_INCLUDE_PATH_ENV_KEY: &str = "CUDA_INCLUDE_PATH";
 
 fn main() {
     // Cargo.toml か build.rs か third_party のヘッダファイルが更新されたら、バインディングファイルを再生成する
@@ -140,7 +140,7 @@ To resolve this issue:
         .header(nvenc_header.display().to_string())
         .header(cuvid_header.display().to_string())
         .header(nvcuvid_header.display().to_string())
-        .clang_arg(format!("-I{cuda_include_path}"))
+        .clang_arg(format!("-I{}", cuda_include_path.display()))
         .generate_comments(false)
         .derive_debug(false)
         .derive_default(false)
