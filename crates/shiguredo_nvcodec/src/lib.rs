@@ -240,6 +240,21 @@ impl CudaLibrary {
             "failed to copy memory from device to host",
         )
     }
+
+    /// CUDA context を push して、クロージャを実行し、自動的に pop する
+    unsafe fn with_context<F, R>(&self, ctx: sys::CUcontext, f: F) -> Result<R, Error>
+    where
+        F: FnOnce() -> Result<R, Error>,
+    {
+        self.cu_ctx_push_current(ctx)?;
+
+        let result = f();
+
+        let mut popped_ctx = std::ptr::null_mut();
+        self.cu_ctx_pop_current(&mut popped_ctx)?;
+
+        result
+    }
 }
 
 /// CUDA ライブラリを動的にロードする
@@ -278,24 +293,6 @@ fn load_cuda_library() -> Result<Arc<libloading::Library>, Error> {
 /// CUDA ライブラリがロード可能かチェックする
 pub fn is_cuda_available() -> bool {
     load_cuda_library().is_ok()
-}
-
-// CUDA context を push して、クロージャを実行し、自動的に pop する
-fn with_cuda_context<F, R>(ctx: sys::CUcontext, f: F) -> Result<R, Error>
-where
-    F: FnOnce() -> Result<R, Error>,
-{
-    unsafe {
-        let status = sys::cuCtxPushCurrent_v2(ctx);
-        Error::check(status, "cuCtxPushCurrent_v2", "failed to push CUDA context")?;
-
-        let result = f();
-
-        let status = sys::cuCtxPopCurrent_v2(std::ptr::null_mut());
-        Error::check(status, "cuCtxPopCurrent_v2", "failed to pop CUDA context")?;
-
-        result
-    }
 }
 
 /// エラー時にリソースを確実に解放するための構造体
