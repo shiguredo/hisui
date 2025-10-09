@@ -75,7 +75,7 @@ fn load_cuda_library() -> Result<Arc<libloading::Library>, Error> {
 }
 
 /// CUDA ライブラリがロード可能かチェックする
-pub fn is_cuda_library_available() -> bool {
+pub fn is_cuda_available() -> bool {
     load_cuda_library().is_ok()
 }
 
