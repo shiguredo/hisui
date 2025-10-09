@@ -393,11 +393,6 @@ pub const NV_ENC_PRESET_P7_GUID: GUID = GUID {
         format!("{bindings}\n{additional_definitions}"),
     )
     .expect("failed to write bindings");
-
-    // CUDA と NVENC/NVCUVID ライブラリのリンク設定
-    println!("cargo::rustc-link-lib=dylib=cuda");
-    println!("cargo::rustc-link-lib=dylib=nvcuvid");
-    println!("cargo::rustc-link-lib=dylib=nvidia-encode");
 }
 
 // Cargo.toml から依存ライブラリのバージョンを取得する
