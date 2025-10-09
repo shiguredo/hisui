@@ -69,16 +69,12 @@ struct CudaLibrary {
 impl CudaLibrary {
     /// CUDA ライブラリをロードし、必要な関数が利用可能かチェックする
     fn load() -> Result<Self, Error> {
-        static LIBS: LazyLock<
-            Result<
-                (
-                    Arc<libloading::Library>,
-                    Arc<libloading::Library>,
-                    Arc<libloading::Library>,
-                ),
-                Error,
-            >,
-        > = LazyLock::new(|| unsafe {
+        type Libraries = (
+            Arc<libloading::Library>,
+            Arc<libloading::Library>,
+            Arc<libloading::Library>,
+        );
+        static LIBS: LazyLock<Result<Libraries, Error>> = LazyLock::new(|| unsafe {
             // CUDA ドライバーライブラリをロード
             let cuda_lib = libloading::Library::new("libcuda.so.1")
                 .map(Arc::new)
