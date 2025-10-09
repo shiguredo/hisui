@@ -4,7 +4,8 @@
 //! [NVCODEC]: https://developer.nvidia.com/video-codec-sdk
 #![warn(missing_docs)]
 
-use std::sync::LazyLock;
+use std::ffi::c_void;
+use std::sync::{Arc, LazyLock};
 
 mod decode;
 mod encode;
@@ -117,132 +118,146 @@ impl CudaLibrary {
     }
 
     /// CUDA コンテキストを作成する
-    unsafe fn cu_ctx_create(
+    fn cu_ctx_create(
         &self,
         ctx: *mut sys::CUcontext,
         flags: u32,
         device: i32,
     ) -> Result<(), Error> {
-        let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext, u32, i32) -> u32> =
-            self.lib
-                .get(b"cuCtxCreate_v2")
-                .expect("cuCtxCreate_v2 should exist (checked in load())");
-        let status = f(ctx, flags, device);
-        Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext, u32, i32) -> u32> =
+                self.lib
+                    .get(b"cuCtxCreate_v2")
+                    .expect("cuCtxCreate_v2 should exist (checked in load())");
+            let status = f(ctx, flags, device);
+            Error::check(status, "cuCtxCreate_v2", "failed to create CUDA context")
+        }
     }
 
     /// CUDA コンテキストを破棄する
-    unsafe fn cu_ctx_destroy(&self, ctx: sys::CUcontext) -> Result<(), Error> {
-        let f: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = self
-            .lib
-            .get(b"cuCtxDestroy_v2")
-            .expect("cuCtxDestroy_v2 should exist (checked in load())");
-        let status = f(ctx);
-        Error::check(status, "cuCtxDestroy_v2", "failed to destroy CUDA context")
+    fn cu_ctx_destroy(&self, ctx: sys::CUcontext) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = self
+                .lib
+                .get(b"cuCtxDestroy_v2")
+                .expect("cuCtxDestroy_v2 should exist (checked in load())");
+            let status = f(ctx);
+            Error::check(status, "cuCtxDestroy_v2", "failed to destroy CUDA context")
+        }
     }
 
     /// CUDA コンテキストをスタックにプッシュする
-    unsafe fn cu_ctx_push_current(&self, ctx: sys::CUcontext) -> Result<(), Error> {
-        let f: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = self
-            .lib
-            .get(b"cuCtxPushCurrent_v2")
-            .expect("cuCtxPushCurrent_v2 should exist (checked in load())");
-        let status = f(ctx);
-        Error::check(status, "cuCtxPushCurrent_v2", "failed to push CUDA context")
+    fn cu_ctx_push_current(&self, ctx: sys::CUcontext) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = self
+                .lib
+                .get(b"cuCtxPushCurrent_v2")
+                .expect("cuCtxPushCurrent_v2 should exist (checked in load())");
+            let status = f(ctx);
+            Error::check(status, "cuCtxPushCurrent_v2", "failed to push CUDA context")
+        }
     }
 
     /// CUDA コンテキストをスタックからポップする
-    unsafe fn cu_ctx_pop_current(&self, ctx: *mut sys::CUcontext) -> Result<(), Error> {
-        let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext) -> u32> = self
-            .lib
-            .get(b"cuCtxPopCurrent_v2")
-            .expect("cuCtxPopCurrent_v2 should exist (checked in load())");
-        let status = f(ctx);
-        Error::check(status, "cuCtxPopCurrent_v2", "failed to pop CUDA context")
+    fn cu_ctx_pop_current(&self, ctx: *mut sys::CUcontext) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext) -> u32> = self
+                .lib
+                .get(b"cuCtxPopCurrent_v2")
+                .expect("cuCtxPopCurrent_v2 should exist (checked in load())");
+            let status = f(ctx);
+            Error::check(status, "cuCtxPopCurrent_v2", "failed to pop CUDA context")
+        }
     }
 
     /// CUDA コンテキストを同期する
-    unsafe fn cu_ctx_synchronize(&self) -> Result<(), Error> {
-        let f: libloading::Symbol<unsafe extern "C" fn() -> u32> = self
-            .lib
-            .get(b"cuCtxSynchronize")
-            .expect("cuCtxSynchronize should exist (checked in load())");
-        let status = f();
-        Error::check(
-            status,
-            "cuCtxSynchronize",
-            "failed to synchronize CUDA context",
-        )
+    fn cu_ctx_synchronize(&self) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn() -> u32> = self
+                .lib
+                .get(b"cuCtxSynchronize")
+                .expect("cuCtxSynchronize should exist (checked in load())");
+            let status = f();
+            Error::check(
+                status,
+                "cuCtxSynchronize",
+                "failed to synchronize CUDA context",
+            )
+        }
     }
 
     /// デバイスメモリを割り当てる
-    unsafe fn cu_mem_alloc(
-        &self,
-        dptr: *mut sys::CUdeviceptr,
-        bytesize: usize,
-    ) -> Result<(), Error> {
-        let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUdeviceptr, usize) -> u32> = self
-            .lib
-            .get(b"cuMemAlloc_v2")
-            .expect("cuMemAlloc_v2 should exist (checked in load())");
-        let status = f(dptr, bytesize);
-        Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")
+    fn cu_mem_alloc(&self, dptr: *mut sys::CUdeviceptr, bytesize: usize) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUdeviceptr, usize) -> u32> =
+                self.lib
+                    .get(b"cuMemAlloc_v2")
+                    .expect("cuMemAlloc_v2 should exist (checked in load())");
+            let status = f(dptr, bytesize);
+            Error::check(status, "cuMemAlloc_v2", "failed to allocate device memory")
+        }
     }
 
     /// デバイスメモリを解放する
-    unsafe fn cu_mem_free(&self, dptr: sys::CUdeviceptr) -> Result<(), Error> {
-        let f: libloading::Symbol<unsafe extern "C" fn(sys::CUdeviceptr) -> u32> = self
-            .lib
-            .get(b"cuMemFree_v2")
-            .expect("cuMemFree_v2 should exist (checked in load())");
-        let status = f(dptr);
-        Error::check(status, "cuMemFree_v2", "failed to free device memory")
+    fn cu_mem_free(&self, dptr: sys::CUdeviceptr) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(sys::CUdeviceptr) -> u32> = self
+                .lib
+                .get(b"cuMemFree_v2")
+                .expect("cuMemFree_v2 should exist (checked in load())");
+            let status = f(dptr);
+            Error::check(status, "cuMemFree_v2", "failed to free device memory")
+        }
     }
 
     /// ホストからデバイスへメモリをコピーする
-    unsafe fn cu_memcpy_h_to_d(
+    fn cu_memcpy_h_to_d(
         &self,
         dst_device: sys::CUdeviceptr,
         src_host: *const c_void,
         byte_count: usize,
     ) -> Result<(), Error> {
-        let f: libloading::Symbol<
-            unsafe extern "C" fn(sys::CUdeviceptr, *const c_void, usize) -> u32,
-        > = self
-            .lib
-            .get(b"cuMemcpyHtoD_v2")
-            .expect("cuMemcpyHtoD_v2 should exist (checked in load())");
-        let status = f(dst_device, src_host, byte_count);
-        Error::check(
-            status,
-            "cuMemcpyHtoD_v2",
-            "failed to copy memory from host to device",
-        )
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(sys::CUdeviceptr, *const c_void, usize) -> u32,
+            > = self
+                .lib
+                .get(b"cuMemcpyHtoD_v2")
+                .expect("cuMemcpyHtoD_v2 should exist (checked in load())");
+            let status = f(dst_device, src_host, byte_count);
+            Error::check(
+                status,
+                "cuMemcpyHtoD_v2",
+                "failed to copy memory from host to device",
+            )
+        }
     }
 
     /// デバイスからホストへメモリをコピーする
-    unsafe fn cu_memcpy_d_to_h(
+    fn cu_memcpy_d_to_h(
         &self,
         dst_host: *mut c_void,
         src_device: sys::CUdeviceptr,
         byte_count: usize,
     ) -> Result<(), Error> {
-        let f: libloading::Symbol<
-            unsafe extern "C" fn(*mut c_void, sys::CUdeviceptr, usize) -> u32,
-        > = self
-            .lib
-            .get(b"cuMemcpyDtoH_v2")
-            .expect("cuMemcpyDtoH_v2 should exist (checked in load())");
-        let status = f(dst_host, src_device, byte_count);
-        Error::check(
-            status,
-            "cuMemcpyDtoH_v2",
-            "failed to copy memory from device to host",
-        )
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(*mut c_void, sys::CUdeviceptr, usize) -> u32,
+            > = self
+                .lib
+                .get(b"cuMemcpyDtoH_v2")
+                .expect("cuMemcpyDtoH_v2 should exist (checked in load())");
+            let status = f(dst_host, src_device, byte_count);
+            Error::check(
+                status,
+                "cuMemcpyDtoH_v2",
+                "failed to copy memory from device to host",
+            )
+        }
     }
 
     /// CUDA context を push して、クロージャを実行し、自動的に pop する
-    unsafe fn with_context<F, R>(&self, ctx: sys::CUcontext, f: F) -> Result<R, Error>
+    fn with_context<F, R>(&self, ctx: sys::CUcontext, f: F) -> Result<R, Error>
     where
         F: FnOnce() -> Result<R, Error>,
     {
