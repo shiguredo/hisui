@@ -300,7 +300,7 @@ impl Encoder {
             ctx_guard.cancel();
 
             let mut encoder = Self {
-                lib,
+                lib: lib.clone(),
                 ctx,
                 encoder: encoder_api,
                 h_encoder,
