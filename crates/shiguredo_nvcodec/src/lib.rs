@@ -421,6 +421,198 @@ impl CudaLibrary {
         }
     }
 
+    /// cuvidCtxLockCreate を呼び出す
+    fn cuvid_ctx_lock_create(
+        &self,
+        lock: *mut sys::CUvideoctxlock,
+        ctx: sys::CUcontext,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(*mut sys::CUvideoctxlock, sys::CUcontext) -> u32,
+            > = self
+                .nvcuvid_lib
+                .get(b"cuvidCtxLockCreate")
+                .expect("cuvidCtxLockCreate should exist (checked in load())");
+            let status = f(lock, ctx);
+            Error::check(
+                status,
+                "cuvidCtxLockCreate",
+                "failed to create context lock",
+            )
+        }
+    }
+
+    /// cuvidCtxLockDestroy を呼び出す
+    fn cuvid_ctx_lock_destroy(&self, lock: sys::CUvideoctxlock) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(sys::CUvideoctxlock) -> u32> = self
+                .nvcuvid_lib
+                .get(b"cuvidCtxLockDestroy")
+                .expect("cuvidCtxLockDestroy should exist (checked in load())");
+            let status = f(lock);
+            Error::check(
+                status,
+                "cuvidCtxLockDestroy",
+                "failed to destroy context lock",
+            )
+        }
+    }
+
+    /// cuvidCreateVideoParser を呼び出す
+    fn cuvid_create_video_parser(
+        &self,
+        parser: *mut sys::CUvideoparser,
+        params: *mut sys::CUVIDPARSERPARAMS,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(*mut sys::CUvideoparser, *mut sys::CUVIDPARSERPARAMS) -> u32,
+            > = self
+                .nvcuvid_lib
+                .get(b"cuvidCreateVideoParser")
+                .expect("cuvidCreateVideoParser should exist (checked in load())");
+            let status = f(parser, params);
+            Error::check(
+                status,
+                "cuvidCreateVideoParser",
+                "failed to create video parser",
+            )
+        }
+    }
+
+    /// cuvidDestroyVideoParser を呼び出す
+    fn cuvid_destroy_video_parser(&self, parser: sys::CUvideoparser) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(sys::CUvideoparser) -> u32> = self
+                .nvcuvid_lib
+                .get(b"cuvidDestroyVideoParser")
+                .expect("cuvidDestroyVideoParser should exist (checked in load())");
+            let status = f(parser);
+            Error::check(
+                status,
+                "cuvidDestroyVideoParser",
+                "failed to destroy video parser",
+            )
+        }
+    }
+
+    /// cuvidParseVideoData を呼び出す
+    fn cuvid_parse_video_data(
+        &self,
+        parser: sys::CUvideoparser,
+        packet: *mut sys::CUVIDSOURCEDATAPACKET,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(sys::CUvideoparser, *mut sys::CUVIDSOURCEDATAPACKET) -> u32,
+            > = self
+                .nvcuvid_lib
+                .get(b"cuvidParseVideoData")
+                .expect("cuvidParseVideoData should exist (checked in load())");
+            let status = f(parser, packet);
+            Error::check(status, "cuvidParseVideoData", "failed to parse video data")
+        }
+    }
+
+    /// cuvidCreateDecoder を呼び出す
+    fn cuvid_create_decoder(
+        &self,
+        decoder: *mut sys::CUvideodecoder,
+        create_info: *mut sys::CUVIDDECODECREATEINFO,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(
+                    *mut sys::CUvideodecoder,
+                    *mut sys::CUVIDDECODECREATEINFO,
+                ) -> u32,
+            > = self
+                .nvcuvid_lib
+                .get(b"cuvidCreateDecoder")
+                .expect("cuvidCreateDecoder should exist (checked in load())");
+            let status = f(decoder, create_info);
+            Error::check(status, "cuvidCreateDecoder", "failed to create decoder")
+        }
+    }
+
+    /// cuvidDestroyDecoder を呼び出す
+    fn cuvid_destroy_decoder(&self, decoder: sys::CUvideodecoder) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(sys::CUvideodecoder) -> u32> = self
+                .nvcuvid_lib
+                .get(b"cuvidDestroyDecoder")
+                .expect("cuvidDestroyDecoder should exist (checked in load())");
+            let status = f(decoder);
+            Error::check(status, "cuvidDestroyDecoder", "failed to destroy decoder")
+        }
+    }
+
+    /// cuvidDecodePicture を呼び出す
+    fn cuvid_decode_picture(
+        &self,
+        decoder: sys::CUvideodecoder,
+        pic_params: *mut sys::CUVIDPICPARAMS,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(sys::CUvideodecoder, *mut sys::CUVIDPICPARAMS) -> u32,
+            > = self
+                .nvcuvid_lib
+                .get(b"cuvidDecodePicture")
+                .expect("cuvidDecodePicture should exist (checked in load())");
+            let status = f(decoder, pic_params);
+            Error::check(status, "cuvidDecodePicture", "failed to decode picture")
+        }
+    }
+
+    /// cuvidMapVideoFrame64 を呼び出す
+    fn cuvid_map_video_frame(
+        &self,
+        decoder: sys::CUvideodecoder,
+        picture_index: i32,
+        device_ptr: *mut u64,
+        pitch: *mut u32,
+        proc_params: *mut sys::CUVIDPROCPARAMS,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(
+                    sys::CUvideodecoder,
+                    i32,
+                    *mut u64,
+                    *mut u32,
+                    *mut sys::CUVIDPROCPARAMS,
+                ) -> u32,
+            > = self
+                .nvcuvid_lib
+                .get(b"cuvidMapVideoFrame64")
+                .expect("cuvidMapVideoFrame64 should exist (checked in load())");
+            let status = f(decoder, picture_index, device_ptr, pitch, proc_params);
+            Error::check(status, "cuvidMapVideoFrame64", "failed to map video frame")
+        }
+    }
+
+    /// cuvidUnmapVideoFrame64 を呼び出す
+    fn cuvid_unmap_video_frame(
+        &self,
+        decoder: sys::CUvideodecoder,
+        device_ptr: u64,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(sys::CUvideodecoder, u64) -> u32> = self
+                .nvcuvid_lib
+                .get(b"cuvidUnmapVideoFrame64")
+                .expect("cuvidUnmapVideoFrame64 should exist (checked in load())");
+            let status = f(decoder, device_ptr);
+            Error::check(
+                status,
+                "cuvidUnmapVideoFrame64",
+                "failed to unmap video frame",
+            )
+        }
+    }
+
     /// CUDA context を push して、クロージャを実行し、自動的に pop する
     fn with_context<F, R>(&self, ctx: sys::CUcontext, f: F) -> Result<R, Error>
     where
