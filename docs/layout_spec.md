@@ -219,6 +219,7 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 
 なお自前で Hisui のビルドを行う場合には、nvcodec はデフォルトでは無効になっています。
 有効にする方法は [ビルド方法](build.md) をご参照ください。
+ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効になっています（CUDA がない環境では実行時に無効になります）。
 
 ### `video_bitrate: $BITRATE`
 

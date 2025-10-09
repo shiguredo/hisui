@@ -43,6 +43,11 @@ cargo install --path .
 
 ### NVIDIA Video Codec を使った H.264 / H.265 / AV1 のデコードおよびエンコードを有効にする場合
 
+> [NOTE]
+>
+> ubuntu-24.04_x86_64 向けのビルド済みバイナリでは、nvcodec 機能が有効になっています。
+> CUDA がインストールされていない環境では実行時に自動的に無効になります。
+
 CUDA が利用できる環境で、以下のように `--features nvcodec` を指定して Hisui をビルドしてください。
 
 ```bash
