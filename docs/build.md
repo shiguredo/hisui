@@ -49,6 +49,24 @@ CUDA が利用できる環境で、以下のように `--features nvcodec` を�
 cargo install hisui --features nvcodec
 ```
 
+#### CUDA Toolkit のインストール
+
+nvcodec 機能を有効にするには、CUDA Toolkit がインストールされている必要があります。
+
+CUDA Toolkit は [NVIDIA の公式サイト](https://developer.nvidia.com/cuda-downloads) からダウンロードできます。
+
+インストール後、`cuda.h` が以下のいずれかの場所に存在することを確認してください：
+
+- デフォルトパス: `/usr/local/cuda/include/cuda.h`
+- 環境変数で指定したパス: `$CUDA_INCLUDE_PATH/cuda.h`
+
+デフォルトパス以外に CUDA をインストールした場合は、環境変数 `CUDA_INCLUDE_PATH` を設定してください：
+
+```bash
+export CUDA_INCLUDE_PATH=/path/to/cuda/include
+cargo install hisui --features nvcodec
+```
+
 ### FDK-AAC を使った AAC エンコードを有効にする場合
 
 Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
