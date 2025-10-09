@@ -178,27 +178,25 @@ impl Decoder {
 
 impl Drop for Decoder {
     fn drop(&mut self) {
-        unsafe {
-            if !self.parser.is_null() {
-                let _ = self.lib.cuvid_destroy_video_parser(self.parser);
-            }
+        if !self.parser.is_null() {
+            let _ = self.lib.cuvid_destroy_video_parser(self.parser);
+        }
 
-            // ここでロック確保に失敗してもできることはないので、成功時にだけ処理を行う
-            if let Ok(state) = self.state.lock()
-                && !state.decoder.is_null()
-            {
-                let _ = self
-                    .lib
-                    .with_context(self.ctx, || self.lib.cuvid_destroy_decoder(state.decoder));
-            }
+        // ここでロック確保に失敗してもできることはないので、成功時にだけ処理を行う
+        if let Ok(state) = self.state.lock()
+            && !state.decoder.is_null()
+        {
+            let _ = self
+                .lib
+                .with_context(self.ctx, || self.lib.cuvid_destroy_decoder(state.decoder));
+        }
 
-            if !self.ctx_lock.is_null() {
-                let _ = self.lib.cuvid_ctx_lock_destroy(self.ctx_lock);
-            }
+        if !self.ctx_lock.is_null() {
+            let _ = self.lib.cuvid_ctx_lock_destroy(self.ctx_lock);
+        }
 
-            if !self.ctx.is_null() {
-                let _ = self.lib.cu_ctx_destroy(self.ctx);
-            }
+        if !self.ctx.is_null() {
+            let _ = self.lib.cu_ctx_destroy(self.ctx);
         }
     }
 }
