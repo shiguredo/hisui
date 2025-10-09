@@ -272,12 +272,7 @@ impl Encoder {
                 let mut encoder_api: sys::NV_ENCODE_API_FUNCTION_LIST = std::mem::zeroed();
                 encoder_api.version = sys::NV_ENCODE_API_FUNCTION_LIST_VER;
 
-                let status = sys::NvEncodeAPICreateInstance(&mut encoder_api);
-                Error::check(
-                    status,
-                    "NvEncodeAPICreateInstance",
-                    "failed to create NVENC API instance",
-                )?;
+                lib.nvenc_create_api_instance(&mut encoder_api)?;
 
                 // エンコードセッションを開く
                 let mut open_session_params: sys::NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS =

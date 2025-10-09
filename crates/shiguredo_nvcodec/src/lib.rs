@@ -400,6 +400,27 @@ impl CudaLibrary {
         }
     }
 
+    /// NvEncodeAPICreateInstance を呼び出す
+    fn nvenc_create_api_instance(
+        &self,
+        function_list: *mut sys::NV_ENCODE_API_FUNCTION_LIST,
+    ) -> Result<(), Error> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(*mut sys::NV_ENCODE_API_FUNCTION_LIST) -> u32,
+            > = self
+                .nvenc_lib
+                .get(b"NvEncodeAPICreateInstance")
+                .expect("NvEncodeAPICreateInstance should exist (checked in load())");
+            let status = f(function_list);
+            Error::check(
+                status,
+                "NvEncodeAPICreateInstance",
+                "failed to create NVENC API instance",
+            )
+        }
+    }
+
     /// CUDA context を push して、クロージャを実行し、自動的に pop する
     fn with_context<F, R>(&self, ctx: sys::CUcontext, f: F) -> Result<R, Error>
     where
