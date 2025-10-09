@@ -75,15 +75,10 @@ impl Decoder {
 
             // デコーダー用のコンテキストロックを作成
             let mut ctx_lock = ptr::null_mut();
-            let status = sys::cuvidCtxLockCreate(&mut ctx_lock, ctx);
-            Error::check(
-                status,
-                "cuvidCtxLockCreate",
-                "failed to create context lock",
-            )?;
+            lib.cuvid_ctx_lock_create(&mut ctx_lock, ctx)?;
 
             let ctx_lock_guard = crate::ReleaseGuard::new(|| {
-                sys::cuvidCtxLockDestroy(ctx_lock);
+                let _ = lib.cuvid_ctx_lock_destroy(ctx_lock);
             });
 
             // チャンネルを作成
@@ -113,12 +108,7 @@ impl Decoder {
             parser_params.pfnDisplayPicture = Some(handle_picture_display);
 
             let mut parser = ptr::null_mut();
-            let status = sys::cuvidCreateVideoParser(&mut parser, &mut parser_params);
-            Error::check(
-                status,
-                "cuvidCreateVideoParser",
-                "failed to create video parser",
-            )?;
+            lib.cuvid_create_video_parser(&mut parser, &mut parser_params)?;
 
             // 成功したのでクリーンアップをキャンセル
             ctx_guard.cancel();
@@ -147,8 +137,7 @@ impl Decoder {
             packet.flags = 0;
             packet.timestamp = 0;
 
-            let status = sys::cuvidParseVideoData(self.parser, &mut packet);
-            Error::check(status, "cuvidParseVideoData", "failed to parse video data")?;
+            self.lib.cuvid_parse_video_data(self.parser, &mut packet)?;
         }
 
         Ok(())
@@ -164,8 +153,7 @@ impl Decoder {
             packet.flags = sys::CUvideopacketflags_CUVID_PKT_ENDOFSTREAM as u64;
             packet.timestamp = 0;
 
-            let status = sys::cuvidParseVideoData(self.parser, &mut packet);
-            Error::check(status, "cuvidParseVideoData", "failed to finish decoding")?;
+            self.lib.cuvid_parse_video_data(self.parser, &mut packet)?;
 
             // パーサーは非同期でデータを処理するので、
             // すべてのデコード操作が完了するまでここで待機（同期）する
@@ -192,21 +180,20 @@ impl Drop for Decoder {
     fn drop(&mut self) {
         unsafe {
             if !self.parser.is_null() {
-                sys::cuvidDestroyVideoParser(self.parser);
+                let _ = self.lib.cuvid_destroy_video_parser(self.parser);
             }
 
             // ここでロック確保に失敗してもできることはないので、成功時にだけ処理を行う
             if let Ok(state) = self.state.lock()
                 && !state.decoder.is_null()
             {
-                let _ = self.lib.with_context(self.ctx, || {
-                    sys::cuvidDestroyDecoder(state.decoder);
-                    Ok(())
-                });
+                let _ = self
+                    .lib
+                    .with_context(self.ctx, || self.lib.cuvid_destroy_decoder(state.decoder));
             }
 
             if !self.ctx_lock.is_null() {
-                sys::cuvidCtxLockDestroy(self.ctx_lock);
+                let _ = self.lib.cuvid_ctx_lock_destroy(self.ctx_lock);
             }
 
             if !self.ctx.is_null() {
@@ -309,12 +296,10 @@ fn handle_video_sequence_inner(
     // パーサーと共有するコンテキストロックを使用
     create_info.vidLock = state.ctx_lock;
 
-    state.lib.with_context(state.ctx, || unsafe {
-        Error::check(
-            sys::cuvidCreateDecoder(&mut state.decoder, &mut create_info),
-            "cuvidCreateDecoder",
-            "failed to create video decoder",
-        )
+    state.lib.with_context(state.ctx, || {
+        state
+            .lib
+            .cuvid_create_decoder(&mut state.decoder, &mut create_info)
     })?;
     state.width = (format.display_area.right - format.display_area.left) as u32;
     state.height = (format.display_area.bottom - format.display_area.top) as u32;
@@ -361,9 +346,10 @@ fn handle_picture_decode_inner(
         ));
     }
 
-    state.lib.with_context(state.ctx, || unsafe {
-        let status = sys::cuvidDecodePicture(state.decoder, pic_params as *const _ as *mut _);
-        Error::check(status, "cuvidDecodePicture", "failed to decode picture")
+    state.lib.with_context(state.ctx, || {
+        state
+            .lib
+            .cuvid_decode_picture(state.decoder, pic_params as *const _ as *mut _)
     })?;
 
     Ok(())
@@ -417,18 +403,17 @@ fn handle_picture_display_inner(
         // デコード済みフレームをマップ
         let mut device_ptr = 0u64;
         let mut pitch = 0u32;
-        let status = sys::cuvidMapVideoFrame64(
+        state.lib.cuvid_map_video_frame(
             state.decoder,
             disp_info.picture_index,
             &mut device_ptr,
             &mut pitch,
             &mut proc_params,
-        );
-        Error::check(status, "cuvidMapVideoFrame64", "failed to map video frame")?;
+        )?;
 
         // 確実にフレームをアンマップするためのガードを作成
         let _unmap_guard = crate::ReleaseGuard::new(|| {
-            sys::cuvidUnmapVideoFrame64(state.decoder, device_ptr);
+            let _ = state.lib.cuvid_unmap_video_frame(state.decoder, device_ptr);
         });
 
         // フレームサイズを計算 (NV12 形式: Y プレーン + UV プレーン)
