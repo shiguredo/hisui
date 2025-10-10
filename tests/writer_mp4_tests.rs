@@ -282,6 +282,12 @@ fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout 
         video_bitrate: None,
         encode_params: Default::default(),
         decode_params: Default::default(),
+        video_encoder: None,
+        video_h264_decoder: None,
+        video_h265_decoder: None,
+        video_vp8_decoder: None,
+        video_vp9_decoder: None,
+        video_av1_decoder: None,
     }
 }
 
