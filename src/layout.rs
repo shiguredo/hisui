@@ -56,6 +56,11 @@ pub struct Layout {
     pub audio_bitrate: Option<NonZeroUsize>,
     pub video_bitrate: Option<usize>,
     pub video_encoder: Option<EngineName>,
+    pub video_h264_decoder: Option<EngineName>,
+    pub video_h265_decoder: Option<EngineName>,
+    pub video_vp8_decoder: Option<EngineName>,
+    pub video_vp9_decoder: Option<EngineName>,
+    pub video_av1_decoder: Option<EngineName>,
     pub encode_params: LayoutEncodeParams,
     pub decode_params: LayoutDecodeParams,
     pub frame_rate: FrameRate,
@@ -216,6 +221,11 @@ struct RawLayout {
     audio_codec: CodecName,
     video_codec: CodecName,
     video_encoder: Option<EngineName>,
+    video_h264_decoder: Option<EngineName>,
+    video_h265_decoder: Option<EngineName>,
+    video_vp8_decoder: Option<EngineName>,
+    video_vp9_decoder: Option<EngineName>,
+    video_av1_decoder: Option<EngineName>,
     encode_params: LayoutEncodeParams,
     decode_params: LayoutDecodeParams,
     frame_rate: FrameRate,
@@ -264,6 +274,16 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                 })?
                 .unwrap_or(CodecName::Opus),
             video_encoder: object.get_with("video_encoder", EngineName::parse_video_encoder)?,
+            video_h264_decoder: object
+                .get_with("video_h264_decoder", EngineName::parse_video_h264_decoder)?,
+            video_h265_decoder: object
+                .get_with("video_h265_decoder", EngineName::parse_video_h265_decoder)?,
+            video_vp8_decoder: object
+                .get_with("video_vp8_decoder", EngineName::parse_video_vp8_decoder)?,
+            video_vp9_decoder: object
+                .get_with("video_vp9_decoder", EngineName::parse_video_vp9_decoder)?,
+            video_av1_decoder: object
+                .get_with("video_av1_decoder", EngineName::parse_video_av1_decoder)?,
             frame_rate: object
                 .get_with("frame_rate", |v| {
                     v.as_raw_str().parse().map_err(|e| v.invalid(e))
@@ -351,6 +371,11 @@ impl RawLayout {
             audio_bitrate: self.audio_bitrate,
             video_bitrate: self.video_bitrate,
             video_encoder: self.video_encoder,
+            video_h264_decoder: self.video_h264_decoder,
+            video_h265_decoder: self.video_h265_decoder,
+            video_vp8_decoder: self.video_vp8_decoder,
+            video_vp9_decoder: self.video_vp9_decoder,
+            video_av1_decoder: self.video_av1_decoder,
             encode_params: self.encode_params,
             decode_params: self.decode_params,
             frame_rate: self.frame_rate,

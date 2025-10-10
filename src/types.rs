@@ -145,6 +145,143 @@ impl EngineName {
             _ => Err(value.invalid(format!("unknown video encoder: {s}"))),
         }
     }
+
+    pub fn parse_video_h264_decoder(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
+        match s.as_ref() {
+            "openh264" => Ok(Self::Openh264),
+            "nvcodec" => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    Ok(Self::Nvcodec)
+                }
+                #[cfg(not(feature = "nvcodec"))]
+                {
+                    Err(value.invalid("nvcodec feature is not enabled"))
+                }
+            }
+            "video_toolbox" => {
+                #[cfg(target_os = "macos")]
+                {
+                    Ok(Self::VideoToolbox)
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(value.invalid("video_toolbox is only available on macOS"))
+                }
+            }
+            _ => Err(value.invalid(format!("unknown or unsupported H264 decoder: {s}"))),
+        }
+    }
+
+    pub fn parse_video_h265_decoder(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
+        match s.as_ref() {
+            "nvcodec" => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    Ok(Self::Nvcodec)
+                }
+                #[cfg(not(feature = "nvcodec"))]
+                {
+                    Err(value.invalid("nvcodec feature is not enabled"))
+                }
+            }
+            "video_toolbox" => {
+                #[cfg(target_os = "macos")]
+                {
+                    Ok(Self::VideoToolbox)
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(value.invalid("video_toolbox is only available on macOS"))
+                }
+            }
+            _ => Err(value.invalid(format!("unknown or unsupported H265 decoder: {s}"))),
+        }
+    }
+
+    pub fn parse_video_vp8_decoder(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
+        match s.as_ref() {
+            "nvcodec" => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    Ok(Self::Nvcodec)
+                }
+                #[cfg(not(feature = "nvcodec"))]
+                {
+                    Err(value.invalid("nvcodec feature is not enabled"))
+                }
+            }
+            "libvpx" => {
+                #[cfg(feature = "libvpx")]
+                {
+                    Ok(Self::Libvpx)
+                }
+                #[cfg(not(feature = "libvpx"))]
+                {
+                    Err(value.invalid("libvpx feature is not enabled"))
+                }
+            }
+            _ => Err(value.invalid(format!("unknown or unsupported VP8 decoder: {s}"))),
+        }
+    }
+
+    pub fn parse_video_vp9_decoder(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
+        match s.as_ref() {
+            "nvcodec" => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    Ok(Self::Nvcodec)
+                }
+                #[cfg(not(feature = "nvcodec"))]
+                {
+                    Err(value.invalid("nvcodec feature is not enabled"))
+                }
+            }
+            "libvpx" => {
+                #[cfg(feature = "libvpx")]
+                {
+                    Ok(Self::Libvpx)
+                }
+                #[cfg(not(feature = "libvpx"))]
+                {
+                    Err(value.invalid("libvpx feature is not enabled"))
+                }
+            }
+            _ => Err(value.invalid(format!("unknown or unsupported VP9 decoder: {s}"))),
+        }
+    }
+
+    pub fn parse_video_av1_decoder(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
+        match s.as_ref() {
+            "nvcodec" => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    Ok(Self::Nvcodec)
+                }
+                #[cfg(not(feature = "nvcodec"))]
+                {
+                    Err(value.invalid("nvcodec feature is not enabled"))
+                }
+            }
+            "dav1d" => Ok(Self::Dav1d),
+            _ => Err(value.invalid(format!("unknown or unsupported AV1 decoder: {s}"))),
+        }
+    }
 }
 
 impl nojson::DisplayJson for EngineName {
