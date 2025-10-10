@@ -250,6 +250,7 @@ impl AudioEncoderInner {
 #[derive(Debug, Clone)]
 pub struct VideoEncoderOptions {
     pub codec: CodecName,
+    pub engine: Option<EngineName>,
     pub bitrate: usize,
     pub width: EvenUsize,
     pub height: EvenUsize,
@@ -261,6 +262,7 @@ impl VideoEncoderOptions {
     pub fn from_layout(layout: &Layout) -> Self {
         Self {
             codec: layout.video_codec,
+            engine: layout.video_encoder,
             bitrate: layout.video_bitrate_bps(),
             width: layout.resolution.width(),
             height: layout.resolution.height(),
