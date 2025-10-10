@@ -92,6 +92,8 @@
   "nvcodec_av1_encode_params": $PARAMS,
   "nvcodec_h264_decode_params": $PARAMS,
   "nvcodec_h265_decode_params": $PARAMS,
+  "nvcodec_vp8_decode_params": $PARAMS,
+  "nvcodec_vp9_decode_params": $PARAMS,
   "nvcodec_av1_decode_params": $PARAMS,
   "trim": $BOOLEAN
 }
@@ -642,11 +644,6 @@ NVIDIA Video Codec SDK で H.264 デコードを行う際のデコードパラ�
 NVIDIA Video Codec SDK で H.265 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
-### `nvcodec_av1_decode_params: $PARAMS`
-
-NVIDIA Video Codec SDK で AV1 デコードを行う際のデコードパラメーターを指定します。
-詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
-
 ### `nvcodec_vp8_decode_params: $PARAMS`
 
 NVIDIA Video Codec SDK で VP8 デコードを行う際のデコードパラメーターを指定します。
@@ -655,6 +652,11 @@ NVIDIA Video Codec SDK で VP8 デコードを行う際のデコードパラメ�
 ### `nvcodec_vp9_decode_params: $PARAMS`
 
 NVIDIA Video Codec SDK で VP9 デコードを行う際のデコードパラメーターを指定します。
+詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
+
+### `nvcodec_av1_decode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で AV1 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
 ### `trim: $BOOLEAN`

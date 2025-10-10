@@ -11,7 +11,7 @@
 ## NVIDIA Video Codec SDK デコーダーパラメーター
 
 NVIDIA Video Codec SDK（nvcodec）は、CUDA 対応 GPU を利用したハードウェアデコーダーです。
-Hisui では H.264、H.265、AV1、VP8、VP9 のデコードに利用できます。
+Hisui では H.264、H.265、VP8、VP9、AV1 のデコードに利用できます。
 
 ### 利用条件
 
@@ -31,9 +31,9 @@ nvcodec デコーダーでは、H.264、H.265、AV1、VP8、VP9 の各コーデ�
 
 - `nvcodec_h264_decode_params`: H.264 デコード時のパラメーター
 - `nvcodec_h265_decode_params`: H.265 デコード時のパラメーター
-- `nvcodec_av1_decode_params`: AV1 デコード時のパラメーター
 - `nvcodec_vp8_decode_params`: VP8 デコード時のパラメーター
 - `nvcodec_vp9_decode_params`: VP9 デコード時のパラメーター
+- `nvcodec_av1_decode_params`: AV1 デコード時のパラメーター
 
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、公式ドキュメントを参照してください。

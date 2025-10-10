@@ -169,17 +169,17 @@
     "max_num_decode_surfaces": 20,
     "max_display_delay": 0,
   },
-  "nvcodec_av1_decode_params": {
-    "device_id": 0,
-    "max_num_decode_surfaces": 20,
-    "max_display_delay": 0,
-  },
   "nvcodec_vp8_decode_params": {
     "device_id": 0,
     "max_num_decode_surfaces": 20,
     "max_display_delay": 0,
   },
   "nvcodec_vp9_decode_params": {
+    "device_id": 0,
+    "max_num_decode_surfaces": 20,
+    "max_display_delay": 0,
+  },
+  "nvcodec_av1_decode_params": {
     "device_id": 0,
     "max_num_decode_surfaces": 20,
     "max_display_delay": 0,
