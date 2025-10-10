@@ -647,6 +647,16 @@ NVIDIA Video Codec SDK で H.265 デコードを行う際のデコードパラ�
 NVIDIA Video Codec SDK で AV1 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
+### `nvcodec_vp8_decode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で VP8 デコードを行う際のデコードパラメーターを指定します。
+詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
+
+### `nvcodec_vp9_decode_params: $PARAMS`
+
+NVIDIA Video Codec SDK で VP9 デコードを行う際のデコードパラメーターを指定します。
+詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
+
 ### `trim: $BOOLEAN`
 
 配信者が存在しない期間の自動トリミング（除去）を有効にするかどうかを指定します。
