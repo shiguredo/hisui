@@ -235,13 +235,10 @@ fn extract_parameter_sets_annexb(
             }
             Ok(annexb_data)
         }
-        (SampleEntry::Av01(_entry), VideoFormat::Av1) => {
-            // AV1はパラメータセットを個別に送る必要がないため空のVecを返す
+        _ => {
+            // VP8 / VP9 / AV1はパラメータセットを個別に送る必要がないため空のVecを返す
             Ok(Vec::new())
         }
-        _ => Err(orfail::Failure::new(
-            "Sample entry format mismatch or unsupported codec",
-        )),
     }
 }
 
