@@ -205,8 +205,16 @@ fn test_simple_single_source_common(
 ///   - VP9, OPUS, 25 fps, 320x240
 #[test]
 #[cfg(feature = "libvpx")]
-fn simple_single_source() -> noargs::Result<()> {
+fn simple_single_source_vp9() -> noargs::Result<()> {
     test_simple_single_source_common("testdata/e2e/simple_single_source/", CodecName::Vp9)
+}
+
+/// simple_single_source_vp9 とほぼ同様だけど nvcodec は VP9 エンコードをサポートしていないので、
+/// 出力では H.264 を使っている
+#[test]
+#[cfg(feature = "nvcodec")]
+fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
+    test_simple_single_source_common("testdata/e2e/simple_single_source/", CodecName::H264)
 }
 
 /// 単一のソースをそのまま変換する場合 (H.265版)
