@@ -14,7 +14,7 @@ use crate::{
     layout_encode_params::LayoutEncodeParams,
     layout_region::{self, RawRegion, Region},
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
-    types::{CodecName, EvenUsize},
+    types::{CodecName, EngineName, EvenUsize},
     video::FrameRate,
 };
 
@@ -214,6 +214,7 @@ struct RawLayout {
     video_bitrate: Option<usize>,
     audio_codec: CodecName,
     video_codec: CodecName,
+    video_encoder: Option<EngineName>,
     encode_params: LayoutEncodeParams,
     decode_params: LayoutDecodeParams,
     frame_rate: FrameRate,
@@ -261,6 +262,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                         .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))
                 })?
                 .unwrap_or(CodecName::Opus),
+            video_encoder: object.get_with("video_encoder", EngineName::parse_video_encoder)?,
             frame_rate: object
                 .get_with("frame_rate", |v| {
                     v.as_raw_str().parse().map_err(|e| v.invalid(e))
