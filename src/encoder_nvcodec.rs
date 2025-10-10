@@ -252,12 +252,11 @@ impl NvcodecEncoder {
     ///   - bit 6: obu_has_size_field
     ///   - bit 7: obu_reserved_1bit
     ///
-    /// obu_type の値:
+    /// obu_type の値（一部）:
     ///   - 1: OBU_SEQUENCE_HEADER (シーケンスヘッダー)
     ///   - 2: OBU_TEMPORAL_DELIMITER (テンポラルデリミタ)
     ///   - 3: OBU_FRAME_HEADER (フレームヘッダー)
     ///   - 6: OBU_FRAME (フレーム)
-    ///   など
     ///
     /// キーフレームは通常、以下のいずれかの構成になる:
     ///   1. [Temporal Delimiter] + [Sequence Header] + [Frame Header] + [Tile Data]
