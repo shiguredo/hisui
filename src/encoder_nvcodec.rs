@@ -231,86 +231,24 @@ impl NvcodecEncoder {
         Ok(())
     }
 
-    /// AV1 ペイロードに Sequence Header OBU が含まれているかチェック
-    ///
-    /// AV1 のビットストリームは OBU (Open Bitstream Unit) の連続で構成される。
-    /// 各 OBU は以下の構造を持つ:
-    ///   - obu_header (1-2 bytes): OBU タイプなどの情報
-    ///   - obu_size (可変長, optional)
-    ///   - payload
-    ///
-    /// obu_header のビット構成:
-    ///   - bit 0: obu_forbidden_bit (常に0)
-    ///   - bit 1-4: obu_type
-    ///   - bit 5: obu_extension_flag
-    ///   - bit 6: obu_has_size_field
-    ///   - bit 7: obu_reserved_1bit
-    ///
-    /// obu_type の値（一部）:
-    ///   - 1: OBU_SEQUENCE_HEADER (シーケンスヘッダー)
-    ///   - 2: OBU_TEMPORAL_DELIMITER (テンポラルデリミタ)
-    ///   - 3: OBU_FRAME_HEADER (フレームヘッダー)
-    ///   - 6: OBU_FRAME (フレーム)
-    ///
-    /// キーフレームは通常、以下のいずれかの構成になる:
-    ///   1. [Temporal Delimiter] + [Sequence Header] + [Frame Header] + [Tile Data]
-    ///   2. [Temporal Delimiter] + [Frame Header] + [Tile Data]  (Sequence Header なし)
-    ///
-    /// このメソッドは、先頭または Temporal Delimiter の次に Sequence Header (type=1) が
-    /// 存在するかをチェックする。
+    /// AV1 ペイロードの先頭に Sequence Header OBU が含まれているかチェック
     fn has_sequence_header(&self, data: &[u8]) -> bool {
         if data.len() < 2 {
             return false;
         }
 
         // 先頭の OBU Header を解析
+        // obu_header のビット構成:
+        //   - bit 0: obu_forbidden_bit (常に0)
+        //   - bit 1-4: obu_type
+        //   - bit 5: obu_extension_flag
+        //   - bit 6: obu_has_size_field
+        //   - bit 7: obu_reserved_1bit
         let obu_header = data[0];
         let obu_type = (obu_header >> 3) & 0x0F;
 
-        // 先頭が Sequence Header なら true
-        if obu_type == 1 {
-            return true;
-        }
-
-        // 先頭が Temporal Delimiter (type=2) の場合は次の OBU をチェック
-        if obu_type == 2 {
-            let mut pos = 1;
-
-            // extension_flag が立っている場合は extension_header (1バイト) をスキップ
-            if (obu_header & 0x04) != 0 {
-                pos += 1;
-                if pos >= data.len() {
-                    return false;
-                }
-            }
-
-            // has_size_field が立っている場合は size フィールドとペイロードをスキップ
-            if (obu_header & 0x02) != 0 {
-                // LEB128 形式のサイズフィールドを読む（簡略化: 1-2バイトのみ対応）
-                if pos >= data.len() {
-                    return false;
-                }
-                let mut size = (data[pos] & 0x7F) as usize;
-                if (data[pos] & 0x80) != 0 {
-                    // 2バイト目がある場合
-                    pos += 1;
-                    if pos >= data.len() {
-                        return false;
-                    }
-                    size |= ((data[pos] & 0x7F) as usize) << 7;
-                }
-                pos += 1; // size フィールド分
-                pos += size; // ペイロード分
-            }
-
-            // 次の OBU をチェック
-            if pos < data.len() {
-                let next_obu_type = (data[pos] >> 3) & 0x0F;
-                return next_obu_type == 1; // Sequence Header
-            }
-        }
-
-        false
+        // 先頭が Sequence Header (type=1) なら true
+        obu_type == 1
     }
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
