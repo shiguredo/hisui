@@ -206,7 +206,7 @@ fn test_simple_single_source_common(
 #[test]
 #[cfg(feature = "libvpx")]
 fn simple_single_source_vp9() -> noargs::Result<()> {
-    test_simple_single_source_common("testdata/e2e/simple_single_source/", CodecName::Vp9)
+    test_simple_single_source_common("testdata/e2e/simple_single_source_vp9/", CodecName::Vp9)
 }
 
 /// simple_single_source_vp9 とほぼ同様だけど nvcodec は VP9 エンコードをサポートしていないので、
@@ -214,7 +214,10 @@ fn simple_single_source_vp9() -> noargs::Result<()> {
 #[test]
 #[cfg(feature = "nvcodec")]
 fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
-    test_simple_single_source_common("testdata/e2e/simple_single_source/", CodecName::H264)
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_vp9_nvcodec/",
+        CodecName::H264,
+    )
 }
 
 /// 単一のソースをそのまま変換する場合 (H.265版)
