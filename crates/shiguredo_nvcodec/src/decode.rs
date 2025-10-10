@@ -1,4 +1,3 @@
-// TODO: VP8 / VP9 のデコードに対応する
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::Mutex;
