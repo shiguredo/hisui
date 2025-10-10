@@ -202,7 +202,7 @@ impl NvcodecEncoder {
                 if keyframe && !self.has_sequence_header(&data) {
                     log::debug!(
                         "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
-                        self.av1_sequence_header.len().len(),
+                        self.av1_sequence_header.len(),
                         data.len()
                     );
                     let mut new_data =
