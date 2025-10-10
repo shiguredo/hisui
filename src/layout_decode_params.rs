@@ -12,6 +12,10 @@ pub struct LayoutDecodeParams {
     pub nvcodec_h265: shiguredo_nvcodec::DecoderConfig,
     #[cfg(feature = "nvcodec")]
     pub nvcodec_av1: shiguredo_nvcodec::DecoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_vp8: shiguredo_nvcodec::DecoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_vp9: shiguredo_nvcodec::DecoderConfig,
 }
 
 impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutDecodeParams {
@@ -32,6 +36,14 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutDecodePar
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_av1_decode_params" => {
                     params.nvcodec_av1 = decoder_nvcodec_params::parse_av1_decode_params(value)?;
+                }
+                #[cfg(feature = "nvcodec")]
+                "nvcodec_vp8_decode_params" => {
+                    params.nvcodec_vp8 = decoder_nvcodec_params::parse_vp8_decode_params(value)?;
+                }
+                #[cfg(feature = "nvcodec")]
+                "nvcodec_vp9_decode_params" => {
+                    params.nvcodec_vp9 = decoder_nvcodec_params::parse_vp9_decode_params(value)?;
                 }
                 _ => {}
             }
@@ -60,6 +72,16 @@ impl LayoutDecodeParams {
             value.to_member("nvcodec_av1_decode_params")?.required()?,
         )?;
 
+        #[cfg(feature = "nvcodec")]
+        let nvcodec_vp8 = decoder_nvcodec_params::parse_vp8_decode_params(
+            value.to_member("nvcodec_vp8_decode_params")?.required()?,
+        )?;
+
+        #[cfg(feature = "nvcodec")]
+        let nvcodec_vp9 = decoder_nvcodec_params::parse_vp9_decode_params(
+            value.to_member("nvcodec_vp9_decode_params")?.required()?,
+        )?;
+
         Ok(Self {
             #[cfg(feature = "nvcodec")]
             nvcodec_h264,
@@ -67,6 +89,10 @@ impl LayoutDecodeParams {
             nvcodec_h265,
             #[cfg(feature = "nvcodec")]
             nvcodec_av1,
+            #[cfg(feature = "nvcodec")]
+            nvcodec_vp8,
+            #[cfg(feature = "nvcodec")]
+            nvcodec_vp9,
         })
     }
 }

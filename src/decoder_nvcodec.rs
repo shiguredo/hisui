@@ -52,10 +52,37 @@ impl NvcodecDecoder {
         })
     }
 
+    pub fn new_vp8(params: &LayoutDecodeParams) -> orfail::Result<Self> {
+        log::debug!("create nvcodec(VP8) decoder");
+        let config = params.nvcodec_vp8.clone();
+        Ok(Self {
+            inner: shiguredo_nvcodec::Decoder::new_vp8(config).or_fail()?,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new(),
+            parameter_sets: None,
+        })
+    }
+
+    pub fn new_vp9(params: &LayoutDecodeParams) -> orfail::Result<Self> {
+        log::debug!("create nvcodec(VP9) decoder");
+        let config = params.nvcodec_vp9.clone();
+        Ok(Self {
+            inner: shiguredo_nvcodec::Decoder::new_vp9(config).or_fail()?,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new(),
+            parameter_sets: None,
+        })
+    }
+
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
         matches!(
             frame.format,
-            VideoFormat::H264 | VideoFormat::H264AnnexB | VideoFormat::H265 | VideoFormat::Av1
+            VideoFormat::H264
+                | VideoFormat::H264AnnexB
+                | VideoFormat::H265
+                | VideoFormat::Vp8
+                | VideoFormat::Vp9
+                | VideoFormat::Av1
         )
         .or_fail()?;
 
@@ -67,8 +94,11 @@ impl NvcodecDecoder {
                 Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
         }
 
-        let data = if frame.format == VideoFormat::Av1 {
-            // AV1 の場合は Annex B 形式への変換は不要なので、そのままデータを使用
+        let data = if matches!(
+            frame.format,
+            VideoFormat::Vp8 | VideoFormat::Vp9 | VideoFormat::Av1
+        ) {
+            // VP8 / VP9 / AV1 の場合は Annex B 形式は存在しないので、データの変換は不要
             Cow::Borrowed(&frame.data)
         } else if frame.format == VideoFormat::H264AnnexB {
             // すでに Annex B 形式の場合はそのまま使用
@@ -205,13 +235,10 @@ fn extract_parameter_sets_annexb(
             }
             Ok(annexb_data)
         }
-        (SampleEntry::Av01(_entry), VideoFormat::Av1) => {
-            // AV1はパラメータセットを個別に送る必要がないため空のVecを返す
+        _ => {
+            // VP8 / VP9 / AV1はパラメータセットを個別に送る必要がないため空のVecを返す
             Ok(Vec::new())
         }
-        _ => Err(orfail::Failure::new(
-            "Sample entry format mismatch or unsupported codec",
-        )),
     }
 }
 

@@ -67,6 +67,50 @@ pub fn parse_av1_decode_params(
     Ok(config)
 }
 
+pub fn parse_vp8_decode_params(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
+    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+
+    // デフォルトレイアウトの設定を反映
+    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
+    let params = JsonObject::new(
+        default
+            .value()
+            .to_member("nvcodec_vp8_decode_params")?
+            .required()?,
+    )?;
+    update_decode_params(params, &mut config)?;
+
+    // 実際のレイアウトの設定を反映
+    let params = JsonObject::new(value)?;
+    update_decode_params(params, &mut config)?;
+
+    Ok(config)
+}
+
+pub fn parse_vp9_decode_params(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
+    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+
+    // デフォルトレイアウトの設定を反映
+    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
+    let params = JsonObject::new(
+        default
+            .value()
+            .to_member("nvcodec_vp9_decode_params")?
+            .required()?,
+    )?;
+    update_decode_params(params, &mut config)?;
+
+    // 実際のレイアウトの設定を反映
+    let params = JsonObject::new(value)?;
+    update_decode_params(params, &mut config)?;
+
+    Ok(config)
+}
+
 fn update_decode_params(
     params: JsonObject<'_, '_>,
     config: &mut shiguredo_nvcodec::DecoderConfig,

@@ -54,6 +54,16 @@ impl Decoder {
         Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_AV1, config)
     }
 
+    /// VP8 用のデコーダーインスタンスを生成する
+    pub fn new_vp8(config: DecoderConfig) -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_VP8, config)
+    }
+
+    /// VP9 用のデコーダーインスタンスを生成する
+    pub fn new_vp9(config: DecoderConfig) -> Result<Self, Error> {
+        Self::new_with_codec(sys::cudaVideoCodec_enum_cudaVideoCodec_VP9, config)
+    }
+
     /// 指定されたコーデックタイプでデコーダーインスタンスを生成する
     fn new_with_codec(
         codec_type: sys::cudaVideoCodec,
@@ -521,6 +531,20 @@ mod tests {
     }
 
     #[test]
+    fn init_vp8_decoder() {
+        let _decoder =
+            Decoder::new_vp8(DecoderConfig::default()).expect("Failed to initialize vp8 decoder");
+        println!("vp8 decoder initialized successfully");
+    }
+
+    #[test]
+    fn init_vp9_decoder() {
+        let _decoder =
+            Decoder::new_vp9(DecoderConfig::default()).expect("Failed to initialize vp9 decoder");
+        println!("vp9 decoder initialized successfully");
+    }
+
+    #[test]
     fn test_multiple_decoders() {
         // CUDA初期化が1回だけ実行されることを確認するため、複数のデコーダーを作成
         let _decoder1 = Decoder::new_h265(DecoderConfig::default())
@@ -787,6 +811,170 @@ mod tests {
 
         println!(
             "Successfully decoded AV1 black frame: {}x{} (stride: {})",
+            frame.width(),
+            frame.height(),
+            frame.y_stride()
+        );
+        println!("Y average: {}, UV average: {}", y_avg, uv_avg);
+    }
+
+    #[test]
+    fn test_decode_vp8_black_frame() {
+        // VP8の黒フレームデータ
+        let vp8_data = vec![
+            80, 66, 0, 157, 1, 42, 128, 2, 224, 1, 2, 199, 8, 133, 133, 136, 153, 132, 136, 15, 2,
+            0, 6, 22, 4, 247, 6, 129, 100, 159, 107, 219, 155, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39,
+            56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123,
+            39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56,
+            123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 56, 123, 39, 55, 128, 254,
+            250, 215, 128,
+        ];
+
+        let mut decoder =
+            Decoder::new_vp8(DecoderConfig::default()).expect("Failed to create vp8 decoder");
+
+        // デコードを実行
+        decoder
+            .decode(&vp8_data)
+            .expect("Failed to decode VP8 data");
+
+        // フィニッシュ処理をテスト
+        decoder.finish().expect("Failed to finish decoding");
+
+        // デコード済みフレームを取得
+        let frame = decoder
+            .next_frame()
+            .expect("Decoding error occurred")
+            .expect("No decoded frame available");
+
+        assert_eq!(frame.width(), 640);
+        assert_eq!(frame.height(), 480);
+
+        // Y平面とUV平面のデータサイズを確認
+        assert_eq!(frame.y_plane().len(), frame.y_stride() * frame.height());
+        assert_eq!(
+            frame.uv_plane().len(),
+            frame.uv_stride() * frame.height() / 2
+        );
+
+        // ストライドが幅以上であることを確認（GPUアラインメントのため）
+        assert!(frame.y_stride() >= frame.width());
+        assert!(frame.uv_stride() >= frame.width());
+
+        // 黒画面なので、Y成分は16付近、UV成分は128付近の値になることを確認
+        let y_data = frame.y_plane();
+        let uv_data = frame.uv_plane();
+
+        // Y成分の平均値をチェック（完全な黒は16）
+        let y_avg = y_data.iter().map(|&x| x as u32).sum::<u32>() / y_data.len() as u32;
+        assert!(
+            y_avg >= 10 && y_avg <= 30,
+            "Y average should be around 16 for black, got {}",
+            y_avg
+        );
+
+        // UV成分の平均値をチェック
+        let uv_avg = uv_data.iter().map(|&x| x as u32).sum::<u32>() / uv_data.len() as u32;
+        assert!(
+            uv_avg >= 70 && uv_avg <= 140,
+            "UV average should be in reasonable range for the encoded frame, got {}",
+            uv_avg
+        );
+
+        println!(
+            "Successfully decoded VP8 black frame: {}x{} (stride: {})",
+            frame.width(),
+            frame.height(),
+            frame.y_stride()
+        );
+        println!("Y average: {}, UV average: {}", y_avg, uv_avg);
+    }
+
+    #[test]
+    fn test_decode_vp9_black_frame() {
+        // VP9の黒フレームデータ
+        let vp9_data = vec![
+            130, 73, 131, 66, 0, 39, 240, 29, 246, 0, 56, 36, 28, 24, 74, 16, 0, 80, 97, 246, 58,
+            246, 128, 92, 209, 238, 0, 0, 0, 0, 0, 20, 103, 26, 154, 224, 98, 35, 126, 68, 120,
+            240, 227, 199, 143, 30, 28, 238, 113, 218, 24, 0, 103, 26, 154, 224, 98, 35, 126, 68,
+            120, 240, 227, 199, 143, 30, 28, 238, 113, 218, 24, 0,
+        ];
+
+        let mut decoder =
+            Decoder::new_vp9(DecoderConfig::default()).expect("Failed to create vp9 decoder");
+
+        // デコードを実行
+        decoder
+            .decode(&vp9_data)
+            .expect("Failed to decode VP9 data");
+
+        // フィニッシュ処理をテスト
+        decoder.finish().expect("Failed to finish decoding");
+
+        // デコード済みフレームを取得
+        let frame = decoder
+            .next_frame()
+            .expect("Decoding error occurred")
+            .expect("No decoded frame available");
+
+        assert_eq!(frame.width(), 640);
+        assert_eq!(frame.height(), 480);
+
+        // Y平面とUV平面のデータサイズを確認
+        assert_eq!(frame.y_plane().len(), frame.y_stride() * frame.height());
+        assert_eq!(
+            frame.uv_plane().len(),
+            frame.uv_stride() * frame.height() / 2
+        );
+
+        // ストライドが幅以上であることを確認（GPUアラインメントのため）
+        assert!(frame.y_stride() >= frame.width());
+        assert!(frame.uv_stride() >= frame.width());
+
+        // 黒画面なので、Y成分は16付近、UV成分は128付近の値になることを確認
+        let y_data = frame.y_plane();
+        let uv_data = frame.uv_plane();
+
+        // Y成分の平均値をチェック（完全な黒は16）
+        let y_avg = y_data.iter().map(|&x| x as u32).sum::<u32>() / y_data.len() as u32;
+        assert!(
+            y_avg >= 10 && y_avg <= 30,
+            "Y average should be around 16 for black, got {}",
+            y_avg
+        );
+
+        // UV成分の平均値をチェック
+        let uv_avg = uv_data.iter().map(|&x| x as u32).sum::<u32>() / uv_data.len() as u32;
+        assert!(
+            uv_avg >= 70 && uv_avg <= 140,
+            "UV average should be in reasonable range for the encoded frame, got {}",
+            uv_avg
+        );
+
+        println!(
+            "Successfully decoded VP9 black frame: {}x{} (stride: {})",
             frame.width(),
             frame.height(),
             frame.y_stride()

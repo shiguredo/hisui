@@ -161,6 +161,10 @@ impl VideoDecoder {
         let mut engines = Vec::new();
         match codec {
             CodecName::Vp8 | CodecName::Vp9 => {
+                #[cfg(feature = "nvcodec")]
+                if shiguredo_nvcodec::is_cuda_available() {
+                    engines.push(EngineName::Nvcodec);
+                }
                 #[cfg(feature = "libvpx")]
                 {
                     engines.push(EngineName::Libvpx);
@@ -328,11 +332,29 @@ impl VideoDecoderInner {
                     stats.codec.set(CodecName::H265);
                     self.decode(frame, stats).or_fail()
                 }
+                #[cfg(feature = "nvcodec")]
+                VideoFormat::Vp8 if shiguredo_nvcodec::is_cuda_available() => {
+                    *self = NvcodecDecoder::new_vp8(&options.decode_params)
+                        .or_fail()
+                        .map(Self::Nvcodec)?;
+                    stats.engine.set(EngineName::Nvcodec);
+                    stats.codec.set(CodecName::Vp8);
+                    self.decode(frame, stats).or_fail()
+                }
                 #[cfg(feature = "libvpx")]
                 VideoFormat::Vp8 => {
                     *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
                     stats.engine.set(EngineName::Libvpx);
                     stats.codec.set(CodecName::Vp8);
+                    self.decode(frame, stats).or_fail()
+                }
+                #[cfg(feature = "nvcodec")]
+                VideoFormat::Vp9 if shiguredo_nvcodec::is_cuda_available() => {
+                    *self = NvcodecDecoder::new_vp9(&options.decode_params)
+                        .or_fail()
+                        .map(Self::Nvcodec)?;
+                    stats.engine.set(EngineName::Nvcodec);
+                    stats.codec.set(CodecName::Vp9);
                     self.decode(frame, stats).or_fail()
                 }
                 #[cfg(feature = "libvpx")]

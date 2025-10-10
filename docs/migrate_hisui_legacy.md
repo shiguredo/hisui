@@ -204,7 +204,7 @@ Sora の MP4 録画機能で録画されたファイルを合成できるよう�
 
 ### NVIDIA Video Codec に対応
 
-NVIDIA Video Codec を利用した H.264 / H.265 / AV1 のエンコードおよびデコードに対応しています。
+NVIDIA Video Codec を利用した H.264 / H.265 / AV1 のエンコードおよび H.264 / H.265 / VP8 / VP9 / AV1 デコードに対応しています。
 
 ### H.265 ストリームのデコードおよびエンコードに対応（macOS のみ）
 
