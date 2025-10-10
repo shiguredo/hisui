@@ -234,7 +234,8 @@ impl NvcodecEncoder {
 
     /// AV1 ペイロードの先頭に Sequence Header OBU が含まれているかチェック
     fn has_sequence_header(&self, data: &[u8]) -> bool {
-        if data.len() < 2 {
+        // 最低限 OBU Header の 1 バイトが必要
+        if data.is_empty() {
             return false;
         }
 
@@ -246,6 +247,13 @@ impl NvcodecEncoder {
         //   - bit 6: obu_has_size_field
         //   - bit 7: obu_reserved_1bit
         let obu_header = data[0];
+        let obu_has_extension = (obu_header & 0b0010_0000) != 0;
+
+        // OBU Extension が存在する場合は 2 バイト目も必要
+        if obu_has_extension && data.len() < 2 {
+            return false;
+        }
+
         let obu_type = (obu_header >> 3) & 0x0F;
 
         // 先頭が Sequence Header (type=1) なら true
