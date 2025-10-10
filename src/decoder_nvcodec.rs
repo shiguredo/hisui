@@ -80,9 +80,9 @@ impl NvcodecDecoder {
             VideoFormat::H264
                 | VideoFormat::H264AnnexB
                 | VideoFormat::H265
-                | VideoFormat::Av1
                 | VideoFormat::Vp8
                 | VideoFormat::Vp9
+                | VideoFormat::Av1
         )
         .or_fail()?;
 
@@ -94,8 +94,11 @@ impl NvcodecDecoder {
                 Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
         }
 
-        let data = if frame.format == VideoFormat::Av1 {
-            // AV1, VP8, VP9 の場合は Annex B 形式への変換は不要なので、そのままデータを使用
+        let data = if matches!(
+            frame.format,
+            VideoFormat::Vp8 | VideoFormat::Vp9 | VideoFormat::Av1
+        ) {
+            // VP8 / VP9 / AV1 の場合は Annex B 形式は存在しないので、データの変換は不要
             Cow::Borrowed(&frame.data)
         } else if frame.format == VideoFormat::H264AnnexB {
             // すでに Annex B 形式の場合はそのまま使用
