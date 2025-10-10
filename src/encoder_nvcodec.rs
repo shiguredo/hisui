@@ -17,7 +17,7 @@ pub struct NvcodecEncoder {
     output_queue: VecDeque<VideoFrame>,
     sample_entry: Option<SampleEntry>,
     encoded_format: VideoFormat,
-    av1_sequence_header: Option<Vec<u8>>,
+    av1_sequence_header: Vec<u8>,
 }
 
 impl NvcodecEncoder {
@@ -47,7 +47,7 @@ impl NvcodecEncoder {
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::H264,
-            av1_sequence_header: None,
+            av1_sequence_header: Vec::new(),
         })
     }
 
@@ -82,7 +82,7 @@ impl NvcodecEncoder {
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::H265,
-            av1_sequence_header: None,
+            av1_sequence_header: Vec::new(),
         })
     }
 
@@ -128,7 +128,7 @@ impl NvcodecEncoder {
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::Av1,
-            av1_sequence_header: Some(seq_params),
+            av1_sequence_header: seq_params,
         })
     }
 
@@ -200,21 +200,15 @@ impl NvcodecEncoder {
 
                 // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
                 if keyframe && !self.has_sequence_header(&data) {
-                    if let Some(ref seq_header) = self.av1_sequence_header {
-                        log::debug!(
-                            "Prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
-                            seq_header.len(),
-                            data.len()
-                        );
-                        let mut new_data = Vec::with_capacity(seq_header.len() + data.len());
-                        new_data.extend_from_slice(seq_header);
-                        new_data.extend_from_slice(&data);
-                        data = new_data;
-                    } else {
-                        log::warn!(
-                            "AV1 keyframe missing Sequence Header but no saved header available"
-                        );
-                    }
+                    log::debug!(
+                        "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
+                        seq_header.len().len(),
+                        data.len()
+                    );
+                    let mut new_data = Vec::with_capacity(seq_header.len() + data.len());
+                    new_data.extend_from_slice(&self.av1_sequence_header);
+                    new_data.extend_from_slice(&data);
+                    data = new_data;
                 }
                 data
             } else {
