@@ -17,6 +17,7 @@ pub struct NvcodecEncoder {
     output_queue: VecDeque<VideoFrame>,
     sample_entry: Option<SampleEntry>,
     encoded_format: VideoFormat,
+    av1_sequence_header: Vec<u8>,
 }
 
 impl NvcodecEncoder {
@@ -46,6 +47,7 @@ impl NvcodecEncoder {
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::H264,
+            av1_sequence_header: Vec::new(),
         })
     }
 
@@ -80,6 +82,7 @@ impl NvcodecEncoder {
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::H265,
+            av1_sequence_header: Vec::new(),
         })
     }
 
@@ -103,7 +106,20 @@ impl NvcodecEncoder {
         log::debug!("nvcodec av1 encoder config: {config:?}");
 
         let mut inner = shiguredo_nvcodec::Encoder::new_av1(config).or_fail()?;
+
+        // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
+        // には以下の記載がある:
+        //   "By default, SPS/PPS and Sequence Header OBU data will be attached to every IDR frame and Key frame for H.264/HEVC and AV1 respectively."
+        //
+        // しかし実際には、AV1の場合、最初のキーフレームにのみ Sequence Header OBU が付与され、
+        // 二番目以降のキーフレームには含まれない。これにより、二番目以降のキーフレームからシークすると、
+        // デコーダが解像度やプロファイルなどの情報を取得できず、映像が再生できない問題が発生する。
+        //
+        // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
+        // キーフレームのエンコード時に Sequence Header が含まれていない場合は、
+        // hisui 側で明示的に付与するワークアラウンドを実装している。
         let seq_params = inner.get_sequence_params().or_fail()?;
+
         let sample_entry = video_av1::av1_sample_entry(width, height, &seq_params);
 
         Ok(Self {
@@ -112,6 +128,7 @@ impl NvcodecEncoder {
             output_queue: VecDeque::new(),
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::Av1,
+            av1_sequence_header: seq_params,
         })
     }
 
@@ -176,9 +193,25 @@ impl NvcodecEncoder {
                 shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
             );
 
-            // AV1 の場合は変換不要、H.264/H.265 の場合は Annex B から MP4 形式に変換
+            // AV1 の場合は変換不要だが、キーフレームに Sequence Header が含まれていない場合は付与
+            // H.264/H.265 の場合は Annex B から MP4 形式に変換
             let frame_data = if self.encoded_format == VideoFormat::Av1 {
-                encoded_frame.into_data()
+                let mut data = encoded_frame.into_data();
+
+                // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
+                if keyframe && !self.has_sequence_header(&data) {
+                    log::debug!(
+                        "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
+                        self.av1_sequence_header.len(),
+                        data.len()
+                    );
+                    let mut new_data =
+                        Vec::with_capacity(self.av1_sequence_header.len() + data.len());
+                    new_data.extend_from_slice(&self.av1_sequence_header);
+                    new_data.extend_from_slice(&data);
+                    data = new_data;
+                }
+                data
             } else {
                 convert_annexb_to_mp4(encoded_frame.data()).or_fail()?
             };
@@ -197,6 +230,34 @@ impl NvcodecEncoder {
             });
         }
         Ok(())
+    }
+
+    /// AV1 ペイロードの先頭に Sequence Header OBU が含まれているかチェック
+    fn has_sequence_header(&self, data: &[u8]) -> bool {
+        // 最低限 OBU Header の 1 バイトが必要
+        if data.is_empty() {
+            return false;
+        }
+
+        // 先頭の OBU Header を解析
+        // obu_header のビット構成:
+        //   - bit 0: obu_forbidden_bit (常に0)
+        //   - bit 1-4: obu_type
+        //   - bit 5: obu_extension_flag
+        //   - bit 6: obu_has_size_field
+        //   - bit 7: obu_reserved_1bit
+        let obu_header = data[0];
+        let obu_has_extension = (obu_header & 0b0010_0000) != 0;
+
+        // OBU Extension が存在する場合は 2 バイト目も必要
+        if obu_has_extension && data.len() < 2 {
+            return false;
+        }
+
+        let obu_type = (obu_header >> 3) & 0x0F;
+
+        // 先頭が Sequence Header (type=1) なら true
+        obu_type == 1
     }
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
