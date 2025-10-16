@@ -250,7 +250,7 @@ impl AudioEncoderInner {
 #[derive(Debug, Clone)]
 pub struct VideoEncoderOptions {
     pub codec: CodecName,
-    pub engines: Vec<EngineName>,
+    pub engines: Option<Vec<EngineName>>,
     pub bitrate: usize,
     pub width: EvenUsize,
     pub height: EvenUsize,
@@ -290,22 +290,14 @@ impl VideoEncoder {
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
         let mut inner = None;
-        let engine = options
+        let mut candidate_engines = options
             .engines
+            .cloned()
+            .unwrap_or_else(|| EngineName::default_video_encoders(openh264_lib.is_some()));
+        let engine = candidate_engines
             .iter()
-            .find(|x| x.is_available_video_encode_codec(options.codec))
-            .or_fail_with(|()| {
-                format!(
-                    "no available encoder for {} codec (candidate encoders: {})",
-                    options.codec.as_str(),
-                    options
-                        .engines
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            })?;
+            .find(|engine| engine.is_available_video_encode_codec(options.codec))
+            .copied();
         let inner = match (engine, options.codec) {
             #[cfg(feature = "libvpx")]
             (EngineName::Libvpx, CodecName::Vp8) => {
@@ -319,9 +311,21 @@ impl VideoEncoder {
             (EngineName::Nvcodec, CodecName::H264) => {
                 VideoEncoderInner::new_nvcodec_h264(options).or_fail()?
             }
+            #[cfg(feature = "nvcodec")]
+            (EngineName::Nvcodec, CodecName::H265) => {
+                VideoEncoderInner::new_nvcodec_h265(options).or_fail()?
+            }
+            #[cfg(feature = "nvcodec")]
+            (EngineName::Nvcodec, CodecName::Av1) => {
+                VideoEncoderInner::new_nvcodec_av1(options).or_fail()?
+            }
             #[cfg(target_os = "macos")]
             (EngineName::VideoToolbox, CodecName::H264) => {
                 VideoEncoderInner::new_video_toolbox_h264(options).or_fail()?
+            }
+            #[cfg(target_os = "macos")]
+            (EngineName::VideoToolbox, CodecName::H265) => {
+                VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?
             }
             (EngineName::Openh264, CodecName::H264) => {
                 let lib = openh264_lib.or_fail_with(|()| {
@@ -332,21 +336,20 @@ impl VideoEncoder {
                 })?;
                 VideoEncoderInner::new_openh264(lib, options).or_fail()?
             }
-            #[cfg(feature = "nvcodec")]
-            CodecName::H265 if shiguredo_nvcodec::is_cuda_available() => {
-                VideoEncoderInner::new_nvcodec_h265(options).or_fail()?
+            (EngineName::SvtAv1, CodecName::Av1) => {
+                VideoEncoderInner::new_svt_av1(options).or_fail()?
             }
-            #[cfg(target_os = "macos")]
-            CodecName::H265 if check_engine(EngineName::VideoToolbox) => {
-                VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?
-            }
-            #[cfg(feature = "nvcodec")]
-            CodecName::Av1 if shiguredo_nvcodec::is_cuda_available() => {
-                VideoEncoderInner::new_nvcodec_av1(options).or_fail()?
-            }
-            CodecName::Av1 => VideoEncoderInner::new_svt_av1(options).or_fail()?,
             _ => {
-                continue;
+                return Err(orfail::Failure::new(format!(
+                    "no available encoder for {} codec (candidate encoders: {})",
+                    options.codec.as_str(),
+                    options
+                        .engines
+                        .iter()
+                        .map(|engine| engine.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
             }
         };
 

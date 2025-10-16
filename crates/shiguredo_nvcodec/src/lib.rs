@@ -636,7 +636,12 @@ impl CudaLibrary {
 }
 
 /// CUDA ライブラリがロード可能かチェックする
-pub fn is_cuda_available() -> bool {
+pub fn is_cuda_library_available() -> bool {
+    libloading::Library::new("libcuda.so.1").is_ok()
+}
+
+// ライブラリロード + CUDA 初期化
+fn is_cuda_available() -> bool {
     CudaLibrary::load().is_ok()
 }
 

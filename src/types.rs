@@ -88,13 +88,29 @@ pub enum EngineName {
 }
 
 impl EngineName {
-    pub const DEFAULT_VIDEO_ENCODERS: &[Self] = &[
-        Self::Nvcodec,
-        Self::VideoToolbox,
-        Self::Openh264,
-        Self::SvtAv1,
-        Self::Libvpx,
-    ];
+    // NOTE: 先頭の方が優先順位が高い
+    pub fn default_video_encoders(is_openh264_enabled: bool) -> Vec<Self> {
+        let mut engines = Vec::new();
+
+        if is_openh264_enabled {
+            engines.push(Self::Openh264);
+        }
+        #[cfg(feature = "nvcodec")]
+        if shiguredo_nvcodec::is_cuda_library_available() {
+            engines.push(Self::Nvcodec);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            engines.push(Self::VideoToolbox);
+        }
+        engines.push(Self::SvtAv1);
+        #[cfg(feature = "libvpx")]
+        {
+            engines.push(Self::Libvpx);
+        }
+
+        engines
+    }
 
     pub fn is_available_video_encode_codec(self, codec: CodecName) -> bool {
         match self {
@@ -102,13 +118,10 @@ impl EngineName {
             EngineName::Libvpx => matches!(CodecName, CodecName::Vp8 | CodecName::Vp9),
             #[cfg(feature = "nvcodec")]
             EngineName::Nvcodec => {
-                // NOTE:
-                // CUDA の初期化を不必要に行わないようにするために
-                // shiguredo_nvcodec::is_cuda_available() の呼び出しは最後にしている
                 matches!(
                     CodecName,
                     CodecName::H264 | CodecName::H265 | CodecName::Av1
-                ) && shiguredo_nvcodec::is_cuda_available()
+                )
             }
             EngineName::Openh264 => matches!(CodecName, CodecName::H264),
             EngineName::SvtAv1 => matches!(CodecName, CodecName::Av1),
