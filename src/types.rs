@@ -89,6 +89,53 @@ pub enum EngineName {
 
 impl EngineName {
     // NOTE: 先頭の方が優先順位が高い
+    pub fn default_video_decoders(is_openh264_enabled: bool) -> Vec<Self> {
+        let mut engines = Vec::new();
+
+        if is_openh264_enabled {
+            engines.push(Self::Openh264);
+        }
+        #[cfg(feature = "nvcodec")]
+        if shiguredo_nvcodec::is_cuda_library_available() {
+            engines.push(Self::Nvcodec);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            engines.push(Self::VideoToolbox);
+        }
+        engines.push(Self::Dav1d);
+        #[cfg(feature = "libvpx")]
+        {
+            engines.push(Self::Libvpx);
+        }
+
+        engines
+    }
+
+    pub fn is_available_video_decode_codec(self, codec: CodecName) -> bool {
+        match self {
+            #[cfg(feature = "libvpx")]
+            EngineName::Libvpx => matches!(codec, CodecName::Vp8 | CodecName::Vp9),
+            #[cfg(feature = "nvcodec")]
+            EngineName::Nvcodec => {
+                matches!(
+                    codec,
+                    CodecName::H264
+                        | CodecName::H265
+                        | CodecName::Vp8
+                        | CodecName::Vp9
+                        | CodecName::Av1
+                )
+            }
+            EngineName::Openh264 => matches!(codec, CodecName::H264),
+            EngineName::Dav1d => matches!(codec, CodecName::Av1),
+            #[cfg(target_os = "macos")]
+            EngineName::VideoToolbox => matches!(codec, CodecName::H264 | CodecName::H265),
+            _ => false,
+        }
+    }
+
+    // NOTE: 先頭の方が優先順位が高い
     pub fn default_video_encoders(is_openh264_enabled: bool) -> Vec<Self> {
         let mut engines = Vec::new();
 
