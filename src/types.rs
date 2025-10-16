@@ -88,6 +88,36 @@ pub enum EngineName {
 }
 
 impl EngineName {
+    pub const DEFAULT_VIDEO_ENCODERS: &[Self] = &[
+        Self::Nvcodec,
+        Self::VideoToolbox,
+        Self::Openh264,
+        Self::SvtAv1,
+        Self::Libvpx,
+    ];
+
+    pub fn is_available_video_encode_codec(self, codec: CodecName) -> bool {
+        match self {
+            #[cfg(feature = "libvpx")]
+            EngineName::Libvpx => matches!(CodecName, CodecName::Vp8 | CodecName::Vp9),
+            #[cfg(feature = "nvcodec")]
+            EngineName::Nvcodec => {
+                // NOTE:
+                // CUDA の初期化を不必要に行わないようにするために
+                // shiguredo_nvcodec::is_cuda_available() の呼び出しは最後にしている
+                matches!(
+                    CodecName,
+                    CodecName::H264 | CodecName::H265 | CodecName::Av1
+                ) && shiguredo_nvcodec::is_cuda_available()
+            }
+            EngineName::Openh264 => matches!(CodecName, CodecName::H264),
+            EngineName::SvtAv1 => matches!(CodecName, CodecName::Av1),
+            #[cfg(target_os = "macos")]
+            EngineName::VideoToolbox => matches!(CodecName, CodecName::H264 | CodecName::H265),
+            _ => false,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             EngineName::AudioToolbox => "audio_toolbox",

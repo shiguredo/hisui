@@ -55,7 +55,7 @@ pub struct Layout {
     pub video_codec: CodecName,
     pub audio_bitrate: Option<NonZeroUsize>,
     pub video_bitrate: Option<usize>,
-    pub video_encoder: Option<EngineName>,
+    pub video_encoders: Vec<EngineName>,
     pub video_h264_decoder: Option<EngineName>,
     pub video_h265_decoder: Option<EngineName>,
     pub video_vp8_decoder: Option<EngineName>,
@@ -220,7 +220,7 @@ struct RawLayout {
     video_bitrate: Option<usize>,
     audio_codec: CodecName,
     video_codec: CodecName,
-    video_encoder: Option<EngineName>,
+    video_encoders: Vec<EngineName>,
     video_h264_decoder: Option<EngineName>,
     video_h265_decoder: Option<EngineName>,
     video_vp8_decoder: Option<EngineName>,
@@ -273,7 +273,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                         .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))
                 })?
                 .unwrap_or(CodecName::Opus),
-            video_encoder: object.get_with("video_encoder", EngineName::parse_video_encoder)?,
+            video_encoders: object
+                .get_with("video_encoders", |v| {
+                    v.to_array()?.map(EngineName::parse_video_encoder).collect()
+                })?
+                .unwrap_or_else(|| EngineName::DEFAULT_VIDEO_ENCODERS.to_vec()),
             video_h264_decoder: object
                 .get_with("video_h264_decoder", EngineName::parse_video_h264_decoder)?,
             video_h265_decoder: object
@@ -370,7 +374,7 @@ impl RawLayout {
             video_codec: self.video_codec,
             audio_bitrate: self.audio_bitrate,
             video_bitrate: self.video_bitrate,
-            video_encoder: self.video_encoder,
+            video_encoders: self.video_encoders,
             video_h264_decoder: self.video_h264_decoder,
             video_h265_decoder: self.video_h265_decoder,
             video_vp8_decoder: self.video_vp8_decoder,

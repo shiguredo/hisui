@@ -250,7 +250,7 @@ impl AudioEncoderInner {
 #[derive(Debug, Clone)]
 pub struct VideoEncoderOptions {
     pub codec: CodecName,
-    pub engine: Option<EngineName>,
+    pub engines: Vec<EngineName>,
     pub bitrate: usize,
     pub width: EvenUsize,
     pub height: EvenUsize,
@@ -262,7 +262,7 @@ impl VideoEncoderOptions {
     pub fn from_layout(layout: &Layout) -> Self {
         Self {
             codec: layout.video_codec,
-            engine: layout.video_encoder,
+            engines: layout.video_encoders.clone(),
             bitrate: layout.video_bitrate_bps(),
             width: layout.resolution.width(),
             height: layout.resolution.height(),
@@ -289,31 +289,43 @@ impl VideoEncoder {
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
-        let check_engine = |actual| options.engine.is_none_or(|expected| actual == expected);
-        let inner = match options.codec {
+        let mut inner = None;
+        let engine = options
+            .engines
+            .iter()
+            .find(|x| x.is_available_video_encode_codec(options.codec))
+            .or_fail_with(|()| {
+                format!(
+                    "no available encoder for {} codec (candidate encoders: {})",
+                    options.codec.as_str(),
+                    options
+                        .engines
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
+        let inner = match (engine, options.codec) {
             #[cfg(feature = "libvpx")]
-            CodecName::Vp8 if check_engine(EngineName::Libvpx) => {
+            (EngineName::Libvpx, CodecName::Vp8) => {
                 VideoEncoderInner::new_vp8(options).or_fail()?
             }
             #[cfg(feature = "libvpx")]
-            CodecName::Vp9 if check_engine(EngineName::Libvpx) => {
+            (EngineName::Libvpx, CodecName::Vp9) => {
                 VideoEncoderInner::new_vp9(options).or_fail()?
             }
             #[cfg(feature = "nvcodec")]
-            CodecName::H264
-                if check_engine(EngineName::Nvcodec)
-                    && openh264_lib.is_none()
-                    && shiguredo_nvcodec::is_cuda_available() =>
-            {
+            (EngineName::Nvcodec, CodecName::H264) => {
                 VideoEncoderInner::new_nvcodec_h264(options).or_fail()?
             }
             #[cfg(target_os = "macos")]
-            CodecName::H264 if check_engine(EngineName::VideoToolbox) && openh264_lib.is_none() => {
+            (EngineName::VideoToolbox, CodecName::H264) => {
                 VideoEncoderInner::new_video_toolbox_h264(options).or_fail()?
             }
-            CodecName::H264 if check_engine(EngineName::Openh264) => {
+            (EngineName::Openh264, CodecName::H264) => {
                 let lib = openh264_lib.or_fail_with(|()| {
-                    concat!(
+                        concat!(
                         "OpenH264 library is required for H.264 encoding. ",
                         "Please specify the library path using --openh264 command line argument or ",
                         "HISUI_OPENH264_PATH environment variable.").to_owned()
@@ -321,9 +333,7 @@ impl VideoEncoder {
                 VideoEncoderInner::new_openh264(lib, options).or_fail()?
             }
             #[cfg(feature = "nvcodec")]
-            CodecName::H265
-                if check_engine(EngineName::Nvcodec) && shiguredo_nvcodec::is_cuda_available() =>
-            {
+            CodecName::H265 if shiguredo_nvcodec::is_cuda_available() => {
                 VideoEncoderInner::new_nvcodec_h265(options).or_fail()?
             }
             #[cfg(target_os = "macos")]
@@ -331,27 +341,12 @@ impl VideoEncoder {
                 VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?
             }
             #[cfg(feature = "nvcodec")]
-            CodecName::Av1
-                if check_engine(EngineName::Nvcodec) && shiguredo_nvcodec::is_cuda_available() =>
-            {
+            CodecName::Av1 if shiguredo_nvcodec::is_cuda_available() => {
                 VideoEncoderInner::new_nvcodec_av1(options).or_fail()?
             }
-            CodecName::Av1 if check_engine(EngineName::SvtAv1) => {
-                VideoEncoderInner::new_svt_av1(options).or_fail()?
-            }
-            codec => {
-                if let Some(engine) = options.engine {
-                    return Err(orfail::Failure::new(format!(
-                        "encoder {} is not available or does not support {} codec",
-                        engine.as_str(),
-                        codec.as_str(),
-                    )));
-                } else {
-                    return Err(orfail::Failure::new(format!(
-                        "no available {} encoder",
-                        codec.as_str()
-                    )));
-                }
+            CodecName::Av1 => VideoEncoderInner::new_svt_av1(options).or_fail()?,
+            _ => {
+                continue;
             }
         };
 
