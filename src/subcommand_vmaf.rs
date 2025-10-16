@@ -158,6 +158,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let decoder_options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
         decode_params: layout.decode_params.clone(),
+        engines: None,
     };
     for (source_id, source_info) in &layout.sources {
         if layout.video_source_ids().all(|id| id != source_id) {
