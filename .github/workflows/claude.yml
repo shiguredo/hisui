@@ -16,19 +16,38 @@ env:
   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_SORA_OSS_SONNET }}
 
 jobs:
-  claude-opus-response-voluntas:
+  claude-response-voluntas:
     if: github.event.comment.user.login == 'voluntas'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: anthropics/claude-code-action@v1
+        if: contains(github.event.comment.body, '!opus')
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_VOLUNTAS }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           trigger_phrase: "!opus"
           claude_args: |
             --model claude-opus-4-1-20250805
+
+      - uses: anthropics/claude-code-action@v1
+        if: contains(github.event.comment.body, '!sonnet')
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_VOLUNTAS }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          trigger_phrase: "!sonnet"
+          claude_args: |
+            --model claude-sonnet-4-5-20250929
+
+      - uses: anthropics/claude-code-action@v1
+        if: contains(github.event.comment.body, '!haiku')
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_VOLUNTAS }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          trigger_phrase: "!haiku"
+          claude_args: |
+            --model claude-haiku-4-5-20251001
 
   check-permission:
     if: github.event.comment.user.login != 'voluntas'
@@ -42,14 +61,15 @@ jobs:
         with:
           username: ${{ github.event.comment.user.login }}
 
-  claude-sonnet-response-others:
+  claude-response-others:
     needs: check-permission
-    if: needs.check-permission.outputs.has_permission == 'true' && contains(github.event.comment.body, '!sonnet')
+    if: needs.check-permission.outputs.has_permission == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: anthropics/claude-code-action@v1
+        if: contains(github.event.comment.body, '!sonnet')
         with:
           anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -57,14 +77,8 @@ jobs:
           claude_args: |
             --model claude-sonnet-4-5-20250929
 
-  claude-haiku-response-others:
-    needs: check-permission
-    if: needs.check-permission.outputs.has_permission == 'true' && contains(github.event.comment.body, '!haiku')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v5
       - uses: anthropics/claude-code-action@v1
+        if: contains(github.event.comment.body, '!haiku')
         with:
           anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
