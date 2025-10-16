@@ -10,7 +10,7 @@ use hisui::{
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
-    types::CodecName,
+    types::{CodecName, EngineName},
     video::VideoFrame,
 };
 use orfail::OrFail;
@@ -63,9 +63,11 @@ fn empty_source() -> noargs::Result<()> {
 fn test_simple_single_source_common(
     test_data_dir: &str,
     expected_codec: CodecName,
+    expected_engine: Option<EngineName>,
 ) -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let stats_file = tempfile::NamedTempFile::new().or_fail()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -77,6 +79,8 @@ fn test_simple_single_source_common(
             &format!("{test_data_dir}/layout.jsonc"),
             "--output-file",
             &out_file.path().display().to_string(),
+            "--stats-file",
+            &stats_file.path().display().to_string(),
             test_data_dir,
         ])
         .output()
@@ -86,6 +90,10 @@ fn test_simple_single_source_common(
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
         return Err("hisui command failed".into());
+    }
+
+    if let Some(expected_engine) = expected_engine {
+        check_engine_in_stats(&stats_file, expected_engine)?;
     }
 
     // 変換結果ファイルを読み込む
@@ -191,6 +199,71 @@ fn test_simple_single_source_common(
     Ok(())
 }
 
+/// stats_file を確認して、デコーダーとエンコーダーの engine が期待通りかをチェックする
+fn check_engine_in_stats(
+    stats_file: &tempfile::NamedTempFile,
+    expected_engine: EngineName,
+) -> noargs::Result<()> {
+    // stats_file を読み込んでパース
+    let stats_json = std::fs::read_to_string(stats_file.path())
+        .map_err(|e| format!("Failed to read stats file: {e}"))?;
+    let stats = nojson::RawJson::parse(&stats_json)
+        .map_err(|e| format!("Failed to parse stats JSON: {e}"))?;
+
+    // processors 配列を取得
+    let processors = stats
+        .value()
+        .to_member("processors")?
+        .required()?
+        .to_array()?;
+
+    // デコーダーとエンコーダーの engine をチェック
+    let mut found_decoder = false;
+    let mut found_encoder = false;
+
+    for processor in processors {
+        let processor_type = processor
+            .to_member("type")?
+            .required()?
+            .to_unquoted_string_str()?;
+
+        match processor_type.as_ref() {
+            "video_decoder" => {
+                if let Some(engine_value) = processor.to_member("engine")?.get() {
+                    if let Ok(engine_str) = engine_value.to_unquoted_string_str() {
+                        assert_eq!(
+                            engine_str.as_ref(),
+                            expected_engine.as_str(),
+                            "video decoder engine mismatch"
+                        );
+                        found_decoder = true;
+                    }
+                }
+            }
+            "video_encoder" => {
+                if let Some(engine_value) = processor.to_member("engine")?.get() {
+                    let engine_str = engine_value
+                        .to_unquoted_string_str()
+                        .map_err(|e| format!("engine is not a string: {e}"))?;
+                    assert_eq!(
+                        engine_str.as_ref(),
+                        expected_engine.as_str(),
+                        "video encoder engine mismatch"
+                    );
+                    found_encoder = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // デコーダーとエンコーダーが両方とも見つかったことを確認
+    assert!(found_decoder, "video decoder not found in stats");
+    assert!(found_encoder, "video encoder not found in stats");
+
+    Ok(())
+}
+
 /// 単一のソースをそのまま変換する場合
 /// - 入力:
 ///   - 映像:
@@ -206,7 +279,11 @@ fn test_simple_single_source_common(
 #[test]
 #[cfg(feature = "libvpx")]
 fn simple_single_source_vp9() -> noargs::Result<()> {
-    test_simple_single_source_common("testdata/e2e/simple_single_source_vp9/", CodecName::Vp9)
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_vp9/",
+        CodecName::Vp9,
+        Some(EngineName::Libvpx),
+    )
 }
 
 /// simple_single_source_vp9 とほぼ同様だけど nvcodec は VP9 エンコードをサポートしていないので、
@@ -217,6 +294,7 @@ fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_vp9_nvcodec/",
         CodecName::H264,
+        Some(EngineName::Nvcodec),
     )
 }
 
@@ -235,7 +313,11 @@ fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
 #[test]
 #[cfg(any(feature = "nvcodec", target_os = "macos"))]
 fn simple_single_source_h265() -> noargs::Result<()> {
-    test_simple_single_source_common("testdata/e2e/simple_single_source_h265/", CodecName::H265)
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_h265/",
+        CodecName::H265,
+        None,
+    )
 }
 
 /// 単一のソースをそのまま変換する場合 (H.264 版)
@@ -253,7 +335,11 @@ fn simple_single_source_h265() -> noargs::Result<()> {
 #[test]
 #[cfg(any(feature = "nvcodec", target_os = "macos"))]
 fn simple_single_source_h264() -> noargs::Result<()> {
-    test_simple_single_source_common("testdata/e2e/simple_single_source_h264/", CodecName::H264)
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_h264/",
+        CodecName::H264,
+        None,
+    )
 }
 
 /// 単一のソースをそのまま変換する場合 (AV1 版)
@@ -270,7 +356,11 @@ fn simple_single_source_h264() -> noargs::Result<()> {
 ///   - VP9, OPUS, 25 fps, 320x240
 #[test]
 fn simple_single_source_av1() -> noargs::Result<()> {
-    test_simple_single_source_common("testdata/e2e/simple_single_source_av1/", CodecName::Av1)
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_av1/",
+        CodecName::Av1,
+        None,
+    )
 }
 
 /// 単一のソースをそのまま変換する場合（奇数解像度版）

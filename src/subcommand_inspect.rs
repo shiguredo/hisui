@@ -97,6 +97,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 .transpose()
                 .or_fail()?,
             decode_params: Default::default(),
+            engines: None,
         };
         let decoder = VideoDecoder::new(VIDEO_ENCODED_STREAM_ID, VIDEO_DECODED_STREAM_ID, options);
         scheduler.register(decoder).or_fail()?;
