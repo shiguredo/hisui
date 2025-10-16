@@ -120,7 +120,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           brew update
-          brew install meson nasm yasm automake autoconf libtool pkg-config
+          brew install meson nasm yasm automake autoconf libtool
       - run: cargo build --release
       - run: |
           mkdir -p hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
