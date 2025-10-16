@@ -383,6 +383,8 @@ jobs:
       - test-apple-toolbox
       - test-fdk-aac
       - test-openh264
+      - ubuntu-binary
+      - macos-binary
       - valgrind
       - docs_rs
     timeout-minutes: 20
