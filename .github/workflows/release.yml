@@ -6,7 +6,7 @@ on:
       - "*"
 
 env:
-  CUDA_VERSION: 13-0
+  CUDA_VERSION: 13.0.2
 
 jobs:
   github-release:
@@ -62,13 +62,12 @@ jobs:
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
 
       # CUDA のインストール (x86_64 のみ)
-      - name: Install CUDA
+      - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
         if: contains(matrix.platform.name, 'x86_64')
-        run: |
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_*all.deb
-          sudo apt-get update
-          DEBIAN_FRONTEND=noninteractive sudo apt-get -y install cuda-toolkit-${{ env.CUDA_VERSION }}
+        id: cuda
+        with:
+          cuda_version: ${{ env.CUDA_VERSION }}
+          platform: ${{ matrix.platform.runs-on }}
 
       - run: rustup update stable
       - run: rustup default stable
