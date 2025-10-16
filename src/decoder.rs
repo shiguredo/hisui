@@ -308,35 +308,30 @@ impl VideoDecoderInner {
                 *self = NvcodecDecoder::new_h264(&options.decode_params)
                     .or_fail()
                     .map(Self::Nvcodec)?;
-                Ok(())
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H265) => {
                 *self = NvcodecDecoder::new_h265(&options.decode_params)
                     .or_fail()
                     .map(Self::Nvcodec)?;
-                Ok(())
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp8) => {
                 *self = NvcodecDecoder::new_vp8(&options.decode_params)
                     .or_fail()
                     .map(Self::Nvcodec)?;
-                Ok(())
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp9) => {
                 *self = NvcodecDecoder::new_vp9(&options.decode_params)
                     .or_fail()
                     .map(Self::Nvcodec)?;
-                Ok(())
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Av1) => {
                 *self = NvcodecDecoder::new_av1(&options.decode_params)
                     .or_fail()
                     .map(Self::Nvcodec)?;
-                Ok(())
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H264) => {
@@ -344,7 +339,6 @@ impl VideoDecoderInner {
                     .or_fail()
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
-                Ok(())
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
@@ -352,7 +346,6 @@ impl VideoDecoderInner {
                     .or_fail()
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
-                Ok(())
             }
             (Some(EngineName::Openh264), CodecName::H264) => {
                 let lib = options.openh264_lib.or_fail_with(|()| {
@@ -361,32 +354,31 @@ impl VideoDecoderInner {
                 *self = Openh264Decoder::new(lib.clone())
                     .or_fail()
                     .map(Self::Openh264)?;
-                Ok(())
             }
             #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp8) => {
                 *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
-                Ok(())
             }
             #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp9) => {
                 *self = LibvpxDecoder::new_vp9().or_fail().map(Self::Libvpx)?;
-                Ok(())
             }
             (Some(EngineName::Dav1d), CodecName::Av1) => {
                 *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
-                Ok(())
             }
-            _ => Err(orfail::Failure::new(format!(
-                "no available decoder for {} codec (candidate decoders: {})",
-                codec.as_str(),
-                candidate_engines
-                    .iter()
-                    .map(|engine| engine.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))),
+            _ => {
+                return Err(orfail::Failure::new(format!(
+                    "no available decoder for {} codec (candidate decoders: {})",
+                    codec.as_str(),
+                    candidate_engines
+                        .iter()
+                        .map(|engine| engine.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
         }
+        Ok(())
     }
 
     fn decode(&mut self, frame: &VideoFrame, stats: &mut VideoDecoderStats) -> orfail::Result<()> {
