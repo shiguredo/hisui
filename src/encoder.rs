@@ -289,10 +289,9 @@ impl VideoEncoder {
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
-        let mut inner = None;
-        let mut candidate_engines = options
+        let  candidate_engines = options
             .engines
-            .cloned()
+            .clone()
             .unwrap_or_else(|| EngineName::default_video_encoders(openh264_lib.is_some()));
         let engine = candidate_engines
             .iter()
@@ -300,34 +299,34 @@ impl VideoEncoder {
             .copied();
         let inner = match (engine, options.codec) {
             #[cfg(feature = "libvpx")]
-            (EngineName::Libvpx, CodecName::Vp8) => {
+            (Some(EngineName::Libvpx), CodecName::Vp8) => {
                 VideoEncoderInner::new_vp8(options).or_fail()?
             }
             #[cfg(feature = "libvpx")]
-            (EngineName::Libvpx, CodecName::Vp9) => {
+            (Some(EngineName::Libvpx), CodecName::Vp9) => {
                 VideoEncoderInner::new_vp9(options).or_fail()?
             }
             #[cfg(feature = "nvcodec")]
-            (EngineName::Nvcodec, CodecName::H264) => {
+            (Some(EngineName::Nvcodec), CodecName::H264) => {
                 VideoEncoderInner::new_nvcodec_h264(options).or_fail()?
             }
             #[cfg(feature = "nvcodec")]
-            (EngineName::Nvcodec, CodecName::H265) => {
+            (Some(EngineName::Nvcodec), CodecName::H265) => {
                 VideoEncoderInner::new_nvcodec_h265(options).or_fail()?
             }
             #[cfg(feature = "nvcodec")]
-            (EngineName::Nvcodec, CodecName::Av1) => {
+            (Some(EngineName::Nvcodec), CodecName::Av1) => {
                 VideoEncoderInner::new_nvcodec_av1(options).or_fail()?
             }
             #[cfg(target_os = "macos")]
-            (EngineName::VideoToolbox, CodecName::H264) => {
+            (Some(EngineName::VideoToolbox), CodecName::H264) => {
                 VideoEncoderInner::new_video_toolbox_h264(options).or_fail()?
             }
             #[cfg(target_os = "macos")]
-            (EngineName::VideoToolbox, CodecName::H265) => {
+            (Some(EngineName::VideoToolbox), CodecName::H265) => {
                 VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?
             }
-            (EngineName::Openh264, CodecName::H264) => {
+            (Some(EngineName::Openh264), CodecName::H264) => {
                 let lib = openh264_lib.or_fail_with(|()| {
                         concat!(
                         "OpenH264 library is required for H.264 encoding. ",
@@ -336,15 +335,14 @@ impl VideoEncoder {
                 })?;
                 VideoEncoderInner::new_openh264(lib, options).or_fail()?
             }
-            (EngineName::SvtAv1, CodecName::Av1) => {
+            (Some(EngineName::SvtAv1), CodecName::Av1) => {
                 VideoEncoderInner::new_svt_av1(options).or_fail()?
             }
             _ => {
                 return Err(orfail::Failure::new(format!(
                     "no available encoder for {} codec (candidate encoders: {})",
                     options.codec.as_str(),
-                    options
-                        .engines
+                    candidate_engines
                         .iter()
                         .map(|engine| engine.as_str())
                         .collect::<Vec<_>>()
