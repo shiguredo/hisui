@@ -163,7 +163,7 @@ impl VideoDecoder {
         match codec {
             CodecName::Vp8 | CodecName::Vp9 => {
                 #[cfg(feature = "nvcodec")]
-                if shiguredo_nvcodec::is_cuda_available() {
+                if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(feature = "libvpx")]
@@ -176,7 +176,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Openh264);
                 }
                 #[cfg(feature = "nvcodec")]
-                if shiguredo_nvcodec::is_cuda_available() {
+                if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -186,7 +186,7 @@ impl VideoDecoder {
             }
             CodecName::H265 => {
                 #[cfg(feature = "nvcodec")]
-                if shiguredo_nvcodec::is_cuda_available() {
+                if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -196,7 +196,7 @@ impl VideoDecoder {
             }
             CodecName::Av1 => {
                 #[cfg(feature = "nvcodec")]
-                if shiguredo_nvcodec::is_cuda_available() {
+                if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 engines.push(EngineName::Dav1d);

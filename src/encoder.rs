@@ -385,7 +385,7 @@ impl VideoEncoder {
                     engines.push(EngineName::Openh264);
                 }
                 #[cfg(feature = "nvcodec")]
-                if shiguredo_nvcodec::is_cuda_available() {
+                if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -395,7 +395,7 @@ impl VideoEncoder {
             }
             CodecName::H265 => {
                 #[cfg(feature = "nvcodec")]
-                if shiguredo_nvcodec::is_cuda_available() {
+                if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
@@ -405,7 +405,7 @@ impl VideoEncoder {
             }
             CodecName::Av1 => {
                 #[cfg(feature = "nvcodec")]
-                if shiguredo_nvcodec::is_cuda_available() {
+                if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
                 engines.push(EngineName::SvtAv1);
