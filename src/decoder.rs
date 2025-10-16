@@ -278,121 +278,133 @@ impl VideoDecoderInner {
         Self::Initial { options }
     }
 
+    fn initialize_decoder(
+        &mut self,
+        frame: &VideoFrame,
+        stats: &mut VideoDecoderStats,
+        options: VideoDecoderOptions,
+    ) -> orfail::Result<()> {
+        match frame.format {
+            #[cfg(feature = "nvcodec")]
+            VideoFormat::H264 | VideoFormat::H264AnnexB
+                if options.openh264_lib.is_none() && shiguredo_nvcodec::is_cuda_available() =>
+            {
+                *self = NvcodecDecoder::new_h264(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                stats.engine.set(EngineName::Nvcodec);
+                stats.codec.set(CodecName::H264);
+                Ok(())
+            }
+            #[cfg(target_os = "macos")]
+            VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
+                *self = VideoToolboxDecoder::new_h264(frame)
+                    .or_fail()
+                    .map(Box::new)
+                    .map(Self::VideoToolbox)?;
+                stats.engine.set(EngineName::VideoToolbox);
+                stats.codec.set(CodecName::H264);
+                Ok(())
+            }
+            VideoFormat::H264 | VideoFormat::H264AnnexB => {
+                let lib = options
+                    .openh264_lib
+                    .or_fail_with(|()| "no available H.264 decoder".to_owned())?;
+                *self = Openh264Decoder::new(lib.clone())
+                    .or_fail()
+                    .map(Self::Openh264)?;
+                stats.engine.set(EngineName::Openh264);
+                stats.codec.set(CodecName::H264);
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            VideoFormat::H265 if shiguredo_nvcodec::is_cuda_available() => {
+                *self = NvcodecDecoder::new_h265(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                stats.engine.set(EngineName::Nvcodec);
+                stats.codec.set(CodecName::H265);
+                Ok(())
+            }
+            #[cfg(target_os = "macos")]
+            VideoFormat::H265 => {
+                *self = VideoToolboxDecoder::new_h265(frame)
+                    .or_fail()
+                    .map(Box::new)
+                    .map(Self::VideoToolbox)?;
+                stats.engine.set(EngineName::VideoToolbox);
+                stats.codec.set(CodecName::H265);
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            VideoFormat::Vp8 if shiguredo_nvcodec::is_cuda_available() => {
+                *self = NvcodecDecoder::new_vp8(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                stats.engine.set(EngineName::Nvcodec);
+                stats.codec.set(CodecName::Vp8);
+                Ok(())
+            }
+            #[cfg(feature = "libvpx")]
+            VideoFormat::Vp8 => {
+                *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
+                stats.engine.set(EngineName::Libvpx);
+                stats.codec.set(CodecName::Vp8);
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            VideoFormat::Vp9 if shiguredo_nvcodec::is_cuda_available() => {
+                *self = NvcodecDecoder::new_vp9(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                stats.engine.set(EngineName::Nvcodec);
+                stats.codec.set(CodecName::Vp9);
+                Ok(())
+            }
+            #[cfg(feature = "libvpx")]
+            VideoFormat::Vp9 => {
+                *self = LibvpxDecoder::new_vp9().or_fail().map(Self::Libvpx)?;
+                stats.engine.set(EngineName::Libvpx);
+                stats.codec.set(CodecName::Vp9);
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            VideoFormat::Av1 if shiguredo_nvcodec::is_cuda_available() => {
+                *self = NvcodecDecoder::new_av1(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                stats.engine.set(EngineName::Nvcodec);
+                stats.codec.set(CodecName::Av1);
+                Ok(())
+            }
+            VideoFormat::Av1 => {
+                *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
+                stats.engine.set(EngineName::Dav1d);
+                stats.codec.set(CodecName::Av1);
+                Ok(())
+            }
+            VideoFormat::I420 => {
+                // デコーダーに非圧縮が渡されるのは想定外
+                Err(orfail::Failure::new(format!(
+                    "unexpected video format: {:?}",
+                    frame.format
+                )))
+            }
+            // feature によってここに到達するかどうかが変わるので expect ではなく allow にしている
+            #[allow(unreachable_patterns)]
+            codec => Err(orfail::Failure::new(format!(
+                "no available {codec} decoder"
+            ))),
+        }
+    }
+
     fn decode(&mut self, frame: &VideoFrame, stats: &mut VideoDecoderStats) -> orfail::Result<()> {
         match self {
-            Self::Initial { options } => match frame.format {
-                #[cfg(feature = "nvcodec")]
-                VideoFormat::H264 | VideoFormat::H264AnnexB
-                    if options.openh264_lib.is_none() && shiguredo_nvcodec::is_cuda_available() =>
-                {
-                    *self = NvcodecDecoder::new_h264(&options.decode_params)
-                        .or_fail()
-                        .map(Self::Nvcodec)?;
-                    stats.engine.set(EngineName::Nvcodec);
-                    stats.codec.set(CodecName::H264);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(target_os = "macos")]
-                VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
-                    *self = VideoToolboxDecoder::new_h264(frame)
-                        .or_fail()
-                        .map(Box::new)
-                        .map(Self::VideoToolbox)?;
-                    stats.engine.set(EngineName::VideoToolbox);
-                    stats.codec.set(CodecName::H264);
-                    self.decode(frame, stats).or_fail()
-                }
-                VideoFormat::H264 | VideoFormat::H264AnnexB => {
-                    let lib = options
-                        .openh264_lib
-                        .take()
-                        .or_fail_with(|()| "no available H.264 decoder".to_owned())?;
-                    *self = Openh264Decoder::new(lib.clone())
-                        .or_fail()
-                        .map(Self::Openh264)?;
-                    stats.engine.set(EngineName::Openh264);
-                    stats.codec.set(CodecName::H264);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(feature = "nvcodec")]
-                VideoFormat::H265 if shiguredo_nvcodec::is_cuda_available() => {
-                    *self = NvcodecDecoder::new_h265(&options.decode_params)
-                        .or_fail()
-                        .map(Self::Nvcodec)?;
-                    stats.engine.set(EngineName::Nvcodec);
-                    stats.codec.set(CodecName::H265);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(target_os = "macos")]
-                VideoFormat::H265 => {
-                    *self = VideoToolboxDecoder::new_h265(frame)
-                        .or_fail()
-                        .map(Box::new)
-                        .map(Self::VideoToolbox)?;
-                    stats.engine.set(EngineName::VideoToolbox);
-                    stats.codec.set(CodecName::H265);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(feature = "nvcodec")]
-                VideoFormat::Vp8 if shiguredo_nvcodec::is_cuda_available() => {
-                    *self = NvcodecDecoder::new_vp8(&options.decode_params)
-                        .or_fail()
-                        .map(Self::Nvcodec)?;
-                    stats.engine.set(EngineName::Nvcodec);
-                    stats.codec.set(CodecName::Vp8);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(feature = "libvpx")]
-                VideoFormat::Vp8 => {
-                    *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
-                    stats.engine.set(EngineName::Libvpx);
-                    stats.codec.set(CodecName::Vp8);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(feature = "nvcodec")]
-                VideoFormat::Vp9 if shiguredo_nvcodec::is_cuda_available() => {
-                    *self = NvcodecDecoder::new_vp9(&options.decode_params)
-                        .or_fail()
-                        .map(Self::Nvcodec)?;
-                    stats.engine.set(EngineName::Nvcodec);
-                    stats.codec.set(CodecName::Vp9);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(feature = "libvpx")]
-                VideoFormat::Vp9 => {
-                    *self = LibvpxDecoder::new_vp9().or_fail().map(Self::Libvpx)?;
-                    stats.engine.set(EngineName::Libvpx);
-                    stats.codec.set(CodecName::Vp9);
-                    self.decode(frame, stats).or_fail()
-                }
-                #[cfg(feature = "nvcodec")]
-                VideoFormat::Av1 if shiguredo_nvcodec::is_cuda_available() => {
-                    *self = NvcodecDecoder::new_av1(&options.decode_params)
-                        .or_fail()
-                        .map(Self::Nvcodec)?;
-                    stats.engine.set(EngineName::Nvcodec);
-                    stats.codec.set(CodecName::Av1);
-                    self.decode(frame, stats).or_fail()
-                }
-                VideoFormat::Av1 => {
-                    *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
-                    stats.engine.set(EngineName::Dav1d);
-                    stats.codec.set(CodecName::Av1);
-                    self.decode(frame, stats).or_fail()
-                }
-                VideoFormat::I420 => {
-                    // デコーダーに非圧縮が渡されるのは想定外
-                    Err(orfail::Failure::new(format!(
-                        "unexpected video format: {:?}",
-                        frame.format
-                    )))
-                }
-                // feature によってここに到達するかどうかが変わるので expect ではなく allow にしている
-                #[allow(unreachable_patterns)]
-                codec => Err(orfail::Failure::new(format!(
-                    "no available {codec} decoder"
-                ))),
-            },
+            Self::Initial { options } => {
+                let options = options.clone();
+                self.initialize_decoder(frame, stats, options).or_fail()?;
+                self.decode(frame, stats).or_fail()
+            }
             #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.decode(frame).or_fail(),
             Self::Openh264(decoder) => decoder.decode(frame).or_fail(),

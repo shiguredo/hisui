@@ -1173,11 +1173,7 @@ fn layout(
         encode_params: Default::default(),
         decode_params: Default::default(),
         video_encoders: None,
-        video_h264_decoder: None,
-        video_h265_decoder: None,
-        video_vp8_decoder: None,
-        video_vp9_decoder: None,
-        video_av1_decoder: None,
+        video_decoders: None,
     };
     VideoMixerSpec::from_layout(&layout)
 }
