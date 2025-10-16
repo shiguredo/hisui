@@ -62,6 +62,8 @@
   "audio_source_excluded": [ $SOURCE_FILE_NAME ],
   "video_codec": $VIDEO_CODEC_NAME,
   "video_bitrate": $BITRATE,
+  "video_encoders": [ $ENCODER_NAME ],
+  "video_decoders": [ $DECODER_NAME ],
   "resolution": $RESOLUTION,
   "video_layout": { $REGION_NAME: {
     "video_sources": [ $SOURCE_FILE_NAME ],
@@ -230,6 +232,57 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 デフォルト値は `映像ソースの数 * 200 * 1024` です。
 
 **注意**: レガシー版の Hisui との互換性のため、`bitrate` フィールド（kbps単位）も利用可能ですが、両方が指定された場合には `video_bitrate` が優先されます。
+
+### `video_encoders: [ $ENCODER_NAME ]`
+
+映像エンコード時に使用するエンコーダーの候補を配列で指定します。
+
+デフォルト値は環境に依存し、以下の順序で使用可能なエンジンが自動的に設定されます:
+
+1. `"openh264"` (OpenH264 が引数ないし環境変数経由で指定されている場合)
+2. `"nvcodec"` (nvcodec feature が有効になっている場合)
+3. `"video_toolbox"` (macOS の場合)
+4. `"svt_av1"`
+5. `"libvpx"`
+
+配列の先頭に近いエンコーダーほど優先度が高くなります。指定されたコーデックに対応していないものは無視されます。
+
+例:
+```json
+{
+  "video_encoders": ["nvcodec", "svt_av1", "libvpx"],
+  "video_codec": "AV1"
+}
+```
+
+この場合、AV1 エンコードに対して、nvcodec が最優先で使用され、利用できない場合は svt_av1 が使用されます。
+
+なお、値に空配列が指定されたり、対象のエンコードコーデックを扱えるエンコーダーがひとつもない場合にはエラーになります。
+
+### `video_decoders: [ $DECODER_NAME ]`
+
+映像デコード時に使用するデコーダーの候補を配列で指定します。
+
+デフォルト値は環境に依存し、以下の順序で使用可能なエンジンが自動的に設定されます:
+
+1. `"openh264"` (OpenH264 が引数ないし環境変数経由で指定されている場合)
+2. `"nvcodec"` (nvcodec feature が有効になっている場合)
+3. `"video_toolbox"` (macOS の場合)
+4. `"dav1d"`
+5. `"libvpx"`
+
+配列の先頭に近いデコードほど優先度が高くなります。指定されたコーデックに対応していないものは無視されます。
+
+例:
+```json
+{
+  "video_decoders": ["nvcodec", "dav1d", "libvpx"]
+}
+```
+
+この場合、各コーデックのデコードに対して、nvcodec が最優先で使用され、利用できない場合や対応していないコーデックの場合は、以降のデコーダーが使用されます。
+
+なお、値に空配列が指定されたり、対象のデコードコーデックを扱えるデコーダーがひとつもない場合にはエラーになります。
 
 ### `resolution: $RESOLUTION`
 

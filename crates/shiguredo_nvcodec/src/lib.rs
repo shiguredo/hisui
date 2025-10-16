@@ -636,8 +636,12 @@ impl CudaLibrary {
 }
 
 /// CUDA ライブラリがロード可能かチェックする
-pub fn is_cuda_available() -> bool {
-    CudaLibrary::load().is_ok()
+///
+/// NOTE:
+/// この関数がチェックするのは、あくまでも .so などが読み込めるかどうか、までで
+/// その環境で実際に CUDA が利用可能かどうかまでは確認していない
+pub fn is_cuda_library_available() -> bool {
+    unsafe { libloading::Library::new("libcuda.so.1").is_ok() }
 }
 
 /// エラー時にリソースを確実に解放するための構造体

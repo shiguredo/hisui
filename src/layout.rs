@@ -14,7 +14,7 @@ use crate::{
     layout_encode_params::LayoutEncodeParams,
     layout_region::{self, RawRegion, Region},
     metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
-    types::{CodecName, EvenUsize},
+    types::{CodecName, EngineName, EvenUsize},
     video::FrameRate,
 };
 
@@ -55,6 +55,8 @@ pub struct Layout {
     pub video_codec: CodecName,
     pub audio_bitrate: Option<NonZeroUsize>,
     pub video_bitrate: Option<usize>,
+    pub video_encoders: Option<Vec<EngineName>>,
+    pub video_decoders: Option<Vec<EngineName>>,
     pub encode_params: LayoutEncodeParams,
     pub decode_params: LayoutDecodeParams,
     pub frame_rate: FrameRate,
@@ -214,6 +216,8 @@ struct RawLayout {
     video_bitrate: Option<usize>,
     audio_codec: CodecName,
     video_codec: CodecName,
+    video_encoders: Option<Vec<EngineName>>,
+    video_decoders: Option<Vec<EngineName>>,
     encode_params: LayoutEncodeParams,
     decode_params: LayoutDecodeParams,
     frame_rate: FrameRate,
@@ -261,6 +265,18 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                         .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))
                 })?
                 .unwrap_or(CodecName::Opus),
+            video_encoders: object.get_with("video_encoders", |v| {
+                if v.to_array()?.count() == 0 {
+                    return Err(v.invalid("video_encoders must not be empty"));
+                }
+                v.to_array()?.map(EngineName::parse_video_encoder).collect()
+            })?,
+            video_decoders: object.get_with("video_decoders", |v| {
+                if v.to_array()?.count() == 0 {
+                    return Err(v.invalid("video_decoders must not be empty"));
+                }
+                v.to_array()?.map(EngineName::parse_video_decoder).collect()
+            })?,
             frame_rate: object
                 .get_with("frame_rate", |v| {
                     v.as_raw_str().parse().map_err(|e| v.invalid(e))
@@ -347,6 +363,8 @@ impl RawLayout {
             video_codec: self.video_codec,
             audio_bitrate: self.audio_bitrate,
             video_bitrate: self.video_bitrate,
+            video_encoders: self.video_encoders,
+            video_decoders: self.video_decoders,
             encode_params: self.encode_params,
             decode_params: self.decode_params,
             frame_rate: self.frame_rate,

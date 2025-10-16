@@ -257,6 +257,7 @@ impl PipelineComponent {
 
                 let options = VideoEncoderOptions {
                     codec: CodecName::Vp8,
+                    engines: None,
                     bitrate: 1_000_000, // 1 Mbps
                     // TODO(atode): 解像度は入力にあわせて動的に決定すべき
                     width: RESOLUTION_HD.width,

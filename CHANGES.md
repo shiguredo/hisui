@@ -44,6 +44,15 @@
     - nvcodec_vp9_decode_params
     - nvcodec_av1_decode_params
   - @sile
+- [ADD] レイアウトファイルに video_encoders と video_decoders を追加する
+  - 合成に使用するビデオエンコーダーとデコーダーを明示的に指定できるようにする
+  - video_encoders: 映像エンコード時に使用するエンコーダーの候補を配列で指定（先頭のものほど優先される）
+  - video_decoders: 映像デコード時に使用するデコーダーの候補を配列で指定（先頭のものほど優先される）
+  - 指定可能な値（特定の features が有効な場合にのみ指定可能なものも含む）:
+    - エンコーダー: "libvpx", "nvcodec", "openh264", "svt_av1", "video_toolbox"
+    - デコーダー: "libvpx", "nvcodec", "openh264", "dav1d", "video_toolbox"
+  - 未指定の場合は、その環境で利用可能なエンコーダーおよびデコーダーが全て候補となる（今まで通りの挙動）
+  - @sile
 - [ADD] macos-26 向けのリリースを追加する
   - @voluntas
 
