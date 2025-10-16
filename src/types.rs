@@ -38,7 +38,7 @@ impl CodecName {
 
     pub fn parse_audio(s: &str) -> Result<Self, String> {
         match s {
-            "Opus" => Ok(Self::Opus), // コマンドライン引数パース時には以前の Hisui に合わせた名前にする
+            "OPUS" => Ok(Self::Opus),
             "AAC" => Ok(Self::Aac),
             _ => Err(format!("unknown audio codec name: {s}")),
         }
