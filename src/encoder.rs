@@ -289,7 +289,7 @@ impl VideoEncoder {
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
-        let  candidate_engines = options
+        let candidate_engines = options
             .engines
             .clone()
             .unwrap_or_else(|| EngineName::default_video_encoders(openh264_lib.is_some()));

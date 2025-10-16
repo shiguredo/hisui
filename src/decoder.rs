@@ -128,6 +128,7 @@ impl AudioDecoderInner {
 pub struct VideoDecoderOptions {
     pub openh264_lib: Option<Openh264Library>,
     pub decode_params: LayoutDecodeParams,
+    pub engines: Option<Vec<EngineName>>,
 }
 
 #[derive(Debug)]
