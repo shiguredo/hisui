@@ -48,8 +48,22 @@ jobs:
         platform:
           - name: ubuntu-24.04_x86_64
             runs-on: ubuntu-24.04
+            arch: x86_64
+            cuda-repo: ubuntu2404
+            enable-nvcodec: true
           - name: ubuntu-24.04_arm64
             runs-on: ubuntu-24.04-arm
+            arch: arm64
+            enable-nvcodec: false
+          - name: ubuntu-22.04_x86_64
+            runs-on: ubuntu-22.04
+            arch: x86_64
+            cuda-repo: ubuntu2204
+            enable-nvcodec: true
+          - name: ubuntu-22.04_arm64
+            runs-on: ubuntu-22.04-arm
+            arch: arm64
+            enable-nvcodec: false
     runs-on: ${{ matrix.platform.runs-on }}
     needs: github-release
     steps:
@@ -63,9 +77,9 @@ jobs:
 
       # CUDA のインストール (x86_64 のみ)
       - name: Install CUDA
-        if: contains(matrix.platform.name, 'x86_64')
+        if: matrix.platform.arch == 'x86_64'
         run: |
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          wget https://developer.download.nvidia.com/compute/cuda/repos/${{ matrix.platform.cuda-repo }}/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_*all.deb
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get -y install cuda-toolkit-${{ env.CUDA_VERSION }}
@@ -75,12 +89,12 @@ jobs:
 
       # x86_64 では nvcodec feature を有効化
       - name: Build with NVCODEC (x86_64)
-        if: contains(matrix.platform.name, 'x86_64')
+        if: matrix.platform.enable-nvcodec == true
         run: cargo build --release --features nvcodec
 
       # ARM では通常ビルド
       - name: Build (ARM)
-        if: contains(matrix.platform.name, 'arm64')
+        if: matrix.platform.arch == 'arm64'
         run: cargo build --release
 
       - run: |

@@ -47,6 +47,14 @@
 - [ADD] macos-26 向けのリリースを追加する
   - @voluntas
 
+### misc
+
+- [UPDATE] リリースバイナリに Ubuntu 22.04 を追加
+  - 以下のバイナリを追加した
+    - Ubuntu 22.04 x86_64
+    - Ubuntu 22.04 arm64
+  - @miosakuma
+
 ## 2025.1.0
 
 **祝リリース**
