@@ -44,7 +44,7 @@ jobs:
 
   claude-sonnet-response-others:
     needs: check-permission
-    if: needs.check-permission.outputs.has_permission == 'true'
+    if: needs.check-permission.outputs.has_permission == 'true' && contains(github.event.comment.body, '!sonnet')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -56,3 +56,18 @@ jobs:
           trigger_phrase: "!sonnet"
           claude_args: |
             --model claude-sonnet-4-5-20250929
+
+  claude-haiku-response-others:
+    needs: check-permission
+    if: needs.check-permission.outputs.has_permission == 'true' && contains(github.event.comment.body, '!haiku')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          trigger_phrase: "!haiku"
+          claude_args: |
+            --model claude-haiku-4-5-20251001
