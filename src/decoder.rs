@@ -22,7 +22,7 @@ use crate::{
     },
     stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
-    video::{VideoFormat, VideoFrame},
+    video::VideoFrame,
 };
 
 #[derive(Debug)]
@@ -284,116 +284,107 @@ impl VideoDecoderInner {
         stats: &mut VideoDecoderStats,
         options: VideoDecoderOptions,
     ) -> orfail::Result<()> {
-        match frame.format {
+        let codec = frame
+            .format
+            .codec_name()
+            .or_fail_with(|()| format!("unexpected video format: {:?}", frame.format))?;
+        stats.codec.set(codec);
+
+        let candidate_engines = options
+            .engines
+            .unwrap_or_else(|| VideoDecoder::get_engines(codec, options.openh264_lib.is_some()));
+
+        let engine = candidate_engines
+            .iter()
+            .find(|engine| engine.is_available_video_decode_codec(codec))
+            .copied();
+        if let Some(engine) = engine {
+            stats.engine.set(engine);
+        }
+
+        match (engine, codec) {
             #[cfg(feature = "nvcodec")]
-            VideoFormat::H264 | VideoFormat::H264AnnexB
-                if options.openh264_lib.is_none() && shiguredo_nvcodec::is_cuda_available() =>
-            {
+            (Some(EngineName::Nvcodec), CodecName::H264) => {
                 *self = NvcodecDecoder::new_h264(&options.decode_params)
                     .or_fail()
                     .map(Self::Nvcodec)?;
-                stats.engine.set(EngineName::Nvcodec);
-                stats.codec.set(CodecName::H264);
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            (Some(EngineName::Nvcodec), CodecName::H265) => {
+                *self = NvcodecDecoder::new_h265(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            (Some(EngineName::Nvcodec), CodecName::Vp8) => {
+                *self = NvcodecDecoder::new_vp8(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            (Some(EngineName::Nvcodec), CodecName::Vp9) => {
+                *self = NvcodecDecoder::new_vp9(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
+                Ok(())
+            }
+            #[cfg(feature = "nvcodec")]
+            (Some(EngineName::Nvcodec), CodecName::Av1) => {
+                *self = NvcodecDecoder::new_av1(&options.decode_params)
+                    .or_fail()
+                    .map(Self::Nvcodec)?;
                 Ok(())
             }
             #[cfg(target_os = "macos")]
-            VideoFormat::H264 | VideoFormat::H264AnnexB if options.openh264_lib.is_none() => {
+            (Some(EngineName::VideoToolbox), CodecName::H264) => {
                 *self = VideoToolboxDecoder::new_h264(frame)
                     .or_fail()
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
-                stats.engine.set(EngineName::VideoToolbox);
-                stats.codec.set(CodecName::H264);
-                Ok(())
-            }
-            VideoFormat::H264 | VideoFormat::H264AnnexB => {
-                let lib = options
-                    .openh264_lib
-                    .or_fail_with(|()| "no available H.264 decoder".to_owned())?;
-                *self = Openh264Decoder::new(lib.clone())
-                    .or_fail()
-                    .map(Self::Openh264)?;
-                stats.engine.set(EngineName::Openh264);
-                stats.codec.set(CodecName::H264);
-                Ok(())
-            }
-            #[cfg(feature = "nvcodec")]
-            VideoFormat::H265 if shiguredo_nvcodec::is_cuda_available() => {
-                *self = NvcodecDecoder::new_h265(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
-                stats.engine.set(EngineName::Nvcodec);
-                stats.codec.set(CodecName::H265);
                 Ok(())
             }
             #[cfg(target_os = "macos")]
-            VideoFormat::H265 => {
+            (Some(EngineName::VideoToolbox), CodecName::H265) => {
                 *self = VideoToolboxDecoder::new_h265(frame)
                     .or_fail()
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
-                stats.engine.set(EngineName::VideoToolbox);
-                stats.codec.set(CodecName::H265);
                 Ok(())
             }
-            #[cfg(feature = "nvcodec")]
-            VideoFormat::Vp8 if shiguredo_nvcodec::is_cuda_available() => {
-                *self = NvcodecDecoder::new_vp8(&options.decode_params)
+            (Some(EngineName::Openh264), CodecName::H264) => {
+                let lib = options.openh264_lib.or_fail_with(|()| {
+                    "OpenH264 library is required for H.264 decoding".to_owned()
+                })?;
+                *self = Openh264Decoder::new(lib.clone())
                     .or_fail()
-                    .map(Self::Nvcodec)?;
-                stats.engine.set(EngineName::Nvcodec);
-                stats.codec.set(CodecName::Vp8);
+                    .map(Self::Openh264)?;
                 Ok(())
             }
             #[cfg(feature = "libvpx")]
-            VideoFormat::Vp8 => {
+            (Some(EngineName::Libvpx), CodecName::Vp8) => {
                 *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
-                stats.engine.set(EngineName::Libvpx);
-                stats.codec.set(CodecName::Vp8);
-                Ok(())
-            }
-            #[cfg(feature = "nvcodec")]
-            VideoFormat::Vp9 if shiguredo_nvcodec::is_cuda_available() => {
-                *self = NvcodecDecoder::new_vp9(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
-                stats.engine.set(EngineName::Nvcodec);
-                stats.codec.set(CodecName::Vp9);
                 Ok(())
             }
             #[cfg(feature = "libvpx")]
-            VideoFormat::Vp9 => {
+            (Some(EngineName::Libvpx), CodecName::Vp9) => {
                 *self = LibvpxDecoder::new_vp9().or_fail().map(Self::Libvpx)?;
-                stats.engine.set(EngineName::Libvpx);
-                stats.codec.set(CodecName::Vp9);
                 Ok(())
             }
-            #[cfg(feature = "nvcodec")]
-            VideoFormat::Av1 if shiguredo_nvcodec::is_cuda_available() => {
-                *self = NvcodecDecoder::new_av1(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
-                stats.engine.set(EngineName::Nvcodec);
-                stats.codec.set(CodecName::Av1);
-                Ok(())
-            }
-            VideoFormat::Av1 => {
+            (Some(EngineName::Dav1d), CodecName::Av1) => {
                 *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
-                stats.engine.set(EngineName::Dav1d);
-                stats.codec.set(CodecName::Av1);
                 Ok(())
             }
-            VideoFormat::I420 => {
-                // デコーダーに非圧縮が渡されるのは想定外
-                Err(orfail::Failure::new(format!(
-                    "unexpected video format: {:?}",
-                    frame.format
-                )))
-            }
-            // feature によってここに到達するかどうかが変わるので expect ではなく allow にしている
-            #[allow(unreachable_patterns)]
-            codec => Err(orfail::Failure::new(format!(
-                "no available {codec} decoder"
+            _ => Err(orfail::Failure::new(format!(
+                "no available decoder for {} codec (candidate decoders: {})",
+                codec.as_str(),
+                candidate_engines
+                    .iter()
+                    .map(|engine| engine.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))),
         }
     }
