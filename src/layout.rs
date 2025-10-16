@@ -266,9 +266,15 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                 })?
                 .unwrap_or(CodecName::Opus),
             video_encoders: object.get_with("video_encoders", |v| {
+                if v.to_array()?.count() == 0 {
+                    return Err(v.invalid("video_encoders must not be empty"));
+                }
                 v.to_array()?.map(EngineName::parse_video_encoder).collect()
             })?,
             video_decoders: object.get_with("video_decoders", |v| {
+                if v.to_array()?.count() == 0 {
+                    return Err(v.invalid("video_decoders must not be empty"));
+                }
                 v.to_array()?.map(EngineName::parse_video_decoder).collect()
             })?,
             frame_rate: object
