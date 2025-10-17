@@ -19,19 +19,14 @@
 - [FIX] レイアウトファイルで `"audio_codec": "OPUS"` を指定するとエラーになるのを修正する
   - 値として "Opus" を期待する実装になっていたが、全て大文字が正しいので修正する
   - @sile
+- [UPDATE] shiguredo_libyuv のバージョンを 2025.2.0 に更新する
+  - nv12 と i420 の相互変換関数が追加された
+  - @sile
 - [ADD] libvpx feature を追加する
   - デフォルトで有効
   - 無効にした場合には libvpx を用いた VP8 / VP9 のエンコードおよびデコードが行えなくなる
   - 主に CI 環境で、 libvpx が不要なテストのビルド時間短縮用に使用する目的
-   - 内部利用前提であるため、ユーザーが無効化する必要はない（そのため公開ドキュメントにもこの feature は記載していない）
-  - @sile
-- [CHANGE] legacy サブコマンドを削除する
-  - Hisui 2025.1.x で提供されていた `hisui legacy` サブコマンドを削除
-  - 代わりに `hisui compose` サブコマンドを使用すること
-  - 詳細は [マイグレーションガイド](./docs/migrate_hisui_legacy.md) を参照
-  - @sile
-- [UPDATE] shiguredo_libyuv のバージョンを 2025.2.0 に更新する
-  - nv12 と i420 の相互変換関数が追加された
+  - 内部利用前提であるため、ユーザーが無効化する必要はない（そのため公開ドキュメントにもこの feature は記載していない）
   - @sile
 - [ADD] shiguredo_nvcodec を依存に追加する
   - @sile
@@ -62,6 +57,26 @@
   - 未指定の場合は、その環境で利用可能なエンコーダーおよびデコーダーが全て候補となる（今まで通りの挙動）
   - @sile
 - [ADD] macos-26 向けのリリースを追加する
+  - @voluntas
+- [ADD] macos-14 向けのリリースを追加する
+  - @voluntas
+- [CHANGE] legacy サブコマンドを削除する
+  - Hisui 2025.1.x で提供されていた `hisui legacy` サブコマンドを削除
+  - 代わりに `hisui compose` サブコマンドを使用すること
+  - 詳細は [マイグレーションガイド](./docs/migrate_hisui_legacy.md) を参照
+  - @sile
+- [CHANGE] ビルド用 CUDA Toolkit のバージョンを 13.0.2 にする
+  - @voluntas
+- [FIX] Ubuntu 22.04 向けリリースビルドを追加する
+  - x86_64 および arm64 アーキテクチャ向け
+  - @voluntas
+- [FIX] レイアウトファイルで `"audio_codec": "OPUS"` を指定するとエラーになるのを修正する
+  - 値として "Opus" を期待する実装になっていたが、全て大文字が正しいので修正する
+  - @sile
+
+### misc
+
+- [ADD] ci.yml にビルドバイナリを artifact としてアップロードするステップを追加する
   - @voluntas
 
 ## 2025.1.0
