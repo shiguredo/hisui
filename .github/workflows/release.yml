@@ -51,6 +51,10 @@ jobs:
             runs-on: ubuntu-24.04
           - name: ubuntu-24.04_arm64
             runs-on: ubuntu-24.04-arm
+          - name: ubuntu-22.04_x86_64
+            runs-on: ubuntu-22.04
+          - name: ubuntu-22.04_arm64
+            runs-on: ubuntu-22.04-arm
     runs-on: ${{ matrix.platform.runs-on }}
     timeout-minutes: 20
     steps:
@@ -110,6 +114,8 @@ jobs:
             runs-on: macos-26
           - name: macos-15_arm64
             runs-on: macos-15
+          - name: macos-14_arm64
+            runs-on: macos-14
     runs-on: ${{ matrix.platform.runs-on }}
     timeout-minutes: 20
     steps:
