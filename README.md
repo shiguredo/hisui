@@ -87,7 +87,7 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 - [dav1d](https://code.videolan.org/videolan/dav1d/) を利用した AV1 のソフトウェアによるデコードに対応しています
 - [OpenH264](https://github.com/cisco/openh264) を利用した H.264 のデコード/エンコードに対応しています
 - [Apple Video Toolbox](https://developer.apple.com/documentation/videotoolbox) を利用したハードウェアアクセラレーターによる H.264 / H.265 のデコード/エンコードに対応しています
-- [NVIDIA Video Codec](https://developer.nvidia.com/nvidia-video-codec-sdk) を利用したハードウェアアクセラレーターによる AV1 / H.264 / H.265 のデコード/エンコードに対応しています
+- [NVIDIA Video Codec](https://developer.nvidia.com/nvidia-video-codec-sdk) を利用したハードウェアアクセラレーターによる AV1 / H.264 / H.265 のエンコードと、VP8 / VP9 / AV1 / H.264 / H.265 のデコードに対応しています
 
 ### FDK-AAC
 
