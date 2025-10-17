@@ -262,7 +262,7 @@ impl VideoEncoderOptions {
     pub fn from_layout(layout: &Layout) -> Self {
         Self {
             codec: layout.video_codec,
-            engines: layout.video_encoders.clone(),
+            engines: layout.video_encode_engines.clone(),
             bitrate: layout.video_bitrate_bps(),
             width: layout.resolution.width(),
             height: layout.resolution.height(),

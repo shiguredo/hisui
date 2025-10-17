@@ -62,8 +62,8 @@
   "audio_source_excluded": [ $SOURCE_FILE_NAME ],
   "video_codec": $VIDEO_CODEC_NAME,
   "video_bitrate": $BITRATE,
-  "video_encoders": [ $ENCODER_NAME ],
-  "video_decoders": [ $DECODER_NAME ],
+  "video_encode_engines": [ $ENCODER_NAME ],
+  "video_decode_engines": [ $DECODER_NAME ],
   "resolution": $RESOLUTION,
   "video_layout": { $REGION_NAME: {
     "video_sources": [ $SOURCE_FILE_NAME ],
@@ -233,7 +233,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 **注意**: レガシー版の Hisui との互換性のため、`bitrate` フィールド（kbps単位）も利用可能ですが、両方が指定された場合には `video_bitrate` が優先されます。
 
-### `video_encoders: [ $ENCODER_NAME ]`
+### `video_encode_engines: [ $ENCODER_NAME ]`
 
 映像エンコード時に使用するエンコーダーの候補を配列で指定します。
 
@@ -250,7 +250,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 例:
 ```json
 {
-  "video_encoders": ["nvcodec", "svt_av1", "libvpx"],
+  "video_encode_engines": ["nvcodec", "svt_av1", "libvpx"],
   "video_codec": "AV1"
 }
 ```
@@ -259,7 +259,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 なお、値に空配列が指定されたり、対象のエンコードコーデックを扱えるエンコーダーがひとつもない場合にはエラーになります。
 
-### `video_decoders: [ $DECODER_NAME ]`
+### `video_decode_engines: [ $DECODER_NAME ]`
 
 映像デコード時に使用するデコーダーの候補を配列で指定します。
 
@@ -276,7 +276,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 例:
 ```json
 {
-  "video_decoders": ["nvcodec", "dav1d", "libvpx"]
+  "video_decode_engines": ["nvcodec", "dav1d", "libvpx"]
 }
 ```
 

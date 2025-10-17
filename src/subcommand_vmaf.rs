@@ -215,7 +215,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         openh264_lib.clone(),
     )
     .or_fail()?;
-    let encoder_name = encoder.name();
+    let encode_engine = encoder.name();
     let encoder_stats = encoder.encoder_stats().clone();
     scheduler.register(encoder).or_fail()?;
 
@@ -279,7 +279,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         reference_yuv_file_path,
         distorted_yuv_file_path,
         vmaf_output_file_path,
-        encoder_name,
+        encode_engine,
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
@@ -380,7 +380,7 @@ struct Output {
     reference_yuv_file_path: PathBuf,
     distorted_yuv_file_path: PathBuf,
     vmaf_output_file_path: PathBuf,
-    encoder_name: EngineName,
+    encode_engine: EngineName,
     width: usize,
     height: usize,
     frame_rate: FrameRate,
@@ -398,7 +398,7 @@ impl nojson::DisplayJson for Output {
             f.member("reference_yuv_file_path", &self.reference_yuv_file_path)?;
             f.member("distorted_yuv_file_path", &self.distorted_yuv_file_path)?;
             f.member("vmaf_output_file_path", &self.vmaf_output_file_path)?;
-            f.member("encoder_name", self.encoder_name)?;
+            f.member("encode_engine", self.encode_engine)?;
             f.member("width", self.width)?;
             f.member("height", self.height)?;
             f.member("frame_rate", self.frame_rate)?;

@@ -72,7 +72,7 @@ vmaf_v0.6.1: 96.361266
   "reference_yuv_file_path": "/path/to/archive/RECORDING_ID/reference.yuv",
   "distorted_yuv_file_path": "/path/to/archive/RECORDING_ID/distorted.yuv",
   "vmaf_output_file_path": "/path/to/archive/RECORDING_ID/vmaf-output.jsonc",
-  "encoder_name": "libvpx",
+  "encode_engine": "libvpx",
   "width": 642,
   "height": 240,
   "frame_rate": 25,
