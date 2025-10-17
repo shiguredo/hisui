@@ -15,6 +15,7 @@ on:
 
 env:
   RUST_BACKTRACE: 1
+  CUDA_VERSION: 13.0.2
 
 jobs:
   check:
@@ -265,6 +266,110 @@ jobs:
         # NOTE: SVT-AV1 の v3.1.2 では hisui 側では対処不可能そうなエラーが出ているので、いったん抑制している（TODO: 新バージョンが出たらまた対象に含めること）
         run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec --exclude shiguredo_svt_av1 -- --skip simple_single_source_av1
 
+  ubuntu-binary:
+    name: "Upload Binary for Ubuntu"
+    needs: [test]
+    strategy:
+      matrix:
+        platform:
+          - name: ubuntu-24.04_x86_64
+            runs-on: ubuntu-24.04
+          - name: ubuntu-24.04_arm64
+            runs-on: ubuntu-24.04-arm
+          - name: ubuntu-22.04_x86_64
+            runs-on: ubuntu-22.04
+          - name: ubuntu-22.04_arm64
+            runs-on: ubuntu-22.04-arm
+    runs-on: ${{ matrix.platform.runs-on }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+
+      # CUDA のインストール (x86_64 のみ)
+      - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
+        if: contains(matrix.platform.name, 'x86_64')
+        id: cuda
+        with:
+          cuda_version: ${{ env.CUDA_VERSION }}
+          platform: ${{ matrix.platform.runs-on }}
+      - run: rustup update stable
+      - run: rustup default stable
+
+      # x86_64 では nvcodec feature を有効化
+      - name: Build with NVCODEC (x86_64)
+        if: contains(matrix.platform.name, 'x86_64')
+        run: cargo build --release --features nvcodec
+
+      # ARM では通常ビルド
+      - name: Build (ARM)
+        if: contains(matrix.platform.name, 'arm64')
+        run: cargo build --release
+
+      - name: Get the version
+        id: get_version
+        run: |
+          VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "hisui") | .version')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - run: |
+          mkdir -p hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+          cp target/release/hisui hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}/
+          tar -czf hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
+            hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hisui-binary-${{ matrix.platform.name }}
+          path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
+
+  macos-binary:
+    name: "Upload Binary for MacOS"
+    needs: [test-apple-toolbox]
+    strategy:
+      matrix:
+        platform:
+          - name: macos-26_arm64
+            runs-on: macos-26
+          - name: macos-15_arm64
+            runs-on: macos-15
+          - name: macos-14_arm64
+            runs-on: macos-14
+    runs-on: ${{ matrix.platform.runs-on }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Get the version
+        id: get_version
+        run: |
+          VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "hisui") | .version')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - run: rustup update stable
+      - run: rustup default stable
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson nasm yasm automake autoconf libtool pkg-config
+      - run: cargo build --release
+      - run: |
+          mkdir -p hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+          cp target/release/hisui hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}/
+          tar -czf hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
+            hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hisui-binary-${{ matrix.platform.name }}
+          path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
+
   docs_rs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -286,6 +391,8 @@ jobs:
       - test-apple-toolbox
       - test-fdk-aac
       - test-openh264
+      - ubuntu-binary
+      - macos-binary
       - valgrind
       - docs_rs
     timeout-minutes: 20

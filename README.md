@@ -101,6 +101,7 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 - Ubuntu 24.04 arm64
 - Ubuntu 22.04 x86_64
 - Ubuntu 22.04 arm64
+- macOS 26 arm64
 - macOS 15 arm64
 - macOS 14 arm64
 
