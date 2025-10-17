@@ -11,6 +11,11 @@
 
 ## develop
 
+- [CHANGE] デコーダーおよびエンコーダーの名前を JSON に載せる際のキー名を "..._engine" 形式に統一する
+  - compose コマンドの出力 JSON の `output_audio_encoder_name` を `output_audio_encode_engine` に変更する
+  - compose コマンドの出力 JSON の `output_video_encoder_name` を `output_video_encode_engine` に変更する
+  - vmaf コマンドの出力 JSON の `encoder_name` を `encode_engine` に変更する
+  - @sile
 - [FIX] レイアウトファイルで `"audio_codec": "OPUS"` を指定するとエラーになるのを修正する
   - 値として "Opus" を期待する実装になっていたが、全て大文字が正しいので修正する
   - @sile
@@ -47,10 +52,10 @@
     - nvcodec_vp9_decode_params
     - nvcodec_av1_decode_params
   - @sile
-- [ADD] レイアウトファイルに video_encoders と video_decoders を追加する
+- [ADD] レイアウトファイルに video_encode_engines と video_decode_engines を追加する
   - 合成に使用するビデオエンコーダーとデコーダーを明示的に指定できるようにする
-  - video_encoders: 映像エンコード時に使用するエンコーダーの候補を配列で指定（先頭のものほど優先される）
-  - video_decoders: 映像デコード時に使用するデコーダーの候補を配列で指定（先頭のものほど優先される）
+  - video_encode_engines: 映像エンコード時に使用するエンコーダーの候補を配列で指定（先頭のものほど優先される）
+  - video_decode_engines: 映像デコード時に使用するデコーダーの候補を配列で指定（先頭のものほど優先される）
   - 指定可能な値（特定の features が有効な場合にのみ指定可能なものも含む）:
     - エンコーダー: "libvpx", "nvcodec", "openh264", "svt_av1", "video_toolbox"
     - デコーダー: "libvpx", "nvcodec", "openh264", "dav1d", "video_toolbox"
