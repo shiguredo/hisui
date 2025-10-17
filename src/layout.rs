@@ -270,29 +270,13 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                     return Err(v.invalid("video_encode_engines must not be empty"));
                 }
                 v.to_array()?.map(EngineName::parse_video_encoder).collect()
-            })?.or_else(|| {
-                // 後方互換性のために video_encoders も確認
-                object.get_with("video_encoders", |v| {
-                    if v.to_array()?.count() == 0 {
-                        return Err(v.invalid("video_encoders must not be empty"));
-                    }
-                    v.to_array()?.map(EngineName::parse_video_encoder).collect()
-                }).unwrap_or(None)
-            }),
+            })?,
             video_decode_engines: object.get_with("video_decode_engines", |v| {
                 if v.to_array()?.count() == 0 {
                     return Err(v.invalid("video_decode_engines must not be empty"));
                 }
                 v.to_array()?.map(EngineName::parse_video_decoder).collect()
-            })?.or_else(|| {
-                // 後方互換性のために video_decoders も確認
-                object.get_with("video_decoders", |v| {
-                    if v.to_array()?.count() == 0 {
-                        return Err(v.invalid("video_decoders must not be empty"));
-                    }
-                    v.to_array()?.map(EngineName::parse_video_decoder).collect()
-                }).unwrap_or(None)
-            }),
+            })?,
             frame_rate: object
                 .get_with("frame_rate", |v| {
                     v.as_raw_str().parse().map_err(|e| v.invalid(e))
