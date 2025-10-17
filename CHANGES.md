@@ -16,9 +16,6 @@
   - compose コマンドの出力 JSON の `output_video_encoder_name` を `output_video_encode_engine` に変更する
   - vmaf コマンドの出力 JSON の `encoder_name` を `encode_engine` に変更する
   - @sile
-- [FIX] レイアウトファイルで `"audio_codec": "OPUS"` を指定するとエラーになるのを修正する
-  - 値として "Opus" を期待する実装になっていたが、全て大文字が正しいので修正する
-  - @sile
 - [UPDATE] shiguredo_libyuv のバージョンを 2025.2.0 に更新する
   - nv12 と i420 の相互変換関数が追加された
   - @sile
