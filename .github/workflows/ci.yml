@@ -277,6 +277,7 @@ jobs:
           - name: ubuntu-24.04_arm64
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.platform.runs-on }}
+    timeout-minutes: 20
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
@@ -325,6 +326,7 @@ jobs:
 
   macos-binary:
     name: "Upload Binary for MacOS"
+    needs: [test-apple-toolbox]
     strategy:
       matrix:
         platform:
@@ -333,7 +335,7 @@ jobs:
           - name: macos-15_arm64
             runs-on: macos-15
     runs-on: ${{ matrix.platform.runs-on }}
-    needs: [test-apple-toolbox]
+    timeout-minutes: 20
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
