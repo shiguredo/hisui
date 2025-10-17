@@ -13,6 +13,6 @@
     }
   },
   "video_codec": "VP9",
-  "video_encoders": ["libvpx"],
-  "video_decoders": ["libvpx"],
+  "video_encode_engines": ["libvpx"],
+  "video_decode_engines": ["libvpx"],
 }

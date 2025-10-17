@@ -13,6 +13,6 @@
     }
   },
   "video_codec": "H264",
-  "video_encoders": ["nvcodec"],
-  "video_decoders": ["nvcodec"],
+  "video_encode_engines": ["nvcodec"],
+  "video_decode_engines": ["nvcodec"],
 }
