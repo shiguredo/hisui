@@ -1172,8 +1172,8 @@ fn layout(
         video_bitrate: None,
         encode_params: Default::default(),
         decode_params: Default::default(),
-        video_encoders: None,
-        video_decoders: None,
+        video_encode_engines: None,
+        video_decode_engines: None,
     };
     VideoMixerSpec::from_layout(&layout)
 }
