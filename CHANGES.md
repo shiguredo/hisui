@@ -11,6 +11,10 @@
 
 ## develop
 
+## 2025.2.0
+
+**リリース日**: 2025-10-20
+
 - [CHANGE] デコーダーおよびエンコーダーの名前を JSON に載せる際のキー名を "..._engine" 形式に統一する
   - compose コマンドの出力 JSON の `output_audio_encoder_name` を `output_audio_encode_engine` に変更する
   - compose コマンドの出力 JSON の `output_video_encoder_name` を `output_video_encode_engine` に変更する
