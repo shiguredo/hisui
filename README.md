@@ -27,30 +27,7 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 - 複雑なレイアウトを JSON で指定することができます
 - 用途に合わせた[エンコードパラメーターの指定](./docs/layout_encode_params.md)や[自動調整](./docs/command_tune.md)ができます
 
-### レガシー版 Hisui
-
-新しい Hisui はレガシー版の Hisui とほぼ互換性があります。
-レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
-
-<https://github.com/shiguredo/hisui-legacy>
-
-### 新しい Hisui とレガシー版 Hisui の違い
-
-- Rust で実装されています
-- macOS の Audio Toolbox を利用した AAC の音声エンコードに対応しています
-- macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
-- MP4 と WebM の入力形式に対応しています
-- 分割録画機能が出力するファイル形式に対応しています
-- 出力形式が MP4 形式のみです
-  - WebM での出力形式は非対応です
-- AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
-- Intel VPL に非対応です
-- NVIDIA Video Codec に対応しています
-- [Optuna](https://optuna.org/) を利用したエンコーダーパラメータの自動調整機能を利用できます
-
-詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。
-
-### 今後の Hisui について
+## 今後の Hisui について
 
 Hisui は Sora 向けの Recording Composition Tool から汎用的な Media Pipeline Tool を目指します。
 
@@ -67,11 +44,20 @@ Hisui は Sora 向けの Recording Composition Tool から汎用的な Media Pip
 
 Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 
-- 入出力は全て JSON-RPC で完結します
-  - `Content-Type` と `Content-Length` を持つ JSON-RPC 2.0 ベースのプロトコルを採用しています
+- 入出力に JSON-RPC 2.0 を利用する事ができます
+  - `Content-Type` と `Content-Length` を持つ JSON-RPC 2.0 ベースのプロトコルを採用します
   - `Content-Type` に `application/octet-stream` を指定することでバイナリデータを扱えます
-- プラグイン不要で JSON-RPC サーバーを実装するだけで機能を拡張できます
-- 重いエンコード・デコード・合成処理は Hisui が担当
+- プラグイン不要で JSON-RPC 2.0 サーバーを実装するだけで機能を拡張できます
+- 重いエンコード・デコード・合成処理は Hisui が担当します
+
+### 対応予定機能
+
+- パイプライン機能
+- SRT 入出力対応
+- RTMP 入出力対応
+- RTSP 入出力対応
+- WebRTC SFU Sora 入出力対応
+  - 開発中の Sora Rust SDK を利用
 
 ## ファイル形式
 
@@ -94,6 +80,30 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 > [!IMPORTANT]
 > Ubuntu を利用する場合、 FDK-AAC を利用した AAC のエンコードに対応しています。
 > ただし、 `libfdk-aac-dev` パッケージをシステムにインストールした上で、 `--features fdk-aac` を指定して Hisui を自前でビルドする必要があります。
+
+### Hisui レガシー機能
+
+新しい Hisui のレガシー機能は [レガシー版の Hisui](<https://github.com/shiguredo/hisui-legacy>) とほぼ互換性があります。
+レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
+Hisui レガシー機能は Hisui 2025.1.x でのみ利用できます。
+
+2025.2.x からは Hisui レガシー機能は削除していますので、ご注意ください。
+
+### 新しい Hisui とレガシー版 Hisui の違い
+
+- Rust で実装されています
+- macOS の Audio Toolbox を利用した AAC の音声エンコードに対応しています
+- macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
+- MP4 と WebM の入力形式に対応しています
+- 分割録画機能が出力するファイル形式に対応しています
+- 出力形式が MP4 形式のみです
+  - WebM での出力形式は非対応です
+- AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
+- Intel VPL に非対応です
+- NVIDIA Video Codec に対応しています
+- [Optuna](https://optuna.org/) を利用したエンコーダーパラメータの自動調整機能を利用できます
+
+詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。
 
 ## 動作環境
 
