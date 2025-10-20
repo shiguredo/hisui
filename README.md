@@ -31,20 +31,22 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 
 Hisui は Sora 向けの Recording Composition Tool から汎用的な Media Pipeline Tool を目指します。
 
+### Media Pipeline Tool Hisui とは
+
 - 現在は Sora の録画ファイルを合成する専用ツール
 - 今後は 映像・音声をパイプラインで自在に処理する汎用的なメディア処理ツール
 
-映像・音声の入力から出力まで、柔軟なパイプライン処理が可能になります。
+映像・音声の入力から出力まで、柔軟なパイプライン処理ができるようになります。
 
 例えば以下のようなことができるようになります。
 
 - Sora Python SDK から受信した映像・音声をリアルタイムで合成
-- JSON-RPC 経由で Python による音声文字起こし結果を映像に埋め込み
+- JSON-RPC 2.0 経由で Python による音声文字起こし結果を映像に埋め込み
 - 処理済み映像を Sora Python SDK で配信しつつ、RTMP で配信しつつ、MP4 ファイルとして同時出力
 
 Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 
-- 入出力に JSON-RPC 2.0 を利用する事ができます
+- 入出力に JSON-RPC 2.0 が利用できます
   - `Content-Type` と `Content-Length` を持つ JSON-RPC 2.0 ベースのプロトコルを採用します
   - `Content-Type` に `application/octet-stream` を指定することでバイナリデータを扱えます
 - プラグイン不要で JSON-RPC 2.0 サーバーを実装するだけで機能を拡張できます
@@ -53,11 +55,9 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 ### 対応予定機能
 
 - パイプライン機能
-- SRT 入出力対応
-- RTMP 入出力対応
-- RTSP 入出力対応
-- WebRTC SFU Sora 入出力対応
-  - 開発中の Sora Rust SDK を利用
+- SRT 入出力機能
+- RTMP 入出力機能
+- RTSP 入出力機能
 
 ## ファイル形式
 
