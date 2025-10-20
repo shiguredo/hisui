@@ -1,6 +1,6 @@
 [package]
 name = "hisui"
-version = "2025.2.0-canary.5"
+version = "2025.2.0"
 edition = "2024"
 rust-version = "1.90"
 authors = ["Shiguredo Inc."]
@@ -50,7 +50,7 @@ members = [
   "crates/shiguredo_libyuv",
   "crates/shiguredo_nvcodec",
   "crates/shiguredo_openh264",
-  "crates/shiguredo_opus" ,
+  "crates/shiguredo_opus",
   "crates/shiguredo_svt_av1",
   "crates/shiguredo_video_toolbox",
 ]
