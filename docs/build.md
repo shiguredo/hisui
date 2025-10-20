@@ -41,6 +41,37 @@ cargo install --path .
 `$HOME/.cargo/bin/hisui` のようなディレクトリに配置されます。
 アンインストールする場合には `cargo uninstall hisui` を実行してください。
 
+### NVIDIA Video Codec を使った H.264 / H.265 / AV1 のデコードおよびエンコードを有効にする場合
+
+> [NOTE]
+>
+> ubuntu-24.04_x86_64 向けのビルド済みバイナリでは、nvcodec 機能が有効になっています。
+> CUDA がインストールされていない環境では実行時に自動的に無効になります。
+
+CUDA が利用できる環境で、以下のように `--features nvcodec` を指定して Hisui をビルドしてください。
+
+```bash
+cargo install hisui --features nvcodec
+```
+
+#### CUDA Toolkit のインストール
+
+nvcodec 機能を有効にするには、CUDA Toolkit がインストールされている必要があります。
+
+CUDA Toolkit は [NVIDIA の公式サイト](https://developer.nvidia.com/cuda-downloads) からダウンロードできます。
+
+インストール後、`cuda.h` が以下のいずれかの場所に存在することを確認してください：
+
+- デフォルトパス: `/usr/local/cuda/include/cuda.h`
+- 環境変数で指定したパス: `$CUDA_INCLUDE_PATH/cuda.h`
+
+デフォルトパス以外に CUDA をインストールした場合は、環境変数 `CUDA_INCLUDE_PATH` を設定してください：
+
+```bash
+export CUDA_INCLUDE_PATH=/path/to/cuda/include
+cargo install hisui --features nvcodec
+```
+
 ### FDK-AAC を使った AAC エンコードを有効にする場合
 
 Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
@@ -67,7 +98,6 @@ Commands:
   inspect     録画ファイルの情報を取得します
   list-codecs 利用可能なコーデック一覧を表示します
   compose     録画ファイルの合成を行います
-  legacy      レガシー Hisui との互換性維持用のコマンドです
   vmaf        VMAF を用いた映像エンコード品質の評価を行います
   tune        Optuna を用いた映像エンコードパラメーターの調整を行います
   pipeline    ユーザー定義のパイプラインを実行します（実験的機能）

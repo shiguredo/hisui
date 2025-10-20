@@ -27,51 +27,37 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 - 複雑なレイアウトを JSON で指定することができます
 - 用途に合わせた[エンコードパラメーターの指定](./docs/layout_encode_params.md)や[自動調整](./docs/command_tune.md)ができます
 
-### レガシー版 Hisui
-
-新しい Hisui はレガシー版の Hisui とほぼ互換性があります。
-レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
-
-<https://github.com/shiguredo/hisui-legacy>
-
-### 新しい Hisui とレガシー版 Hisui の違い
-
-- Rust で実装されています
-- macOS の Audio Toolbox を利用した AAC の音声エンコードに対応しています
-- macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
-- MP4 と WebM の入力形式に対応しています
-- 分割録画機能が出力するファイル形式に対応しています
-- 出力形式が MP4 形式のみです
-  - WebM での出力形式は非対応です
-- AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
-- Intel VPL に非対応です
-- [Optuna](https://optuna.org/) を利用したエンコーダーパラメータの自動調整機能を利用できます
--
-
-詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。
-
-### 今後の Hisui について
+## 今後の Hisui について
 
 Hisui は Sora 向けの Recording Composition Tool から汎用的な Media Pipeline Tool を目指します。
+
+### Media Pipeline Tool Hisui とは
 
 - 現在は Sora の録画ファイルを合成する専用ツール
 - 今後は 映像・音声をパイプラインで自在に処理する汎用的なメディア処理ツール
 
-映像・音声の入力から出力まで、柔軟なパイプライン処理が可能になります。
+映像・音声の入力から出力まで、柔軟なパイプライン処理ができるようになります。
 
 例えば以下のようなことができるようになります。
 
 - Sora Python SDK から受信した映像・音声をリアルタイムで合成
-- JSON-RPC 経由で Python による音声文字起こし結果を映像に埋め込み
+- JSON-RPC 2.0 経由で Python による音声文字起こし結果を映像に埋め込み
 - 処理済み映像を Sora Python SDK で配信しつつ、RTMP で配信しつつ、MP4 ファイルとして同時出力
 
 Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 
-- 入出力は全て JSON-RPC で完結します
-  - `Content-Type` と `Content-Length` を持つ JSON-RPC 2.0 ベースのプロトコルを採用しています
+- 入出力に JSON-RPC 2.0 が利用できます
+  - `Content-Type` と `Content-Length` を持つ JSON-RPC 2.0 ベースのプロトコルを採用します
   - `Content-Type` に `application/octet-stream` を指定することでバイナリデータを扱えます
-- プラグイン不要で JSON-RPC サーバーを実装するだけで機能を拡張できます
-- 重いエンコード・デコード・合成処理は Hisui が担当
+- プラグイン不要で JSON-RPC 2.0 サーバーを実装するだけで機能を拡張できます
+- 重いエンコード・デコード・合成処理は Hisui が担当します
+
+### 対応予定機能
+
+- パイプライン機能
+- SRT 入出力機能
+- RTMP 入出力機能
+- RTSP 入出力機能
 
 ## ファイル形式
 
@@ -87,6 +73,7 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 - [dav1d](https://code.videolan.org/videolan/dav1d/) を利用した AV1 のソフトウェアによるデコードに対応しています
 - [OpenH264](https://github.com/cisco/openh264) を利用した H.264 のデコード/エンコードに対応しています
 - [Apple Video Toolbox](https://developer.apple.com/documentation/videotoolbox) を利用したハードウェアアクセラレーターによる H.264 / H.265 のデコード/エンコードに対応しています
+- [NVIDIA Video Codec](https://developer.nvidia.com/nvidia-video-codec-sdk) を利用したハードウェアアクセラレーターによる AV1 / H.264 / H.265 のエンコードと、VP8 / VP9 / AV1 / H.264 / H.265 のデコードに対応しています
 
 ### FDK-AAC
 
@@ -94,12 +81,37 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 > Ubuntu を利用する場合、 FDK-AAC を利用した AAC のエンコードに対応しています。
 > ただし、 `libfdk-aac-dev` パッケージをシステムにインストールした上で、 `--features fdk-aac` を指定して Hisui を自前でビルドする必要があります。
 
+### Hisui レガシー機能
+
+新しい Hisui のレガシー機能は [レガシー版の Hisui](<https://github.com/shiguredo/hisui-legacy>) とほぼ互換性があります。
+レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
+Hisui レガシー機能は Hisui 2025.1.x でのみ利用できます。
+
+2025.2.x からは Hisui レガシー機能は削除していますので、ご注意ください。
+
+### 新しい Hisui とレガシー版 Hisui の違い
+
+- Rust で実装されています
+- macOS の Audio Toolbox を利用した AAC の音声エンコードに対応しています
+- macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
+- MP4 と WebM の入力形式に対応しています
+- 分割録画機能が出力するファイル形式に対応しています
+- 出力形式が MP4 形式のみです
+  - WebM での出力形式は非対応です
+- AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
+- Intel VPL に非対応です
+- NVIDIA Video Codec に対応しています
+- [Optuna](https://optuna.org/) を利用したエンコーダーパラメータの自動調整機能を利用できます
+
+詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。
+
 ## 動作環境
 
 - Ubuntu 24.04 x86_64
 - Ubuntu 24.04 arm64
 - Ubuntu 22.04 x86_64
 - Ubuntu 22.04 arm64
+- macOS 26 arm64
 - macOS 15 arm64
 - macOS 14 arm64
 
@@ -133,7 +145,6 @@ Hisui のビルド方法は [build.md](docs/build.md) をご確認ください�
 
 ### 優先実装が可能な機能一覧
 
-- NVIDIA Video Codec 対応
 - Intel VPL 対応
 - AMD AMF 対応
 - NETINT Quadra 対応
@@ -179,6 +190,14 @@ limitations under the License.
 
 ```text
 "OpenH264 Video Codec provided by Cisco Systems, Inc."
+```
+
+## NVIDIA Video Codec SDK
+
+<https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/index.html>
+
+```text
+“This software contains source code provided by NVIDIA Corporation.”
 ```
 
 ## H.264 (AVC) と H.265 (HEVC) のライセンスについて

@@ -55,6 +55,7 @@ fn h265_multi_resolutions() -> orfail::Result<()> {
 }
 
 #[test]
+#[cfg(feature = "libvpx")]
 fn vp9_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-vp9");
     let source_id1 = SourceId::new("archive-red-320x320-vp9");
@@ -108,6 +109,8 @@ where
             eprintln!("no available H.264 decoder");
             return Ok(());
         },
+        decode_params: Default::default(),
+        engines: None,
     };
 
     // デコードする

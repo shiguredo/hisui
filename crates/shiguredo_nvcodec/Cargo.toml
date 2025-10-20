@@ -1,0 +1,38 @@
+[package]
+name = "shiguredo_nvcodec"
+version = "2025.2.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Shiguredo Inc."]
+license = "Apache-2.0"
+description = "NVIDIA Video Codec decoders and encoders for Hisui"
+homepage = "https://github.com/shiguredo/hisui"
+repository = "https://github.com/shiguredo/hisui"
+readme = "README.md"
+build = "build.rs"
+
+[dependencies]
+libloading = "0.8.9"
+
+[build-dependencies]
+bindgen = "0.72.0"
+toml = "0.9.0"
+
+# NVIDIA Video Codec SDK 用の外部ライブラリビルド用メタデータ
+# (この内容は build.rs の中からのみ参照される)
+#
+# [NOTE]
+# 依存ライブラリのソースコードが公開されている他の crate とは異なり、
+# NVIDIA Video Codec SDK はヘッダーファイルのみの公開となっている。
+#
+# また、そのヘッダーファイルも https://developer.nvidia.com/video-codec-sdk から
+# ログインした状態でダウンロードする必要があるので、build.rs の中でビルド時に取得するのではなく、
+# 事前にダウンロードして、hisui リポジトリの third_party/ 以下に配置するようにしている。
+#
+# そのため、ここのバージョンを更新する際には、third_party/ の更新もセットで行う必要がある。
+#
+# なお、bindgen はマクロ（#define）による定数や一部の static 変数の自動変換には対応していないため、
+# それらは build.rs の中で直接定義しているので、必要応じて build.rs も更新すること。
+[package.metadata.external-dependencies]
+nvcodec = { version = "13.0.19" }
+

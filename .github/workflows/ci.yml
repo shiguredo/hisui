@@ -15,6 +15,7 @@ on:
 
 env:
   RUST_BACKTRACE: 1
+  CUDA_VERSION: 13.0.2
 
 jobs:
   check:
@@ -44,7 +45,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   clippy:
     runs-on: ubuntu-24.04
@@ -74,7 +75,7 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox -- --deny warnings
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- --deny warnings
 
   test:
     runs-on: ubuntu-24.04
@@ -103,7 +104,45 @@ jobs:
             # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
+
+  test-nvidia-video-codec:
+    runs-on:
+      group: Self
+      labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - run: cargo check --no-default-features --features nvcodec -p hisui -p shiguredo_nvcodec
+      - run: cargo clippy --no-default-features --features nvcodec -p hisui -p shiguredo_nvcodec -- --deny warnings
+      - run: cargo test --no-default-features --features nvcodec -p hisui -p shiguredo_nvcodec -- --test-threads=1
+
+  test-apple-toolbox:
+    runs-on:
+      group: Self
+      labels: [self-hosted, macOS, ARM64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: 🍺 Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+      - run: cargo check --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx
+      - run: cargo clippy --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx -- --deny warnings
+      - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx --exclude shiguredo_openh264
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
@@ -133,9 +172,9 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
       - run: cargo test --package shiguredo_fdk_aac
-      - run: cargo test --features fdk-aac
+      - run: cargo test --no-default-features --features fdk-aac
 
-      - run: cargo build --features fdk-aac
+      - run: cargo build --no-default-features --features fdk-aac
       - run: ldd target/debug/hisui
       - name: FDK-AAC が動的リンクされることを確認する
         run: ldd target/debug/hisui | grep fdk-aac
@@ -180,7 +219,7 @@ jobs:
           curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
-      - run: cargo test -p hisui -p shiguredo_openh264
+      - run: cargo test --no-default-features -p hisui -p shiguredo_openh264
 
   valgrind:
     runs-on: ubuntu-24.04
@@ -221,7 +260,115 @@ jobs:
           bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
       - run: cargo install cargo-valgrind || echo 'already installed'
-      - run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - name: Run valgrind tests
+        env:
+          VALGRINDFLAGS: --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
+        # NOTE: SVT-AV1 の v3.1.2 では hisui 側では対処不可能そうなエラーが出ているので、いったん抑制している（TODO: 新バージョンが出たらまた対象に含めること）
+        run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec --exclude shiguredo_svt_av1 -- --skip simple_single_source_av1
+
+  ubuntu-binary:
+    name: "Upload Binary for Ubuntu"
+    needs: [test]
+    strategy:
+      matrix:
+        platform:
+          - name: ubuntu-24.04_x86_64
+            runs-on: ubuntu-24.04
+          - name: ubuntu-24.04_arm64
+            runs-on: ubuntu-24.04-arm
+          - name: ubuntu-22.04_x86_64
+            runs-on: ubuntu-22.04
+          - name: ubuntu-22.04_arm64
+            runs-on: ubuntu-22.04-arm
+    runs-on: ${{ matrix.platform.runs-on }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+
+      # CUDA のインストール (x86_64 のみ)
+      - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
+        if: contains(matrix.platform.name, 'x86_64')
+        id: cuda
+        with:
+          cuda_version: ${{ env.CUDA_VERSION }}
+          platform: ${{ matrix.platform.runs-on }}
+      - run: rustup update stable
+      - run: rustup default stable
+
+      # x86_64 では nvcodec feature を有効化
+      - name: Build with NVCODEC (x86_64)
+        if: contains(matrix.platform.name, 'x86_64')
+        run: cargo build --release --features nvcodec
+
+      # ARM では通常ビルド
+      - name: Build (ARM)
+        if: contains(matrix.platform.name, 'arm64')
+        run: cargo build --release
+
+      - name: Get the version
+        id: get_version
+        run: |
+          VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "hisui") | .version')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - run: |
+          mkdir -p hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+          cp target/release/hisui hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}/
+          tar -czf hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
+            hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hisui-binary-${{ matrix.platform.name }}
+          path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
+
+  macos-binary:
+    name: "Upload Binary for MacOS"
+    needs: [test-apple-toolbox]
+    strategy:
+      matrix:
+        platform:
+          - name: macos-26_arm64
+            runs-on: macos-26
+          - name: macos-15_arm64
+            runs-on: macos-15
+          - name: macos-14_arm64
+            runs-on: macos-14
+    runs-on: ${{ matrix.platform.runs-on }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Get the version
+        id: get_version
+        run: |
+          VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "hisui") | .version')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - run: rustup update stable
+      - run: rustup default stable
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson nasm yasm automake autoconf libtool pkg-config
+      - run: cargo build --release
+      - run: |
+          mkdir -p hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+          cp target/release/hisui hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}/
+          tar -czf hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
+            hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hisui-binary-${{ matrix.platform.name }}
+          path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
 
   docs_rs:
     runs-on: ubuntu-24.04
@@ -236,7 +383,18 @@ jobs:
       - run: cargo doc --workspace --exclude hisui
 
   slack_notify_failed:
-    needs: [check, clippy, test, test-fdk-aac, test-openh264, valgrind, docs_rs]
+    needs:
+      - check
+      - clippy
+      - test
+      - test-nvidia-video-codec
+      - test-apple-toolbox
+      - test-fdk-aac
+      - test-openh264
+      - ubuntu-binary
+      - macos-binary
+      - valgrind
+      - docs_rs
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     if: failure()
@@ -250,4 +408,3 @@ jobs:
           SLACK_TITLE: "FAILED"
           SLACK_MESSAGE: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{github.event.head_commit.message }}>
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-

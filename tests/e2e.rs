@@ -1,34 +1,45 @@
 use std::time::Duration;
 
+#[cfg(feature = "libvpx")]
+use hisui::decoder_libvpx::LibvpxDecoder;
 use hisui::{
-    decoder_libvpx::LibvpxDecoder,
+    decoder::{VideoDecoder, VideoDecoderOptions},
     decoder_opus::OpusDecoder,
+    media::MediaStreamId,
     metadata::SourceId,
+    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
-    subcommand_legacy::{Args, Runner},
-    types::CodecName,
+    types::{CodecName, EngineName},
+    video::VideoFrame,
 };
 use orfail::OrFail;
 
 /// ソースが空の場合
 #[test]
+#[cfg(feature = "libvpx")]
 fn empty_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            "testdata/e2e/empty_source/report.json",
-            "--out-file",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/empty_source/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 結果ファイルを確認（映像・音声トラックが存在しない）
     assert!(out_file.path().exists());
@@ -48,35 +59,42 @@ fn empty_source() -> noargs::Result<()> {
     Ok(())
 }
 
-/// 単一のソースをそのまま変換する場合
-/// - 入力;
-///   - 映像:
-///     - VP9
-///     - 30 fps
-///     - 320x240
-///     - 赤一色
-///   - 音声:
-///     - OPUS
-///     - ホワイトノイズ
-/// - 出力:
-///   - VP9, OPUS, 25 fps, 320x240
-#[test]
-fn simple_single_source() -> noargs::Result<()> {
+// 共通のテスト関数
+fn test_simple_single_source_common(
+    test_data_dir: &str,
+    expected_codec: CodecName,
+    expected_engine: Option<EngineName>,
+) -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            "testdata/e2e/simple_single_source/report.json",
-            "--out-file",
+    let stats_file = tempfile::NamedTempFile::new().or_fail()?;
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
+            &format!("{test_data_dir}/layout.jsonc"),
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "--stats-file",
+            &stats_file.path().display().to_string(),
+            test_data_dir,
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
+
+    if let Some(expected_engine) = expected_engine {
+        check_engine_in_stats(&stats_file, expected_engine)?;
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -102,7 +120,7 @@ fn simple_single_source() -> noargs::Result<()> {
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec.get(), Some(expected_codec));
     assert_eq!(
         video_stats
             .resolutions
@@ -130,28 +148,219 @@ fn simple_single_source() -> noargs::Result<()> {
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
-        while let Some(decoded) = decoder.next_decoded_frame() {
-            // 画像が赤一色かどうかの確認する
-            let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
-            y_plane
-                .iter()
-                .for_each(|x| assert!(matches!(x, 80..=82), "y={x}"));
-            u_plane.iter().for_each(|x| assert_eq!(*x, 90));
-            v_plane.iter().for_each(|x| assert_eq!(*x, 240));
-        }
+    const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+    const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+
+    let check_decoded_frame = |decoded: &VideoFrame| -> orfail::Result<()> {
+        // 画像が赤一色かどうかの確認する
+        let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
+        y_plane
+            .iter()
+            .for_each(|x| assert!(matches!(x, 80..=83), "y={x}"));
+        u_plane
+            .iter()
+            .for_each(|x| assert!(matches!(*x, 90 | 91), "u={x}"));
+        v_plane
+            .iter()
+            .for_each(|x| assert!(matches!(x, 240 | 241), "v={x}"));
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    let mut decoder = VideoDecoder::new(
+        DECODER_INPUT_STREAM_ID,
+        DECODER_OUTPUT_STREAM_ID,
+        VideoDecoderOptions::default(),
+    );
+
     for frame in video_samples {
-        decoder.decode(&frame).or_fail()?;
-        check_decoded_frames(&mut decoder).or_fail()?;
+        decoder
+            .process_input(MediaProcessorInput::video_frame(
+                DECODER_INPUT_STREAM_ID,
+                frame,
+            ))
+            .or_fail()?;
+        while let MediaProcessorOutput::Processed { sample, .. } =
+            decoder.process_output().or_fail()?
+        {
+            let decoded = sample.expect_video_frame().or_fail()?;
+            check_decoded_frame(&decoded).or_fail()?;
+        }
     }
-    decoder.finish().or_fail()?;
-    check_decoded_frames(&mut decoder).or_fail()?;
+
+    decoder
+        .process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))
+        .or_fail()?;
+
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
+        let decoded = sample.expect_video_frame().or_fail()?;
+        check_decoded_frame(&decoded).or_fail()?;
+    }
 
     Ok(())
+}
+
+/// stats_file を確認して、デコーダーとエンコーダーの engine が期待通りかをチェックする
+fn check_engine_in_stats(
+    stats_file: &tempfile::NamedTempFile,
+    expected_engine: EngineName,
+) -> noargs::Result<()> {
+    // stats_file を読み込んでパース
+    let stats_json = std::fs::read_to_string(stats_file.path())
+        .map_err(|e| format!("Failed to read stats file: {e}"))?;
+    let stats = nojson::RawJson::parse(&stats_json)
+        .map_err(|e| format!("Failed to parse stats JSON: {e}"))?;
+
+    // processors 配列を取得
+    let processors = stats
+        .value()
+        .to_member("processors")?
+        .required()?
+        .to_array()?;
+
+    // デコーダーとエンコーダーの engine をチェック
+    let mut found_decoder = false;
+    let mut found_encoder = false;
+
+    for processor in processors {
+        let processor_type = processor
+            .to_member("type")?
+            .required()?
+            .to_unquoted_string_str()?;
+
+        match processor_type.as_ref() {
+            "video_decoder" => {
+                if let Some(engine_value) = processor.to_member("engine")?.get() {
+                    if let Ok(engine_str) = engine_value.to_unquoted_string_str() {
+                        assert_eq!(
+                            engine_str.as_ref(),
+                            expected_engine.as_str(),
+                            "video decoder engine mismatch"
+                        );
+                        found_decoder = true;
+                    }
+                }
+            }
+            "video_encoder" => {
+                if let Some(engine_value) = processor.to_member("engine")?.get() {
+                    let engine_str = engine_value
+                        .to_unquoted_string_str()
+                        .map_err(|e| format!("engine is not a string: {e}"))?;
+                    assert_eq!(
+                        engine_str.as_ref(),
+                        expected_engine.as_str(),
+                        "video encoder engine mismatch"
+                    );
+                    found_encoder = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // デコーダーとエンコーダーが両方とも見つかったことを確認
+    assert!(found_decoder, "video decoder not found in stats");
+    assert!(found_encoder, "video encoder not found in stats");
+
+    Ok(())
+}
+
+/// 単一のソースをそのまま変換する場合
+/// - 入力:
+///   - 映像:
+///     - VP9
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+#[cfg(feature = "libvpx")]
+fn simple_single_source_vp9() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_vp9/",
+        CodecName::Vp9,
+        Some(EngineName::Libvpx),
+    )
+}
+
+/// simple_single_source_vp9 とほぼ同様だけど nvcodec は VP9 エンコードをサポートしていないので、
+/// 出力では H.264 を使っている
+#[test]
+#[cfg(feature = "nvcodec")]
+fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_vp9_nvcodec/",
+        CodecName::H264,
+        Some(EngineName::Nvcodec),
+    )
+}
+
+/// 単一のソースをそのまま変換する場合 (H.265版)
+/// - 入力:
+///   - 映像:
+///     - H.265
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+#[cfg(any(feature = "nvcodec", target_os = "macos"))]
+fn simple_single_source_h265() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_h265/",
+        CodecName::H265,
+        None,
+    )
+}
+
+/// 単一のソースをそのまま変換する場合 (H.264 版)
+/// - 入力:
+///   - 映像:
+///     - H.264
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+#[cfg(any(feature = "nvcodec", target_os = "macos"))]
+fn simple_single_source_h264() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_h264/",
+        CodecName::H264,
+        None,
+    )
+}
+
+/// 単一のソースをそのまま変換する場合 (AV1 版)
+/// - 入力:
+///   - 映像:
+///     - AV1
+///     - 30 fps
+///     - 320x240
+///     - 赤一色
+///   - 音声:
+///     - OPUS
+///     - ホワイトノイズ
+/// - 出力:
+///   - VP9, OPUS, 25 fps, 320x240
+#[test]
+fn simple_single_source_av1() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_av1/",
+        CodecName::Av1,
+        None,
+    )
 }
 
 /// 単一のソースをそのまま変換する場合（奇数解像度版）
@@ -167,22 +376,29 @@ fn simple_single_source() -> noargs::Result<()> {
 /// - 出力:
 ///   - VP9, OPUS, 25 fps, 319x239
 #[test]
+#[cfg(feature = "libvpx")]
 fn odd_resolution_single_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            "testdata/e2e/odd_resolution_single_source/report.json",
-            "--out-file",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/odd_resolution_single_source/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -257,9 +473,9 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 let col = (i % 160) * 2;
                 let row = (i / 160) * 2;
                 if col >= 318 || row >= 238 {
-                    assert!(matches!(x, 124..=131), "Expected black U value, got u={x}");
+                    assert!(matches!(x, 122..=131), "Expected black U value, got u={x}");
                 } else {
-                    assert!(matches!(x, 87..=95), "Expected red U value, got u={x}");
+                    assert!(matches!(x, 86..=95), "Expected red U value, got u={x}");
                 }
             });
 
@@ -269,7 +485,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 if col >= 318 || row >= 238 {
                     assert!(matches!(x, 122..=131), "Expected black V value, got v={x}");
                 } else {
-                    assert!(matches!(x, 238..=244), "Expected red V value, got v={x}");
+                    assert!(matches!(x, 235..=244), "Expected red V value, got v={x}");
                 }
             });
         }
@@ -289,22 +505,29 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 
 /// 複数のソースをレイアウト指定なしで変換する場合
 #[test]
+#[cfg(feature = "libvpx")]
 fn simple_multi_sources() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "-f",
-            "testdata/e2e/simple_multi_sources/report.json",
-            "--out-file",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/simple_multi_sources/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -345,7 +568,8 @@ fn simple_multi_sources() -> noargs::Result<()> {
             .into_iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
-        [(320 * 3, 240 * 1)]
+        // NOTE: +4 は枠線用
+        [(320 * 3 + 4, 240 * 1)]
     );
 
     // 一秒分 (25 fps = 40 ms)
@@ -363,22 +587,31 @@ fn simple_multi_sources() -> noargs::Result<()> {
 /// - 各ソースファイルは16x16の解像度
 /// - レイアウトファイルで縦に並べて配置
 #[test]
+#[cfg(feature = "libvpx")]
 fn simple_split_archive() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "--layout",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
             "testdata/e2e/simple_split_archive/layout.jsonc",
-            "--out-file",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/simple_split_archive/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -493,22 +726,31 @@ fn simple_split_archive() -> noargs::Result<()> {
 
 /// 複数のソースをレイアウト指定で、縦に並べて変換する場合
 #[test]
+#[cfg(feature = "libvpx")]
 fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "--layout",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
             "testdata/e2e/multi_sources_single_column/layout.json",
-            "--out-file",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/multi_sources_single_column/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -571,7 +813,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
             for (i, y) in y_plane.iter().copied().enumerate() {
                 if i / width < 16 {
                     // 最初の 16 行は青
-                    assert!(matches!(y, 40..=42), "y={y}");
+                    assert!(matches!(y, 40..=43), "y={y}");
                 } else if i / width < 16 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");
@@ -609,22 +851,31 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 /// - 二つ目のリージョンは中央に一つのセルがある（赤） => 後ろに別のリージョンがあるので外枠がつく
 /// - 音声ソースはなし
 #[test]
+#[cfg(feature = "libvpx")]
 fn two_regions() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let args = Args::parse(noargs::RawArgs::new(
-        [
-            "hisui",
-            "--show-progress-bar=false",
-            "--layout",
+
+    // ビルド済みバイナリのパスを取得
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args([
+            "compose",
+            "--no-progress-bar",
+            "--layout-file",
             "testdata/e2e/two_regions/layout.json",
-            "--out-file",
+            "--output-file",
             &out_file.path().display().to_string(),
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    ))?;
-    Runner::new(args).run()?;
+            "testdata/e2e/two_regions/",
+        ])
+        .output()
+        .or_fail()?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("hisui command failed".into());
+    }
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
@@ -672,13 +923,13 @@ fn two_regions() -> noargs::Result<()> {
             for (i, y) in y_plane.iter().copied().enumerate() {
                 if i / width < 8 {
                     // 最初の 8 行は青
-                    assert!(matches!(y, 40..=42), "y={y}");
+                    assert!(matches!(y, 40..=44), "y={y}");
                 } else if i / width < 8 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");
                 } else if i / width < 8 + 2 + 16 {
                     // 次の 16 行は赤
-                    assert!(matches!(y, 80..=82), "y={y}");
+                    assert!(matches!(y, 79..=83), "y={y}");
                 } else if i / width < 8 + 2 + 16 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");

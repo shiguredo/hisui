@@ -203,7 +203,7 @@ fn print_output_stats_summary(
 
         for processor in &stats.processors {
             if let ProcessorStats::AudioEncoder(encoder) = processor {
-                f.member("output_audio_encoder_name", encoder.engine)?;
+                f.member("output_audio_encode_engine", encoder.engine)?;
                 break;
             }
         }
@@ -225,7 +225,7 @@ fn print_output_stats_summary(
 
         for processor in &stats.processors {
             if let ProcessorStats::VideoEncoder(encoder) = processor {
-                f.member("output_video_encoder_name", encoder.engine)?;
+                f.member("output_video_encode_engine", encoder.engine)?;
                 break;
             }
         }

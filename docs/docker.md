@@ -22,7 +22,7 @@ docker pull ghcr.io/shiguredo/hisui:2025.1.0-canary.8
 Docker で Hisui を実行する際は、録画ファイルへのアクセスのためにボリュームマウントが必要です。
 
 ```bash
-docker run --rm -v <ホストのディレクトリ>:<コンテナ内のパス> ghcr.io/shiguredo/hisui:latest <コマンド> <引数>
+docker run --rm -it -v <ホストのディレクトリ>:<コンテナ内のパス> ghcr.io/shiguredo/hisui:latest <コマンド> <引数>
 ```
 
 ## 実行例
@@ -54,7 +54,7 @@ Video Decoders:
 
 ```bash
 # 録画ディレクトリをマウントして合成を実行
-docker run --rm \
+docker run --rm -it \
   -v $(pwd)/recordings:/recordings \
   ghcr.io/shiguredo/hisui:latest \
   compose /recordings/RECORDING_ID/
@@ -67,7 +67,7 @@ ls recordings/RECORDING_ID/output.mp4
 
 ```bash
 # レイアウトファイルと録画ディレクトリをマウント
-docker run --rm \
+docker run --rm -it \
   -v $(pwd)/recordings:/recordings \
   -v $(pwd)/my-layout.json:/layout.json \
   ghcr.io/shiguredo/hisui:latest \
@@ -77,7 +77,7 @@ docker run --rm \
 ### 出力ファイル名を指定しての合成
 
 ```bash
-docker run --rm \
+docker run --rm -it \
   -v $(pwd)/recordings:/recordings \
   ghcr.io/shiguredo/hisui:latest \
   compose -o /recordings/RECORDING_ID/composed.mp4 /recordings/RECORDING_ID/
@@ -86,7 +86,7 @@ docker run --rm \
 ### 統計情報を出力しての合成
 
 ```bash
-docker run --rm \
+docker run --rm -it \
   -v $(pwd)/recordings:/recordings \
   ghcr.io/shiguredo/hisui:latest \
   compose -s /recordings/RECORDING_ID/stats.json /recordings/RECORDING_ID/
@@ -101,7 +101,7 @@ cat recordings/RECORDING_ID/stats.json
 docker run --rm \
   -v $(pwd)/recordings:/recordings \
   ghcr.io/shiguredo/hisui:latest \
-  inspect /recordings/RECORDING_ID/
+  inspect /recordings/RECORDING_ID/archive-CONNECTION_ID.mp4
 ```
 
 ## 注意事項

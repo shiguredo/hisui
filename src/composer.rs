@@ -71,6 +71,8 @@ impl Composer {
         let mut video_mixer_input_stream_ids = Vec::new();
         let video_decoder_options = VideoDecoderOptions {
             openh264_lib: self.openh264_lib.clone(),
+            decode_params: self.layout.decode_params.clone(),
+            engines: self.layout.video_decode_engines.clone(),
         };
         for source_id in self.layout.video_source_ids() {
             let source_info = self.layout.sources.get(source_id).or_fail()?;

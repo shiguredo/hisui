@@ -387,5 +387,105 @@
   "video_toolbox_h265_encode_params.use_parallelization": [
     true,
     false
-  ]
+  ],
+  "nvcodec_h264_encode_params.preset": [
+    "p1",
+    "p2",
+    "p3",
+    "p4",
+    "p5",
+    "p6",
+    "p7"
+  ],
+  "nvcodec_h264_encode_params.tuning_info": [
+    "high_quality",
+    "low_latency",
+    "ultra_low_latency",
+    "lossless"
+  ],
+  "nvcodec_h264_encode_params.rate_control_mode": [
+    "const_qp",
+    "vbr",
+    "cbr"
+  ],
+  "nvcodec_h264_encode_params.gop_length": {
+    "min": 1,
+    "max": 600
+  },
+  "nvcodec_h264_encode_params.idr_period": {
+    "min": 1,
+    "max": 600
+  },
+  "nvcodec_h264_encode_params.profile": [
+    "baseline",
+    "main",
+    "high",
+    "high_10",
+    "high_422",
+    "high_444"
+  ],
+  "nvcodec_h265_encode_params.preset": [
+    "p1",
+    "p2",
+    "p3",
+    "p4",
+    "p5",
+    "p6",
+    "p7"
+  ],
+  "nvcodec_h265_encode_params.tuning_info": [
+    "high_quality",
+    "low_latency",
+    "ultra_low_latency",
+    "lossless"
+  ],
+  "nvcodec_h265_encode_params.rate_control_mode": [
+    "const_qp",
+    "vbr",
+    "cbr"
+  ],
+  "nvcodec_h265_encode_params.gop_length": {
+    "min": 1,
+    "max": 600
+  },
+  "nvcodec_h265_encode_params.idr_period": {
+    "min": 1,
+    "max": 600
+  },
+  "nvcodec_h265_encode_params.profile": [
+    "main",
+    "main10",
+    "frext"
+  ],
+  "nvcodec_av1_encode_params.preset": [
+    "p1",
+    "p2",
+    "p3",
+    "p4",
+    "p5",
+    "p6",
+    "p7"
+  ],
+  "nvcodec_av1_encode_params.tuning_info": [
+    "high_quality",
+    "low_latency",
+    "ultra_low_latency",
+    "lossless"
+  ],
+  "nvcodec_av1_encode_params.rate_control_mode": [
+    "const_qp",
+    "vbr",
+    "cbr"
+  ],
+  "nvcodec_av1_encode_params.gop_length": {
+    "min": 1,
+    "max": 600
+  },
+  "nvcodec_av1_encode_params.idr_period": {
+    "min": 1,
+    "max": 600
+  },
+  "nvcodec_av1_encode_params.profile": [
+    "main"
+  ],
 }

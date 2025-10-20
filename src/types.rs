@@ -38,7 +38,7 @@ impl CodecName {
 
     pub fn parse_audio(s: &str) -> Result<Self, String> {
         match s {
-            "Opus" => Ok(Self::Opus), // コマンドライン引数パース時には以前の Hisui に合わせた名前にする
+            "OPUS" => Ok(Self::Opus),
             "AAC" => Ok(Self::Aac),
             _ => Err(format!("unknown audio codec name: {s}")),
         }
@@ -74,37 +74,213 @@ impl FromStr for CodecName {
     }
 }
 
-/// エンジン名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EngineName {
     AudioToolbox,
     Dav1d,
     FdkAac,
     Libvpx,
+    Nvcodec,
     Openh264,
     Opus,
     SvtAv1,
     VideoToolbox,
 }
 
-impl nojson::DisplayJson for EngineName {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(self.as_str())
-    }
-}
-
 impl EngineName {
+    // NOTE: 先頭の方が優先順位が高い
+    pub fn default_video_decoders(is_openh264_enabled: bool) -> Vec<Self> {
+        let mut engines = Vec::new();
+
+        if is_openh264_enabled {
+            engines.push(Self::Openh264);
+        }
+        #[cfg(feature = "nvcodec")]
+        if shiguredo_nvcodec::is_cuda_library_available() {
+            engines.push(Self::Nvcodec);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            engines.push(Self::VideoToolbox);
+        }
+        engines.push(Self::Dav1d);
+        #[cfg(feature = "libvpx")]
+        {
+            engines.push(Self::Libvpx);
+        }
+
+        engines
+    }
+
+    pub fn is_available_video_decode_codec(self, codec: CodecName) -> bool {
+        match self {
+            #[cfg(feature = "libvpx")]
+            EngineName::Libvpx => matches!(codec, CodecName::Vp8 | CodecName::Vp9),
+            #[cfg(feature = "nvcodec")]
+            EngineName::Nvcodec => {
+                matches!(
+                    codec,
+                    CodecName::H264
+                        | CodecName::H265
+                        | CodecName::Vp8
+                        | CodecName::Vp9
+                        | CodecName::Av1
+                )
+            }
+            EngineName::Openh264 => matches!(codec, CodecName::H264),
+            EngineName::Dav1d => matches!(codec, CodecName::Av1),
+            #[cfg(target_os = "macos")]
+            EngineName::VideoToolbox => matches!(codec, CodecName::H264 | CodecName::H265),
+            _ => false,
+        }
+    }
+
+    // NOTE: 先頭の方が優先順位が高い
+    pub fn default_video_encoders(is_openh264_enabled: bool) -> Vec<Self> {
+        let mut engines = Vec::new();
+
+        if is_openh264_enabled {
+            engines.push(Self::Openh264);
+        }
+        #[cfg(feature = "nvcodec")]
+        if shiguredo_nvcodec::is_cuda_library_available() {
+            engines.push(Self::Nvcodec);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            engines.push(Self::VideoToolbox);
+        }
+        engines.push(Self::SvtAv1);
+        #[cfg(feature = "libvpx")]
+        {
+            engines.push(Self::Libvpx);
+        }
+
+        engines
+    }
+
+    pub fn is_available_video_encode_codec(self, codec: CodecName) -> bool {
+        match self {
+            #[cfg(feature = "libvpx")]
+            EngineName::Libvpx => matches!(codec, CodecName::Vp8 | CodecName::Vp9),
+            #[cfg(feature = "nvcodec")]
+            EngineName::Nvcodec => {
+                matches!(codec, CodecName::H264 | CodecName::H265 | CodecName::Av1)
+            }
+            EngineName::Openh264 => matches!(codec, CodecName::H264),
+            EngineName::SvtAv1 => matches!(codec, CodecName::Av1),
+            #[cfg(target_os = "macos")]
+            EngineName::VideoToolbox => matches!(codec, CodecName::H264 | CodecName::H265),
+            _ => false,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             EngineName::AudioToolbox => "audio_toolbox",
             EngineName::Dav1d => "dav1d",
             EngineName::FdkAac => "fdk_aac",
             EngineName::Libvpx => "libvpx",
+            EngineName::Nvcodec => "nvcodec",
             EngineName::Openh264 => "openh264",
             EngineName::Opus => "opus",
             EngineName::SvtAv1 => "svt_av1",
             EngineName::VideoToolbox => "video_toolbox",
         }
+    }
+
+    pub fn parse_video_encoder(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
+        match s.as_ref() {
+            "libvpx" => {
+                #[cfg(feature = "libvpx")]
+                {
+                    Ok(Self::Libvpx)
+                }
+                #[cfg(not(feature = "libvpx"))]
+                {
+                    Err(value.invalid("libvpx feature is not enabled"))
+                }
+            }
+            "nvcodec" => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    Ok(Self::Nvcodec)
+                }
+                #[cfg(not(feature = "nvcodec"))]
+                {
+                    Err(value.invalid("nvcodec feature is not enabled"))
+                }
+            }
+            "openh264" => Ok(Self::Openh264),
+            "svt_av1" => Ok(Self::SvtAv1),
+            "video_toolbox" => {
+                #[cfg(target_os = "macos")]
+                {
+                    Ok(Self::VideoToolbox)
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(value.invalid("video_toolbox is only available on macOS"))
+                }
+            }
+            "audio_toolbox" | "dav1d" | "fdk_aac" | "opus" => {
+                Err(value.invalid(format!("{s} is not a video encoder")))
+            }
+            _ => Err(value.invalid(format!("unknown video encoder: {s}"))),
+        }
+    }
+
+    pub fn parse_video_decoder(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        let s = value.to_unquoted_string_str()?;
+        match s.as_ref() {
+            "libvpx" => {
+                #[cfg(feature = "libvpx")]
+                {
+                    Ok(Self::Libvpx)
+                }
+                #[cfg(not(feature = "libvpx"))]
+                {
+                    Err(value.invalid("libvpx feature is not enabled"))
+                }
+            }
+            "nvcodec" => {
+                #[cfg(feature = "nvcodec")]
+                {
+                    Ok(Self::Nvcodec)
+                }
+                #[cfg(not(feature = "nvcodec"))]
+                {
+                    Err(value.invalid("nvcodec feature is not enabled"))
+                }
+            }
+            "openh264" => Ok(Self::Openh264),
+            "dav1d" => Ok(Self::Dav1d),
+            "video_toolbox" => {
+                #[cfg(target_os = "macos")]
+                {
+                    Ok(Self::VideoToolbox)
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(value.invalid("video_toolbox is only available on macOS"))
+                }
+            }
+            "audio_toolbox" | "fdk_aac" | "opus" | "svt_av1" => {
+                Err(value.invalid(format!("{s} is not a video decoder")))
+            }
+            _ => Err(value.invalid(format!("unknown video decoder: {s}"))),
+        }
+    }
+}
+
+impl nojson::DisplayJson for EngineName {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.as_str())
     }
 }
 
@@ -123,15 +299,27 @@ impl EvenUsize {
     pub const MIN_CELL_SIZE: Self = Self(16);
 
     pub const fn new(n: usize) -> Option<Self> {
-        if n.is_multiple_of(2) { Some(Self(n)) } else { None }
+        if n.is_multiple_of(2) {
+            Some(Self(n))
+        } else {
+            None
+        }
     }
 
     pub const fn truncating_new(n: usize) -> Self {
-        if n.is_multiple_of(2) { Self(n) } else { Self(n - 1) }
+        if n.is_multiple_of(2) {
+            Self(n)
+        } else {
+            Self(n - 1)
+        }
     }
 
     pub const fn ceiling_new(n: usize) -> Self {
-        if n.is_multiple_of(2) { Self(n) } else { Self(n + 1) }
+        if n.is_multiple_of(2) {
+            Self(n)
+        } else {
+            Self(n + 1)
+        }
     }
 
     pub const fn get(self) -> usize {

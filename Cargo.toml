@@ -1,6 +1,6 @@
 [package]
 name = "hisui"
-version = "2025.1.0"
+version = "2025.2.0"
 edition = "2024"
 rust-version = "1.90"
 authors = ["Shiguredo Inc."]
@@ -11,7 +11,11 @@ repository = "https://github.com/shiguredo/hisui"
 readme = "README.md"
 
 [features]
+default = ["libvpx"]
+
 fdk-aac = ["shiguredo_fdk_aac"]
+nvcodec = ["shiguredo_nvcodec"]
+libvpx = ["shiguredo_libvpx"]
 
 [dependencies]
 indicatif = "0.18.0"
@@ -23,8 +27,9 @@ shiguredo_mp4 = "2025.2.0"
 
 shiguredo_dav1d = { version = "2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "2025.1.0", path = "crates/shiguredo_fdk_aac/", optional = true }
-shiguredo_libvpx = { version = "2025.1.0", path = "crates/shiguredo_libvpx/" }
-shiguredo_libyuv = { version = "2025.1.0", path = "crates/shiguredo_libyuv/" }
+shiguredo_libvpx = { version = "2025.1.0", path = "crates/shiguredo_libvpx/", optional = true }
+shiguredo_libyuv = { version = "2025.2.0", path = "crates/shiguredo_libyuv/" }
+shiguredo_nvcodec = { version = "2025.2.0", path = "crates/shiguredo_nvcodec/", optional = true }
 shiguredo_openh264 = { version = "2025.1.0", path = "crates/shiguredo_openh264/" }
 shiguredo_opus = { version = "2025.1.0", path = "crates/shiguredo_opus/" }
 shiguredo_svt_av1 = { version = "2025.1.0", path = "crates/shiguredo_svt_av1/" }
@@ -43,8 +48,9 @@ members = [
   "crates/shiguredo_fdk_aac",
   "crates/shiguredo_libvpx",
   "crates/shiguredo_libyuv",
+  "crates/shiguredo_nvcodec",
   "crates/shiguredo_openh264",
-  "crates/shiguredo_opus" ,
+  "crates/shiguredo_opus",
   "crates/shiguredo_svt_av1",
   "crates/shiguredo_video_toolbox",
 ]
