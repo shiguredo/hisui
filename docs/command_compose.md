@@ -1,4 +1,4 @@
-# `hisui compose` コマンド
+# `hisui compose` コマンド {#command-compose}
 
 `hisui compose` コマンドは、Sora が保存した録画ファイルを合成するためのコマンドです。
 
@@ -7,7 +7,7 @@
 どのようなレイアウトが指定可能かについては [レイアウト機能](layout.md) のドキュメントをご参照ください。
 デフォルトでは [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) のレイアウトが使用されます。
 
-## 使用方法
+## 使用方法 {#command-compose-usage}
 
 ```console
 $ hisui compose -h
@@ -33,9 +33,9 @@ Options:
   -T, --thread-count <INTEGER> 合成処理に使用するワーカースレッド数を指定します [env: HISUI_THREAD_COUNT] [default: 1]
 ```
 
-## 実行例
+## 実行例 {#command-compose-examples}
 
-### デフォルトレイアウトでの合成
+### デフォルトレイアウトでの合成 {#command-compose-example-default}
 
 ```console
 $ hisui compose /path/to/archive/RECORDING_ID/
@@ -64,7 +64,7 @@ $ hisui compose /path/to/archive/RECORDING_ID/
 }
 ```
 
-### レイアウトファイルを指定しての合成
+### レイアウトファイルを指定しての合成 {#command-compose-example-layout}
 
 ```console
 $ hisui compose -l layout-examples/compose-default.jsonc /path/to/archive/RECORDING_ID/
@@ -96,14 +96,14 @@ $ hisui compose -l layout-examples/compose-default.jsonc /path/to/archive/RECORD
 ...
 ```
 
-## Tips
+## Tips {#command-compose-tips}
 
-### 実行環境で利用可能なコーデックを確認する方法
+### 実行環境で利用可能なコーデックを確認する方法 {#command-compose-tip-codecs}
 
 Hisui でのエンコードおよびデコード時に利用可能なコーデックは、様々な要因によって変ります。
 実際の環境でどのコーデックが使用できるかは [`hisui list-codecs`](command_list_codecs.md) コマンドで確認できます。
 
-### 最適な映像エンコードパラメーターの決定方法
+### 最適な映像エンコードパラメーターの決定方法 {#command-compose-tip-params}
 
 Hisui ではエンコーダー毎に、細かくエンコードパラメーターが指定できるようになっています。
 
@@ -111,7 +111,7 @@ Hisui ではエンコーダー毎に、細かくエンコードパラメータ�
 
 [`hisui tune`](command_tune.md) コマンドを利用することで、エンコーダーに詳しくなくても、最適なパラメーターの探索を行いやすくなっているので、ぜひ試してみてください。
 
-### マルチスレッドで合成を行う方法
+### マルチスレッドで合成を行う方法 {#command-compose-tip-multithread}
 
 Hisui はデフォルトではシングルスレッドで合成処理を実行しますが、`--thread-count` オプションを指定することでマルチスレッドで処理させることができます。
 もし一度に実行する Hisui プロセスがひとつだけで、できるだけ合成処理時間を短くしたい場合には、このオプションの値に CPU の物理コアの数を指定してみてください。
@@ -120,4 +120,3 @@ Hisui はデフォルトではシングルスレッドで合成処理を実行�
 映像エンコーダーは内部的に独自のマルチスレッド処理を行うことが多いですが、それらのスレッド数はこのオプションの影響を受けません。
 エンコーダー内部のスレッド数を制御したい場合は、レイアウトファイルの中で
 各エンコーダー固有の設定パラメーター（例：`libvpx_vp8_encode_params.threads` や `openh264_encode_params.thread_count` など）を使用してください。
-

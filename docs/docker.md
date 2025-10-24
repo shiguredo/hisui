@@ -1,10 +1,10 @@
-# Docker を利用した Hisui の実行
+# Docker を利用した Hisui の実行 {#docker}
 
 Hisui は Docker イメージとして提供されており、環境構築なしですぐに利用することができます。
 
 Docker イメージは GitHub Container Registry (ghcr.io) で公開されており、amd64 と arm64 の両アーキテクチャに対応しています。
 
-## イメージの取得
+## イメージの取得 {#docker-pull}
 
 ```bash
 # 最新の安定版を取得
@@ -17,7 +17,7 @@ docker pull ghcr.io/shiguredo/hisui:2025.1.0
 docker pull ghcr.io/shiguredo/hisui:2025.1.0-canary.8
 ```
 
-## 使用方法
+## 使用方法 {#docker-usage}
 
 Docker で Hisui を実行する際は、録画ファイルへのアクセスのためにボリュームマウントが必要です。
 
@@ -25,16 +25,16 @@ Docker で Hisui を実行する際は、録画ファイルへのアクセスの
 docker run --rm -it -v <ホストのディレクトリ>:<コンテナ内のパス> ghcr.io/shiguredo/hisui:latest <コマンド> <引数>
 ```
 
-## 実行例
+## 実行例 {#docker-examples}
 
-### バージョン確認
+### バージョン確認 {#docker-example-version}
 
 ```console
 $ docker run --rm ghcr.io/shiguredo/hisui:latest --version
 hisui 2025.1.0
 ```
 
-### 利用可能なコーデック一覧の表示
+### 利用可能なコーデック一覧の表示 {#docker-example-codecs}
 
 ```console
 $ docker run --rm ghcr.io/shiguredo/hisui:latest list-codecs
@@ -50,7 +50,7 @@ Video Decoders:
   ...
 ```
 
-### デフォルトレイアウトでの録画ファイル合成
+### デフォルトレイアウトでの録画ファイル合成 {#docker-example-default}
 
 ```bash
 # 録画ディレクトリをマウントして合成を実行
@@ -63,7 +63,7 @@ docker run --rm -it \
 ls recordings/RECORDING_ID/output.mp4
 ```
 
-### レイアウトファイルを指定しての合成
+### レイアウトファイルを指定しての合成 {#docker-example-layout}
 
 ```bash
 # レイアウトファイルと録画ディレクトリをマウント
@@ -74,7 +74,7 @@ docker run --rm -it \
   compose -l /layout.json /recordings/RECORDING_ID/
 ```
 
-### 出力ファイル名を指定しての合成
+### 出力ファイル名を指定しての合成 {#docker-example-output}
 
 ```bash
 docker run --rm -it \
@@ -83,7 +83,7 @@ docker run --rm -it \
   compose -o /recordings/RECORDING_ID/composed.mp4 /recordings/RECORDING_ID/
 ```
 
-### 統計情報を出力しての合成
+### 統計情報を出力しての合成 {#docker-example-stats}
 
 ```bash
 docker run --rm -it \
@@ -95,7 +95,7 @@ docker run --rm -it \
 cat recordings/RECORDING_ID/stats.json
 ```
 
-### 録画ファイルの詳細情報を取得
+### 録画ファイルの詳細情報を取得 {#docker-example-inspect}
 
 ```bash
 docker run --rm \
@@ -104,14 +104,14 @@ docker run --rm \
   inspect /recordings/RECORDING_ID/archive-CONNECTION_ID.mp4
 ```
 
-## 注意事項
+## 注意事項 {#docker-notes}
 
-### マルチアーキテクチャ対応
+### マルチアーキテクチャ対応 {#docker-notes-multiarch}
 
 Docker イメージは amd64（Intel/AMD）と arm64（Apple Silicon など）の両方に対応しています。
 Docker が自動的にホストのアーキテクチャに適したイメージを選択するため、特別な指定は不要です。
 
-### タグ戦略
+### タグ戦略 {#docker-notes-tags}
 
 - `latest`: 最新の安定版リリース
 - `<version>`: 特定のバージョン（例: `2025.1.0`）
@@ -120,7 +120,7 @@ Docker が自動的にホストのアーキテクチャに適したイメージ�
 Canary リリースは最新機能を含みますが、安定性は保証されません。
 本番環境では `latest` または特定のバージョンタグの使用を推奨します。
 
-### 未対応コマンド
+### 未対応コマンド {#docker-notes-unsupported}
 
 この Docker イメージには Hisui 本体のバイナリしか含まれていません。
 そのため、外部パッケージのインストールが別途必要となる以下のコマンドには未対応となります。

@@ -1,4 +1,4 @@
-# レガシー版 Hisui からのマイグレーションガイド
+# レガシー版 Hisui からのマイグレーションガイド {#migration-guide}
 
 このドキュメントは [C++ で実装されている 2024.1.1 以前の Hisui][hisui-legacy] から Rust で
 書き直された 2025.1.0 の Hisui への移行方法や両者の相違点についてを説明するものです。
@@ -10,12 +10,12 @@
 
 [hisui-legacy]: https://github.com/shiguredo/hisui-legacy
 
-## 注意
+## 注意 {#migration-note}
 
 このガイドは Hisui 2025.2.0 時点の内容をもとに記載されています。
 2025.2.0 以降の Hisui の変更点については [CHANGES.md](../CHANGES.md) ファイルをご参照ください。
 
-## **[2025.1.x のみ]** `hisui legacy` サブコマンドを用いた移行方法
+## **[2025.1.x のみ]** `hisui legacy` サブコマンドを用いた移行方法 {#migration-legacy-subcommand}
 
 新 Hisui は、サブコマンド方式のコマンドラインインタフェースを採用しています。
 そのため、レガシー Hisui とは異なり、コマンドラインの第一引数はサブコマンドの名前となっています。
@@ -26,7 +26,7 @@
 ただし `hisui legacy` サブコマンドは Hisui 2025.2.0 で廃止されているため、
 基本的には、次に説明する `hisui compose` サブコマンドへの移行を推奨しています。
 
-## `hisui compose` サブコマンドへの移行方法
+## `hisui compose` サブコマンドへの移行方法 {#migration-compose}
 
 [`hisui compose`](./command_compose.md) サブコマンドは「レガシー Hisuiでのレイアウトファイルを指定した合成」を中心に据えて、
 その分、コマンドライン引数をシンプルにしたものと考えることができます。
@@ -71,50 +71,50 @@ hisui compose /path/to/合成対象の録画ファイルが配置されている
 
 これ以降では、レガシー Hisui と新 Hisui の相違点について説明します。
 
-## 相違点: 廃止された機能
+## 相違点: 廃止された機能 {#migration-differences-removed}
 
 本セクションでは、新 Hisui では廃止されて使えなくなった機能について説明します。
 
-### 実験的なコマンドライン引数は廃止
+### 実験的なコマンドライン引数は廃止 {#migration-removed-experimental}
 
 レガシー Hisui で実験的な扱いであったり、ドキュメントに記載がなかったりした引数は、新 Hisui では完全に廃止されました。
 
-### 合成結果の WebM 形式での出力は廃止
+### 合成結果の WebM 形式での出力は廃止 {#migration-removed-webm}
 
 出力形式としては MP4 のみのサポートとなりました。
 レイアウトファイルで `format` が指定されても無視されます。
 
-### OneVPL を使った H.264 エンコードおよびデコードの廃止
+### OneVPL を使った H.264 エンコードおよびデコードの廃止 {#migration-removed-onevpl}
 
 OneVPL 対応は廃止されました。
 
 Linux 環境で、H.264 のエンコードおよびデコードを行うためには OpenH264 ないし NVIDA Video Codec が必須となります。
 なお macOS 環境では Apple Video Toolbox を使った H.264 ストリーム処理をサポートしています。
 
-### `--video-codec-engines` コマンドライン引数は廃止
+### `--video-codec-engines` コマンドライン引数は廃止 {#migration-removed-video-codec-engines}
 
 利用可能なコーデック一覧を取得する方法としては、代わりに [list-codecs](./command_list_codecs.md) サブコマンドが導入されました。
 
-## 相違点: 挙動が変わった機能
+## 相違点: 挙動が変わった機能 {#migration-differences-behavior}
 
 本セクションでは、新 Hisui での挙動の変更点について説明します。
 なお基本的には、細かい調整や修正が主であって、普通に使っている範囲では、これらの変更の影響を受けることは少ないと思われます。
 
-### MP4 ファイル出力が常に faststart 方式で行われるようになった
+### MP4 ファイル出力が常に faststart 方式で行われるようになった {#migration-behavior-faststart}
 
 faststart 方式は「MP4 の再生に必要なメタデータをファイルの先頭付近に配置することで再生開始までの時間を短くする」というものです。
 
 新 Hisui では、常にこの方式を採用し、またその際に（レガシー Hisuiと異なり）一時ファイルを利用しなくなりました。
 
-### AV1 デコーダーの変更
+### AV1 デコーダーの変更 {#migration-behavior-av1-decoder}
 
 AV1 ストリーム用のデコーダーが SVT-AV1 から dav1d に変更されました。
 
-### ログメッセージの内容の変更
+### ログメッセージの内容の変更 {#migration-behavior-logs}
 
 ログメッセージの出力内容には互換性がありません。
 
-### プログレスバーの内容の変更
+### プログレスバーの内容の変更 {#migration-behavior-progress}
 
 プログレスバーの出力内容には互換性がありません。
 
@@ -131,14 +131,14 @@ AV1 ストリーム用のデコーダーが SVT-AV1 から dav1d に変更され
 
 `[00:00:26 (ETA: 0s)] [########################################] complete 100% of 135s total output duration`
 
-### 音声のみ合成でのデフォルト出力ファイルの拡張子の変更
+### 音声のみ合成でのデフォルト出力ファイルの拡張子の変更 {#migration-behavior-audio-only-ext}
 
 レガシー Hisui で出力ファイルの名前を省略した場合は、
 「音声のみの場合は `.mp4a`」で「それ以外の場合は `.mp4`」という拡張子になっていました。
 
 新 Hisui では、デフォルト出力ファイルの拡張子は常に `.mp4` となります。
 
-### デフォルトエンコードパラメーターの変更
+### デフォルトエンコードパラメーターの変更 {#migration-behavior-encode-defaults}
 
 後述するように、新 Hisui ではエンコードパラメーターを以前よりも細かく指定できるようになりました。
 それに伴ってデフォルトで使用されるエンコードパラメーターも調整されており、レガシー Hisui とは異なるものとなっています。
@@ -146,21 +146,21 @@ AV1 ストリーム用のデコーダーが SVT-AV1 から dav1d に変更され
 レガシー Hisui でのデフォルトエンコードパラメーターは明文化されているものではなかったので、ここで詳細に変更点を列挙することはしませんが、
 新 Hisui でのデフォルトパラメーターについては [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) ファイルをご参照ください。
 
-### レイアウトファイルでの解像度指定の制限が少し緩和された
+### レイアウトファイルでの解像度指定の制限が少し緩和された {#migration-behavior-resolution}
 
 レガシー Hisui では「4 の倍数」という制限だったのが、新 Hisui では「2 の倍数」と緩和されました。
 
-### レイアウトファイルで、ひとつのリージョンの中で同じソースが複数回指定された場合の挙動の変更
+### レイアウトファイルで、ひとつのリージョンの中で同じソースが複数回指定された場合の挙動の変更 {#migration-behavior-duplicate-sources}
 
 レガシー Hisui では、別々のソースとして扱われますが、新 Hisui では同じリージョン内での重複したソースはひとつにまとめられます。
 
-### レイアウトファイルでのメディアファイルの探索方法の変更
+### レイアウトファイルでのメディアファイルの探索方法の変更 {#migration-behavior-media-discovery}
 
 レガシー Hisui では、`archive-*.json` の中身に記載されているパスの情報などを考慮して対応するメディアファイルのパスを決定していました。
 新 Hisui では、`archive-*.json` の中身は考慮せずに、単純に、指定された `archive-*.json` のパスの
 拡張子を（`.mp4` ないし `.webm` に）置換することでメディアファイルのパスを決定しています。
 
-### レイアウトファイル使用時の、セルへの映像ソース割り当ての際に、ソースの指定順を常に考慮しなくなった
+### レイアウトファイル使用時の、セルへの映像ソース割り当ての際に、ソースの指定順を常に考慮しなくなった {#migration-behavior-source-order}
 
 基本的には、レガシー Hisui でも新 Hisuiでも、映像ソースはその開始時刻の順番でセルに割り当てられます。
 そのため、利用可能なセルの数に限りがある場合には、設定によっては、開始時刻が後ろのソースが合成結果から除外されるようになります。
@@ -172,45 +172,45 @@ AV1 ストリーム用のデコーダーが SVT-AV1 から dav1d に変更され
 
 新 Hisui ではこのような特別扱いはなく、ソースの指定順の影響は受けません。
 
-### レイアウトファイルでの、ソースのワイルドカード指定の際の制限が少し緩和された
+### レイアウトファイルでの、ソースのワイルドカード指定の際の制限が少し緩和された {#migration-behavior-wildcard}
 
 レガシー Hisui では「ワイルドカードを使用する場合には Sora の録画データと同じディレクトリにレイアウトファイルがあること」という制限がありました。
 
 新 Hisui では、この制限は緩和され「ROOT_DIR 引数で指定したディレクトリを基点として、その子孫ディレクトリにあるファイルが参照可能」というようになりました。
 
-### レイアウトファイルで `resolution` の指定が必須ではなくなった
+### レイアウトファイルで `resolution` の指定が必須ではなくなった {#migration-behavior-resolution-optional}
 
 省略された場合には、リージョンのサイズから自動計算されます。
 なお「`resolution` が未指定」かつ「リージョンのサイズが明示的に指定されていない場合」には、全体の解像度の値が一意に定まらないためエラーとなります。
 
-## 相違点: 追加された機能
+## 相違点: 追加された機能 {#migration-differences-added}
 
 本セクションでは、新 Hisui で新しく追加された機能を紹介します。
 
-### 分割録画対応
+### 分割録画対応 {#migration-added-split-recording}
 
 Sora の分割録画機能を使って作成された録画ファイルの合成ができるようになりました。
 
 `hisui compose` で指定するレイアウトファイルの中で、`split-archive-*.json` のようにソースリストを指定すれば、
 ワイルドカードに一致したソース群の中で、コネクション ID が同じものは、ひとつのソースとして連結して扱われます。
 
-### MP4 ファイル入力に対応
+### MP4 ファイル入力に対応 {#migration-added-mp4}
 
 Sora の MP4 録画機能で録画されたファイルを合成できるようになりました。
 
-### macOS に対応
+### macOS に対応 {#migration-added-macos}
 
 新 Hisui は macOS でのビルドおよび実行に対応しています。
 
-### NVIDIA Video Codec に対応
+### NVIDIA Video Codec に対応 {#migration-added-nvcodec}
 
 NVIDIA Video Codec を利用した H.264 / H.265 / AV1 のエンコードおよび H.264 / H.265 / VP8 / VP9 / AV1 デコードに対応しています。
 
-### H.265 ストリームのデコードおよびエンコードに対応（macOS のみ）
+### H.265 ストリームのデコードおよびエンコードに対応（macOS のみ） {#migration-added-h265}
 
 macOS では Apple Video Toolbox を、Linux では NVIDIA Video Codec を使って H.265 ストリームを扱えるようになりました。
 
-### レイアウトファイルへの追加項目
+### レイアウトファイルへの追加項目 {#migration-added-layout-fields}
 
 新 Hisui では、レガシー Hisui に比べてレイアウトファイルで指定できる項目が増えています。
 
@@ -233,14 +233,14 @@ macOS では Apple Video Toolbox を、Linux では NVIDIA Video Codec を使っ
 
 各項目についての説明は [レイアウトの仕様ドキュメント](./layout_spec.md) をご参照ください。
 
-### エンコードパラメーターの細かい指定と自動調整に対応
+### エンコードパラメーターの細かい指定と自動調整に対応 {#migration-added-encoding-options}
 
 新 Hisui では、レガシー Hisui に比べて、合成結果のエンコードの際のパラメーターをより細かく指定できるようになっています。
 詳細は [エンコードパラメーター指定のドキュメント](./layout_encode_params.md) をご参照ください。
 
 また [`hisui tune`](./command_tune.md) サブコマンドを使うことで、用途に合ったエンコードパラメーターを、ある程度自動で探索することもできます。
 
-### Hisui 自体のマルチスレッド実行に対応
+### Hisui 自体のマルチスレッド実行に対応 {#migration-added-multithread}
 
 新 Hisui では `--thread-count` 引数を指定することでデコードや画像合成、エンコードなどの処理を別々のスレッドで実行することができます
 (デフォルトではレガシー Hisui と同様にシングルスレッドで実行されます）。
@@ -249,7 +249,7 @@ macOS では Apple Video Toolbox を、Linux では NVIDIA Video Codec を使っ
 映像エンコーダーは、内部的にマルチスレッドでの処理に対応していることが多いですが、
 それらの挙動の制御は `libvpx_vp8_encode_params` などの、各エンコーダー固有のオプション指定を通して行ってください。
 
-### 統計情報の出力に対応
+### 統計情報の出力に対応 {#migration-added-stats}
 
 新 Hisui では `--stats-file` 引数を指定することで、
 合成処理中に収集された統計情報をファイルに出力することができます。

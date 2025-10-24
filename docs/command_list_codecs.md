@@ -1,9 +1,9 @@
-# `hisui list-codecs` コマンド
+# `hisui list-codecs` コマンド {#command-list-codecs}
 
 `hisui list-codecs` コマンドは、Hisui で利用可能なコーデックの一覧を表示するためのコマンドです。
 このコマンドは、使用可能なエンコーダーやデコーダーの情報を JSON 形式で出力します。
 
-## 使用方法
+## 使用方法 {#command-list-codecs-usage}
 
 ```console
 $ hisui list-codecs -h
@@ -18,7 +18,7 @@ Options:
       --openh264 <PATH> OpenH264 の共有ライブラリのパス [env: HISUI_OPENH264_PATH]
 ```
 
-## 実行例
+## 実行例 {#command-list-codecs-examples}
 
 コマンドを実行すると、利用可能なコーデックの一覧が JSON 形式で出力されます。
 

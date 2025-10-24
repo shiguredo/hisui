@@ -1,9 +1,9 @@
-# `hisui inspect` コマンド（開発者向け）
+# `hisui inspect` コマンド（開発者向け） {#command-inspect}
 
 `hisui inspect` コマンドは、録画ファイルの詳細情報を取得するためのコマンドです。
 このコマンドは主にデバッグやファイル分析に使用されます。
 
-## 使用方法
+## 使用方法 {#command-inspect-usage}
 
 ```console
 $ hisui inspect -h
@@ -25,7 +25,7 @@ Options:
       --openh264 <PATH> OpenH264 の共有ライブラリのパス [env: HISUI_OPENH264_PATH]
 ```
 
-## 実行例
+## 実行例 {#command-inspect-examples}
 
 録画ファイルを指定して実行すると、ファイルのパース結果が JSON 形式で出力されます。
 

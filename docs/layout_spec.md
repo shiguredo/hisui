@@ -1,6 +1,6 @@
-# レイアウト JSON の 仕様
+# レイアウト JSON の 仕様 {#layout-spec}
 
-## JSONC (JSON with Comments) 対応
+## JSONC (JSON with Comments) 対応 {#layout-spec-jsonc}
 
 レイアウト JSON ファイルの拡張子が `.jsonc` の場合には、以下の JSONC の仕様が有効になります:
 
@@ -8,11 +8,11 @@
 - `/* ... */` によるブロックコメント
 - 配列およびオブジェクトの末尾要素の後ろのカンマを許容
 
-## 表記法について
+## 表記法について {#layout-spec-notation}
 
 このドキュメントでは、JSON 構造を説明する際に以下の表記法を使用します。
 
-### `$VARIABLE` 表記について
+### `$VARIABLE` 表記について {#layout-spec-notation-variable}
 
 このドキュメントでは、JSON の値として任意の値を取りうる箇所を `$VARIABLE` という形式で表記しています。
 これらは実際の JSON では具体的な値に置き換える必要があります。
@@ -25,7 +25,7 @@
 - `$INTEGER` → `640` などの整数値
 - `$BOOLEAN` → `true` または `false`
 
-### ネストした JSON オブジェクトのメンバー表記
+### ネストした JSON オブジェクトのメンバー表記 {#layout-spec-notation-nested}
 
 `root_name.child_name` の形式で、ネストしたオブジェクトのメンバーを示します。
 
@@ -49,7 +49,7 @@
 具体的な JSON オブジェクトでの `max_columns` の値に言及する時には `video_layout.main.main_max_columns` と記載しますが、
 そうではなく、一般的な仕様の説明の際には `video_layout.$REGION_NAME.max_columns` と記載します。
 
-## レイアウト JSON で指定可能な項目一覧
+## レイアウト JSON で指定可能な項目一覧 {#layout-spec-summary}
 
 以下はレイアウトで指定可能な項目を全て記載した JSON です。
 各項目の詳細については以降で説明します。
@@ -108,9 +108,9 @@
 
 `video_layout` 以下の項目の扱いについては [layout_region.md](./layout_region.md) も参照してください。
 
-## レイアウト JSON の各項目の詳細
+## レイアウト JSON の各項目の詳細 {#layout-spec-details}
 
-### `audio_codec: $AUDIO_CODEC_NAME`
+### `audio_codec: $AUDIO_CODEC_NAME` {#layout-spec-audio-codec}
 
 合成後の音声のエンコードに使用するコーデックを指定します。
 
@@ -124,13 +124,13 @@
 - macOS 用にビルドされた Hisui（Apple Audio Toolboxの AAC エンコーダーが使用されます）
 - FDK-AAC を有効にしてビルドされた Hisui（参考: [build.md](build.md)）
 
-### `audio_bitrate: $BITRATE`
+### `audio_bitrate: $BITRATE` {#layout-spec-audio-bitrate}
 
 合成後の音声のエンコードビットレートを指定します（bps 単位）。
 
 デフォルト値は `65536` です。
 
-### `audio_sources: [ $SOURCE_FILE_NAME ]`
+### `audio_sources: [ $SOURCE_FILE_NAME ]` {#layout-spec-audio-sources}
 
 音声合成のソースとなるファイル（JSON）のパスを配列で指定します。
 
@@ -188,7 +188,7 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 
 なお、対応するメディアファイルが存在しないソースのパスは、ワイルドカードにマッチしたとしても展開結果から除外されます。
 
-### `audio_source_excluded: [ $SOURCE_FILE_NAME ]`
+### `audio_source_excluded: [ $SOURCE_FILE_NAME ]` {#layout-spec-audio-sources-excluded}
 
 音声合成から除外するソースファイルのパスを配列で指定します。
 
@@ -196,7 +196,7 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 
 `$SOURCE_FILE_NAME` の詳細については `audio_sources` の説明を参照してください。
 
-### `video_codec: $VIDEO_CODEC_NAME`
+### `video_codec: $VIDEO_CODEC_NAME` {#layout-spec-video-codec}
 
 合成後の映像のエンコードに使用するコーデックを指定します。
 
@@ -225,7 +225,7 @@ Hisui は、この `archive.json` ファイルの中の以下の情報を参照�
 有効にする方法は [ビルド方法](build.md) をご参照ください。
 ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効になっています（CUDA がない環境では実行時に無効になります）。
 
-### `video_bitrate: $BITRATE`
+### `video_bitrate: $BITRATE` {#layout-spec-video-bitrate}
 
 合成後の映像のエンコードビットレートを指定します（bps 単位）。
 
@@ -233,7 +233,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 **注意**: レガシー版の Hisui との互換性のため、`bitrate` フィールド（kbps単位）も利用可能ですが、両方が指定された場合には `video_bitrate` が優先されます。
 
-### `video_encode_engines: [ $ENCODER_NAME ]`
+### `video_encode_engines: [ $ENCODER_NAME ]` {#layout-spec-video-encode-engines}
 
 映像エンコード時に使用するエンコーダーの候補を配列で指定します。
 
@@ -259,7 +259,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 なお、値に空配列が指定されたり、対象のエンコードコーデックを扱えるエンコーダーがひとつもない場合にはエラーになります。
 
-### `video_decode_engines: [ $DECODER_NAME ]`
+### `video_decode_engines: [ $DECODER_NAME ]` {#layout-spec-video-decode-engines}
 
 映像デコード時に使用するデコーダーの候補を配列で指定します。
 
@@ -284,7 +284,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 なお、値に空配列が指定されたり、対象のデコードコーデックを扱えるデコーダーがひとつもない場合にはエラーになります。
 
-### `resolution: $RESOLUTION`
+### `resolution: $RESOLUTION` {#layout-spec-resolution}
 
 合成後の映像の解像度を指定します。
 
@@ -299,7 +299,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.video_sources: [ $SOURCE_FILE_NAME ]`
+### `video_layout.$REGION_NAME.video_sources: [ $SOURCE_FILE_NAME ]` {#layout-spec-region-video-sources}
 
 指定されたリージョンの映像合成のソースとなるファイル（JSON）のパスを配列で指定します。
 
@@ -308,7 +308,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 `$SOURCE_FILE_NAME` の詳細については `audio_sources` の説明を参照してください。
 
-### `video_layout.$REGION_NAME.video_sources_excluded: [ $SOURCE_FILE_NAME ]`
+### `video_layout.$REGION_NAME.video_sources_excluded: [ $SOURCE_FILE_NAME ]` {#layout-spec-region-video-sources-excluded}
 
 指定されたリージョンの映像合成から除外するソースファイルのパスを配列で指定します。
 
@@ -316,13 +316,13 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 `$SOURCE_FILE_NAME` の詳細については `audio_sources` の説明を参照してください。
 
-### `video_layout.$REGION_NAME.cells_excluded: [ $CELL_INDEX ]`
+### `video_layout.$REGION_NAME.cells_excluded: [ $CELL_INDEX ]` {#layout-spec-region-cells-excluded}
 
 指定されたリージョンで、映像ソースの割り当てを除外するセルのインデックスを配列で指定します。
 
 リージョンやセルなどの詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.width: $INTEGER`
+### `video_layout.$REGION_NAME.width: $INTEGER` {#layout-spec-region-width}
 
 指定されたリージョンの幅をピクセル単位で指定します。
 
@@ -342,7 +342,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 リージョンの幅の計算方法の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.height: $INTEGER`
+### `video_layout.$REGION_NAME.height: $INTEGER` {#layout-spec-region-height}
 
 指定されたリージョンの高さをピクセル単位で指定します。
 
@@ -362,7 +362,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 リージョンの高さの計算方法の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.cell_width: $INTEGER`
+### `video_layout.$REGION_NAME.cell_width: $INTEGER` {#layout-spec-region-cell-width}
 
 指定されたリージョンのセルの幅をピクセル単位で指定します。
 
@@ -378,7 +378,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 リージョンのサイズ計算の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.cell_height: $INTEGER`
+### `video_layout.$REGION_NAME.cell_height: $INTEGER` {#layout-spec-region-cell-height}
 
 指定されたリージョンのセルの高さをピクセル単位で指定します。
 
@@ -394,7 +394,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 リージョンのサイズ計算の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.max_columns: $INTEGER`
+### `video_layout.$REGION_NAME.max_columns: $INTEGER` {#layout-spec-region-max-columns}
 
 指定されたリージョンのグリッドの最大列数を指定します。
 
@@ -422,7 +422,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 グリッドの行列数の決定方法の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.max_rows: $INTEGER`
+### `video_layout.$REGION_NAME.max_rows: $INTEGER` {#layout-spec-region-max-rows}
 
 指定されたリージョンのグリッドの最大行数を指定します。
 
@@ -450,7 +450,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 グリッドの行列数の決定方法の詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.reuse: $REUSE_KIND`
+### `video_layout.$REGION_NAME.reuse: $REUSE_KIND` {#layout-spec-region-reuse}
 
 指定されたリージョンでのセル再利用方法を指定します。
 
@@ -481,7 +481,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.x_pos: $INTEGER`
+### `video_layout.$REGION_NAME.x_pos: $INTEGER` {#layout-spec-region-x-pos}
 
 指定されたリージョンを配置する X 座標をピクセル単位で指定します。
 
@@ -515,7 +515,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 リージョンの位置とサイズの詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.y_pos: $INTEGER`
+### `video_layout.$REGION_NAME.y_pos: $INTEGER` {#layout-spec-region-y-pos}
 
 指定されたリージョンを配置する Y 座標をピクセル単位で指定します。
 
@@ -549,7 +549,7 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 リージョンの位置とサイズの詳細については [layout_region.md](./layout_region.md) を参照してください。
 
-### `video_layout.$REGION_NAME.z_pos: $INTEGER`
+### `video_layout.$REGION_NAME.z_pos: $INTEGER` {#layout-spec-region-z-pos}
 
 指定されたリージョンの Z 座標（重ね合わせ順序）を指定します。
 
@@ -582,7 +582,7 @@ Z 座標は、複数のリージョンが重なり合う場合の描画順序を
 
 上記の例では、`background` リージョンが最も奥に、`overlay` リージョンが最も手前に描画されます。
 
-### `video_layout.$REGION_NAME.border_pixels: $INTEGER`
+### `video_layout.$REGION_NAME.border_pixels: $INTEGER` {#layout-spec-region-border-pixels}
 
 指定されたリージョンのセル間および外周の枠線の幅をピクセル単位で指定します。
 
@@ -618,7 +618,7 @@ Z 座標は、複数のリージョンが重なり合う場合の描画順序を
 なお、外周については、リージョンやセルのサイズ関連の関係で
 枠線のサイズが指定値からわずかに変わることがあります。
 
-### `frame_rate: $FRAME_RATE`
+### `frame_rate: $FRAME_RATE` {#layout-spec-frame-rate}
 
 出力映像のフレームレートを指定します。
 
@@ -632,7 +632,7 @@ Z 座標は、複数のリージョンが重なり合う場合の描画順序を
 
 デフォルト値は `25` です。
 
-### `bitrate: $BITRATE_KBPS`
+### `bitrate: $BITRATE_KBPS` {#layout-spec-bitrate}
 
 **非推奨**: この項目はレガシー版の Hisui との互換性維持のために残されています。新しい Hisui では `video_bitrate` の使用を推奨します。
 
@@ -642,77 +642,77 @@ Z 座標は、複数のリージョンが重なり合う場合の描画順序を
 
 `video_bitrate` フィールドと `bitrate` フィールドの両方が指定された場合、`video_bitrate` が優先されます。
 
-### `libvpx_vp8_encode_params: $PARAMS`
+### `libvpx_vp8_encode_params: $PARAMS` {#layout-spec-libvpx-vp8-params}
 
 libvpx で VP8 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `libvpx_vp9_encode_params: $PARAMS`
+### `libvpx_vp9_encode_params: $PARAMS` {#layout-spec-libvpx-vp9-params}
 
 libvpx で VP9 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `openh264_encode_params: $PARAMS`
+### `openh264_encode_params: $PARAMS` {#layout-spec-openh264-params}
 
 OpenH264 で H.264 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `svt_av1_encode_params: $PARAMS`
+### `svt_av1_encode_params: $PARAMS` {#layout-spec-svt-av1-params}
 
 SVT-AV1 で AV1 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `video_toolbox_h264_encode_params: $PARAMS`
+### `video_toolbox_h264_encode_params: $PARAMS` {#layout-spec-video-toolbox-h264-params}
 
 Apple Video Toolbox で H.264 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `video_toolbox_h265_encode_params: $PARAMS`
+### `video_toolbox_h265_encode_params: $PARAMS` {#layout-spec-video-toolbox-h265-params}
 
 Apple Video Toolbox で H.265 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `nvcodec_h264_encode_params: $PARAMS`
+### `nvcodec_h264_encode_params: $PARAMS` {#layout-spec-nvcodec-h264-params}
 
 NVIDIA Video Codec SDK で H.264 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `nvcodec_h265_encode_params: $PARAMS`
+### `nvcodec_h265_encode_params: $PARAMS` {#layout-spec-nvcodec-h265-params}
 
 NVIDIA Video Codec SDK で H.265 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `nvcodec_av1_encode_params: $PARAMS`
+### `nvcodec_av1_encode_params: $PARAMS` {#layout-spec-nvcodec-av1-params}
 
 NVIDIA Video Codec SDK で AV1 エンコードを行う際のエンコードパラメーターを指定します。
 詳細は [layout_encode_params.md](./layout_encode_params.md) を参照してください。
 
-### `nvcodec_h264_decode_params: $PARAMS`
+### `nvcodec_h264_decode_params: $PARAMS` {#layout-spec-nvcodec-h264-decode-params}
 
 NVIDIA Video Codec SDK で H.264 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
-### `nvcodec_h265_decode_params: $PARAMS`
+### `nvcodec_h265_decode_params: $PARAMS` {#layout-spec-nvcodec-h265-decode-params}
 
 NVIDIA Video Codec SDK で H.265 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
-### `nvcodec_vp8_decode_params: $PARAMS`
+### `nvcodec_vp8_decode_params: $PARAMS` {#layout-spec-nvcodec-vp8-decode-params}
 
 NVIDIA Video Codec SDK で VP8 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
-### `nvcodec_vp9_decode_params: $PARAMS`
+### `nvcodec_vp9_decode_params: $PARAMS` {#layout-spec-nvcodec-vp9-decode-params}
 
 NVIDIA Video Codec SDK で VP9 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
-### `nvcodec_av1_decode_params: $PARAMS`
+### `nvcodec_av1_decode_params: $PARAMS` {#layout-spec-nvcodec-av1-decode-params}
 
 NVIDIA Video Codec SDK で AV1 デコードを行う際のデコードパラメーターを指定します。
 詳細は [layout_decode_params.md](./layout_decode_params.md) を参照してください。
 
-### `trim: $BOOLEAN`
+### `trim: $BOOLEAN` {#layout-spec-trim}
 
 配信者が存在しない期間の自動トリミング（除去）を有効にするかどうかを指定します。
 
