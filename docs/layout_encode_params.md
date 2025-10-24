@@ -1,4 +1,4 @@
-# エンコード設定の指定方法
+# エンコード設定の指定方法 {#layout-encode}
 
 [レイアウト機能](./layout.md) で指定する JSON ファイルでは、
 合成後の映像や音声をエンコードするコーデックやエンコードパラメーターを指定することができます。
@@ -13,7 +13,7 @@ Hisui を最大限活用するためには、これらを適切に指定する�
 なお [`hisui tune`](./command_tune.md) コマンドを利用することで、
 適切なエンコードパラメーターをある程度自動で調整することができます。
 
-## 音声エンコードコーデックの指定
+## 音声エンコードコーデックの指定 {#layout-encode-audio-codec}
 
 合成後の音声のエンコードコーデックは、以下のように `audio_codec` フィールドで指定できます。
 
@@ -29,7 +29,7 @@ Hisui を最大限活用するためには、これらを適切に指定する�
 - `"OPUS"`: Opus音声コーデック（デフォルト）
 - `"AAC"`: AAC音声コーデック
 
-### 注意
+### 注意 {#layout-encode-audio-codec-note}
 
 `"AAC"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です：
 
@@ -39,7 +39,7 @@ Hisui を最大限活用するためには、これらを適切に指定する�
 公開されているビルド済みバイナリは FDK-AAC には対応していません。
 FDK-AAC を利用する場合は、[ビルド方法](build.md) を参考にして、自前でのビルドを行ってください。
 
-## 音声エンコードビットレートの指定
+## 音声エンコードビットレートの指定 {#layout-encode-audio-bitrate}
 
 映像とは異なり、音声はエンコード時のパラメーターが少なく、
 エンコードビットレートのみが指定可能となっています。
@@ -56,7 +56,7 @@ FDK-AAC を利用する場合は、[ビルド方法](build.md) を参考にし�
 
 `audio_bitrate` のデフォルト値は 65536 です。
 
-## 映像エンコードコーデックの指定
+## 映像エンコードコーデックの指定 {#layout-encode-video-codec}
 
 合成後の映像のエンコードコーデックは、レイアウト JSON の `video_codec` フィールドで指定できます。
 
@@ -79,7 +79,7 @@ FDK-AAC を利用する場合は、[ビルド方法](build.md) を参考にし�
 - `"H265"`: H.265 映像コーデック
 - `"AV1"`: AV1 映像コーデック
 
-### 注意
+### 注意 {#layout-encode-video-codec-note}
 
 `"H264"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です：
 
@@ -101,7 +101,7 @@ FDK-AAC を利用する場合は、[ビルド方法](build.md) を参考にし�
 有効にする方法は [ビルド方法](build.md) をご参照ください。
 ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効になっています（CUDA がない環境では実行時に無効になります）。
 
-## 映像エンコードビットレートの指定
+## 映像エンコードビットレートの指定 {#layout-encode-video-bitrate}
 
 映像エンコードビットレートは、レイアウト JSON の `video_bitrate` フィールドで bps 単位で指定できます。
 
@@ -119,11 +119,11 @@ ubuntu-24.04_x86_64 向けのビルド済みバイナリでは nvcodec が有効
 
 `video_bitrate` のデフォルト値は `映像ソースの数 * 200 * 1024` です。
 
-### 注意
+### 注意 {#layout-encode-video-bitrate-note}
 
 [レガシー版の Hisui](./migrate_hisui_legacy.md) との互換性維持のため、`bitrate` フィールド（kbps単位）も利用可能ですが、両方が指定された場合には `video_bitrate` が優先されます。
 
-## 映像エンコーダー固有のパラメーターセットの指定
+## 映像エンコーダー固有のパラメーターセットの指定 {#layout-encode-specific-params}
 
 Hisui は映像のエンコーダーとして、以下をサポートしています:
 
@@ -165,14 +165,14 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 
 なお、デフォルトで使用されるエンコードパラメーターは [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) にも記載されています。
 
-### `libvpx_vp8_encode_params` で指定可能なパラメーターセット
+### `libvpx_vp8_encode_params` で指定可能なパラメーターセット {#layout-encode-libvpx-vp8}
 
 `libvpx` で VP8 エンコードを行う際に指定可能なパラメーターは以下の通りです。
 
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、本家のドキュメントやソースコードを参照してください。
 
-### 基本的なエンコーダーパラメーター
+### 基本的なエンコーダーパラメーター {#layout-encode-libvpx-vp8-basic}
 
 - `min_quantizer` (整数値): 最小量子化パラメーター値
   - デフォルト値: 26
@@ -191,7 +191,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - 指定可能な範囲: 0 〜 16
   - 値が大きいほど高速だが品質が低下
 
-### エンコード制御パラメーター
+### エンコード制御パラメーター {#layout-encode-libvpx-vp8-control}
 
 - `deadline` (文字列): エンコード期限設定
   - デフォルト値: `"realtime"`
@@ -216,7 +216,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: 300
   - 指定可能な範囲: 1 以上の値
 
-### VP8 固有のパラメーター
+### VP8 固有のパラメーター {#layout-encode-libvpx-vp8-specific}
 
 - `noise_sensitivity` (整数値): ノイズ感度設定
   - デフォルト値: 0
@@ -245,14 +245,14 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
     - デフォルト値: 2（必須項目）
     - 指定可能な値: 正の整数値
 
-### `libvpx_vp9_encode_params` で指定可能なパラメーターセット
+### `libvpx_vp9_encode_params` で指定可能なパラメーターセット {#layout-encode-libvpx-vp9}
 
 `libvpx_vp9_encode_params` で指定可能なパラメーターセットは以下の通りです。
 
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、本家のドキュメントやソースコードを参照してください。
 
-## 基本的なエンコーダーパラメーター
+## 基本的なエンコーダーパラメーター {#layout-encode-libvpx-vp9-basic}
 
 - `min_quantizer` (整数値): 最小量子化パラメーター値
   - デフォルト値: 15
@@ -271,7 +271,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - 指定可能な範囲: 0 〜 9
   - 値が大きいほど高速だが品質が低下
 
-## エンコード制御パラメーター
+## エンコード制御パラメーター {#layout-encode-libvpx-vp9-control}
 
 - `deadline` (文字列): エンコード期限設定
   - デフォルト値: `"realtime"`
@@ -296,7 +296,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: 300
   - 指定可能な範囲: 1 以上の値
 
-## VP9 固有のパラメーター
+## VP9 固有のパラメーター {#layout-encode-libvpx-vp9-specific}
 
 - `aq_mode` (整数値): 適応量子化モード
   - デフォルト値: 3
@@ -324,14 +324,14 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: `"default"`
   - 指定可能な値: `"default"`, `"screen"`
 
-### `openh264_encode_params` で指定可能なパラメーターセット
+### `openh264_encode_params` で指定可能なパラメーターセット {#layout-encode-openh264}
 
 `openh264` で H.264 エンコードを行う際に指定可能なパラメーターは以下の通りです。
 
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、本家のドキュメントやソースコードを参照してください。
 
-#### 基本的なエンコーダーパラメーター
+#### 基本的なエンコーダーパラメーター {#layout-encode-openh264-basic}
 
 - `thread_count` (整数値): エンコードに使用するスレッド数
   - デフォルト値: 1
@@ -341,7 +341,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: 300
   - 指定可能な範囲: 1 〜 1000
 
-#### 品質制御パラメーター
+#### 品質制御パラメーター {#layout-encode-openh264-quality}
 
 - `max_qp` (整数値): 最大量子化パラメーター値
   - デフォルト値: 39
@@ -355,7 +355,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: `"low"`
   - 指定可能な値: `"low"`, `"medium"`, `"high"`
 
-#### エンコード制御パラメーター
+#### エンコード制御パラメーター {#layout-encode-openh264-control}
 
 - `entropy_coding` (真偽値): エントロピー符号化の有効化（CABAC/CAVLC選択）
   - デフォルト値: `false`
@@ -373,7 +373,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: なし（省略可能）
   - 指定可能な範囲: 1 〜 4
 
-#### レート制御パラメーター
+#### レート制御パラメーター {#layout-encode-openh264-rate}
 
 - `rate_control_mode` (文字列): レート制御モード
   - デフォルト値: `"timestamp"`
@@ -383,7 +383,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
     - `"bitrate"`: ビットレート優先モード
     - `"timestamp"`: タイムスタンプ基準モード
 
-#### 前処理機能パラメーター
+#### 前処理機能パラメーター {#layout-encode-openh264-preprocess}
 
 - `denoise` (真偽値): ノイズ除去の有効化
   - デフォルト値: `false`
@@ -403,7 +403,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `long_term_reference` (真偽値): 長期参照フレームの有効化
   - デフォルト値: `false`
 
-#### スライスモード設定
+#### スライスモード設定 {#layout-encode-openh264-slice}
 
 - `slice_mode` (オブジェクト): スライス分割方法の設定
   - `type` (文字列): スライスモードのタイプ（必須）
@@ -417,14 +417,14 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - `size` (整数値): `"size_constrained"` モード時の最大サイズ（バイト単位）
     - 指定可能な範囲: 1 〜 1000000
 
-## `svt_av1_encode_params` で指定可能なパラメーターセット
+## `svt_av1_encode_params` で指定可能なパラメーターセット {#layout-encode-svt-av1}
 
 `SVT-AV1` で AV1 エンコードを行う際に指定可能なパラメーターは以下の通りです。
 
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、本家のドキュメントやソースコードを参照してください。
 
-### 品質・速度制御パラメーター
+### 品質・速度制御パラメーター {#layout-encode-svt-av1-quality}
 
 - `enc_mode` (整数値): エンコード速度と品質のバランス調整
   - デフォルト値: 13
@@ -443,7 +443,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: 50
   - 指定可能な範囲: 35 〜 63
 
-### レート制御パラメーター
+### レート制御パラメーター {#layout-encode-svt-av1-rate}
 
 - `rate_control_mode` (文字列): レート制御モード
   - デフォルト値: `"vbr"`
@@ -457,7 +457,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: 75
   - 指定可能な範囲: 0 〜 100
 
-### GOP・フレーム構造パラメーター
+### GOP・フレーム構造パラメーター {#layout-encode-svt-av1-gop}
 
 - `intra_period_length` (整数値): イントラフレーム間隔
   - デフォルト値: 300
@@ -479,7 +479,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: 13
   - 指定可能な範囲: 0 〜 120
 
-### 並列処理パラメーター
+### 並列処理パラメーター {#layout-encode-svt-av1-parallel}
 
 - `pin_threads` (整数値): スレッドピニング設定
   - デフォルト値: 1
@@ -497,7 +497,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: なし（省略可能）
   - 指定可能な範囲: -1 〜 1
 
-### フィルタリングパラメーター
+### フィルタリングパラメーター {#layout-encode-svt-av1-filter}
 
 - `enable_dlf_flag` (真偽値): デブロッキングループフィルターの有効化
   - デフォルト値: `false`
@@ -509,7 +509,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `enable_restoration_filtering` (真偽値): 復元フィルタリングの有効化
   - デフォルト値: `false`
 
-### 高度な設定パラメーター
+### 高度な設定パラメーター {#layout-encode-svt-av1-advanced}
 
 - `enable_tf` (真偽値): Temporal Filtering の有効化
   - デフォルト値: `true`
@@ -533,7 +533,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `recon_enabled` (真偽値): 再構成フレーム出力の有効化
   - デフォルト値: なし（省略可能）
 
-### エンコーダー固有設定パラメーター
+### エンコーダー固有設定パラメーター {#layout-encode-svt-av1-specific}
 
 - `tier` (整数値): エンコーダーティア設定
   - デフォルト値: 1
@@ -542,20 +542,20 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `fast_decode` (真偽値): 高速デコードモードの有効化
   - デフォルト値: `false`
 
-## `video_toolbox_h264_encode_params` で指定可能なパラメーターセット
+## `video_toolbox_h264_encode_params` で指定可能なパラメーターセット {#layout-encode-videotoolbox-h264}
 
 `Apple Video Toolbox` で H.264 エンコードを行う際に指定可能なパラメーターは以下の通りです。
 
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、本家のドキュメントを参照してください。
 
-### 基本的なエンコーダーパラメーター
+### 基本的なエンコーダーパラメーター {#layout-encode-videotoolbox-h264-basic}
 
 - `max_key_frame_interval` (整数値): キーフレーム間隔の最大値（フレーム数）
   - デフォルト値: 300
   - 指定可能な範囲: 1 〜 600
 
-### 速度と品質のバランス設定
+### 速度と品質のバランス設定 {#layout-encode-videotoolbox-h264-speed}
 
 - `prioritize_speed_over_quality` (真偽値): 品質よりも速度を優先するモード
   - デフォルト値: `true`
@@ -566,7 +566,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `maximize_power_efficiency` (真偽値): 電力効率最大化モード
   - デフォルト値: `false`
 
-### フレーム構造設定
+### フレーム構造設定 {#layout-encode-videotoolbox-h264-structure}
 
 - `allow_frame_reordering` (真偽値): フレーム再順序付けの許可
   - デフォルト値: `false`
@@ -574,7 +574,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `allow_temporal_compression` (真偽値): 時間圧縮の許可
   - デフォルト値: `true`
 
-### プロファイル・レベル設定
+### プロファイル・レベル設定 {#layout-encode-videotoolbox-h264-profile}
 
 - `profile_level` (文字列): H.264プロファイル・レベル
   - デフォルト値: `"baseline"`
@@ -584,7 +584,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
   - デフォルト値: `"cavlc"`
   - 指定可能な値: `"cavlc"`, `"cabac"`
 
-### 並列処理・遅延制御設定
+### 並列処理・遅延制御設定 {#layout-encode-videotoolbox-h264-parallel}
 
 - `max_frame_delay_count` (整数値): 最大フレーム遅延数
   - デフォルト値: 2
@@ -593,7 +593,7 @@ Hisui は映像のエンコーダーとして、以下をサポートしてい�
 - `use_parallelization` (真偽値): 並列処理の使用
   - デフォルト値: `false`
 
-## `video_toolbox_h265_encode_params` で指定可能なパラメーターセット
+## `video_toolbox_h265_encode_params` で指定可能なパラメーターセット {#layout-encode-videotoolbox-h265}
 
 `Apple Video Toolbox` で H.265 エンコードを行う際に指定可能なパラメーターは以下の通りです。
 
@@ -602,13 +602,13 @@ H.265 エンコーダーは H.264 と多くの共通点がありますが、い�
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、本家のドキュメントを参照してください。
 
-### 基本的なエンコーダーパラメーター
+### 基本的なエンコーダーパラメーター {#layout-encode-videotoolbox-h265-basic}
 
 - `max_key_frame_interval` (整数値): キーフレーム間隔の最大値（フレーム数）
   - デフォルト値: 300
   - 指定可能な範囲: 1 〜 600
 
-### 速度と品質のバランス設定
+### 速度と品質のバランス設定 {#layout-encode-videotoolbox-h265-speed}
 
 - `real_time` (真偽値): リアルタイムエンコードモード
   - デフォルト値: `false`
@@ -616,7 +616,7 @@ H.265 エンコーダーは H.264 と多くの共通点がありますが、い�
 - `maximize_power_efficiency` (真偽値): 電力効率最大化モード
   - デフォルト値: `false`
 
-### フレーム構造設定
+### フレーム構造設定 {#layout-encode-videotoolbox-h265-structure}
 
 - `allow_frame_reordering` (真偽値): フレーム再順序付   けの許可
   - デフォルト値: `false`
@@ -628,13 +628,13 @@ H.265 エンコーダーは H.264 と多くの共通点がありますが、い�
   - デフォルト値: `true`
   - H.265 では H.264 と異なり、この設定が利用可能です
 
-### プロファイル・レベル設定
+### プロファイル・レベル設定 {#layout-encode-videotoolbox-h265-profile}
 
 - `profile_level` (文字列): H.265プロファイル・レベル
   - デフォルト値: `"main"`
   - 指定可能な値: `"main"`, `"main10"`
 
-### 並列処理・遅延制御設定
+### 並列処理・遅延制御設定 {#layout-encode-videotoolbox-h265-parallel}
 
 - `max_frame_delay_count` (整数値): 最大フレーム遅延数
   - デフォルト値: 15
@@ -643,12 +643,12 @@ H.265 エンコーダーは H.264 と多くの共通点がありますが、い�
 - `use_parallelization` (真偽値): 並列処理の使用
   - デフォルト値: `true`
 
-## NVIDIA Video Codec SDK エンコーダーパラメーター
+## NVIDIA Video Codec SDK エンコーダーパラメーター {#layout-encode-nvcodec}
 
 NVIDIA Video Codec SDK（nvcodec）は、CUDA対応GPUを利用したハードウェア加速エンコーダーです。
 H.264、H.265、AV1の各コーデックに対応しており、高い処理性能を提供します。
 
-### 利用条件
+### 利用条件 {#layout-encode-nvcodec-requirements}
 
 nvcodecエンコーダーを利用するには、以下の条件を満たしている必要があります：
 
@@ -657,11 +657,11 @@ nvcodecエンコーダーを利用するには、以下の条件を満たして�
 - nvcodecに対応してビルドされたHisui
   - ubuntu-24.04_x86_64 向けのビルド済みバイナリは nvcodec が有効になっています（CUDA がない環境では実行時に無効になります）
 
-### 共通パラメーター
+### 共通パラメーター {#layout-encode-nvcodec-common}
 
 nvcodecエンコーダーでは、H.264、H.265、AV1の全てのコーデックで共通して利用できるパラメーターがあります。
 
-#### エンコード品質・速度制御パラメーター
+#### エンコード品質・速度制御パラメーター {#layout-encode-nvcodec-quality}
 
 - `preset` (文字列): エンコードプリセット
   - デフォルト値: `"p4"`
@@ -676,7 +676,7 @@ nvcodecエンコーダーでは、H.264、H.265、AV1の全てのコーデック
     - `"ultra_low_latency"`: 超低遅延優先
     - `"lossless"`: 無劣化圧縮
 
-#### レート制御パラメーター
+#### レート制御パラメーター {#layout-encode-nvcodec-rate}
 
 - `rate_control_mode` (文字列): レート制御モード
   - デフォルト値: `"vbr"`
@@ -685,7 +685,7 @@ nvcodecエンコーダーでは、H.264、H.265、AV1の全てのコーデック
     - `"vbr"`: 可変ビットレート
     - `"cbr"`: 固定ビットレート
 
-#### GOP・フレーム構造パラメーター
+#### GOP・フレーム構造パラメーター {#layout-encode-nvcodec-gop}
 
 - `gop_length` (整数値): GOPの長さ（フレーム数）
   - デフォルト値: `300`
@@ -696,17 +696,17 @@ nvcodecエンコーダーでは、H.264、H.265、AV1の全てのコーデック
   - 指定可能な範囲: 整数値
   - 省略時は gop_length と同じ値が使用されます
 
-#### デバイス制御パラメーター
+#### デバイス制御パラメーター {#layout-encode-nvcodec-device}
 
 - `device_id` (整数値): 使用するCUDAデバイスのID
   - デフォルト値: `0`
   - 指定可能な範囲: 0以上の値（システムの利用可能GPU数による）
 
-### `nvcodec_h264_encode_params` で指定可能なパラメーターセット
+### `nvcodec_h264_encode_params` で指定可能なパラメーターセット {#layout-encode-nvcodec-h264}
 
 NVIDIA Video Codec SDK で H.264 エンコードを行う際に指定可能なパラメーターは、上記の共通パラメーターに加えて、以下のH.264固有のパラメーターがあります。
 
-#### H.264固有パラメーター
+#### H.264固有パラメーター {#layout-encode-nvcodec-h264-specific}
 
 - `profile` (文字列): H.264プロファイル
   - デフォルト値: `"main"`
@@ -718,11 +718,11 @@ NVIDIA Video Codec SDK で H.264 エンコードを行う際に指定可能な�
     - `"high_422"`: High 4:2:2 Profile
     - `"high_444"`: High 4:4:4 Profile
 
-### `nvcodec_h265_encode_params` で指定可能なパラメーターセット
+### `nvcodec_h265_encode_params` で指定可能なパラメーターセット {#layout-encode-nvcodec-h265}
 
 NVIDIA Video Codec SDK で H.265 エンコードを行う際に指定可能なパラメーターは、上記の共通パラメーターに加えて、以下のH.265固有のパラメーターがあります。
 
-#### H.265固有パラメーター
+#### H.265固有パラメーター {#layout-encode-nvcodec-h265-specific}
 
 - `profile` (文字列): H.265プロファイル
   - デフォルト値: `"main"`
@@ -731,11 +731,11 @@ NVIDIA Video Codec SDK で H.265 エンコードを行う際に指定可能な�
     - `"main10"`: Main 10 Profile
     - `"frext"`: Format Range Extensions Profile
 
-### `nvcodec_av1_encode_params` で指定可能なパラメーターセット
+### `nvcodec_av1_encode_params` で指定可能なパラメーターセット {#layout-encode-nvcodec-av1}
 
 NVIDIA Video Codec SDK で AV1 エンコードを行う際に指定可能なパラメーターは、上記の共通パラメーターに加えて、以下のAV1固有のパラメーターがあります。
 
-#### AV1固有パラメーター
+#### AV1固有パラメーター {#layout-encode-nvcodec-av1-specific}
 
 - `profile` (文字列): AV1プロファイル
   - デフォルト値: `"main"`

@@ -1,8 +1,8 @@
-# ビルド方法
+# ビルド方法 {#build}
 
-## ビルドに必要な依存パッケージのインストール
+## ビルドに必要な依存パッケージのインストール {#install-dependencies}
 
-### Ubuntu の場合
+### Ubuntu の場合 {#ubuntu-dependencies}
 
 Ubuntu の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
@@ -10,7 +10,7 @@ Ubuntu の場合には以下のようにして、ビルドに必要なパッケ�
 sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake clang
 ```
 
-### macOS の場合
+### macOS の場合 {#macos-dependencies}
 
 macOS の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
@@ -18,7 +18,7 @@ macOS の場合には以下のようにして、ビルドに必要なパッケ�
 brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
 ```
 
-## Hisui 本体のビルド方法
+## Hisui 本体のビルド方法 {#build-hisui}
 
 Hisui は Rust のビルドツールである [Cargo](https://doc.rust-lang.org/cargo/) を使って以下のようにビルドします。
 
@@ -41,7 +41,7 @@ cargo install --path .
 `$HOME/.cargo/bin/hisui` のようなディレクトリに配置されます。
 アンインストールする場合には `cargo uninstall hisui` を実行してください。
 
-### NVIDIA Video Codec を使った H.264 / H.265 / AV1 のデコードおよびエンコードを有効にする場合
+### NVIDIA Video Codec を使った H.264 / H.265 / AV1 のデコードおよびエンコードを有効にする場合 {#nvcodec}
 
 > [NOTE]
 >
@@ -54,7 +54,7 @@ CUDA が利用できる環境で、以下のように `--features nvcodec` を�
 cargo install hisui --features nvcodec
 ```
 
-#### CUDA Toolkit のインストール
+#### CUDA Toolkit のインストール {#cuda-toolkit}
 
 nvcodec 機能を有効にするには、CUDA Toolkit がインストールされている必要があります。
 
@@ -72,7 +72,7 @@ export CUDA_INCLUDE_PATH=/path/to/cuda/include
 cargo install hisui --features nvcodec
 ```
 
-### FDK-AAC を使った AAC エンコードを有効にする場合
+### FDK-AAC を使った AAC エンコードを有効にする場合 {#fdk-aac}
 
 Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
 `--features fdk-aac` を指定して Hisui をビルドする必要があります。
@@ -84,7 +84,7 @@ cargo install hisui --features fdk-aac
 
 なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。
 
-## ビルド結果の確認方法
+## ビルド結果の確認方法 {#verify-build}
 
 `hisui -h` を実行してみてください。
 
