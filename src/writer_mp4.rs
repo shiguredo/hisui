@@ -23,6 +23,9 @@ use crate::{
     video::{FrameRate, VideoFrame},
 };
 
+// 映像・音声混在時のチャンクの尺の最大値（映像か音声の片方だけの場合はチャンクは一つだけ）
+const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Clone)]
 pub struct Mp4WriterOptions {
     pub resolution: Resolution,
@@ -50,6 +53,8 @@ pub struct Mp4Writer {
     input_video_stream_id: Option<MediaStreamId>,
     input_audio_queue: VecDeque<Arc<AudioData>>,
     input_video_queue: VecDeque<Arc<VideoFrame>>,
+    last_audio_chunk_time: Duration,
+    last_video_chunk_time: Duration,
     appending_video_chunk: bool,
     stats: Mp4WriterStats,
 }
@@ -88,6 +93,8 @@ impl Mp4Writer {
             input_video_stream_id,
             input_audio_queue: VecDeque::new(),
             input_video_queue: VecDeque::new(),
+            last_audio_chunk_time: Duration::ZERO,
+            last_video_chunk_time: Duration::ZERO,
             appending_video_chunk: true,
             stats,
         };
@@ -112,6 +119,14 @@ impl Mp4Writer {
             && let Some(name) = frame.format.codec_name()
         {
             self.stats.video_codec.set(name);
+        }
+
+        // Check if we need a new chunk (for statistics tracking)
+        let new_chunk =
+            frame.timestamp.saturating_sub(self.last_video_chunk_time) > MAX_CHUNK_DURATION;
+        if new_chunk {
+            self.last_video_chunk_time = frame.timestamp;
+            self.stats.total_video_chunk_count.add(1);
         }
 
         let sample = Sample {
@@ -146,6 +161,14 @@ impl Mp4Writer {
             self.stats.audio_codec.set(name);
         }
 
+        // Check if we need a new chunk (for statistics tracking)
+        let new_chunk =
+            data.timestamp.saturating_sub(self.last_audio_chunk_time) > MAX_CHUNK_DURATION;
+        if new_chunk {
+            self.last_audio_chunk_time = data.timestamp;
+            self.stats.total_audio_chunk_count.add(1);
+        }
+
         let sample = Sample {
             track_kind: TrackKind::Audio,
             sample_entry: data.sample_entry.clone(),
@@ -174,14 +197,6 @@ impl Mp4Writer {
         self.stats
             .actual_moov_box_size
             .set(finalized.moov_box_size() as u64);
-
-        // Update chunk counts from finalized data
-        self.stats
-            .total_audio_chunk_count
-            .set(finalized.audio_chunk_count() as u64);
-        self.stats
-            .total_video_chunk_count
-            .set(finalized.video_chunk_count() as u64);
 
         // Write finalized boxes
         for (offset, bytes) in finalized.offset_and_bytes_pairs() {
@@ -218,7 +233,19 @@ impl Mp4Writer {
                 self.append_audio_data(false)?;
                 Ok(true)
             }
-            (Some(_audio_ts), Some(_video_ts)) => {
+            (Some(audio_ts), Some(video_ts))
+                if
+                // 音声が一定以上遅れている場合は映像に追従する
+                (self.appending_video_chunk && video_ts.saturating_sub(audio_ts) > MAX_CHUNK_DURATION)
+                ||
+                // 一度音声追記モードに入った場合には、映像に追いつくまでは音声を追記し続ける
+                (!self.appending_video_chunk && video_ts > audio_ts) =>
+            {
+                self.append_audio_data(false)?;
+                Ok(true)
+            }
+            (Some(_), Some(_)) => {
+                // 音声との差が一定以内の場合は、映像の処理を進める
                 self.append_video_frame(false)?;
                 Ok(true)
             }
