@@ -13,7 +13,8 @@ use shiguredo_mp4::{
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
+    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
+    types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -103,6 +104,18 @@ impl Mp4VideoReader {
             let mut data = vec![0; data_size];
             self.file.seek(SeekFrom::Start(data_offset)).or_fail()?;
             self.file.read_exact(&mut data).or_fail()?;
+
+            // Update statistics
+            self.stats.total_sample_count.add(1);
+            self.stats.total_track_duration.add(duration);
+            if self.stats.codec.get().is_none()
+                && let Some(name) = format.codec_name()
+            {
+                self.stats.codec.set(name);
+            }
+            self.stats
+                .resolutions
+                .insert(VideoResolution { width, height });
 
             return Ok(Some(VideoFrame {
                 source_id: Some(self.source_id.clone()),
@@ -207,6 +220,13 @@ impl Mp4AudioReader {
             let mut data = vec![0; data_size];
             self.file.seek(SeekFrom::Start(data_offset)).or_fail()?;
             self.file.read_exact(&mut data).or_fail()?;
+
+            // Update statistics
+            self.stats.total_sample_count.add(1);
+            self.stats.total_track_duration.add(sample.duration());
+            if self.stats.codec.is_none() {
+                self.stats.codec = Some(CodecName::Opus);
+            }
 
             return Ok(Some(AudioData {
                 source_id: Some(self.source_id.clone()),

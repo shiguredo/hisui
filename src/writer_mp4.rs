@@ -70,9 +70,14 @@ impl Mp4Writer {
             .or_fail()?;
 
         let muxer_options = Mp4FileMuxerOptions {
-            reserved_moov_box_size: 65536, // 64KB buffer for moov box
-            creation_timestamp: Duration::ZERO,
+            reserved_moov_box_size: 65536, // 64KB buffer for moov box // TODO: calculate from options
+            ..Default::default()
         };
+
+        let stats = Mp4WriterStats::default();
+        stats
+            .reserved_moov_box_size
+            .set(muxer_options.reserved_moov_box_size as u64);
 
         let muxer = Mp4FileMuxer::with_options(muxer_options).or_fail()?;
         let mut this = Self {
@@ -84,7 +89,7 @@ impl Mp4Writer {
             input_audio_queue: VecDeque::new(),
             input_video_queue: VecDeque::new(),
             appending_video_chunk: true,
-            stats: Mp4WriterStats::default(),
+            stats,
         };
 
         // Write initial boxes
