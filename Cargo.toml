@@ -23,7 +23,8 @@ log = "0.4.25"
 noargs = "0.4.0"
 nojson = "0.3.2"
 orfail = "1.1.0"
-shiguredo_mp4 = "2025.2.0"
+# TODO: shiguredo_mp4 = "2025.2.0"
+shiguredo_mp4 = { git = "https://github.com/shiguredo/mp4-rust.git" }
 
 shiguredo_dav1d = { version = "2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "2025.1.0", path = "crates/shiguredo_fdk_aac/", optional = true }
