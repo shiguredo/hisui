@@ -68,8 +68,11 @@ impl Mp4VideoReader {
         }
     }
 
-    fn next_sample(&mut self) -> orfail::Result<Option<Sample<'_>>> {
-        let mut err = match self.demuxer.next_sample() {
+    fn next_sample<'a>(
+        demuxer: &'a mut Mp4FileDemuxer,
+        file: &mut File,
+    ) -> orfail::Result<Option<Sample<'a>>> {
+        let mut err = match demuxer.next_sample() {
             Ok(sample) => return Ok(sample),
             Err(e) => e,
         };
@@ -80,14 +83,14 @@ impl Mp4VideoReader {
         } = err
         {
             let mut data = vec![0; size];
-            self.file.seek(SeekFrom::Start(position)).or_fail()?;
-            self.file.read_exact(&mut data).or_fail()?;
-            let Err(e) = self.demuxer.handle_input(Input {
+            file.seek(SeekFrom::Start(position)).or_fail()?;
+            file.read_exact(&mut data).or_fail()?;
+            let Err(e) = demuxer.handle_input(Input {
                 position,
                 data: &data,
             }) else {
                 // ここは常に成功するはず
-                return self.demuxer.next_sample().or_fail();
+                return demuxer.next_sample().or_fail();
             };
             err = e;
         }
@@ -96,7 +99,7 @@ impl Mp4VideoReader {
     }
 
     fn next_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
-        while let Some(sample) = self.next_sample().or_fail()? {
+        while let Some(sample) = Self::next_sample(&mut self.demuxer, &mut self.file).or_fail()? {
             // ビデオトラックのみを処理
             if sample.track.kind != TrackKind::Video {
                 continue;
