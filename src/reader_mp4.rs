@@ -45,29 +45,6 @@ impl Mp4VideoReader {
         &self.stats
     }
 
-    fn with_io<F, T>(&mut self, f: F) -> orfail::Result<T>
-    where
-        F: Fn(&mut Self) -> Result<T, DemuxError>,
-    {
-        loop {
-            match f(self) {
-                Err(DemuxError::NeedInput {
-                    position,
-                    size: Some(size),
-                }) => {
-                    let mut data = vec![0; size];
-                    self.file.seek(SeekFrom::Start(position)).or_fail()?;
-                    self.file.read_exact(&mut data).or_fail()?;
-                    self.demuxer.handle_input(Input {
-                        position,
-                        data: &data,
-                    });
-                }
-                other => return Ok(other.or_fail()?),
-            }
-        }
-    }
-
     fn next_sample<'a>(
         demuxer: &'a mut Mp4FileDemuxer,
         file: &mut File,
