@@ -72,30 +72,27 @@ impl Mp4VideoReader {
         demuxer: &'a mut Mp4FileDemuxer,
         file: &mut File,
     ) -> orfail::Result<Option<Sample<'a>>> {
-        let mut err = match demuxer.next_sample() {
-            Ok(sample) => return Ok(sample),
-            Err(e) => e,
+        let mut data = Vec::new();
+        let mut input = Input {
+            position: 0,
+            data: &data,
         };
-
-        while let DemuxError::NeedInput {
+        while let Err(DemuxError::NeedInput {
             position,
             size: Some(size),
-        } = err
+        }) = demuxer.handle_input(input)
         {
-            let mut data = vec![0; size];
+            data.resize(size, 0);
             file.seek(SeekFrom::Start(position)).or_fail()?;
             file.read_exact(&mut data).or_fail()?;
-            let Err(e) = demuxer.handle_input(Input {
+            input = Input {
                 position,
                 data: &data,
-            }) else {
-                // ここは常に成功するはず
-                return demuxer.next_sample().or_fail();
             };
-            err = e;
         }
 
-        Err(err).or_fail()
+        // ここは常に成功するはず
+        demuxer.next_sample().or_fail()
     }
 
     fn next_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
