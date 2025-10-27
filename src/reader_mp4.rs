@@ -114,23 +114,29 @@ impl Mp4VideoReader {
                     )));
                 }
             };
+            let keyframe = sample.keyframe;
+            let sample_entry = keyframe.then(|| sample.sample_entry.clone());
+            let width = metadata.width as usize;
+            let height = metadata.height as usize;
+            let timestamp = sample.timestamp();
+            let duration = sample.duration();
+            let data_offset = sample.data_offset;
+            let data_size = sample.data_size;
 
-            let mut data = vec![0; sample.data_size];
-            self.file
-                .seek(SeekFrom::Start(sample.data_offset))
-                .or_fail()?;
+            let mut data = vec![0; data_size];
+            self.file.seek(SeekFrom::Start(data_offset)).or_fail()?;
             self.file.read_exact(&mut data).or_fail()?;
 
             return Ok(Some(VideoFrame {
                 source_id: Some(self.source_id.clone()),
-                sample_entry: Some(sample.sample_entry.clone()),
+                sample_entry,
                 data,
                 format,
-                keyframe: sample.keyframe,
-                width: metadata.width as usize,
-                height: metadata.height as usize,
-                timestamp: sample.timestamp(),
-                duration: sample.duration(),
+                keyframe,
+                width,
+                height,
+                timestamp,
+                duration,
             }));
         }
         Ok(None)
