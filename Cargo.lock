@@ -443,7 +443,7 @@ dependencies = [
 [[package]]
 name = "shiguredo_mp4"
 version = "2025.2.0"
-source = "git+https://github.com/shiguredo/mp4-rust.git#820781691d7c03c8470dc55e53cd8e2e960da33d"
+source = "git+https://github.com/shiguredo/mp4-rust.git#cafa9ad5228858c87c7a03e878425fff4758e4a8"
 
 [[package]]
 name = "shiguredo_nvcodec"

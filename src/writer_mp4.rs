@@ -175,6 +175,14 @@ impl Mp4Writer {
             .actual_moov_box_size
             .set(finalized.moov_box_size() as u64);
 
+        // Update chunk counts from finalized data
+        self.stats
+            .total_audio_chunk_count
+            .set(finalized.audio_chunk_count() as u64);
+        self.stats
+            .total_video_chunk_count
+            .set(finalized.video_chunk_count() as u64);
+
         // Write finalized boxes
         for (offset, bytes) in finalized.offset_and_bytes_pairs() {
             self.file.seek(SeekFrom::Start(offset)).or_fail()?;
