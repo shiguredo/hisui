@@ -153,9 +153,10 @@ impl Iterator for Mp4VideoReader {
 
 #[derive(Debug)]
 pub struct Mp4AudioReader {
-    file_data: Vec<u8>,
+    file: File,
     demuxer: Mp4FileDemuxer,
     source_id: SourceId,
+    is_first_sample: bool,
     stats: Mp4AudioReaderStats,
 }
 
@@ -165,20 +166,13 @@ impl Mp4AudioReader {
         path: P,
         stats: Mp4AudioReaderStats,
     ) -> orfail::Result<Self> {
-        let file_data = std::fs::read(&path)
+        let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-
-        let mut demuxer = Mp4FileDemuxer::new();
-        let input = Input {
-            position: 0,
-            data: &file_data,
-        };
-        demuxer.handle_input(input).or_fail()?;
-
         Ok(Self {
-            file_data,
-            demuxer,
+            file,
+            demuxer: Mp4FileDemuxer::new(),
             source_id,
+            is_first_sample: true,
             stats,
         })
     }
@@ -186,52 +180,76 @@ impl Mp4AudioReader {
     pub fn stats(&self) -> &Mp4AudioReaderStats {
         &self.stats
     }
-}
 
-impl Iterator for Mp4AudioReader {
-    type Item = orfail::Result<AudioData>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let sample = match self.demuxer.next_sample() {
-                Ok(Some(sample)) => sample,
-                Ok(None) => return None,
-                Err(e) => return Some(Err(orfail::Failure::new(e.to_string()).into())),
+    fn next_sample<'a>(
+        demuxer: &'a mut Mp4FileDemuxer,
+        file: &mut File,
+    ) -> orfail::Result<Option<Sample<'a>>> {
+        let mut data = Vec::new();
+        let mut input = Input {
+            position: 0,
+            data: &data,
+        };
+        while let Err(DemuxError::NeedInput {
+            position,
+            size: Some(size),
+        }) = demuxer.handle_input(input)
+        {
+            data.resize(size, 0);
+            file.seek(SeekFrom::Start(position)).or_fail()?;
+            file.read_exact(&mut data).or_fail()?;
+            input = Input {
+                position,
+                data: &data,
             };
+        }
 
+        demuxer.next_sample().or_fail()
+    }
+
+    fn next_audio(&mut self) -> orfail::Result<Option<AudioData>> {
+        while let Some(sample) = Self::next_sample(&mut self.demuxer, &mut self.file).or_fail()? {
             // 音声トラックのみを処理
             if sample.track.kind != TrackKind::Audio {
                 continue;
             }
 
-            let format = match sample.sample_entry {
-                shiguredo_mp4::boxes::SampleEntry::Opus(_) => AudioFormat::Opus,
+            let (format, metadata) = match sample.sample_entry {
+                shiguredo_mp4::boxes::SampleEntry::Opus(b) => (AudioFormat::Opus, &b.audio),
                 entry => {
-                    return Some(Err(orfail::Failure::new(format!(
+                    return Err(orfail::Failure::new(format!(
                         "unsupported sample entry: {entry:?}"
-                    ))));
+                    )));
                 }
             };
+            let sample_entry = self.is_first_sample.then(|| sample.sample_entry.clone());
+            self.is_first_sample = false;
 
-            let metadata = match sample.sample_entry {
-                shiguredo_mp4::boxes::SampleEntry::Opus(b) => &b.audio,
-                _ => unreachable!(),
-            };
-
-            let data_offset = sample.data_offset as usize;
+            let data_offset = sample.data_offset;
             let data_size = sample.data_size;
-            let data = self.file_data[data_offset..data_offset + data_size].to_vec();
+            let mut data = vec![0; data_size];
+            self.file.seek(SeekFrom::Start(data_offset)).or_fail()?;
+            self.file.read_exact(&mut data).or_fail()?;
 
-            return Some(Ok(AudioData {
+            return Ok(Some(AudioData {
                 source_id: Some(self.source_id.clone()),
                 data,
                 format,
-                sample_entry: Some(sample.sample_entry.clone()),
+                sample_entry,
                 stereo: metadata.channelcount != 1,
                 sample_rate: metadata.samplerate.integer,
                 timestamp: sample.timestamp(),
                 duration: sample.duration(),
             }));
         }
+        Ok(None)
+    }
+}
+
+impl Iterator for Mp4AudioReader {
+    type Item = orfail::Result<AudioData>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_audio().transpose()
     }
 }
