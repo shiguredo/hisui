@@ -1,91 +1,127 @@
 use std::{
     fs::File,
-    io::{BufReader, Read},
+    io::{Read, Seek, SeekFrom},
     path::Path,
 };
 
 use orfail::OrFail;
 use shiguredo_mp4::{
     TrackKind,
-    demux::{Input, Mp4FileDemuxer},
+    demux::{DemuxError, Input, Mp4FileDemuxer, Sample},
 };
 
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
+    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
     video::{VideoFormat, VideoFrame},
 };
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
-    file_data: Vec<u8>,
+    file: File,
     demuxer: Mp4FileDemuxer,
     source_id: SourceId,
+    stats: Mp4VideoReaderStats,
 }
 
 impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let file_data = std::fs::read(&path)
+    pub fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: Mp4VideoReaderStats,
+    ) -> orfail::Result<Self> {
+        let file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-
-        let mut demuxer = Mp4FileDemuxer::new();
-        let input = Input {
-            position: 0,
-            data: &file_data,
-        };
-        demuxer.handle_input(input).or_fail()?;
-
         Ok(Self {
-            file_data,
-            demuxer,
+            file,
+            demuxer: Mp4FileDemuxer::new(),
             source_id,
+            stats,
         })
     }
-}
 
-impl Iterator for Mp4VideoReader {
-    type Item = orfail::Result<VideoFrame>;
+    pub fn stats(&self) -> &Mp4VideoReaderStats {
+        &self.stats
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn with_io<F, T>(&mut self, f: F) -> orfail::Result<T>
+    where
+        F: Fn(&mut Self) -> Result<T, DemuxError>,
+    {
         loop {
-            let sample = match self.demuxer.next_sample() {
-                Ok(Some(sample)) => sample,
-                Ok(None) => return None,
-                Err(e) => return Some(Err(orfail::Failure::new(e.to_string()).into())),
-            };
+            match f(self) {
+                Err(DemuxError::NeedInput {
+                    position,
+                    size: Some(size),
+                }) => {
+                    let mut data = vec![0; size];
+                    self.file.seek(SeekFrom::Start(position)).or_fail()?;
+                    self.file.read_exact(&mut data).or_fail()?;
+                    self.demuxer.handle_input(Input {
+                        position,
+                        data: &data,
+                    });
+                }
+                other => return Ok(other.or_fail()?),
+            }
+        }
+    }
 
+    fn next_sample(&mut self) -> orfail::Result<Option<Sample<'_>>> {
+        let mut err = match self.demuxer.next_sample() {
+            Ok(sample) => return Ok(sample),
+            Err(e) => e,
+        };
+
+        while let DemuxError::NeedInput {
+            position,
+            size: Some(size),
+        } = err
+        {
+            let mut data = vec![0; size];
+            self.file.seek(SeekFrom::Start(position)).or_fail()?;
+            self.file.read_exact(&mut data).or_fail()?;
+            let Err(e) = self.demuxer.handle_input(Input {
+                position,
+                data: &data,
+            }) else {
+                // ここは常に成功するはず
+                return self.demuxer.next_sample().or_fail();
+            };
+            err = e;
+        }
+
+        Err(err).or_fail()
+    }
+
+    fn next_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
+        while let Some(sample) = self.next_sample().or_fail()? {
             // ビデオトラックのみを処理
             if sample.track.kind != TrackKind::Video {
                 continue;
             }
 
-            let format = match sample.sample_entry {
-                shiguredo_mp4::boxes::SampleEntry::Avc1(_) => VideoFormat::H264,
-                shiguredo_mp4::boxes::SampleEntry::Hev1(_) => VideoFormat::H265,
-                shiguredo_mp4::boxes::SampleEntry::Vp08(_) => VideoFormat::Vp8,
-                shiguredo_mp4::boxes::SampleEntry::Vp09(_) => VideoFormat::Vp9,
-                shiguredo_mp4::boxes::SampleEntry::Av01(_) => VideoFormat::Av1,
+            let (format, metadata) = match sample.sample_entry {
+                shiguredo_mp4::boxes::SampleEntry::Avc1(b) => (VideoFormat::H264, &b.visual),
+                shiguredo_mp4::boxes::SampleEntry::Hev1(b) => (VideoFormat::H265, &b.visual),
+                shiguredo_mp4::boxes::SampleEntry::Vp08(b) => (VideoFormat::Vp8, &b.visual),
+                shiguredo_mp4::boxes::SampleEntry::Vp09(b) => (VideoFormat::Vp9, &b.visual),
+                shiguredo_mp4::boxes::SampleEntry::Av01(b) => (VideoFormat::Av1, &b.visual),
                 entry => {
-                    return Some(Err(orfail::Failure::new(format!(
+                    return Err(orfail::Failure::new(format!(
                         "unsupported sample entry: {entry:?}"
-                    ))));
+                    )));
                 }
             };
 
-            let metadata = match sample.sample_entry {
-                shiguredo_mp4::boxes::SampleEntry::Avc1(b) => &b.visual,
-                shiguredo_mp4::boxes::SampleEntry::Hev1(b) => &b.visual,
-                shiguredo_mp4::boxes::SampleEntry::Vp08(b) => &b.visual,
-                shiguredo_mp4::boxes::SampleEntry::Vp09(b) => &b.visual,
-                shiguredo_mp4::boxes::SampleEntry::Av01(b) => &b.visual,
-                _ => unreachable!(),
-            };
+            let mut data = vec![0; sample.data_size];
+            self.file
+                .seek(SeekFrom::Start(sample.data_offset))
+                .or_fail()?;
+            self.file.read_exact(&mut data).or_fail()?;
 
-            let data_offset = sample.data_offset as usize;
-            let data_size = sample.data_size;
-            let data = self.file_data[data_offset..data_offset + data_size].to_vec();
-
-            return Some(Ok(VideoFrame {
+            return Ok(Some(VideoFrame {
                 source_id: Some(self.source_id.clone()),
                 sample_entry: Some(sample.sample_entry.clone()),
                 data,
@@ -97,6 +133,15 @@ impl Iterator for Mp4VideoReader {
                 duration: sample.duration(),
             }));
         }
+        Ok(None)
+    }
+}
+
+impl Iterator for Mp4VideoReader {
+    type Item = orfail::Result<VideoFrame>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_frame().transpose()
     }
 }
 
@@ -105,10 +150,15 @@ pub struct Mp4AudioReader {
     file_data: Vec<u8>,
     demuxer: Mp4FileDemuxer,
     source_id: SourceId,
+    stats: Mp4AudioReaderStats,
 }
 
 impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: Mp4AudioReaderStats,
+    ) -> orfail::Result<Self> {
         let file_data = std::fs::read(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
 
@@ -123,7 +173,12 @@ impl Mp4AudioReader {
             file_data,
             demuxer,
             source_id,
+            stats,
         })
+    }
+
+    pub fn stats(&self) -> &Mp4AudioReaderStats {
+        &self.stats
     }
 }
 

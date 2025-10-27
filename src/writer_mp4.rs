@@ -10,7 +10,7 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    BaseBox, BoxSize, BoxType, Either, Encode, FixedPointNumber, Mp4FileTime, Utf8String,
+    BoxSize, BoxType, Either, Encode, FixedPointNumber, Mp4FileTime, Utf8String,
     boxes::{
         Brand, Co64Box, DinfBox, FreeBox, FtypBox, HdlrBox, MdatBox, MdhdBox, MdiaBox, MinfBox,
         MoovBox, MvhdBox, SampleEntry, SmhdBox, StblBox, StcoBox, StscBox, StscEntry, StsdBox,
