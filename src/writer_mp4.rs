@@ -63,7 +63,7 @@ impl Mp4Writer {
     /// [`Mp4Writer`] インスタンスを生成する
     pub fn new<P: AsRef<Path>>(
         path: P,
-        _options: &Mp4WriterOptions,
+        options: &Mp4WriterOptions,
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
     ) -> orfail::Result<Self> {
@@ -74,8 +74,23 @@ impl Mp4Writer {
             .open(path)
             .or_fail()?;
 
+        let mut sample_counts = Vec::new();
+        if input_audio_stream_id.is_some() {
+            let audio_sample_count = (options.duration.as_secs_f64() * 50.0) as usize;
+            sample_counts.push(audio_sample_count);
+        }
+        if input_video_stream_id.is_some() {
+            let video_sample_count =
+                (options.duration.as_secs_f64() * options.frame_rate.numerator.get() as f64
+                    / options.frame_rate.denumerator.get() as f64) as usize;
+            sample_counts.push(video_sample_count);
+        }
+
+        let reserved_moov_box_size =
+            shiguredo_mp4::mux::estimate_maximum_moov_box_size(&sample_counts);
+
         let muxer_options = Mp4FileMuxerOptions {
-            reserved_moov_box_size: 65536, // 64KB buffer for moov box // TODO: calculate from options
+            reserved_moov_box_size,
             ..Default::default()
         };
 
