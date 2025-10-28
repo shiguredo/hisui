@@ -7,7 +7,7 @@ use std::{
 use orfail::OrFail;
 use shiguredo_mp4::{
     TrackKind,
-    demux::{DemuxError, Input, Mp4FileDemuxer, Sample},
+    demux::{Mp4FileDemuxer, Sample},
 };
 
 use crate::{
@@ -50,23 +50,11 @@ impl Mp4VideoReader {
         demuxer: &'a mut Mp4FileDemuxer,
         file: &mut File,
     ) -> orfail::Result<Option<Sample<'a>>> {
-        let mut data = Vec::new();
-        let mut input = Input {
-            position: 0,
-            data: &data,
-        };
-        while let Err(DemuxError::NeedInput {
-            position,
-            size: Some(size),
-        }) = demuxer.handle_input(input)
-        {
-            data.resize(size, 0);
-            file.seek(SeekFrom::Start(position)).or_fail()?;
+        while let Some(required) = demuxer.required_input() {
+            let mut data = vec![0; required.size.or_fail()?];
+            file.seek(SeekFrom::Start(required.position)).or_fail()?;
             file.read_exact(&mut data).or_fail()?;
-            input = Input {
-                position,
-                data: &data,
-            };
+            demuxer.handle_input(required.to_input(&data));
         }
 
         // ここは常に成功するはず
@@ -175,25 +163,14 @@ impl Mp4AudioReader {
         demuxer: &'a mut Mp4FileDemuxer,
         file: &mut File,
     ) -> orfail::Result<Option<Sample<'a>>> {
-        let mut data = Vec::new();
-        let mut input = Input {
-            position: 0,
-            data: &data,
-        };
-        while let Err(DemuxError::NeedInput {
-            position,
-            size: Some(size),
-        }) = demuxer.handle_input(input)
-        {
-            data.resize(size, 0);
-            file.seek(SeekFrom::Start(position)).or_fail()?;
+        while let Some(required) = demuxer.required_input() {
+            let mut data = vec![0; required.size.or_fail()?];
+            file.seek(SeekFrom::Start(required.position)).or_fail()?;
             file.read_exact(&mut data).or_fail()?;
-            input = Input {
-                position,
-                data: &data,
-            };
+            demuxer.handle_input(required.to_input(&data));
         }
 
+        // ここは常に成功するはず
         demuxer.next_sample().or_fail()
     }
 
