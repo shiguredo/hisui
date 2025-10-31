@@ -1,0 +1,44 @@
+name: PyPI Build
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Build manylinux wheels
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64
+            manylinux: manylinux_2_28
+          - runner: ubuntu-22.04
+            target: aarch64
+            manylinux: manylinux_2_28
+          - runner: ubuntu-24.04
+            target: x86_64
+            manylinux: manylinux_2_28
+          - runner: ubuntu-24.04
+            target: aarch64
+            manylinux: manylinux_2_28
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          command: build
+          args: --release --strip --compatibility pypi
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.runner }}-${{ matrix.target }}
+          path: target/wheels/*.whl
