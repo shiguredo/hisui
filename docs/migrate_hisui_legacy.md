@@ -223,6 +223,14 @@ macOS では Apple Video Toolbox を、Linux では NVIDIA Video Codec を使っ
 - frame_rate
 - libvpx_vp8_encode_params
 - libvpx_vp9_encode_params
+- nvcodec_h264_decode_params
+- nvcodec_h265_decode_params
+- nvcodec_vp8_decode_params
+- nvcodec_vp9_decode_params
+- nvcodec_av1_decode_params
+- nvcodec_h264_encode_params
+- nvcodec_h265_encode_params
+- nvcodec_av1_encode_params
 - openh264_encode_params
 - svt_av1_encode_params
 - video_toolbox_h264_encode_params
