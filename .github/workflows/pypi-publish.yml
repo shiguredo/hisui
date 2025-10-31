@@ -33,12 +33,13 @@ jobs:
           rustup update stable
           rustup default stable
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-
       - name: Build with cargo
         run: cargo build --release
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - run: uv tool install marturin
       - name: Build wheel with maturin
         run: uv run maturin build --release
 
