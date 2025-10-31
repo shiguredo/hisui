@@ -2,6 +2,9 @@ name: PyPI Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/pypi
 
 env:
   CARGO_TERM_COLOR: always
@@ -9,22 +12,14 @@ env:
 jobs:
   linux:
     name: Build manylinux wheels
-    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
-          - runner: ubuntu-22.04
-            target: x86_64
-            manylinux: manylinux_2_28
-          - runner: ubuntu-22.04
-            target: aarch64
-            manylinux: manylinux_2_28
           - runner: ubuntu-24.04
             target: x86_64
             manylinux: manylinux_2_28
-          - runner: ubuntu-24.04
-            target: aarch64
-            manylinux: manylinux_2_28
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
