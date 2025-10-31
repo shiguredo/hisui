@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "hisui"
+dynamic = ["version"]
+description = "Recording Composition Tool Hisui を Python から利用可能にする CLI パッケージ"
+authors = [{ name = "Shiguredo Inc." }]
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+readme = "README.md"
+keywords = ["recording", "composition", "video", "cli"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Topic :: Multimedia :: Video",
+]
+
+[project.urls]
+Homepage = "https://github.com/shiguredo/hisui"
+Repository = "https://github.com/shiguredo/hisui"
+
+[tool.maturin]
+bindings = "bin"
+module-name = "hisui"
+strip = true
+
+[]
