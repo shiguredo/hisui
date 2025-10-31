@@ -39,8 +39,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
-      - run: uv tool install marturin
-      - name: Build wheel with maturin
+      - run: uv tool install maturin
+      - name: Build wheel with Maturin
         run: uv run maturin build --release
 
       - name: Upload wheels
