@@ -1,4 +1,4 @@
-# デコード設定の指定方法
+# デコード設定の指定方法 {#layout-decode}
 
 [レイアウト機能](./layout.md) で指定する JSON ファイルでは、
 映像ソースをデコードする一部のデコーダーのパラメーターを指定することができます。
@@ -8,12 +8,12 @@
 
 なお、デフォルトで使用されるデコードパラメーターは [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) にも記載されています。
 
-## NVIDIA Video Codec SDK デコーダーパラメーター
+## NVIDIA Video Codec SDK デコーダーパラメーター {#layout-decode-nvcodec}
 
 NVIDIA Video Codec SDK（nvcodec）は、CUDA 対応 GPU を利用したハードウェアデコーダーです。
 Hisui では H.264、H.265、VP8、VP9、AV1 のデコードに利用できます。
 
-### 利用条件
+### 利用条件 {#layout-decode-nvcodec-requirements}
 
 nvcodec デコーダーを利用するには、以下の条件を満たしている必要があります：
 
@@ -23,7 +23,7 @@ nvcodec デコーダーを利用するには、以下の条件を満たしてい
   - ubuntu-24.04_x86_64 向けのビルド済みバイナリは nvcodec が有効になっています（CUDA がない環境では実行時に無効になります）
   - 自前でビルドした Hisui で nvcodec を有効にする場合には [ビルド方法](./build.md) をご参照ください
 
-### パラメーター
+### パラメーター {#layout-decode-nvcodec-parameters}
 
 nvcodec デコーダーでは、H.264、H.265、AV1、VP8、VP9 の各コーデックで同じパラメーター項目が利用できます。
 
@@ -38,13 +38,13 @@ nvcodec デコーダーでは、H.264、H.265、AV1、VP8、VP9 の各コーデ�
 なお、本ドキュメントでの各パラメーターについての説明などは参考程度のものとなっております。
 正確な情報については、公式ドキュメントを参照してください。
 
-#### デバイス制御パラメーター
+#### デバイス制御パラメーター {#layout-decode-nvcodec-device}
 
 - `device_id` (整数値): 使用する CUDA デバイスの ID
   - デフォルト値: `0`
   - 指定可能な範囲: 0 以上の値（システムの利用可能 GPU 数による）
 
-#### メモリ・バッファ制御パラメーター
+#### メモリ・バッファ制御パラメーター {#layout-decode-nvcodec-memory}
 
 - `max_num_decode_surfaces` (整数値): デコード用サーフェスの最大数
   - デフォルト値: `20`
@@ -56,7 +56,7 @@ nvcodec デコーダーでは、H.264、H.265、AV1、VP8、VP9 の各コーデ�
   - 指定可能な範囲: 0以上の値
   - 0に設定すると遅延を最小にし、値を大きくするとデコード効率が向上します
 
-## 使用例
+## 使用例 {#layout-decode-examples}
 
 以下は、H.264 用の nvcodec デコーダーパラメーターを指定したレイアウトファイルの例です：
 

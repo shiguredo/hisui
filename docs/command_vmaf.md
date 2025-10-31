@@ -1,4 +1,4 @@
-# `hisui vmaf` コマンド
+# `hisui vmaf` コマンド {#command-vmaf}
 
 `hisui vmaf` コマンドは、録画ファイルの合成結果のエンコード品質評価を行うためのコマンドです。
 
@@ -16,7 +16,7 @@
 このコマンドは、主に [`hisui tune`](command_tune.md) コマンドと組み合わせて、
 映像エンコードパラメーターの調整に利用することを想定しています。
 
-## 依存パッケージ
+## 依存パッケージ {#command-vmaf-dependencies}
 
 このコマンドを利用するためには https://github.com/Netflix/vmaf が提供する `vmaf` コマンドがシステムにインストールされている必要があります。
 
@@ -26,7 +26,7 @@ macOS の場合には以下のようにして、依存パッケージがイン�
 brew install libvmaf
 ```
 
-## 使用方法
+## 使用方法 {#command-vmaf-usage}
 
 ```console
 $ hisui vmaf -h
@@ -54,7 +54,7 @@ Options:
       --timeout <SECONDS>         処理のタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）
 ```
 
-## 実行例
+## 実行例 {#command-vmaf-examples}
 
 ```console
 $ hisui vmaf /path/to/archive/RECORDING_ID/

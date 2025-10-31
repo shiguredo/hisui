@@ -1,4 +1,4 @@
-# レイアウト機能
+# レイアウト機能 {#layout-overview}
 
 Hisui では、レイアウトを定義した JSON ファイルを使うことで、複数映像ソースを合成する際の配置を細かく指定できます。
 また、レイアウト JSON では、映像ソースの配置以外に、映像や音声のエンコード設定も指定できます。
@@ -11,7 +11,7 @@ hisui compose -l /path/to/layout.jsonc /path/to/archive/RECORDING_ID/
 
 レイアウトファイルを指定しない場合は [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) が使用されます。
 
-## レイアウト JSON の概要
+## レイアウト JSON の概要 {#layout-json-overview}
 
 レイアウト JSON には、以下が指定できます。
 
@@ -27,7 +27,7 @@ hisui compose -l /path/to/layout.jsonc /path/to/archive/RECORDING_ID/
 こちらも詳細は [リージョン（映像の配置方法指定）について](./layout_region.md) が詳しいですが、
 以降ではいくつかの例を記載しています。
 
-## レイアウトの例: グリッド（デフォルトレイアウト）
+## レイアウトの例: グリッド（デフォルトレイアウト） {#layout-example-grid}
 
 以下は [layout-examples/compose-default.jsonc](../layout-examples/compose-default.jsonc) でも採用されている、
 一番ベーシックな配信者の映像をグリッド状に配置するレイアウト JSON の例です。
@@ -66,7 +66,7 @@ JSON の各項目の概要は以下の通りです。
 `max_columns` および `max_rows` の設定、映像ソースの数などに基づいて決定されます。
 今回の設定では、最大で `3x2` のグリッドが形成されることになります。
 
-### 合成結果のイメージ
+### 合成結果のイメージ {#layout-example-grid-image}
 
 配信者が 5 人いる場合の合成結果のイメージは以下の通りです（2行3列のグリッド）：
 
@@ -93,7 +93,7 @@ JSON の各項目の概要は以下の通りです。
 
 このデフォルトレイアウトは、参加者数が適度で、全員の映像を同じサイズで表示したい会議録画などに適しています。
 
-## レイアウトの例: Picture-in-Picture
+## レイアウトの例: Picture-in-Picture {#layout-example-pip}
 
 以下は、二つのリージョンを使って、
 メイン映像と小さなサブ映像を組み合わせた Picture-in-Picture レイアウトの例です。
@@ -153,7 +153,7 @@ JSON の各項目の概要は以下の通りです。
     - `x_pos`, `y_pos`: 右下に配置する位置座標
     - `z_pos`: 重ね合わせ順序（10 なのでメインより前面）
 
-### 合成結果のイメージ
+### 合成結果のイメージ {#layout-example-pip-image}
 
 Picture-in-Picture レイアウトの合成結果のイメージは以下の通りです。
 
