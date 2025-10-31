@@ -14,26 +14,36 @@ jobs:
     name: Build manylinux wheels
     strategy:
       matrix:
-        include:
-          - runner: ubuntu-24.04
-            target: x86_64
-            manylinux: manylinux_2_28
+        runner:
+          - ubuntu-24.04
+          # - ubuntu-22.04
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          manylinux: ${{ matrix.manylinux }}
-          command: build
-          args: --release --strip --compatibility pypi
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build with cargo
+        run: cargo build --release
+
+      - name: Build wheel with maturin
+        run: uv run maturin build --release
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: wheels-${{ matrix.runner }}-${{ matrix.target }}
+          name: wheels-${{ matrix.runner }}-x86_64
           path: target/wheels/*.whl

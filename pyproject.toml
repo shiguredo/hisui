@@ -28,7 +28,4 @@ Repository = "https://github.com/shiguredo/hisui"
 
 [tool.maturin]
 bindings = "bin"
-module-name = "hisui"
 strip = true
-
-[]
