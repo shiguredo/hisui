@@ -10,15 +10,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  linux:
+  linux-wheel:
     name: Build manylinux wheels
     strategy:
       matrix:
         include:
           - runner: ubuntu-22.04
-            architecture: x86_64
+            arch: x86_64
           - runner: ubuntu-22.04-arm
-            architecture: arm64
+            arch: aarch64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -48,5 +48,48 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v5
         with:
-          name: wheels-${{ matrix.runner }}-${{ matrix.architecture }}
+          name: wheels-${{ matrix.runner }}-${{ matrix.arch }}
+          path: target/wheels/*.whl
+
+  macos-wheel:
+    name: Build macOS wheels
+    strategy:
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson nasm yasm automake autoconf libtool
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Build with cargo
+        run: cargo build --release
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - run: uv tool install maturin
+      - name: Build wheel with Maturin
+        run: uv run maturin build --release
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v5
+        with:
+          name: wheels-${{ matrix.runner }}-${{ matrix.arch }}
           path: target/wheels/*.whl
