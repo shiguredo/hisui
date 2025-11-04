@@ -27,6 +27,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Build with cargo
+        run: cargo build --release
+
       - name: Set version in Cargo.toml for Python compatibility
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -41,19 +54,6 @@ jobs:
           sed -i "s/^version = .*/version = \"$PYTHON_VERSION\"/" Cargo.toml
           echo "Updated Cargo.toml version to: $PYTHON_VERSION"
           grep "^version = " Cargo.toml
-
-      - name: Install packages to build external dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
-
-      - name: Install Rust
-        run: |
-          rustup update stable
-          rustup default stable
-
-      - name: Build with cargo
-        run: cargo build --release
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -85,6 +85,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson nasm yasm automake autoconf libtool
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Build with cargo
+        run: cargo build --release
+
       - name: Set version in Cargo.toml for Python compatibility
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -100,19 +113,6 @@ jobs:
           sed -i '' "s/^version = .*/version = \"$PYTHON_VERSION\"/" Cargo.toml
           echo "Updated Cargo.toml version to: $PYTHON_VERSION"
           grep "^version = " Cargo.toml
-
-      - name: Install packages to build external dependencies
-        run: |
-          brew update
-          brew install meson nasm yasm automake autoconf libtool
-
-      - name: Install Rust
-        run: |
-          rustup update stable
-          rustup default stable
-
-      - name: Build with cargo
-        run: cargo build --release
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
