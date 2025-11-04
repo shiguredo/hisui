@@ -32,11 +32,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
 
-      - name: Install Rust
-        run: |
-          rustup update stable
-          rustup default stable
-
       - name: Setup version for build
         run: |
           # Cargo.toml のバージョンを取得
@@ -46,12 +41,17 @@ jobs:
           # -canary. を -dev. に変換（必要な場合のみ）
           if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
             PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
-            echo "Converting to: $PYTHON_VERSION"
+            echo "Converting to Python-compatible version: $PYTHON_VERSION"
             sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
             if [ -f Cargo.lock ]; then
               sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
             fi
           fi
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
 
       - name: Build with cargo
         run: cargo build --release
@@ -92,11 +92,6 @@ jobs:
           brew update
           brew install meson nasm yasm automake autoconf libtool
 
-      - name: Install Rust
-        run: |
-          rustup update stable
-          rustup default stable
-
       - name: Setup version for build
         run: |
           # Cargo.toml のバージョンを取得
@@ -106,13 +101,18 @@ jobs:
           # -canary. を -dev. に変換（必要な場合のみ）
           if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
             PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
-            echo "Converting to: $PYTHON_VERSION"
-            # macOS の sed は -i オプションが異なる
+            echo "Converting to Python-compatible version: $PYTHON_VERSION"
+            # macOS では sed -i に '' が必要
             sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
             if [ -f Cargo.lock ]; then
               sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
             fi
           fi
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
 
       - name: Build with cargo
         run: cargo build --release
@@ -136,7 +136,6 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [linux-wheel, macos-wheel]
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       id-token: write
     steps:
@@ -152,8 +151,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          verbose: true
+        env:
+          name: testpypi
 
       # 本番用
       # - name: Publish package to PyPI
       #   uses: pypa/gh-action-pypi-publish@release/v1
+      #   env:
+      #     name: pypi
