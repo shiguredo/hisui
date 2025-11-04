@@ -9,7 +9,7 @@ on:
       - "*"
 
 env:
-  CARGO_TERM_COLOR: always
+  CUDA_VERSION: 13.0.2
 
 jobs:
   linux-wheel:
@@ -58,9 +58,22 @@ jobs:
         with:
           python-version: 3.12
 
+      # CUDA のインストール (x86_64 のみ)
+      - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
+        if: contains(matrix.arch, 'x86_64')
+        id: cuda
+        with:
+          cuda_version: ${{ env.CUDA_VERSION }}
+          platform: ${{ matrix.runner }}
+
       - run: uv tool install maturin
 
       - name: Build wheel with Maturin
+        if: matrix.arch == 'x86_64'
+        run: maturin build --release --features nvcodec --compatibility pypi
+
+      - name: Build wheel with Maturin
+        if: matrix.arch == 'aarch64'
         run: maturin build --release --compatibility pypi
 
       - name: Upload wheels
