@@ -136,6 +136,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [linux-wheel, macos-wheel]
     runs-on: ubuntu-latest
+    # environment: "pypi"
+    environment: testpypi
     permissions:
       id-token: write
     steps:
@@ -151,11 +153,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-        env:
-          name: testpypi
 
       # 本番用
       # - name: Publish package to PyPI
       #   uses: pypa/gh-action-pypi-publish@release/v1
-      #   env:
-      #     name: pypi
