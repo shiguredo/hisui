@@ -60,7 +60,7 @@ jobs:
 
       - run: uv tool install maturin
 
-      - run: uv run marturin --help
+      - run: uv run maturin --help
 
       - name: Build wheel with Maturin
         run: uv run maturin build --release --compatibility pypi --no-default-features
