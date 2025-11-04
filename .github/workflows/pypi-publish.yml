@@ -119,7 +119,7 @@ jobs:
       - run: uv tool install maturin
 
       - name: Build wheel with Maturin
-        run: maturin build --release
+        run: maturin build --release --compatibility pypi
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5
