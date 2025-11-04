@@ -6,8 +6,7 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-from contextlib import contextmanager
+from typing import Any
 
 
 class HisuiError(Exception):
@@ -37,16 +36,15 @@ class Hisui:
             print(codecs)
     """
 
-    def __init__(self, binary_path: Optional[str] = None, verbose: bool = False):
+    def __init__(self, verbose: bool = False):
         """
         Initialize Hisui wrapper
 
         Args:
-            binary_path: Path to hisui binary (searches PATH if not specified)
             verbose: Enable verbose logging
         """
         # When installed via maturin, the binary should be in PATH
-        self.binary_path = binary_path or "hisui"
+        self.binary_path = "hisui"
         self.verbose = verbose
         self._temp_files: list[str] = []
 
@@ -60,7 +58,7 @@ class Hisui:
                 Path(temp_file).unlink()
         self._temp_files.clear()
 
-    def _run_command(self, args: List[str], capture_output: bool = True) -> Union[str, None]:
+    def _run_command(self, args: list[str], capture_output: bool = True) -> str | None:
         """
         Execute hisui command
 
@@ -99,7 +97,7 @@ class Hisui:
         except FileNotFoundError:
             raise HisuiError(f"hisui binary not found at: {self.binary_path}") from None
 
-    def inspect(self, input_file: str, decode: bool = False) -> Dict[str, Any]:
+    def inspect(self, input_file: str, decode: bool = False) -> dict[str, Any]:
         """
         Get recording file information
 
@@ -119,7 +117,7 @@ class Hisui:
             return json.loads(output)
         return {}
 
-    def list_codecs(self) -> Dict[str, Any]:
+    def list_codecs(self) -> dict[str, Any]:
         """
         Get list of available codecs
 
@@ -135,12 +133,12 @@ class Hisui:
     def compose(
         self,
         root_dir: str,
-        layout_file: Optional[str] = None,
-        output_file: Optional[str] = None,
-        stats_file: Optional[str] = None,
-        openh264: Optional[str] = None,
+        layout_file: str | None = None,
+        output_file: str | None = None,
+        stats_file: str | None = None,
+        openh264: str | None = None,
         no_progress_bar: bool = False,
-        thread_count: Optional[int] = None,
+        thread_count: int | None = None,
         **kwargs
     ) -> None:
         """
@@ -185,10 +183,10 @@ class Hisui:
     def vmaf(
         self,
         root_dir: str,
-        layout_file: Optional[str] = None,
-        reference_yuv_file: Optional[str] = None,
+        layout_file: str | None = None,
+        reference_yuv_file: str | None = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Evaluate video encoding quality using VMAF
 
@@ -250,10 +248,10 @@ class Hisui:
     def tune(
         self,
         root_dir: str,
-        layout_file: Optional[str] = None,
-        search_space_file: Optional[str] = None,
+        layout_file: str | None = None,
+        search_space_file: str | None = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Tune video encoding parameters using Optuna
 
@@ -290,7 +288,7 @@ class Hisui:
     def create_layout_config(
         self,
         layout_type: str,
-        regions: List[Dict[str, Any]]
+        regions: list[dict[str, Any]]
     ) -> str:
         """
         Create layout configuration file
@@ -318,21 +316,4 @@ class Hisui:
         return temp_path
 
 
-# Helper function for context manager
-@contextmanager
-def hisui(binary_path: Optional[str] = None, verbose: bool = False):
-    """
-    Hisui context manager
-
-    Example:
-        with hisui() as h:
-            h.inspect("input.webm")
-    """
-    h = Hisui(binary_path=binary_path, verbose=verbose)
-    try:
-        yield h
-    finally:
-        h.__exit__(None, None, None)
-
-
-__all__ = ["Hisui", "HisuiError", "hisui"]
+__all__ = ["Hisui", "HisuiError"]
