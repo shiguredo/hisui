@@ -36,6 +36,7 @@ dev = ["pytest", "ruff", "ty"]
 bindings = "bin"
 strip = true
 python-source = "python"
+compatibility = "manylinux_2_31"
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]
