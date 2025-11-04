@@ -5,8 +5,10 @@
 
 ## ビルド
 
+
 ```bash
-uv run maturin build --release
+uv tool install maturin
+maturin build --release
 ```
 
 ## ツールインストール

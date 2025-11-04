@@ -35,8 +35,8 @@ if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
 fi
 
 # maturin build を実行（引数をそのまま渡す）
-echo "Running: uv run maturin build $@"
-uv run maturin build "$@"
+echo "Running: maturin build $@"
+maturin build "$@"
 RESULT=$?
 
 if [ $RESULT -eq 0 ]; then

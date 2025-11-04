@@ -37,8 +37,8 @@ if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
     fi
 
     # maturin develop を実行（引数をそのまま渡す）
-    echo "Running: uv run maturin develop $@"
-    uv run maturin develop "$@"
+    echo "Running: maturin develop $@"
+    maturin develop "$@"
     RESULT=$?
 
     # 元のバージョンに戻す
@@ -51,7 +51,7 @@ if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
 else
     # 変換不要な場合はそのまま実行
     echo "No conversion needed, running maturin develop directly"
-    uv run maturin develop "$@"
+    maturin develop "$@"
     RESULT=$?
 fi
 
