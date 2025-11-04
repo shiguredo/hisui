@@ -19,8 +19,8 @@ jobs:
         include:
           - runner: ubuntu-22.04
             arch: x86_64
-          # - runner: ubuntu-22.04-arm
-          #   arch: aarch64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -56,14 +56,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          python-version: 3.13
+          python-version: 3.12
 
       - run: uv tool install maturin
 
       - name: Build wheel with Maturin
-        run: maturin build --release --compatibility pypi --no-default-features
-
-      - run: ls -la target/wheels/
+        run: maturin build --release --compatibility pypi
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5
@@ -72,7 +70,6 @@ jobs:
           path: target/wheels/*.whl
 
   macos-wheel:
-    if: false
     name: Build macOS wheels
     strategy:
       matrix:
