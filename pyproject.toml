@@ -33,5 +33,8 @@ bindings = "bin"
 strip = true
 python-source = "python"
 
+[tool.maturin.target.aarch64-apple-darwin]
+macos-deployment-target = "14.0"
+
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]
