@@ -54,7 +54,7 @@ jobs:
           rustup default stable
 
       - name: Build with cargo
-        run: cargo build --release
+        run: cargo build --release --no-default-features
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -62,7 +62,7 @@ jobs:
       - run: uv tool install maturin
 
       - name: Build wheel with Maturin
-        run: uv run maturin build --release --compatibility pypi
+        run: uv run maturin build --release --compatibility pypi --no-default-features
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5
