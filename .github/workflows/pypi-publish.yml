@@ -53,9 +53,6 @@ jobs:
           rustup update stable
           rustup default stable
 
-      - name: Build with cargo
-        run: cargo build --release --no-default-features
-
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
@@ -113,9 +110,6 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
-
-      - name: Build with cargo
-        run: cargo build --release
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
