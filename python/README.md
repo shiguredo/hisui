@@ -3,6 +3,12 @@
 これは、Recording Composition Tool Hisui の Python ラッパーライブラリです。
 バインディングではなく Python から Hisui のコマンドラインインターフェースを呼び出す形で実装されています。
 
+## ビルド
+
+```bash
+uv run maturin build --release
+```
+
 ## ツールインストール
 
 ```bash
