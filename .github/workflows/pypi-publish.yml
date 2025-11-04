@@ -19,8 +19,8 @@ jobs:
         include:
           - runner: ubuntu-22.04
             arch: x86_64
-          - runner: ubuntu-22.04-arm
-            arch: aarch64
+          # - runner: ubuntu-22.04-arm
+          #   arch: aarch64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -37,43 +37,32 @@ jobs:
           rustup update stable
           rustup default stable
 
+      - name: Setup version for build
+        run: |
+          # Cargo.toml のバージョンを取得
+          ORIGINAL_VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "Original version: $ORIGINAL_VERSION"
+
+          # -canary. を -dev. に変換（必要な場合のみ）
+          if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
+            PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
+            echo "Converting to: $PYTHON_VERSION"
+            sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
+            if [ -f Cargo.lock ]; then
+              sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
+            fi
+          fi
+
       - name: Build with cargo
         run: cargo build --release
-
-      - name: Setup Python version for packaging
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            # canary.N を .devN に変換
-            if [[ "$TAG" == *"-canary."* ]]; then
-              PYTHON_VERSION="${TAG/-canary./.dev}"
-            else
-              PYTHON_VERSION="$TAG"
-            fi
-          else
-            # タグ以外のビルドでは開発バージョンを使用
-            COMMIT_SHA="${GITHUB_SHA::8}"
-            PYTHON_VERSION="0.0.0.dev${COMMIT_SHA}"
-          fi
-          echo "Python package version will be: $PYTHON_VERSION"
-          # pyproject.toml のバージョンを更新
-          cp pyproject.toml pyproject.toml.backup
-          sed -i "s/^version = .*/version = \"$PYTHON_VERSION\"/" pyproject.toml
-          echo "Updated pyproject.toml:"
-          head -n 5 pyproject.toml
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
       - run: uv tool install maturin
+
       - name: Build wheel with Maturin
         run: uv run maturin build --release
-
-      - name: Restore original pyproject.toml
-        run: |
-          if [ -f pyproject.toml.backup ]; then
-            mv pyproject.toml.backup pyproject.toml
-          fi
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5
@@ -88,10 +77,10 @@ jobs:
         include:
           - runner: macos-26
             arch: arm64
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-14
-            arch: arm64
+          # - runner: macos-15
+          #   arch: arm64
+          # - runner: macos-14
+          #   arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -108,44 +97,33 @@ jobs:
           rustup update stable
           rustup default stable
 
+      - name: Setup version for build
+        run: |
+          # Cargo.toml のバージョンを取得
+          ORIGINAL_VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "Original version: $ORIGINAL_VERSION"
+
+          # -canary. を -dev. に変換（必要な場合のみ）
+          if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
+            PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
+            echo "Converting to: $PYTHON_VERSION"
+            # macOS の sed は -i オプションが異なる
+            sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
+            if [ -f Cargo.lock ]; then
+              sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
+            fi
+          fi
+
       - name: Build with cargo
         run: cargo build --release
-
-      - name: Setup Python version for packaging
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            # canary.N を .devN に変換
-            if [[ "$TAG" == *"-canary."* ]]; then
-              PYTHON_VERSION="${TAG/-canary./.dev}"
-            else
-              PYTHON_VERSION="$TAG"
-            fi
-          else
-            # タグ以外のビルドでは開発バージョンを使用
-            COMMIT_SHA="${GITHUB_SHA::8}"
-            PYTHON_VERSION="0.0.0.dev${COMMIT_SHA}"
-          fi
-          echo "Python package version will be: $PYTHON_VERSION"
-          # pyproject.toml のバージョンを更新
-          cp pyproject.toml pyproject.toml.backup
-          # macOS の sed は -i オプションが異なる
-          sed -i '' "s/^version = .*/version = \"$PYTHON_VERSION\"/" pyproject.toml
-          echo "Updated pyproject.toml:"
-          head -n 5 pyproject.toml
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
       - run: uv tool install maturin
+
       - name: Build wheel with Maturin
         run: uv run maturin build --release
-
-      - name: Restore original pyproject.toml
-        run: |
-          if [ -f pyproject.toml.backup ]; then
-            mv pyproject.toml.backup pyproject.toml
-          fi
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5

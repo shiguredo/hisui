@@ -1,6 +1,6 @@
 [project]
 name = "hisui"
-version = "0.0.0.dev0"  # GitHub Actions でタグからビルドする際に自動で上書きされる
+dynamic = ["version"]
 description = "Recording Composition Tool Hisui を Python から利用可能にする CLI パッケージ"
 authors = [{ name = "Shiguredo Inc." }]
 license = { text = "Apache-2.0" }
