@@ -11,6 +11,7 @@ from typing import Any
 
 class HisuiError(Exception):
     """Error during Hisui execution"""
+
     pass
 
 
@@ -79,10 +80,7 @@ class Hisui:
 
         try:
             result = subprocess.run(
-                cmd,
-                capture_output=capture_output,
-                text=True,
-                check=True
+                cmd, capture_output=capture_output, text=True, check=True
             )
 
             if capture_output:
@@ -139,7 +137,7 @@ class Hisui:
         openh264: str | None = None,
         no_progress_bar: bool = False,
         thread_count: int | None = None,
-        **kwargs
+        **kwargs,
     ) -> None:
         """
         Compose recording files
@@ -185,7 +183,7 @@ class Hisui:
         root_dir: str,
         layout_file: str | None = None,
         reference_yuv_file: str | None = None,
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Evaluate video encoding quality using VMAF
@@ -220,11 +218,7 @@ class Hisui:
             return json.loads(output)
         return {}
 
-    def pipeline(
-        self,
-        pipeline_file: str,
-        **kwargs
-    ) -> None:
+    def pipeline(self, pipeline_file: str, **kwargs) -> None:
         """
         Execute user-defined pipeline
 
@@ -250,7 +244,7 @@ class Hisui:
         root_dir: str,
         layout_file: str | None = None,
         search_space_file: str | None = None,
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Tune video encoding parameters using Optuna
@@ -286,9 +280,7 @@ class Hisui:
         return {}
 
     def create_layout_config(
-        self,
-        layout_type: str,
-        regions: list[dict[str, Any]]
+        self, layout_type: str, regions: list[dict[str, Any]]
     ) -> str:
         """
         Create layout configuration file
@@ -300,15 +292,8 @@ class Hisui:
         Returns:
             Path to the created configuration file
         """
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.json',
-            delete=False
-        ) as f:
-            config = {
-                "type": layout_type,
-                "regions": regions
-            }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            config = {"type": layout_type, "regions": regions}
             json.dump(config, f, indent=2)
             temp_path = f.name
 
