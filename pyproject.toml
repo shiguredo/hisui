@@ -1,7 +1,3 @@
-[build-system]
-requires = ["maturin>=1.9,<2.0"]
-build-backend = "maturin"
-
 [project]
 name = "hisui"
 dynamic = ["version"]
@@ -29,7 +25,17 @@ classifiers = [
 Homepage = "https://github.com/shiguredo/hisui"
 Repository = "https://github.com/shiguredo/hisui"
 
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[dependency-groups]
+dev = ["pytest", "ruff", "ty"]
+
 [tool.maturin]
 bindings = "bin"
 strip = true
 python-source = "python"
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
