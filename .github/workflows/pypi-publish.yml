@@ -60,10 +60,8 @@ jobs:
 
       - run: uv tool install maturin
 
-      - run: uv run maturin --help
-
       - name: Build wheel with Maturin
-        run: uv run maturin build --release --compatibility pypi --no-default-features
+        run: maturin build --release --compatibility pypi --no-default-features
 
       - run: ls -la target/wheels/
 
@@ -124,7 +122,7 @@ jobs:
       - run: uv tool install maturin
 
       - name: Build wheel with Maturin
-        run: uv run maturin build --release
+        run: maturin build --release
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5

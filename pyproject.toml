@@ -8,9 +8,6 @@ requires-python = ">=3.12"
 readme = "README.md"
 keywords = ["recording", "composition", "video", "cli"]
 classifiers = [
-  "Development Status :: 4 - Beta",
-  "Environment :: Console",
-  "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3 :: Only",
@@ -18,7 +15,6 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Programming Language :: Rust",
-  "Topic :: Multimedia :: Video",
 ]
 
 [project.urls]
