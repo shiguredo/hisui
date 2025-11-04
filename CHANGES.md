@@ -14,6 +14,8 @@
 - [UPDATE] shiguredo_nvcodec のバージョンを 2025.2.1 に更新する
   - 2025.2.0 には crates.io 経由でのビルドに失敗する問題があった
   - @sile
+- [ADD] PyPI に Hiusi を登録する仕組みを追加する
+  - @voluntas
 
 ## 2025.2.0
 
