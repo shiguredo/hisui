@@ -11,6 +11,9 @@
 
 ## develop
 
+- [UPDATE] hisui が直接に依存するパッケージのバージョンは厳密一致で指定するようにする
+  - `cargo install hisui` の際に、依存パッケージのバージョン更新によって、突然ビルドに失敗してしまうことを防ぐため
+  - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2025.2.1 に更新する
   - 2025.2.0 には crates.io 経由でのビルドに失敗する問題があった
   - @sile
