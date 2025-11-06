@@ -7,7 +7,7 @@ fn main() {
     // Cargo.toml か build.rs か third_party のヘッダファイルが更新されたら、バインディングファイルを再生成する
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed=build.rs");
-    println!("cargo::rerun-if-changed=../../third_party/nvcodec/include/");
+    println!("cargo::rerun-if-changed=third_party/nvcodec/include/");
 
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("infallible"));
@@ -24,11 +24,7 @@ fn main() {
 
     // third_party にあるヘッダファイルのパス
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("infallible"));
-    let third_party_header_dir = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("failed to get project root")
-        .join("third_party/nvcodec/include");
+    let third_party_header_dir = manifest_dir.join("third_party/nvcodec/include");
 
     if std::env::var("DOCS_RS").is_ok() {
         // Docs.rs 向けのビルドでは外部ファイルのダウンロードができないので build.rs の処理はスキップして、
