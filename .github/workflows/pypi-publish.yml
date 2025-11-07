@@ -3,8 +3,6 @@ name: PyPI Build and Publish
 on:
   workflow_dispatch:
   push:
-    branches:
-      - feature/pypi
     tags:
       - "*"
 

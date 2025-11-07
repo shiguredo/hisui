@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/pypi
-    tags:
-      - "*"
+      - develop
+      - feature/**
 
 env:
   CUDA_VERSION: 13.0.2
