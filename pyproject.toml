@@ -33,7 +33,7 @@ Repository = "https://github.com/shiguredo/hisui"
 package = false
 
 [dependency-groups]
-dev = ["pytest", "ruff", "ty"]
+dev = ["pytest", "ruff", "ty", "maturin"]
 
 [tool.maturin]
 bindings = "bin"

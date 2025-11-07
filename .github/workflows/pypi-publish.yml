@@ -66,15 +66,13 @@ jobs:
           cuda_version: ${{ env.CUDA_VERSION }}
           platform: ${{ matrix.runner }}
 
-      - run: uv tool install maturin
-
       - name: Build wheel with Maturin
         if: matrix.arch == 'x86_64'
-        run: maturin build --release --features nvcodec --compatibility pypi
+        run: uv run maturin build --release --features nvcodec --compatibility pypi
 
       - name: Build wheel with Maturin
         if: matrix.arch == 'aarch64'
-        run: maturin build --release --compatibility pypi
+        run: uv run maturin build --release --compatibility pypi
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5
@@ -125,10 +123,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
-      - run: uv tool install maturin
-
       - name: Build wheel with Maturin
-        run: maturin build --release --compatibility pypi
+        run: uv run maturin build --release --compatibility pypi
 
       - name: Upload wheels
         uses: actions/upload-artifact@v5

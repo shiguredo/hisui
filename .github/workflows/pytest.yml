@@ -68,14 +68,11 @@ jobs:
         with:
           python-version: ${{ matrix.python_version }}
 
-      - name: Install Maturin
-        run: uv tool install maturin
-
       - name: Sync uv dependencies
         run: uv sync
 
       - name: Build with Maturin
-        run: maturin develop --no-default-features
+        run: uv run maturin develop --no-default-features
 
       - name: Run pytest
         run: uv run pytest
