@@ -32,21 +32,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
 
-      - name: Setup version for build
-        run: |
-          # Cargo.toml のバージョンを取得
-          ORIGINAL_VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
-          echo "Original version: $ORIGINAL_VERSION"
-
-          # -canary. を -dev. に変換（必要な場合のみ）
-          if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
-            PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
-            echo "Converting to Python-compatible version: $PYTHON_VERSION"
-            sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
-            if [ -f Cargo.lock ]; then
-              sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
-            fi
-          fi
+      - name: Convert Cargo version for Python
+        uses: ./.github/actions/convert-cargo-version-for-python
 
       - name: Install Rust
         run: |
@@ -98,22 +85,8 @@ jobs:
           brew update
           brew install meson nasm yasm automake autoconf libtool
 
-      - name: Setup version for build
-        run: |
-          # Cargo.toml のバージョンを取得
-          ORIGINAL_VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
-          echo "Original version: $ORIGINAL_VERSION"
-
-          # -canary. を -dev. に変換（必要な場合のみ）
-          if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
-            PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
-            echo "Converting to Python-compatible version: $PYTHON_VERSION"
-            # macOS では sed -i に '' が必要
-            sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
-            if [ -f Cargo.lock ]; then
-              sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
-            fi
-          fi
+      - name: Convert Cargo version for Python
+        uses: ./.github/actions/convert-cargo-version-for-python
 
       - name: Install Rust
         run: |
