@@ -1,5 +1,5 @@
 #!/bin/bash
-# maturin develop を実行する前に Cargo.toml のバージョンを Python 互換に変換するスクリプト
+# uv run maturin develop を実行する前に Cargo.toml のバージョンを Python 互換に変換するスクリプト
 #
 # 使い方:
 #   ./scripts/maturin_develop.sh
@@ -36,9 +36,9 @@ if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
         fi
     fi
 
-    # maturin develop を実行（引数をそのまま渡す）
-    echo "Running: maturin develop $@"
-    maturin develop "$@"
+    # uv run maturin develop を実行（引数をそのまま渡す）
+    echo "Running: uv run maturin develop $@"
+    uv run maturin develop "$@"
     RESULT=$?
 
     # 元のバージョンに戻す
@@ -50,7 +50,7 @@ if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
 
 else
     # 変換不要な場合はそのまま実行
-    echo "No conversion needed, running maturin develop directly"
+    echo "No conversion needed, running uv run maturin develop directly"
     uv run maturin develop "$@"
     RESULT=$?
 fi
@@ -58,7 +58,7 @@ fi
 if [ $RESULT -eq 0 ]; then
     echo "✅ Development environment ready!"
 else
-    echo "❌ maturin develop failed with exit code $RESULT"
+    echo "❌ uv run maturin develop failed with exit code $RESULT"
 fi
 
 exit $RESULT
