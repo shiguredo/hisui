@@ -1,32 +1,35 @@
+[build-system]
+build-backend = "maturin"
+requires = ["maturin>=1.9,<2.0"]
+
 [project]
 name = "hisui"
+authors = [{ name = "Shiguredo Inc.", email = "contact+pypi@shiguredo.jp" }]
 dynamic = ["version"]
-description = "Recording Composition Tool Hisui を Python から利用可能にする CLI パッケージ"
-authors = [{ name = "Shiguredo Inc." }]
-license = { text = "Apache-2.0" }
-requires-python = ">=3.12"
+description = "CLI package for using Recording Composition Tool Hisui from Python"
 readme = "README.md"
-keywords = ["recording", "composition", "video", "cli"]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Rust",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
-  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: Implementation :: CPython",
 ]
+requires-python = ">=3.12"
 
 [project.urls]
 Homepage = "https://github.com/shiguredo/hisui"
 Repository = "https://github.com/shiguredo/hisui"
 
-[build-system]
-requires = ["maturin>=1.9,<2.0"]
-build-backend = "maturin"
-
 [tool.uv]
-# uv sync や uv run 時に自動ビルドを避けるため、package false に設定
 package = false
 
 [dependency-groups]
