@@ -30,4 +30,5 @@
 - コメントは日本語で書くこと
 - `maturin build --release` でビルドできることを確認すること
 - `maturin develop` でインストールして利用できることを確認すること
+  - `maturin develop` をするまえに `uv sync` すること
 - `uv run pytest` でテストが通ることを確認すること
