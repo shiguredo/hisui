@@ -25,6 +25,10 @@ Repository = "https://github.com/shiguredo/hisui"
 requires = ["maturin>=1.9,<2.0"]
 build-backend = "maturin"
 
+[tool.uv]
+# uv sync や uv run 時に自動ビルドを避けるため、package false に設定
+package = false
+
 [dependency-groups]
 dev = ["pytest", "ruff", "ty"]
 

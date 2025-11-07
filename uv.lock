@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "hisui"
-source = { editable = "." }
+source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
