@@ -36,7 +36,7 @@ fi
 
 # maturin build を実行（引数をそのまま渡す）
 echo "Running: maturin build $@"
-maturin build "$@"
+uv run maturin build "$@"
 RESULT=$?
 
 if [ $RESULT -eq 0 ]; then

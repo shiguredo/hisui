@@ -51,7 +51,7 @@ if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
 else
     # 変換不要な場合はそのまま実行
     echo "No conversion needed, running maturin develop directly"
-    maturin develop "$@"
+    uv run maturin develop "$@"
     RESULT=$?
 fi
 
