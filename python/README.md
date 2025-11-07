@@ -6,8 +6,8 @@
 ## ビルド
 
 ```bash
-uv tool install maturin
-maturin build --release
+uv sync
+uv run maturin build --release
 ```
 
 ## ツールインストール
@@ -45,8 +45,7 @@ uv run python3
 ## テスト
 
 ```bash
-uv tool install maturin
-maturin develop
 uv sync
+uv run maturin develop --no-default-features
 uv run pytest
 ```
