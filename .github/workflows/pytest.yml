@@ -68,6 +68,9 @@ jobs:
       - name: Install Maturin
         run: uv tool install maturin
 
+      - name: Sync uv dependencies
+        run: uv sync
+
       - name: Build with Maturin
         run: maturin develop --no-default-features
 
