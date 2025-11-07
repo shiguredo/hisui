@@ -28,7 +28,5 @@
 ## Python について
 
 - コメントは日本語で書くこと
-- `maturin build --release` でビルドできることを確認すること
-- `maturin develop` でインストールして利用できることを確認すること
-  - `maturin develop` をするまえに `uv sync` すること
+- `uv run maturin develop` でビルドできることを確認すること
 - `uv run pytest` でテストが通ることを確認すること
