@@ -1,0 +1,75 @@
+name: Pytest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/pypi
+    tags:
+      - "*"
+
+env:
+  CUDA_VERSION: 13.0.2
+
+jobs:
+  pytest:
+    strategy:
+      matrix:
+        include:
+          - runs_on: ubuntu-22.04
+            arch: x86_64
+          - runs_on: ubuntu-22.04-arm
+            arch: aarch64
+          - runs_on: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install packages to build external dependencies
+        if: startsWith(matrix.runs_on, 'macos')
+        run: |
+          brew update
+          brew install meson nasm yasm automake autoconf libtool
+
+      - name: Install packages to build external dependencies
+        if: startsWith(matrix.runs_on, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+
+      - name: Setup version for build
+        run: |
+          # Cargo.toml のバージョンを取得
+          ORIGINAL_VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "Original version: $ORIGINAL_VERSION"
+
+          # -canary. を -dev. に変換（必要な場合のみ）
+          if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
+            PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
+            echo "Converting to Python-compatible version: $PYTHON_VERSION"
+            # macOS では sed -i に '' が必要
+            sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
+            if [ -f Cargo.lock ]; then
+              sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
+            fi
+          fi
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install Maturin
+        run: uv tool install maturin
+
+      - name: Build with Maturin
+        run: maturin develop --no-default-features
+
+      - name: Run pytest
+        run: uv run pytest
