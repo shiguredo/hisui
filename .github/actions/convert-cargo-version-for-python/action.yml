@@ -1,0 +1,33 @@
+name: Convert Cargo version for Python
+description: Cargo.toml のバージョンを Python 互換形式に変換する（-canary. を -dev. に変換）
+
+runs:
+  using: composite
+  steps:
+    - name: Convert version
+      shell: bash
+      run: |
+        # Cargo.toml のバージョンを取得
+        ORIGINAL_VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
+        echo "Original version: $ORIGINAL_VERSION"
+
+        # -canary. を -dev. に変換（必要な場合のみ）
+        if [[ "$ORIGINAL_VERSION" == *"-canary."* ]]; then
+          PYTHON_VERSION="${ORIGINAL_VERSION//-canary./-dev.}"
+          echo "Converting to Python-compatible version: $PYTHON_VERSION"
+
+          # OS によって sed のオプションを変更
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS では sed -i に '' が必要
+            sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
+            if [ -f Cargo.lock ]; then
+              sed -i '' "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
+            fi
+          else
+            # Linux
+            sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.toml
+            if [ -f Cargo.lock ]; then
+              sed -i "s/^version = \"$ORIGINAL_VERSION\"/version = \"$PYTHON_VERSION\"/" Cargo.lock
+            fi
+          fi
+        fi

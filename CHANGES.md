@@ -11,6 +11,17 @@
 
 ## develop
 
+- [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
+  - バージョンが `-canary.X` は `.devX` 形式に変換される
+  - @voluntas
+
+### misc
+
+- [ADD] Hisui Python バインディングテスト用の GitHub Actions `pytest.yml` を追加する
+  - @voluntas
+- [ADD] python/tests に Hisui Python バインディングのテストコードを追加する
+  - @voluntas
+
 ## 2025.3.0
 
 **リリース日**: 2025-11-06

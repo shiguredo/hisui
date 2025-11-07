@@ -1,0 +1,133 @@
+name: PyPI Build and Publish
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/pypi
+    tags:
+      - "*"
+
+env:
+  CUDA_VERSION: 13.0.2
+
+jobs:
+  linux-wheel:
+    name: Build manylinux wheels
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+
+      - name: Convert Cargo version for Python
+        uses: ./.github/actions/convert-cargo-version-for-python
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: 3.12
+
+      # CUDA のインストール (x86_64 のみ)
+      - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
+        if: contains(matrix.arch, 'x86_64')
+        id: cuda
+        with:
+          cuda_version: ${{ env.CUDA_VERSION }}
+          platform: ${{ matrix.runner }}
+
+      - name: Build wheel with Maturin
+        if: matrix.arch == 'x86_64'
+        run: uv run maturin build --release --features nvcodec --compatibility pypi
+
+      - name: Build wheel with Maturin
+        if: matrix.arch == 'aarch64'
+        run: uv run maturin build --release --compatibility pypi
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v5
+        with:
+          name: wheels-${{ matrix.runner }}-${{ matrix.arch }}
+          path: target/wheels/*.whl
+
+  macos-wheel:
+    name: Build macOS wheels
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson nasm yasm automake autoconf libtool
+
+      - name: Convert Cargo version for Python
+        uses: ./.github/actions/convert-cargo-version-for-python
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build wheel with Maturin
+        run: uv run maturin build --release --compatibility pypi
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v5
+        with:
+          name: wheels-${{ matrix.runner }}-${{ matrix.arch }}
+          path: target/wheels/*.whl
+
+  publish:
+    name: Publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux-wheel, macos-wheel]
+    runs-on: ubuntu-latest
+    environment: pypi
+    # environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      # テスト用
+      # - name: Publish package to TestPyPI
+      #   uses: pypa/gh-action-pypi-publish@release/v1
+      #   with:
+      #     repository-url: https://test.pypi.org/legacy/
+
+      # 本番用
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
