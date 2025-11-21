@@ -59,6 +59,7 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 - RTMP 入出力機能
 - RTSP 入出力機能
 - RTP 入出力機能
+- NDI 入出力
 - HLS 出力機能
 
 ## インストール
