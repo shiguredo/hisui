@@ -170,35 +170,46 @@ impl Encoder {
             return Ok(None);
         }
 
+        let in_buf = MaybeUninit::<sys::AACENC_BufDesc>::zeroed();
+        let out_buf = MaybeUninit::<sys::AACENC_BufDesc>::zeroed();
+        let in_elem_size = 2;
+        let out_elem_size = 1;
+        let in_args = MaybeUninit::<sys::AACENC_InArgs>::zeroed();
+        let mut out_args = MaybeUninit::<sys::AACENC_OutArgs>::zeroed();
         unsafe {
-            let mut in_args = MaybeUninit::<sys::AACENC_InArgs>::zeroed().assume_init();
+            let mut in_args = in_args.assume_init();
             in_args.numInSamples = self.pcm_buf.len() as sys::INT;
 
-            let in_identifier = sys::AACENC_BufferIdentifier_IN_AUDIO_DATA as i32;
-            let in_size = self.pcm_buf.len() as sys::INT * 2;
-            let in_elem_size = 2i32;
-            let in_ptr = self.pcm_buf.as_ptr() as *mut c_void;
+            let mut in_buf = in_buf.assume_init();
 
-            let mut in_buf = MaybeUninit::<sys::AACENC_BufDesc>::zeroed().assume_init();
+            // 一時配列を直接フィールドに代入してしまうと、
+            // リリースビルド時のコンパイラの最適化によってポインタが無効になることがあるので、
+            // 一度変数を経由する
+            let mut in_buf_bufs = [self.pcm_buf.as_ptr() as *mut c_void];
+            let mut in_buf_buf_sizes = [self.pcm_buf.len() as sys::INT * in_elem_size];
+            let mut in_buf_buf_el_sizes = [in_elem_size];
+
             in_buf.numBufs = 1;
-            in_buf.bufs = &in_ptr as *const _ as *mut _; // スタック変数のアドレス
-            in_buf.bufferIdentifiers = &in_identifier as *const _ as *mut _;
-            in_buf.bufSizes = &in_size as *const _ as *mut _;
-            in_buf.bufElSizes = &in_elem_size as *const _ as *mut _;
+            in_buf.bufs = in_buf_bufs.as_mut_ptr();
+            in_buf.bufferIdentifiers =
+                [sys::AACENC_BufferIdentifier_IN_AUDIO_DATA as i32].as_mut_ptr();
+            in_buf.bufSizes = in_buf_buf_sizes.as_mut_ptr();
+            in_buf.bufElSizes = in_buf_buf_el_sizes.as_mut_ptr();
 
-            let out_identifier = sys::AACENC_BufferIdentifier_OUT_BITSTREAM_DATA as i32;
-            let out_size = self.encode_buf.len() as sys::INT;
-            let out_elem_size = 1i32;
-            let out_ptr = self.encode_buf.as_mut_ptr() as *mut c_void;
+            let mut out_buf = out_buf.assume_init();
 
-            let mut out_buf = MaybeUninit::<sys::AACENC_BufDesc>::zeroed().assume_init();
+            // in_bufs_* と同様にこちらも変数を経由してポインタを取得する
+            let mut out_buf_bufs = [self.encode_buf.as_mut_ptr() as *mut c_void];
+            let mut out_buf_buffer_identifiers =
+                [sys::AACENC_BufferIdentifier_OUT_BITSTREAM_DATA as i32];
+            let mut out_buf_buf_sizes = [self.encode_buf.len() as sys::INT];
+            let mut out_buf_buf_el_sizes = [out_elem_size];
+
             out_buf.numBufs = 1;
-            out_buf.bufs = &out_ptr as *const _ as *mut _;
-            out_buf.bufferIdentifiers = &out_identifier as *const _ as *mut _;
-            out_buf.bufSizes = &out_size as *const _ as *mut _;
-            out_buf.bufElSizes = &out_elem_size as *const _ as *mut _;
-
-            let mut out_args = MaybeUninit::<sys::AACENC_OutArgs>::zeroed();
+            out_buf.bufs = out_buf_bufs.as_mut_ptr();
+            out_buf.bufferIdentifiers = out_buf_buffer_identifiers.as_mut_ptr();
+            out_buf.bufSizes = out_buf_buf_sizes.as_mut_ptr();
+            out_buf.bufElSizes = out_buf_buf_el_sizes.as_mut_ptr();
 
             let code = sys::aacEncEncode(
                 self.handle.0,
