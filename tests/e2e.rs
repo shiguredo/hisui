@@ -103,12 +103,6 @@ fn test_simple_single_source_common(
         return Ok(());
     }
 
-    if expected_audio_codec == CodecName::Aac {
-        // 現状の Hisui は読み込み側での AAC には対応しておらず、AAC の場合はこれ以降の確認は行えないので、
-        // ここで終了する
-        return Ok(());
-    }
-
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
