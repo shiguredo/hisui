@@ -62,8 +62,9 @@ fn empty_source() -> noargs::Result<()> {
 // 共通のテスト関数
 fn test_simple_single_source_common(
     test_data_dir: &str,
-    expected_codec: CodecName,
-    expected_engine: Option<EngineName>,
+    expected_video_codec: CodecName,
+    expected_video_engine: Option<EngineName>,
+    expected_audio_codec: CodecName,
 ) -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new().or_fail()?;
@@ -92,7 +93,7 @@ fn test_simple_single_source_common(
         return Err("hisui command failed".into());
     }
 
-    if let Some(expected_engine) = expected_engine {
+    if let Some(expected_engine) = expected_video_engine {
         check_engine_in_stats(&stats_file, expected_engine)?;
     }
 
@@ -126,7 +127,7 @@ fn test_simple_single_source_common(
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(expected_codec));
+    assert_eq!(video_stats.codec.get(), Some(expected_video_codec));
     assert_eq!(
         video_stats
             .resolutions
@@ -289,6 +290,7 @@ fn simple_single_source_vp9() -> noargs::Result<()> {
         "testdata/e2e/simple_single_source_vp9/",
         CodecName::Vp9,
         Some(EngineName::Libvpx),
+        CodecName::Opus,
     )
 }
 
@@ -336,6 +338,7 @@ fn simple_single_source_h265() -> noargs::Result<()> {
         "testdata/e2e/simple_single_source_h265/",
         CodecName::H265,
         None,
+        CodecName::Opus,
     )
 }
 
@@ -358,6 +361,7 @@ fn simple_single_source_h264() -> noargs::Result<()> {
         "testdata/e2e/simple_single_source_h264/",
         CodecName::H264,
         None,
+        CodecName::Opus,
     )
 }
 
@@ -379,6 +383,7 @@ fn simple_single_source_av1() -> noargs::Result<()> {
         "testdata/e2e/simple_single_source_av1/",
         CodecName::Av1,
         None,
+        CodecName::Opus,
     )
 }
 
