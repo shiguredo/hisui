@@ -313,8 +313,8 @@ fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
 fn simple_single_source_aac_encode() -> noargs::Result<()> {
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_aac_encode/",
-        CodecName::H264,
-        Some(EngineName::Libvpx),
+        CodecName::Av1,
+        None,
         CodecName::Aac,
     )
 }

@@ -12,6 +12,6 @@
       ]
     }
   },
-  "video_codec": "VP9",
+  "video_codec": "AV1",
   "audio_codec": "AAC",
 }
