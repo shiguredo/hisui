@@ -181,20 +181,35 @@ impl Encoder {
             in_args.numInSamples = self.pcm_buf.len() as sys::INT;
 
             let mut in_buf = in_buf.assume_init();
+
+            // 一時配列を直接フィールドに代入してしまうと、
+            // リリースビルド時のコンパイラの最適化によってポインタが無効になることがあるので、
+            // 一度変数を経由する
+            let mut in_buf_bufs = [self.pcm_buf.as_ptr() as *mut c_void];
+            let mut in_buf_buffer_identifiers = [sys::AACENC_BufferIdentifier_IN_AUDIO_DATA as i32];
+            let mut in_buf_buf_sizes = [self.pcm_buf.len() as sys::INT * in_elem_size];
+            let mut in_buf_buf_el_sizes = [in_elem_size];
+
             in_buf.numBufs = 1;
-            in_buf.bufs = [self.pcm_buf.as_ptr() as *mut c_void].as_mut_ptr();
-            in_buf.bufferIdentifiers =
-                [sys::AACENC_BufferIdentifier_IN_AUDIO_DATA as i32].as_mut_ptr();
-            in_buf.bufSizes = [self.pcm_buf.len() as sys::INT * in_elem_size].as_mut_ptr();
-            in_buf.bufElSizes = [in_elem_size].as_mut_ptr();
+            in_buf.bufs = in_buf_bufs.as_mut_ptr();
+            in_buf.bufferIdentifiers = in_buf_buffer_identifiers.as_mut_ptr();
+            in_buf.bufSizes = in_buf_buf_sizes.as_mut_ptr();
+            in_buf.bufElSizes = in_buf_buf_el_sizes.as_mut_ptr();
 
             let mut out_buf = out_buf.assume_init();
+
+            // in_buf_* と同様にこちらも変数を経由してポインタを取得する
+            let mut out_buf_bufs = [self.encode_buf.as_mut_ptr() as *mut c_void];
+            let mut out_buf_buffer_identifiers =
+                [sys::AACENC_BufferIdentifier_OUT_BITSTREAM_DATA as i32];
+            let mut out_buf_buf_sizes = [self.encode_buf.len() as sys::INT];
+            let mut out_buf_buf_el_sizes = [out_elem_size];
+
             out_buf.numBufs = 1;
-            out_buf.bufs = [self.encode_buf.as_mut_ptr() as *mut c_void].as_mut_ptr();
-            out_buf.bufferIdentifiers =
-                [sys::AACENC_BufferIdentifier_OUT_BITSTREAM_DATA as i32].as_mut_ptr();
-            out_buf.bufSizes = [self.encode_buf.len() as sys::INT].as_mut_ptr();
-            out_buf.bufElSizes = [out_elem_size].as_mut_ptr();
+            out_buf.bufs = out_buf_bufs.as_mut_ptr();
+            out_buf.bufferIdentifiers = out_buf_buffer_identifiers.as_mut_ptr();
+            out_buf.bufSizes = out_buf_buf_sizes.as_mut_ptr();
+            out_buf.bufElSizes = out_buf_buf_el_sizes.as_mut_ptr();
 
             let code = sys::aacEncEncode(
                 self.handle.0,

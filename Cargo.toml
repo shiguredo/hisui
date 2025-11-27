@@ -1,6 +1,6 @@
 [package]
 name = "hisui"
-version = "2025.3.0"
+version = "2025.3.1"
 edition = "2024"
 rust-version = "1.90"
 authors = ["Shiguredo Inc."]
@@ -28,7 +28,7 @@ orfail = "=1.1.0"
 shiguredo_mp4 = "=2025.2.0"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
-shiguredo_fdk_aac = { version = "=2025.1.0", path = "crates/shiguredo_fdk_aac/", optional = true }
+shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }
 shiguredo_libvpx = { version = "=2025.1.0", path = "crates/shiguredo_libvpx/", optional = true }
 shiguredo_libyuv = { version = "=2025.2.0", path = "crates/shiguredo_libyuv/" }
 shiguredo_nvcodec = { version = "=2025.2.1", path = "crates/shiguredo_nvcodec/", optional = true }
