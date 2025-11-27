@@ -1,0 +1,8 @@
+{
+  "connection_id": "red-noise",
+  "format": "mp4",
+  "audio": true,
+  "video": true,
+  "start_time_offset": 0,
+  "stop_time_offset": 1
+}
