@@ -198,7 +198,7 @@ impl Encoder {
 
             let mut out_buf = out_buf.assume_init();
 
-            // in_bufs_* と同様にこちらも変数を経由してポインタを取得する
+            // in_buf_* と同様にこちらも変数を経由してポインタを取得する
             let mut out_buf_bufs = [self.encode_buf.as_mut_ptr() as *mut c_void];
             let mut out_buf_buffer_identifiers =
                 [sys::AACENC_BufferIdentifier_OUT_BITSTREAM_DATA as i32];
