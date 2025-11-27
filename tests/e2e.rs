@@ -295,6 +295,19 @@ fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
         "testdata/e2e/simple_single_source_vp9_nvcodec/",
         CodecName::H264,
         Some(EngineName::Nvcodec),
+        CodecName::Opus,
+    )
+}
+
+/// simple_single_source_vp9 とほぼ同様だけどエンコードに AAC を指定している
+#[test]
+#[cfg(any(feature = "fdk-aac", target_os = "macos"))]
+fn simple_single_source_aac_encode() -> noargs::Result<()> {
+    test_simple_single_source_common(
+        "testdata/e2e/simple_single_source_aac_encode/",
+        CodecName::H264,
+        Some(EngineName::Libvpx),
+        CodecName::Aac,
     )
 }
 
