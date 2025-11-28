@@ -38,7 +38,7 @@ fn main() {
     .expect("failed to write metadata file");
 
     if std::env::var("DOCS_RS").is_ok() {
-        // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップして、
+        // Docs.rs 向けのビルドでは curl ができないので build.rs の処理はスキップして、
         // 代わりに、ドキュメント生成時に最低限必要な定義だけをダミーで出力している。
         //
         // See also: https://docs.rs/about/builds
@@ -55,8 +55,8 @@ fn main() {
         return;
     }
 
-    // 依存ライブラリのリポジトリを取得する
-    git_clone_external_lib(&out_build_dir);
+    // 依存ライブラリを source URL から curl でダウンロードする
+    download_external_lib(&out_build_dir);
 
     // 依存ライブラリをビルドする
     let success = Command::new(src_dir.join("Build/linux/build.sh"))
@@ -81,22 +81,51 @@ fn main() {
     println!("cargo::rustc-link-lib=static={LINK_NAME}");
 }
 
-// 外部ライブラリのリポジトリを git clone する
-fn git_clone_external_lib(build_dir: &Path) {
-    let (git_url, version) = get_git_url_and_version();
-    let success = Command::new("git")
-        .arg("clone")
-        .arg("--depth")
-        .arg("1")
-        .arg("--branch")
-        .arg(version)
-        .arg(git_url)
-        .current_dir(build_dir)
+// 外部ライブラリを source URL から curl でダウンロードして展開する
+fn download_external_lib(build_dir: &Path) {
+    let (_git_url, version) = get_git_url_and_version();
+    let source_url = get_source_url();
+
+    // tar.gz ファイルをダウンロード
+    let tar_gz_filename = format!("{LIB_NAME}-{version}.tar.gz");
+    let tar_gz_path = build_dir.join(&tar_gz_filename);
+
+    println!("Downloading {LIB_NAME} from {}", source_url);
+
+    let success = Command::new("curl")
+        .arg("-L")
+        .arg("-o")
+        .arg(&tar_gz_path)
+        .arg(&source_url)
         .status()
         .is_ok_and(|status| status.success());
+
     if !success {
-        panic!("failed to clone {LIB_NAME} repository");
+        panic!(
+            "failed to download {LIB_NAME} from source URL: {}",
+            source_url
+        );
     }
+
+    // tar.gz を展開
+    println!("Extracting {tar_gz_filename}");
+
+    let success = Command::new("tar")
+        .arg("-xzf")
+        .arg(&tar_gz_path)
+        .arg("-C")
+        .arg(build_dir)
+        .status()
+        .is_ok_and(|status| status.success());
+
+    if !success {
+        panic!("failed to extract {LIB_NAME} archive");
+    }
+
+    // ダウンロードしたファイルを削除
+    let _ = std::fs::remove_file(&tar_gz_path);
+
+    println!("Successfully downloaded and extracted {LIB_NAME}");
 }
 
 // Cargo.toml から依存ライブラリの Git URL とバージョンタグを取得する
@@ -120,5 +149,23 @@ fn get_git_url_and_version() -> (String, String) {
         panic!(
             "Cargo.toml does not contain a valid [package.metadata.external-dependencies.{LIB_NAME}] table"
         );
+    }
+}
+
+// Cargo.toml から source URL を取得する
+fn get_source_url() -> String {
+    let cargo_toml: toml::Value =
+        toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml");
+    if let Some(source_url) = cargo_toml
+        .get("package")
+        .and_then(|v| v.get("metadata"))
+        .and_then(|v| v.get("external-dependencies"))
+        .and_then(|v| v.get(LIB_NAME))
+        .and_then(|v| v.get("source"))
+        .and_then(|s| s.as_str())
+    {
+        source_url.to_string()
+    } else {
+        panic!("Cargo.toml does not contain a valid source URL for {LIB_NAME}");
     }
 }
