@@ -15,9 +15,6 @@ fn main() {
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("infallible"));
     let out_build_dir = out_dir.join("build/");
-    let src_dir = out_build_dir.join(LIB_NAME);
-    let input_header_path = src_dir.join("Source/API/EbSvtAv1Enc.h");
-    let output_lib_dir = src_dir.join("Bin/Release/");
     let output_metadata_path = out_dir.join("metadata.rs");
     let output_bindings_path = out_dir.join("bindings.rs");
     let _ = std::fs::remove_dir_all(&out_build_dir);
@@ -36,6 +33,10 @@ fn main() {
         ),
     )
     .expect("failed to write metadata file");
+
+    let src_dir = out_build_dir.join(format!("{LIB_NAME}-{version}"));
+    let input_header_path = src_dir.join("Source/API/EbSvtAv1Enc.h");
+    let output_lib_dir = src_dir.join("Bin/Release/");
 
     if std::env::var("DOCS_RS").is_ok() {
         // Docs.rs 向けのビルドでは curl ができないので build.rs の処理はスキップして、
