@@ -57,7 +57,7 @@ fn main() {
     }
 
     // 依存ライブラリを source URL から curl でダウンロードする
-    download_external_lib(&out_build_dir);
+    download_external_lib(&out_build_dir, &version);
 
     // 依存ライブラリをビルドする
     let success = Command::new(src_dir.join("Build/linux/build.sh"))
@@ -83,8 +83,7 @@ fn main() {
 }
 
 // 外部ライブラリを source URL から curl でダウンロードして展開する
-fn download_external_lib(build_dir: &Path) {
-    let (_git_url, version) = get_git_url_and_version();
+fn download_external_lib(build_dir: &Path, version: &str) {
     let source_url = get_source_url();
 
     // tar.gz ファイルをダウンロード
