@@ -1,7 +1,11 @@
 use std::{
+    fs::File,
+    io::Read,
     path::{Path, PathBuf},
     process::Command,
 };
+
+use sha2::Digest;
 
 // 依存ライブラリの名前
 const LIB_NAME: &str = "SVT-AV1";
@@ -85,6 +89,7 @@ fn main() {
 // 外部ライブラリを source URL から curl でダウンロードして展開する
 fn download_external_lib(build_dir: &Path, version: &str) {
     let source_url = get_source_url();
+    let expected_sha256 = get_expected_sha256();
 
     // tar.gz ファイルをダウンロード
     let tar_gz_filename = format!("{LIB_NAME}-{version}.tar.gz");
@@ -107,6 +112,9 @@ fn download_external_lib(build_dir: &Path, version: &str) {
         );
     }
 
+    // ダウンロードしたファイルのハッシュを検証
+    verify_sha256(&tar_gz_path, &expected_sha256).expect("SHA256 verification failed");
+
     // tar.gz を展開
     println!("Extracting {tar_gz_filename}");
 
@@ -126,6 +134,46 @@ fn download_external_lib(build_dir: &Path, version: &str) {
     let _ = std::fs::remove_file(&tar_gz_path);
 
     println!("Successfully downloaded and extracted {LIB_NAME}");
+}
+
+// ファイルの SHA256 ハッシュを計算して検証
+fn verify_sha256(file_path: &Path, expected_hash: &str) -> Result<(), String> {
+    use std::fmt::Write as FmtWrite;
+
+    println!("Verifying SHA256 hash for {}", file_path.display());
+
+    let mut file = File::open(file_path).map_err(|e| format!("failed to open file: {}", e))?;
+
+    // SHA256 を計算
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = [0; 8192];
+    loop {
+        let n = file
+            .read(&mut buffer)
+            .map_err(|e| format!("failed to read file: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        use sha2::Digest;
+        hasher.update(&buffer[..n]);
+    }
+
+    let result = hasher.finalize();
+    let mut calculated_hash = String::new();
+    for byte in result {
+        write!(&mut calculated_hash, "{:02x}", byte)
+            .map_err(|e| format!("formatting error: {}", e))?;
+    }
+
+    if calculated_hash.eq_ignore_ascii_case(expected_hash) {
+        println!("=> SHA256 hash verified: {}", calculated_hash);
+        Ok(())
+    } else {
+        Err(format!(
+            "SHA256 hash mismatch!\nExpected: {}\nCalculated: {}",
+            expected_hash, calculated_hash
+        ))
+    }
 }
 
 // Cargo.toml から依存ライブラリの Git URL とバージョンタグを取得する
@@ -167,5 +215,23 @@ fn get_source_url() -> String {
         source_url.to_string()
     } else {
         panic!("Cargo.toml does not contain a valid source URL for {LIB_NAME}");
+    }
+}
+
+// Cargo.toml から期待される SHA256 ハッシュを取得する
+fn get_expected_sha256() -> String {
+    let cargo_toml: toml::Value =
+        toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml");
+    if let Some(sha256) = cargo_toml
+        .get("package")
+        .and_then(|v| v.get("metadata"))
+        .and_then(|v| v.get("external-dependencies"))
+        .and_then(|v| v.get(LIB_NAME))
+        .and_then(|v| v.get("sha256"))
+        .and_then(|s| s.as_str())
+    {
+        sha256.to_string()
+    } else {
+        panic!("Cargo.toml does not contain a valid SHA256 hash for {LIB_NAME}");
     }
 }

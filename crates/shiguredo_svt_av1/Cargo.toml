@@ -16,6 +16,7 @@ log = "0.4.27"
 
 [build-dependencies]
 bindgen = "0.72.0"
+sha2 = "0.10.9"
 toml = "0.9.0"
 
 # 以降は外部ライブラリビルド用のメタデータ
@@ -24,3 +25,4 @@ toml = "0.9.0"
 git = "https://gitlab.com/AOMediaCodec/SVT-AV1.git" 
 source = "https://oss-mirrors.shiguredo.jp/SVT-AV1-v3.1.2.tar.gz"
 version = "v3.1.2"
+sha256 = "d0d73bfea42fdcc1222272bf2b0e2319e9df5574721298090c3d28315586ecb1"
