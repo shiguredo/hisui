@@ -103,6 +103,10 @@ with Hisui() as hisui:
 - [Apple Video Toolbox](https://developer.apple.com/documentation/videotoolbox) を利用したハードウェアアクセラレーターによる H.264 / H.265 のデコード/エンコードに対応しています
 - [NVIDIA Video Codec](https://developer.nvidia.com/nvidia-video-codec-sdk) を利用したハードウェアアクセラレーターによる AV1 / H.264 / H.265 のエンコードと、VP8 / VP9 / AV1 / H.264 / H.265 のデコードに対応しています
 
+### NVIDIA Video Codec
+
+NVIDIA Video Codec を利用する場合は NVIDIA ドライバー 570.0 以降が必要です。
+
 ### FDK-AAC
 
 > [!IMPORTANT]
