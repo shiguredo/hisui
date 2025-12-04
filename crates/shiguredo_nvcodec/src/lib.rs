@@ -56,6 +56,7 @@ impl Error {
 
     fn status_to_message(status: u32) -> Option<&'static str> {
         match status {
+            sys::_NVENCSTATUS_NV_ENC_SUCCESS => Some("Encoding completed successfully"),
             sys::_NVENCSTATUS_NV_ENC_ERR_NO_ENCODE_DEVICE => {
                 Some("No encode capable devices were detected")
             }
@@ -133,7 +134,7 @@ impl Error {
                 "Encode driver requires more output buffers to write an output bitstream. This is not a fatal error",
             ),
 
-            // 成功時や不明なステータスの場合は None を返す
+            // 不明なステータスの場合は None を返す
             _ => None,
         }
     }
@@ -357,6 +358,42 @@ impl CudaLibrary {
             nvcuvid_lib,
             nvenc_lib,
         })
+    }
+
+    /// CUDA エラー名を取得する
+    fn cu_get_error_name(&self, status: u32) -> Option<&'static std::ffi::CStr> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(u32, *mut *const std::os::raw::c_char) -> u32,
+            > = self.cuda_lib.get(b"cuGetErrorName").ok()?;
+
+            let mut s: *const std::os::raw::c_char = std::ptr::null();
+            let result_status = f(status, &mut s);
+
+            if result_status == sys::cudaError_enum_CUDA_SUCCESS && !s.is_null() {
+                Some(std::ffi::CStr::from_ptr(s))
+            } else {
+                None
+            }
+        }
+    }
+
+    /// CUDA エラー文字列を取得する
+    fn cu_get_error_string(&self, status: u32) -> Option<&'static std::ffi::CStr> {
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(u32, *mut *const std::os::raw::c_char) -> u32,
+            > = self.cuda_lib.get(b"cuGetErrorString").ok()?;
+
+            let mut s: *const std::os::raw::c_char = std::ptr::null();
+            let result_status = f(status, &mut s);
+
+            if result_status == sys::cudaError_enum_CUDA_SUCCESS && !s.is_null() {
+                Some(std::ffi::CStr::from_ptr(s))
+            } else {
+                None
+            }
+        }
     }
 
     /// CUDA コンテキストを作成する
