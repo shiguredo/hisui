@@ -147,11 +147,15 @@ impl std::fmt::Display for Error {
         if let Some(message) = Self::status_to_message(self.status) {
             write!(
                 f,
-                "{}() failed: {} ([status={}] {message})",
-                self.function, self.reason, self.status
+                "{}() failed[status={}]: {} ({message})",
+                self.function, self.status, self.reason,
             )?;
         } else {
-            write!(f, "{}() failed: {}", self.function, self.reason)?;
+            write!(
+                f,
+                "{}() failed[status={}]: {}",
+                self.function, self.status, self.reason,
+            )?;
         }
         Ok(())
     }
