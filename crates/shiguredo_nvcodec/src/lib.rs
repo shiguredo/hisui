@@ -56,7 +56,6 @@ impl Error {
 
     fn status_to_message(status: u32) -> Option<&'static str> {
         match status {
-            sys::_NVENCSTATUS_NV_ENC_SUCCESS => Some("Encoding completed successfully"),
             sys::_NVENCSTATUS_NV_ENC_ERR_NO_ENCODE_DEVICE => {
                 Some("No encode capable devices were detected")
             }
@@ -134,10 +133,8 @@ impl Error {
                 "Encode driver requires more output buffers to write an output bitstream. This is not a fatal error",
             ),
 
-            // 以下の場合は、有益な情報を出すことができないので None にする
-            sys::cudaError_enum_CUDA_SUCCESS => None,
-            sys::cudaError_enum_CUDA_ERROR_UNKNOWN => None,
-            _ => None,
+            // ステータスが不明だったり、有益な情報な追加情報を出すことができない場合は None を返す
+            sys::_NVENCSTATUS_NV_ENC_SUCCESS | _ => None,
         }
     }
 }
