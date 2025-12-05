@@ -9,6 +9,7 @@ use std::sync::{Arc, LazyLock};
 
 mod decode;
 mod encode;
+mod error;
 mod sys;
 
 pub use decode::{DecodedFrame, Decoder, DecoderConfig};
