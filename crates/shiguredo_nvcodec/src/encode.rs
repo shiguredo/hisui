@@ -403,8 +403,7 @@ impl Encoder {
                     encode_config.encodeCodecConfig.av1Config.idrPeriod = idr_period;
                 }
                 _ => {
-                    return Err(Error::new(
-                        sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
+                    return Err(Error::new_custom(
                         "initialize_encoder",
                         "unsupported codec GUID",
                     ));
@@ -463,11 +462,7 @@ impl Encoder {
         let expected_size = (self.width * self.height * 3 / 2) as usize;
 
         if nv12_data.len() != expected_size {
-            return Err(Error::new(
-                sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
-                "encode",
-                "invalid NV12 data size",
-            ));
+            return Err(Error::new_custom("encode", "invalid NV12 data size"));
         }
 
         self.lib
