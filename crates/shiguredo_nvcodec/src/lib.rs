@@ -233,6 +233,10 @@ impl CudaLibrary {
                 // NOTE: 無限再帰を避けるために、ここでは Error::check_cuda() は使わない
                 return None;
             }
+            if error_name.is_null() {
+                // ここには来ないはずだけど保守的に NULL チェックを入れておく
+                return None;
+            }
 
             let error_str = std::ffi::CStr::from_ptr(error_name as *const i8)
                 .to_string_lossy()
@@ -251,6 +255,10 @@ impl CudaLibrary {
             let status = f(code, &mut error_msg);
             if status != sys::cudaError_enum_CUDA_SUCCESS {
                 // NOTE: 無限再帰を避けるために、ここでは Error::check_cuda() は使わない
+                return None;
+            }
+            if error_msg.is_null() {
+                // ここには来ないはずだけど保守的に NULL チェックを入れておく
                 return None;
             }
 
