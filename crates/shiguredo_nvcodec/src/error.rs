@@ -262,6 +262,24 @@ mod tests {
     }
 
     #[test]
+    fn test_check_cuda_error_with_invalid_code() {
+        // CUDA では定義されていなさそうなエラーコードを使った場合のテスト
+        // (もし将来的なバージョン更新によって存在するようになったら、適宜値を修正すること）
+        let invalid_code = 99999;
+        let result = Error::check_cuda(invalid_code, "cuda_func");
+        let error = result.expect_err("not err");
+
+        assert_eq!(error.status_code, Some(invalid_code));
+        assert_eq!(error.status_name, None);
+        assert_eq!(error.status_message, None);
+
+        assert_eq!(
+            error.to_string(),
+            "cuda_func() failed[status={invalid_code}"
+        );
+    }
+
+    #[test]
     fn test_check_nvenc_success() {
         let result = Error::check_nvenc(sys::_NVENCSTATUS_NV_ENC_SUCCESS, "nvenc_func");
         assert!(result.is_ok());
