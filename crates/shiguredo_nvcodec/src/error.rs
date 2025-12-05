@@ -1,3 +1,5 @@
+use crate::sys;
+
 /// エラー
 #[derive(Debug, Clone)]
 pub struct Error {
@@ -9,12 +11,32 @@ pub struct Error {
 
 impl Error {
     // CUDA や NVIDIA Video Codec SDK ではなく、この crate 起因のエラーを構築するための関数
-    pub(crate) fn custom(function: &'static str, message: &'static str) -> Self {
+    pub(crate) fn new_custom(function: &'static str, message: &'static str) -> Self {
         Self {
             function,
             status_code: None,
             status_name: None,
             status_message: Some(message),
+        }
+    }
+
+    // CUDA 関連のエラーを生成するための関数
+    pub(crate) fn new_nvenc(function: &'static str, code: sys::CUresult) -> Self {
+        Self {
+            function,
+            status_code: Some(code as u32),
+            status_name: None,
+            status_message: None,
+        }
+    }
+
+    // NVENC 関連のエラーを生成するための関数（CUDA とはまたエラーコードの空間が別）
+    pub(crate) fn new_nvenc(function: &'static str, code: sys::NVENCSTATUS) -> Self {
+        Self {
+            function,
+            status_code: Some(code as u32),
+            status_name: None,
+            status_message: None,
         }
     }
 }
