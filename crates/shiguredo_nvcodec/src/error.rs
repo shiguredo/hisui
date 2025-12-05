@@ -225,3 +225,55 @@ fn get_nvencstatus_message(status: u32) -> Option<&'static str> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_custom_display() {
+        let error = Error::new_custom("test_func", "custom error message");
+        assert_eq!(
+            error.to_string(),
+            "test_func() failed: custom error message"
+        );
+    }
+
+    #[test]
+    fn test_check_cuda_success() {
+        let result = Error::check_cuda(sys::cudaError_enum_CUDA_SUCCESS, "cuda_func");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_cuda_error() {
+        let result = Error::check_cuda(1, "cuda_func");
+        let error = result.expect_err("not err");
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("cuda_func() failed[status=1]:")
+        );
+
+        // 具体的な内容は CUDA のバージョンなどに依存するので、存在することだけを確認する
+        assert!(error.status_name.is_some());
+        assert!(error.status_message.is_some());
+    }
+
+    #[test]
+    fn test_check_nvenc_success() {
+        let result = Error::check_nvenc(sys::_NVENCSTATUS_NV_ENC_SUCCESS, "nvenc_func");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_nvenc_error() {
+        let result = Error::new_nvenc(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM, "nvenc_func");
+        let error = result.expect_err("not err");
+        assert_eq!(
+            error.to_string(),
+            "nvenc_func() failed[status=2]: One or more of the parameter passed to the API call is invalid (NV_ENC_ERR_INVALID_PARAM)"
+        );
+    }
+}
