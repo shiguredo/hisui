@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_check_nvenc_error() {
-        let result = Error::new_nvenc(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM, "nvenc_func");
+        let result = Error::check_nvenc(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM, "nvenc_func");
         let error = result.expect_err("not err");
         assert_eq!(
             error.to_string(),
