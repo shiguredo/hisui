@@ -83,6 +83,16 @@ impl CudaLibrary {
 
         // 必要な関数が存在するか確認
         unsafe {
+            // エラー関連
+            let _: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> = cuda_lib
+                .get(b"cuGetErrorName")
+                .map_err(|_| Error::new_custom("CudaLibrary::load", "cuGetErrorName not found"))?;
+
+            let _: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> =
+                cuda_lib.get(b"cuGetErrorString").map_err(|_| {
+                    Error::new_custom("CudaLibrary::load", "cuGetErrorString not found")
+                })?;
+
             // コンテキスト管理関連
             let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext, u32, i32) -> u32> =
                 cuda_lib.get(b"cuCtxCreate_v2").map_err(|_| {
@@ -209,6 +219,44 @@ impl CudaLibrary {
             nvcuvid_lib,
             nvenc_lib,
         })
+    }
+
+    /// エラーコードに対応する名前を取得する
+    fn cu_get_error_name(&self, code: u32) -> Result<String, Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> = self
+                .cuda_lib
+                .get(b"cuGetErrorName")
+                .expect("cuGetErrorName should exist (checked in load())");
+
+            let mut error_name: *const u8 = std::ptr::null();
+            let status = f(code, &mut error_name);
+            Error::check_cuda(status, "cuGetErrorName")?;
+
+            let error_str = std::ffi::CStr::from_ptr(error_name as *const i8)
+                .to_string_lossy()
+                .into_owned();
+            Ok(error_str)
+        }
+    }
+
+    /// エラーコードに対応するメッセージを取得する
+    fn cu_get_error_string(&self, code: u32) -> Result<String, Error> {
+        unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> = self
+                .cuda_lib
+                .get(b"cuGetErrorString")
+                .expect("cuGetErrorString should exist (checked in load())");
+
+            let mut error_msg: *const u8 = std::ptr::null();
+            let status = f(code, &mut error_msg);
+            Error::check_cuda(status, "cuGetErrorString")?;
+
+            let error_str = std::ffi::CStr::from_ptr(error_msg as *const i8)
+                .to_string_lossy()
+                .into_owned();
+            Ok(error_str)
+        }
     }
 
     /// CUDA コンテキストを作成する
