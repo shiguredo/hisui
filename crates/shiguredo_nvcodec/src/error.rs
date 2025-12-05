@@ -275,7 +275,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "cuda_func() failed[status={invalid_code}"
+            format!("cuda_func() failed[status={invalid_code}")
         );
     }
 
