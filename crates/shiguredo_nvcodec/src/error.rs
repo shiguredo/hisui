@@ -1,4 +1,4 @@
-use std::cow::Cow;
+use std::borrow::Cow;
 
 use crate::{CudaLibrary, sys};
 
@@ -29,7 +29,7 @@ impl Error {
         let mut status_message = None;
         if let Ok(lib) = CudaLibrary::load() {
             status_name = lib.cu_get_error_name(code).map(Cow::Onwed);
-            status_message = lib.cu_get_error_message(code).map(Cow::Onwed);
+            status_message = lib.cu_get_error_string(code).map(Cow::Onwed);
         }
 
         Self {
