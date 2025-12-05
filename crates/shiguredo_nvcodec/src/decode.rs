@@ -175,8 +175,7 @@ impl Decoder {
     /// デコード済みのフレームを取り出す
     pub fn next_frame(&mut self) -> Result<Option<DecodedFrame>, Error> {
         if self.state.is_poisoned() {
-            return Err(Error::new(
-                sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+            return Err(Error::new_custom(
                 "next_frame",
                 "decoder state is poisoned (a thread panicked while holding the lock)",
             ));
@@ -346,8 +345,7 @@ fn handle_picture_decode_inner(
     pic_params: &sys::CUVIDPICPARAMS,
 ) -> Result<(), Error> {
     if state.decoder.is_null() {
-        return Err(Error::new(
-            sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+        return Err(Error::new_custom(
             "handle_picture_decode",
             "decoder not initialized",
         ));
@@ -392,8 +390,7 @@ fn handle_picture_display_inner(
     disp_info: &sys::CUVIDPARSERDISPINFO,
 ) -> Result<(), Error> {
     if state.decoder.is_null() {
-        return Err(Error::new(
-            sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+        return Err(Error::new_custom(
             "handle_picture_display",
             "decoder not initialized",
         ));
