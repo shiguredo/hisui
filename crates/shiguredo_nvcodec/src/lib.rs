@@ -222,40 +222,42 @@ impl CudaLibrary {
     }
 
     /// エラーコードに対応する名前を取得する
-    fn cu_get_error_name(&self, code: u32) -> Result<String, Error> {
+    fn cu_get_error_name(&self, code: u32) -> Option<String> {
         unsafe {
-            let f: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> = self
-                .cuda_lib
-                .get(b"cuGetErrorName")
-                .expect("cuGetErrorName should exist (checked in load())");
+            let f: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> =
+                self.cuda_lib.get(b"cuGetErrorName").ok()?;
 
             let mut error_name: *const u8 = std::ptr::null();
             let status = f(code, &mut error_name);
-            Error::check_cuda(status, "cuGetErrorName")?;
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                // NOTE: 無限再帰を避けるために、ここでは Error::check_cuda() は使わない
+                return None;
+            }
 
             let error_str = std::ffi::CStr::from_ptr(error_name as *const i8)
                 .to_string_lossy()
                 .into_owned();
-            Ok(error_str)
+            Some(error_str)
         }
     }
 
     /// エラーコードに対応するメッセージを取得する
-    fn cu_get_error_string(&self, code: u32) -> Result<String, Error> {
+    fn cu_get_error_string(&self, code: u32) -> Option<String> {
         unsafe {
-            let f: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> = self
-                .cuda_lib
-                .get(b"cuGetErrorString")
-                .expect("cuGetErrorString should exist (checked in load())");
+            let f: libloading::Symbol<unsafe extern "C" fn(u32, *mut *const u8) -> u32> =
+                self.cuda_lib.get(b"cuGetErrorString").ok()?;
 
             let mut error_msg: *const u8 = std::ptr::null();
             let status = f(code, &mut error_msg);
-            Error::check_cuda(status, "cuGetErrorString")?;
+            if status != sys::cudaError_enum_CUDA_SUCCESS {
+                // NOTE: 無限再帰を避けるために、ここでは Error::check_cuda() は使わない
+                return None;
+            }
 
             let error_str = std::ffi::CStr::from_ptr(error_msg as *const i8)
                 .to_string_lossy()
                 .into_owned();
-            Ok(error_str)
+            Some(error_str)
         }
     }
 

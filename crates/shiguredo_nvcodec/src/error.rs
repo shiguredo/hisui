@@ -1,12 +1,14 @@
-use crate::sys;
+use std::cow::Cow;
+
+use crate::{CudaLibrary, sys};
 
 /// エラー
 #[derive(Debug, Clone)]
 pub struct Error {
     function: &'static str,
     status_code: Option<u32>,
-    status_name: Option<&'static str>,
-    status_message: Option<&'static str>,
+    status_name: Option<Cow<'static, str>>,
+    status_message: Option<Cow<'static, str>>,
 }
 
 impl Error {
@@ -16,17 +18,25 @@ impl Error {
             function,
             status_code: None,
             status_name: None,
-            status_message: Some(message),
+            status_message: Some(Cow::Borrowed(message)),
         }
     }
 
     // CUDA 関連のエラーを生成するための関数
     fn new_cuda(code: u32, function: &'static str) -> Self {
+        // 可能なら詳細情報を取得する
+        let mut status_name = None;
+        let mut status_message = None;
+        if let Ok(lib) = CudaLibrary::load() {
+            status_name = lib.cu_get_error_name(code).map(Cow::Onwed);
+            status_message = lib.cu_get_error_message(code).map(Cow::Onwed);
+        }
+
         Self {
             function,
             status_code: Some(code),
-            status_name: None,
-            status_message: None,
+            status_name,
+            status_message,
         }
     }
 
@@ -44,8 +54,8 @@ impl Error {
         Self {
             function,
             status_code: Some(code),
-            status_name: get_nvencstatus_name(code),
-            status_message: get_nvencstatus_message(code),
+            status_name: get_nvencstatus_name(code).map(Cow::Borrowed),
+            status_message: get_nvencstatus_message(code).map(Cow::Borrowed),
         }
     }
 
@@ -66,13 +76,15 @@ impl std::fmt::Display for Error {
         if let Some(code) = self.status_code {
             write!(f, "[status={code}]")?;
         }
-        write!(f, ": ")?;
+        if self.status_name.is_some() || self.status_message.is_some() {
+            write!(f, ": ")?;
+        }
 
-        if let Some(message) = self.status_message {
+        if let Some(message) = &self.status_message {
             write!(f, "{message}")?;
         }
 
-        if let Some(name) = self.status_name {
+        if let Some(name) = &self.status_name {
             if self.status_message.is_some() {
                 write!(f, " ({name})")?;
             } else {
