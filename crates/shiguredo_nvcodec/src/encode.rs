@@ -378,8 +378,7 @@ impl Encoder {
             // ビットレート設定
             if config.rate_control_mode != RateControlMode::ConstQp {
                 let bitrate = config.target_bitrate.ok_or_else(|| {
-                    Error::new(
-                        sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
+                    Error::new_custom(
                         "initialize_encoder",
                         "target_bitrate must be specified when not using ConstQp mode",
                     )

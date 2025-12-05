@@ -35,7 +35,7 @@ impl Error {
         if status == sys::cudaError_enum_CUDA_SUCCESS {
             Ok(())
         } else {
-            Err(Self::new_cude(status, function))
+            Err(Self::new_cuda(status, function))
         }
     }
 
