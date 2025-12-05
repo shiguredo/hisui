@@ -21,7 +21,7 @@ impl Error {
     }
 
     // CUDA 関連のエラーを生成するための関数
-    pub(crate) fn new_cuda(function: &'static str, code: sys::CUresult) -> Self {
+    fn new_cuda(code: sys::CUresult, function: &'static str) -> Self {
         Self {
             function,
             status_code: Some(code as u32),
@@ -30,13 +30,34 @@ impl Error {
         }
     }
 
+    /// CUDA エラーをチェックする
+    pub(crate) fn check_cuda(status: sys::CUresult, function: &'static str) -> Result<(), Error> {
+        if status == sys::cudaError_enum_CUDA_SUCCESS {
+            Ok(())
+        } else {
+            Err(Self::new_cude(status, function))
+        }
+    }
+
     // NVENC 関連のエラーを生成するための関数（CUDA とはまたエラーコードの空間が別）
-    pub(crate) fn new_nvenc(function: &'static str, code: sys::NVENCSTATUS) -> Self {
+    fn new_nvenc(code: sys::NVENCSTATUS, function: &'static str) -> Self {
         Self {
             function,
             status_code: Some(code as u32),
             status_name: get_nvencstatus_name(code),
             status_message: get_nvencstatus_message(code),
+        }
+    }
+
+    /// NVENC エラーをチェックする
+    pub(crate) fn check_nvenc(
+        status: sys::NVENCSTATUS,
+        function: &'static str,
+    ) -> Result<(), Error> {
+        if status == sys::_NVENCSTATUS_NV_ENC_SUCCESS {
+            Ok(())
+        } else {
+            Err(Self::new_nvenc(status, function))
         }
     }
 }

@@ -16,58 +16,10 @@ pub use decode::{DecodedFrame, Decoder, DecoderConfig};
 pub use encode::{
     EncodedFrame, Encoder, EncoderConfig, PictureType, Preset, Profile, RateControlMode, TuningInfo,
 };
+pub use error::Error;
 
 /// ビルド時に参照したバージョン
 pub const BUILD_VERSION: &str = sys::BUILD_METADATA_VERSION;
-
-/// エラー
-#[derive(Debug, Clone)]
-pub struct Error {
-    status: u32, // NVENCSTATUS は u32 型
-    function: &'static str,
-    reason: &'static str,
-}
-
-impl Error {
-    fn new(status: u32, function: &'static str, reason: &'static str) -> Self {
-        Self {
-            status,
-            function,
-            reason,
-        }
-    }
-
-    /// CUDA エラーをチェックする
-    fn check_cuda(status: u32, function: &'static str, reason: &'static str) -> Result<(), Error> {
-        if status == sys::cudaError_enum_CUDA_SUCCESS {
-            Ok(())
-        } else {
-            Err(Self::new(status, function, reason))
-        }
-    }
-
-    /// NVENC エラーをチェックする
-    fn check_nvenc(status: u32, function: &'static str, reason: &'static str) -> Result<(), Error> {
-        if status == sys::_NVENCSTATUS_NV_ENC_SUCCESS {
-            Ok(())
-        } else {
-            Err(Self::new(status, function, reason))
-        }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}() failed: status={}, reason={}",
-            self.function, self.status, self.reason
-        )?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// CUDA ライブラリのラッパー構造体
 #[derive(Debug, Clone)]
@@ -90,8 +42,7 @@ impl CudaLibrary {
             let cuda_lib = libloading::Library::new("libcuda.so.1")
                 .map(Arc::new)
                 .map_err(|_| {
-                    Error::new(
-                        sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+                    Error::new_custom(
                         "CudaLibrary::load",
                         "failed to load CUDA library (libcuda.so.1 not found)",
                     )
@@ -108,7 +59,7 @@ impl CudaLibrary {
                 })?;
             let flags = 0;
             let status = cu_init(flags);
-            Error::check_cuda(status, "cuInit", "failed to initialize CUDA driver")?;
+            Error::check_cuda(status, "cuInit")?;
 
             // NVCUVID ライブラリをロード（デコード用）
             let nvcuvid_lib = libloading::Library::new("libnvcuvid.so.1")
@@ -141,96 +92,99 @@ impl CudaLibrary {
         unsafe {
             // コンテキスト管理関連
             let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext, u32, i32) -> u32> =
-                cuda_lib
-                    .get(b"cuCtxCreate_v2")
-                    .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxCreate_v2 not found"))?;
+                cuda_lib.get(b"cuCtxCreate_v2").map_err(|_| {
+                    Error::new_custom("CudaLibrary::load", "cuCtxCreate_v2 not found")
+                })?;
 
             let _: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = cuda_lib
                 .get(b"cuCtxDestroy_v2")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxDestroy_v2 not found"))?;
+                .map_err(|_| Error::new_custom("CudaLibrary::load", "cuCtxDestroy_v2 not found"))?;
 
-            let _: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> = cuda_lib
-                .get(b"cuCtxPushCurrent_v2")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxPushCurrent_v2 not found"))?;
+            let _: libloading::Symbol<unsafe extern "C" fn(sys::CUcontext) -> u32> =
+                cuda_lib.get(b"cuCtxPushCurrent_v2").map_err(|_| {
+                    Error::new_custom("CudaLibrary::load", "cuCtxPushCurrent_v2 not found")
+                })?;
 
-            let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext) -> u32> = cuda_lib
-                .get(b"cuCtxPopCurrent_v2")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxPopCurrent_v2 not found"))?;
+            let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUcontext) -> u32> =
+                cuda_lib.get(b"cuCtxPopCurrent_v2").map_err(|_| {
+                    Error::new_custom("CudaLibrary::load", "cuCtxPopCurrent_v2 not found")
+                })?;
 
-            let _: libloading::Symbol<unsafe extern "C" fn() -> u32> = cuda_lib
-                .get(b"cuCtxSynchronize")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuCtxSynchronize not found"))?;
+            let _: libloading::Symbol<unsafe extern "C" fn() -> u32> =
+                cuda_lib.get(b"cuCtxSynchronize").map_err(|_| {
+                    Error::new_custom("CudaLibrary::load", "cuCtxSynchronize not found")
+                })?;
 
             // メモリ管理関連
             let _: libloading::Symbol<unsafe extern "C" fn(*mut sys::CUdeviceptr, usize) -> u32> =
-                cuda_lib
-                    .get(b"cuMemAlloc_v2")
-                    .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemAlloc_v2 not found"))?;
+                cuda_lib.get(b"cuMemAlloc_v2").map_err(|_| {
+                    Error::new_custom("CudaLibrary::load", "cuMemAlloc_v2 not found")
+                })?;
 
             let _: libloading::Symbol<unsafe extern "C" fn(sys::CUdeviceptr) -> u32> = cuda_lib
                 .get(b"cuMemFree_v2")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemFree_v2 not found"))?;
+                .map_err(|_| Error::new_custom("CudaLibrary::load", "cuMemFree_v2 not found"))?;
 
             let _: libloading::Symbol<
                 unsafe extern "C" fn(sys::CUdeviceptr, *const c_void, usize) -> u32,
             > = cuda_lib
                 .get(b"cuMemcpyHtoD_v2")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemcpyHtoD_v2 not found"))?;
+                .map_err(|_| Error::new_custom("CudaLibrary::load", "cuMemcpyHtoD_v2 not found"))?;
 
             let _: libloading::Symbol<
                 unsafe extern "C" fn(*mut c_void, sys::CUdeviceptr, usize) -> u32,
             > = cuda_lib
                 .get(b"cuMemcpyDtoH_v2")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuMemcpyDtoH_v2 not found"))?;
+                .map_err(|_| Error::new_custom("CudaLibrary::load", "cuMemcpyDtoH_v2 not found"))?;
 
             // NVCUVID 関連
             let _: libloading::Symbol<
                 unsafe extern "C" fn(*mut sys::CUvideoctxlock, sys::CUcontext) -> u32,
-            > = nvcuvid_lib
-                .get(b"cuvidCtxLockCreate")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuvidCtxLockCreate not found"))?;
+            > = nvcuvid_lib.get(b"cuvidCtxLockCreate").map_err(|_| {
+                Error::new_custom("CudaLibrary::load", "cuvidCtxLockCreate not found")
+            })?;
 
             let _: libloading::Symbol<unsafe extern "C" fn(sys::CUvideoctxlock) -> u32> =
                 nvcuvid_lib.get(b"cuvidCtxLockDestroy").map_err(|_| {
-                    Error::new(0, "CudaLibrary::load", "cuvidCtxLockDestroy not found")
+                    Error::new_custom("CudaLibrary::load", "cuvidCtxLockDestroy not found")
                 })?;
 
             let _: libloading::Symbol<
                 unsafe extern "C" fn(*mut sys::CUvideoparser, *mut sys::CUVIDPARSERPARAMS) -> u32,
             > = nvcuvid_lib.get(b"cuvidCreateVideoParser").map_err(|_| {
-                Error::new(0, "CudaLibrary::load", "cuvidCreateVideoParser not found")
+                Error::new_custom("CudaLibrary::load", "cuvidCreateVideoParser not found")
             })?;
 
             let _: libloading::Symbol<unsafe extern "C" fn(sys::CUvideoparser) -> u32> =
                 nvcuvid_lib.get(b"cuvidDestroyVideoParser").map_err(|_| {
-                    Error::new(0, "CudaLibrary::load", "cuvidDestroyVideoParser not found")
+                    Error::new_custom("CudaLibrary::load", "cuvidDestroyVideoParser not found")
                 })?;
 
             let _: libloading::Symbol<
                 unsafe extern "C" fn(sys::CUvideoparser, *mut sys::CUVIDSOURCEDATAPACKET) -> u32,
-            > = nvcuvid_lib
-                .get(b"cuvidParseVideoData")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuvidParseVideoData not found"))?;
+            > = nvcuvid_lib.get(b"cuvidParseVideoData").map_err(|_| {
+                Error::new_custom("CudaLibrary::load", "cuvidParseVideoData not found")
+            })?;
 
             let _: libloading::Symbol<
                 unsafe extern "C" fn(
                     *mut sys::CUvideodecoder,
                     *mut sys::CUVIDDECODECREATEINFO,
                 ) -> u32,
-            > = nvcuvid_lib
-                .get(b"cuvidCreateDecoder")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuvidCreateDecoder not found"))?;
+            > = nvcuvid_lib.get(b"cuvidCreateDecoder").map_err(|_| {
+                Error::new_custom("CudaLibrary::load", "cuvidCreateDecoder not found")
+            })?;
 
             let _: libloading::Symbol<unsafe extern "C" fn(sys::CUvideodecoder) -> u32> =
                 nvcuvid_lib.get(b"cuvidDestroyDecoder").map_err(|_| {
-                    Error::new(0, "CudaLibrary::load", "cuvidDestroyDecoder not found")
+                    Error::new_custom("CudaLibrary::load", "cuvidDestroyDecoder not found")
                 })?;
 
             let _: libloading::Symbol<
                 unsafe extern "C" fn(sys::CUvideodecoder, *mut sys::CUVIDPICPARAMS) -> u32,
-            > = nvcuvid_lib
-                .get(b"cuvidDecodePicture")
-                .map_err(|_| Error::new(0, "CudaLibrary::load", "cuvidDecodePicture not found"))?;
+            > = nvcuvid_lib.get(b"cuvidDecodePicture").map_err(|_| {
+                Error::new_custom("CudaLibrary::load", "cuvidDecodePicture not found")
+            })?;
 
             let _: libloading::Symbol<
                 unsafe extern "C" fn(
@@ -241,23 +195,19 @@ impl CudaLibrary {
                     *mut sys::CUVIDPROCPARAMS,
                 ) -> u32,
             > = nvcuvid_lib.get(b"cuvidMapVideoFrame64").map_err(|_| {
-                Error::new(0, "CudaLibrary::load", "cuvidMapVideoFrame64 not found")
+                Error::new_custom("CudaLibrary::load", "cuvidMapVideoFrame64 not found")
             })?;
 
             let _: libloading::Symbol<unsafe extern "C" fn(sys::CUvideodecoder, u64) -> u32> =
                 nvcuvid_lib.get(b"cuvidUnmapVideoFrame64").map_err(|_| {
-                    Error::new(0, "CudaLibrary::load", "cuvidUnmapVideoFrame64 not found")
+                    Error::new_custom("CudaLibrary::load", "cuvidUnmapVideoFrame64 not found")
                 })?;
 
             // NVENC 関連
             let _: libloading::Symbol<
                 unsafe extern "C" fn(*mut sys::NV_ENCODE_API_FUNCTION_LIST) -> u32,
             > = nvenc_lib.get(b"NvEncodeAPICreateInstance").map_err(|_| {
-                Error::new(
-                    0,
-                    "CudaLibrary::load",
-                    "NvEncodeAPICreateInstance not found",
-                )
+                Error::new_custom("CudaLibrary::load", "NvEncodeAPICreateInstance not found")
             })?;
         }
 
@@ -281,7 +231,7 @@ impl CudaLibrary {
                     .get(b"cuCtxCreate_v2")
                     .expect("cuCtxCreate_v2 should exist (checked in load())");
             let status = f(ctx, flags, device);
-            Error::check_cuda(status, "cuCtxCreate_v2", "failed to create CUDA context")
+            Error::check_cuda(status, "cuCtxCreate_v2")
         }
     }
 
@@ -293,7 +243,7 @@ impl CudaLibrary {
                 .get(b"cuCtxDestroy_v2")
                 .expect("cuCtxDestroy_v2 should exist (checked in load())");
             let status = f(ctx);
-            Error::check_cuda(status, "cuCtxDestroy_v2", "failed to destroy CUDA context")
+            Error::check_cuda(status, "cuCtxDestroy_v2")
         }
     }
 
@@ -305,7 +255,7 @@ impl CudaLibrary {
                 .get(b"cuCtxPushCurrent_v2")
                 .expect("cuCtxPushCurrent_v2 should exist (checked in load())");
             let status = f(ctx);
-            Error::check_cuda(status, "cuCtxPushCurrent_v2", "failed to push CUDA context")
+            Error::check_cuda(status, "cuCtxPushCurrent_v2")
         }
     }
 
@@ -317,7 +267,7 @@ impl CudaLibrary {
                 .get(b"cuCtxPopCurrent_v2")
                 .expect("cuCtxPopCurrent_v2 should exist (checked in load())");
             let status = f(ctx);
-            Error::check_cuda(status, "cuCtxPopCurrent_v2", "failed to pop CUDA context")
+            Error::check_cuda(status, "cuCtxPopCurrent_v2")
         }
     }
 
@@ -329,11 +279,7 @@ impl CudaLibrary {
                 .get(b"cuCtxSynchronize")
                 .expect("cuCtxSynchronize should exist (checked in load())");
             let status = f();
-            Error::check_cuda(
-                status,
-                "cuCtxSynchronize",
-                "failed to synchronize CUDA context",
-            )
+            Error::check_cuda(status, "cuCtxSynchronize")
         }
     }
 
@@ -345,7 +291,7 @@ impl CudaLibrary {
                     .get(b"cuMemAlloc_v2")
                     .expect("cuMemAlloc_v2 should exist (checked in load())");
             let status = f(dptr, bytesize);
-            Error::check_cuda(status, "cuMemAlloc_v2", "failed to allocate device memory")
+            Error::check_cuda(status, "cuMemAlloc_v2")
         }
     }
 
@@ -357,7 +303,7 @@ impl CudaLibrary {
                 .get(b"cuMemFree_v2")
                 .expect("cuMemFree_v2 should exist (checked in load())");
             let status = f(dptr);
-            Error::check_cuda(status, "cuMemFree_v2", "failed to free device memory")
+            Error::check_cuda(status, "cuMemFree_v2")
         }
     }
 
@@ -376,11 +322,7 @@ impl CudaLibrary {
                 .get(b"cuMemcpyHtoD_v2")
                 .expect("cuMemcpyHtoD_v2 should exist (checked in load())");
             let status = f(dst_device, src_host, byte_count);
-            Error::check_cuda(
-                status,
-                "cuMemcpyHtoD_v2",
-                "failed to copy memory from host to device",
-            )
+            Error::check_cuda(status, "cuMemcpyHtoD_v2")
         }
     }
 
@@ -399,11 +341,7 @@ impl CudaLibrary {
                 .get(b"cuMemcpyDtoH_v2")
                 .expect("cuMemcpyDtoH_v2 should exist (checked in load())");
             let status = f(dst_host, src_device, byte_count);
-            Error::check_cuda(
-                status,
-                "cuMemcpyDtoH_v2",
-                "failed to copy memory from device to host",
-            )
+            Error::check_cuda(status, "cuMemcpyDtoH_v2")
         }
     }
 
@@ -442,11 +380,7 @@ impl CudaLibrary {
                 .get(b"cuvidCtxLockCreate")
                 .expect("cuvidCtxLockCreate should exist (checked in load())");
             let status = f(lock, ctx);
-            Error::check_cuda(
-                status,
-                "cuvidCtxLockCreate",
-                "failed to create context lock",
-            )
+            Error::check_cuda(status, "cuvidCtxLockCreate")
         }
     }
 
@@ -458,11 +392,7 @@ impl CudaLibrary {
                 .get(b"cuvidCtxLockDestroy")
                 .expect("cuvidCtxLockDestroy should exist (checked in load())");
             let status = f(lock);
-            Error::check_cuda(
-                status,
-                "cuvidCtxLockDestroy",
-                "failed to destroy context lock",
-            )
+            Error::check_cuda(status, "cuvidCtxLockDestroy")
         }
     }
 
@@ -480,11 +410,7 @@ impl CudaLibrary {
                 .get(b"cuvidCreateVideoParser")
                 .expect("cuvidCreateVideoParser should exist (checked in load())");
             let status = f(parser, params);
-            Error::check_cuda(
-                status,
-                "cuvidCreateVideoParser",
-                "failed to create video parser",
-            )
+            Error::check_cuda(status, "cuvidCreateVideoParser")
         }
     }
 
@@ -496,11 +422,7 @@ impl CudaLibrary {
                 .get(b"cuvidDestroyVideoParser")
                 .expect("cuvidDestroyVideoParser should exist (checked in load())");
             let status = f(parser);
-            Error::check_cuda(
-                status,
-                "cuvidDestroyVideoParser",
-                "failed to destroy video parser",
-            )
+            Error::check_cuda(status, "cuvidDestroyVideoParser")
         }
     }
 
@@ -518,7 +440,7 @@ impl CudaLibrary {
                 .get(b"cuvidParseVideoData")
                 .expect("cuvidParseVideoData should exist (checked in load())");
             let status = f(parser, packet);
-            Error::check_cuda(status, "cuvidParseVideoData", "failed to parse video data")
+            Error::check_cuda(status, "cuvidParseVideoData")
         }
     }
 
@@ -539,7 +461,7 @@ impl CudaLibrary {
                 .get(b"cuvidCreateDecoder")
                 .expect("cuvidCreateDecoder should exist (checked in load())");
             let status = f(decoder, create_info);
-            Error::check_cuda(status, "cuvidCreateDecoder", "failed to create decoder")
+            Error::check_cuda(status, "cuvidCreateDecoder")
         }
     }
 
@@ -551,7 +473,7 @@ impl CudaLibrary {
                 .get(b"cuvidDestroyDecoder")
                 .expect("cuvidDestroyDecoder should exist (checked in load())");
             let status = f(decoder);
-            Error::check_cuda(status, "cuvidDestroyDecoder", "failed to destroy decoder")
+            Error::check_cuda(status, "cuvidDestroyDecoder")
         }
     }
 
@@ -569,7 +491,7 @@ impl CudaLibrary {
                 .get(b"cuvidDecodePicture")
                 .expect("cuvidDecodePicture should exist (checked in load())");
             let status = f(decoder, pic_params);
-            Error::check_cuda(status, "cuvidDecodePicture", "failed to decode picture")
+            Error::check_cuda(status, "cuvidDecodePicture")
         }
     }
 
@@ -596,7 +518,7 @@ impl CudaLibrary {
                 .get(b"cuvidMapVideoFrame64")
                 .expect("cuvidMapVideoFrame64 should exist (checked in load())");
             let status = f(decoder, picture_index, device_ptr, pitch, proc_params);
-            Error::check_cuda(status, "cuvidMapVideoFrame64", "failed to map video frame")
+            Error::check_cuda(status, "cuvidMapVideoFrame64")
         }
     }
 
@@ -612,11 +534,7 @@ impl CudaLibrary {
                 .get(b"cuvidUnmapVideoFrame64")
                 .expect("cuvidUnmapVideoFrame64 should exist (checked in load())");
             let status = f(decoder, device_ptr);
-            Error::check_cuda(
-                status,
-                "cuvidUnmapVideoFrame64",
-                "failed to unmap video frame",
-            )
+            Error::check_cuda(status, "cuvidUnmapVideoFrame64")
         }
     }
 

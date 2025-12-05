@@ -287,11 +287,7 @@ impl Encoder {
                     .nvEncOpenEncodeSessionEx
                     .map(|f| f(&mut open_session_params, &mut h_encoder))
                     .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-                Error::check_nvenc(
-                    status,
-                    "nvEncOpenEncodeSessionEx",
-                    "failed to open encode session",
-                )?;
+                Error::check_nvenc(status, "nvEncOpenEncodeSessionEx")?;
 
                 Ok((encoder_api, h_encoder))
             })?;
@@ -352,11 +348,7 @@ impl Encoder {
                     )
                 })
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(
-                status,
-                "nvEncGetEncodePresetConfigEx",
-                "failed to get preset configuration",
-            )?;
+            Error::check_nvenc(status, "nvEncGetEncodePresetConfigEx")?;
 
             // エンコーダーパラメータを初期化
             let mut init_params: sys::NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
@@ -426,11 +418,7 @@ impl Encoder {
                 .nvEncInitializeEncoder
                 .map(|f| f(self.h_encoder, &mut init_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(
-                status,
-                "nvEncInitializeEncoder",
-                "failed to initialize encoder",
-            )?;
+            Error::check_nvenc(status, "nvEncInitializeEncoder")?;
 
             Ok(())
         }
@@ -462,11 +450,7 @@ impl Encoder {
                 .map(|f| f(self.h_encoder, &mut seq_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
 
-            Error::check_nvenc(
-                status,
-                "nvEncGetSequenceParams",
-                "failed to get sequence parameters",
-            )?;
+            Error::check_nvenc(status, "nvEncGetSequenceParams")?;
 
             // 実際に書き込まれたサイズに合わせてバッファをリサイズ
             payload_buffer.truncate(out_size as usize);
@@ -563,11 +547,7 @@ impl Encoder {
                 .nvEncRegisterResource
                 .map(|f| f(self.h_encoder, &mut register_resource))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(
-                status,
-                "nvEncRegisterResource",
-                "failed to register input resource",
-            )?;
+            Error::check_nvenc(status, "nvEncRegisterResource")?;
 
             let registered_resource = register_resource.registeredResource;
 
@@ -595,11 +575,7 @@ impl Encoder {
                 .nvEncMapInputResource
                 .map(|f| f(self.h_encoder, &mut map_input_resource))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(
-                status,
-                "nvEncMapInputResource",
-                "failed to map input resource",
-            )?;
+            Error::check_nvenc(status, "nvEncMapInputResource")?;
 
             let mapped_resource = map_input_resource.mappedResource;
 
@@ -625,11 +601,7 @@ impl Encoder {
                 .nvEncCreateBitstreamBuffer
                 .map(|f| f(self.h_encoder, &mut create_bitstream))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(
-                status,
-                "nvEncCreateBitstreamBuffer",
-                "failed to create bitstream buffer",
-            )?;
+            Error::check_nvenc(status, "nvEncCreateBitstreamBuffer")?;
 
             let output_buffer = create_bitstream.bitstreamBuffer;
 
@@ -667,7 +639,7 @@ impl Encoder {
                 .nvEncEncodePicture
                 .map(|f| f(self.h_encoder, &mut pic_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(status, "nvEncEncodePicture", "failed to encode picture")?;
+            Error::check_nvenc(status, "nvEncEncodePicture")?;
 
             Ok(())
         }
@@ -687,7 +659,7 @@ impl Encoder {
                 .nvEncLockBitstream
                 .map(|f| f(self.h_encoder, &mut lock_bitstream))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(status, "nvEncLockBitstream", "failed to lock bitstream")?;
+            Error::check_nvenc(status, "nvEncLockBitstream")?;
 
             // ビットストリームがロックされている間にエンコード済みデータをコピー
             let encoded_data = std::slice::from_raw_parts(
@@ -701,7 +673,7 @@ impl Encoder {
                 .nvEncUnlockBitstream
                 .map(|f| f(self.h_encoder, lock_bitstream.outputBitstream));
             if let Some(status) = status {
-                Error::check_nvenc(status, "nvEncUnlockBitstream", "failed to unlock bitstream")?;
+                Error::check_nvenc(status, "nvEncUnlockBitstream")?;
             }
 
             let timestamp = lock_bitstream.outputTimeStamp;
@@ -728,7 +700,7 @@ impl Encoder {
                 .nvEncEncodePicture
                 .map(|f| f(self.h_encoder, &mut pic_params))
                 .unwrap_or(sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PTR);
-            Error::check_nvenc(status, "nvEncEncodePicture", "failed to finish encoder")?;
+            Error::check_nvenc(status, "nvEncEncodePicture")?;
 
             Ok(())
         }
