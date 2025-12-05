@@ -21,7 +21,7 @@ impl Error {
     }
 
     // CUDA 関連のエラーを生成するための関数
-    pub(crate) fn new_nvenc(function: &'static str, code: sys::CUresult) -> Self {
+    pub(crate) fn new_cuda(function: &'static str, code: sys::CUresult) -> Self {
         Self {
             function,
             status_code: Some(code as u32),
@@ -35,8 +35,8 @@ impl Error {
         Self {
             function,
             status_code: Some(code as u32),
-            status_name: None,
-            status_message: None,
+            status_name: get_nvencstatus_name(code),
+            status_message: get_nvencstatus_message(code),
         }
     }
 }
@@ -68,7 +68,7 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-fn get_nvencstatus_name(status: u32) -> Option<&'static str> {
+fn get_nvencstatus_name(status: sys::NVENCSTATUS) -> Option<&'static str> {
     match status {
         sys::_NVENCSTATUS_NV_ENC_SUCCESS => Some("NV_ENC_SUCCESS"),
         sys::_NVENCSTATUS_NV_ENC_ERR_NO_ENCODE_DEVICE => Some("NV_ENC_ERR_NO_ENCODE_DEVICE"),
@@ -111,7 +111,7 @@ fn get_nvencstatus_name(status: u32) -> Option<&'static str> {
     }
 }
 
-fn get_nvencstatus_string(status: u32) -> Option<&'static str> {
+fn get_nvencstatus_message(status: sys::NVENCSTATUS) -> Option<&'static str> {
     match status {
         sys::_NVENCSTATUS_NV_ENC_SUCCESS => Some("Encoding completed successfully"),
         sys::_NVENCSTATUS_NV_ENC_ERR_NO_ENCODE_DEVICE => {
