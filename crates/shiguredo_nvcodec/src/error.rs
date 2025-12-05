@@ -273,7 +273,10 @@ mod tests {
         let error = result.expect_err("not err");
         assert_eq!(
             error.to_string(),
-            "nvenc_func() failed[status=2]: One or more of the parameter passed to the API call is invalid (NV_ENC_ERR_INVALID_PARAM)"
+            format!(
+                "nvenc_func() failed[status={}]: One or more of the parameter passed to the API call is invalid (NV_ENC_ERR_INVALID_PARAM)",
+                sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM
+            )
         );
     }
 }
