@@ -28,8 +28,8 @@ impl Error {
         let mut status_name = None;
         let mut status_message = None;
         if let Ok(lib) = CudaLibrary::load() {
-            status_name = lib.cu_get_error_name(code).map(Cow::Onwed);
-            status_message = lib.cu_get_error_string(code).map(Cow::Onwed);
+            status_name = lib.cu_get_error_name(code).map(Cow::Owned);
+            status_message = lib.cu_get_error_string(code).map(Cow::Owned);
         }
 
         Self {
