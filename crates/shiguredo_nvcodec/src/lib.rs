@@ -49,14 +49,9 @@ impl CudaLibrary {
                 })?;
 
             // cuInit を呼び出して CUDA ドライバーを初期化
-            let cu_init: libloading::Symbol<unsafe extern "C" fn(u32) -> u32> =
-                cuda_lib.get(b"cuInit").map_err(|_| {
-                    Error::new(
-                        sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
-                        "CudaLibrary::load",
-                        "cuInit not found",
-                    )
-                })?;
+            let cu_init: libloading::Symbol<unsafe extern "C" fn(u32) -> u32> = cuda_lib
+                .get(b"cuInit")
+                .map_err(|_| Error::new_custom("CudaLibrary::load", "cuInit not found"))?;
             let flags = 0;
             let status = cu_init(flags);
             Error::check_cuda(status, "cuInit")?;
@@ -65,8 +60,7 @@ impl CudaLibrary {
             let nvcuvid_lib = libloading::Library::new("libnvcuvid.so.1")
                 .map(Arc::new)
                 .map_err(|_| {
-                    Error::new(
-                        sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+                    Error::new_custom(
                         "CudaLibrary::load",
                         "failed to load NVCUVID library (libnvcuvid.so.1 not found)",
                     )
@@ -76,8 +70,7 @@ impl CudaLibrary {
             let nvenc_lib = libloading::Library::new("libnvidia-encode.so.1")
                 .map(Arc::new)
                 .map_err(|_| {
-                    Error::new(
-                        sys::cudaError_enum_CUDA_ERROR_UNKNOWN,
+                    Error::new_custom(
                         "CudaLibrary::load",
                         "failed to load NVENC library (libnvidia-encode.so.1 not found)",
                     )
@@ -358,11 +351,7 @@ impl CudaLibrary {
                 .get(b"NvEncodeAPICreateInstance")
                 .expect("NvEncodeAPICreateInstance should exist (checked in load())");
             let status = f(function_list);
-            Error::check_nvenc(
-                status,
-                "NvEncodeAPICreateInstance",
-                "failed to create NVENC API instance",
-            )
+            Error::check_nvenc(status, "NvEncodeAPICreateInstance")
         }
     }
 
@@ -587,22 +576,5 @@ impl<F: FnOnce()> Drop for ReleaseGuard<F> {
         if let Some(cleanup) = self.cleanup.take() {
             cleanup();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn error_display() {
-        let e = Error::new(
-            sys::_NVENCSTATUS_NV_ENC_ERR_INVALID_PARAM,
-            "test_function",
-            "test error",
-        );
-        let error_string = format!("{}", e);
-        assert!(error_string.contains("test_function"));
-        assert!(error_string.contains("test error"));
     }
 }
