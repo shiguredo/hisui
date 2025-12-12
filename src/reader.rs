@@ -266,7 +266,7 @@ impl VideoReader {
                 inner.stats().clone(),
                 Mp4VideoReader::new,
             )
-            .map(|reader| reader.map(|reader| *inner = Box::new(reader)).is_some())
+            .map(|reader| reader.map(|reader| **inner = reader).is_some())
             .or_fail(),
             VideoReaderInner::Webm(inner) => start_next_input_file(
                 &mut self.remaining_input_files,
@@ -275,7 +275,7 @@ impl VideoReader {
                 inner.stats().clone(),
                 WebmVideoReader::new,
             )
-            .map(|reader| reader.map(|reader| *inner = Box::new(reader)).is_some())
+            .map(|reader| reader.map(|reader| **inner = reader).is_some())
             .or_fail(),
         }
     }
