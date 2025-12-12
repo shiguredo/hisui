@@ -369,11 +369,19 @@ impl Encoder {
             init_params.maxEncodeHeight = config.max_encode_height.unwrap_or(config.height);
             init_params.tuningInfo = config.tuning_info.to_sys();
 
-            encode_config.version = sys::NV_ENC_CONFIG_VER;
-            encode_config.profileGUID = profile;
-            encode_config.gopLength = config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH);
-            encode_config.frameIntervalP = config.frame_interval_p as i32;
-            encode_config.rcParams.rateControlMode = config.rate_control_mode.to_sys();
+            // [NOTE]
+            // encode_config は、上の箇所で init_params.encodeConfig に格納しているが、
+            // これは C のポインタであるためか、コンパイラが「以降の代入の結果が使われていません」という警告を出してしまう。
+            // C API を呼ぶ必要がある以上、簡単な解決策はなさそうなので、この警告は抑制している。
+            #[expect(unused_assignments)]
+            {
+                encode_config.version = sys::NV_ENC_CONFIG_VER;
+                encode_config.profileGUID = profile;
+                encode_config.gopLength =
+                    config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH);
+                encode_config.frameIntervalP = config.frame_interval_p as i32;
+                encode_config.rcParams.rateControlMode = config.rate_control_mode.to_sys();
+            }
 
             // ビットレート設定
             if config.rate_control_mode != RateControlMode::ConstQp {
