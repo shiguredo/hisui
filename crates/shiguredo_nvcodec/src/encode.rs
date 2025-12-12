@@ -364,6 +364,7 @@ impl Encoder {
             init_params.frameRateNum = config.fps_numerator;
             init_params.frameRateDen = config.fps_denominator;
             init_params.enablePTD = 1;
+
             init_params.encodeConfig = &mut encode_config;
             init_params.maxEncodeWidth = config.max_encode_width.unwrap_or(config.width);
             init_params.maxEncodeHeight = config.max_encode_height.unwrap_or(config.height);
@@ -381,40 +382,40 @@ impl Encoder {
                     config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH);
                 encode_config.frameIntervalP = config.frame_interval_p as i32;
                 encode_config.rcParams.rateControlMode = config.rate_control_mode.to_sys();
-            }
 
-            // ビットレート設定
-            if config.rate_control_mode != RateControlMode::ConstQp {
-                let bitrate = config.target_bitrate.ok_or_else(|| {
-                    Error::new_custom(
-                        "initialize_encoder",
-                        "target_bitrate must be specified when not using ConstQp mode",
-                    )
-                })?;
-                encode_config.rcParams.averageBitRate = bitrate;
-                encode_config.rcParams.maxBitRate = bitrate;
-            }
+                // ビットレート設定
+                if config.rate_control_mode != RateControlMode::ConstQp {
+                    let bitrate = config.target_bitrate.ok_or_else(|| {
+                        Error::new_custom(
+                            "initialize_encoder",
+                            "target_bitrate must be specified when not using ConstQp mode",
+                        )
+                    })?;
+                    encode_config.rcParams.averageBitRate = bitrate;
+                    encode_config.rcParams.maxBitRate = bitrate;
+                }
 
-            let idr_period = config
-                .idr_period
-                .unwrap_or_else(|| config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH));
+                let idr_period = config
+                    .idr_period
+                    .unwrap_or_else(|| config.gop_length.unwrap_or(sys::NVENC_INFINITE_GOPLENGTH));
 
-            // コーデック固有の設定
-            match codec_guid {
-                sys::NV_ENC_CODEC_HEVC_GUID => {
-                    encode_config.encodeCodecConfig.hevcConfig.idrPeriod = idr_period;
-                }
-                sys::NV_ENC_CODEC_H264_GUID => {
-                    encode_config.encodeCodecConfig.h264Config.idrPeriod = idr_period;
-                }
-                sys::NV_ENC_CODEC_AV1_GUID => {
-                    encode_config.encodeCodecConfig.av1Config.idrPeriod = idr_period;
-                }
-                _ => {
-                    return Err(Error::new_custom(
-                        "initialize_encoder",
-                        "unsupported codec GUID",
-                    ));
+                // コーデック固有の設定
+                match codec_guid {
+                    sys::NV_ENC_CODEC_HEVC_GUID => {
+                        encode_config.encodeCodecConfig.hevcConfig.idrPeriod = idr_period;
+                    }
+                    sys::NV_ENC_CODEC_H264_GUID => {
+                        encode_config.encodeCodecConfig.h264Config.idrPeriod = idr_period;
+                    }
+                    sys::NV_ENC_CODEC_AV1_GUID => {
+                        encode_config.encodeCodecConfig.av1Config.idrPeriod = idr_period;
+                    }
+                    _ => {
+                        return Err(Error::new_custom(
+                            "initialize_encoder",
+                            "unsupported codec GUID",
+                        ));
+                    }
                 }
             }
 
