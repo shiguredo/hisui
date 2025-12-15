@@ -507,7 +507,7 @@ checksum = "531b351cb6aa06e9e8ea5d55367ee1b634120f0d430f65e5a10ab135e151b164"
 
 [[package]]
 name = "shiguredo_nvcodec"
-version = "2025.2.1"
+version = "2025.2.2"
 dependencies = [
  "bindgen",
  "libloading",
