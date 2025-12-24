@@ -6,7 +6,7 @@ requires = ["maturin>=1.9,<2.0"]
 name = "hisui"
 authors = [{ name = "Shiguredo Inc.", email = "contact+pypi@shiguredo.jp" }]
 dynamic = ["version"]
-description = "CLI package for using Recording Composition Tool Hisui from Python"
+description = "CLI package for using Media Pipeline Tool Hisui from Python"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -33,7 +33,9 @@ Repository = "https://github.com/shiguredo/hisui"
 package = false
 
 [dependency-groups]
-dev = ["pytest", "ruff", "ty", "maturin"]
+dev = ["maturin", { include-group = "test" }, { include-group = "lint" }]
+test = ["pytest"]
+lint = ["ruff", "ty"]
 
 [tool.maturin]
 bindings = "bin"
