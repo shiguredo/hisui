@@ -1,4 +1,4 @@
-# Recording Composition Tool Hisui
+# Media Pipeline Tool Hisui
 
 [![GitHub tag (latest SemVer)](https://img.shields.io/github/tag/shiguredo/hisui.svg)](https://github.com/shiguredo/hisui)
 [![hisui](https://img.shields.io/crates/v/hisui.svg)](https://crates.io/crates/hisui)
@@ -14,53 +14,38 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 
 利用前に <https://github.com/shiguredo/oss> をお読みください。
 
-## Recording Composition Tool Hisui について
+## Media Pipeline Tool Hisui について
 
-Recording Composition Tool Hisui は WebRTC SFU Sora 向けの録画合成ツールです。
+Media Pipeline Tool Hisui は複数のプロトコルやファイルに対応したメディアパイプラインツールです。
 
-Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で出力するツールです。
+RTMP と SRTP からの音声や映像を一つの映像に合成して WebRTC SFU Sora と YouTube に同時配信したり、
+複数の MP4 ファイルを合成して一つの MP4 ファイルに出力したりすることができます。
 
 ## 特徴
+
+- 様々なメディアプロトコルに対応
+  - RTMP または RTMPS の入出力に対応
+  - RTSP の入出力に対応
+    - RTSP over HTTPS
+  - SRT 入出力に対応
+  - WebRTC 入出力に対応
+  - RTP 入出力に対応
+  - NDI 入出力に対応
+  - HLS 出力に対応
+- 様々な映像・音声コーデックに対応
+  - 音声コーデック: Opus / AAC
+  - 映像コーデック: VP9 / VP8 / AV1 / H.265 / H.264
+- パイプライン処理
+  - JSON-RPC 2.0 ベースのプロトコルで柔軟にパイプラインを構築
+  - Python などで JSON-RPC 2.0 サーバーを実装するだけで機能拡張が可能
+  - Hisui SDK を使う事で簡単に Python で JSON-RPC 2.0 サーバーを実装できます
+
+### Sora 録画ファイルの合成に最適化
 
 - Sora が生成する録画ファイルや録画レポートをそのまま利用できます
 - 特に設定することなくすぐに使い始められます
 - 複雑なレイアウトを JSON で指定することができます
 - 用途に合わせた[エンコードパラメーターの指定](./docs/layout_encode_params.md)や[自動調整](./docs/command_tune.md)ができます
-
-## 今後の Hisui について
-
-Hisui は Sora 向けの Recording Composition Tool から汎用的な Media Pipeline Tool を目指します。
-
-### Media Pipeline Tool Hisui とは
-
-- 現在は Sora の録画ファイルを合成する専用ツール
-- 今後は 映像・音声をパイプラインで自在に処理する汎用的なメディア処理ツール
-
-映像・音声の入力から出力まで、柔軟なパイプライン処理ができるようになります。
-
-例えば以下のようなことができるようになります。
-
-- Sora Python SDK から受信した映像・音声をリアルタイムで合成
-- JSON-RPC 2.0 経由で Python による音声文字起こし結果を映像に埋め込み
-- 処理済み映像を Sora Python SDK で配信しつつ、RTMP で配信しつつ、MP4 ファイルとして同時出力
-
-Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
-
-- 入出力に JSON-RPC 2.0 が利用できます
-  - `Content-Type` と `Content-Length` を持つ JSON-RPC 2.0 ベースのプロトコルを採用します
-  - `Content-Type` に `application/octet-stream` を指定することでバイナリデータを扱えます
-- プラグイン不要で JSON-RPC 2.0 サーバーを実装するだけで機能を拡張できます
-- 重いエンコード・デコード・合成処理は Hisui が担当します
-
-### 対応予定機能
-
-- パイプライン機能
-- SRT 入出力機能
-- RTMP 入出力機能
-- RTSP 入出力機能
-- RTP 入出力機能
-- NDI 入出力
-- HLS 出力機能
 
 ## インストール
 
@@ -89,8 +74,8 @@ with Hisui() as hisui:
 
 ## ファイル形式
 
-- Sora が生成した MP4 または WebM ファイルに対応しています
-- 出力ファイル形式は MP4 に対応しています
+- MP4 または WebM ファイルに対応しています
+- 出力ファイル形式は MP4 または Fragmented MP4 に対応しています
 
 ## デコーダー/エンコーダー
 
