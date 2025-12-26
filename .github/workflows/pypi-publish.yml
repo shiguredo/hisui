@@ -60,7 +60,7 @@ jobs:
         run: uv run maturin build --release --compatibility pypi
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-${{ matrix.runner }}-${{ matrix.arch }}
           path: target/wheels/*.whl
@@ -98,7 +98,7 @@ jobs:
         run: uv run maturin build --release --compatibility pypi
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-${{ matrix.runner }}-${{ matrix.arch }}
           path: target/wheels/*.whl

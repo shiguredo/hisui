@@ -93,7 +93,7 @@ jobs:
           tar -czf hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
             hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}
       - name: Upload artifact for Docker image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: hisui-binary-${{ matrix.platform.name }}
           path: hisui-${{ needs.github-release.outputs.version }}_${{ matrix.platform.name }}.tar.gz
