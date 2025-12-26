@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup default stable
       - name: Install packages to build external dependencies
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup default stable
       - run: rustup component add clippy
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup default stable
       - name: Install packages to build external dependencies
@@ -114,7 +114,7 @@ jobs:
       labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install rustup
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -130,7 +130,7 @@ jobs:
       labels: [self-hosted, macOS, ARM64]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: 🍺 Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@master
       - name: Install rustup
@@ -150,7 +150,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup default stable
       - name: Install packages to build external dependencies
@@ -196,7 +196,7 @@ jobs:
       OPENH264_VERSION: "2.6.0"
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup default stable
       - name: Install packages to build external dependencies
@@ -233,7 +233,7 @@ jobs:
       OPENH264_VERSION: "2.6.0"
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup default stable
       - name: Install packages to build external dependencies
@@ -289,7 +289,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install packages to build external dependencies
         run: |
@@ -349,7 +349,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Get the version
         id: get_version
@@ -382,7 +382,7 @@ jobs:
       DOCS_RS: 1
     steps:
       # docs.rs 向けでは外部ライブラリのビルドは走らないので依存パッケージなどのインストールは不要
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup default stable
       - run: cargo doc --workspace --exclude hisui
