@@ -1,0 +1,28 @@
+# To get started with Dependabot version updates, you'll need to specify which
+# package ecosystems to update and where the package manifests are located.
+# Please see the documentation for all configuration options:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-name: "actions/checkout"
+      - dependency-name: "actions/cache"
+      - dependency-name: "actions/upload-artifact"
+      - dependency-name: "actions/download-artifact"
+      - dependency-name: "actions/dependency-review-action"
+      - dependency-name: "actions/setup-node"
+      - dependency-name: "astral-sh/setup-uv"
+      - dependency-name: "anthropics/claude-code-action"
+      - dependency-name: "Homebrew/actions"
+      - dependency-name: "tailscale/github-action"
+      - dependency-name: "github/codeql-action"
+      - dependency-name: "rtCamp/action-slack-notify"
+      - dependency-name: "docker/login-action"
+      - dependency-name: "docker/setup-buildx-action"
+      - dependency-name: "docker/setup-qemu-action"
+      - dependency-name: "shiguredo/github-actions"
