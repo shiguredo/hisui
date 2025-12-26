@@ -17,7 +17,7 @@ jobs:
       release-id: ${{ steps.create-release.outputs.release-id }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Get the version
         id: get_version
@@ -59,7 +59,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install packages to build external dependencies
         run: |
@@ -120,7 +120,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - run: rustup update stable
       - run: rustup default stable
@@ -148,7 +148,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Download Ubuntu x86_64 binary
         uses: actions/download-artifact@v7
