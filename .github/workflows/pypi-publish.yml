@@ -39,7 +39,7 @@ jobs:
           rustup default stable
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: 3.12
 
@@ -92,7 +92,7 @@ jobs:
           rustup default stable
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       - name: Build wheel with Maturin
         run: uv run maturin build --release --compatibility pypi
