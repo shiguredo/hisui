@@ -1,5 +1,5 @@
 use orfail::OrFail;
-use shiguredo_mp4::boxes::{Hev1Box, HvccBox, HvccNalUintArray, SampleEntry};
+use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
     types::EvenUsize,
@@ -26,7 +26,11 @@ pub fn h265_sample_entry(
     sps_list: NalUnitArray,
     pps_list: NalUnitArray,
 ) -> orfail::Result<SampleEntry> {
-    Ok(SampleEntry::Hev1(Hev1Box {
+    // [NOTE]
+    // H.265 を表現するためのボックスには hev1 もあり、機能的には hev1 と hvc1 は
+    // ほぼ同様（後者の場合にはキーフレームのサンプルデータ本体に SPS などの情報を付与することが必須なのが異なる）だが、
+    // hev1 は Apple 系の動画プレイヤーでサポートされていないため、ここでは hvc1 を使用している
+    Ok(SampleEntry::Hvc1(Hvc1Box {
         visual: video::sample_entry_visual_fields(width.get(), height.get()),
         hvcc_box: HvccBox {
             // 以下はSora の録画ファイルに合わせた値（必要に応じて調整すること）

@@ -173,8 +173,9 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> orfail::Result<(Vec<u8>, Vec<u8>)> {
 fn get_h265_vps_sps_pps(frame: &VideoFrame) -> orfail::Result<(&[u8], &[u8], &[u8])> {
     matches!(frame.format, VideoFormat::H265).or_fail()?;
 
-    let Some(SampleEntry::Hev1(b)) = &frame.sample_entry else {
-        return Err(orfail::Failure::new("no H.265 sample entry"));
+    let b = match &frame.sample_entry {
+        Some(SampleEntry::Hev1(b)) | Some(SampleEntry::Hvc1(b)) => b,
+        _ => return Err(orfail::Failure::new("no H.265 sample entry")),
     };
 
     let mut vps = &[][..];
