@@ -211,7 +211,17 @@ fn extract_parameter_sets_annexb(
     use shiguredo_mp4::boxes::SampleEntry;
 
     match (sample_entry, format) {
-        (SampleEntry::Hev1(entry) | SampleEntry::Hev1(entry), VideoFormat::H265) => {
+        (SampleEntry::Hev1(entry), VideoFormat::H265) => {
+            let mut annexb_data = Vec::new();
+            for array in &entry.hvcc_box.nalu_arrays {
+                for nalu in &array.nalus {
+                    annexb_data.extend_from_slice(&[0, 0, 0, 1]);
+                    annexb_data.extend_from_slice(nalu);
+                }
+            }
+            Ok(annexb_data)
+        }
+        (SampleEntry::Hvc1(entry), VideoFormat::H265) => {
             let mut annexb_data = Vec::new();
             for array in &entry.hvcc_box.nalu_arrays {
                 for nalu in &array.nalus {
