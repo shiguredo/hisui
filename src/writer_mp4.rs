@@ -10,7 +10,7 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    BaseBox, BoxSize, BoxType, Either, Encode, FixedPointNumber, Mp4FileTime, Utf8String,
+    BoxHeader, BoxSize, BoxType, Either, Encode, FixedPointNumber, Mp4FileTime, Utf8String,
     boxes::{
         Brand, Co64Box, DinfBox, FreeBox, FtypBox, HdlrBox, MdatBox, MdhdBox, MdiaBox, MinfBox,
         MoovBox, MvhdBox, SampleEntry, SmhdBox, StblBox, StcoBox, StscBox, StscEntry, StsdBox,
@@ -273,7 +273,8 @@ impl Mp4Writer {
         // 領域を上書きする
         let moov_box = self.build_moov_box().or_fail()?;
 
-        let moov_box_size = moov_box.box_size().get();
+        let moov_box_bytes = moov_box.encode_to_vec().or_fail()?;
+        let moov_box_size = moov_box_bytes.len() as u64;
         let free_box_min_size = 8;
         let reserved_size = self.mdat_box_offset - self.moov_box_offset;
         self.stats
@@ -284,14 +285,16 @@ impl Mp4Writer {
         self.file
             .seek(SeekFrom::Start(self.moov_box_offset))
             .or_fail()?;
-        moov_box.encode(&mut self.file).or_fail()?;
+        self.file.write_all(&moov_box_bytes).or_fail()?;
 
         let free_box_payload_size =
             self.mdat_box_offset - (self.moov_box_offset + moov_box_size) - 8;
         let free_box = FreeBox {
             payload: vec![0; free_box_payload_size as usize],
         };
-        free_box.encode(&mut self.file).or_fail()?;
+        self.file
+            .write_all(&free_box.encode_to_vec().or_fail()?)
+            .or_fail()?;
 
         // [NOTE]
         // 特に支障はないはずなので mdat ボックスは可変長サイズ扱いのままにしておく
@@ -394,7 +397,7 @@ impl Mp4Writer {
             name: Utf8String::EMPTY.into_null_terminated_bytes(),
         };
         let minf_box = MinfBox {
-            smhd_or_vmhd_box: Either::A(SmhdBox::default()),
+            smhd_or_vmhd_box: Some(Either::A(SmhdBox::default())),
             dinf_box: DinfBox::LOCAL_FILE,
             stbl_box: self.build_stbl_box(sample_entry, &self.audio_chunks),
             unknown_boxes: Vec::new(),
@@ -421,7 +424,7 @@ impl Mp4Writer {
             name: Utf8String::EMPTY.into_null_terminated_bytes(),
         };
         let minf_box = MinfBox {
-            smhd_or_vmhd_box: Either::B(VmhdBox::default()),
+            smhd_or_vmhd_box: Some(Either::B(VmhdBox::default())),
             dinf_box: DinfBox::LOCAL_FILE,
             stbl_box: self.build_stbl_box(sample_entry, &self.video_chunks),
             unknown_boxes: Vec::new(),
@@ -514,11 +517,13 @@ impl Mp4Writer {
         // 可変長の mdat ボックスのヘッダーを書きこむ
         self.mdat_box_offset = self.file_size;
 
-        let mdat_box = MdatBox {
-            is_variable_size: true,
-            payload: Vec::new(),
+        let mdat_box_header = BoxHeader {
+            box_type: MdatBox::TYPE,
+            box_size: BoxSize::VARIABLE_SIZE,
         };
-        mdat_box.encode(&mut self.file).or_fail()?;
+        self.file
+            .write_all(&mdat_box_header.encode_to_vec().or_fail()?)
+            .or_fail()?;
 
         // [NOTE] 可変サイズの場合は `mdat_box.box_size()` は使えないので、固定値を加算する
         self.file_size += 8;
@@ -542,8 +547,9 @@ impl Mp4Writer {
             minor_version: 0,
             compatible_brands,
         };
-        ftyp_box.encode(&mut self.file).or_fail()?;
-        self.file_size += ftyp_box.box_size().get();
+        let ftyp_box_bytes = ftyp_box.encode_to_vec().or_fail()?;
+        self.file.write_all(&ftyp_box_bytes).or_fail()?;
+        self.file_size += ftyp_box_bytes.len() as u64;
 
         Ok(())
     }
@@ -554,7 +560,8 @@ impl Mp4Writer {
         // faststart 用にダミーの moov を事前に構築する (必要なサイズの計測用)
         // かなり余裕をみた計算方法になっているので、これで足りないことはまずないはず
         let moov_box = self.build_dummy_moov_box(options);
-        let max_moov_box_size = moov_box.box_size().get();
+        let moov_box_bytes = moov_box.encode_to_vec().or_fail()?;
+        let max_moov_box_size = moov_box_bytes.len() as u64;
         self.stats.reserved_moov_box_size.set(max_moov_box_size);
         log::debug!("reserved moov box size: {max_moov_box_size}");
 
@@ -562,8 +569,9 @@ impl Mp4Writer {
         let free_box = FreeBox {
             payload: vec![0; max_moov_box_size as usize],
         };
-        free_box.encode(&mut self.file).or_fail()?;
-        self.file_size += free_box.box_size().get();
+        let free_box_bytes = free_box.encode_to_vec().or_fail()?;
+        self.file.write_all(&free_box_bytes).or_fail()?;
+        self.file_size += free_box_bytes.len() as u64;
         Ok(())
     }
 
@@ -643,7 +651,7 @@ impl Mp4Writer {
         };
         let minf_box = MinfBox {
             // 同上（テキトウな固定値でいい）
-            smhd_or_vmhd_box: Either::B(VmhdBox::default()),
+            smhd_or_vmhd_box: Some(Either::B(VmhdBox::default())),
             dinf_box: DinfBox::LOCAL_FILE,
             stbl_box: self.build_dummy_stbl_box(sample_count),
             unknown_boxes: Vec::new(),
