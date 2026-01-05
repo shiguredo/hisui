@@ -88,7 +88,7 @@ impl Mp4VideoReaderInner {
         }))
     }
 
-    fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
+    fn find_trak_box<R: Read + Seek>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
         let moov = find_moov_box(&mut reader).or_fail()?;
         Ok(moov
             .trak_boxes
@@ -241,7 +241,7 @@ impl Mp4AudioReaderInner {
         }))
     }
 
-    fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
+    fn find_trak_box<R: Read + Seek>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
         let moov = find_moov_box(&mut reader).or_fail()?;
         Ok(moov
             .trak_boxes
@@ -309,7 +309,7 @@ impl Iterator for Mp4AudioReaderInner {
     }
 }
 
-fn read_next_box_header<R: Read>(reader: &mut R) -> orfail::Result<(BoxHeader, Vec<u8>)> {
+fn read_next_box_header<R: Read + Seek>(reader: &mut R) -> orfail::Result<(BoxHeader, Vec<u8>)> {
     let mut buf = vec![0; BoxHeader::MIN_SIZE];
     reader.read_exact(&mut buf).or_fail()?;
 
@@ -329,10 +329,12 @@ fn read_next_box_header<R: Read>(reader: &mut R) -> orfail::Result<(BoxHeader, V
     }
 }
 
-fn find_moov_box<R: Read>(reader: &mut R) -> orfail::Result<MoovBox> {
+fn find_moov_box<R: Read + Seek>(reader: &mut R) -> orfail::Result<MoovBox> {
     loop {
         let (header, mut buf) = read_next_box_header(reader).or_fail()?;
         if header.box_type != MoovBox::TYPE {
+            let payload_size = header.box_size.get() as i64 - buf.len() as i64;
+            reader.seek(SeekFrom::Current(payload_size)).or_fail()?;
             continue;
         }
 
