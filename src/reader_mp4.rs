@@ -104,6 +104,7 @@ impl Mp4VideoReaderInner {
         let (metadata, format) = match sample_entry {
             SampleEntry::Avc1(b) => (&b.visual, VideoFormat::H264),
             SampleEntry::Hev1(b) => (&b.visual, VideoFormat::H265),
+            SampleEntry::Hvc1(b) => (&b.visual, VideoFormat::H265),
             SampleEntry::Vp08(b) => (&b.visual, VideoFormat::Vp8),
             SampleEntry::Vp09(b) => (&b.visual, VideoFormat::Vp9),
             SampleEntry::Av01(b) => (&b.visual, VideoFormat::Av1),
