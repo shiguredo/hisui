@@ -8,9 +8,9 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    Decode, Either,
+    BoxHeader, Decode,
     aux::SampleTableAccessor,
-    boxes::{FtypBox, HdlrBox, IgnoredBox, MoovBox, SampleEntry, StblBox, TrakBox},
+    boxes::{HdlrBox, MoovBox, SampleEntry, StblBox, TrakBox},
 };
 
 use crate::{
@@ -89,14 +89,7 @@ impl Mp4VideoReaderInner {
     }
 
     fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
-        let _ = FtypBox::decode(&mut reader).or_fail()?;
-        let moov: MoovBox = loop {
-            if let Either::A(moov) =
-                IgnoredBox::decode_or_ignore(&mut reader, |t| t == MoovBox::TYPE).or_fail()?
-            {
-                break moov;
-            }
-        };
+        let moov = find_moov_box(&mut reader).or_fail()?;
         Ok(moov
             .trak_boxes
             .into_iter()
@@ -248,14 +241,7 @@ impl Mp4AudioReaderInner {
     }
 
     fn find_trak_box<R: Read>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
-        let _ = FtypBox::decode(&mut reader).or_fail()?;
-        let moov: MoovBox = loop {
-            if let Either::A(moov) =
-                IgnoredBox::decode_or_ignore(&mut reader, |t| t == MoovBox::TYPE).or_fail()?
-            {
-                break moov;
-            }
-        };
+        let moov = find_moov_box(&mut reader).or_fail()?;
         Ok(moov
             .trak_boxes
             .into_iter()
@@ -319,5 +305,42 @@ impl Iterator for Mp4AudioReaderInner {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_audio_data()
+    }
+}
+
+fn read_next_box_header<R: Read>(reader: &mut R) -> orfail::Result<(BoxHeader, Vec<u8>)> {
+    let mut buf = vec![0; BoxHeader::MIN_SIZE];
+    reader.read_exact(&mut buf).or_fail()?;
+
+    loop {
+        match BoxHeader::decode(&buf) {
+            Ok((header, _)) => return Ok((header, buf)),
+            Err(e) if e.kind == shiguredo_mp4::ErrorKind::InsufficientBuffer => {
+                (buf.len() <= BoxHeader::MAX_SIZE)
+                    .or_fail_with(|()| "unexpected EOF".to_owned())?;
+
+                let mut byte = [0];
+                reader.read_exact(&mut byte).or_fail()?;
+                buf.push(byte[0]);
+            }
+            Err(e) => return Err(e).or_fail(),
+        }
+    }
+}
+
+fn find_moov_box<R: Read>(reader: &mut R) -> orfail::Result<MoovBox> {
+    loop {
+        let (header, mut buf) = read_next_box_header(reader).or_fail()?;
+        if header.box_type != MoovBox::TYPE {
+            continue;
+        }
+
+        let header_len = buf.len();
+        buf.resize(header.box_size.get() as usize, 0);
+
+        reader.read_exact(&mut buf[header_len..]).or_fail()?;
+
+        let (moov, _size) = MoovBox::decode(&buf).or_fail()?;
+        return Ok(moov);
     }
 }
