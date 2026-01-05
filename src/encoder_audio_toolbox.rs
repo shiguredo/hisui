@@ -90,14 +90,14 @@ fn sample_entry(bitrate: NonZeroUsize) -> SampleEntry {
                         DecoderConfigDescriptor::OBJECT_TYPE_INDICATION_AUDIO_ISO_IEC_14496_3,
                     stream_type: DecoderConfigDescriptor::STREAM_TYPE_AUDIO,
                     up_stream: DecoderConfigDescriptor::UP_STREAM_FALSE,
-                    dec_specific_info: DecoderSpecificInfo {
+                    dec_specific_info: Some(DecoderSpecificInfo {
                         // AAC LC, 48kHz, stereo 用の配列 (ISO_IEC_14496-3)
                         // - 最初の 5 bit: 0b00010 (AAC LC)
                         // - 次の 4 bit: 0b0011 (48kHz を意味する値)
                         // - 次の 4 bit: 0b0010 (ステレオを意味する値)
                         // - 最後の 3 bit: 未使用
                         payload: vec![0x11, 0x90],
-                    },
+                    }),
 
                     // 以下は適当にそれっぽい値を指定している
                     buffer_size_db: Uint::new(bitrate.get() as u32 / 8), // 1 秒分のバッファサイズ

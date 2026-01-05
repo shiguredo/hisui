@@ -89,9 +89,9 @@ fn sample_entry(encoder: &shiguredo_fdk_aac::Encoder, bitrate: NonZeroUsize) -> 
                         DecoderConfigDescriptor::OBJECT_TYPE_INDICATION_AUDIO_ISO_IEC_14496_3,
                     stream_type: DecoderConfigDescriptor::STREAM_TYPE_AUDIO,
                     up_stream: DecoderConfigDescriptor::UP_STREAM_FALSE,
-                    dec_specific_info: DecoderSpecificInfo {
+                    dec_specific_info: Some(DecoderSpecificInfo {
                         payload: encoder.audio_specific_config().to_vec(),
-                    },
+                    }),
 
                     // 以下は適当にそれっぽい値を指定している
                     buffer_size_db: Uint::new(bitrate.get() as u32 / 8), // 1 秒分のバッファサイズ
