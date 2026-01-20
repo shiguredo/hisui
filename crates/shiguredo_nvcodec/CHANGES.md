@@ -11,6 +11,9 @@
 
 ## develop
 
+- [UPDATE] libloading crate のバージョンを 0.9.0 に上げる
+  - @sile
+
 ## 2025.2.2
 
 - [UPDATE] エラーメッセージを改善する

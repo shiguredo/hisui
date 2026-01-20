@@ -11,3 +11,6 @@
 
 ## develop
 
+- [UPDATE] libloading crate のバージョンを 0.9.0 に上げる
+  - @sile
+
