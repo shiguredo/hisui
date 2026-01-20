@@ -11,6 +11,8 @@
 
 ## develop
 
+- [UPDATE] indicatif crate のバージョンを 0.18.3 に上げる
+  - @sile
 - [UPDATE] log crate のバージョンを 0.4.29 に上げる
   - @sile
 - [UPDATE] noargs crate のバージョンを 0.4.2 に上げる
