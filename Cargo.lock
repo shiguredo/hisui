@@ -323,9 +323,9 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "orfail"
-version = "1.1.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aba2212a0fddd290c8209fb9b0393382435ede29c24a71f245d7fa92f0f3442e"
+checksum = "4d047c6764bd82c0195d8d392c043a37e9d4a152379e1dd88f7e63b19eb7c1d6"
 
 [[package]]
 name = "portable-atomic"
