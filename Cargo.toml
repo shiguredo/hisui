@@ -22,7 +22,7 @@ libvpx = ["shiguredo_libvpx"]
 
 indicatif = "=0.18.2"
 log = "=0.4.28"
-noargs = "=0.4.1"
+noargs = "=0.4.2"
 nojson = "=0.3.6"
 orfail = "=2.0.0"
 shiguredo_mp4 = "=2026.1.0"

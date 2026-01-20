@@ -11,6 +11,8 @@
 
 ## develop
 
+- [UPDATE] noargs のバージョンを 0.4.2 に上げる
+  - @sile
 - [UPDATE] orfail のバージョンを 2.0.0 に上げる
   - @sile
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
