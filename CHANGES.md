@@ -11,9 +11,11 @@
 
 ## develop
 
-- [UPDATE] noargs のバージョンを 0.4.2 に上げる
+- [UPDATE] log crate のバージョンを 0.4.29 に上げる
   - @sile
-- [UPDATE] orfail のバージョンを 2.0.0 に上げる
+- [UPDATE] noargs crate のバージョンを 0.4.2 に上げる
+  - @sile
+- [UPDATE] orfail crate のバージョンを 2.0.0 に上げる
   - @sile
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する

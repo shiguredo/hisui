@@ -21,7 +21,7 @@ libvpx = ["shiguredo_libvpx"]
 # NOTE: 通常の依存は突然挙動が変わることが内容に、バージョンは厳密一致で指定している
 
 indicatif = "=0.18.2"
-log = "=0.4.28"
+log = "=0.4.29"
 noargs = "=0.4.2"
 nojson = "=0.3.6"
 orfail = "=2.0.0"
