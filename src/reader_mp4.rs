@@ -1,7 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, Read, Seek, SeekFrom},
-    num::NonZeroU32,
+    io::{Read, Seek, SeekFrom},
     path::Path,
     time::Duration,
 };
@@ -9,8 +8,7 @@ use std::{
 use orfail::OrFail;
 use shiguredo_mp4::{
     BoxHeader, Decode, TrackKind,
-    aux::SampleTableAccessor,
-    boxes::{HdlrBox, MoovBox, SampleEntry, StblBox, TrakBox},
+    boxes::{MoovBox, SampleEntry},
     demux::Mp4FileDemuxer,
 };
 
@@ -146,8 +144,10 @@ impl Iterator for Mp4VideoReader {
 
 #[derive(Debug)]
 pub struct Mp4AudioReader {
-    // 音声トラックが存在しない場合は None になる
-    inner: Option<Mp4AudioReaderInner>,
+    file: File,
+    demuxer: Mp4FileDemuxer,
+    source_id: SourceId,
+    format: AudioFormat,
     stats: Mp4AudioReaderStats,
 }
 
@@ -157,12 +157,85 @@ impl Mp4AudioReader {
         path: P,
         stats: Mp4AudioReaderStats,
     ) -> orfail::Result<Self> {
-        let inner = Mp4AudioReaderInner::new(source_id, path, stats.clone()).or_fail()?;
-        Ok(Self { inner, stats })
+        let mut file = File::open(&path)
+            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+        let mut demuxer = Mp4FileDemuxer::new();
+        initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
+
+        Ok(Self {
+            file,
+            demuxer,
+            source_id,
+            stats,
+            // 後で更新されるので適当な初期値を設定しておく
+            format: AudioFormat::Opus,
+        })
     }
 
     pub fn stats(&self) -> &Mp4AudioReaderStats {
         &self.stats
+    }
+
+    fn next_sample(&mut self) -> orfail::Result<Option<AudioData>> {
+        let sample = 'next_sample: loop {
+            match self
+                .demuxer
+                .next_sample()
+                .or_fail_with(|e| format!("Read sample error: {e}"))?
+            {
+                None => return Ok(None),
+                Some(sample) if sample.track.kind != TrackKind::Audio => {}
+                Some(sample) => break 'next_sample sample,
+            }
+        };
+
+        let sample_entry = sample.sample_entry.cloned();
+        if let Some(sample_entry) = &sample_entry {
+            // 新しいサンプルエントリーが来たのでハンドリングする
+            let (_metadata, format) = match sample_entry {
+                SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
+                entry => {
+                    return Err(orfail::Failure::new(format!(
+                        "unsupported sample entry: {entry:?}"
+                    )));
+                }
+            };
+
+            self.format = format;
+        }
+
+        // サンプルデータを読み込む
+        let mut data = vec![0; sample.data_size];
+        self.file
+            .seek(SeekFrom::Start(sample.data_offset))
+            .or_fail_with(|e| format!("Seek error: {e}"))?;
+        self.file
+            .read_exact(&mut data)
+            .or_fail_with(|e| format!("Read error: {e}"))?;
+
+        // タイムスタンプを計算する
+        let timescale = sample.track.timescale.get();
+        let timestamp = Duration::from_secs(sample.timestamp) / timescale;
+        let duration = Duration::from_secs(sample.duration as u64) / timescale;
+
+        // 統計値を更新する
+        self.stats.total_sample_count.add(1);
+        self.stats.total_track_duration.set(timestamp + duration);
+
+        Ok(Some(AudioData {
+            source_id: Some(self.source_id.clone()),
+            data,
+            format: self.format,
+            sample_entry,
+            // [NOTE]
+            // 一応、コンテナで指定された値を設定しているけど、
+            // ここの値はあまり信用できないので、`AudioData` 処理側は、
+            // 実際のペイロードの値を参照する想定
+            stereo: false,
+            sample_rate: 0,
+            timestamp,
+            duration,
+        }))
     }
 }
 
@@ -170,150 +243,7 @@ impl Iterator for Mp4AudioReader {
     type Item = orfail::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.as_mut()?.next()
-    }
-}
-
-#[derive(Debug)]
-pub struct Mp4AudioReaderInner {
-    file: BufReader<File>,
-    source_id: SourceId,
-    table: SampleTableAccessor<StblBox>,
-    timescale: NonZeroU32,
-    next_sample_index: NonZeroU32,
-    stats: Mp4AudioReaderStats,
-}
-
-impl Mp4AudioReaderInner {
-    fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        path: P,
-        stats: Mp4AudioReaderStats,
-    ) -> orfail::Result<Option<Self>> {
-        let file = File::open(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
-        let mut file = BufReader::new(file);
-        let Some(trak) = Self::find_trak_box(&mut file).or_fail()? else {
-            return Ok(None);
-        };
-        let table = SampleTableAccessor::new(trak.mdia_box.minf_box.stbl_box.clone()).or_fail()?;
-
-        file.seek(SeekFrom::Start(0)).or_fail()?;
-
-        Ok(Some(Self {
-            source_id,
-            file,
-            table,
-            timescale: trak.mdia_box.mdhd_box.timescale,
-            next_sample_index: NonZeroU32::MIN,
-            stats,
-        }))
-    }
-
-    fn find_trak_box<R: Read + Seek>(mut reader: R) -> orfail::Result<Option<TrakBox>> {
-        let moov = find_moov_box(&mut reader).or_fail()?;
-        Ok(moov
-            .trak_boxes
-            .into_iter()
-            .find(|t| t.mdia_box.hdlr_box.handler_type == HdlrBox::HANDLER_TYPE_SOUN))
-    }
-
-    fn next_audio_data(&mut self) -> Option<orfail::Result<AudioData>> {
-        let sample = self.table.get_sample(self.next_sample_index)?;
-        self.next_sample_index = self.next_sample_index.checked_add(1)?;
-
-        let sample_entry = sample.chunk().sample_entry();
-        let (metadata, format) = match &sample_entry {
-            SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
-            entry => {
-                return Some(Err(orfail::Failure::new(format!(
-                    "unsupported sample entry: {entry:?}"
-                ))));
-            }
-        };
-
-        if let Err(e) = self
-            .file
-            .seek(SeekFrom::Start(sample.data_offset()))
-            .or_fail()
-        {
-            return Some(Err(e));
-        }
-
-        let mut data = vec![0; sample.data_size() as usize];
-        if let Err(e) = self.file.read_exact(&mut data).or_fail() {
-            return Some(Err(e));
-        }
-
-        let timestamp = Duration::from_secs(sample.timestamp()) / self.timescale.get();
-        let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
-
-        self.stats.total_sample_count.add(1);
-        self.stats.total_track_duration.set(timestamp + duration);
-
-        Some(Ok(AudioData {
-            source_id: Some(self.source_id.clone()),
-            data,
-            format,
-            sample_entry: Some(sample_entry.clone()),
-
-            // [NOTE]
-            // 一応、コンテナで指定された値を設定しているけど、
-            // ここの値はあまり信用できないので、`AudioData` 処理側は、
-            // 実際のペイロードの値を参照する想定
-            stereo: metadata.channelcount != 1,
-
-            sample_rate: metadata.samplerate.integer,
-            timestamp,
-            duration,
-        }))
-    }
-}
-
-impl Iterator for Mp4AudioReaderInner {
-    type Item = orfail::Result<AudioData>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_audio_data()
-    }
-}
-
-fn read_next_box_header<R: Read + Seek>(reader: &mut R) -> orfail::Result<(BoxHeader, Vec<u8>)> {
-    let mut buf = vec![0; BoxHeader::MIN_SIZE];
-    reader.read_exact(&mut buf).or_fail()?;
-
-    loop {
-        match BoxHeader::decode(&buf) {
-            Ok((header, _)) => return Ok((header, buf)),
-            Err(e) if e.kind == shiguredo_mp4::ErrorKind::InsufficientBuffer => {
-                (buf.len() <= BoxHeader::MAX_SIZE)
-                    .or_fail_with(|()| "unexpected EOF".to_owned())?;
-
-                let mut byte = [0];
-                reader.read_exact(&mut byte).or_fail()?;
-                buf.push(byte[0]);
-            }
-            Err(e) => return Err(e).or_fail(),
-        }
-    }
-}
-
-fn find_moov_box<R: Read + Seek>(reader: &mut R) -> orfail::Result<MoovBox> {
-    loop {
-        let (header, mut buf) = read_next_box_header(reader).or_fail()?;
-        if header.box_type != MoovBox::TYPE {
-            let payload_size = header.box_size.get() as i64 - buf.len() as i64;
-            reader.seek(SeekFrom::Current(payload_size)).or_fail()?;
-            continue;
-        }
-
-        let header_len = buf.len();
-        buf.resize(header.box_size.get() as usize, 0);
-
-        reader.read_exact(&mut buf[header_len..]).or_fail()?;
-
-        let (moov, _size) = MoovBox::decode(&buf).or_fail()?;
-        return Ok(moov);
+        self.next_sample().or_fail().transpose()
     }
 }
 
