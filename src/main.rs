@@ -37,6 +37,13 @@ fn main() -> noargs::Result<()> {
         Logger::init(log::LevelFilter::Warn)?;
     };
 
+    // 実験的機能を有効にするかどうか
+    let experimental = noargs::flag("experimental")
+        .short('x')
+        .doc("実験的機能を有効にします")
+        .take(&mut args)
+        .is_present();
+
     // サブコマンドで分岐する
     if INSPECT_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_inspect::run(args)?;
@@ -48,7 +55,7 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_tune::run(args)?;
-    } else if PIPELINE_COMMAND.take(&mut args).is_present() {
+    } else if experimental && PIPELINE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_pipeline::run(args)?;
     } else if let Some(help) = args.finish()? {
         print!("{help}");
