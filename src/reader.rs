@@ -156,7 +156,6 @@ impl MediaProcessor for AudioReader {
     }
 }
 
-// Box both variants to ensure uniform enum size
 #[derive(Debug)]
 enum AudioReaderInner {
     Mp4(Box<Mp4AudioReader>),
@@ -322,7 +321,6 @@ impl MediaProcessor for VideoReader {
     }
 }
 
-// Box both variants to ensure uniform enum size
 #[derive(Debug)]
 enum VideoReaderInner {
     Mp4(Box<Mp4VideoReader>),
