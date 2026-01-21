@@ -43,6 +43,7 @@ const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
 pub struct Mp4Writer2 {
     file: BufWriter<File>,
     muxer: Mp4FileMuxer,
+    next_position: u64,
     input_audio_stream_id: Option<MediaStreamId>,
     input_video_stream_id: Option<MediaStreamId>,
     input_audio_queue: VecDeque<Arc<AudioData>>,
@@ -80,7 +81,7 @@ impl Mp4Writer2 {
             creation_timestamp: std::time::UNIX_EPOCH.elapsed().or_fail()?,
             reserved_moov_box_size,
         };
-        let mut muxer = Mp4FileMuxer::with_options(muxer_options).or_fail()?;
+        let muxer = Mp4FileMuxer::with_options(muxer_options).or_fail()?;
 
         let mut file = std::fs::OpenOptions::new()
             .create(true)
@@ -88,11 +89,15 @@ impl Mp4Writer2 {
             .write(true)
             .open(path)
             .or_fail()?;
-        file.write_all(muxer.initial_boxes_bytes()).or_fail()?;
+        let initial_bytes = muxer.initial_boxes_bytes();
+        file.write_all(initial_bytes).or_fail()?;
+
+        let next_position = initial_bytes.len() as u64;
 
         Ok(Self {
             file: BufWriter::new(file),
             muxer,
+            next_position,
             input_audio_stream_id,
             input_video_stream_id,
             input_audio_queue: VecDeque::new(),
@@ -169,7 +174,7 @@ impl Mp4Writer2 {
 
         // file へのデータ追記
         self.file.write_all(&frame.data).or_fail()?;
-        let data_offset = self.muxer.next_position; // TODO: この情報は writer 構造体側で管理する
+        let data_offset = self.next_position;
 
         // muxer へのサンプル登録
         let sample = shiguredo_mp4::mux::Sample {
@@ -183,6 +188,9 @@ impl Mp4Writer2 {
         };
         self.muxer.append_sample(&sample).or_fail()?;
 
+        // ポジションを更新
+        self.next_position += frame.data.len() as u64;
+
         self.stats.total_video_sample_count.add(1);
         self.stats
             .total_video_sample_data_byte_size
@@ -193,9 +201,7 @@ impl Mp4Writer2 {
     }
 
     fn append_audio_data(&mut self) -> orfail::Result<()> {
-        todo!()
-
-        /*// 次の入力を取り出す（これは常に成功する）
+        // 次の入力を取り出す（これは常に成功する）
         let data = self.input_audio_queue.pop_front().or_fail()?;
 
         if self.stats.audio_codec.get().is_none()
@@ -204,43 +210,32 @@ impl Mp4Writer2 {
             self.stats.audio_codec.set(name);
         }
 
-        // Hisui では途中でエンコード情報が変わることがないので、
-        // サンプルエントリーは最初に一回だけ存在する
-        if self.audio_sample_entry.is_none() {
-            data.sample_entry.is_some().or_fail()?;
-            self.audio_sample_entry = data.sample_entry.clone();
-        } else {
-            data.sample_entry.is_none().or_fail()?;
-        }
-
-        // 必要に応じて新しいチャンクを始める
-        if new_chunk {
-            self.audio_chunks.push(Chunk {
-                offset: self.file_size,
-                samples: Vec::new(),
-            });
-            self.stats.total_audio_chunk_count.add(1);
-        }
-
-        // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
-        let sample = Sample {
-            keyframe: true,
-            size: data.data.len() as u32,
-            duration: data.duration.as_micros() as u32,
-        };
-        self.audio_chunks.last_mut().or_fail()?.samples.push(sample);
-        self.stats.total_audio_sample_count.add(1);
-
-        // mdat ボックスにデータを追記する
+        // file へのデータ追記
         self.file.write_all(&data.data).or_fail()?;
-        self.file_size += data.data.len() as u64;
+        let data_offset = self.next_position;
+
+        // muxer へのサンプル登録
+        let sample = shiguredo_mp4::mux::Sample {
+            track_kind: shiguredo_mp4::TrackKind::Audio,
+            sample_entry: data.sample_entry.clone(),
+            keyframe: true, // Audio samples are always keyframes
+            timescale: TIMESCALE,
+            duration: data.duration.as_micros() as u32,
+            data_offset,
+            data_size: data.data.len(),
+        };
+        self.muxer.append_sample(&sample).or_fail()?;
+
+        // ポジションを更新
+        self.next_position += data.data.len() as u64;
+
+        self.stats.total_audio_sample_count.add(1);
         self.stats
             .total_audio_sample_data_byte_size
             .add(data.data.len() as u64);
-
         self.stats.total_audio_track_duration.add(data.duration);
         self.appending_video_chunk = false;
-        Ok(())*/
+        Ok(())
     }
 }
 
