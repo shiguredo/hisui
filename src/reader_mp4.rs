@@ -7,8 +7,8 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    BoxHeader, Decode, TrackKind,
-    boxes::{MoovBox, SampleEntry},
+    TrackKind,
+    boxes::SampleEntry,
     demux::Mp4FileDemuxer,
 };
 
