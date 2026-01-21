@@ -6,11 +6,7 @@ use std::{
 };
 
 use orfail::OrFail;
-use shiguredo_mp4::{
-    TrackKind,
-    boxes::SampleEntry,
-    demux::Mp4FileDemuxer,
-};
+use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
     audio::{AudioData, AudioFormat},
@@ -148,6 +144,8 @@ pub struct Mp4AudioReader {
     demuxer: Mp4FileDemuxer,
     source_id: SourceId,
     format: AudioFormat,
+    stereo: bool,
+    sample_rate: u16,
     stats: Mp4AudioReaderStats,
 }
 
@@ -169,6 +167,8 @@ impl Mp4AudioReader {
             stats,
             // 後で更新されるので適当な初期値を設定しておく
             format: AudioFormat::Opus,
+            stereo: false,
+            sample_rate: 0,
         })
     }
 
@@ -192,7 +192,7 @@ impl Mp4AudioReader {
         let sample_entry = sample.sample_entry.cloned();
         if let Some(sample_entry) = &sample_entry {
             // 新しいサンプルエントリーが来たのでハンドリングする
-            let (_metadata, format) = match sample_entry {
+            let (metadata, format) = match sample_entry {
                 SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
                 entry => {
                     return Err(orfail::Failure::new(format!(
@@ -202,6 +202,8 @@ impl Mp4AudioReader {
             };
 
             self.format = format;
+            self.stereo = metadata.channelcount != 1;
+            self.sample_rate = metadata.samplerate.integer;
         }
 
         // サンプルデータを読み込む
@@ -227,12 +229,8 @@ impl Mp4AudioReader {
             data,
             format: self.format,
             sample_entry,
-            // [NOTE]
-            // 一応、コンテナで指定された値を設定しているけど、
-            // ここの値はあまり信用できないので、`AudioData` 処理側は、
-            // 実際のペイロードの値を参照する想定
-            stereo: false,
-            sample_rate: 0,
+            stereo: self.stereo,
+            sample_rate: self.sample_rate,
             timestamp,
             duration,
         }))
