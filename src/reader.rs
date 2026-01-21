@@ -65,9 +65,9 @@ impl AudioReader {
                     current_input_file: SharedOption::new(Some(first_input_file.clone())),
                     ..Default::default()
                 };
-                AudioReaderInner::Mp4(
+                AudioReaderInner::Mp4(Box::new(
                     Mp4AudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                )
+                ))
             }
             ContainerFormat::Webm => {
                 let stats = WebmAudioReaderStats {
@@ -77,9 +77,9 @@ impl AudioReader {
                     current_input_file: SharedOption::new(Some(first_input_file.clone())),
                     ..Default::default()
                 };
-                AudioReaderInner::Webm(
+                AudioReaderInner::Webm(Box::new(
                     WebmAudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                )
+                ))
             }
         };
         Ok(Self {
@@ -101,7 +101,7 @@ impl AudioReader {
                 inner.stats().clone(),
                 Mp4AudioReader::new,
             )
-            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .map(|reader| reader.map(|reader| **inner = reader).is_some())
             .or_fail(),
             AudioReaderInner::Webm(inner) => start_next_input_file(
                 &mut self.remaining_input_files,
@@ -110,7 +110,7 @@ impl AudioReader {
                 inner.stats().clone(),
                 WebmAudioReader::new,
             )
-            .map(|reader| reader.map(|reader| *inner = reader).is_some())
+            .map(|reader| reader.map(|reader| **inner = reader).is_some())
             .or_fail(),
         }
     }
@@ -156,10 +156,11 @@ impl MediaProcessor for AudioReader {
     }
 }
 
+// Box both variants to ensure uniform enum size
 #[derive(Debug)]
 enum AudioReaderInner {
-    Mp4(Mp4AudioReader),
-    Webm(WebmAudioReader),
+    Mp4(Box<Mp4AudioReader>),
+    Webm(Box<WebmAudioReader>),
 }
 
 impl AudioReaderInner {
@@ -321,7 +322,7 @@ impl MediaProcessor for VideoReader {
     }
 }
 
-// Box は clippy::large_enum_variant 対策
+// Box both variants to ensure uniform enum size
 #[derive(Debug)]
 enum VideoReaderInner {
     Mp4(Box<Mp4VideoReader>),
