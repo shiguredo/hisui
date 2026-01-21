@@ -19,7 +19,7 @@
   - @sile
 - [UPDATE] orfail crate のバージョンを 2.0.0 に上げる
   - @sile
-- [UPDATE] MP4 ファイルの読み込みに Mp4FileDemuxer を使用する
+- [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
   - @sile
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
