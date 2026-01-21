@@ -16,6 +16,7 @@ use shiguredo_mp4::{
         MoovBox, MvhdBox, SampleEntry, SmhdBox, StblBox, StcoBox, StscBox, StscEntry, StsdBox,
         StssBox, StszBox, SttsBox, TkhdBox, TrakBox, UnknownBox, VmhdBox,
     },
+    mux::{Mp4FileMuxer, Mp4FileMuxerOptions},
 };
 
 use crate::{
@@ -37,9 +38,155 @@ const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 // 映像・音声混在時のチャンクの尺の最大値（映像か音声の片方だけの場合はチャンクは一つだけ）
 const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
 
+/// 合成結果を含んだ MP4 ファイルを書き出すための構造体
+#[derive(Debug)]
+pub struct Mp4Writer2 {
+    file: BufWriter<File>,
+    muxer: Mp4FileMuxer,
+    input_audio_stream_id: Option<MediaStreamId>,
+    input_video_stream_id: Option<MediaStreamId>,
+    stats: Mp4WriterStats,
+    /*file_size: u64,
+    resolution: Resolution,
+    moov_box_offset: u64,
+    mdat_box_offset: u64,
+    audio_chunks: Vec<Chunk>,
+    video_chunks: Vec<Chunk>,
+    audio_sample_entry: Option<SampleEntry>,
+    video_sample_entry: Option<SampleEntry>,
+    input_audio_queue: VecDeque<Arc<AudioData>>,
+    input_video_queue: VecDeque<Arc<VideoFrame>>,
+    finalize_time: Mp4FileTime,
+    appending_video_chunk: bool,*/
+}
+
+impl Mp4Writer2 {
+    /// [`Mp4Writer`] インスタンスを生成する
+    pub fn new<P: AsRef<Path>>(
+        path: P,
+        options: Option<Mp4WriterOptions>, // ライブの場合は None になる
+        input_audio_stream_id: Option<MediaStreamId>,
+        input_video_stream_id: Option<MediaStreamId>,
+    ) -> orfail::Result<Self> {
+        let reserved_moov_box_size = if let Some(options) = options {
+            // 事前に尺などが分かっている場合には fast start 用の領域を計算する
+
+            let mut sample_counts = Vec::new();
+            if input_audio_stream_id.is_some() {
+                // 音声サンプルの尺は 20 ms と仮定する（つまり一秒に 50 sample）
+                let count = options.duration.as_secs() * 50;
+                sample_counts.push(count as usize);
+            }
+            if input_video_stream_id.is_some() {
+                let count = options.duration.as_secs() as f64 * options.frame_rate.as_f64();
+                sample_counts.push(count.ceil() as usize);
+            }
+            shiguredo_mp4::mux::estimate_maximum_moov_box_size(&sample_counts)
+        } else {
+            0
+        };
+        let muxer_options = Mp4FileMuxerOptions {
+            creation_timestamp: std::time::UNIX_EPOCH.elapsed().or_fail()?,
+            reserved_moov_box_size,
+        };
+        let mut muxer = Mp4FileMuxer::with_options(muxer_options).or_fail()?;
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
+            .or_fail()?;
+        file.write_all(muxer.initial_boxes_bytes()).or_fail()?;
+
+        Ok(Self {
+            file: BufWriter::new(file),
+            muxer,
+            input_audio_stream_id,
+            input_video_stream_id,
+            stats: Mp4WriterStats::default(),
+        })
+    }
+
+    /// 統計情報を返す
+    pub fn stats(&self) -> &Mp4WriterStats {
+        &self.stats
+    }
+
+    pub fn current_duration(&self) -> Duration {
+        self.stats
+            .total_audio_track_duration
+            .get()
+            .max(self.stats.total_video_track_duration.get())
+    }
+}
+
+impl MediaProcessor for Mp4Writer2 {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self
+                .input_audio_stream_id
+                .into_iter()
+                .chain(self.input_video_stream_id)
+                .collect(),
+            output_stream_ids: Vec::new(),
+            stats: ProcessorStats::Mp4Writer(self.stats.clone()),
+            workload_hint: MediaProcessorWorkloadHint::WRITER,
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+        match input.sample {
+            Some(MediaSample::Audio(sample))
+                if Some(input.stream_id) == self.input_audio_stream_id =>
+            {
+                self.input_audio_queue.push_back(sample);
+            }
+            None if Some(input.stream_id) == self.input_audio_stream_id => {
+                self.input_audio_stream_id = None;
+            }
+            Some(MediaSample::Video(sample))
+                if Some(input.stream_id) == self.input_video_stream_id =>
+            {
+                self.input_video_queue.push_back(sample);
+            }
+            None if Some(input.stream_id) == self.input_video_stream_id => {
+                self.input_video_stream_id = None;
+            }
+            _ => return Err(orfail::Failure::new("BUG: unexpected input stream")),
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+        loop {
+            if let Some(id) = self.input_video_stream_id
+                && self.input_video_queue.is_empty()
+            {
+                return Ok(MediaProcessorOutput::pending(id));
+            } else if let Some(id) = self.input_audio_stream_id
+                && self.input_audio_queue.is_empty()
+            {
+                return Ok(MediaProcessorOutput::pending(id));
+            }
+
+            let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
+            let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
+
+            let in_progress = self
+                .handle_next_audio_and_video(audio_timestamp, video_timestamp)
+                .or_fail()?;
+
+            if !in_progress {
+                return Ok(MediaProcessorOutput::Finished);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Mp4WriterOptions {
-    pub resolution: Resolution,
+    pub resolution: Resolution, // TODO: delete
     pub duration: Duration,
     pub frame_rate: FrameRate,
 }
