@@ -11,6 +11,7 @@ use shiguredo_mp4::{
     BoxHeader, Decode,
     aux::SampleTableAccessor,
     boxes::{HdlrBox, MoovBox, SampleEntry, StblBox, TrakBox},
+    demux::Mp4FileDemuxer,
 };
 
 use crate::{
@@ -19,6 +20,70 @@ use crate::{
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
     video::{VideoFormat, VideoFrame},
 };
+
+#[derive(Debug)]
+pub struct Mp4VideoReader2 {
+    demuxer: Mp4FileDemuxer,
+    source_id: SourceId,
+    stats: Mp4VideoReaderStats,
+}
+
+impl Mp4VideoReader2 {
+    pub fn new<P: AsRef<Path>>(
+        source_id: SourceId,
+        path: P,
+        stats: Mp4VideoReaderStats,
+    ) -> orfail::Result<Self> {
+        let mut file = File::open(&path)
+            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+        let mut demuxer = Mp4FileDemuxer::new();
+
+        // トラック情報を読み込む
+        //
+        // NOTE: fMP4 には未対応なので、これ以降で demuxer がファイル読み込みを要求することはない
+        while let Some(required) = demuxer.required_input() {
+            let size = required.size.or_fail_with(|()| {
+                format!(
+                    "MP4 file contains unexpected variable size box {}",
+                    path.as_ref().display()
+                )
+            })?;
+            let mut buf = vec![0; size];
+            file.seek(SeekFrom::Start(required.position))
+                .or_fail_with(|e| format!("Seek error {}: {e}", path.as_ref().display()))?;
+            file.read_exact(&mut buf)
+                .or_fail_with(|e| format!("Read error {}: {e}", path.as_ref().display()))?;
+            let input = required.to_input(&buf);
+            demuxer.handle_input(input);
+        }
+
+        Ok(Self {
+            demuxer,
+            source_id,
+            stats,
+        })
+    }
+
+    pub fn stats(&self) -> &Mp4VideoReaderStats {
+        &self.stats
+    }
+}
+
+impl Iterator for Mp4VideoReader2 {
+    type Item = orfail::Result<VideoFrame>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self
+            .demuxer
+            .next_sample()
+            .transpose()?
+            .or_fail_with(|e| format!("Read sample error: {e}"))
+        {
+            Err(e) => Some(Err(e)),
+            Ok(sample) => todo!(),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
