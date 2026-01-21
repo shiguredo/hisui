@@ -41,25 +41,7 @@ impl Mp4VideoReader {
         let mut file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut demuxer = Mp4FileDemuxer::new();
-
-        // トラック情報を読み込む
-        //
-        // NOTE: fMP4 には未対応なので、これ以降で demuxer がファイル読み込みを要求することはない
-        while let Some(required) = demuxer.required_input() {
-            let size = required.size.or_fail_with(|()| {
-                format!(
-                    "MP4 file contains unexpected variable size box {}",
-                    path.as_ref().display()
-                )
-            })?;
-            let mut buf = vec![0; size];
-            file.seek(SeekFrom::Start(required.position))
-                .or_fail_with(|e| format!("Seek error {}: {e}", path.as_ref().display()))?;
-            file.read_exact(&mut buf)
-                .or_fail_with(|e| format!("Read error {}: {e}", path.as_ref().display()))?;
-            let input = required.to_input(&buf);
-            demuxer.handle_input(input);
-        }
+        initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
 
         Ok(Self {
             file,
@@ -78,7 +60,7 @@ impl Mp4VideoReader {
         &self.stats
     }
 
-    fn next_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
+    fn next_sample(&mut self) -> orfail::Result<Option<VideoFrame>> {
         let sample = 'next_sample: loop {
             match self
                 .demuxer
@@ -158,7 +140,7 @@ impl Iterator for Mp4VideoReader {
     type Item = orfail::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_frame().or_fail().transpose()
+        self.next_sample().or_fail().transpose()
     }
 }
 
@@ -333,4 +315,30 @@ fn find_moov_box<R: Read + Seek>(reader: &mut R) -> orfail::Result<MoovBox> {
         let (moov, _size) = MoovBox::decode(&buf).or_fail()?;
         return Ok(moov);
     }
+}
+
+/// MP4 ファイルからトラック情報を初期化する
+///
+/// NOTE: fMP4 には未対応なので、この関数完了後、demuxer はファイル読み込みを要求しない
+fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
+    file: &mut R,
+    demuxer: &mut Mp4FileDemuxer,
+    path: P,
+) -> orfail::Result<()> {
+    while let Some(required) = demuxer.required_input() {
+        let size = required.size.or_fail_with(|()| {
+            format!(
+                "MP4 file contains unexpected variable size box {}",
+                path.as_ref().display()
+            )
+        })?;
+        let mut buf = vec![0; size];
+        file.seek(SeekFrom::Start(required.position))
+            .or_fail_with(|e| format!("Seek error {}: {e}", path.as_ref().display()))?;
+        file.read_exact(&mut buf)
+            .or_fail_with(|e| format!("Read error {}: {e}", path.as_ref().display()))?;
+        let input = required.to_input(&buf);
+        demuxer.handle_input(input);
+    }
+    Ok(())
 }
