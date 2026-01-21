@@ -9,6 +9,8 @@ use std::{
 };
 
 use orfail::OrFail;
+use shiguredo_mp4::Either;
+use shiguredo_mp4::boxes::HdlrBox;
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
 
 use crate::{
@@ -134,11 +136,18 @@ impl Mp4Writer {
             (None, None) => {
                 // 全部の入力の処理が完了した
                 let finalized = self.muxer.finalize().or_fail()?;
+
+                let actual_moov_size = finalized.moov_box_size() as u64;
+                self.stats.actual_moov_box_size.set(actual_moov_size);
+
                 for (offset, bytes) in finalized.offset_and_bytes_pairs() {
                     self.file.seek(SeekFrom::Start(offset)).or_fail()?;
                     self.file.write_all(bytes).or_fail()?;
                 }
                 self.file.flush().or_fail()?;
+
+                self.update_finalized_chunk_counts()?;
+
                 return Ok(false);
             }
             (None, Some(_)) => {
@@ -166,6 +175,31 @@ impl Mp4Writer {
         }
 
         Ok(true)
+    }
+
+    // 確定したチャンク数を統計値に反映する
+    fn update_finalized_chunk_counts(&mut self) -> orfail::Result<()> {
+        let moov_box = self.muxer.finalized_boxes().or_fail()?.moov_box();
+
+        for trak in &moov_box.trak_boxes {
+            let stbl = &trak.mdia_box.minf_box.stbl_box;
+
+            let chunk_count = match &stbl.stco_or_co64_box {
+                Either::A(stco) => stco.chunk_offsets.len() as u64,
+                Either::B(co64) => co64.chunk_offsets.len() as u64,
+            };
+
+            match trak.mdia_box.hdlr_box.handler_type {
+                HdlrBox::HANDLER_TYPE_SOUN => {
+                    self.stats.total_audio_chunk_count.set(chunk_count);
+                }
+                HdlrBox::HANDLER_TYPE_VIDE => {
+                    self.stats.total_video_chunk_count.set(chunk_count);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     fn append_video_frame(&mut self) -> orfail::Result<()> {
