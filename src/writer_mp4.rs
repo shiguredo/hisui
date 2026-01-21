@@ -45,19 +45,10 @@ pub struct Mp4Writer2 {
     muxer: Mp4FileMuxer,
     input_audio_stream_id: Option<MediaStreamId>,
     input_video_stream_id: Option<MediaStreamId>,
-    stats: Mp4WriterStats,
-    /*file_size: u64,
-    resolution: Resolution,
-    moov_box_offset: u64,
-    mdat_box_offset: u64,
-    audio_chunks: Vec<Chunk>,
-    video_chunks: Vec<Chunk>,
-    audio_sample_entry: Option<SampleEntry>,
-    video_sample_entry: Option<SampleEntry>,
     input_audio_queue: VecDeque<Arc<AudioData>>,
     input_video_queue: VecDeque<Arc<VideoFrame>>,
-    finalize_time: Mp4FileTime,
-    appending_video_chunk: bool,*/
+    appending_video_chunk: bool,
+    stats: Mp4WriterStats,
 }
 
 impl Mp4Writer2 {
@@ -104,6 +95,9 @@ impl Mp4Writer2 {
             muxer,
             input_audio_stream_id,
             input_video_stream_id,
+            input_audio_queue: VecDeque::new(),
+            input_video_queue: VecDeque::new(),
+            appending_video_chunk: true,
             stats: Mp4WriterStats::default(),
         })
     }
@@ -118,6 +112,147 @@ impl Mp4Writer2 {
             .total_audio_track_duration
             .get()
             .max(self.stats.total_video_track_duration.get())
+    }
+
+    fn handle_next_audio_and_video(
+        &mut self,
+        audio_timestamp: Option<Duration>,
+        video_timestamp: Option<Duration>,
+    ) -> orfail::Result<bool> {
+        match (audio_timestamp, video_timestamp) {
+            (None, None) => {
+                // 全部の入力の処理が完了した
+                let finalized = self.muxer.finalize().or_fail()?;
+                for (offset, bytes) in finalized.offset_and_bytes_pairs() {
+                    self.file.seek(SeekFrom::Start(offset)).or_fail()?;
+                    self.file.write_all(bytes).or_fail()?;
+                }
+                self.file.flush().or_fail()?;
+                return Ok(false);
+            }
+            (None, Some(_)) => {
+                // 残りは映像のみ
+                self.append_video_frame().or_fail()?;
+            }
+            (Some(_), None) => {
+                // 残りは音声のみ
+                self.append_audio_data().or_fail()?;
+            }
+            (Some(audio_timestamp), Some(video_timestamp)) => {
+                if self.appending_video_chunk
+                    && video_timestamp.saturating_sub(audio_timestamp) > MAX_CHUNK_DURATION
+                {
+                    // 音声が一定以上遅れている場合は映像に追従する
+                    self.append_audio_data().or_fail()?;
+                } else if !self.appending_video_chunk && video_timestamp > audio_timestamp {
+                    // 一度音声追記モードに入った場合には、映像に追いつくまでは音声を追記し続ける
+                    self.append_audio_data().or_fail()?;
+                } else {
+                    // 音声との差が一定以内の場合は、映像の処理を進める
+                    self.append_video_frame().or_fail()?;
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn append_video_frame(&mut self) -> orfail::Result<()> {
+        // 次の入力を取り出す（これは常に成功する）
+        let frame = self.input_video_queue.pop_front().or_fail()?;
+
+        if self.stats.video_codec.get().is_none()
+            && let Some(name) = frame.format.codec_name()
+        {
+            self.stats.video_codec.set(name);
+        }
+
+        // Hisui では途中でエンコード情報が変わることがないので、
+        // サンプルエントリーは最初に一回だけ存在する
+        if self.video_sample_entry.is_none() {
+            frame.sample_entry.is_some().or_fail()?;
+            self.video_sample_entry = frame.sample_entry.clone();
+        } else {
+            frame.sample_entry.is_none().or_fail()?;
+        }
+
+        // 必要に応じて新しいチャンクを始める
+        if new_chunk {
+            self.video_chunks.push(Chunk {
+                offset: self.file_size,
+                samples: Vec::new(),
+            });
+            self.stats.total_video_chunk_count.add(1);
+        }
+
+        // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
+        let sample = Sample {
+            keyframe: frame.keyframe,
+            size: frame.data.len() as u32,
+            duration: frame.duration.as_micros() as u32,
+        };
+        self.video_chunks.last_mut().or_fail()?.samples.push(sample);
+        self.stats.total_video_sample_count.add(1);
+
+        // mdat ボックスにデータを追記する
+        self.file.write_all(&frame.data).or_fail()?;
+        self.file_size += frame.data.len() as u64;
+        self.stats
+            .total_video_sample_data_byte_size
+            .add(frame.data.len() as u64);
+
+        self.stats.total_video_track_duration.add(frame.duration);
+        self.appending_video_chunk = true;
+        Ok(())
+    }
+
+    fn append_audio_data(&mut self, new_chunk: bool) -> orfail::Result<()> {
+        // 次の入力を取り出す（これは常に成功する）
+        let data = self.input_audio_queue.pop_front().or_fail()?;
+
+        if self.stats.audio_codec.get().is_none()
+            && let Some(name) = data.format.codec_name()
+        {
+            self.stats.audio_codec.set(name);
+        }
+
+        // Hisui では途中でエンコード情報が変わることがないので、
+        // サンプルエントリーは最初に一回だけ存在する
+        if self.audio_sample_entry.is_none() {
+            data.sample_entry.is_some().or_fail()?;
+            self.audio_sample_entry = data.sample_entry.clone();
+        } else {
+            data.sample_entry.is_none().or_fail()?;
+        }
+
+        // 必要に応じて新しいチャンクを始める
+        if new_chunk {
+            self.audio_chunks.push(Chunk {
+                offset: self.file_size,
+                samples: Vec::new(),
+            });
+            self.stats.total_audio_chunk_count.add(1);
+        }
+
+        // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
+        let sample = Sample {
+            keyframe: true,
+            size: data.data.len() as u32,
+            duration: data.duration.as_micros() as u32,
+        };
+        self.audio_chunks.last_mut().or_fail()?.samples.push(sample);
+        self.stats.total_audio_sample_count.add(1);
+
+        // mdat ボックスにデータを追記する
+        self.file.write_all(&data.data).or_fail()?;
+        self.file_size += data.data.len() as u64;
+        self.stats
+            .total_audio_sample_data_byte_size
+            .add(data.data.len() as u64);
+
+        self.stats.total_audio_track_duration.add(data.duration);
+        self.appending_video_chunk = false;
+        Ok(())
     }
 }
 
