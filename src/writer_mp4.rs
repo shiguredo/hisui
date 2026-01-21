@@ -167,47 +167,35 @@ impl Mp4Writer2 {
             self.stats.video_codec.set(name);
         }
 
-        // Hisui では途中でエンコード情報が変わることがないので、
-        // サンプルエントリーは最初に一回だけ存在する
-        if self.video_sample_entry.is_none() {
-            frame.sample_entry.is_some().or_fail()?;
-            self.video_sample_entry = frame.sample_entry.clone();
-        } else {
-            frame.sample_entry.is_none().or_fail()?;
-        }
-
-        // 必要に応じて新しいチャンクを始める
-        if new_chunk {
-            self.video_chunks.push(Chunk {
-                offset: self.file_size,
-                samples: Vec::new(),
-            });
-            self.stats.total_video_chunk_count.add(1);
-        }
-
-        // 一番最後に moov ボックスを構築するためのメタデータを覚えておく
-        let sample = Sample {
-            keyframe: frame.keyframe,
-            size: frame.data.len() as u32,
-            duration: frame.duration.as_micros() as u32,
-        };
-        self.video_chunks.last_mut().or_fail()?.samples.push(sample);
-        self.stats.total_video_sample_count.add(1);
-
-        // mdat ボックスにデータを追記する
+        // file へのデータ追記
         self.file.write_all(&frame.data).or_fail()?;
-        self.file_size += frame.data.len() as u64;
+        let data_offset = self.muxer.next_position; // TODO: この情報は writer 構造体側で管理する
+
+        // muxer へのサンプル登録
+        let sample = shiguredo_mp4::mux::Sample {
+            track_kind: shiguredo_mp4::TrackKind::Video,
+            sample_entry: frame.sample_entry.clone(),
+            keyframe: frame.keyframe,
+            timescale: TIMESCALE,
+            duration: frame.duration.as_micros() as u32,
+            data_offset,
+            data_size: frame.data.len(),
+        };
+        self.muxer.append_sample(&sample).or_fail()?;
+
+        self.stats.total_video_sample_count.add(1);
         self.stats
             .total_video_sample_data_byte_size
             .add(frame.data.len() as u64);
-
         self.stats.total_video_track_duration.add(frame.duration);
         self.appending_video_chunk = true;
         Ok(())
     }
 
-    fn append_audio_data(&mut self, new_chunk: bool) -> orfail::Result<()> {
-        // 次の入力を取り出す（これは常に成功する）
+    fn append_audio_data(&mut self) -> orfail::Result<()> {
+        todo!()
+
+        /*// 次の入力を取り出す（これは常に成功する）
         let data = self.input_audio_queue.pop_front().or_fail()?;
 
         if self.stats.audio_codec.get().is_none()
@@ -252,7 +240,7 @@ impl Mp4Writer2 {
 
         self.stats.total_audio_track_duration.add(data.duration);
         self.appending_video_chunk = false;
-        Ok(())
+        Ok(())*/
     }
 }
 

@@ -908,10 +908,10 @@ pub struct Mp4WriterStats {
     pub actual_moov_box_size: SharedAtomicCounter,
 
     /// 出力ファイルに含まれる音声チャンクの数
-    pub total_audio_chunk_count: SharedAtomicCounter,
+    pub total_audio_chunk_count: SharedAtomicCounter, // TODO: delete
 
     /// 出力ファイルに含まれる映像チャンクの数
-    pub total_video_chunk_count: SharedAtomicCounter,
+    pub total_video_chunk_count: SharedAtomicCounter, // TODO: delete
 
     /// 出力ファイルに含まれる音声サンプルの数
     pub total_audio_sample_count: SharedAtomicCounter,
