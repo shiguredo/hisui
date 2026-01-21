@@ -101,6 +101,10 @@ impl Mp4Writer {
         file.write_all(initial_bytes).or_fail()?;
 
         let next_position = initial_bytes.len() as u64;
+        let stats = Mp4WriterStats::default();
+        stats
+            .reserved_moov_box_size
+            .set(reserved_moov_box_size as u64);
 
         Ok(Self {
             file: BufWriter::new(file),
@@ -111,7 +115,7 @@ impl Mp4Writer {
             input_audio_queue: VecDeque::new(),
             input_video_queue: VecDeque::new(),
             appending_video_chunk: true,
-            stats: Mp4WriterStats::default(),
+            stats,
         })
     }
 
