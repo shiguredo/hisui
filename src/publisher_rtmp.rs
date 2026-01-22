@@ -1,32 +1,23 @@
+// TODO: マージ前に削除する
 #![expect(dead_code)]
+#![expect(clippy::too_many_arguments)]
+
+use orfail::OrFail;
+
 use crate::{
+    audio::AudioFormat,
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
     stats::ProcessorStats,
+    video::VideoFormat,
 };
 
 #[derive(Debug, Default, Clone)]
 pub struct RtmpPublisherOptions {
     pub tls: bool,
-}
-
-#[derive(Debug)]
-struct RtmpPublishRunner {
-    server_host: String,
-    server_port: u16,
-    app: String,
-    stream_name: String,
-    options: RtmpPublisherOptions,
-    rx: tokio::sync::mpsc::Receiver<MediaSample>,
-}
-
-impl RtmpPublishRunner {
-    async fn run(self) {
-        //
-    }
 }
 
 #[derive(Debug)]
@@ -47,7 +38,7 @@ impl RtmpPublisher {
         stream_name: String,
         options: RtmpPublisherOptions,
     ) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::channel(10); // TODO: サイズは変更できるようにする
+        let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
         runtime.spawn(async move {
             let runner = RtmpPublishRunner {
                 server_host,
@@ -87,7 +78,12 @@ impl MediaProcessor for RtmpPublisher {
             Some(MediaSample::Audio(sample))
                 if Some(input.stream_id) == self.input_audio_stream_id =>
             {
-                todo!()
+                // 音声は AAC のみ許可する
+                (sample.format == AudioFormat::Aac)
+                    .or_fail_with(|()| format!("unsupported audio codec: {}", sample.format))?;
+
+                // TODO: ちゃんとエラーハンドリングする（一時的に詰まっているだけならエラーにしない）
+                self.tx.try_send(MediaSample::Audio(sample)).or_fail()?;
             }
             None if Some(input.stream_id) == self.input_audio_stream_id => {
                 self.input_audio_stream_id = None;
@@ -95,7 +91,12 @@ impl MediaProcessor for RtmpPublisher {
             Some(MediaSample::Video(sample))
                 if Some(input.stream_id) == self.input_video_stream_id =>
             {
-                todo!()
+                // 映像は H.264 （AVC 形式） のみ許可する
+                (sample.format == VideoFormat::H264)
+                    .or_fail_with(|()| format!("unsupported video codec: {}", sample.format))?;
+
+                // TODO: ちゃんとエラーハンドリングする（一時的に詰まっているだけならエラーにしない）
+                self.tx.try_send(MediaSample::Video(sample)).or_fail()?;
             }
             None if Some(input.stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
@@ -113,5 +114,28 @@ impl MediaProcessor for RtmpPublisher {
         } else {
             Ok(MediaProcessorOutput::Finished)
         }
+    }
+}
+
+#[derive(Debug)]
+struct RtmpPublishRunner {
+    server_host: String,
+    server_port: u16,
+    app: String,
+    stream_name: String,
+    options: RtmpPublisherOptions,
+    rx: tokio::sync::mpsc::Receiver<MediaSample>,
+}
+
+impl RtmpPublishRunner {
+    async fn run(self) {
+        log::debug!(
+            "Starting RTMP publisher: {}://{}:{}/{}/{}",
+            if self.options.tls { "rtmps" } else { "rtmp" },
+            self.server_host,
+            self.server_port,
+            self.app,
+            self.stream_name
+        );
     }
 }
