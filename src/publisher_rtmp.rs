@@ -1,8 +1,8 @@
 // TODO: マージ前に削除する
-#![expect(dead_code)]
 #![expect(clippy::too_many_arguments)]
 
 use orfail::OrFail;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     audio::AudioFormat,
@@ -130,7 +130,7 @@ struct RtmpPublishRunner {
 }
 
 impl RtmpPublishRunner {
-    async fn run(self) -> orfail::Result<()> {
+    async fn run(mut self) -> orfail::Result<()> {
         log::debug!(
             "Starting RTMP publisher: {}://{}:{}/{}/{}",
             if self.options.tls { "rtmps" } else { "rtmp" },
@@ -139,6 +139,110 @@ impl RtmpPublishRunner {
             self.app,
             self.stream_name
         );
+
+        // TCP または TLS 接続を確立
+        let mut stream = if self.options.tls {
+            crate::tcp::TcpOrTlsStream::connect_tls(
+                format!("{}:{}", self.server_host, self.server_port),
+                &self.server_host,
+            )
+            .await
+            .or_fail()?
+        } else {
+            crate::tcp::TcpOrTlsStream::connect_tcp(format!(
+                "{}:{}",
+                self.server_host, self.server_port
+            ))
+            .await
+            .or_fail()?
+        };
+
+        // RTMP パブリッシュクライアント接続を作成
+        let tc_url = format!(
+            "{}://{}:{}/{}",
+            if self.options.tls { "rtmps" } else { "rtmp" },
+            self.server_host,
+            self.server_port,
+            self.app
+        );
+
+        let mut connection =
+            shiguredo_rtmp::RtmpPublishClientConnection::new(&tc_url, &self.stream_name);
+        let mut recv_buf = vec![0u8; 8192];
+
+        // イベント処理ループ
+        loop {
+            // イベント処理
+            while let Some(event) = connection.next_event() {
+                log::debug!("RTMP event: {:?}", event);
+            }
+
+            // 送信バッファをストリームに書き込む
+            let send_data = connection.send_buf();
+            if !send_data.is_empty() {
+                stream.write_all(send_data).await.or_fail()?;
+                connection.advance_send_buf(send_data.len());
+            }
+
+            // ストリームからデータを受信 (タイムアウト付き)
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(5),
+                stream.read(&mut recv_buf),
+            )
+            .await
+            {
+                Ok(Ok(0)) => break, // 接続が切断された
+                Ok(Ok(n)) => connection.feed_recv_buf(&recv_buf[..n]).or_fail()?,
+                Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Ok(Err(e)) => Err(e).or_fail()?,
+                Err(_) => {} // タイムアウト
+            }
+
+            // メディアサンプルを送信
+            if let Ok(sample) = self.rx.try_recv() {
+                match sample {
+                    crate::media::MediaSample::Audio(audio) => {
+                        let frame = shiguredo_rtmp::AudioFrame {
+                            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
+                                audio.timestamp.as_millis() as u32,
+                            ),
+                            format: shiguredo_rtmp::AudioFormat::Aac,
+                            sample_rate: shiguredo_rtmp::AudioSampleRate::Khz44,
+                            is_8bit_sample: false,
+                            is_stereo: true,
+                            is_aac_sequence_header: false,
+                            data: audio.data.clone(),
+                        };
+                        connection.send_audio(frame).or_fail()?;
+                    }
+                    crate::media::MediaSample::Video(video) => {
+                        let frame = shiguredo_rtmp::VideoFrame {
+                            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
+                                video.timestamp.as_millis() as u32,
+                            ),
+                            composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
+                            frame_type: if video.keyframe {
+                                shiguredo_rtmp::VideoFrameType::KeyFrame
+                            } else {
+                                shiguredo_rtmp::VideoFrameType::InterFrame
+                            },
+                            codec: shiguredo_rtmp::VideoCodec::Avc,
+                            avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
+                            data: video.data.clone(),
+                        };
+                        connection.send_video(frame).or_fail()?;
+                    }
+                }
+            } else {
+                // チャンネルが閉じている可能性をチェック
+                if self.rx.is_closed() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        }
+
+        log::debug!("RTMP publisher finished");
         Ok(())
     }
 }
