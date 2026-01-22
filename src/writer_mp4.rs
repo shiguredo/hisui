@@ -216,7 +216,7 @@ impl Mp4Writer {
             self.stats.video_codec.set(name);
         }
 
-        // file へのデータ追記
+        // ファイルへのデータ追記
         self.file.write_all(&frame.data).or_fail()?;
         let data_offset = self.next_position;
 
@@ -254,7 +254,7 @@ impl Mp4Writer {
             self.stats.audio_codec.set(name);
         }
 
-        // file へのデータ追記
+        // ファイルへのデータ追記
         self.file.write_all(&data.data).or_fail()?;
         let data_offset = self.next_position;
 
@@ -262,7 +262,7 @@ impl Mp4Writer {
         let sample = shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,
             sample_entry: data.sample_entry.clone(),
-            keyframe: true, // Audio samples are always keyframes
+            keyframe: true,
             timescale: TIMESCALE,
             duration: data.duration.as_micros() as u32,
             data_offset,
