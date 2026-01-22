@@ -48,8 +48,10 @@ impl RtmpPublisher {
                 options,
                 rx,
             };
-            runner.run().await;
-            todo!()
+            if let Err(e) = runner.run().await.or_fail() {
+                log::error!("RTMP publish error: {e}");
+                // TODO: stats 更新
+            }
         });
         Self {
             input_audio_stream_id,
@@ -128,7 +130,7 @@ struct RtmpPublishRunner {
 }
 
 impl RtmpPublishRunner {
-    async fn run(self) {
+    async fn run(self) -> orfail::Result<()> {
         log::debug!(
             "Starting RTMP publisher: {}://{}:{}/{}/{}",
             if self.options.tls { "rtmps" } else { "rtmp" },
@@ -137,5 +139,6 @@ impl RtmpPublishRunner {
             self.app,
             self.stream_name
         );
+        Ok(())
     }
 }

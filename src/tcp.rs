@@ -19,12 +19,8 @@ impl TcpOrTlsStream {
         server_name: &str,
     ) -> std::io::Result<Self> {
         // TLS設定をプラットフォームの証明書ストアを使用して作成
-        let config = rustls::ClientConfig::with_platform_verifier().map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create TLS config: {e}"),
-            )
-        })?;
+        let config = rustls::ClientConfig::with_platform_verifier()
+            .map_err(|e| std::io::Error::other(format!("Failed to create TLS config: {e}")))?;
 
         let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
 
@@ -44,12 +40,7 @@ impl TcpOrTlsStream {
         let tls_stream = connector
             .connect(server_name_ref, tcp_stream)
             .await
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("TLS handshake failed: {e}"),
-                )
-            })?;
+            .map_err(|e| std::io::Error::other(format!("TLS handshake failed: {e}")))?;
 
         Ok(TcpOrTlsStream::Tls(Box::new(tls_stream)))
     }
