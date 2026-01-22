@@ -133,7 +133,7 @@ impl Composer {
         // ライターを登録
         let writer = Mp4Writer::new(
             out_file_path,
-            &Mp4WriterOptions::from_layout(&self.layout),
+            Some(Mp4WriterOptions::from_layout(&self.layout)),
             self.layout
                 .has_audio()
                 .then_some(audio_encoder_output_stream_id),

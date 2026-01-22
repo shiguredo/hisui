@@ -283,14 +283,13 @@ impl PipelineComponent {
                 let input_audio_stream_id = input_stream_ids.first().copied();
                 let input_video_stream_id = input_stream_ids.get(1).copied();
                 let options = Mp4WriterOptions {
-                    resolution: RESOLUTION_HD,
                     duration: ONE_DAY,
                     frame_rate: FrameRate::FPS_25,
                 };
 
                 let processor = Mp4Writer::new(
                     output_file,
-                    &options,
+                    Some(options),
                     input_audio_stream_id,
                     input_video_stream_id,
                 )

@@ -29,7 +29,7 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
     // ライターを作成する
     let mut writer = Mp4Writer::new(
         output_file_path.path(),
-        &Mp4WriterOptions::from_layout(&layout),
+        Some(Mp4WriterOptions::from_layout(&layout)),
         Some(AUDIO_STREAM_ID),
         None,
     )
@@ -86,7 +86,7 @@ fn write_video_only_mp4() -> orfail::Result<()> {
     // ライターを作成する
     let mut writer = Mp4Writer::new(
         output_file_path.path(),
-        &Mp4WriterOptions::from_layout(&layout),
+        Some(Mp4WriterOptions::from_layout(&layout)),
         None,
         Some(VIDEO_STREAM_ID),
     )
@@ -144,7 +144,7 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
     // ライターを作成する
     let mut writer = Mp4Writer::new(
         output_file_path.path(),
-        &Mp4WriterOptions::from_layout(&layout),
+        Some(Mp4WriterOptions::from_layout(&layout)),
         Some(AUDIO_STREAM_ID),
         Some(VIDEO_STREAM_ID),
     )
@@ -216,7 +216,7 @@ fn no_video_and_audio_mp4() -> orfail::Result<()> {
     // ライターを作成する
     let mut writer = Mp4Writer::new(
         output_file_path.path(),
-        &Mp4WriterOptions::from_layout(&layout),
+        Some(Mp4WriterOptions::from_layout(&layout)),
         None,
         None,
     )
