@@ -44,7 +44,16 @@ impl RtmpPublisher {
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
         runtime.spawn(async move {
-            let runner = RtmpPublishRunner { url, rx };
+            let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(
+                &url.to_string(),
+                &url.stream_name,
+            );
+            let runner = RtmpPublishRunner {
+                url,
+                rx,
+                recv_buf: vec![0u8; 8192],
+                connection,
+            };
             if let Err(e) = runner.run().await.or_fail() {
                 log::error!("RTMP publish error: {e}");
                 // TODO: stats 更新
@@ -120,6 +129,8 @@ impl MediaProcessor for RtmpPublisher {
 struct RtmpPublishRunner {
     url: RtmpStreamUrl,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
+    recv_buf: Vec<u8>,
+    connection: shiguredo_rtmp::RtmpPublishClientConnection,
 }
 
 impl RtmpPublishRunner {
@@ -136,7 +147,6 @@ impl RtmpPublishRunner {
         // RTMP パブリッシュクライアント接続を作成
         let mut connection =
             shiguredo_rtmp::RtmpPublishClientConnection::new(&tc_url, &self.url.stream_name);
-        let mut recv_buf = vec![0u8; 8192];
 
         // イベント処理ループ
         loop {
@@ -155,14 +165,7 @@ impl RtmpPublishRunner {
             // select! マクロでストリーム受信とメディアサンプル受信を並行処理
             tokio::select! {
                 // ストリームからデータを受信
-                read_result = stream.read(&mut recv_buf) => {
-                    match read_result {
-                        Ok(0) => break, // 接続が切断された
-                        Ok(n) => connection.feed_recv_buf(&recv_buf[..n]).or_fail()?,
-                        Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
-                        Err(e) => Err(e).or_fail()?,
-                    }
-                }
+                read_result = stream.read(&mut self.recv_buf) => self.handle_read_result(read_result).or_fail()?,
 
                 // メディアサンプルを受信
                 Some(sample) = self.rx.recv() => {
@@ -179,7 +182,7 @@ impl RtmpPublishRunner {
                                 is_aac_sequence_header: false,
                                 data: audio.data.clone(),
                             };
-                            connection.send_audio(frame).or_fail()?;
+                            self.connection.send_audio(frame).or_fail()?;
                         }
                         crate::media::MediaSample::Video(video) => {
                             let frame = shiguredo_rtmp::VideoFrame {
@@ -196,7 +199,7 @@ impl RtmpPublishRunner {
                                 avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
                                 data: video.data.clone(),
                             };
-                            connection.send_video(frame).or_fail()?;
+                            self.connection.send_video(frame).or_fail()?;
                         }
                     }
                 }
@@ -209,6 +212,18 @@ impl RtmpPublishRunner {
         }
 
         log::debug!("RTMP publisher finished");
+        Ok(())
+    }
+
+    fn handle_read_result(&mut self, result: std::io::Result<usize>) -> orfail::Result<()> {
+        let n = result.or_fail()?;
+
+        // サーバーから切断されるのは想定外なのでエラー扱いにする
+        (n == 0).or_fail_with(|()| "connection reset by server".to_owned())?;
+
+        self.connection
+            .feed_recv_buf(&self.recv_buf[..n])
+            .or_fail()?;
         Ok(())
     }
 }
