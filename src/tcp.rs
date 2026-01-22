@@ -9,15 +9,20 @@ pub enum TcpOrTlsStream {
 }
 
 impl TcpOrTlsStream {
-    pub async fn connect_tcp<A: tokio::net::ToSocketAddrs>(addr: A) -> std::io::Result<Self> {
-        let stream = tokio::net::TcpStream::connect(addr).await?;
+    pub async fn connect(host: &str, port: u16, tls: bool) -> std::io::Result<Self> {
+        if tls {
+            Self::connect_tls(host, port).await
+        } else {
+            Self::connect_tcp(host, port).await
+        }
+    }
+
+    async fn connect_tcp(host: &str, port: u16) -> std::io::Result<Self> {
+        let stream = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
         Ok(TcpOrTlsStream::Tcp(stream))
     }
 
-    pub async fn connect_tls<A: tokio::net::ToSocketAddrs>(
-        addr: A,
-        server_name: &str,
-    ) -> std::io::Result<Self> {
+    async fn connect_tls(host: &str, port: u16) -> std::io::Result<Self> {
         // TLS設定をプラットフォームの証明書ストアを使用して作成
         let config = rustls::ClientConfig::with_platform_verifier()
             .map_err(|e| std::io::Error::other(format!("Failed to create TLS config: {e}")))?;
@@ -25,11 +30,11 @@ impl TcpOrTlsStream {
         let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
 
         // 最初にプレーンなTCP接続を確立
-        let tcp_stream = tokio::net::TcpStream::connect(addr).await?;
+        let tcp_stream = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
 
         // TLS SNI用のサーバー名を作成
-        let server_name_ref = rustls::pki_types::ServerName::try_from(server_name.to_string())
-            .map_err(|e| {
+        let server_name_ref =
+            rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("Invalid server name: {e}"),

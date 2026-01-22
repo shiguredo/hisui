@@ -1,6 +1,3 @@
-// TODO: マージ前に削除する
-#![expect(clippy::too_many_arguments)]
-
 use orfail::OrFail;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -25,10 +22,6 @@ pub struct RtmpStreamEndpoint {
 }
 
 impl RtmpStreamEndpoint {
-    pub fn addr(&self) -> String {
-        format!("{}:{}", self.host, self.port)
-    }
-
     pub fn tc_url(&self) -> String {
         let scheme = if self.tls { "rtmps" } else { "rtmp" };
         format!("{}://{}:{}/{}", scheme, self.host, self.port, self.app)
@@ -135,15 +128,13 @@ impl RtmpPublishRunner {
         log::debug!("Starting RTMP publisher: {tc_url}");
 
         // TCP または TLS 接続を確立
-        let mut stream = if self.endpoint.tls {
-            crate::tcp::TcpOrTlsStream::connect_tls(self.endpoint.addr(), &self.endpoint.host)
-                .await
-                .or_fail()?
-        } else {
-            crate::tcp::TcpOrTlsStream::connect_tcp(self.endpoint.addr())
-                .await
-                .or_fail()?
-        };
+        let mut stream = crate::tcp::TcpOrTlsStream::connect(
+            &self.endpoint.host,
+            self.endpoint.port,
+            self.endpoint.tls,
+        )
+        .await
+        .or_fail()?;
 
         // RTMP パブリッシュクライアント接続を作成
         let mut connection =
