@@ -206,6 +206,7 @@ dependencies = [
  "shiguredo_nvcodec",
  "shiguredo_openh264",
  "shiguredo_opus",
+ "shiguredo_rtmp",
  "shiguredo_svt_av1",
  "shiguredo_video_toolbox",
  "tempfile",
@@ -541,6 +542,12 @@ dependencies = [
  "bindgen",
  "toml",
 ]
+
+[[package]]
+name = "shiguredo_rtmp"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4d203c745ab9de8bd49bc9ddabfdda032cb9d4197484f90525ab49d08196dea"
 
 [[package]]
 name = "shiguredo_svt_av1"
