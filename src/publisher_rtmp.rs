@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct RtmpStreamEndpoint {
+pub struct RtmpStreamUrl {
     pub host: String,
     pub port: u16,
     pub app: String,
@@ -21,10 +21,10 @@ pub struct RtmpStreamEndpoint {
     pub tls: bool,
 }
 
-impl RtmpStreamEndpoint {
-    pub fn tc_url(&self) -> String {
+impl std::fmt::Display for RtmpStreamUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let scheme = if self.tls { "rtmps" } else { "rtmp" };
-        format!("{}://{}:{}/{}", scheme, self.host, self.port, self.app)
+        write!(f, "{}://{}:{}/{}", scheme, self.host, self.port, self.app)
     }
 }
 
@@ -40,7 +40,7 @@ impl RtmpPublisher {
         runtime: &tokio::runtime::Runtime,
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
-        endpoint: RtmpStreamEndpoint,
+        endpoint: RtmpStreamUrl,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
         runtime.spawn(async move {
@@ -118,13 +118,13 @@ impl MediaProcessor for RtmpPublisher {
 
 #[derive(Debug)]
 struct RtmpPublishRunner {
-    endpoint: RtmpStreamEndpoint,
+    endpoint: RtmpStreamUrl,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
 }
 
 impl RtmpPublishRunner {
     async fn run(mut self) -> orfail::Result<()> {
-        let tc_url = self.endpoint.tc_url();
+        let tc_url = self.endpoint.to_string();
         log::debug!("Starting RTMP publisher: {tc_url}");
 
         // TCP または TLS 接続を確立
