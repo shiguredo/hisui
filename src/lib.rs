@@ -49,6 +49,7 @@ pub mod optuna;
 pub mod pipeline;
 pub mod plugin;
 pub mod processor;
+pub mod publisher_rtmp;
 pub mod reader;
 pub mod reader_mp4;
 pub mod reader_webm;
