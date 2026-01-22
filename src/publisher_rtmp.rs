@@ -91,8 +91,8 @@ impl MediaProcessor for RtmpPublisher {
             Some(MediaSample::Video(sample))
                 if Some(input.stream_id) == self.input_video_stream_id =>
             {
-                // 映像は H.264 （AVC 形式） のみ許可する
-                (sample.format == VideoFormat::H264)
+                // 映像は H.264 （AVC or Annex.B 形式） のみ許可する
+                matches!(sample.format, VideoFormat::H264 | VideoFormat::H264AnnexB)
                     .or_fail_with(|()| format!("unsupported video codec: {}", sample.format))?;
 
                 // TODO: ちゃんとエラーハンドリングする（一時的に詰まっているだけならエラーにしない）
