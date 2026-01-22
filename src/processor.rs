@@ -139,6 +139,8 @@ pub enum MediaProcessorOutput {
         stream_id: MediaStreamId,
         sample: MediaSample,
     },
+    // TODO: 入力側にフィードバックするバリアントを追加する:
+    //   例: Feedback { input_stream_id: ..., kind: Overloaded | KeyframeRequired }
     Pending {
         // 入力を待機しているストリームの ID
         //
