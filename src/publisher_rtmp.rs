@@ -164,61 +164,59 @@ impl RtmpPublishRunner {
                 connection.advance_send_buf(send_data.len());
             }
 
-            // ストリームからデータを受信 (タイムアウト付き)
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(5),
-                stream.read(&mut recv_buf),
-            )
-            .await
-            {
-                Ok(Ok(0)) => break, // 接続が切断された
-                Ok(Ok(n)) => connection.feed_recv_buf(&recv_buf[..n]).or_fail()?,
-                Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
-                Ok(Err(e)) => Err(e).or_fail()?,
-                Err(_) => {} // タイムアウト
-            }
-
-            // メディアサンプルを送信
-            if let Ok(sample) = self.rx.try_recv() {
-                match sample {
-                    crate::media::MediaSample::Audio(audio) => {
-                        let frame = shiguredo_rtmp::AudioFrame {
-                            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
-                                audio.timestamp.as_millis() as u32,
-                            ),
-                            format: shiguredo_rtmp::AudioFormat::Aac,
-                            sample_rate: shiguredo_rtmp::AudioSampleRate::Khz44,
-                            is_8bit_sample: false,
-                            is_stereo: true,
-                            is_aac_sequence_header: false,
-                            data: audio.data.clone(),
-                        };
-                        connection.send_audio(frame).or_fail()?;
-                    }
-                    crate::media::MediaSample::Video(video) => {
-                        let frame = shiguredo_rtmp::VideoFrame {
-                            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
-                                video.timestamp.as_millis() as u32,
-                            ),
-                            composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-                            frame_type: if video.keyframe {
-                                shiguredo_rtmp::VideoFrameType::KeyFrame
-                            } else {
-                                shiguredo_rtmp::VideoFrameType::InterFrame
-                            },
-                            codec: shiguredo_rtmp::VideoCodec::Avc,
-                            avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
-                            data: video.data.clone(),
-                        };
-                        connection.send_video(frame).or_fail()?;
+            // select! マクロでストリーム受信とメディアサンプル受信を並行処理
+            tokio::select! {
+                // ストリームからデータを受信
+                read_result = stream.read(&mut recv_buf) => {
+                    match read_result {
+                        Ok(0) => break, // 接続が切断された
+                        Ok(n) => connection.feed_recv_buf(&recv_buf[..n]).or_fail()?,
+                        Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
+                        Err(e) => Err(e).or_fail()?,
                     }
                 }
-            } else {
-                // チャンネルが閉じている可能性をチェック
-                if self.rx.is_closed() {
+
+                // メディアサンプルを受信
+                Some(sample) = self.rx.recv() => {
+                    match sample {
+                        crate::media::MediaSample::Audio(audio) => {
+                            let frame = shiguredo_rtmp::AudioFrame {
+                                timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
+                                    audio.timestamp.as_millis() as u32,
+                                ),
+                                format: shiguredo_rtmp::AudioFormat::Aac,
+                                sample_rate: shiguredo_rtmp::AudioSampleRate::Khz44,
+                                is_8bit_sample: false,
+                                is_stereo: true,
+                                is_aac_sequence_header: false,
+                                data: audio.data.clone(),
+                            };
+                            connection.send_audio(frame).or_fail()?;
+                        }
+                        crate::media::MediaSample::Video(video) => {
+                            let frame = shiguredo_rtmp::VideoFrame {
+                                timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
+                                    video.timestamp.as_millis() as u32,
+                                ),
+                                composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
+                                frame_type: if video.keyframe {
+                                    shiguredo_rtmp::VideoFrameType::KeyFrame
+                                } else {
+                                    shiguredo_rtmp::VideoFrameType::InterFrame
+                                },
+                                codec: shiguredo_rtmp::VideoCodec::Avc,
+                                avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
+                                data: video.data.clone(),
+                            };
+                            connection.send_video(frame).or_fail()?;
+                        }
+                    }
+                }
+
+                // チャンネルが閉じている場合
+                else => {
                     break;
                 }
-                tokio::task::yield_now().await;
             }
         }
 
