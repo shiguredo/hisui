@@ -15,9 +15,24 @@ use crate::{
     video::VideoFormat,
 };
 
-#[derive(Debug, Default, Clone)]
-pub struct RtmpPublisherOptions {
+#[derive(Debug, Clone)]
+pub struct RtmpStreamEndpoint {
+    pub host: String,
+    pub port: u16,
+    pub app: String,
+    pub stream_name: String,
     pub tls: bool,
+}
+
+impl RtmpStreamEndpoint {
+    pub fn addr(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+
+    pub fn tc_url(&self) -> String {
+        let scheme = if self.tls { "rtmps" } else { "rtmp" };
+        format!("{}://{}:{}/{}", scheme, self.host, self.port, self.app)
+    }
 }
 
 #[derive(Debug)]
@@ -32,22 +47,11 @@ impl RtmpPublisher {
         runtime: &tokio::runtime::Runtime,
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
-        server_host: String,
-        server_port: u16,
-        app: String,
-        stream_name: String,
-        options: RtmpPublisherOptions,
+        endpoint: RtmpStreamEndpoint,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
         runtime.spawn(async move {
-            let runner = RtmpPublishRunner {
-                server_host,
-                server_port,
-                app,
-                stream_name,
-                options,
-                rx,
-            };
+            let runner = RtmpPublishRunner { endpoint, rx };
             if let Err(e) = runner.run().await.or_fail() {
                 log::error!("RTMP publish error: {e}");
                 // TODO: stats 更新
@@ -121,53 +125,29 @@ impl MediaProcessor for RtmpPublisher {
 
 #[derive(Debug)]
 struct RtmpPublishRunner {
-    server_host: String,
-    server_port: u16,
-    app: String,
-    stream_name: String,
-    options: RtmpPublisherOptions,
+    endpoint: RtmpStreamEndpoint,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
 }
 
 impl RtmpPublishRunner {
     async fn run(mut self) -> orfail::Result<()> {
-        log::debug!(
-            "Starting RTMP publisher: {}://{}:{}/{}/{}",
-            if self.options.tls { "rtmps" } else { "rtmp" },
-            self.server_host,
-            self.server_port,
-            self.app,
-            self.stream_name
-        );
+        let tc_url = self.endpoint.tc_url();
+        log::debug!("Starting RTMP publisher: {tc_url}");
 
         // TCP または TLS 接続を確立
-        let mut stream = if self.options.tls {
-            crate::tcp::TcpOrTlsStream::connect_tls(
-                format!("{}:{}", self.server_host, self.server_port),
-                &self.server_host,
-            )
-            .await
-            .or_fail()?
+        let mut stream = if self.endpoint.tls {
+            crate::tcp::TcpOrTlsStream::connect_tls(self.endpoint.addr(), &self.endpoint.host)
+                .await
+                .or_fail()?
         } else {
-            crate::tcp::TcpOrTlsStream::connect_tcp(format!(
-                "{}:{}",
-                self.server_host, self.server_port
-            ))
-            .await
-            .or_fail()?
+            crate::tcp::TcpOrTlsStream::connect_tcp(self.endpoint.addr())
+                .await
+                .or_fail()?
         };
 
         // RTMP パブリッシュクライアント接続を作成
-        let tc_url = format!(
-            "{}://{}:{}/{}",
-            if self.options.tls { "rtmps" } else { "rtmp" },
-            self.server_host,
-            self.server_port,
-            self.app
-        );
-
         let mut connection =
-            shiguredo_rtmp::RtmpPublishClientConnection::new(&tc_url, &self.stream_name);
+            shiguredo_rtmp::RtmpPublishClientConnection::new(&tc_url, &self.endpoint.stream_name);
         let mut recv_buf = vec![0u8; 8192];
 
         // イベント処理ループ
