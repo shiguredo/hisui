@@ -32,10 +32,11 @@ rustls = { version = "=0.23.36", default-features = false, features = [
 ] }
 rustls-platform-verifier = "=0.6.2"
 tokio = { version = "=1.49.0", features = [
-    "rt-multi-thread",
+    "rt",
     "net",
     "io-util",
     "macros",
+    "sync",
     "time",
 ] }
 tokio-rustls = "=0.26.4"

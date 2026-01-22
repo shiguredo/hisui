@@ -1,3 +1,4 @@
+#![expect(dead_code)]
 use crate::{
     media::{MediaSample, MediaStreamId},
     processor::{
@@ -7,10 +8,64 @@ use crate::{
     stats::ProcessorStats,
 };
 
+#[derive(Debug, Default, Clone)]
+pub struct RtmpPublisherOptions {
+    pub tls: bool,
+}
+
+#[derive(Debug)]
+struct RtmpPublishRunner {
+    server_host: String,
+    server_port: u16,
+    app: String,
+    stream_name: String,
+    options: RtmpPublisherOptions,
+    rx: tokio::sync::mpsc::Receiver<MediaSample>,
+}
+
+impl RtmpPublishRunner {
+    async fn run(self) {
+        //
+    }
+}
+
 #[derive(Debug)]
 pub struct RtmpPublisher {
     input_audio_stream_id: Option<MediaStreamId>,
     input_video_stream_id: Option<MediaStreamId>,
+    tx: tokio::sync::mpsc::Sender<MediaSample>,
+}
+
+impl RtmpPublisher {
+    pub fn start(
+        runtime: &tokio::runtime::Runtime,
+        input_audio_stream_id: Option<MediaStreamId>,
+        input_video_stream_id: Option<MediaStreamId>,
+        server_host: String,
+        server_port: u16,
+        app: String,
+        stream_name: String,
+        options: RtmpPublisherOptions,
+    ) -> Self {
+        let (tx, rx) = tokio::sync::mpsc::channel(10); // TODO: サイズは変更できるようにする
+        runtime.spawn(async move {
+            let runner = RtmpPublishRunner {
+                server_host,
+                server_port,
+                app,
+                stream_name,
+                options,
+                rx,
+            };
+            runner.run().await;
+            todo!()
+        });
+        Self {
+            input_audio_stream_id,
+            input_video_stream_id,
+            tx,
+        }
+    }
 }
 
 impl MediaProcessor for RtmpPublisher {
@@ -56,7 +111,7 @@ impl MediaProcessor for RtmpPublisher {
         if self.input_audio_stream_id.is_none() && self.input_video_stream_id.is_none() {
             Ok(MediaProcessorOutput::awaiting_any())
         } else {
-            return Ok(MediaProcessorOutput::Finished);
+            Ok(MediaProcessorOutput::Finished)
         }
     }
 }
