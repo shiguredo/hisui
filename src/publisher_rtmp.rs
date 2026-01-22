@@ -32,7 +32,7 @@ impl std::fmt::Display for RtmpStreamUrl {
 pub struct RtmpPublisher {
     input_audio_stream_id: Option<MediaStreamId>,
     input_video_stream_id: Option<MediaStreamId>,
-    tx: tokio::sync::mpsc::Sender<MediaSample>,
+    tx: Option<tokio::sync::mpsc::Sender<MediaSample>>,
 }
 
 impl RtmpPublisher {
@@ -62,7 +62,7 @@ impl RtmpPublisher {
         Self {
             input_audio_stream_id,
             input_video_stream_id,
-            tx,
+            tx: Some(tx),
         }
     }
 }
@@ -90,8 +90,10 @@ impl MediaProcessor for RtmpPublisher {
                 (sample.format == AudioFormat::Aac)
                     .or_fail_with(|()| format!("unsupported audio codec: {}", sample.format))?;
 
+                let tx = self.tx.as_ref().or_fail()?;
+
                 // TODO: ちゃんとエラーハンドリングする（一時的に詰まっているだけならエラーにしない）
-                self.tx.try_send(MediaSample::Audio(sample)).or_fail()?;
+                tx.try_send(MediaSample::Audio(sample)).or_fail()?;
             }
             None if Some(input.stream_id) == self.input_audio_stream_id => {
                 self.input_audio_stream_id = None;
@@ -103,8 +105,10 @@ impl MediaProcessor for RtmpPublisher {
                 matches!(sample.format, VideoFormat::H264 | VideoFormat::H264AnnexB)
                     .or_fail_with(|()| format!("unsupported video codec: {}", sample.format))?;
 
+                let tx = self.tx.as_ref().or_fail()?;
+
                 // TODO: ちゃんとエラーハンドリングする（一時的に詰まっているだけならエラーにしない）
-                self.tx.try_send(MediaSample::Video(sample)).or_fail()?;
+                tx.try_send(MediaSample::Video(sample)).or_fail()?;
             }
             None if Some(input.stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
@@ -120,6 +124,7 @@ impl MediaProcessor for RtmpPublisher {
         if self.input_audio_stream_id.is_none() && self.input_video_stream_id.is_none() {
             Ok(MediaProcessorOutput::awaiting_any())
         } else {
+            self.tx = None;
             Ok(MediaProcessorOutput::Finished)
         }
     }
@@ -164,48 +169,16 @@ impl RtmpPublishRunner {
 
             // select! マクロでストリーム受信とメディアサンプル受信を並行処理
             tokio::select! {
-                // ストリームからデータを受信
-                read_result = stream.read(&mut self.recv_buf) => self.handle_read_result(read_result).or_fail()?,
-
-                // メディアサンプルを受信
-                Some(sample) = self.rx.recv() => {
-                    match sample {
-                        crate::media::MediaSample::Audio(audio) => {
-                            let frame = shiguredo_rtmp::AudioFrame {
-                                timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
-                                    audio.timestamp.as_millis() as u32,
-                                ),
-                                format: shiguredo_rtmp::AudioFormat::Aac,
-                                sample_rate: shiguredo_rtmp::AudioSampleRate::Khz44,
-                                is_8bit_sample: false,
-                                is_stereo: true,
-                                is_aac_sequence_header: false,
-                                data: audio.data.clone(),
-                            };
-                            self.connection.send_audio(frame).or_fail()?;
-                        }
-                        crate::media::MediaSample::Video(video) => {
-                            let frame = shiguredo_rtmp::VideoFrame {
-                                timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
-                                    video.timestamp.as_millis() as u32,
-                                ),
-                                composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-                                frame_type: if video.keyframe {
-                                    shiguredo_rtmp::VideoFrameType::KeyFrame
-                                } else {
-                                    shiguredo_rtmp::VideoFrameType::InterFrame
-                                },
-                                codec: shiguredo_rtmp::VideoCodec::Avc,
-                                avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
-                                data: video.data.clone(),
-                            };
-                            self.connection.send_video(frame).or_fail()?;
-                        }
-                    }
+                result = stream.read(&mut self.recv_buf) => {
+                    // TCP / TLS ストリームからデータを受信
+                    self.handle_read_result(result).or_fail()?;
                 }
-
-                // チャンネルが閉じている場合
+                Some(sample) = self.rx.recv() => {
+                    // サーバーに配信すべき入力メディアサンプルを受信
+                    self.handle_media_sample(sample).or_fail()?;
+                }
                 else => {
+                    // 配信すべき入力サンプルがなくなった（正常終了）
                     break;
                 }
             }
@@ -224,6 +197,43 @@ impl RtmpPublishRunner {
         self.connection
             .feed_recv_buf(&self.recv_buf[..n])
             .or_fail()?;
+        Ok(())
+    }
+
+    fn handle_media_sample(&mut self, sample: crate::media::MediaSample) -> orfail::Result<()> {
+        match sample {
+            crate::media::MediaSample::Audio(audio) => {
+                let frame = shiguredo_rtmp::AudioFrame {
+                    timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
+                        audio.timestamp.as_millis() as u32,
+                    ),
+                    format: shiguredo_rtmp::AudioFormat::Aac,
+                    sample_rate: shiguredo_rtmp::AudioSampleRate::Khz44,
+                    is_8bit_sample: false,
+                    is_stereo: true,
+                    is_aac_sequence_header: false,
+                    data: audio.data.clone(),
+                };
+                self.connection.send_audio(frame).or_fail()?;
+            }
+            crate::media::MediaSample::Video(video) => {
+                let frame = shiguredo_rtmp::VideoFrame {
+                    timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
+                        video.timestamp.as_millis() as u32,
+                    ),
+                    composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
+                    frame_type: if video.keyframe {
+                        shiguredo_rtmp::VideoFrameType::KeyFrame
+                    } else {
+                        shiguredo_rtmp::VideoFrameType::InterFrame
+                    },
+                    codec: shiguredo_rtmp::VideoCodec::Avc,
+                    avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
+                    data: video.data.clone(),
+                };
+                self.connection.send_video(frame).or_fail()?;
+            }
+        }
         Ok(())
     }
 }
