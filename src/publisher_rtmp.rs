@@ -28,11 +28,11 @@ impl MediaProcessor for RtmpPublisher {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        /* match input.sample {
+        match input.sample {
             Some(MediaSample::Audio(sample))
                 if Some(input.stream_id) == self.input_audio_stream_id =>
             {
-                self.input_audio_queue.push_back(sample);
+                todo!()
             }
             None if Some(input.stream_id) == self.input_audio_stream_id => {
                 self.input_audio_stream_id = None;
@@ -40,13 +40,13 @@ impl MediaProcessor for RtmpPublisher {
             Some(MediaSample::Video(sample))
                 if Some(input.stream_id) == self.input_video_stream_id =>
             {
-                self.input_video_queue.push_back(sample);
+                todo!()
             }
             None if Some(input.stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
             }
             _ => return Err(orfail::Failure::new("BUG: unexpected input stream")),
-        }*/
+        }
         Ok(())
     }
 
