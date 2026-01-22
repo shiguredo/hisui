@@ -141,6 +141,9 @@ pub enum MediaProcessorOutput {
     },
     // TODO: 入力側にフィードバックするバリアントを追加する:
     //   例: Feedback { input_stream_id: ..., kind: Overloaded | KeyframeRequired }
+    //
+    // ただし、この枠組みだと、そもそも Processor に入力を伝えるためのキューが詰まっている時にそれを伝えるのが難しい。
+    // （それは別の枠組みで対処するか、Processor の代わりにその runner がつまりを検知してフィードバックメッセージを生成するとかする必要がありそう）
     Pending {
         // 入力を待機しているストリームの ID
         //
