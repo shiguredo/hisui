@@ -40,11 +40,11 @@ impl RtmpPublisher {
         runtime: &tokio::runtime::Runtime,
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
-        endpoint: RtmpStreamUrl,
+        url: RtmpStreamUrl,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
         runtime.spawn(async move {
-            let runner = RtmpPublishRunner { endpoint, rx };
+            let runner = RtmpPublishRunner { url, rx };
             if let Err(e) = runner.run().await.or_fail() {
                 log::error!("RTMP publish error: {e}");
                 // TODO: stats 更新
@@ -118,27 +118,24 @@ impl MediaProcessor for RtmpPublisher {
 
 #[derive(Debug)]
 struct RtmpPublishRunner {
-    endpoint: RtmpStreamUrl,
+    url: RtmpStreamUrl,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
 }
 
 impl RtmpPublishRunner {
     async fn run(mut self) -> orfail::Result<()> {
-        let tc_url = self.endpoint.to_string();
+        let tc_url = self.url.to_string();
         log::debug!("Starting RTMP publisher: {tc_url}");
 
         // TCP または TLS 接続を確立
-        let mut stream = crate::tcp::TcpOrTlsStream::connect(
-            &self.endpoint.host,
-            self.endpoint.port,
-            self.endpoint.tls,
-        )
-        .await
-        .or_fail()?;
+        let mut stream =
+            crate::tcp::TcpOrTlsStream::connect(&self.url.host, self.url.port, self.url.tls)
+                .await
+                .or_fail()?;
 
         // RTMP パブリッシュクライアント接続を作成
         let mut connection =
-            shiguredo_rtmp::RtmpPublishClientConnection::new(&tc_url, &self.endpoint.stream_name);
+            shiguredo_rtmp::RtmpPublishClientConnection::new(&tc_url, &self.url.stream_name);
         let mut recv_buf = vec![0u8; 8192];
 
         // イベント処理ループ
