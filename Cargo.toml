@@ -25,6 +25,20 @@ log = "=0.4.29"
 noargs = "=0.4.2"
 nojson = "=0.3.6"
 orfail = "=2.0.0"
+rustls = { version = "=0.23.36", default-features = false, features = [
+    "std",
+    "tls12",
+    "aws-lc-rs",
+] }
+rustls-platform-verifier = "=0.6.2"
+tokio = { version = "=1.49.0", features = [
+    "rt-multi-thread",
+    "net",
+    "io-util",
+    "macros",
+    "time",
+] }
+tokio-rustls = "=0.26.4"
 shiguredo_mp4 = "=2026.1.0"
 shiguredo_rtmp = "=2026.1.0-canary.0"
 
