@@ -51,28 +51,12 @@ impl MediaProcessor for RtmpPublisher {
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        /*loop {
-            if let Some(id) = self.input_video_stream_id
-                && self.input_video_queue.is_empty()
-            {
-                return Ok(MediaProcessorOutput::pending(id));
-            } else if let Some(id) = self.input_audio_stream_id
-                && self.input_audio_queue.is_empty()
-            {
-                return Ok(MediaProcessorOutput::pending(id));
-            }
+        // TODO: ネットワークが詰まっている場合には、それを前段にフィードバックする
 
-            let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
-            let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
-
-            let in_progress = self
-                .handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                .or_fail()?;
-
-            if !in_progress {
-                return Ok(MediaProcessorOutput::Finished);
-            }
-        }*/
-        todo!()
+        if self.input_audio_stream_id.is_none() && self.input_video_stream_id.is_none() {
+            Ok(MediaProcessorOutput::awaiting_any())
+        } else {
+            return Ok(MediaProcessorOutput::Finished);
+        }
     }
 }
