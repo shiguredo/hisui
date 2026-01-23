@@ -231,29 +231,24 @@ impl RtmpPublishRunner {
 
     /// 音声サンプルを処理してサーバーに送信する
     fn handle_audio_sample(&mut self, audio: Arc<AudioData>) -> orfail::Result<()> {
-        // AAC の場合は以下のパラメーターは固定と仕様で決まっている（シーケンスヘッダの方の値が使われる）
-        let sample_rate = shiguredo_rtmp::AudioSampleRate::Khz44;
-        let is_stereo = true;
-
-        let is_8bit = false; // Hisui は 16 bit サンプル前提
-
         // 最初のサンプルまたは新しいサンプルエントリーが来た場合、シーケンスヘッダを送信
         if self.audio_sequence_header_data.is_none()
             && let Some(entry) = &audio.sample_entry
-                && let Ok(seq_header) = create_audio_sequence_header(entry) {
-                    let seq_frame = shiguredo_rtmp::AudioFrame {
-                        timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
-                        format: shiguredo_rtmp::AudioFormat::Aac,
-                        sample_rate,
-                        is_8bit_sample: is_8bit,
-                        is_stereo,
-                        is_aac_sequence_header: true,
-                        data: seq_header.clone(),
-                    };
-                    self.connection.send_audio(seq_frame).or_fail()?;
-                    self.audio_sequence_header_data = Some(seq_header);
-                    log::debug!("Sent AAC sequence header");
-                }
+            && let Ok(seq_header) = create_audio_sequence_header(entry)
+        {
+            let seq_frame = shiguredo_rtmp::AudioFrame {
+                timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
+                format: shiguredo_rtmp::AudioFormat::Aac,
+                sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
+                is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
+                is_8bit_sample: false, // Hisui は 16 bit サンプル前提
+                is_aac_sequence_header: true,
+                data: seq_header.clone(),
+            };
+            self.connection.send_audio(seq_frame).or_fail()?;
+            self.audio_sequence_header_data = Some(seq_header);
+            log::debug!("Sent AAC sequence header");
+        }
 
         // 音声フレームデータを送信
         let frame = shiguredo_rtmp::AudioFrame {
@@ -261,9 +256,9 @@ impl RtmpPublishRunner {
                 audio.timestamp.as_millis() as u32
             ),
             format: shiguredo_rtmp::AudioFormat::Aac,
-            sample_rate,
-            is_8bit_sample: is_8bit,
-            is_stereo,
+            sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
+            is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
+            is_8bit_sample: false, // Hisui は 16 bit サンプル前提
             is_aac_sequence_header: false,
             data: audio.data.clone(),
         };
@@ -279,19 +274,20 @@ impl RtmpPublishRunner {
         if video.keyframe {
             // 新しいサンプルエントリーが来た場合
             if let Some(entry) = &video.sample_entry
-                && let Ok(seq_header_data) = create_video_sequence_header(entry) {
-                    let seq_frame = shiguredo_rtmp::VideoFrame {
-                        timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
-                        composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-                        frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
-                        codec: shiguredo_rtmp::VideoCodec::Avc,
-                        avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
-                        data: seq_header_data.clone(),
-                    };
-                    self.connection.send_video(seq_frame).or_fail()?;
-                    self.video_sequence_header_data = Some(seq_header_data);
-                    log::debug!("Sent H.264 sequence header");
-                }
+                && let Ok(seq_header_data) = create_video_sequence_header(entry)
+            {
+                let seq_frame = shiguredo_rtmp::VideoFrame {
+                    timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
+                    composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
+                    frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
+                    codec: shiguredo_rtmp::VideoCodec::Avc,
+                    avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
+                    data: seq_header_data.clone(),
+                };
+                self.connection.send_video(seq_frame).or_fail()?;
+                self.video_sequence_header_data = Some(seq_header_data);
+                log::debug!("Sent H.264 sequence header");
+            }
             self.last_video_keyframe_timestamp = Some(timestamp_ms);
         }
 
