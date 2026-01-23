@@ -181,8 +181,8 @@ impl RtmpPublishRunner {
             }
 
             // 送信バッファをストリームに書き込む
-            let send_data = self.connection.send_buf();
-            if !send_data.is_empty() {
+            while !self.connection.send_buf().is_empty() {
+                let send_data = self.connection.send_buf();
                 stream.write_all(send_data).await.or_fail()?;
                 self.connection.advance_send_buf(send_data.len());
             }
