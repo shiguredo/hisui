@@ -32,6 +32,8 @@ impl std::fmt::Display for RtmpStreamUrl {
     }
 }
 
+// TODO: impl Parse
+
 #[derive(Debug)]
 pub struct RtmpPublisher {
     input_audio_stream_id: Option<MediaStreamId>,
@@ -57,6 +59,7 @@ impl RtmpPublisher {
                 rx,
                 recv_buf: vec![0u8; 8192],
                 connection,
+                ready: false,
             };
             if let Err(e) = runner.run().await.or_fail() {
                 log::error!("RTMP publish error: {e}");
@@ -125,7 +128,7 @@ impl MediaProcessor for RtmpPublisher {
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         // TODO: ネットワークが詰まっている場合には、それを前段にフィードバックする
 
-        if self.input_audio_stream_id.is_none() && self.input_video_stream_id.is_none() {
+        if self.input_audio_stream_id.is_some() || self.input_video_stream_id.is_some() {
             Ok(MediaProcessorOutput::awaiting_any())
         } else {
             self.tx = None;
@@ -140,6 +143,7 @@ struct RtmpPublishRunner {
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
     recv_buf: Vec<u8>,
     connection: shiguredo_rtmp::RtmpPublishClientConnection,
+    ready: bool,
 }
 
 impl RtmpPublishRunner {
@@ -162,6 +166,14 @@ impl RtmpPublishRunner {
             // イベント処理
             while let Some(event) = connection.next_event() {
                 log::debug!("RTMP event: {:?}", event);
+                if matches!(
+                    event,
+                    shiguredo_rtmp::RtmpConnectionEvent::StateChanged(
+                        shiguredo_rtmp::RtmpConnectionState::Publishing
+                    )
+                ) {
+                    self.ready = true;
+                }
             }
 
             // 送信バッファをストリームに書き込む
@@ -205,6 +217,12 @@ impl RtmpPublishRunner {
     }
 
     fn handle_media_sample(&mut self, sample: crate::media::MediaSample) -> orfail::Result<()> {
+        if !self.ready {
+            // RTMP サーバーへの接続中
+            // TODO: ある程度バッファリングする
+            return Ok(());
+        }
+
         match sample {
             crate::media::MediaSample::Audio(audio) => {
                 let frame = shiguredo_rtmp::AudioFrame {
