@@ -229,14 +229,11 @@ impl RtmpPublishRunner {
 
     /// 音声サンプルを処理してサーバーに送信する
     fn handle_audio_sample(&mut self, audio: Arc<AudioData>) -> orfail::Result<()> {
-        // サンプルエントリーから実際のメタデータを抽出
-        let (sample_rate, is_stereo, is_8bit) = if let Some(entry) = &audio.sample_entry {
-            extract_audio_params(entry)?
-        } else {
-            // フォールバック: audio フィールドから取得
-            let sample_rate = hz_to_rtmp_sample_rate(audio.sample_rate);
-            (sample_rate, audio.stereo, false)
-        };
+        // AAC の場合は以下のパラメーターは固定と仕様で決まっている（シーケンスヘッダの方の値が使われる）
+        let sample_rate = shiguredo_rtmp::AudioSampleRate::Khz44;
+        let is_stereo = true;
+
+        let is_8bit = false; // Hisui は 16 bit サンプル前提
 
         // 最初のサンプルまたは新しいサンプルエントリーが来た場合、シーケンスヘッダを送信
         if self.audio_sequence_header_data.is_none() {
@@ -280,39 +277,20 @@ impl RtmpPublishRunner {
 
         // キーフレームの場合、シーケンスヘッダを送信
         if video.keyframe {
-            // 最初のキーフレームまたは新しいサンプルエントリーが来た場合
+            // 新しいサンプルエントリーが来た場合
             if let Some(entry) = &video.sample_entry {
-                if self.video_sequence_header_data.is_none() {
-                    if let Ok(seq_header_data) = create_video_sequence_header(entry) {
-                        let seq_frame = shiguredo_rtmp::VideoFrame {
-                            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
-                            composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-                            frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
-                            codec: shiguredo_rtmp::VideoCodec::Avc,
-                            avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
-                            data: seq_header_data.clone(),
-                        };
-                        self.connection.send_video(seq_frame).or_fail()?;
-                        self.video_sequence_header_data = Some(seq_header_data);
-                        log::debug!("Sent H.264 sequence header");
-                    }
-                } else if self
-                    .last_video_keyframe_timestamp
-                    .map(|ts| timestamp_ms.saturating_sub(ts) > 5000)
-                    .unwrap_or(false)
-                {
-                    // 5秒ごとにシーケンスヘッダを再送（オプション）
-                    if let Some(ref seq_header_data) = self.video_sequence_header_data {
-                        let seq_frame = shiguredo_rtmp::VideoFrame {
-                            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
-                            composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-                            frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
-                            codec: shiguredo_rtmp::VideoCodec::Avc,
-                            avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
-                            data: seq_header_data.clone(),
-                        };
-                        self.connection.send_video(seq_frame).or_fail()?;
-                    }
+                if let Ok(seq_header_data) = create_video_sequence_header(entry) {
+                    let seq_frame = shiguredo_rtmp::VideoFrame {
+                        timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
+                        composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
+                        frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
+                        codec: shiguredo_rtmp::VideoCodec::Avc,
+                        avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
+                        data: seq_header_data.clone(),
+                    };
+                    self.connection.send_video(seq_frame).or_fail()?;
+                    self.video_sequence_header_data = Some(seq_header_data);
+                    log::debug!("Sent H.264 sequence header");
                 }
             }
             self.last_video_keyframe_timestamp = Some(timestamp_ms);
@@ -333,39 +311,6 @@ impl RtmpPublishRunner {
         };
         self.connection.send_video(frame).or_fail()?;
         Ok(())
-    }
-}
-
-/// Hz のサンプリングレートを RTMP の AudioSampleRate に変換
-fn hz_to_rtmp_sample_rate(hz: u16) -> shiguredo_rtmp::AudioSampleRate {
-    match hz {
-        5500 => shiguredo_rtmp::AudioSampleRate::Khz5,
-        11000 => shiguredo_rtmp::AudioSampleRate::Khz11,
-        22000 => shiguredo_rtmp::AudioSampleRate::Khz22,
-        44100 => shiguredo_rtmp::AudioSampleRate::Khz44,
-        48000 => shiguredo_rtmp::AudioSampleRate::Khz44, // TODO: Check if Khz48 exists in shiguredo_rtmp
-        _ => {
-            log::warn!("Unsupported sample rate: {hz}Hz, defaulting to 44.1kHz");
-            shiguredo_rtmp::AudioSampleRate::Khz44
-        }
-    }
-}
-
-/// サンプルエントリーから音声パラメーターを抽出
-fn extract_audio_params(
-    entry: &SampleEntry,
-) -> orfail::Result<(shiguredo_rtmp::AudioSampleRate, bool, bool)> {
-    match entry {
-        SampleEntry::Mp4a(mp4a) => {
-            let channel_count = mp4a.audio.channelcount as u8;
-            let is_stereo = channel_count >= 2;
-            let is_8bit = mp4a.audio.samplesize == 8;
-            let sample_rate_hz = mp4a.audio.samplerate.integer;
-            let sample_rate = hz_to_rtmp_sample_rate(sample_rate_hz);
-
-            Ok((sample_rate, is_stereo, is_8bit))
-        }
-        _ => Err(orfail::Failure::new("Not an audio sample entry")),
     }
 }
 
