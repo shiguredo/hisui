@@ -128,8 +128,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         codec: CodecName::H264,
         engines: None,
         bitrate: 1000000, // 1 Mbps
-        width: crate::types::EvenUsize::new(1280).or_fail()?,
-        height: crate::types::EvenUsize::new(720).or_fail()?,
+        // TODO: 起動時に固定値を渡すのではなく、実際の値を使うようにする
+        width: crate::types::EvenUsize::new(320).or_fail()?,
+        height: crate::types::EvenUsize::new(180).or_fail()?,
         frame_rate: FrameRate::FPS_25,
         encode_params: Default::default(),
     };
