@@ -192,7 +192,7 @@ impl RtmpPublishRunner {
         let n = result.or_fail()?;
 
         // サーバーから切断されるのは想定外なのでエラー扱いにする
-        (n == 0).or_fail_with(|()| "connection reset by server".to_owned())?;
+        (n > 0).or_fail_with(|()| "connection reset by server".to_owned())?;
 
         self.connection
             .feed_recv_buf(&self.recv_buf[..n])
