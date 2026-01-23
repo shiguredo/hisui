@@ -193,8 +193,8 @@ impl RtmpPublishRunner {
                     // TCP / TLS ストリームからデータを受信
                     self.handle_read_result(result).or_fail()?;
                 }
-                Some(sample) = self.rx.recv() => {
-                    // サーバーに配信すべき入力メディアサンプルを受信
+                Some(sample) = self.rx.recv(), if self.ready => {
+                    // RTMP サーバーとの接続処理が完了したら、メディアサンプルを受信処理
                     self.handle_media_sample(sample).or_fail()?;
                 }
                 else => {
@@ -221,13 +221,6 @@ impl RtmpPublishRunner {
     }
 
     fn handle_media_sample(&mut self, sample: MediaSample) -> orfail::Result<()> {
-        if !self.ready {
-            // RTMP サーバーへの接続中
-            // TODO: ある程度バッファリングする
-            // => そもそも ready になるまでは rx での受信を試みないのが良さそう
-            return Ok(());
-        }
-
         match sample {
             MediaSample::Audio(audio) => self.handle_audio_sample(audio),
             MediaSample::Video(video) => self.handle_video_sample(video),
