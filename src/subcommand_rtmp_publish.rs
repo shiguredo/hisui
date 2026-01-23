@@ -157,7 +157,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .enable_all()
         .build()
         .or_fail()?;
-    let url = crate::publisher_rtmp::RtmpStreamUrl {
+    let url = shiguredo_rtmp::RtmpUrl {
         host,
         port,
         app,

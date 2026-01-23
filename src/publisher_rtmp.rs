@@ -14,28 +14,6 @@ use crate::{
     video::{VideoFormat, VideoFrame},
 };
 
-#[derive(Debug, Clone)]
-pub struct RtmpStreamUrl {
-    pub host: String,
-    pub port: u16,
-    pub app: String,
-    pub stream_name: String,
-    pub tls: bool,
-}
-
-impl std::fmt::Display for RtmpStreamUrl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let scheme = if self.tls { "rtmps" } else { "rtmp" };
-        write!(
-            f,
-            "{}://{}:{}/{}/{}",
-            scheme, self.host, self.port, self.app, self.stream_name
-        )
-    }
-}
-
-// TODO: impl Parse
-
 #[derive(Debug)]
 pub struct RtmpPublisher {
     input_audio_stream_id: Option<MediaStreamId>,
@@ -48,14 +26,11 @@ impl RtmpPublisher {
         runtime: &tokio::runtime::Runtime,
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
-        url: RtmpStreamUrl,
+        url: shiguredo_rtmp::RtmpUrl,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
         runtime.spawn(async move {
-            let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(
-                &url.to_string(),
-                &url.stream_name,
-            );
+            let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(url.clone());
             let runner = RtmpPublishRunner {
                 url,
                 rx,
@@ -145,7 +120,7 @@ impl MediaProcessor for RtmpPublisher {
 
 #[derive(Debug)]
 struct RtmpPublishRunner {
-    url: RtmpStreamUrl,
+    url: shiguredo_rtmp::RtmpUrl,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
     recv_buf: Vec<u8>,
     connection: shiguredo_rtmp::RtmpPublishClientConnection,
@@ -158,8 +133,7 @@ struct RtmpPublishRunner {
 
 impl RtmpPublishRunner {
     async fn run(mut self) -> orfail::Result<()> {
-        let tc_url = self.url.to_string();
-        log::debug!("Starting RTMP publisher: {tc_url}");
+        log::debug!("Starting RTMP publisher: {}", self.url);
 
         // TCP または TLS 接続を確立
         let mut stream =
