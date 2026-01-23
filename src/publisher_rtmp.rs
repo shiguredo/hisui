@@ -24,7 +24,11 @@ pub struct RtmpStreamUrl {
 impl std::fmt::Display for RtmpStreamUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let scheme = if self.tls { "rtmps" } else { "rtmp" };
-        write!(f, "{}://{}:{}/{}", scheme, self.host, self.port, self.app)
+        write!(
+            f,
+            "{}://{}:{}/{}/{}",
+            scheme, self.host, self.port, self.app, self.stream_name
+        )
     }
 }
 
