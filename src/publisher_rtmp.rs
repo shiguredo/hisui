@@ -157,14 +157,10 @@ impl RtmpPublishRunner {
                 .await
                 .or_fail()?;
 
-        // RTMP パブリッシュクライアント接続を作成
-        let mut connection =
-            shiguredo_rtmp::RtmpPublishClientConnection::new(&tc_url, &self.url.stream_name);
-
         // イベント処理ループ
         loop {
             // イベント処理
-            while let Some(event) = connection.next_event() {
+            while let Some(event) = self.connection.next_event() {
                 log::debug!("RTMP event: {:?}", event);
                 if matches!(
                     event,
@@ -177,10 +173,10 @@ impl RtmpPublishRunner {
             }
 
             // 送信バッファをストリームに書き込む
-            let send_data = connection.send_buf();
+            let send_data = self.connection.send_buf();
             if !send_data.is_empty() {
                 stream.write_all(send_data).await.or_fail()?;
-                connection.advance_send_buf(send_data.len());
+                self.connection.advance_send_buf(send_data.len());
             }
 
             // select! マクロでストリーム受信とメディアサンプル受信を並行処理
@@ -220,6 +216,7 @@ impl RtmpPublishRunner {
         if !self.ready {
             // RTMP サーバーへの接続中
             // TODO: ある程度バッファリングする
+            // => そもそも ready になるまでは rx での受信を試みないのが良さそう
             return Ok(());
         }
 

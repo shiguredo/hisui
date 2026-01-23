@@ -153,7 +153,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // RTMP パブリッシャーを登録
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
-        .enable_io()
+        .enable_all()
         .build()
         .or_fail()?;
     let url = crate::publisher_rtmp::RtmpStreamUrl {
