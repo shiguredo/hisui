@@ -227,6 +227,12 @@ jobs:
       - run: cargo test --no-default-features -p hisui -p shiguredo_openh264
 
   valgrind:
+    # [NOTE]
+    # Rust 1.93.0 に上がったタイミングで valgrind チェックが常に失敗するようになったので、その解決策が見つかるまでこのジョブはスキップする
+    # 失敗例: https://github.com/shiguredo/hisui/actions/runs/21272612023/job/61225691502 )
+    #
+    # 上の結果を見ると、特定のテストでチェックがこけている、という感じではなく cargo test 自体と相性が悪そうにも見える
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -398,6 +404,7 @@ jobs:
       - test-openh264
       - ubuntu-binary
       - macos-binary
+      # - valgrind  # スキップ中のため除外（TODO: valgrind ジョブのスキップをやめたらコメントアウトを外す）
       - valgrind
       - docs_rs
     timeout-minutes: 20
