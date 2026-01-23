@@ -8,6 +8,7 @@ use crate::{
     encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
     media::MediaStreamId,
     metadata::ContainerFormat,
+    processor::RealtimePacer,
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
     types::CodecName,
@@ -20,6 +21,8 @@ const AUDIO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(2);
 const VIDEO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(3);
 const AUDIO_REENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(4);
 const VIDEO_REENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(5);
+const AUDIO_PACED_STREAM_ID: MediaStreamId = MediaStreamId::new(6);
+const VIDEO_PACED_STREAM_ID: MediaStreamId = MediaStreamId::new(7);
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let host: String = noargs::opt("host")
@@ -139,6 +142,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
     scheduler.register(encoder).or_fail()?;
 
+    // リアルタイムペーサーを登録
+    let pacer = RealtimePacer::new(
+        vec![AUDIO_REENCODED_STREAM_ID, VIDEO_REENCODED_STREAM_ID],
+        vec![AUDIO_PACED_STREAM_ID, VIDEO_PACED_STREAM_ID],
+    )
+    .or_fail()?;
+    scheduler.register(pacer).or_fail()?;
+
     // RTMP パブリッシャーを登録
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -154,8 +165,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     };
     let publisher = crate::publisher_rtmp::RtmpPublisher::start(
         &runtime,
-        Some(AUDIO_REENCODED_STREAM_ID),
-        Some(VIDEO_REENCODED_STREAM_ID),
+        Some(AUDIO_PACED_STREAM_ID),
+        Some(VIDEO_PACED_STREAM_ID),
         url,
     );
     scheduler.register(publisher).or_fail()?;
