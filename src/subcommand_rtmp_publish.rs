@@ -4,11 +4,22 @@ use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
-    decoder::{AudioDecoder, VideoDecoder},
-    encoder::{AudioEncoder, VideoEncoder},
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
+    media::MediaStreamId,
     metadata::ContainerFormat,
-    types::{CodecName, EngineName},
+    reader::{AudioReader, VideoReader},
+    scheduler::Scheduler,
+    types::CodecName,
+    video::FrameRate,
 };
+
+const AUDIO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
+const VIDEO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+const AUDIO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(2);
+const VIDEO_DECODED_STREAM_ID: MediaStreamId = MediaStreamId::new(3);
+const AUDIO_REENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(4);
+const VIDEO_REENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(5);
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let host: String = noargs::opt("host")
@@ -57,6 +68,99 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .as_ref()
         .and_then(|path| Openh264Library::load(path).ok());
     let format = ContainerFormat::from_path(&input_file_path).or_fail()?;
+    let default_port = if tls_flag { 443 } else { 1935 };
+    let port = port.unwrap_or(default_port);
 
+    let mut scheduler = Scheduler::new();
+    let dummy_source_id = crate::metadata::SourceId::new("rtmp_publish");
+
+    // 音声リーダーを登録
+    let reader = AudioReader::new(
+        AUDIO_ENCODED_STREAM_ID,
+        dummy_source_id.clone(),
+        format,
+        std::time::Duration::ZERO,
+        vec![input_file_path.clone()],
+    )
+    .or_fail()?;
+    scheduler.register(reader).or_fail()?;
+
+    // 映像リーダーを登録
+    let reader = VideoReader::new(
+        VIDEO_ENCODED_STREAM_ID,
+        dummy_source_id.clone(),
+        format,
+        std::time::Duration::ZERO,
+        vec![input_file_path.clone()],
+    )
+    .or_fail()?;
+    scheduler.register(reader).or_fail()?;
+
+    // 音声デコーダー（Opus）を登録
+    let decoder =
+        AudioDecoder::new_opus(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
+    scheduler.register(decoder).or_fail()?;
+
+    // 映像デコーダー（H.264）を登録
+    let options = VideoDecoderOptions {
+        openh264_lib: openh264_lib.clone(),
+        decode_params: Default::default(),
+        engines: None,
+    };
+    let decoder = VideoDecoder::new(VIDEO_ENCODED_STREAM_ID, VIDEO_DECODED_STREAM_ID, options);
+    scheduler.register(decoder).or_fail()?;
+
+    // 音声エンコーダー（AAC固定）を登録
+    let audio_bitrate = std::num::NonZeroUsize::new(44000).unwrap(); // 44 kbps
+    let encoder = AudioEncoder::new(
+        CodecName::Aac,
+        audio_bitrate,
+        AUDIO_DECODED_STREAM_ID,
+        AUDIO_REENCODED_STREAM_ID,
+    )
+    .or_fail()?;
+    scheduler.register(encoder).or_fail()?;
+
+    // 映像エンコーダー（H.264固定）を登録
+    let video_options = VideoEncoderOptions {
+        codec: CodecName::H264,
+        engines: None,
+        bitrate: 1000000, // 1 Mbps
+        width: crate::types::EvenUsize::new(1280).unwrap(),
+        height: crate::types::EvenUsize::new(720).unwrap(),
+        frame_rate: FrameRate::FPS_25,
+        encode_params: Default::default(),
+    };
+    let encoder = VideoEncoder::new(
+        &video_options,
+        VIDEO_DECODED_STREAM_ID,
+        VIDEO_REENCODED_STREAM_ID,
+        openh264_lib,
+    )
+    .or_fail()?;
+    scheduler.register(encoder).or_fail()?;
+
+    // RTMP パブリッシャーを登録
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .build()
+        .or_fail()?;
+    let url = crate::publisher_rtmp::RtmpStreamUrl {
+        host,
+        port,
+        app,
+        stream_name,
+        tls: tls_flag,
+    };
+    let publisher = crate::publisher_rtmp::RtmpPublisher::start(
+        &runtime,
+        Some(AUDIO_REENCODED_STREAM_ID),
+        Some(VIDEO_REENCODED_STREAM_ID),
+        url,
+    );
+    scheduler.register(publisher).or_fail()?;
+
+    // スケジューラー実行
+    scheduler.run().or_fail()?;
     Ok(())
 }
