@@ -1,7 +1,6 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
+
+use git2::Repository;
 
 // 依存ライブラリの名前
 const LIB_NAME: &str = "libyuv";
@@ -17,7 +16,6 @@ fn main() {
     let out_build_dir = out_dir.join("build/");
     let src_dir = out_build_dir.join(LIB_NAME);
     let input_header_dir = src_dir.join("include/");
-    let cmake_dir = src_dir.join("out");
     let output_metadata_path = out_dir.join("metadata.rs");
     let output_bindings_path = out_dir.join("bindings.rs");
     let _ = std::fs::remove_dir_all(&out_build_dir);
@@ -50,32 +48,11 @@ fn main() {
     // 依存ライブラリのリポジトリを取得する
     git_clone_external_lib(&out_build_dir);
 
-    // 依存ライブラリをビルドする
-    std::fs::create_dir(&cmake_dir).expect("failed to create build directory");
-
-    // CMakeの設定を追加（リリースビルド、静的ライブラリ）
-    let success = Command::new("cmake")
-        .arg("..")
-        .arg("-DCMAKE_BUILD_TYPE=Release")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .current_dir(&cmake_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[cmake configure] failed to build {LIB_NAME}");
-    }
-
-    let success = Command::new("cmake")
-        .arg("--build")
-        .arg(".")
-        .arg("--config")
-        .arg("Release")
-        .current_dir(&cmake_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[cmake build] failed to build {LIB_NAME}");
-    }
+    // 依存ライブラリをビルドする（cmake クレートを使用）
+    let dst = cmake::Config::new(&src_dir)
+        .define("CMAKE_BUILD_TYPE", "Release")
+        .define("BUILD_SHARED_LIBS", "OFF")
+        .build();
 
     // バインディングを生成する
     bindgen::Builder::default()
@@ -86,35 +63,34 @@ fn main() {
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    println!("cargo::rustc-link-search={}", cmake_dir.display());
+    println!("cargo::rustc-link-search={}", dst.join("lib").display());
     println!("cargo::rustc-link-lib=static={LINK_NAME}");
 }
 
-// 外部ライブラリのリポジトリを git clone する
+// 外部ライブラリのリポジトリを git clone する（git2 クレートを使用）
 fn git_clone_external_lib(build_dir: &Path) {
     let (git_url, version) = get_git_url_and_version();
-
-    let success = Command::new("git")
-        .arg("clone")
-        .arg(&git_url)
-        .arg(LIB_NAME)
-        .current_dir(build_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("failed to clone {LIB_NAME} repository");
-    }
-
     let repo_dir = build_dir.join(LIB_NAME);
 
-    let success = Command::new("git")
-        .arg("checkout")
-        .arg(&version)
-        .current_dir(&repo_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("failed to checkout commit {version} in {LIB_NAME} repository");
+    // リポジトリを clone する
+    let repo = Repository::clone(&git_url, &repo_dir)
+        .unwrap_or_else(|e| panic!("failed to clone {LIB_NAME} repository: {e}"));
+
+    // 指定されたバージョン（コミットハッシュまたはタグ）に checkout する
+    let (object, reference) = repo
+        .revparse_ext(&version)
+        .unwrap_or_else(|e| panic!("failed to find revision {version}: {e}"));
+
+    repo.checkout_tree(&object, None)
+        .unwrap_or_else(|e| panic!("failed to checkout tree: {e}"));
+
+    match reference {
+        Some(gref) => repo
+            .set_head(gref.name().unwrap())
+            .unwrap_or_else(|e| panic!("failed to set head: {e}")),
+        None => repo
+            .set_head_detached(object.id())
+            .unwrap_or_else(|e| panic!("failed to set head detached: {e}")),
     }
 }
 

@@ -3,6 +3,8 @@ use std::{
     process::Command,
 };
 
+use git2::Repository;
+
 // 依存ライブラリの名前
 const LIB_NAME: &str = "libvpx";
 const LINK_NAME: &str = "vpx";
@@ -106,21 +108,30 @@ fn main() {
     println!("cargo::rustc-link-lib=static={LINK_NAME}");
 }
 
-// 外部ライブラリのリポジトリを git clone する
+// 外部ライブラリのリポジトリを git clone する（git2 クレートを使用）
 fn git_clone_external_lib(build_dir: &Path) {
     let (git_url, version) = get_git_url_and_version();
-    let success = Command::new("git")
-        .arg("clone")
-        .arg("--depth")
-        .arg("1")
-        .arg("--branch")
-        .arg(version)
-        .arg(git_url)
-        .current_dir(build_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("failed to clone {LIB_NAME} repository");
+    let repo_dir = build_dir.join(LIB_NAME);
+
+    // リポジトリを clone する
+    let repo = Repository::clone(&git_url, &repo_dir)
+        .unwrap_or_else(|e| panic!("failed to clone {LIB_NAME} repository: {e}"));
+
+    // 指定されたバージョン（タグ）に checkout する
+    let (object, reference) = repo
+        .revparse_ext(&version)
+        .unwrap_or_else(|e| panic!("failed to find revision {version}: {e}"));
+
+    repo.checkout_tree(&object, None)
+        .unwrap_or_else(|e| panic!("failed to checkout tree: {e}"));
+
+    match reference {
+        Some(gref) => repo
+            .set_head(gref.name().unwrap())
+            .unwrap_or_else(|e| panic!("failed to set head: {e}")),
+        None => repo
+            .set_head_detached(object.id())
+            .unwrap_or_else(|e| panic!("failed to set head detached: {e}")),
     }
 }
 
