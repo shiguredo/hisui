@@ -84,9 +84,8 @@ impl MediaProcessor for RtmpPublisher {
                     .or_fail_with(|()| format!("unsupported audio codec: {}", sample.format))?;
 
                 let tx = self.tx.as_ref().or_fail()?;
-
-                // TODO: ちゃんとエラーハンドリングする（一時的に詰まっているだけならエラーにしない）
-                tx.try_send(MediaSample::Audio(sample)).or_fail()?;
+                tx.try_send(MediaSample::Audio(sample))
+                    .or_fail_with(|e| format!("failed to send audio frame: {e}"))?;
             }
             None if Some(input.stream_id) == self.input_audio_stream_id => {
                 self.input_audio_stream_id = None;
@@ -99,9 +98,8 @@ impl MediaProcessor for RtmpPublisher {
                     .or_fail_with(|()| format!("unsupported video codec: {}", sample.format))?;
 
                 let tx = self.tx.as_ref().or_fail()?;
-
-                // TODO: ちゃんとエラーハンドリングする（一時的に詰まっているだけならエラーにしない）
-                tx.try_send(MediaSample::Video(sample)).or_fail()?;
+                tx.try_send(MediaSample::Video(sample))
+                    .or_fail_with(|e| format!("failed to send audio frame: {e}"))?;
             }
             None if Some(input.stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
