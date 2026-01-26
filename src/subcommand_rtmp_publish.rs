@@ -28,7 +28,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let stream_name: Option<String> = noargs::opt("stream")
         .short('s')
         .doc("ストリーム名（省略時には RTMP_URL 引数にストリーム名が含まれるものとして扱われる）")
-        .default("stream")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
