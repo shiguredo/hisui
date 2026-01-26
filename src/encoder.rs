@@ -386,7 +386,7 @@ impl VideoEncoder {
                 VideoEncoderInner::new_svt_av1(options).or_fail()
             }
             _ => {
-                return Err(orfail::Failure::new(format!(
+                Err(orfail::Failure::new(format!(
                     "no available encoder for {} codec (candidate encoders: {})",
                     options.codec.as_str(),
                     candidate_engines
@@ -394,7 +394,7 @@ impl VideoEncoder {
                         .map(|engine| engine.as_str())
                         .collect::<Vec<_>>()
                         .join(", ")
-                )));
+                )))
             }
         }
     }
