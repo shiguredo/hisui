@@ -33,7 +33,7 @@ impl RtmpPublisher {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
 
         let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(url.clone());
-        let runner = RtmpPublishRunner {
+        let mut runner = RtmpPublishRunner {
             url,
             rx,
             recv_buf: vec![0u8; 8192],
@@ -48,7 +48,7 @@ impl RtmpPublisher {
         runtime.spawn(async move {
             if let Err(e) = runner.run().await.or_fail() {
                 log::error!("RTMP publish error: {e}");
-                // TODO: stats 更新
+                runner.stats.error.set(true);
             }
         });
         Self {
@@ -138,7 +138,7 @@ struct RtmpPublishRunner {
 }
 
 impl RtmpPublishRunner {
-    async fn run(mut self) -> orfail::Result<()> {
+    async fn run(&mut self) -> orfail::Result<()> {
         log::debug!("Starting RTMP publisher: {}", self.url);
 
         // TCP または TLS 接続を確立
