@@ -57,7 +57,7 @@ impl RtmpPublisher {
         let mut runner = RtmpPublishRunner {
             url,
             rx,
-            recv_buf: vec![0u8; 8192],
+            recv_buf: vec![0u8; 4096],
             connection,
             ready: false,
             video_sequence_header_data: None,
