@@ -114,9 +114,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         codec: CodecName::H264,
         engines: None,
         bitrate: 1000000, // 1 Mbps （実験的コマンドなので固定値で十分）
-        // TODO: 起動時に固定値を渡すのではなく、実際の値を使うようにする
-        width: crate::types::EvenUsize::new(320).or_fail()?,
-        height: crate::types::EvenUsize::new(180).or_fail()?,
+        width: VideoEncoderOptions::DUMMY_WIDTH,
+        height: VideoEncoderOptions::DUMMY_HEIGHT,
         frame_rate: FrameRate::FPS_25,
         encode_params: Default::default(),
     };

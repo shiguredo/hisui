@@ -252,7 +252,6 @@ pub struct VideoEncoderOptions {
     pub codec: CodecName,
     pub engines: Option<Vec<EngineName>>,
     pub bitrate: usize,
-    // 最初のフレーム受信時に実際の解像度で上書きされるダミー値
     pub width: EvenUsize,
     pub height: EvenUsize,
     pub frame_rate: FrameRate,
@@ -260,6 +259,11 @@ pub struct VideoEncoderOptions {
 }
 
 impl VideoEncoderOptions {
+    // width / height の最初の値は実際には使われず、後で実際のフレームの解像度で更新されるので、
+    // その（使われない）初期値の設定を行いやすくするための定数を定義しておく
+    pub const DUMMY_WIDTH: EvenUsize = EvenUsize::ZERO;
+    pub const DUMMY_HEIGHT: EvenUsize = EvenUsize::ZERO;
+
     pub fn from_layout(layout: &Layout) -> Self {
         Self {
             codec: layout.video_codec,
@@ -385,17 +389,15 @@ impl VideoEncoder {
             (Some(EngineName::SvtAv1), CodecName::Av1) => {
                 VideoEncoderInner::new_svt_av1(options).or_fail()
             }
-            _ => {
-                Err(orfail::Failure::new(format!(
-                    "no available encoder for {} codec (candidate encoders: {})",
-                    options.codec.as_str(),
-                    candidate_engines
-                        .iter()
-                        .map(|engine| engine.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )))
-            }
+            _ => Err(orfail::Failure::new(format!(
+                "no available encoder for {} codec (candidate encoders: {})",
+                options.codec.as_str(),
+                candidate_engines
+                    .iter()
+                    .map(|engine| engine.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
         }
     }
 
