@@ -25,33 +25,12 @@ const AUDIO_PACED_STREAM_ID: MediaStreamId = MediaStreamId::new(6);
 const VIDEO_PACED_STREAM_ID: MediaStreamId = MediaStreamId::new(7);
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
-    let host: String = noargs::opt("host")
-        .short('H')
-        .doc("RTMP server host")
-        .default("127.0.0.1")
-        .take(&mut args)
-        .then(|o| o.value().parse())?;
-    let port: Option<u16> = noargs::opt("port")
-        .short('p')
-        .doc("RTMP server port (default: 1935, or 443 with --tls)")
-        .take(&mut args)
-        .present_and_then(|o| o.value().parse())?;
-    let app: String = noargs::opt("app")
-        .short('a')
-        .doc("RTMP application name")
-        .default("live")
-        .take(&mut args)
-        .then(|o| o.value().parse())?;
-    let stream_name: String = noargs::opt("stream")
+    let stream_name: Option<String> = noargs::opt("stream")
         .short('s')
-        .doc("RTMP stream name")
+        .doc("ストリーム名（省略時には RTMP_URL 引数にストリーム名が含まれるものとして扱われる）")
         .default("stream")
         .take(&mut args)
-        .then(|o| o.value().parse())?;
-    let tls: bool = noargs::flag("tls")
-        .doc("Enable TLS (RTMPS)")
-        .take(&mut args)
-        .is_present();
+        .present_and_then(|o| o.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
@@ -62,6 +41,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("入力ファイル（.mp4 ないし .webm）")
         .take(&mut args)
         .then(|a| a.value().parse())?;
+    let output_rtmp_url = noargs::arg("RTMP_URL")
+        .doc("出力先の RTMP の URL")
+        .take(&mut args)
+        .then(|a| {
+            if let Some(stream) = &stream_name {
+                shiguredo_rtmp::RtmpUrl::parse_with_stream_name(a.value(), stream)
+            } else {
+                shiguredo_rtmp::RtmpUrl::parse(a.value())
+            }
+        })?;
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
@@ -71,9 +60,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .as_ref()
         .and_then(|path| Openh264Library::load(path).ok());
     let format = ContainerFormat::from_path(&input_file_path).or_fail()?;
-    let default_port = if tls { 443 } else { 1935 };
-    let port = port.unwrap_or(default_port);
-
     let mut scheduler = Scheduler::new();
     let dummy_source_id = crate::metadata::SourceId::new("rtmp_publish");
 
@@ -127,7 +113,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let video_options = VideoEncoderOptions {
         codec: CodecName::H264,
         engines: None,
-        bitrate: 1000000, // 1 Mbps
+        bitrate: 1000000, // 1 Mbps （実験的コマンドなので固定値で十分）
         // TODO: 起動時に固定値を渡すのではなく、実際の値を使うようにする
         width: crate::types::EvenUsize::new(320).or_fail()?,
         height: crate::types::EvenUsize::new(180).or_fail()?,
@@ -157,18 +143,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .enable_all()
         .build()
         .or_fail()?;
-    let url = shiguredo_rtmp::RtmpUrl {
-        host,
-        port,
-        app,
-        stream_name,
-        tls,
-    };
     let publisher = crate::publisher_rtmp::RtmpPublisher::start(
         &runtime,
         Some(AUDIO_PACED_STREAM_ID),
         Some(VIDEO_PACED_STREAM_ID),
-        url,
+        output_rtmp_url,
         crate::publisher_rtmp::RtmpPublisherOptions::default(),
     );
     scheduler.register(publisher).or_fail()?;
