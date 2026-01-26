@@ -1,7 +1,10 @@
 use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
 
 use crate::{
     audio::{AudioData, AudioFormat},
@@ -14,12 +17,13 @@ use crate::{
     video::{VideoFormat, VideoFrame},
 };
 
-// TODO: doc
+/// メディアフレーム用チャネルサイズ
 const FRAME_CHANNEL_SIZE: usize = 100;
 
 #[derive(Debug, Default, Clone)]
 pub struct RtmpOutboundEndpointOptions {}
 
+/// RTMP Play Server - クライアントからの play リクエストを受け付けてメディアストリームを配信する
 #[derive(Debug)]
 pub struct RtmpOutboundEndpoint {
     input_audio_stream_id: Option<MediaStreamId>,
@@ -39,25 +43,23 @@ impl RtmpOutboundEndpoint {
         let stats = RtmpOutboundEndpointStats::default();
         let (tx, rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
 
-        let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(url.clone());
-        let mut runner = RtmpPublishRunner {
-            url,
-            rx,
-            recv_buf: vec![0u8; 4096],
-            connection,
-            ready: false,
-            video_sequence_header_data: None,
-            audio_sequence_header_data: None,
-            last_video_keyframe_timestamp: None,
-            video_nalu_length_size: 4,
-            stats: stats.clone(),
-        };
+        let stats_clone = stats.clone();
+
         runtime.spawn(async move {
-            if let Err(e) = runner.run().await.or_fail() {
-                log::error!("RTMP publish error: {e}");
-                runner.stats.error.set(true);
+            let mut server = RtmpPlayServer {
+                url: url.clone(),
+                listener: None,
+                rx,
+                media_streams: Arc::new(Mutex::new(HashMap::new())),
+                stats: stats_clone.clone(),
+            };
+
+            if let Err(e) = server.run().await.or_fail() {
+                log::error!("RTMP play server error: {e}");
+                server.stats.error.set(true);
             }
         });
+
         Self {
             input_audio_stream_id,
             input_video_stream_id,
@@ -128,118 +130,268 @@ impl MediaProcessor for RtmpOutboundEndpoint {
     }
 }
 
+/// RTMP Play Server の実装
 #[derive(Debug)]
-struct RtmpPublishRunner {
+struct RtmpPlayServer {
     url: shiguredo_rtmp::RtmpUrl,
+    listener: Option<TcpListener>,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
-    recv_buf: Vec<u8>,
-    connection: shiguredo_rtmp::RtmpPublishClientConnection,
-    ready: bool,
-    video_sequence_header_data: Option<Vec<u8>>,
-    audio_sequence_header_data: Option<Vec<u8>>,
-    last_video_keyframe_timestamp: Option<u32>,
-    video_nalu_length_size: u8,
+    /// ストリーム ID -> ストリーム状態のマップ
+    media_streams: Arc<Mutex<HashMap<String, MediaStreamState>>>,
     stats: RtmpOutboundEndpointStats,
 }
 
-impl RtmpPublishRunner {
+impl RtmpPlayServer {
     async fn run(&mut self) -> orfail::Result<()> {
-        log::debug!("Starting RTMP outbound endpoint: {}", self.url);
+        log::debug!(
+            "Starting RTMP play server on {}:{}",
+            self.url.host,
+            self.url.port
+        );
 
-        // TCP または TLS 接続を確立
-        let mut stream =
-            crate::tcp::TcpOrTlsStream::connect(&self.url.host, self.url.port, self.url.tls)
-                .await
-                .or_fail()?;
+        // TCP リスナーをバインドする
+        let addr = format!("{}:{}", self.url.host, self.url.port);
+        let listener = TcpListener::bind(&addr).await.or_fail()?;
+        self.listener = Some(listener);
 
-        // イベント処理ループ
+        let listener = self.listener.as_ref().or_fail()?;
+
+        // メインイベントループ
         loop {
-            // イベント処理
-            while let Some(event) = self.connection.next_event() {
-                log::debug!("RTMP event: {:?}", event);
-                self.stats.total_event_count.increment();
-                if matches!(
-                    event,
-                    shiguredo_rtmp::RtmpConnectionEvent::StateChanged(
-                        shiguredo_rtmp::RtmpConnectionState::Publishing
-                    )
-                ) {
-                    self.ready = true;
-                }
-            }
-
-            // 送信バッファをストリームに書き込む
-            while !self.connection.send_buf().is_empty() {
-                let send_data = self.connection.send_buf();
-                stream.write_all(send_data).await.or_fail()?;
-                self.stats.total_sent_bytes.add(send_data.len() as u64);
-                self.connection.advance_send_buf(send_data.len());
-            }
-
-            // select! マクロでストリーム受信とメディアサンプル受信を並行処理
             tokio::select! {
-                result = stream.read(&mut self.recv_buf) => {
-                    // TCP / TLS ストリームからデータを受信
-                    self.handle_read_result(result).or_fail()?;
+                // 新しいクライアント接続を受け付ける
+                accept_result = listener.accept() => {
+                    let (stream, peer_addr) = accept_result.or_fail()?;
+                    log::debug!("New RTMP client connection from: {}", peer_addr);
+
+                    let media_streams = self.media_streams.clone();
+                    let stats = self.stats.clone();
+
+                    // クライアント接続を別タスクで処理する
+                    tokio::spawn(async move {
+                        let mut handler = RtmpClientHandler {
+                            stream,
+                            connection: shiguredo_rtmp::RtmpServerConnection::new(),
+                            media_streams,
+                            recv_buf: vec![0u8; 4096],
+                            stream_id: String::new(),
+                            received_keyframe: false,
+                            stats,
+                        };
+
+                        if let Err(e) = handler.run().await.or_fail() {
+                            log::error!("RTMP client handler error: {e}");
+                        }
+                        log::debug!("RTMP client disconnected: {}", peer_addr);
+                    });
                 }
-                Some(sample) = self.rx.recv(), if self.ready => {
-                    // RTMP サーバーとの接続処理が完了したら、メディアサンプルを受信処理
-                    self.handle_media_sample(sample).or_fail()?;
+
+                // 上流からメディアサンプルを受信する
+                Some(sample) = self.rx.recv() => {
+                    self.handle_media_sample(sample).await.or_fail()?;
                 }
                 else => {
-                    // 配信すべき入力サンプルがなくなった（正常終了）
+                    // すべての入力が終了した
                     break;
                 }
             }
         }
 
-        log::debug!("RTMP outbound endpoint finished");
+        log::debug!("RTMP play server finished");
         Ok(())
     }
 
-    fn handle_read_result(&mut self, result: std::io::Result<usize>) -> orfail::Result<()> {
-        let n = result.or_fail()?;
+    /// メディアサンプルを受け取り、すべてのプレイヤーに配信する
+    async fn handle_media_sample(&self, sample: MediaSample) -> orfail::Result<()> {
+        let streams = self.media_streams.lock().await;
 
-        // サーバーから切断されるのは想定外なのでエラー扱いにする
-        (n > 0).or_fail_with(|()| "connection reset by server".to_owned())?;
-
-        self.stats.total_received_bytes.add(n as u64);
-        self.connection
-            .feed_recv_buf(&self.recv_buf[..n])
-            .or_fail()?;
-        Ok(())
-    }
-
-    fn handle_media_sample(&mut self, sample: MediaSample) -> orfail::Result<()> {
         match sample {
-            MediaSample::Audio(audio) => self.handle_audio_sample(audio),
-            MediaSample::Video(video) => self.handle_video_sample(video),
+            MediaSample::Audio(audio) => {
+                // すべてのストリームのすべてのプレイヤーに音声を配信する
+                for stream_state in streams.values() {
+                    for player in stream_state.players.values() {
+                        let _ = player.tx.send(ClientMediaFrame::Audio(audio.clone())).await;
+                    }
+                }
+            }
+            MediaSample::Video(video) => {
+                // すべてのストリームのすべてのプレイヤーに映像を配信する
+                for stream_state in streams.values() {
+                    for player in stream_state.players.values() {
+                        let _ = player.tx.send(ClientMediaFrame::Video(video.clone())).await;
+                    }
+                }
+            }
         }
+
+        Ok(())
+    }
+}
+
+/// 配信されているメディアストリームの状態
+#[derive(Debug, Default)]
+struct MediaStreamState {
+    /// このストリームの配信者のクライアント ID
+    publisher_id: Option<usize>,
+    /// シーケンスヘッダーデータ
+    sequence_header: Option<Vec<u8>>,
+    /// このストリームをプレイしているクライアント
+    players: HashMap<usize, PlayerState>,
+}
+
+/// ストリームをプレイしている個別クライアントの状態
+#[derive(Debug)]
+struct PlayerState {
+    /// シーケンスヘッダーが送信されたかどうか
+    is_sequence_header_sent: bool,
+    /// キーフレームが送信されたかどうか
+    is_keyframe_sent: bool,
+    /// このクライアントにメディアフレームを送信するチャネル
+    tx: tokio::sync::mpsc::Sender<ClientMediaFrame>,
+}
+
+/// クライアント配信用の内部メディアフレーム表現
+#[derive(Debug, Clone)]
+enum ClientMediaFrame {
+    Audio(Arc<AudioData>),
+    Video(Arc<VideoFrame>),
+}
+
+/// 個別のクライアント接続を処理する
+#[derive(Debug)]
+struct RtmpClientHandler {
+    stream: TcpStream,
+    connection: shiguredo_rtmp::RtmpServerConnection,
+    media_streams: Arc<Mutex<HashMap<String, MediaStreamState>>>,
+    recv_buf: Vec<u8>,
+    stream_id: String,
+    received_keyframe: bool,
+    stats: RtmpOutboundEndpointStats,
+}
+
+impl RtmpClientHandler {
+    async fn run(&mut self) -> orfail::Result<()> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
+
+        loop {
+            tokio::select! {
+                // このクライアント用のメディアフレームを受信する
+                Some(frame) = rx.recv() => {
+                    self.handle_client_media_frame(frame).or_fail()?;
+                    self.flush_send_buf().await.or_fail()?;
+                }
+
+                // クライアントソケットからデータを受信する
+                read_result = self.stream.read(&mut self.recv_buf) => {
+                    let n = read_result.or_fail()?;
+                    if n == 0 {
+                        // クライアントが切断した
+                        break;
+                    }
+
+                    self.stats.total_received_bytes.add(n as u64);
+                    self.connection.feed_recv_buf(&self.recv_buf[..n]).or_fail()?;
+
+                    // イベントを処理する
+                    while let Some(event) = self.connection.next_event() {
+                        log::debug!("RTMP event: {:?}", event);
+                        self.stats.total_event_count.increment();
+                        self.handle_event(event, tx.clone()).await.or_fail()?;
+                    }
+
+                    self.flush_send_buf().await.or_fail()?;
+                }
+            }
+        }
+
+        self.cleanup().await;
+        Ok(())
     }
 
-    /// 音声サンプルを処理してサーバーに送信する
-    fn handle_audio_sample(&mut self, audio: Arc<AudioData>) -> orfail::Result<()> {
-        // 最初のサンプルまたは新しいサンプルエントリーが来た場合、シーケンスヘッダを送信
-        if self.audio_sequence_header_data.is_none()
-            && let Some(entry) = &audio.sample_entry
-            && let Ok(seq_header) = create_audio_sequence_header(entry)
-        {
-            let seq_frame = shiguredo_rtmp::AudioFrame {
-                timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
-                format: shiguredo_rtmp::AudioFormat::Aac,
-                sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
-                is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
-                is_8bit_sample: false, // Hisui は 16 bit サンプル前提
-                is_aac_sequence_header: true,
-                data: seq_header.clone(),
-            };
-            self.connection.send_audio(seq_frame).or_fail()?;
-            self.audio_sequence_header_data = Some(seq_header);
-            self.stats.total_audio_sequence_header_count.increment();
-            log::debug!("Sent AAC sequence header");
+    /// RTMP イベントを処理する
+    async fn handle_event(
+        &mut self,
+        event: shiguredo_rtmp::RtmpConnectionEvent,
+        tx: tokio::sync::mpsc::Sender<ClientMediaFrame>,
+    ) -> orfail::Result<()> {
+        match event {
+            shiguredo_rtmp::RtmpConnectionEvent::PlayRequested {
+                app, stream_name, ..
+            } => {
+                self.stream_id = format!("{}/{}", app, stream_name);
+                self.handle_play_requested(tx).await.or_fail()?;
+            }
+            shiguredo_rtmp::RtmpConnectionEvent::PublishRequested { .. } => {
+                self.connection
+                    .reject("Publishing is not supported by this server")
+                    .or_fail()?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Play リクエストを処理する
+    async fn handle_play_requested(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<ClientMediaFrame>,
+    ) -> orfail::Result<()> {
+        // Play リクエストを許可する
+        self.connection.accept().or_fail()?;
+
+        // このクライアントをプレイヤーとして登録する
+        let mut streams = self.media_streams.lock().await;
+        streams
+            .entry(self.stream_id.clone())
+            .or_default()
+            .players
+            .insert(
+                self.stream_id.len() as usize, // シンプルなクライアント ID
+                PlayerState {
+                    is_sequence_header_sent: false,
+                    is_keyframe_sent: false,
+                    tx,
+                },
+            );
+
+        log::debug!("Client started playing stream: {}", self.stream_id);
+        Ok(())
+    }
+
+    /// クライアント用メディアフレームを処理する
+    fn handle_client_media_frame(&mut self, frame: ClientMediaFrame) -> orfail::Result<()> {
+        match frame {
+            ClientMediaFrame::Audio(audio) => {
+                self.handle_audio_frame(audio).or_fail()?;
+            }
+            ClientMediaFrame::Video(video) => {
+                self.handle_video_frame(video).or_fail()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 音声フレームをクライアントに送信する
+    fn handle_audio_frame(&mut self, audio: Arc<AudioData>) -> orfail::Result<()> {
+        // 必要に応じて音声シーケンスヘッダーを作成して送信
+        if let Some(entry) = &audio.sample_entry {
+            if let Ok(seq_header) = create_audio_sequence_header(entry) {
+                let seq_frame = shiguredo_rtmp::AudioFrame {
+                    timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
+                    format: shiguredo_rtmp::AudioFormat::Aac,
+                    sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
+                    is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
+                    is_8bit_sample: false,
+                    is_aac_sequence_header: true,
+                    data: seq_header,
+                };
+                self.connection.send_audio(seq_frame).or_fail()?;
+                self.stats.total_audio_sequence_header_count.increment();
+                log::debug!("Sent AAC sequence header");
+            }
         }
 
-        // 音声フレームデータを送信
+        // 音声フレームを送信する
         let frame = shiguredo_rtmp::AudioFrame {
             timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
                 audio.timestamp.as_millis() as u32
@@ -247,7 +399,7 @@ impl RtmpPublishRunner {
             format: shiguredo_rtmp::AudioFormat::Aac,
             sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
             is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
-            is_8bit_sample: false, // Hisui は 16 bit サンプル前提
+            is_8bit_sample: false,
             is_aac_sequence_header: false,
             data: audio.data.clone(),
         };
@@ -256,53 +408,56 @@ impl RtmpPublishRunner {
         Ok(())
     }
 
-    /// 映像サンプルを処理してサーバーに送信する
-    fn handle_video_sample(&mut self, video: Arc<VideoFrame>) -> orfail::Result<()> {
+    /// 映像フレームをクライアントに送信する
+    fn handle_video_frame(&mut self, video: Arc<VideoFrame>) -> orfail::Result<()> {
         let timestamp_ms = video.timestamp.as_millis() as u32;
 
-        // キーフレームの場合、シーケンスヘッダを送信
+        // キーフレームの処理
         if video.keyframe {
             self.stats.total_video_keyframe_count.increment();
 
-            // 新しいサンプルエントリーが来た場合
-            if let Some(entry) = &video.sample_entry
-                && let Ok(seq_header_data) = create_video_sequence_header(entry)
-            {
-                let seq_frame = shiguredo_rtmp::VideoFrame {
-                    timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
-                    composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-                    frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
-                    codec: shiguredo_rtmp::VideoCodec::Avc,
-                    avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
-                    data: seq_header_data.clone(),
-                };
-                self.connection.send_video(seq_frame).or_fail()?;
-                self.video_sequence_header_data = Some(seq_header_data);
-                self.stats.total_video_sequence_header_count.increment();
-                log::debug!("Sent H.264 sequence header");
+            // 利用可能な場合はシーケンスヘッダーを送信する
+            if let Some(entry) = &video.sample_entry {
+                if let Ok(seq_header_data) = create_video_sequence_header(entry) {
+                    let seq_frame = shiguredo_rtmp::VideoFrame {
+                        timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
+                        composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
+                        frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
+                        codec: shiguredo_rtmp::VideoCodec::Avc,
+                        avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
+                        data: seq_header_data,
+                    };
+                    self.connection.send_video(seq_frame).or_fail()?;
+                    self.stats.total_video_sequence_header_count.increment();
+                    log::debug!("Sent H.264 sequence header");
+                }
             }
-            self.last_video_keyframe_timestamp = Some(timestamp_ms);
+            self.received_keyframe = true;
         }
 
-        // 映像フレームデータを送信
-        // Annex B 形式に変換する（必要に応じて）
+        // キーフレームを受け取るまではフレームをスキップする
+        if !self.received_keyframe {
+            return Ok(());
+        }
+
+        // 必要に応じて映像データ形式を変換する
         let frame_data = match video.format {
             VideoFormat::H264 => {
-                // MP4形式の場合はAnnex Bに変換
-                crate::video_h264::convert_nalu_to_annexb(&video.data, self.video_nalu_length_size)
-                    .or_fail()?
+                // MP4 形式を Annex B に変換する
+                crate::video_h264::convert_nalu_to_annexb(&video.data, 4).or_fail()?
             }
             VideoFormat::H264AnnexB => {
-                // 既にAnnex B形式の場合は変換不要
+                // 既に Annex B 形式
                 video.data.clone()
             }
             _ => {
                 return Err(orfail::Failure::new(
-                    "BUG: unsupported video format in handle_video_sample",
+                    "BUG: unsupported video format in handle_video_frame",
                 ));
             }
         };
 
+        // 映像フレームを送信する
         let frame = shiguredo_rtmp::VideoFrame {
             timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
             composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
@@ -319,26 +474,51 @@ impl RtmpPublishRunner {
         self.stats.total_video_frame_count.increment();
         Ok(())
     }
+
+    /// 送信バッファをストリームにフラッシュする
+    async fn flush_send_buf(&mut self) -> orfail::Result<()> {
+        let send_data = self.connection.send_buf();
+        if !send_data.is_empty() {
+            self.stream.write_all(send_data).await.or_fail()?;
+            self.stats.total_sent_bytes.add(send_data.len() as u64);
+            let len = send_data.len();
+            self.connection.advance_send_buf(len);
+        }
+        Ok(())
+    }
+
+    /// クリーンアップ処理
+    async fn cleanup(&mut self) {
+        if let Ok(mut streams) = self.media_streams.try_lock() {
+            if let Some(state) = streams.get_mut(&self.stream_id) {
+                // プレイヤー一覧からクライアントを削除する
+                state.players.remove(&(self.stream_id.len() as usize));
+
+                // 空になったストリームをクリーンアップする
+                if state.players.is_empty() && state.publisher_id.is_none() {
+                    streams.remove(&self.stream_id);
+                }
+            }
+        }
+    }
 }
 
-/// 音声シーケンスヘッダを作成する
+/// サンプルエントリーから音声シーケンスヘッダーを作成する
 fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
     match entry {
-        SampleEntry::Mp4a(mp4a) => {
-            // EsdsBox から DecoderSpecificInfo を取得
-            mp4a.esds_box
-                .es
-                .dec_config_descr
-                .dec_specific_info
-                .as_ref()
-                .map(|info| info.payload.clone())
-                .ok_or_else(|| orfail::Failure::new("No decoder specific info available"))
-        }
+        SampleEntry::Mp4a(mp4a) => mp4a
+            .esds_box
+            .es
+            .dec_config_descr
+            .dec_specific_info
+            .as_ref()
+            .map(|info| info.payload.clone())
+            .ok_or_else(|| orfail::Failure::new("No decoder specific info available")),
         _ => Err(orfail::Failure::new("Not an audio sample entry")),
     }
 }
 
-/// 映像シーケンスヘッダを作成する
+/// サンプルエントリーから映像シーケンスヘッダーを作成する
 fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
     match entry {
         SampleEntry::Avc1(avc1) => {
@@ -373,10 +553,10 @@ pub struct RtmpOutboundEndpointStats {
     /// 配信したキーフレーム（映像）の数
     pub total_video_keyframe_count: SharedAtomicCounter,
 
-    /// 送信した音声シーケンスヘッダの数
+    /// 送信した音声シーケンスヘッダーの数
     pub total_audio_sequence_header_count: SharedAtomicCounter,
 
-    /// 送信した映像シーケンスヘッダの数
+    /// 送信した映像シーケンスヘッダーの数
     pub total_video_sequence_header_count: SharedAtomicCounter,
 
     /// 処理に掛かった時間
