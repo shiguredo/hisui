@@ -73,6 +73,7 @@ impl MediaProcessorWorkloadHint {
     // 今のようなヒューリスティックな値を使って運用してみて、様子を見ることにする。
     pub const READER: Self = Self::IoIntensive;
     pub const WRITER: Self = Self::IoIntensive;
+    pub const ASYNC_IO: Self = Self::IoIntensive;
     pub const CPU_MISC: Self = Self::cpu_intensive(1);
     pub const AUDIO_DECODER: Self = Self::cpu_intensive(1);
     pub const AUDIO_MIXER: Self = Self::cpu_intensive(1);

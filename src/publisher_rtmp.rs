@@ -70,7 +70,7 @@ impl MediaProcessor for RtmpPublisher {
                 .collect(),
             output_stream_ids: Vec::new(),
             stats: ProcessorStats::RtmpPublisher(self.stats.clone()),
-            workload_hint: MediaProcessorWorkloadHint::WRITER, // TODO: 非同期 I/O 用の値を追加する
+            workload_hint: MediaProcessorWorkloadHint::ASYNC_IO,
         }
     }
 
