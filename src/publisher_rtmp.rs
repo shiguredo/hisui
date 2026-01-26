@@ -358,29 +358,12 @@ fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> 
         SampleEntry::Avc1(avc1) => {
             let sps_list = &avc1.avcc_box.sps_list;
             let pps_list = &avc1.avcc_box.pps_list;
-            Ok(create_avc_sequence_header_annexb(sps_list, pps_list))
+            Ok(crate::video_h264::create_sequence_header_annexb(
+                sps_list, pps_list,
+            ))
         }
         _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }
-}
-
-/// H.264 のシーケンスヘッダを Annex B 形式で作成する
-fn create_avc_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>]) -> Vec<u8> {
-    let mut result = Vec::new();
-
-    // 全ての SPS を追加
-    for sps in sps_list {
-        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        result.extend_from_slice(sps);
-    }
-
-    // 全ての PPS を追加
-    for pps in pps_list {
-        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        result.extend_from_slice(pps);
-    }
-
-    result
 }
 
 /// [`RtmpPublisher`] 用の統計情報
