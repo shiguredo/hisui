@@ -303,7 +303,8 @@ impl RtmpPublishRunner {
         let frame_data = match video.format {
             VideoFormat::H264 => {
                 // MP4形式の場合はAnnex Bに変換
-                convert_nalu_to_annexb(&video.data, self.video_nalu_length_size)
+                crate::video_h264::convert_nalu_to_annexb(&video.data, self.video_nalu_length_size)
+                    .or_fail()?
             }
             VideoFormat::H264AnnexB => {
                 // 既にAnnex B形式の場合は変換不要
@@ -377,49 +378,6 @@ fn create_avc_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>])
     for pps in pps_list {
         result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
         result.extend_from_slice(pps);
-    }
-
-    result
-}
-
-/// MP4 ファイルの H.264 映像フレームの形式を RTMP がサポートしている Annex B 形式に変換する
-fn convert_nalu_to_annexb(data: &[u8], length_size: u8) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut offset = 0;
-    let length_size = length_size as usize;
-
-    while offset < data.len() {
-        if offset + length_size > data.len() {
-            break;
-        }
-
-        // MP4 ファイル形式で H.264 の NALU 長を読み取る
-        let length = match length_size {
-            1 => data[offset] as usize,
-            2 => u16::from_be_bytes([data[offset], data[offset + 1]]) as usize,
-            3 => u32::from_be_bytes([0, data[offset], data[offset + 1], data[offset + 2]]) as usize,
-            4 => u32::from_be_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ]) as usize,
-            _ => {
-                unreachable!() // MP4 ライブラリがチェックしているのでここには来ないはず
-            }
-        };
-
-        offset += length_size;
-
-        if offset + length > data.len() {
-            break;
-        }
-
-        // Annex B の形式（先頭に固定の区切りバイト列が付与される）に変換する
-        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        result.extend_from_slice(&data[offset..offset + length]);
-
-        offset += length;
     }
 
     result
