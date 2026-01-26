@@ -297,10 +297,7 @@ impl VideoEncoder {
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
-        // プレースホルダーとしてのstatsを作成する。実際の値は最初のフレーム受信時に更新される
-        let default_engine = EngineName::default_video_encoders(openh264_lib.is_some())[0];
-        let stats = VideoEncoderStats::new(default_engine, options.codec);
-
+        let stats = VideoEncoderStats::new();
         Ok(Self {
             input_stream_id,
             output_stream_id,
@@ -327,9 +324,9 @@ impl VideoEncoder {
         // エンコーダーのインスタンスを作成
         let inner = self.create_inner()?;
 
-        // エンジン名とコーデックを更新
-        self.stats.engine = inner.name();
-        self.stats.codec = inner.codec();
+        // エンジン名とコーデックを設定
+        self.stats.engine.set(inner.name());
+        self.stats.codec.set(inner.codec());
 
         self.inner = Some(inner);
         Ok(())
