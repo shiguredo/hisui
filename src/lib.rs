@@ -46,6 +46,7 @@ pub mod metadata;
 pub mod mixer_audio;
 pub mod mixer_video;
 pub mod optuna;
+pub mod outbound_endpoint_rtmp;
 pub mod pipeline;
 pub mod plugin;
 pub mod processor;
