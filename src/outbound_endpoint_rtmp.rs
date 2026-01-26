@@ -17,14 +17,8 @@ use crate::{
 // TODO: doc
 const FRAME_CHANNEL_SIZE: usize = 100;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct RtmpOutboundEndpointOptions {}
-
-impl Default for RtmpOutboundEndpointOptions {
-    fn default() -> Self {
-        Self {}
-    }
-}
 
 #[derive(Debug)]
 pub struct RtmpOutboundEndpoint {
