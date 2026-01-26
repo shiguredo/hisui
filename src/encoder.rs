@@ -318,8 +318,12 @@ impl VideoEncoder {
         }
 
         // 解像度を含めたオプションを作成
-        self.options.width = EvenUsize::new(width).or_fail()?;
-        self.options.height = EvenUsize::new(height).or_fail()?;
+        //
+        // [NOTE] ここでは偶数解像度を期待する（奇数になる場合は前段でリサイズなどをする必要がある）
+        self.options.width = EvenUsize::new(width)
+            .or_fail_with(|()| format!("frame width must be even, got {width}"))?;
+        self.options.height = EvenUsize::new(height)
+            .or_fail_with(|()| format!("frame height must be even, got {height}"))?;
 
         // エンコーダーのインスタンスを作成
         let inner = self.create_inner()?;
