@@ -399,18 +399,12 @@ impl VideoEncoder {
         }
     }
 
-    pub fn name(&self) -> EngineName {
-        self.inner
-            .as_ref()
-            .map(|inner| inner.name())
-            .unwrap_or(EngineName::default_video_encoders(self.openh264_lib.is_some())[0])
+    pub fn name(&self) -> Option<EngineName> {
+        self.inner.as_ref().map(|inner| inner.name())
     }
 
-    pub fn codec(&self) -> CodecName {
-        self.inner
-            .as_ref()
-            .map(|inner| inner.codec())
-            .unwrap_or(self.options.codec)
+    pub fn codec(&self) -> Option<CodecName> {
+        self.inner.as_ref().map(|inner| inner.codec())
     }
 
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
