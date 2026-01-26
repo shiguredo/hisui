@@ -360,6 +360,12 @@ pub struct VideoEncoderStats {
     pub error: SharedAtomicFlag,
 }
 
+impl Default for VideoEncoderStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VideoEncoderStats {
     pub fn new() -> Self {
         Self {
