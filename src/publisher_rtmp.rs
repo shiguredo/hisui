@@ -10,7 +10,7 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::ProcessorStats,
+    stats::{ProcessorStats, SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
     video::{VideoFormat, VideoFrame},
 };
 
@@ -19,6 +19,7 @@ pub struct RtmpPublisher {
     input_audio_stream_id: Option<MediaStreamId>,
     input_video_stream_id: Option<MediaStreamId>,
     tx: Option<tokio::sync::mpsc::Sender<MediaSample>>,
+    stats: RtmpPublisherStats,
 }
 
 impl RtmpPublisher {
@@ -28,20 +29,23 @@ impl RtmpPublisher {
         input_video_stream_id: Option<MediaStreamId>,
         url: shiguredo_rtmp::RtmpUrl,
     ) -> Self {
+        let stats = RtmpPublisherStats::default();
         let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
+
+        let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(url.clone());
+        let runner = RtmpPublishRunner {
+            url,
+            rx,
+            recv_buf: vec![0u8; 8192],
+            connection,
+            ready: false,
+            video_sequence_header_data: None,
+            audio_sequence_header_data: None,
+            last_video_keyframe_timestamp: None,
+            video_nalu_length_size: 4,
+            stats: stats.clone(),
+        };
         runtime.spawn(async move {
-            let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(url.clone());
-            let runner = RtmpPublishRunner {
-                url,
-                rx,
-                recv_buf: vec![0u8; 8192],
-                connection,
-                ready: false,
-                video_sequence_header_data: None,
-                audio_sequence_header_data: None,
-                last_video_keyframe_timestamp: None,
-                video_nalu_length_size: 4,
-            };
             if let Err(e) = runner.run().await.or_fail() {
                 log::error!("RTMP publish error: {e}");
                 // TODO: stats 更新
@@ -51,6 +55,7 @@ impl RtmpPublisher {
             input_audio_stream_id,
             input_video_stream_id,
             tx: Some(tx),
+            stats,
         }
     }
 }
@@ -64,7 +69,7 @@ impl MediaProcessor for RtmpPublisher {
                 .chain(self.input_video_stream_id)
                 .collect(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("rtmp-publisher"), // TODO: 専用の構造体を用意する
+            stats: ProcessorStats::RtmpPublisher(self.stats.clone()),
             workload_hint: MediaProcessorWorkloadHint::WRITER, // TODO: 非同期 I/O 用の値を追加する
         }
     }
@@ -129,6 +134,7 @@ struct RtmpPublishRunner {
     audio_sequence_header_data: Option<Vec<u8>>,
     last_video_keyframe_timestamp: Option<u32>,
     video_nalu_length_size: u8,
+    stats: RtmpPublisherStats,
 }
 
 impl RtmpPublishRunner {
@@ -237,6 +243,7 @@ impl RtmpPublishRunner {
             data: audio.data.clone(),
         };
         self.connection.send_audio(frame).or_fail()?;
+        self.stats.total_audio_frame_count.increment();
         Ok(())
     }
 
@@ -296,6 +303,7 @@ impl RtmpPublishRunner {
             data: frame_data,
         };
         self.connection.send_video(frame).or_fail()?;
+        self.stats.total_video_frame_count.increment();
         Ok(())
     }
 }
@@ -389,4 +397,34 @@ fn convert_nalu_to_annexb(data: &[u8], length_size: u8) -> Vec<u8> {
     }
 
     result
+}
+
+/// [`RtmpPublisher`] 用の統計情報
+#[derive(Debug, Default, Clone)]
+pub struct RtmpPublisherStats {
+    /// 配信した音声フレームの数
+    pub total_audio_frame_count: SharedAtomicCounter,
+
+    /// 配信した映像フレームの数
+    pub total_video_frame_count: SharedAtomicCounter,
+
+    /// 処理に掛かった時間
+    pub total_processing_duration: SharedAtomicDuration,
+
+    // TODO: イベント数、送受信バイト数、キーフレーム数、シーケンスヘッダ送信数（音声・映像別）
+    /// エラーで中断したかどうか
+    pub error: SharedAtomicFlag,
+}
+
+impl nojson::DisplayJson for RtmpPublisherStats {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("type", "rtmp_publisher")?;
+            f.member("total_audio_frame_count", &self.total_audio_frame_count)?;
+            f.member("total_video_frame_count", &self.total_video_frame_count)?;
+            f.member("total_processing_seconds", &self.total_processing_duration)?;
+            f.member("error", self.error.get())?;
+            Ok(())
+        })
+    }
 }
