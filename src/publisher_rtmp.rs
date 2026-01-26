@@ -120,7 +120,7 @@ impl MediaProcessor for RtmpPublisher {
 
                 let tx = self.tx.as_ref().or_fail()?;
                 tx.try_send(MediaSample::Video(sample))
-                    .or_fail_with(|e| format!("failed to send audio frame: {e}"))?;
+                    .or_fail_with(|e| format!("failed to send video frame: {e}"))?;
             }
             None if Some(input.stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
