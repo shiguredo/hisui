@@ -252,6 +252,7 @@ pub struct VideoEncoderOptions {
     pub codec: CodecName,
     pub engines: Option<Vec<EngineName>>,
     pub bitrate: usize,
+    // 最初のフレーム受信時に実際の解像度で上書きされるダミー値
     pub width: EvenUsize,
     pub height: EvenUsize,
     pub frame_rate: FrameRate,
@@ -279,7 +280,12 @@ pub struct VideoEncoder {
     stats: VideoEncoderStats,
     encoded: VecDeque<VideoFrame>,
     eos: bool,
-    inner: VideoEncoderInner,
+    // 最初のフレームを受信するまで、内部エンコーダは初期化されない
+    inner: Option<VideoEncoderInner>,
+    options: VideoEncoderOptions,
+    openh264_lib: Option<Openh264Library>,
+    // エンコーダーが初期化されたかどうかを示すフラグ
+    initialized: bool,
 }
 
 impl VideoEncoder {
@@ -289,54 +295,99 @@ impl VideoEncoder {
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
+        // プレースホルダーとしてのstatsを作成する。実際の値は最初のフレーム受信時に更新される
+        let default_engine = EngineName::default_video_encoders(openh264_lib.is_some())[0];
+        let stats = VideoEncoderStats::new(default_engine, options.codec);
+
+        Ok(Self {
+            input_stream_id,
+            output_stream_id,
+            stats,
+            encoded: VecDeque::new(),
+            eos: false,
+            inner: None,
+            options: options.clone(),
+            openh264_lib,
+            initialized: false,
+        })
+    }
+
+    /// 最初のフレームの解像度を使用して、内部エンコーダを初期化する
+    fn initialize_inner(&mut self, width: usize, height: usize) -> orfail::Result<()> {
+        // 既に初期化されている場合はスキップ
+        if self.initialized {
+            return Ok(());
+        }
+
+        // 解像度を含めたオプションを作成
+        self.options.width = EvenUsize::new(width).or_fail()?;
+        self.options.height = EvenUsize::new(height).or_fail()?;
+
+        // エンコーダーのインスタンスを作成
+        let inner = self.create_inner()?;
+
+        // 統計情報を正確な値で更新
+        self.stats = VideoEncoderStats::new(inner.name(), inner.codec());
+
+        self.inner = Some(inner);
+        self.initialized = true;
+        Ok(())
+    }
+
+    /// エンコーダーのインスタンスを生成する
+    fn create_inner(&self) -> orfail::Result<VideoEncoderInner> {
+        let options = &self.options;
         let candidate_engines = options
             .engines
             .clone()
-            .unwrap_or_else(|| EngineName::default_video_encoders(openh264_lib.is_some()));
+            .unwrap_or_else(|| EngineName::default_video_encoders(self.openh264_lib.is_some()));
         let engine = candidate_engines
             .iter()
             .find(|engine| engine.is_available_video_encode_codec(options.codec))
             .copied();
-        let inner = match (engine, options.codec) {
+
+        match (engine, options.codec) {
             #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp8) => {
-                VideoEncoderInner::new_vp8(options).or_fail()?
+                VideoEncoderInner::new_vp8(options).or_fail()
             }
             #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp9) => {
-                VideoEncoderInner::new_vp9(options).or_fail()?
+                VideoEncoderInner::new_vp9(options).or_fail()
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H264) => {
-                VideoEncoderInner::new_nvcodec_h264(options).or_fail()?
+                VideoEncoderInner::new_nvcodec_h264(options).or_fail()
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H265) => {
-                VideoEncoderInner::new_nvcodec_h265(options).or_fail()?
+                VideoEncoderInner::new_nvcodec_h265(options).or_fail()
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Av1) => {
-                VideoEncoderInner::new_nvcodec_av1(options).or_fail()?
+                VideoEncoderInner::new_nvcodec_av1(options).or_fail()
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H264) => {
-                VideoEncoderInner::new_video_toolbox_h264(options).or_fail()?
+                VideoEncoderInner::new_video_toolbox_h264(options).or_fail()
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
-                VideoEncoderInner::new_video_toolbox_h265(options).or_fail()?
+                VideoEncoderInner::new_video_toolbox_h265(options).or_fail()
             }
             (Some(EngineName::Openh264), CodecName::H264) => {
-                let lib = openh264_lib.or_fail_with(|()| {
-                        concat!(
+                let lib = self.openh264_lib.clone().or_fail_with(|()| {
+                    concat!(
                         "OpenH264 library is required for H.264 encoding. ",
                         "Please specify the library path using --openh264 command line argument or ",
-                        "HISUI_OPENH264_PATH environment variable.").to_owned()
+                        "HISUI_OPENH264_PATH environment variable."
+                    )
+                    .to_owned()
                 })?;
-                VideoEncoderInner::new_openh264(lib, options).or_fail()?
+                VideoEncoderInner::new_openh264(lib, options).or_fail()
             }
             (Some(EngineName::SvtAv1), CodecName::Av1) => {
-                VideoEncoderInner::new_svt_av1(options).or_fail()?
+                VideoEncoderInner::new_svt_av1(options).or_fail()
             }
             _ => {
                 return Err(orfail::Failure::new(format!(
@@ -349,26 +400,21 @@ impl VideoEncoder {
                         .join(", ")
                 )));
             }
-        };
-
-        let stats = VideoEncoderStats::new(inner.name(), inner.codec());
-
-        Ok(Self {
-            input_stream_id,
-            output_stream_id,
-            stats,
-            encoded: VecDeque::new(),
-            eos: false,
-            inner,
-        })
+        }
     }
 
     pub fn name(&self) -> EngineName {
-        self.inner.name()
+        self.inner
+            .as_ref()
+            .map(|inner| inner.name())
+            .unwrap_or(EngineName::default_video_encoders(self.openh264_lib.is_some())[0])
     }
 
     pub fn codec(&self) -> CodecName {
-        self.inner.codec()
+        self.inner
+            .as_ref()
+            .map(|inner| inner.codec())
+            .unwrap_or(self.options.codec)
     }
 
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
@@ -433,16 +479,28 @@ impl MediaProcessor for VideoEncoder {
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
+
+            // 最初のフレームで、解像度を使って初期化する
+            if !self.initialized {
+                self.initialize_inner(frame.width, frame.height).or_fail()?;
+            }
+
             self.stats.total_input_video_frame_count.add(1);
-            self.inner.encode(frame).or_fail()?;
+            // 初期化後は inner は必ず Some である
+            self.inner.as_mut().unwrap().encode(frame).or_fail()?;
         } else {
             self.eos = true;
-            self.inner.finish().or_fail()?;
+            if let Some(inner) = &mut self.inner {
+                inner.finish().or_fail()?;
+            }
         }
 
-        while let Some(encoded) = self.inner.next_encoded_frame() {
-            self.stats.total_output_video_frame_count.add(1);
-            self.encoded.push_back(encoded);
+        // エンコード済みフレームを取得
+        if let Some(inner) = &mut self.inner {
+            while let Some(encoded) = inner.next_encoded_frame() {
+                self.stats.total_output_video_frame_count.add(1);
+                self.encoded.push_back(encoded);
+            }
         }
         Ok(())
     }
