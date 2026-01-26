@@ -284,8 +284,6 @@ pub struct VideoEncoder {
     inner: Option<VideoEncoderInner>,
     options: VideoEncoderOptions,
     openh264_lib: Option<Openh264Library>,
-    // エンコーダーが初期化されたかどうかを示すフラグ
-    initialized: bool,
 }
 
 impl VideoEncoder {
@@ -308,14 +306,13 @@ impl VideoEncoder {
             inner: None,
             options: options.clone(),
             openh264_lib,
-            initialized: false,
         })
     }
 
     /// 最初のフレームの解像度を使用して、内部エンコーダを初期化する
     fn initialize_inner(&mut self, width: usize, height: usize) -> orfail::Result<()> {
         // 既に初期化されている場合はスキップ
-        if self.initialized {
+        if self.inner.is_some() {
             return Ok(());
         }
 
@@ -330,7 +327,6 @@ impl VideoEncoder {
         self.stats = VideoEncoderStats::new(inner.name(), inner.codec());
 
         self.inner = Some(inner);
-        self.initialized = true;
         Ok(())
     }
 
@@ -481,7 +477,7 @@ impl MediaProcessor for VideoEncoder {
             let frame = sample.expect_video_frame().or_fail()?;
 
             // 最初のフレームで、解像度を使って初期化する
-            if !self.initialized {
+            if self.inner.is_none() {
                 self.initialize_inner(frame.width, frame.height).or_fail()?;
             }
 
