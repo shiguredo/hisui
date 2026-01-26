@@ -152,6 +152,7 @@ impl RtmpPublishRunner {
             // イベント処理
             while let Some(event) = self.connection.next_event() {
                 log::debug!("RTMP event: {:?}", event);
+                self.stats.total_event_count.increment();
                 if matches!(
                     event,
                     shiguredo_rtmp::RtmpConnectionEvent::StateChanged(
@@ -166,6 +167,7 @@ impl RtmpPublishRunner {
             while !self.connection.send_buf().is_empty() {
                 let send_data = self.connection.send_buf();
                 stream.write_all(send_data).await.or_fail()?;
+                self.stats.total_sent_bytes.add(send_data.len() as u64);
                 self.connection.advance_send_buf(send_data.len());
             }
 
@@ -196,6 +198,7 @@ impl RtmpPublishRunner {
         // サーバーから切断されるのは想定外なのでエラー扱いにする
         (n > 0).or_fail_with(|()| "connection reset by server".to_owned())?;
 
+        self.stats.total_received_bytes.add(n as u64);
         self.connection
             .feed_recv_buf(&self.recv_buf[..n])
             .or_fail()?;
@@ -227,6 +230,7 @@ impl RtmpPublishRunner {
             };
             self.connection.send_audio(seq_frame).or_fail()?;
             self.audio_sequence_header_data = Some(seq_header);
+            self.stats.total_audio_sequence_header_count.increment();
             log::debug!("Sent AAC sequence header");
         }
 
@@ -253,6 +257,8 @@ impl RtmpPublishRunner {
 
         // キーフレームの場合、シーケンスヘッダを送信
         if video.keyframe {
+            self.stats.total_video_keyframe_count.increment();
+
             // 新しいサンプルエントリーが来た場合
             if let Some(entry) = &video.sample_entry
                 && let Ok(seq_header_data) = create_video_sequence_header(entry)
@@ -267,6 +273,7 @@ impl RtmpPublishRunner {
                 };
                 self.connection.send_video(seq_frame).or_fail()?;
                 self.video_sequence_header_data = Some(seq_header_data);
+                self.stats.total_video_sequence_header_count.increment();
                 log::debug!("Sent H.264 sequence header");
             }
             self.last_video_keyframe_timestamp = Some(timestamp_ms);
@@ -408,10 +415,27 @@ pub struct RtmpPublisherStats {
     /// 配信した映像フレームの数
     pub total_video_frame_count: SharedAtomicCounter,
 
+    /// RTMP イベント処理の回数
+    pub total_event_count: SharedAtomicCounter,
+
+    /// RTMP で送信したバイト数
+    pub total_sent_bytes: SharedAtomicCounter,
+
+    /// RTMP で受信したバイト数
+    pub total_received_bytes: SharedAtomicCounter,
+
+    /// 配信したキーフレーム（映像）の数
+    pub total_video_keyframe_count: SharedAtomicCounter,
+
+    /// 送信した音声シーケンスヘッダの数
+    pub total_audio_sequence_header_count: SharedAtomicCounter,
+
+    /// 送信した映像シーケンスヘッダの数
+    pub total_video_sequence_header_count: SharedAtomicCounter,
+
     /// 処理に掛かった時間
     pub total_processing_duration: SharedAtomicDuration,
 
-    // TODO: イベント数、送受信バイト数、キーフレーム数、シーケンスヘッダ送信数（音声・映像別）
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -422,6 +446,21 @@ impl nojson::DisplayJson for RtmpPublisherStats {
             f.member("type", "rtmp_publisher")?;
             f.member("total_audio_frame_count", &self.total_audio_frame_count)?;
             f.member("total_video_frame_count", &self.total_video_frame_count)?;
+            f.member("total_event_count", &self.total_event_count)?;
+            f.member("total_sent_bytes", &self.total_sent_bytes)?;
+            f.member("total_received_bytes", &self.total_received_bytes)?;
+            f.member(
+                "total_video_keyframe_count",
+                &self.total_video_keyframe_count,
+            )?;
+            f.member(
+                "total_audio_sequence_header_count",
+                &self.total_audio_sequence_header_count,
+            )?;
+            f.member(
+                "total_video_sequence_header_count",
+                &self.total_video_sequence_header_count,
+            )?;
             f.member("total_processing_seconds", &self.total_processing_duration)?;
             f.member("error", self.error.get())?;
             Ok(())
