@@ -14,6 +14,26 @@ use crate::{
     video::{VideoFormat, VideoFrame},
 };
 
+#[derive(Debug, Clone)]
+pub struct RtmpPublisherOptions {
+    /// 未送信の音声・映像フレームを保持するバッファの最大フレーム数
+    ///
+    /// このサイズを超えてフレームが溜まった場合には、
+    /// 出力先のネットワークないしサーバーが過負荷に陥っていると判断して、
+    /// 接続を強制終了する（エラー扱い）
+    ///
+    /// デフォルト値は 1000
+    pub max_buffered_frame_count: usize,
+}
+
+impl Default for RtmpPublisherOptions {
+    fn default() -> Self {
+        Self {
+            max_buffered_frame_count: 1000, // FPS にもよるけど概ね 10 秒分くらい
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RtmpPublisher {
     input_audio_stream_id: Option<MediaStreamId>,
@@ -28,9 +48,10 @@ impl RtmpPublisher {
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
         url: shiguredo_rtmp::RtmpUrl,
+        options: RtmpPublisherOptions,
     ) -> Self {
         let stats = RtmpPublisherStats::default();
-        let (tx, rx) = tokio::sync::mpsc::channel(100); // TODO: サイズは変更できるようにする
+        let (tx, rx) = tokio::sync::mpsc::channel(options.max_buffered_frame_count);
 
         let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(url.clone());
         let mut runner = RtmpPublishRunner {

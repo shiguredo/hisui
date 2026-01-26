@@ -169,6 +169,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         Some(AUDIO_PACED_STREAM_ID),
         Some(VIDEO_PACED_STREAM_ID),
         url,
+        crate::publisher_rtmp::RtmpPublisherOptions::default(),
     );
     scheduler.register(publisher).or_fail()?;
 
