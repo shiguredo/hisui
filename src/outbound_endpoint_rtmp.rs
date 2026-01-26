@@ -216,15 +216,14 @@ impl RtmpPlayServer {
 
                     for player in stream_state.players.values_mut() {
                         // 初回接続時はシーケンスヘッダーを先に送信
-                        if !player.audio_sequence_header_sent {
-                            if let Some(seq_header) = &stream_state.audio_sequence_header {
+                        if !player.audio_sequence_header_sent
+                            && let Some(seq_header) = &stream_state.audio_sequence_header {
                                 let _ = player
                                     .tx
                                     .send(ClientMediaFrame::Audio(seq_header.clone()))
                                     .await;
                                 player.audio_sequence_header_sent = true;
                             }
-                        }
                         let _ = player.tx.send(ClientMediaFrame::Audio(audio.clone())).await;
                     }
                 }
@@ -239,15 +238,14 @@ impl RtmpPlayServer {
 
                     for player in stream_state.players.values_mut() {
                         // シーケンスヘッダーを送信していない場合は先に送信
-                        if !player.video_sequence_header_sent {
-                            if let Some(seq_header) = &stream_state.video_sequence_header {
+                        if !player.video_sequence_header_sent
+                            && let Some(seq_header) = &stream_state.video_sequence_header {
                                 let _ = player
                                     .tx
                                     .send(ClientMediaFrame::Video(seq_header.clone()))
                                     .await;
                                 player.video_sequence_header_sent = true;
                             }
-                        }
 
                         // キーフレームを待っている場合
                         if !player.video_keyframe_sent {
@@ -386,7 +384,7 @@ impl RtmpClientHandler {
         let mut streams = self.media_streams.lock().await;
         let stream_state = streams.entry(self.stream_id.clone()).or_default();
 
-        let client_id = self.stream_id.len() as usize; // シンプルなクライアント ID
+        let client_id = self.stream_id.len(); // シンプルなクライアント ID
 
         let mut player_state = PlayerState {
             audio_sequence_header_sent: false,
@@ -426,8 +424,8 @@ impl RtmpClientHandler {
     /// 音声フレームをクライアントに送信する
     fn handle_audio_frame(&mut self, audio: Arc<AudioData>) -> orfail::Result<()> {
         // 必要に応じて音声シーケンスヘッダーを作成して送信
-        if let Some(entry) = &audio.sample_entry {
-            if let Ok(seq_header) = create_audio_sequence_header(entry) {
+        if let Some(entry) = &audio.sample_entry
+            && let Ok(seq_header) = create_audio_sequence_header(entry) {
                 let seq_frame = shiguredo_rtmp::AudioFrame {
                     timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
                     format: shiguredo_rtmp::AudioFormat::Aac,
@@ -441,7 +439,6 @@ impl RtmpClientHandler {
                 self.stats.total_audio_sequence_header_count.increment();
                 log::debug!("Sent AAC sequence header");
             }
-        }
 
         // 音声フレームを送信する
         let frame = shiguredo_rtmp::AudioFrame {
@@ -469,8 +466,8 @@ impl RtmpClientHandler {
             self.stats.total_video_keyframe_count.increment();
 
             // 利用可能な場合はシーケンスヘッダーを送信する
-            if let Some(entry) = &video.sample_entry {
-                if let Ok(seq_header_data) = create_video_sequence_header(entry) {
+            if let Some(entry) = &video.sample_entry
+                && let Ok(seq_header_data) = create_video_sequence_header(entry) {
                     let seq_frame = shiguredo_rtmp::VideoFrame {
                         timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
                         composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
@@ -483,7 +480,6 @@ impl RtmpClientHandler {
                     self.stats.total_video_sequence_header_count.increment();
                     log::debug!("Sent H.264 sequence header");
                 }
-            }
             self.received_keyframe = true;
         }
 
@@ -541,17 +537,16 @@ impl RtmpClientHandler {
 
     /// クリーンアップ処理
     async fn cleanup(&mut self) {
-        if let Ok(mut streams) = self.media_streams.try_lock() {
-            if let Some(state) = streams.get_mut(&self.stream_id) {
+        if let Ok(mut streams) = self.media_streams.try_lock()
+            && let Some(state) = streams.get_mut(&self.stream_id) {
                 // プレイヤー一覧からクライアントを削除する
-                state.players.remove(&(self.stream_id.len() as usize));
+                state.players.remove(&{ self.stream_id.len() });
 
                 // 空になったストリームをクリーンアップする
                 if state.players.is_empty() && state.publisher_id.is_none() {
                     streams.remove(&self.stream_id);
                 }
             }
-        }
     }
 }
 
