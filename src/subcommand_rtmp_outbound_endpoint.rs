@@ -40,7 +40,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("入力ファイル（.mp4 ないし .webm）")
         .take(&mut args)
         .then(|a| a.value().parse())?;
-    let output_rtmp_url = noargs::arg("RTMP_URL")
+    let endpoint_rtmp_url = noargs::arg("RTMP_URL")
         .doc("出力先の RTMP の URL")
         .take(&mut args)
         .then(|a| {
@@ -60,7 +60,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .and_then(|path| Openh264Library::load(path).ok());
     let format = ContainerFormat::from_path(&input_file_path).or_fail()?;
     let mut scheduler = Scheduler::new();
-    let dummy_source_id = crate::metadata::SourceId::new("rtmp_publish");
+    let dummy_source_id = crate::metadata::SourceId::new("rtmp");
 
     // 音声リーダーを登録
     let reader = AudioReader::new(
@@ -141,14 +141,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .enable_all()
         .build()
         .or_fail()?;
-    let publisher = crate::publisher_rtmp::RtmpPublisher::start(
+    let outbound_endpoint = crate::outbound_endpoint_rtmp::RtmpOutboundEndpoint::start(
         &runtime,
         Some(AUDIO_PACED_STREAM_ID),
         Some(VIDEO_PACED_STREAM_ID),
-        output_rtmp_url,
-        crate::publisher_rtmp::RtmpPublisherOptions::default(),
+        endpoint_rtmp_url,
+        crate::outbound_endpoint_rtmp::RtmpOutboundEndpointOptions::default(),
     );
-    scheduler.register(publisher).or_fail()?;
+    scheduler.register(outbound_endpoint).or_fail()?;
 
     // スケジューラー実行
     scheduler.run().or_fail()?;
