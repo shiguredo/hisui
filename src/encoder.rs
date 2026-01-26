@@ -480,8 +480,11 @@ impl MediaProcessor for VideoEncoder {
             }
 
             self.stats.total_input_video_frame_count.add(1);
-            // 初期化後は inner は必ず Some である
-            self.inner.as_mut().unwrap().encode(frame).or_fail()?;
+            self.inner
+                .as_mut()
+                .expect("infallible")
+                .encode(frame)
+                .or_fail()?;
         } else {
             self.eos = true;
             if let Some(inner) = &mut self.inner {
