@@ -327,8 +327,9 @@ impl VideoEncoder {
         // エンコーダーのインスタンスを作成
         let inner = self.create_inner()?;
 
-        // 統計情報を正確な値で更新
-        self.stats = VideoEncoderStats::new(inner.name(), inner.codec());
+        // エンジン名とコーデックを更新
+        self.stats.engine = inner.name();
+        self.stats.codec = inner.codec();
 
         self.inner = Some(inner);
         Ok(())
