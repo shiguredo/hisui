@@ -30,6 +30,12 @@
 - [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
   - バージョンが `-canary.X` は `.devX` 形式に変換される
   - @voluntas
+- [ADD] 実験的コマンドとして rtmp-publish を追加する
+  - 入力ファイル（.mp4 or .webm）を RTMP サーバーに配信するためのコマンド
+  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+  - @sile
+- [ADD] 依存ライブラリに shiguredo_rtmp を追加する
+  - @sile
 - [CHANGE] コマンドライン引数に `--experimental(-x)` フラグを追加して `pipeline` サブコマンドはこのフラグ指定時にのみ有効になるようにする
   - `pipeline` サブコマンドは元々実験的機能扱いであったが、実験的機能を扱うためのフラグを追加して、より明確にハンドリングするようにする
   - @sile

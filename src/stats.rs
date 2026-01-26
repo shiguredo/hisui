@@ -72,6 +72,7 @@ pub enum ProcessorStats {
     AudioEncoder(AudioEncoderStats),
     VideoEncoder(VideoEncoderStats),
     Mp4Writer(Mp4WriterStats),
+    RtmpPublisher(crate::publisher_rtmp::RtmpPublisherStats),
     Other {
         processor_type: String,
         total_processing_duration: SharedAtomicDuration,
@@ -101,6 +102,7 @@ impl ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::VideoEncoder(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::Mp4Writer(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::RtmpPublisher(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::Other {
                 total_processing_duration,
                 ..
@@ -121,6 +123,7 @@ impl ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.error.set(true),
             ProcessorStats::VideoEncoder(stats) => stats.error.set(true),
             ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
+            ProcessorStats::RtmpPublisher(stats) => stats.error.set(true),
             ProcessorStats::Other { error, .. } => error.set(true),
         }
     }
@@ -140,6 +143,7 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
             ProcessorStats::VideoEncoder(stats) => stats.fmt(f),
             ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
+            ProcessorStats::RtmpPublisher(stats) => stats.fmt(f),
             ProcessorStats::Other {
                 processor_type,
                 total_processing_duration,
@@ -511,6 +515,10 @@ impl SharedAtomicCounter {
         self.0.fetch_add(n, Ordering::Relaxed);
     }
 
+    pub fn increment(&self) {
+        self.add(1);
+    }
+
     pub fn set(&self, n: u64) {
         // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
         self.0.store(n, Ordering::Relaxed);
@@ -519,6 +527,12 @@ impl SharedAtomicCounter {
     pub fn get(&self) -> u64 {
         // 取得結果が一時的に古くても問題はないので Relaxed で十分
         self.0.load(Ordering::Relaxed)
+    }
+}
+
+impl nojson::DisplayJson for SharedAtomicCounter {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get())
     }
 }
 
@@ -542,6 +556,12 @@ impl SharedAtomicDuration {
 
     pub fn get(&self) -> Duration {
         Duration::from_nanos(self.0.get())
+    }
+}
+
+impl nojson::DisplayJson for SharedAtomicDuration {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get().as_secs_f32())
     }
 }
 
