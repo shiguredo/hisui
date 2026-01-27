@@ -163,7 +163,7 @@ impl RtmpPlayServer {
                     let expected_stream_name = self.url.stream_name.clone();
 
                     tokio::spawn(async move {
-                        let frame_handler_stats = crate::rtmp::RtmpFrameHandlerStats {
+                        let frame_handler_stats = crate::rtmp::RtmpOutgoingFrameHandlerStats {
                             total_audio_frame_count: stats.total_audio_frame_count.clone(),
                             total_video_frame_count: stats.total_video_frame_count.clone(),
                             total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
@@ -179,7 +179,7 @@ impl RtmpPlayServer {
                             stats,
                             expected_app,
                             expected_stream_name,
-                            frame_handler: crate::rtmp::RtmpFrameHandler::new(frame_handler_stats),
+                            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(frame_handler_stats),
                         };
 
                         if let Err(e) = handler.run().await.or_fail() {
@@ -224,7 +224,7 @@ struct RtmpClientHandler {
     stats: RtmpOutboundEndpointStats,
     expected_app: String,
     expected_stream_name: String,
-    frame_handler: crate::rtmp::RtmpFrameHandler,
+    frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
 }
 
 impl RtmpClientHandler {

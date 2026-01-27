@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::{audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
 
 #[derive(Debug)]
-pub struct RtmpFrameHandlerStats {
+pub struct RtmpOutgoingFrameHandlerStats {
     pub total_audio_frame_count: SharedAtomicCounter,
     pub total_video_frame_count: SharedAtomicCounter,
     pub total_video_keyframe_count: SharedAtomicCounter,
@@ -14,18 +14,18 @@ pub struct RtmpFrameHandlerStats {
 
 /// RTMP フレーム処理の共通ロジック
 #[derive(Debug)]
-pub struct RtmpFrameHandler {
+pub struct RtmpOutgoingFrameHandler {
     video_sequence_header_data: Option<Vec<u8>>,
     audio_sequence_header_data: Option<Vec<u8>>,
     video_nalu_length_size: Option<u8>,
     received_keyframe: bool,
 
     // 統計情報への参照（どちらの構造体でも使用可能）
-    stats: RtmpFrameHandlerStats,
+    stats: RtmpOutgoingFrameHandlerStats,
 }
 
-impl RtmpFrameHandler {
-    pub fn new(stats: RtmpFrameHandlerStats) -> Self {
+impl RtmpOutgoingFrameHandler {
+    pub fn new(stats: RtmpOutgoingFrameHandlerStats) -> Self {
         Self {
             video_sequence_header_data: None,
             audio_sequence_header_data: None,
