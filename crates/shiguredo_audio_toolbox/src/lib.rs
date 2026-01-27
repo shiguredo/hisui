@@ -4,7 +4,7 @@
 //! [Audio Toolbox]: https://developer.apple.com/documentation/audiotoolbox/
 #![warn(missing_docs)]
 
-use std::{ffi::c_void, mem::MaybeUninit};
+use std::{ffi::c_void, mem::MaybeUninit, num::NonZeroU8};
 
 mod sys;
 
@@ -216,6 +216,7 @@ pub struct Decoder {
     encoded_buf: Vec<u8>,
     eos: bool,
     packet_desc: Box<sys::AudioStreamPacketDescription>,
+    input_channels: NonZeroU8,
 }
 
 impl Decoder {
@@ -225,7 +226,7 @@ impl Decoder {
     ///
     /// 出力フォーマットは Hisui の仕様に合わせて固定されており、
     /// PCM 48kHz ステレオ（2チャンネル）で出力されます。
-    pub fn new(input_sample_rate: u32, input_channels: usize) -> Result<Self, Error> {
+    pub fn new(input_sample_rate: u32, input_channels: NonZeroU8) -> Result<Self, Error> {
         unsafe {
             let mut input_format =
                 MaybeUninit::<sys::AudioStreamBasicDescription>::zeroed().assume_init();
@@ -236,7 +237,7 @@ impl Decoder {
             input_format.mSampleRate = input_sample_rate as f64;
             input_format.mFormatID = sys::kAudioFormatMPEG4AAC;
             input_format.mFormatFlags = sys::kMPEG4Object_AAC_LC;
-            input_format.mChannelsPerFrame = input_channels as sys::UInt32;
+            input_format.mChannelsPerFrame = input_channels.get() as sys::UInt32;
             input_format.mFramesPerPacket = 1024;
             input_format.mBitsPerChannel = 0;
             input_format.mBytesPerPacket = 0;
@@ -265,6 +266,7 @@ impl Decoder {
                     mVariableFramesInPacket: 0,
                     mDataByteSize: 0,
                 }),
+                input_channels,
             })
         }
     }
@@ -351,7 +353,7 @@ impl Decoder {
 
             let io_data = &mut *io_data;
             io_data.mNumberBuffers = 1;
-            io_data.mBuffers[0].mNumberChannels = CHANNELS as sys::UInt32;
+            io_data.mBuffers[0].mNumberChannels = this.input_channels.get() as sys::UInt32;
             io_data.mBuffers[0].mData = this.encoded_buf.as_mut_ptr().cast();
             io_data.mBuffers[0].mDataByteSize = this.encoded_buf.len() as u32;
 
@@ -413,7 +415,11 @@ mod tests {
     fn decode_silent() {
         // 有効な AAC データを取得するためにエンコーダーを使用する
         let mut encoder = Encoder::new(128_000).expect("create encoder error");
-        let mut decoder = Decoder::new(SAMPLE_RATE as u32, CHANNELS).expect("create decoder error");
+        let mut decoder = Decoder::new(
+            SAMPLE_RATE as u32,
+            NonZeroU8::new(CHANNELS as u8).expect("infallible"),
+        )
+        .expect("create decoder error");
 
         // 無音のオーディオをエンコードする
         let mut acc_encoded_data = Vec::new();
