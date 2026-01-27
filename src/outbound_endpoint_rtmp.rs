@@ -27,6 +27,12 @@ const FRAME_CHANNEL_SIZE: usize = 100;
 /// こっちはクライアントとの接続処理に時間が掛かると少し詰まることがあるので大きめにしておく
 const CLIENT_FRAME_CHANNEL_SIZE: usize = 500;
 
+/// TLS接続時の証明書ファイルパス環境変数名
+const CERT_PATH_ENV_VAR: &str = "HISUI_RTMP_CERT_PATH";
+
+/// TLS接続時の秘密鍵ファイルパス環境変数名
+const KEY_PATH_ENV_VAR: &str = "HISUI_RTMP_KEY_PATH";
+
 #[derive(Debug, Clone, Default)]
 pub struct RtmpOutboundEndpointOptions {
     /// TLS接続時の証明書ファイルパス（オプション）
@@ -213,29 +219,29 @@ impl RtmpPlayServer {
             .cert_path
             .clone()
             .or_else(|| {
-                std::env::var("HISUI_RTMP_CERT_PATH")
+                std::env::var(CERT_PATH_ENV_VAR)
                     .map(PathBuf::from)
                     .ok()
             })
             .or_fail_with(|()| {
-                concat!(
-                    "Certificate path not found.",
-                    " Set cert_path option or HISUI_RTMP_CERT_PATH environment variable"
+                format!(
+                    "Certificate path not found. Set cert_path option or {CERT_PATH_ENV_VAR} environment variable"
                 )
-                .to_owned()
             })?;
 
         let key_path = self
             .options
             .key_path
             .clone()
-            .or_else(|| std::env::var("HISUI_RTMP_KEY_PATH").map(PathBuf::from).ok())
+            .or_else(|| {
+                std::env::var(KEY_PATH_ENV_VAR)
+                    .map(PathBuf::from)
+                    .ok()
+            })
             .or_fail_with(|()| {
-                concat!(
-                    "Private key path not found.",
-                    " Set key_path option or HISUI_RTMP_KEY_PATH environment variable"
+                format!(
+                    "Private key path not found. Set key_path option or {KEY_PATH_ENV_VAR} environment variable"
                 )
-                .to_owned()
             })?;
 
         Ok((cert_path, key_path))
