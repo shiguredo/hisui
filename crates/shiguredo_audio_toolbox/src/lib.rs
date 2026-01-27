@@ -258,15 +258,23 @@ impl Decoder {
         }
     }
 
-    /// AAC 圧縮データをデコードする
-    pub fn decode(&mut self, encoded: &[u8]) -> Result<Option<Vec<i16>>, Error> {
+    /// AAC 圧縮データをデコーダーに入力する
+    pub fn decode(&mut self, encoded: &[u8]) -> Result<(), Error> {
         self.encoded_buf.extend_from_slice(encoded);
-        self.decode_impl()
+        Ok(())
     }
 
-    /// デコーダーに、これ以上データが来ないこと、を伝えて残りのデコード結果を取得する
-    pub fn finish(&mut self) -> Result<Option<Vec<i16>>, Error> {
+    /// デコーダーに、これ以上データが来ないこと、を伝える
+    pub fn finish(&mut self) -> Result<(), Error> {
         self.eos = true;
+        Ok(())
+    }
+
+    /// デコードされたデータを取得する
+    ///
+    /// `Ok(Some(_))` が返される間はこのメソッドをループして呼び出す。
+    /// `Ok(None)` が返されたら、それ以上デコード結果がないことを意味する。
+    pub fn next_decoded_data(&mut self) -> Result<Option<Vec<i16>>, Error> {
         self.decode_impl()
     }
 
@@ -357,9 +365,6 @@ impl Drop for Decoder {
 
 unsafe impl Send for Decoder {}
 
-/// デコードされた音声フレーム
-pub type DecodedFrame = Vec<i16>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,12 +414,11 @@ mod tests {
         }
 
         // エンコードされたデータをデコードする
+        decoder.decode(&acc_encoded_data).expect("decode error");
+        decoder.finish().expect("finish error");
+
         let mut total_decoded = Vec::new();
-        let decoded = decoder.decode(&acc_encoded_data).expect("decode error");
-        if let Some(data) = decoded {
-            total_decoded.extend(data);
-        }
-        while let Some(data) = decoder.finish().expect("finish error") {
+        while let Some(data) = decoder.next_decoded_data().expect("decode error") {
             if data.is_empty() {
                 break;
             }
