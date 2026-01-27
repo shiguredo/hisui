@@ -386,4 +386,27 @@ mod tests {
 
         assert_eq!(sample_count, 100 * 100);
     }
+
+    #[test]
+    fn decode_silent() {
+        // 有効な AAC データを取得するためにエンコーダーを使用する
+        let mut encoder = Encoder::new(128_000).expect("create encoder error");
+        let mut decoder = Decoder::new().expect("create decoder error");
+
+        // 無音のオーディオをエンコードする
+        let encoded = encoder
+            .encode(&[0; 1024 * CHANNELS])
+            .expect("encode error")
+            .expect("no encoded frame");
+
+        // エンコードされたデータをデコードする
+        let decoded = decoder
+            .decode(&encoded.data)
+            .expect("decode error")
+            .expect("no decoded frame");
+
+        // デコード結果が入力と一致することを確認する
+        assert_eq!(decoded.len(), encoded.samples * CHANNELS);
+        assert!(decoded.iter().all(|v| *v == 0));
+    }
 }
