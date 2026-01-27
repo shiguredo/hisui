@@ -26,11 +26,6 @@ const CLIENT_FRAME_CHANNEL_SIZE: usize = 500;
 
 #[derive(Debug, Clone)]
 pub struct RtmpOutboundEndpointOptions {
-    /// TLSを使用するかどうか
-    ///
-    /// デフォルト値は false（平文のRTMP接続）
-    pub tls: bool,
-
     /// TLS接続時の証明書検証を行うかどうか
     ///
     /// true（デフォルト）の場合、システムの証明書ストアを使用して
@@ -38,13 +33,26 @@ pub struct RtmpOutboundEndpointOptions {
     ///
     /// false の場合、自己署名証明書などを許可します（開発環境向け）
     pub verify_certificate: bool,
+
+    /// TLS接続時の証明書ファイルパス（オプション）
+    ///
+    /// 指定されない場合は環境変数 `RTMP_CERT_PATH` から取得します。
+    /// 環境変数も設定されていない場合は `./cert.pem` をデフォルトとします。
+    pub cert_path: Option<String>,
+
+    /// TLS接続時の秘密鍵ファイルパス（オプション）
+    ///
+    /// 指定されない場合は環境変数 `RTMP_KEY_PATH` から取得します。
+    /// 環境変数も設定されていない場合は `./key.pem` をデフォルトとします。
+    pub key_path: Option<String>,
 }
 
 impl Default for RtmpOutboundEndpointOptions {
     fn default() -> Self {
         Self {
-            tls: false,
             verify_certificate: true,
+            cert_path: None,
+            key_path: None,
         }
     }
 }
@@ -176,8 +184,14 @@ impl RtmpPlayServer {
 
         let listener = TcpListener::bind(&addr).await.or_fail()?;
 
-        // TLS用の設定をここで準備
-        let tls_acceptor = if self.options.tls {
+        // URL スキームから TLS を判定（rtmps:// の場合は TLS を有効化）
+        let tls_enabled = self.url.tls;
+        log::debug!(
+            "TLS is {}",
+            if tls_enabled { "enabled" } else { "disabled" }
+        );
+
+        let tls_acceptor = if tls_enabled {
             Some(self.create_tls_acceptor().await.or_fail()?)
         } else {
             None
@@ -203,66 +217,35 @@ impl RtmpPlayServer {
 
     /// TLS Acceptor を作成する
     async fn create_tls_acceptor(&self) -> orfail::Result<Arc<tokio_rustls::TlsAcceptor>> {
-        if !self.options.tls {
-            return Err(orfail::Failure::new("TLS is not enabled"));
-        }
+        log::debug!("Creating TLS config");
 
-        // TLS設定をプラットフォームの証明書ストアを使用して作成
-        let config = if self.options.verify_certificate {
-            // 証明書検証を有効にする場合
-            log::debug!("Creating TLS config with certificate verification enabled");
-
-            // NOTE: 実装では、実際のサーバー証明書と秘密鍵を読み込む必要があります
-            // ここではプレースホルダーとして示しています
-            // 実際の実装例は、examples/server/src/main.rs を参照してください
-            self.load_server_config_with_verification()
-                .await
-                .or_fail()?
-        } else {
-            // 証明書検証を無効にする場合（自己署名証明書対応）
-            log::debug!("Creating TLS config with certificate verification disabled");
-            self.load_server_config_without_verification()
-                .await
-                .or_fail()?
-        };
-
+        let config = self.load_server_config().await.or_fail()?;
         Ok(Arc::new(tokio_rustls::TlsAcceptor::from(Arc::new(config))))
     }
 
-    /// 証明書検証を有効にしてサーバー設定を読み込む
-    async fn load_server_config_with_verification(&self) -> orfail::Result<rustls::ServerConfig> {
-        // 実装例：環境変数から証明書パスを読み込む
-        let cert_path =
-            std::env::var("RTMP_CERT_PATH").unwrap_or_else(|_| "./cert.pem".to_string());
-        let key_path = std::env::var("RTMP_KEY_PATH").unwrap_or_else(|_| "./key.pem".to_string());
-
-        self.load_server_config(&cert_path, &key_path).await
-    }
-
-    /// 証明書検証を無効にしてサーバー設定を読み込む
-    async fn load_server_config_without_verification(
-        &self,
-    ) -> orfail::Result<rustls::ServerConfig> {
-        // 実装例：環境変数から証明書パスを読み込む
-        let cert_path =
-            std::env::var("RTMP_CERT_PATH").unwrap_or_else(|_| "./cert.pem".to_string());
-        let key_path = std::env::var("RTMP_KEY_PATH").unwrap_or_else(|_| "./key.pem".to_string());
-
-        self.load_server_config(&cert_path, &key_path).await
-    }
-
     /// サーバー設定を読み込む
-    async fn load_server_config(
-        &self,
-        cert_path: &str,
-        key_path: &str,
-    ) -> orfail::Result<rustls::ServerConfig> {
+    async fn load_server_config(&self) -> orfail::Result<rustls::ServerConfig> {
         use rustls::pki_types::pem::PemObject;
+
+        // 指定されたパスか環境変数から取得
+        let cert_path = self
+            .options
+            .cert_path
+            .clone()
+            .or_else(|| std::env::var("RTMP_CERT_PATH").ok())
+            .unwrap_or_else(|| "./cert.pem".to_string());
+
+        let key_path = self
+            .options
+            .key_path
+            .clone()
+            .or_else(|| std::env::var("RTMP_KEY_PATH").ok())
+            .unwrap_or_else(|| "./key.pem".to_string());
 
         log::debug!("Loading TLS certificates from {}", cert_path);
 
         // 証明書ファイルを読み込む
-        let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert_path)
+        let certs = rustls::pki_types::CertificateDer::pem_file_iter(&cert_path)
             .or_fail_with(|e| format!("Failed to open certificate file: {e}"))?
             .collect::<Result<Vec<_>, _>>()
             .or_fail_with(|e| format!("Failed to parse certificate file: {e}"))?;
@@ -275,7 +258,7 @@ impl RtmpPlayServer {
 
         // 秘密鍵ファイルを読み込む
         log::debug!("Loading private key from {}", key_path);
-        let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_path)
+        let key = rustls::pki_types::PrivateKeyDer::from_pem_file(&key_path)
             .or_fail_with(|e| format!("Failed to load private key: {e}"))?;
 
         // ServerConfig を作成
@@ -302,7 +285,6 @@ impl RtmpPlayServer {
         let stats = self.stats.clone();
         let expected_app = self.url.app.clone();
         let expected_stream_name = self.url.stream_name.clone();
-        let tls_enabled = self.options.tls;
 
         tokio::spawn(async move {
             // [NOTE]
@@ -318,38 +300,32 @@ impl RtmpPlayServer {
 
             stats.total_connected_clients.increment();
 
-            if tls_enabled {
+            if let Some(acceptor) = tls_acceptor {
                 // TLS接続の処理
-                if let Some(acceptor) = tls_acceptor {
-                    match acceptor.accept(stream).await {
-                        Ok(tls_stream) => {
-                            log::debug!("TLS handshake successful with {peer_addr}");
-                            let mut handler = RtmpClientHandler::new_tls(
-                                tls_stream,
-                                client_rx,
-                                stats.clone(),
-                                expected_app,
-                                expected_stream_name,
-                                frame_handler_stats,
-                            );
+                match acceptor.accept(stream).await {
+                    Ok(tls_stream) => {
+                        log::debug!("TLS handshake successful with {peer_addr}");
+                        let mut handler = RtmpClientHandler::new_tls(
+                            tls_stream,
+                            client_rx,
+                            stats.clone(),
+                            expected_app,
+                            expected_stream_name,
+                            frame_handler_stats,
+                        );
 
-                            if let Err(e) = handler.run().await.or_fail() {
-                                log::error!("RTMP client handler error: {e}");
-                                handler.stats.total_error_disconnected_clients.increment();
-                            }
-                            handler.stats.total_disconnected_clients.increment();
-                            log::debug!("RTMP client disconnected: {peer_addr}");
+                        if let Err(e) = handler.run().await.or_fail() {
+                            log::error!("RTMP client handler error: {e}");
+                            handler.stats.total_error_disconnected_clients.increment();
                         }
-                        Err(e) => {
-                            log::error!("TLS handshake failed with {peer_addr}: {e}");
-                            stats.total_error_disconnected_clients.increment();
-                            stats.total_disconnected_clients.increment();
-                        }
+                        handler.stats.total_disconnected_clients.increment();
+                        log::debug!("RTMP client disconnected: {peer_addr}");
                     }
-                } else {
-                    log::error!("TLS requested but acceptor not available for {peer_addr}");
-                    stats.total_error_disconnected_clients.increment();
-                    stats.total_disconnected_clients.increment();
+                    Err(e) => {
+                        log::error!("TLS handshake failed with {peer_addr}: {e}");
+                        stats.total_error_disconnected_clients.increment();
+                        stats.total_disconnected_clients.increment();
+                    }
                 }
             } else {
                 // 平文接続の処理
