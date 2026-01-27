@@ -171,6 +171,7 @@ impl RtmpPlayServer {
                     log::debug!("New RTMP client connection from: {}", peer_addr);
 
                     // このクライアント用のチャネルを作成
+                    // TODO: これは調整する
                     let (client_tx, client_rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
 
                     // クライアントリストに追加
@@ -244,7 +245,7 @@ impl RtmpClientHandler {
         loop {
             tokio::select! {
                 // このクライアント用のメディアフレームを受信する
-                Some(frame) = self.rx.recv() => {
+                Some(frame) = self.rx.recv(), if self.connection.state() == shiguredo_rtmp::RtmpConnectionState::Playing => {
                     self.handle_client_media_frame(frame).or_fail()?;
                     self.flush_send_buf().await.or_fail()?;
                 }
