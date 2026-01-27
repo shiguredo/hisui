@@ -421,12 +421,11 @@ impl RtmpClientHandler {
 
     /// 送信バッファをストリームにフラッシュする
     async fn flush_send_buf(&mut self) -> orfail::Result<()> {
-        let send_data = self.connection.send_buf();
-        if !send_data.is_empty() {
+        while !self.connection.send_buf().is_empty() {
+            let send_data = self.connection.send_buf();
             self.stream.write_all(send_data).await.or_fail()?;
             self.stats.total_sent_bytes.add(send_data.len() as u64);
-            let len = send_data.len();
-            self.connection.advance_send_buf(len);
+            self.connection.advance_send_buf(send_data.len());
         }
         Ok(())
     }
