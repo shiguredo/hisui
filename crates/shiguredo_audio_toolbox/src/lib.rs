@@ -400,18 +400,23 @@ mod tests {
             .expect("encode error")
             .expect("no encoded frame");
         acc_encoded_data.extend(encoded.data);
+
         if let Some(encoded) = encoder.finish().expect("finish error") {
             acc_encoded_data.extend(encoded.data);
         }
 
         // エンコードされたデータをデコードする
-        let decoded = decoder
-            .decode(&acc_encoded_data)
-            .expect("decode error")
-            .expect("no decoded frame");
+        let mut total_decoded = Vec::new();
+        let decoded = decoder.decode(&acc_encoded_data).expect("decode error");
+        if let Some(data) = decoded {
+            total_decoded.extend(data);
+        }
+        if let Some(data) = decoder.finish().expect("finish error") {
+            total_decoded.extend(data);
+        }
 
         // デコード結果が入力と一致することを確認する
-        assert_eq!(decoded.len(), encoded.samples * CHANNELS);
-        assert!(decoded.iter().all(|v| *v == 0));
+        assert_eq!(total_decoded.len(), 1024 * CHANNELS);
+        assert!(total_decoded.iter().all(|v| *v == 0));
     }
 }
