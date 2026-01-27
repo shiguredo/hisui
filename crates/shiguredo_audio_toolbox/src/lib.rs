@@ -272,7 +272,7 @@ impl Decoder {
 
     fn decode_impl(&mut self) -> Result<Option<Vec<i16>>, Error> {
         let mut pcm_buf = vec![0i16; 1024 * CHANNELS];
-        let mut io_packets = 1;
+        let mut io_packets = (pcm_buf.len() / CHANNELS) as u32; // バッファサイズに合わせる
         let mut output_buffer_list =
             unsafe { MaybeUninit::<sys::AudioBufferList>::zeroed().assume_init() };
         output_buffer_list.mNumberBuffers = 1;
@@ -295,7 +295,8 @@ impl Decoder {
         }
         Error::check(status, "AudioConverterFillComplexBuffer")?;
 
-        let size = output_buffer_list.mBuffers[0].mDataByteSize as usize / size_of::<i16>();
+        let byte_size = output_buffer_list.mBuffers[0].mDataByteSize as usize;
+        let size = byte_size / size_of::<i16>();
         pcm_buf.truncate(size);
         Ok(Some(pcm_buf))
     }
@@ -309,6 +310,7 @@ impl Decoder {
     ) -> i32 {
         unsafe {
             let this: &mut Decoder = &mut *(in_user_data as *mut Decoder);
+            let requested_packets = *io_number_data_packets; // 要求されたパケット数を取得
 
             if this.encoded_buf.is_empty() {
                 if this.eos {
@@ -318,7 +320,8 @@ impl Decoder {
                 return K_NO_MORE_INPUT;
             }
 
-            *io_number_data_packets = 1;
+            // 要求されたパケット数に応じて処理（一度に1パケットまで）
+            *io_number_data_packets = requested_packets.min(1);
 
             let io_data = &mut *io_data;
             io_data.mNumberBuffers = 1;
@@ -411,7 +414,10 @@ mod tests {
         if let Some(data) = decoded {
             total_decoded.extend(data);
         }
-        if let Some(data) = decoder.finish().expect("finish error") {
+        while let Some(data) = decoder.finish().expect("finish error") {
+            if data.is_empty() {
+                break;
+            }
             total_decoded.extend(data);
         }
 
