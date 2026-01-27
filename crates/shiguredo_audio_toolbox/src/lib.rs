@@ -215,6 +215,7 @@ pub struct Decoder {
     converter: sys::AudioConverterRef,
     encoded_buf: Vec<u8>,
     eos: bool,
+    packet_desc: Box<sys::AudioStreamPacketDescription>,
 }
 
 impl Decoder {
@@ -259,6 +260,11 @@ impl Decoder {
                 converter,
                 encoded_buf: Vec::new(),
                 eos: false,
+                packet_desc: Box::new(sys::AudioStreamPacketDescription {
+                    mStartOffset: 0,
+                    mVariableFramesInPacket: 0,
+                    mDataByteSize: 0,
+                }),
             })
         }
     }
@@ -348,14 +354,12 @@ impl Decoder {
 
             // パケット記述情報の設定
             if !out_data_packet_description.is_null() {
-                let packet_desc = std::boxed::Box::leak(std::boxed::Box::new(
-                    sys::AudioStreamPacketDescription {
-                        mStartOffset: 0,
-                        mVariableFramesInPacket: 0,
-                        mDataByteSize: this.encoded_buf.len() as u32,
-                    },
-                ));
-                *out_data_packet_description = packet_desc as *mut _;
+                // this の packet_desc フィールドを更新して、そのポインタを設定
+                this.packet_desc.mStartOffset = 0;
+                this.packet_desc.mVariableFramesInPacket = 0;
+                this.packet_desc.mDataByteSize = this.encoded_buf.len() as u32;
+
+                *out_data_packet_description = &mut *this.packet_desc as *mut _;
             }
 
             this.encoded_buf.clear();
