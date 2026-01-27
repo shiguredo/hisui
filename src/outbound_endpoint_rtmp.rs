@@ -27,24 +27,12 @@ const FRAME_CHANNEL_SIZE: usize = 100;
 /// こっちはクライアントとの接続処理に時間が掛かると少し詰まることがあるので大きめにしておく
 const CLIENT_FRAME_CHANNEL_SIZE: usize = 500;
 
-/// TLS接続時の証明書ファイルパス環境変数名
-const CERT_PATH_ENV_VAR: &str = "HISUI_RTMP_CERT_PATH";
-
-/// TLS接続時の秘密鍵ファイルパス環境変数名
-const KEY_PATH_ENV_VAR: &str = "HISUI_RTMP_KEY_PATH";
-
 #[derive(Debug, Clone, Default)]
 pub struct RtmpOutboundEndpointOptions {
     /// TLS接続時の証明書ファイルパス（オプション）
-    ///
-    /// 指定されない場合は環境変数 `HISUI_RTMP_CERT_PATH` から取得します。
-    /// 環境変数も設定されていない場合はエラーになります。
     pub cert_path: Option<PathBuf>,
 
     /// TLS接続時の秘密鍵ファイルパス（オプション）
-    ///
-    /// 指定されない場合は環境変数 `HISUI_RTMP_KEY_PATH` から取得します。
-    /// 環境変数も設定されていない場合はエラーになります。
     pub key_path: Option<PathBuf>,
 }
 
@@ -184,7 +172,7 @@ impl RtmpPlayServer {
 
         // TLS Acceptor を作成（共通化されたヘルパー関数を使用）
         let tls_acceptor = if tls_enabled {
-            let (cert_path, key_path) = self.load_cert_and_key_paths().await.or_fail()?;
+            let (cert_path, key_path) = self.get_cert_and_key_paths().or_fail()?;
             Some(
                 create_server_tls_acceptor(&cert_path, &key_path)
                     .await
@@ -212,38 +200,18 @@ impl RtmpPlayServer {
         Ok(())
     }
 
-    /// 証明書と秘密鍵のパスを読み込む
-    async fn load_cert_and_key_paths(&self) -> orfail::Result<(PathBuf, PathBuf)> {
+    /// 証明書と秘密鍵のパスを取得する
+    fn get_cert_and_key_paths(&self) -> orfail::Result<(PathBuf, PathBuf)> {
         let cert_path = self
             .options
             .cert_path
             .clone()
-            .or_else(|| {
-                std::env::var(CERT_PATH_ENV_VAR)
-                    .map(PathBuf::from)
-                    .ok()
-            })
-            .or_fail_with(|()| {
-                format!(
-                    "Certificate path not found. Set cert_path option or {CERT_PATH_ENV_VAR} environment variable"
-                )
-            })?;
-
+            .or_fail_with(|()| "Certificate path not specified".to_owned())?;
         let key_path = self
             .options
             .key_path
             .clone()
-            .or_else(|| {
-                std::env::var(KEY_PATH_ENV_VAR)
-                    .map(PathBuf::from)
-                    .ok()
-            })
-            .or_fail_with(|()| {
-                format!(
-                    "Private key path not found. Set key_path option or {KEY_PATH_ENV_VAR} environment variable"
-                )
-            })?;
-
+            .or_fail_with(|()| "Private key path not specified".to_owned())?;
         Ok((cert_path, key_path))
     }
 
