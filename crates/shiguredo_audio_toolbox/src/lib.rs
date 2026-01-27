@@ -305,6 +305,10 @@ impl Decoder {
 
         let byte_size = output_buffer_list.mBuffers[0].mDataByteSize as usize;
         let size = byte_size / size_of::<i16>();
+        if size == 0 {
+            return Ok(None);
+        }
+
         pcm_buf.truncate(size);
         Ok(Some(pcm_buf))
     }
@@ -419,9 +423,6 @@ mod tests {
 
         let mut total_decoded = Vec::new();
         while let Some(data) = decoder.next_decoded_data().expect("decode error") {
-            if data.is_empty() {
-                break;
-            }
             total_decoded.extend(data);
         }
 
