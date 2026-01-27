@@ -1,20 +1,9 @@
-use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 use std::sync::Arc;
 
 use crate::{audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
 
-/// RTMP フレーム処理の共通ロジック
-pub struct RtmpFrameHandler {
-    video_sequence_header_data: Option<Vec<u8>>,
-    audio_sequence_header_data: Option<Vec<u8>>,
-    last_video_keyframe_timestamp: Option<u32>,
-    video_nalu_length_size: u8,
-
-    // 統計情報への参照（どちらの構造体でも使用可能）
-    stats: RtmpFrameHandlerStats,
-}
-
+#[derive(Debug)]
 pub struct RtmpFrameHandlerStats {
     pub total_audio_frame_count: SharedAtomicCounter,
     pub total_video_frame_count: SharedAtomicCounter,
@@ -23,12 +12,22 @@ pub struct RtmpFrameHandlerStats {
     pub total_video_sequence_header_count: SharedAtomicCounter,
 }
 
+/// RTMP フレーム処理の共通ロジック
+#[derive(Debug)]
+pub struct RtmpFrameHandler {
+    video_sequence_header_data: Option<Vec<u8>>,
+    audio_sequence_header_data: Option<Vec<u8>>,
+    video_nalu_length_size: u8,
+
+    // 統計情報への参照（どちらの構造体でも使用可能）
+    stats: RtmpFrameHandlerStats,
+}
+
 impl RtmpFrameHandler {
     pub fn new(video_nalu_length_size: u8, stats: RtmpFrameHandlerStats) -> Self {
         Self {
             video_sequence_header_data: None,
             audio_sequence_header_data: None,
-            last_video_keyframe_timestamp: None,
             video_nalu_length_size,
             stats,
         }
