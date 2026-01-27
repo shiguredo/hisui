@@ -27,7 +27,7 @@ const FRAME_CHANNEL_SIZE: usize = 100;
 /// こっちはクライアントとの接続処理に時間が掛かると少し詰まることがあるので大きめにしておく
 const CLIENT_FRAME_CHANNEL_SIZE: usize = 500;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RtmpOutboundEndpointOptions {
     /// TLS接続時の証明書ファイルパス（オプション）
     ///
@@ -40,15 +40,6 @@ pub struct RtmpOutboundEndpointOptions {
     /// 指定されない場合は環境変数 `HISUI_RTMP_KEY_PATH` から取得します。
     /// 環境変数も設定されていない場合はエラーになります。
     pub key_path: Option<PathBuf>,
-}
-
-impl Default for RtmpOutboundEndpointOptions {
-    fn default() -> Self {
-        Self {
-            cert_path: None,
-            key_path: None,
-        }
-    }
 }
 
 /// クライアントからの play リクエストを受け付けてメディアストリームを配信するサーバー
@@ -236,7 +227,6 @@ impl RtmpPlayServer {
                 )
                 .to_owned()
             })?;
-
         let key_path = self
             .options
             .key_path
@@ -249,7 +239,6 @@ impl RtmpPlayServer {
                 )
                 .to_owned()
             })?;
-
         log::debug!("Loading TLS certificates from {}", cert_path.display());
 
         // 証明書ファイルを読み込む
