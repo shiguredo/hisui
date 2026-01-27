@@ -180,6 +180,8 @@ impl RtmpPlayServer {
                     }
 
                     let stats = self.stats.clone();
+                    let expected_app = self.url.app.clone();
+                    let expected_stream_name = self.url.stream_name.clone();
 
                     // クライアント接続を別タスクで処理する
                     tokio::spawn(async move {
@@ -190,6 +192,8 @@ impl RtmpPlayServer {
                             recv_buf: vec![0u8; 4096],
                             received_keyframe: false,
                             stats,
+                            expected_app,
+                            expected_stream_name,
                         };
 
                         if let Err(e) = handler.run().await.or_fail() {
@@ -238,6 +242,8 @@ struct RtmpClientHandler {
     recv_buf: Vec<u8>,
     received_keyframe: bool,
     stats: RtmpOutboundEndpointStats,
+    expected_app: String,
+    expected_stream_name: String,
 }
 
 impl RtmpClientHandler {
@@ -285,9 +291,27 @@ impl RtmpClientHandler {
             shiguredo_rtmp::RtmpConnectionEvent::PlayRequested {
                 app, stream_name, ..
             } => {
-                // Play リクエストを許可する
-                self.connection.accept().or_fail()?;
-                log::debug!("Client started playing stream: {}/{}", app, stream_name);
+                // Play リクエストの app と stream_name がサーバーの設定値と一致するか検証
+                if app == self.expected_app && stream_name == self.expected_stream_name {
+                    // Play リクエストを許可する
+                    self.connection.accept().or_fail()?;
+                    log::debug!("Client started playing stream: {}/{}", app, stream_name);
+                } else {
+                    // app または stream_name が一致しない場合は reject する
+                    self.connection
+                        .reject(&format!(
+                            "Stream not found: {}/{}. Expected: {}/{}",
+                            app, stream_name, self.expected_app, self.expected_stream_name
+                        ))
+                        .or_fail()?;
+                    log::warn!(
+                        "Client requested invalid stream: {}/{}, expected: {}/{}",
+                        app,
+                        stream_name,
+                        self.expected_app,
+                        self.expected_stream_name
+                    );
+                }
             }
             shiguredo_rtmp::RtmpConnectionEvent::PublishRequested { .. } => {
                 self.connection
