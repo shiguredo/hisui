@@ -176,11 +176,10 @@ impl Encoder {
             let size = packets * CHANNELS as u32 * size_of::<i16>() as u32;
             io_data.mNumberBuffers = 1;
             io_data.mBuffers[0].mNumberChannels = 2;
-            std::slice::from_raw_parts_mut(
-                io_data.mBuffers[0].mData.cast(),
-                size as usize / CHANNELS,
-            )
-            .copy_from_slice(&this.pcm_buf[..size as usize / CHANNELS]);
+
+            let num_samples = (size / size_of::<i16>() as u32) as usize;
+            std::slice::from_raw_parts_mut(io_data.mBuffers[0].mData.cast(), num_samples)
+                .copy_from_slice(&this.pcm_buf[..num_samples]);
 
             io_data.mBuffers[0].mDataByteSize = size;
             this.pcm_buf.drain(0..packets as usize * CHANNELS);
