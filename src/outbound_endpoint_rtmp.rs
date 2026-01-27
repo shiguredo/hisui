@@ -1,6 +1,5 @@
 use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -51,9 +50,8 @@ impl RtmpOutboundEndpoint {
         runtime.spawn(async move {
             let mut server = RtmpPlayServer {
                 url: url.clone(),
-                listener: None,
                 rx,
-                media_streams: Arc::new(Mutex::new(HashMap::new())),
+                clients: Arc::new(Mutex::new(Vec::new())),
                 stats: stats_clone.clone(),
             };
 
@@ -133,14 +131,23 @@ impl MediaProcessor for RtmpOutboundEndpoint {
     }
 }
 
-/// RTMP Play Server の実装
+/// クライアント配信用の内部メディアフレーム表現
+#[derive(Debug, Clone)]
+enum ClientMediaFrame {
+    Audio(Arc<AudioData>),
+    Video(Arc<VideoFrame>),
+}
+
+/// RTMP Play サーバー
+///
+/// 単一の入力ストリームからメディアデータを受け取り、
+/// 複数のクライアント（プレイヤー）に配信する
 #[derive(Debug)]
 struct RtmpPlayServer {
     url: shiguredo_rtmp::RtmpUrl,
-    listener: Option<TcpListener>,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
-    /// ストリーム ID -> ストリーム状態のマップ
-    media_streams: Arc<Mutex<HashMap<String, MediaStreamState>>>,
+    /// 接続しているクライアント毎のメディアフレーム送信チャネル
+    clients: Arc<Mutex<Vec<tokio::sync::mpsc::Sender<ClientMediaFrame>>>>,
     stats: RtmpOutboundEndpointStats,
 }
 
@@ -155,9 +162,6 @@ impl RtmpPlayServer {
         // TCP リスナーをバインドする
         let addr = format!("{}:{}", self.url.host, self.url.port);
         let listener = TcpListener::bind(&addr).await.or_fail()?;
-        self.listener = Some(listener);
-
-        let listener = self.listener.as_ref().or_fail()?;
 
         // メインイベントループ
         loop {
@@ -167,7 +171,15 @@ impl RtmpPlayServer {
                     let (stream, peer_addr) = accept_result.or_fail()?;
                     log::debug!("New RTMP client connection from: {}", peer_addr);
 
-                    let media_streams = self.media_streams.clone();
+                    // このクライアント用のチャネルを作成
+                    let (client_tx, client_rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
+
+                    // クライアントリストに追加
+                    {
+                        let mut clients = self.clients.lock().await;
+                        clients.push(client_tx);
+                    }
+
                     let stats = self.stats.clone();
 
                     // クライアント接続を別タスクで処理する
@@ -175,9 +187,8 @@ impl RtmpPlayServer {
                         let mut handler = RtmpClientHandler {
                             stream,
                             connection: shiguredo_rtmp::RtmpServerConnection::new(),
-                            media_streams,
+                            rx: client_rx,
                             recv_buf: vec![0u8; 4096],
-                            stream_id: String::new(),
                             received_keyframe: false,
                             stats,
                         };
@@ -206,101 +217,19 @@ impl RtmpPlayServer {
 
     /// メディアサンプルを受け取り、すべてのプレイヤーに配信する
     async fn handle_media_sample(&self, sample: MediaSample) -> orfail::Result<()> {
-        let mut streams = self.media_streams.lock().await;
+        let frame = match sample {
+            MediaSample::Audio(audio) => ClientMediaFrame::Audio(audio),
+            MediaSample::Video(video) => ClientMediaFrame::Video(video),
+        };
 
-        match sample {
-            MediaSample::Audio(audio) => {
-                // すべてのストリームの状態を更新し、プレイヤーに配信する
-                for stream_state in streams.values_mut() {
-                    // シーケンスヘッダーを保存（初回のみ）
-                    if stream_state.audio_sequence_header.is_none() {
-                        stream_state.audio_sequence_header = Some(audio.clone());
-                    }
+        let mut clients = self.clients.lock().await;
 
-                    for player in stream_state.players.values_mut() {
-                        // 初回接続時はシーケンスヘッダーを先に送信
-                        if !player.audio_sequence_header_sent
-                            && let Some(seq_header) = &stream_state.audio_sequence_header
-                        {
-                            let _ = player
-                                .tx
-                                .send(ClientMediaFrame::Audio(seq_header.clone()))
-                                .await;
-                            player.audio_sequence_header_sent = true;
-                        }
-                        let _ = player.tx.send(ClientMediaFrame::Audio(audio.clone())).await;
-                    }
-                }
-            }
-            MediaSample::Video(video) => {
-                // すべてのストリームの状態を更新し、プレイヤーに配信する
-                for stream_state in streams.values_mut() {
-                    // キーフレームのシーケンスヘッダーを保存
-                    if video.keyframe {
-                        stream_state.video_sequence_header = Some(video.clone());
-                    }
-
-                    for player in stream_state.players.values_mut() {
-                        // シーケンスヘッダーを送信していない場合は先に送信
-                        if !player.video_sequence_header_sent
-                            && let Some(seq_header) = &stream_state.video_sequence_header
-                        {
-                            let _ = player
-                                .tx
-                                .send(ClientMediaFrame::Video(seq_header.clone()))
-                                .await;
-                            player.video_sequence_header_sent = true;
-                        }
-
-                        // キーフレームを待っている場合
-                        if !player.video_keyframe_sent {
-                            if !video.keyframe {
-                                continue; // キーフレームが来るまでスキップ
-                            }
-                            player.video_keyframe_sent = true;
-                        }
-
-                        let _ = player.tx.send(ClientMediaFrame::Video(video.clone())).await;
-                    }
-                }
-            }
-        }
+        // すべてのクライアントに配信
+        // 接続が閉じられたクライアント（send失敗）を削除しながら配信
+        clients.retain(|tx| tx.try_send(frame.clone()).is_ok());
 
         Ok(())
     }
-}
-
-/// 配信されているメディアストリームの状態
-#[derive(Debug, Default)]
-struct MediaStreamState {
-    /// このストリームの配信者のクライアント ID
-    publisher_id: Option<usize>,
-    /// 音声シーケンスヘッダーデータ
-    audio_sequence_header: Option<Arc<AudioData>>,
-    /// 映像シーケンスヘッダーデータ（キーフレーム）
-    video_sequence_header: Option<Arc<VideoFrame>>,
-    /// このストリームをプレイしているクライアント
-    players: HashMap<usize, PlayerState>,
-}
-
-/// ストリームをプレイしている個別クライアントの状態
-#[derive(Debug)]
-struct PlayerState {
-    /// 音声シーケンスヘッダーが送信されたかどうか
-    audio_sequence_header_sent: bool,
-    /// 映像シーケンスヘッダーが送信されたかどうか
-    video_sequence_header_sent: bool,
-    /// キーフレームが送信されたかどうか
-    video_keyframe_sent: bool,
-    /// このクライアントにメディアフレームを送信するチャネル
-    tx: tokio::sync::mpsc::Sender<ClientMediaFrame>,
-}
-
-/// クライアント配信用の内部メディアフレーム表現
-#[derive(Debug, Clone)]
-enum ClientMediaFrame {
-    Audio(Arc<AudioData>),
-    Video(Arc<VideoFrame>),
 }
 
 /// 個別のクライアント接続を処理する
@@ -308,21 +237,18 @@ enum ClientMediaFrame {
 struct RtmpClientHandler {
     stream: TcpStream,
     connection: shiguredo_rtmp::RtmpServerConnection,
-    media_streams: Arc<Mutex<HashMap<String, MediaStreamState>>>,
+    rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
     recv_buf: Vec<u8>,
-    stream_id: String,
     received_keyframe: bool,
     stats: RtmpOutboundEndpointStats,
 }
 
 impl RtmpClientHandler {
     async fn run(&mut self) -> orfail::Result<()> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
-
         loop {
             tokio::select! {
                 // このクライアント用のメディアフレームを受信する
-                Some(frame) = rx.recv() => {
+                Some(frame) = self.rx.recv() => {
                     self.handle_client_media_frame(frame).or_fail()?;
                     self.flush_send_buf().await.or_fail()?;
                 }
@@ -342,7 +268,7 @@ impl RtmpClientHandler {
                     while let Some(event) = self.connection.next_event() {
                         log::debug!("RTMP event: {:?}", event);
                         self.stats.total_event_count.increment();
-                        self.handle_event(event, tx.clone()).await.or_fail()?;
+                        self.handle_event(event).await.or_fail()?;
                     }
 
                     self.flush_send_buf().await.or_fail()?;
@@ -350,7 +276,6 @@ impl RtmpClientHandler {
             }
         }
 
-        self.cleanup().await;
         Ok(())
     }
 
@@ -358,14 +283,14 @@ impl RtmpClientHandler {
     async fn handle_event(
         &mut self,
         event: shiguredo_rtmp::RtmpConnectionEvent,
-        tx: tokio::sync::mpsc::Sender<ClientMediaFrame>,
     ) -> orfail::Result<()> {
         match event {
             shiguredo_rtmp::RtmpConnectionEvent::PlayRequested {
                 app, stream_name, ..
             } => {
-                self.stream_id = format!("{}/{}", app, stream_name);
-                self.handle_play_requested(tx).await.or_fail()?;
+                // Play リクエストを許可する
+                self.connection.accept().or_fail()?;
+                log::debug!("Client started playing stream: {}/{}", app, stream_name);
             }
             shiguredo_rtmp::RtmpConnectionEvent::PublishRequested { .. } => {
                 self.connection
@@ -374,42 +299,6 @@ impl RtmpClientHandler {
             }
             _ => {}
         }
-        Ok(())
-    }
-
-    /// Play リクエストを処理する
-    async fn handle_play_requested(
-        &mut self,
-        tx: tokio::sync::mpsc::Sender<ClientMediaFrame>,
-    ) -> orfail::Result<()> {
-        // Play リクエストを許可する
-        self.connection.accept().or_fail()?;
-
-        // このクライアントをプレイヤーとして登録する
-        let mut streams = self.media_streams.lock().await;
-        let stream_state = streams.entry(self.stream_id.clone()).or_default();
-
-        let client_id = self.stream_id.len(); // シンプルなクライアント ID
-
-        let mut player_state = PlayerState {
-            audio_sequence_header_sent: false,
-            video_sequence_header_sent: false,
-            video_keyframe_sent: false,
-            tx,
-        };
-
-        // 既存のシーケンスヘッダーがあれば、新しいプレイヤーにすぐに送信できるようにマーク
-        if stream_state.audio_sequence_header.is_some() {
-            player_state.audio_sequence_header_sent = true;
-        }
-        if stream_state.video_sequence_header.is_some() {
-            player_state.video_sequence_header_sent = true;
-            player_state.video_keyframe_sent = true;
-        }
-
-        stream_state.players.insert(client_id, player_state);
-
-        log::debug!("Client started playing stream: {}", self.stream_id);
         Ok(())
     }
 
@@ -467,6 +356,15 @@ impl RtmpClientHandler {
     fn handle_video_frame(&mut self, video: Arc<VideoFrame>) -> orfail::Result<()> {
         let timestamp_ms = video.timestamp.as_millis() as u32;
 
+        // キーフレームを待っている場合
+        if !self.received_keyframe {
+            if !video.keyframe {
+                // キーフレームが来るまでスキップ
+                return Ok(());
+            }
+            self.received_keyframe = true;
+        }
+
         // キーフレームの処理
         if video.keyframe {
             self.stats.total_video_keyframe_count.increment();
@@ -487,12 +385,6 @@ impl RtmpClientHandler {
                 self.stats.total_video_sequence_header_count.increment();
                 log::debug!("Sent H.264 sequence header");
             }
-            self.received_keyframe = true;
-        }
-
-        // キーフレームを受け取るまではフレームをスキップする
-        if !self.received_keyframe && !video.keyframe {
-            return Ok(());
         }
 
         // 必要に応じて映像データ形式を変換する
@@ -540,21 +432,6 @@ impl RtmpClientHandler {
             self.connection.advance_send_buf(len);
         }
         Ok(())
-    }
-
-    /// クリーンアップ処理
-    async fn cleanup(&mut self) {
-        if let Ok(mut streams) = self.media_streams.try_lock()
-            && let Some(state) = streams.get_mut(&self.stream_id)
-        {
-            // プレイヤー一覧からクライアントを削除する
-            state.players.remove(&{ self.stream_id.len() });
-
-            // 空になったストリームをクリーンアップする
-            if state.players.is_empty() && state.publisher_id.is_none() {
-                streams.remove(&self.stream_id);
-            }
-        }
     }
 }
 
