@@ -1,5 +1,8 @@
-use orfail::OrFail;
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use orfail::OrFail;
+use rustls::pki_types::pem::PemObject;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -26,31 +29,22 @@ const CLIENT_FRAME_CHANNEL_SIZE: usize = 500;
 
 #[derive(Debug, Clone)]
 pub struct RtmpOutboundEndpointOptions {
-    /// TLS接続時の証明書検証を行うかどうか
-    ///
-    /// true（デフォルト）の場合、システムの証明書ストアを使用して
-    /// サーバー証明書を検証します。
-    ///
-    /// false の場合、自己署名証明書などを許可します（開発環境向け）
-    pub verify_certificate: bool,
-
     /// TLS接続時の証明書ファイルパス（オプション）
     ///
-    /// 指定されない場合は環境変数 `RTMP_CERT_PATH` から取得します。
-    /// 環境変数も設定されていない場合は `./cert.pem` をデフォルトとします。
-    pub cert_path: Option<String>,
+    /// 指定されない場合は環境変数 `HISUI_RTMP_CERT_PATH` から取得します。
+    /// 環境変数も設定されていない場合はエラーになります。
+    pub cert_path: Option<PathBuf>,
 
     /// TLS接続時の秘密鍵ファイルパス（オプション）
     ///
-    /// 指定されない場合は環境変数 `RTMP_KEY_PATH` から取得します。
-    /// 環境変数も設定されていない場合は `./key.pem` をデフォルトとします。
-    pub key_path: Option<String>,
+    /// 指定されない場合は環境変数 `HISUI_RTMP_KEY_PATH` から取得します。
+    /// 環境変数も設定されていない場合はエラーになります。
+    pub key_path: Option<PathBuf>,
 }
 
 impl Default for RtmpOutboundEndpointOptions {
     fn default() -> Self {
         Self {
-            verify_certificate: true,
             cert_path: None,
             key_path: None,
         }
@@ -225,24 +219,38 @@ impl RtmpPlayServer {
 
     /// サーバー設定を読み込む
     async fn load_server_config(&self) -> orfail::Result<rustls::ServerConfig> {
-        use rustls::pki_types::pem::PemObject;
-
         // 指定されたパスか環境変数から取得
         let cert_path = self
             .options
             .cert_path
             .clone()
-            .or_else(|| std::env::var("RTMP_CERT_PATH").ok())
-            .unwrap_or_else(|| "./cert.pem".to_string());
+            .or_else(|| {
+                std::env::var("HISUI_RTMP_CERT_PATH")
+                    .map(PathBuf::from)
+                    .ok()
+            })
+            .or_fail_with(|()| {
+                concat!(
+                    "Certificate path not found.",
+                    " Set cert_path option or HISUI_RTMP_CERT_PATH environment variable"
+                )
+                .to_owned()
+            })?;
 
         let key_path = self
             .options
             .key_path
             .clone()
-            .or_else(|| std::env::var("RTMP_KEY_PATH").ok())
-            .unwrap_or_else(|| "./key.pem".to_string());
+            .or_else(|| std::env::var("HISUI_RTMP_KEY_PATH").map(PathBuf::from).ok())
+            .or_fail_with(|()| {
+                concat!(
+                    "Private key path not found.",
+                    " Set key_path option or HISUI_RTMP_KEY_PATH environment variable"
+                )
+                .to_owned()
+            })?;
 
-        log::debug!("Loading TLS certificates from {}", cert_path);
+        log::debug!("Loading TLS certificates from {}", cert_path.display());
 
         // 証明書ファイルを読み込む
         let certs = rustls::pki_types::CertificateDer::pem_file_iter(&cert_path)
@@ -257,7 +265,7 @@ impl RtmpPlayServer {
         log::debug!("Loaded {} certificate(s)", certs.len());
 
         // 秘密鍵ファイルを読み込む
-        log::debug!("Loading private key from {}", key_path);
+        log::debug!("Loading private key from {}", key_path.display());
         let key = rustls::pki_types::PrivateKeyDer::from_pem_file(&key_path)
             .or_fail_with(|e| format!("Failed to load private key: {e}"))?;
 
