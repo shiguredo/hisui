@@ -3,7 +3,6 @@ use shiguredo_mp4::boxes::SampleEntry;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
 
 use crate::{
     audio::{AudioData, AudioFormat},
@@ -51,7 +50,7 @@ impl RtmpOutboundEndpoint {
             let mut server = RtmpPlayServer {
                 url: url.clone(),
                 rx,
-                clients: Arc::new(Mutex::new(Vec::new())),
+                clients: Vec::new(),
                 stats: stats_clone.clone(),
             };
 
@@ -147,7 +146,7 @@ struct RtmpPlayServer {
     url: shiguredo_rtmp::RtmpUrl,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
     /// 接続しているクライアント毎のメディアフレーム送信チャネル
-    clients: Arc<Mutex<Vec<tokio::sync::mpsc::Sender<ClientMediaFrame>>>>,
+    clients: Vec<tokio::sync::mpsc::Sender<ClientMediaFrame>>,
     stats: RtmpOutboundEndpointStats,
 }
 
@@ -176,8 +175,7 @@ impl RtmpPlayServer {
 
                     // クライアントリストに追加
                     {
-                        let mut clients = self.clients.lock().await;
-                        clients.push(client_tx);
+                        self.clients.push(client_tx);
                     }
 
                     let stats = self.stats.clone();
@@ -216,17 +214,15 @@ impl RtmpPlayServer {
     }
 
     /// メディアサンプルを受け取り、すべてのプレイヤーに配信する
-    async fn handle_media_sample(&self, sample: MediaSample) -> orfail::Result<()> {
+    async fn handle_media_sample(&mut self, sample: MediaSample) -> orfail::Result<()> {
         let frame = match sample {
             MediaSample::Audio(audio) => ClientMediaFrame::Audio(audio),
             MediaSample::Video(video) => ClientMediaFrame::Video(video),
         };
 
-        let mut clients = self.clients.lock().await;
-
         // すべてのクライアントに配信
         // 接続が閉じられたクライアント（send失敗）を削除しながら配信
-        clients.retain(|tx| tx.try_send(frame.clone()).is_ok());
+        self.clients.retain(|tx| tx.try_send(frame.clone()).is_ok());
 
         Ok(())
     }
