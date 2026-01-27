@@ -291,8 +291,13 @@ impl Decoder {
     }
 
     fn decode_impl(&mut self) -> Result<Option<Vec<i16>>, Error> {
-        let mut pcm_buf = vec![0i16; 1024 * CHANNELS];
-        let mut io_packets = (pcm_buf.len() / CHANNELS) as u32; // バッファサイズに合わせる
+        let pcm_buf_size = 1024;
+        let mut pcm_buf = vec![0i16; pcm_buf_size * CHANNELS];
+
+        // PCM 出力の場合、io_packets はフレーム数を意味する
+        // AAC 1 パケット = 1024 フレームなので、バッファサイズに合わせて 1024 を設定
+        let mut io_packets = pcm_buf_size as u32;
+
         let mut output_buffer_list =
             unsafe { MaybeUninit::<sys::AudioBufferList>::zeroed().assume_init() };
         output_buffer_list.mNumberBuffers = 1;
