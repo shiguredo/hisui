@@ -394,14 +394,19 @@ mod tests {
         let mut decoder = Decoder::new().expect("create decoder error");
 
         // 無音のオーディオをエンコードする
+        let mut acc_encoded_data = Vec::new();
         let encoded = encoder
             .encode(&[0; 1024 * CHANNELS])
             .expect("encode error")
             .expect("no encoded frame");
+        acc_encoded_data.extend(encoded.data);
+        if let Some(encoded) = encoder.finish().expect("finish error") {
+            acc_encoded_data.extend(encoded.data);
+        }
 
         // エンコードされたデータをデコードする
         let decoded = decoder
-            .decode(&encoded.data)
+            .decode(&acc_encoded_data)
             .expect("decode error")
             .expect("no decoded frame");
 
