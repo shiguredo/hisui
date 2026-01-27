@@ -54,6 +54,7 @@ pub mod publisher_rtmp;
 pub mod reader;
 pub mod reader_mp4;
 pub mod reader_webm;
+pub mod rtmp;
 pub mod scheduler;
 pub mod stats;
 pub mod subcommand_compose;
