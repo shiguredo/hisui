@@ -248,24 +248,21 @@ impl RtmpClientHandler {
             while let Some(event) = self.connection.next_event() {
                 log::debug!("RTMP event: {:?}", event);
                 self.stats.total_event_count.increment();
-                self.handle_event(event).await.or_fail()?;
+                self.handle_event(event).or_fail()?;
             }
 
             self.flush_send_buf().await.or_fail()?;
 
             tokio::select! {
-                Some(frame) = self.rx.recv(), if self.connection.state() == shiguredo_rtmp::RtmpConnectionState::Playing => {
-                    self.handle_client_media_frame(frame).or_fail()?;
-                }
-
-                read_result = self.stream.read(&mut self.recv_buf) => {
-                    let n = read_result.or_fail()?;
-                    if n == 0 {
+                frame = self.rx.recv(), if self.connection.state() == shiguredo_rtmp::RtmpConnectionState::Playing => {
+                    if !self.handle_media_frame_or_close(frame).await.or_fail()? {
                         break;
                     }
-
-                    self.stats.total_received_bytes.add(n as u64);
-                    self.connection.feed_recv_buf(&self.recv_buf[..n]).or_fail()?;
+                }
+                read_result = self.stream.read(&mut self.recv_buf) => {
+                    if !self.handle_stream_read(read_result).await.or_fail()? {
+                        break;
+                    }
                 }
             }
         }
@@ -274,10 +271,7 @@ impl RtmpClientHandler {
     }
 
     /// RTMP イベントを処理する
-    async fn handle_event(
-        &mut self,
-        event: shiguredo_rtmp::RtmpConnectionEvent,
-    ) -> orfail::Result<()> {
+    fn handle_event(&mut self, event: shiguredo_rtmp::RtmpConnectionEvent) -> orfail::Result<()> {
         match event {
             shiguredo_rtmp::RtmpConnectionEvent::PlayRequested {
                 app, stream_name, ..
@@ -311,6 +305,23 @@ impl RtmpClientHandler {
         Ok(())
     }
 
+    /// メディアフレームを処理するか、閉じるかのいずれかを行う
+    async fn handle_media_frame_or_close(
+        &mut self,
+        frame: Option<ClientMediaFrame>,
+    ) -> orfail::Result<bool> {
+        match frame {
+            Some(f) => {
+                self.handle_client_media_frame(f).or_fail()?;
+                Ok(true)
+            }
+            None => {
+                log::debug!("Media feed ended for client");
+                Ok(false)
+            }
+        }
+    }
+
     /// クライアント用メディアフレームを処理する
     fn handle_client_media_frame(&mut self, frame: ClientMediaFrame) -> orfail::Result<()> {
         match frame {
@@ -333,6 +344,24 @@ impl RtmpClientHandler {
             }
         }
         Ok(())
+    }
+
+    /// TCP ストリームからデータを読み込み、RTMP 接続に供給する
+    async fn handle_stream_read(&mut self, result: std::io::Result<usize>) -> orfail::Result<bool> {
+        match result {
+            Ok(0) => {
+                log::debug!("Connection closed by client");
+                Ok(false)
+            }
+            Ok(n) => {
+                self.stats.total_received_bytes.add(n as u64);
+                self.connection
+                    .feed_recv_buf(&self.recv_buf[..n])
+                    .or_fail()?;
+                Ok(true)
+            }
+            Err(e) => Err(e).or_fail(),
+        }
     }
 
     /// 送信バッファをストリームにフラッシュする
