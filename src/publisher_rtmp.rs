@@ -1,6 +1,6 @@
-use orfail::OrFail;
-use shiguredo_mp4::boxes::SampleEntry;
 use std::sync::Arc;
+
+use orfail::OrFail;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
@@ -54,16 +54,23 @@ impl RtmpPublisher {
         let (tx, rx) = tokio::sync::mpsc::channel(options.max_buffered_frame_count);
 
         let connection = shiguredo_rtmp::RtmpPublishClientConnection::new(url.clone());
+
+        // Frame handler stats を作成
+        let frame_handler_stats = crate::rtmp::RtmpOutgoingFrameHandlerStats {
+            total_audio_frame_count: stats.total_audio_frame_count.clone(),
+            total_video_frame_count: stats.total_video_frame_count.clone(),
+            total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
+            total_audio_sequence_header_count: stats.total_audio_sequence_header_count.clone(),
+            total_video_sequence_header_count: stats.total_video_sequence_header_count.clone(),
+        };
+
         let mut runner = RtmpPublishRunner {
             url,
             rx,
             recv_buf: vec![0u8; 4096],
             connection,
             ready: false,
-            video_sequence_header_data: None,
-            audio_sequence_header_data: None,
-            last_video_keyframe_timestamp: None,
-            video_nalu_length_size: 4,
+            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(frame_handler_stats),
             stats: stats.clone(),
         };
         runtime.spawn(async move {
@@ -149,10 +156,7 @@ struct RtmpPublishRunner {
     recv_buf: Vec<u8>,
     connection: shiguredo_rtmp::RtmpPublishClientConnection,
     ready: bool,
-    video_sequence_header_data: Option<Vec<u8>>,
-    audio_sequence_header_data: Option<Vec<u8>>,
-    last_video_keyframe_timestamp: Option<u32>,
-    video_nalu_length_size: u8,
+    frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
     stats: RtmpPublisherStats,
 }
 
@@ -231,138 +235,23 @@ impl RtmpPublishRunner {
         }
     }
 
-    /// 音声サンプルを処理してサーバーに送信する
     fn handle_audio_sample(&mut self, audio: Arc<AudioData>) -> orfail::Result<()> {
-        // 最初のサンプルまたは新しいサンプルエントリーが来た場合、シーケンスヘッダを送信
-        if self.audio_sequence_header_data.is_none()
-            && let Some(entry) = &audio.sample_entry
-            && let Ok(seq_header) = create_audio_sequence_header(entry)
-        {
-            let seq_frame = shiguredo_rtmp::AudioFrame {
-                timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
-                format: shiguredo_rtmp::AudioFormat::Aac,
-                sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
-                is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
-                is_8bit_sample: false, // Hisui は 16 bit サンプル前提
-                is_aac_sequence_header: true,
-                data: seq_header.clone(),
-            };
-            self.connection.send_audio(seq_frame).or_fail()?;
-            self.audio_sequence_header_data = Some(seq_header);
-            self.stats.total_audio_sequence_header_count.increment();
-            log::debug!("Sent AAC sequence header");
+        let (seq_frame, audio_frame) = self.frame_handler.prepare_audio_frame(audio)?;
+        if let Some(seq) = seq_frame {
+            self.connection.send_audio(seq).or_fail()?;
         }
-
-        // 音声フレームデータを送信
-        let frame = shiguredo_rtmp::AudioFrame {
-            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
-                audio.timestamp.as_millis() as u32
-            ),
-            format: shiguredo_rtmp::AudioFormat::Aac,
-            sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
-            is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
-            is_8bit_sample: false, // Hisui は 16 bit サンプル前提
-            is_aac_sequence_header: false,
-            data: audio.data.clone(),
-        };
-        self.connection.send_audio(frame).or_fail()?;
-        self.stats.total_audio_frame_count.increment();
+        self.connection.send_audio(audio_frame).or_fail()?;
         Ok(())
     }
 
-    /// 映像サンプルを処理してサーバーに送信する
     fn handle_video_sample(&mut self, video: Arc<VideoFrame>) -> orfail::Result<()> {
-        let timestamp_ms = video.timestamp.as_millis() as u32;
-
-        // キーフレームの場合、シーケンスヘッダを送信
-        if video.keyframe {
-            self.stats.total_video_keyframe_count.increment();
-
-            // 新しいサンプルエントリーが来た場合
-            if let Some(entry) = &video.sample_entry
-                && let Ok(seq_header_data) = create_video_sequence_header(entry)
-            {
-                let seq_frame = shiguredo_rtmp::VideoFrame {
-                    timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
-                    composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-                    frame_type: shiguredo_rtmp::VideoFrameType::KeyFrame,
-                    codec: shiguredo_rtmp::VideoCodec::Avc,
-                    avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::SequenceHeader),
-                    data: seq_header_data.clone(),
-                };
-                self.connection.send_video(seq_frame).or_fail()?;
-                self.video_sequence_header_data = Some(seq_header_data);
-                self.stats.total_video_sequence_header_count.increment();
-                log::debug!("Sent H.264 sequence header");
+        if let Some((seq_frame, video_frame)) = self.frame_handler.prepare_video_frame(video)? {
+            if let Some(seq) = seq_frame {
+                self.connection.send_video(seq).or_fail()?;
             }
-            self.last_video_keyframe_timestamp = Some(timestamp_ms);
+            self.connection.send_video(video_frame).or_fail()?;
         }
-
-        // 映像フレームデータを送信
-        // Annex B 形式に変換する（必要に応じて）
-        let frame_data = match video.format {
-            VideoFormat::H264 => {
-                // MP4形式の場合はAnnex Bに変換
-                crate::video_h264::convert_nalu_to_annexb(&video.data, self.video_nalu_length_size)
-                    .or_fail()?
-            }
-            VideoFormat::H264AnnexB => {
-                // 既にAnnex B形式の場合は変換不要
-                video.data.clone()
-            }
-            _ => {
-                return Err(orfail::Failure::new(
-                    "BUG: unsupported video format in handle_video_sample",
-                ));
-            }
-        };
-
-        let frame = shiguredo_rtmp::VideoFrame {
-            timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
-            composition_timestamp_offset: shiguredo_rtmp::RtmpTimestampDelta::ZERO,
-            frame_type: if video.keyframe {
-                shiguredo_rtmp::VideoFrameType::KeyFrame
-            } else {
-                shiguredo_rtmp::VideoFrameType::InterFrame
-            },
-            codec: shiguredo_rtmp::VideoCodec::Avc,
-            avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
-            data: frame_data,
-        };
-        self.connection.send_video(frame).or_fail()?;
-        self.stats.total_video_frame_count.increment();
         Ok(())
-    }
-}
-
-/// 音声シーケンスヘッダを作成する
-fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
-    match entry {
-        SampleEntry::Mp4a(mp4a) => {
-            // EsdsBox から DecoderSpecificInfo を取得
-            mp4a.esds_box
-                .es
-                .dec_config_descr
-                .dec_specific_info
-                .as_ref()
-                .map(|info| info.payload.clone())
-                .ok_or_else(|| orfail::Failure::new("No decoder specific info available"))
-        }
-        _ => Err(orfail::Failure::new("Not an audio sample entry")),
-    }
-}
-
-/// 映像シーケンスヘッダを作成する
-fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
-    match entry {
-        SampleEntry::Avc1(avc1) => {
-            let sps_list = &avc1.avcc_box.sps_list;
-            let pps_list = &avc1.avcc_box.pps_list;
-            Ok(crate::video_h264::create_sequence_header_annexb(
-                sps_list, pps_list,
-            ))
-        }
-        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }
 }
 

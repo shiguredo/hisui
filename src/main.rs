@@ -21,8 +21,10 @@ const TUNE_COMMAND: noargs::CmdSpec =
 // 以降は実験的なサブコマンドの定義
 const PIPELINE_COMMAND: noargs::CmdSpec =
     noargs::cmd("pipeline").doc("ユーザー定義のパイプラインを実行します（実験的機能）");
-const RTMP_PUBLISH_COMMAND: noargs::CmdSpec =
-    noargs::cmd("rtmp-publish").doc("指定された入力ファイルを RTMP で配信します（実験的機能）");
+const RTMP_PUBLISH_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-publish")
+    .doc("指定された入力ファイルを RTMP クライアントとして配信します（実験的機能）");
+const RTMP_OUTBOUND_ENDPOINT_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-outbound-endpoint")
+    .doc("指定された入力ファイルを RTMP サーバーとして配信します（実験的機能）");
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
@@ -65,6 +67,8 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_pipeline::run(args)?;
     } else if experimental && RTMP_PUBLISH_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_rtmp_publish::run(args)?;
+    } else if experimental && RTMP_OUTBOUND_ENDPOINT_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_rtmp_outbound_endpoint::run(args)?;
     } else if let Some(help) = args.finish()? {
         print!("{help}");
     }
