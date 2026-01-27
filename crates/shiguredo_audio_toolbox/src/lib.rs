@@ -219,7 +219,12 @@ pub struct Decoder {
 
 impl Decoder {
     /// デコーダーインスタンスを生成する
-    pub fn new() -> Result<Self, Error> {
+    ///
+    /// 入力の AAC フォーマット（サンプルレート、チャンネル数）は引数で指定できます。
+    ///
+    /// 出力フォーマットは Hisui の仕様に合わせて固定されており、
+    /// PCM 48kHz ステレオ（2チャンネル）で出力されます。
+    pub fn new(input_sample_rate: u32, input_channels: usize) -> Result<Self, Error> {
         unsafe {
             let mut input_format =
                 MaybeUninit::<sys::AudioStreamBasicDescription>::zeroed().assume_init();
@@ -227,23 +232,23 @@ impl Decoder {
                 MaybeUninit::<sys::AudioStreamBasicDescription>::zeroed().assume_init();
 
             // AAC 入力フォーマット
-            input_format.mSampleRate = SAMPLE_RATE; // TODO: 外から渡すようにする
+            input_format.mSampleRate = input_sample_rate as f64;
             input_format.mFormatID = sys::kAudioFormatMPEG4AAC;
             input_format.mFormatFlags = sys::kMPEG4Object_AAC_LC;
-            input_format.mChannelsPerFrame = CHANNELS as sys::UInt32; // TODO: 外から渡すようにする
+            input_format.mChannelsPerFrame = input_channels as sys::UInt32;
             input_format.mFramesPerPacket = 1024;
             input_format.mBitsPerChannel = 0;
             input_format.mBytesPerPacket = 0;
 
-            // PCM 出力フォーマット
-            output_format.mSampleRate = SAMPLE_RATE; // こちらは hisui が期待する値で固定しておく
+            // PCM 出力フォーマット（Hisui の仕様に合わせて固定）
+            output_format.mSampleRate = SAMPLE_RATE; // 48kHz 固定
             output_format.mFormatID = sys::kAudioFormatLinearPCM;
             output_format.mFormatFlags =
                 sys::kAudioFormatFlagIsSignedInteger | sys::kAudioFormatFlagIsPacked;
             output_format.mBytesPerPacket = 4;
             output_format.mFramesPerPacket = 1;
             output_format.mBytesPerFrame = 4;
-            output_format.mChannelsPerFrame = CHANNELS as sys::UInt32; // こちらは hisui が期待する値で固定しておく
+            output_format.mChannelsPerFrame = CHANNELS as sys::UInt32; // ステレオ固定
             output_format.mBitsPerChannel = CHANNELS as sys::UInt32 * 8;
 
             let mut converter = std::ptr::null_mut();
@@ -403,7 +408,7 @@ mod tests {
     fn decode_silent() {
         // 有効な AAC データを取得するためにエンコーダーを使用する
         let mut encoder = Encoder::new(128_000).expect("create encoder error");
-        let mut decoder = Decoder::new().expect("create decoder error");
+        let mut decoder = Decoder::new(SAMPLE_RATE as u32, CHANNELS).expect("create decoder error");
 
         // 無音のオーディオをエンコードする
         let mut acc_encoded_data = Vec::new();
