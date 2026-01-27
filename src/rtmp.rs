@@ -19,8 +19,6 @@ pub struct RtmpOutgoingFrameHandler {
     audio_sequence_header_data: Option<Vec<u8>>,
     video_nalu_length_size: Option<u8>,
     received_keyframe: bool,
-
-    // 統計情報への参照（どちらの構造体でも使用可能）
     stats: RtmpOutgoingFrameHandlerStats,
 }
 

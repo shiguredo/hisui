@@ -152,43 +152,8 @@ impl RtmpPlayServer {
         loop {
             tokio::select! {
                 accept_result = listener.accept() => {
-                    let (stream, peer_addr) = accept_result.or_fail()?;
-                    log::debug!("New RTMP client connection from: {}", peer_addr);
-
-                    let (client_tx, client_rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
-                    self.clients.push(client_tx);
-
-                    let stats = self.stats.clone();
-                    let expected_app = self.url.app.clone();
-                    let expected_stream_name = self.url.stream_name.clone();
-
-                    tokio::spawn(async move {
-                        let frame_handler_stats = crate::rtmp::RtmpOutgoingFrameHandlerStats {
-                            total_audio_frame_count: stats.total_audio_frame_count.clone(),
-                            total_video_frame_count: stats.total_video_frame_count.clone(),
-                            total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
-                            total_audio_sequence_header_count: stats.total_audio_sequence_header_count.clone(),
-                            total_video_sequence_header_count: stats.total_video_sequence_header_count.clone(),
-                        };
-
-                        let mut handler = RtmpClientHandler {
-                            stream,
-                            connection: shiguredo_rtmp::RtmpServerConnection::new(),
-                            rx: client_rx,
-                            recv_buf: vec![0u8; 4096],
-                            stats,
-                            expected_app,
-                            expected_stream_name,
-                            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(frame_handler_stats),
-                        };
-
-                        if let Err(e) = handler.run().await.or_fail() {
-                            log::error!("RTMP client handler error: {e}");
-                        }
-                        log::debug!("RTMP client disconnected: {}", peer_addr);
-                    });
+                    self.handle_new_client(accept_result).await.or_fail()?;
                 }
-
                 Some(sample) = self.rx.recv() => {
                     self.handle_media_sample(sample).await.or_fail()?;
                 }
@@ -199,6 +164,53 @@ impl RtmpPlayServer {
         }
 
         log::debug!("RTMP play server finished");
+        Ok(())
+    }
+
+    /// クライアント接続を受け付ける
+    async fn handle_new_client(
+        &mut self,
+        accept_result: std::io::Result<(TcpStream, std::net::SocketAddr)>,
+    ) -> orfail::Result<()> {
+        let (stream, peer_addr) = accept_result.or_fail()?;
+        log::debug!("New RTMP client connection from: {}", peer_addr);
+
+        let (client_tx, client_rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
+        self.clients.push(client_tx);
+
+        let stats = self.stats.clone();
+        let expected_app = self.url.app.clone();
+        let expected_stream_name = self.url.stream_name.clone();
+
+        tokio::spawn(async move {
+            // [NOTE]
+            // 統計の各フィールドはアトミック変数で共有されているので、
+            // frame handler の中で更新されれば、大元にも反映される
+            let frame_handler_stats = crate::rtmp::RtmpOutgoingFrameHandlerStats {
+                total_audio_frame_count: stats.total_audio_frame_count.clone(),
+                total_video_frame_count: stats.total_video_frame_count.clone(),
+                total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
+                total_audio_sequence_header_count: stats.total_audio_sequence_header_count.clone(),
+                total_video_sequence_header_count: stats.total_video_sequence_header_count.clone(),
+            };
+
+            let mut handler = RtmpClientHandler {
+                stream,
+                connection: shiguredo_rtmp::RtmpServerConnection::new(),
+                rx: client_rx,
+                recv_buf: vec![0u8; 4096],
+                stats,
+                expected_app,
+                expected_stream_name,
+                frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(frame_handler_stats),
+            };
+
+            if let Err(e) = handler.run().await.or_fail() {
+                log::error!("RTMP client handler error: {e}");
+            }
+            log::debug!("RTMP client disconnected: {}", peer_addr);
+        });
+
         Ok(())
     }
 
