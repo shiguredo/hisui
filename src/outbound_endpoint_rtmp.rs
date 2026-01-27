@@ -360,6 +360,11 @@ impl RtmpClientHandler {
                     .or_fail()?;
                 Ok(true)
             }
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                // 正常終了扱い
+                log::debug!("Connection closed by client");
+                Ok(false)
+            }
             Err(e) => Err(e).or_fail(),
         }
     }
