@@ -196,6 +196,8 @@ impl RtmpPlayServer {
                 total_video_sequence_header_count: stats.total_video_sequence_header_count.clone(),
             };
 
+            stats.total_connected_clients.increment();
+
             let mut handler = RtmpClientHandler {
                 stream,
                 connection: shiguredo_rtmp::RtmpServerConnection::new(),
@@ -209,7 +211,9 @@ impl RtmpPlayServer {
 
             if let Err(e) = handler.run().await.or_fail() {
                 log::error!("RTMP client handler error: {e}");
+                handler.stats.total_error_disconnected_clients.increment();
             }
+            handler.stats.total_disconnected_clients.increment();
             log::debug!("RTMP client disconnected: {peer_addr}");
         });
 
@@ -393,6 +397,9 @@ pub struct RtmpOutboundEndpointStats {
     pub total_audio_sequence_header_count: SharedAtomicCounter,
     pub total_video_sequence_header_count: SharedAtomicCounter,
     pub total_processing_duration: SharedAtomicDuration,
+    pub total_connected_clients: SharedAtomicCounter,
+    pub total_disconnected_clients: SharedAtomicCounter,
+    pub total_error_disconnected_clients: SharedAtomicCounter,
     pub error: SharedAtomicFlag,
 }
 
@@ -418,6 +425,15 @@ impl nojson::DisplayJson for RtmpOutboundEndpointStats {
                 &self.total_video_sequence_header_count,
             )?;
             f.member("total_processing_seconds", &self.total_processing_duration)?;
+            f.member("total_connected_clients", &self.total_connected_clients)?;
+            f.member(
+                "total_disconnected_clients",
+                &self.total_disconnected_clients,
+            )?;
+            f.member(
+                "total_error_disconnected_clients",
+                &self.total_error_disconnected_clients,
+            )?;
             f.member("error", self.error.get())?;
             Ok(())
         })
