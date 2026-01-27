@@ -15,7 +15,14 @@ use crate::{
 };
 
 /// メディアフレーム用チャネルサイズ
+///
+/// こっちは基本的に詰まらないので比較的小さくていい
 const FRAME_CHANNEL_SIZE: usize = 100;
+
+/// クライアント配信用チャネルサイズ（各クライアント接続ごと）
+///
+/// こっちはクライアントとの接続処理に時間が掛かると少し詰まることがあるので大きめにしておく
+const CLIENT_FRAME_CHANNEL_SIZE: usize = 500;
 
 #[derive(Debug, Default, Clone)]
 pub struct RtmpOutboundEndpointOptions {}
@@ -140,15 +147,10 @@ struct RtmpPlayServer {
 
 impl RtmpPlayServer {
     async fn run(&mut self) -> orfail::Result<()> {
-        log::debug!(
-            "Starting RTMP play server on {}:{}",
-            self.url.host,
-            self.url.port
-        );
-
         let addr = format!("{}:{}", self.url.host, self.url.port);
-        let listener = TcpListener::bind(&addr).await.or_fail()?;
+        log::debug!("Starting RTMP outbound endpoint on {addr}");
 
+        let listener = TcpListener::bind(&addr).await.or_fail()?;
         loop {
             tokio::select! {
                 accept_result = listener.accept() => {
@@ -163,7 +165,7 @@ impl RtmpPlayServer {
             }
         }
 
-        log::debug!("RTMP play server finished");
+        log::debug!("RTMP outbound endpoint finished");
         Ok(())
     }
 
@@ -173,9 +175,9 @@ impl RtmpPlayServer {
         accept_result: std::io::Result<(TcpStream, std::net::SocketAddr)>,
     ) -> orfail::Result<()> {
         let (stream, peer_addr) = accept_result.or_fail()?;
-        log::debug!("New RTMP client connection from: {}", peer_addr);
+        log::debug!("New RTMP client connection from: {peer_addr}");
 
-        let (client_tx, client_rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
+        let (client_tx, client_rx) = tokio::sync::mpsc::channel(CLIENT_FRAME_CHANNEL_SIZE);
         self.clients.push(client_tx);
 
         let stats = self.stats.clone();
@@ -208,7 +210,7 @@ impl RtmpPlayServer {
             if let Err(e) = handler.run().await.or_fail() {
                 log::error!("RTMP client handler error: {e}");
             }
-            log::debug!("RTMP client disconnected: {}", peer_addr);
+            log::debug!("RTMP client disconnected: {peer_addr}");
         });
 
         Ok(())
@@ -221,6 +223,7 @@ impl RtmpPlayServer {
             MediaSample::Video(video) => ClientMediaFrame::Video(video),
         };
 
+        // NOTE: RtmpClientHandler が閉じたら削除したいので retain を使っている
         self.clients.retain(|tx| tx.try_send(frame.clone()).is_ok());
         Ok(())
     }
