@@ -243,11 +243,20 @@ struct RtmpClientHandler {
 impl RtmpClientHandler {
     async fn run(&mut self) -> orfail::Result<()> {
         loop {
+            // イベントを処理する
+            while let Some(event) = self.connection.next_event() {
+                log::debug!("RTMP event: {:?}", event);
+                self.stats.total_event_count.increment();
+                self.handle_event(event).await.or_fail()?;
+            }
+
+            // データ送信を処理する
+            self.flush_send_buf().await.or_fail()?;
+
             tokio::select! {
                 // このクライアント用のメディアフレームを受信する
                 Some(frame) = self.rx.recv(), if self.connection.state() == shiguredo_rtmp::RtmpConnectionState::Playing => {
                     self.handle_client_media_frame(frame).or_fail()?;
-                    self.flush_send_buf().await.or_fail()?;
                 }
 
                 // クライアントソケットからデータを受信する
@@ -260,15 +269,6 @@ impl RtmpClientHandler {
 
                     self.stats.total_received_bytes.add(n as u64);
                     self.connection.feed_recv_buf(&self.recv_buf[..n]).or_fail()?;
-
-                    // イベントを処理する
-                    while let Some(event) = self.connection.next_event() {
-                        log::debug!("RTMP event: {:?}", event);
-                        self.stats.total_event_count.increment();
-                        self.handle_event(event).await.or_fail()?;
-                    }
-
-                    self.flush_send_buf().await.or_fail()?;
                 }
             }
         }
