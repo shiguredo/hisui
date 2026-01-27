@@ -76,7 +76,7 @@ impl Encoder {
             input_format.mFramesPerPacket = 1;
             input_format.mBytesPerFrame = 4;
             input_format.mChannelsPerFrame = CHANNELS as sys::UInt32;
-            input_format.mBitsPerChannel = CHANNELS as sys::UInt32 * 8;
+            input_format.mBitsPerChannel = 16; // i16 = 16 bits per sample
 
             // 以下の Table 2-6 が参考になる:
             // https://developer.apple.com/library/archive/documentation/MusicAudio/Reference/CAFSpec/CAF_spec/CAF_spec.html
@@ -250,7 +250,7 @@ impl Decoder {
             output_format.mFramesPerPacket = 1;
             output_format.mBytesPerFrame = 4;
             output_format.mChannelsPerFrame = CHANNELS as sys::UInt32; // ステレオ固定
-            output_format.mBitsPerChannel = CHANNELS as sys::UInt32 * 8;
+            output_format.mBitsPerChannel = 16; // i16 = 16 bits per sample
 
             let mut converter = std::ptr::null_mut();
             let status = sys::AudioConverterNew(&input_format, &output_format, &mut converter);
