@@ -18,6 +18,7 @@ pub struct RtmpFrameHandler {
     video_sequence_header_data: Option<Vec<u8>>,
     audio_sequence_header_data: Option<Vec<u8>>,
     video_nalu_length_size: Option<u8>,
+    received_keyframe: bool,
 
     // 統計情報への参照（どちらの構造体でも使用可能）
     stats: RtmpFrameHandlerStats,
@@ -29,6 +30,7 @@ impl RtmpFrameHandler {
             video_sequence_header_data: None,
             audio_sequence_header_data: None,
             video_nalu_length_size: None,
+            received_keyframe: false,
             stats,
         }
     }
@@ -86,10 +88,20 @@ impl RtmpFrameHandler {
     pub fn prepare_video_frame(
         &mut self,
         video: Arc<VideoFrame>,
-    ) -> orfail::Result<(
-        Option<shiguredo_rtmp::VideoFrame>,
-        shiguredo_rtmp::VideoFrame,
-    )> {
+    ) -> orfail::Result<
+        Option<(
+            Option<shiguredo_rtmp::VideoFrame>,
+            shiguredo_rtmp::VideoFrame,
+        )>,
+    > {
+        // キーフレームを待っている場合はスキップ
+        if !self.received_keyframe && !video.keyframe {
+            return Ok(None);
+        }
+        if !self.received_keyframe {
+            self.received_keyframe = true;
+        }
+
         let timestamp_ms = video.timestamp.as_millis() as u32;
 
         let seq_frame = if video.keyframe {
@@ -147,7 +159,7 @@ impl RtmpFrameHandler {
         };
         self.stats.total_video_frame_count.increment();
 
-        Ok((seq_frame, frame))
+        Ok(Some((seq_frame, frame)))
     }
 }
 

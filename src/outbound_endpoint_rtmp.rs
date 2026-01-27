@@ -176,7 +176,6 @@ impl RtmpPlayServer {
                             connection: shiguredo_rtmp::RtmpServerConnection::new(),
                             rx: client_rx,
                             recv_buf: vec![0u8; 4096],
-                            received_keyframe: false,
                             stats,
                             expected_app,
                             expected_stream_name,
@@ -222,7 +221,6 @@ struct RtmpClientHandler {
     connection: shiguredo_rtmp::RtmpServerConnection,
     rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
     recv_buf: Vec<u8>,
-    received_keyframe: bool,
     stats: RtmpOutboundEndpointStats,
     expected_app: String,
     expected_stream_name: String,
@@ -303,27 +301,20 @@ impl RtmpClientHandler {
         match frame {
             ClientMediaFrame::Audio(audio) => {
                 let (seq_frame, audio_frame) = self.frame_handler.prepare_audio_frame(audio)?;
-
                 if let Some(seq) = seq_frame {
                     self.connection.send_audio(seq).or_fail()?;
                 }
                 self.connection.send_audio(audio_frame).or_fail()?;
             }
             ClientMediaFrame::Video(video) => {
-                // キーフレームを待っている場合
-                if !self.received_keyframe && !video.keyframe {
-                    return Ok(());
+                if let Some((seq_frame, video_frame)) =
+                    self.frame_handler.prepare_video_frame(video)?
+                {
+                    if let Some(seq) = seq_frame {
+                        self.connection.send_video(seq).or_fail()?;
+                    }
+                    self.connection.send_video(video_frame).or_fail()?;
                 }
-                if !self.received_keyframe {
-                    self.received_keyframe = true;
-                }
-
-                let (seq_frame, video_frame) = self.frame_handler.prepare_video_frame(video)?;
-
-                if let Some(seq) = seq_frame {
-                    self.connection.send_video(seq).or_fail()?;
-                }
-                self.connection.send_video(video_frame).or_fail()?;
             }
         }
         Ok(())
