@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use orfail::OrFail;
-use rustls::pki_types::pem::PemObject;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 use crate::{
     audio::{AudioData, AudioFormat},
     media::{MediaSample, MediaStreamId},
@@ -176,8 +176,14 @@ impl RtmpPlayServer {
             if tls_enabled { "enabled" } else { "disabled" }
         );
 
+        // TLS Acceptor を作成（共通化されたヘルパー関数を使用）
         let tls_acceptor = if tls_enabled {
-            Some(self.create_tls_acceptor().await.or_fail()?)
+            let (cert_path, key_path) = self.load_cert_and_key_paths().await.or_fail()?;
+            Some(
+                create_server_tls_acceptor(&cert_path, &key_path)
+                    .await
+                    .or_fail()?,
+            )
         } else {
             None
         };
@@ -200,17 +206,8 @@ impl RtmpPlayServer {
         Ok(())
     }
 
-    /// TLS Acceptor を作成する
-    async fn create_tls_acceptor(&self) -> orfail::Result<Arc<tokio_rustls::TlsAcceptor>> {
-        log::debug!("Creating TLS config");
-
-        let config = self.load_server_config().await.or_fail()?;
-        Ok(Arc::new(tokio_rustls::TlsAcceptor::from(Arc::new(config))))
-    }
-
-    /// サーバー設定を読み込む
-    async fn load_server_config(&self) -> orfail::Result<rustls::ServerConfig> {
-        // 指定されたパスか環境変数から取得
+    /// 証明書と秘密鍵のパスを読み込む
+    async fn load_cert_and_key_paths(&self) -> orfail::Result<(PathBuf, PathBuf)> {
         let cert_path = self
             .options
             .cert_path
@@ -227,6 +224,7 @@ impl RtmpPlayServer {
                 )
                 .to_owned()
             })?;
+
         let key_path = self
             .options
             .key_path
@@ -239,32 +237,8 @@ impl RtmpPlayServer {
                 )
                 .to_owned()
             })?;
-        log::debug!("Loading TLS certificates from {}", cert_path.display());
 
-        // 証明書ファイルを読み込む
-        let certs = rustls::pki_types::CertificateDer::pem_file_iter(&cert_path)
-            .or_fail_with(|e| format!("Failed to open certificate file: {e}"))?
-            .collect::<Result<Vec<_>, _>>()
-            .or_fail_with(|e| format!("Failed to parse certificate file: {e}"))?;
-
-        if certs.is_empty() {
-            return Err(orfail::Failure::new("No certificates found in cert file"));
-        }
-
-        log::debug!("Loaded {} certificate(s)", certs.len());
-
-        // 秘密鍵ファイルを読み込む
-        log::debug!("Loading private key from {}", key_path.display());
-        let key = rustls::pki_types::PrivateKeyDer::from_pem_file(&key_path)
-            .or_fail_with(|e| format!("Failed to load private key: {e}"))?;
-
-        // ServerConfig を作成
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .or_fail_with(|e| format!("Failed to create server config: {e}"))?;
-
-        Ok(config)
+        Ok((cert_path, key_path))
     }
 
     /// クライアント接続を受け付ける
@@ -297,50 +271,33 @@ impl RtmpPlayServer {
 
             stats.total_connected_clients.increment();
 
-            if let Some(acceptor) = tls_acceptor {
-                // TLS接続の処理
-                match acceptor.accept(stream).await {
-                    Ok(tls_stream) => {
+            // TLS処理を共通化されたヘルパー関数で実行
+            match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await {
+                Ok(tls_stream) => {
+                    if tls_acceptor.is_some() {
                         log::debug!("TLS handshake successful with {peer_addr}");
-                        let mut handler = RtmpClientHandler::new_tls(
-                            tls_stream,
-                            client_rx,
-                            stats.clone(),
-                            expected_app,
-                            expected_stream_name,
-                            frame_handler_stats,
-                        );
-
-                        if let Err(e) = handler.run().await.or_fail() {
-                            log::error!("RTMP client handler error: {e}");
-                            handler.stats.total_error_disconnected_clients.increment();
-                        }
-                        handler.stats.total_disconnected_clients.increment();
-                        log::debug!("RTMP client disconnected: {peer_addr}");
                     }
-                    Err(e) => {
-                        log::error!("TLS handshake failed with {peer_addr}: {e}");
-                        stats.total_error_disconnected_clients.increment();
-                        stats.total_disconnected_clients.increment();
-                    }
-                }
-            } else {
-                // 平文接続の処理
-                let mut handler = RtmpClientHandler::new_plain(
-                    stream,
-                    client_rx,
-                    stats.clone(),
-                    expected_app,
-                    expected_stream_name,
-                    frame_handler_stats,
-                );
+                    let mut handler = RtmpClientHandler::new(
+                        tls_stream,
+                        client_rx,
+                        stats.clone(),
+                        expected_app,
+                        expected_stream_name,
+                        frame_handler_stats,
+                    );
 
-                if let Err(e) = handler.run().await.or_fail() {
-                    log::error!("RTMP client handler error: {e}");
-                    handler.stats.total_error_disconnected_clients.increment();
+                    if let Err(e) = handler.run().await.or_fail() {
+                        log::error!("RTMP client handler error: {e}");
+                        handler.stats.total_error_disconnected_clients.increment();
+                    }
+                    handler.stats.total_disconnected_clients.increment();
+                    log::debug!("RTMP client disconnected: {peer_addr}");
                 }
-                handler.stats.total_disconnected_clients.increment();
-                log::debug!("RTMP client disconnected: {peer_addr}");
+                Err(e) => {
+                    log::error!("Connection setup failed with {peer_addr}: {e}");
+                    stats.total_error_disconnected_clients.increment();
+                    stats.total_disconnected_clients.increment();
+                }
             }
         });
 
@@ -360,33 +317,10 @@ impl RtmpPlayServer {
     }
 }
 
-/// TCP/TLS ストリーム抽象化
-#[derive(Debug)]
-enum RtmpClientStream {
-    Plain(TcpStream),
-    Tls(Box<tokio_rustls::server::TlsStream<TcpStream>>),
-}
-
-impl RtmpClientStream {
-    async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            RtmpClientStream::Plain(s) => s.read(buf).await,
-            RtmpClientStream::Tls(s) => s.read(buf).await,
-        }
-    }
-
-    async fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        match self {
-            RtmpClientStream::Plain(s) => s.write_all(buf).await,
-            RtmpClientStream::Tls(s) => s.write_all(buf).await,
-        }
-    }
-}
-
 /// 個別のクライアント接続を処理する
 #[derive(Debug)]
 struct RtmpClientHandler {
-    stream: RtmpClientStream,
+    stream: ServerTcpOrTlsStream,
     connection: shiguredo_rtmp::RtmpServerConnection,
     rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
     recv_buf: Vec<u8>,
@@ -397,8 +331,8 @@ struct RtmpClientHandler {
 }
 
 impl RtmpClientHandler {
-    fn new_plain(
-        stream: TcpStream,
+    fn new(
+        stream: ServerTcpOrTlsStream,
         rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
         stats: RtmpOutboundEndpointStats,
         expected_app: String,
@@ -406,27 +340,7 @@ impl RtmpClientHandler {
         frame_handler_stats: crate::rtmp::RtmpOutgoingFrameHandlerStats,
     ) -> Self {
         Self {
-            stream: RtmpClientStream::Plain(stream),
-            connection: shiguredo_rtmp::RtmpServerConnection::new(),
-            rx,
-            recv_buf: vec![0u8; 4096],
-            stats,
-            expected_app,
-            expected_stream_name,
-            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(frame_handler_stats),
-        }
-    }
-
-    fn new_tls(
-        stream: tokio_rustls::server::TlsStream<TcpStream>,
-        rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
-        stats: RtmpOutboundEndpointStats,
-        expected_app: String,
-        expected_stream_name: String,
-        frame_handler_stats: crate::rtmp::RtmpOutgoingFrameHandlerStats,
-    ) -> Self {
-        Self {
-            stream: RtmpClientStream::Tls(Box::new(stream)),
+            stream,
             connection: shiguredo_rtmp::RtmpServerConnection::new(),
             rx,
             recv_buf: vec![0u8; 4096],
