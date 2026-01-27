@@ -314,6 +314,9 @@ impl Decoder {
         }
         Error::check(status, "AudioConverterFillComplexBuffer")?;
 
+        // 処理が終わったらバッファはクリアする
+        self.encoded_buf.clear();
+
         let byte_size = output_buffer_list.mBuffers[0].mDataByteSize as usize;
         let size = byte_size / size_of::<i16>();
         if size == 0 {
@@ -361,8 +364,6 @@ impl Decoder {
 
                 *out_data_packet_description = &mut *this.packet_desc as *mut _;
             }
-
-            this.encoded_buf.clear();
         }
         sys::noErr as i32
     }
