@@ -17,18 +17,18 @@ pub struct RtmpFrameHandlerStats {
 pub struct RtmpFrameHandler {
     video_sequence_header_data: Option<Vec<u8>>,
     audio_sequence_header_data: Option<Vec<u8>>,
-    video_nalu_length_size: u8,
+    video_nalu_length_size: Option<u8>,
 
     // 統計情報への参照（どちらの構造体でも使用可能）
     stats: RtmpFrameHandlerStats,
 }
 
 impl RtmpFrameHandler {
-    pub fn new(video_nalu_length_size: u8, stats: RtmpFrameHandlerStats) -> Self {
+    pub fn new(stats: RtmpFrameHandlerStats) -> Self {
         Self {
             video_sequence_header_data: None,
             audio_sequence_header_data: None,
-            video_nalu_length_size,
+            video_nalu_length_size: None,
             stats,
         }
     }
@@ -96,6 +96,11 @@ impl RtmpFrameHandler {
             self.stats.total_video_keyframe_count.increment();
 
             if let Some(entry) = &video.sample_entry {
+                // サンプルエントリーから nalu_length_size を取得
+                if self.video_nalu_length_size.is_none() {
+                    self.video_nalu_length_size = Some(extract_nalu_length_size(entry)?);
+                }
+
                 let seq_header_data = create_video_sequence_header(entry)?;
                 let frame = shiguredo_rtmp::VideoFrame {
                     timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(timestamp_ms),
@@ -119,7 +124,10 @@ impl RtmpFrameHandler {
         // 映像フレームデータを Annex B 形式に変換
         let frame_data = match video.format {
             crate::video::VideoFormat::H264 => {
-                crate::video_h264::convert_nalu_to_annexb(&video.data, self.video_nalu_length_size)?
+                let nalu_length_size = self
+                    .video_nalu_length_size
+                    .ok_or_else(|| orfail::Failure::new("nalu_length_size not initialized"))?;
+                crate::video_h264::convert_nalu_to_annexb(&video.data, nalu_length_size)?
             }
             crate::video::VideoFormat::H264AnnexB => video.data.clone(),
             _ => return Err(orfail::Failure::new("unsupported video format")),
@@ -140,6 +148,14 @@ impl RtmpFrameHandler {
         self.stats.total_video_frame_count.increment();
 
         Ok((seq_frame, frame))
+    }
+}
+
+/// AVC1エントリーから nalu_length_size を抽出
+fn extract_nalu_length_size(entry: &SampleEntry) -> orfail::Result<u8> {
+    match entry {
+        SampleEntry::Avc1(avc1) => Ok(avc1.avcc_box.length_size_minus_one.get() + 1),
+        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }
 }
 

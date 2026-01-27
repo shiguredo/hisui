@@ -180,7 +180,7 @@ impl RtmpPlayServer {
                             stats,
                             expected_app,
                             expected_stream_name,
-                            frame_handler: crate::rtmp::RtmpFrameHandler::new(4, frame_handler_stats),
+                            frame_handler: crate::rtmp::RtmpFrameHandler::new(frame_handler_stats),
                         };
 
                         if let Err(e) = handler.run().await.or_fail() {
