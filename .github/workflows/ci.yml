@@ -31,22 +31,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
-      - name: Cache cargo
-        uses: actions/cache@v5
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
-          path: |
-            ~/.cargo/registry/
-            ~/.cargo/git/
-            target/
-
-            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
-            **/build.rs
-            **/Cargo.toml
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+          toolchain: stable
       - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   clippy:
@@ -61,22 +48,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
-      - name: Cache cargo
-        uses: actions/cache@v5
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
-          path: |
-            ~/.cargo/registry/
-            ~/.cargo/git/
-            target/
-
-            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
-            **/build.rs
-            **/Cargo.toml
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+          toolchain: stable
       - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- --deny warnings
 
   test:
@@ -90,22 +64,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
-      - name: Cache cargo
-        uses: actions/cache@v5
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
-          path: |
-            ~/.cargo/registry/
-            ~/.cargo/git/
-            target/
-
-            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
-            **/build.rs
-            **/Cargo.toml
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+          toolchain: stable
       - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   test-nvidia-video-codec:
@@ -157,22 +118,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libfdk-aac-dev
-      - name: Cache cargo
-        uses: actions/cache@v5
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
-          path: |
-            ~/.cargo/registry/
-            ~/.cargo/git/
-            target/
-
-            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
-            **/build.rs
-            **/Cargo.toml
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+          toolchain: stable
       - run: cargo test --package shiguredo_fdk_aac
       # shiguredo_fdk_aac はリリースビルドでだけセグフォすることがあったので、それもテストする
       # （最終的にはリリースバイナリを使った e2e で置き換えるべき）
@@ -203,22 +151,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
-      - name: Cache cargo
-        uses: actions/cache@v5
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
-          path: |
-            ~/.cargo/registry/
-            ~/.cargo/git/
-            target/
-
-            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
-            **/build.rs
-            **/Cargo.toml
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+          toolchain: stable
       - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
         run: |
           curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
@@ -246,25 +181,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake valgrind libfdk-aac-dev
-      - name: Cache cargo
-        uses: actions/cache@v5
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
-          path: |
-            ~/.cargo/registry/
-            ~/.cargo/git/
-            target/
-
-            # cargo-valgrind 用に bin/ もキャッシュする
-            ~/.cargo/bin/
-
-            # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
-            **/build.rs
-            **/Cargo.toml
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
+          toolchain: stable
       - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
         run: |
           curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
