@@ -444,11 +444,11 @@ mod tests {
         let encoder = Encoder::new(config).expect("failed to create encoder");
         let asc = encoder.audio_specific_config();
 
-        // OK: Audio Specific Config が正しい
+        // Audio Specific Config が正しい
         assert!(Decoder::new(asc).is_ok());
 
-        // NG: Audio Specific Config が空
-        assert!(Decoder::new(&[]).is_err());
+        // Audio Specific Config が空でも初期化はできる
+        assert!(Decoder::new(&[]).is_ok());
     }
 
     #[test]
