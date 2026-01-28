@@ -11,7 +11,7 @@ mod sys;
 /// エラー
 #[derive(Debug)]
 pub struct Error {
-    code: sys::AACENC_ERROR,
+    code: std::os::raw::c_uint,
     function: &'static str,
 }
 
