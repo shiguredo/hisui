@@ -129,8 +129,7 @@ impl PipelineComponent {
             } => {
                 let input_stream_id = registry.get_id(input_stream).or_fail()?;
                 let output_stream_id = registry.register_name(output_stream.clone()).or_fail()?;
-                let processor =
-                    AudioDecoder::new_opus(input_stream_id, output_stream_id).or_fail()?;
+                let processor = AudioDecoder::new(input_stream_id, output_stream_id).or_fail()?;
                 Ok(BoxedMediaProcessor::new(processor))
             }
             Self::VideoDecoder {

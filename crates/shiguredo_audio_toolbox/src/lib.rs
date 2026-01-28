@@ -223,8 +223,7 @@ impl Decoder {
     ///
     /// 入力の AAC フォーマット（サンプルレート、チャンネル数）は引数で指定できます。
     ///
-    /// 出力フォーマットは Hisui の仕様に合わせて固定されており、
-    /// PCM 48kHz ステレオ（2チャンネル）で出力されます。
+    /// 出力チャネル数はステレオ固定で、サンプルレートは入力と同じとなります。
     pub fn new(input_sample_rate: u32, input_channels: NonZeroU8) -> Result<Self, Error> {
         unsafe {
             let mut input_format =
@@ -242,7 +241,6 @@ impl Decoder {
             input_format.mBytesPerPacket = 0;
 
             // PCM 出力フォーマット（Hisui の仕様に合わせて固定）
-            output_format.mSampleRate = SAMPLE_RATE; // 48kHz 固定
             output_format.mFormatID = sys::kAudioFormatLinearPCM;
             output_format.mFormatFlags =
                 sys::kAudioFormatFlagIsSignedInteger | sys::kAudioFormatFlagIsPacked;
@@ -251,6 +249,9 @@ impl Decoder {
             output_format.mBytesPerFrame = 4;
             output_format.mChannelsPerFrame = CHANNELS as sys::UInt32; // ステレオ固定
             output_format.mBitsPerChannel = 16; // i16 = 16 bits per sample
+
+            // これは入力に合わせる（固定だとデコード後の音声が変になることがあるため）
+            output_format.mSampleRate = input_sample_rate as f64;
 
             let mut converter = std::ptr::null_mut();
             let status = sys::AudioConverterNew(&input_format, &output_format, &mut converter);

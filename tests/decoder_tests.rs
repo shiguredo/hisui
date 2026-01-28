@@ -1,9 +1,9 @@
 use hisui::{
-    decoder::{VideoDecoder, VideoDecoderOptions},
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::SourceId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
-    reader_mp4::Mp4VideoReader,
+    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     video::VideoFrame,
 };
 use orfail::OrFail;
@@ -190,4 +190,40 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 
     // 対象外のフレームはそのまま返す
     MediaProcessorInput::video_frame(DECODER_INPUT_STREAM_ID, frame)
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn aac_decode() -> orfail::Result<()> {
+    let source_id = SourceId::new("beep-aac-audio");
+    let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4", Default::default())
+        .or_fail()?;
+    let mut decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1)).or_fail()?;
+
+    let mut decoded_count = 0;
+
+    for input_data in reader {
+        let input_data = input_data.or_fail()?;
+        let input = MediaProcessorInput::audio_data(MediaStreamId::new(0), input_data);
+        decoder.process_input(input).or_fail()?;
+
+        while let MediaProcessorOutput::Processed { sample, .. } =
+            decoder.process_output().or_fail()?
+        {
+            let _output_data = sample.expect_audio_data().or_fail()?;
+            decoded_count += 1;
+        }
+    }
+
+    decoder
+        .process_input(MediaProcessorInput::eos(MediaStreamId::new(0)))
+        .or_fail()?;
+
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
+        let _output_data = sample.expect_audio_data().or_fail()?;
+        decoded_count += 1;
+    }
+
+    assert!(decoded_count > 0, "Should decode at least one audio frame");
+    Ok(())
 }

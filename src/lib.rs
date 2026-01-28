@@ -2,6 +2,8 @@ pub mod arg_utils;
 pub mod audio;
 pub mod composer;
 pub mod decoder;
+#[cfg(target_os = "macos")]
+pub mod decoder_audio_toolbox;
 pub mod decoder_dav1d;
 #[cfg(feature = "libvpx")]
 pub mod decoder_libvpx;

@@ -85,8 +85,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     scheduler.register(reader).or_fail()?;
 
     // 音声デコーダーを登録
-    let decoder =
-        AudioDecoder::new_opus(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
+    let decoder = AudioDecoder::new(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
     scheduler.register(decoder).or_fail()?;
 
     // 映像デコーダーを登録
