@@ -350,10 +350,6 @@ impl Decoder {
             // バッファを実際のサンプル数に縮小
             decode_buf.truncate(total_samples);
 
-            if total_samples == 0 {
-                return Ok(None);
-            }
-
             Ok(Some(DecodedFrame {
                 data: decode_buf,
                 samples: frame_size,
