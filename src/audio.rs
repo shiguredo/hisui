@@ -127,7 +127,7 @@ pub fn resample(
         let sample1 = if in_idx + 1 < pcm_data.len() {
             pcm_data[in_idx + 1] as f64
         } else if !prev_pcm_data.is_empty() {
-            // フレーム境界：前フレームの最後を参照
+            // チャンク境界: 次サンプルが現在のチャンクにない場合、前チャンクの最後を使用
             *prev_pcm_data.last().unwrap() as f64
         } else {
             sample0
