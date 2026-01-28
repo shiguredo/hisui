@@ -267,8 +267,7 @@ pub struct Decoder {
 impl Decoder {
     /// デコーダーインスタンスを生成する
     ///
-    /// Audio Specific Config (ASC) バッファを指定して、AAC デコーダーを初期化します。
-    /// ASC はエンコーダーの `audio_specific_config()` メソッドで取得できます。
+    /// Audio Specific Config バッファを指定して、AAC デコーダーを初期化します。
     pub fn new(audio_specific_config: &[u8]) -> Result<Self, Error> {
         unsafe {
             let handle = sys::aacDecoder_Open(sys::TRANSPORT_TYPE_TT_MP4_RAW, 1);
@@ -278,7 +277,6 @@ impl Decoder {
                     function: "aacDecoder_Open",
                 });
             }
-
             let handle = DecoderHandle(handle);
 
             // Audio Specific Config を設定する
@@ -286,9 +284,6 @@ impl Decoder {
             let mut length = [audio_specific_config.len() as sys::UINT];
 
             let code = sys::aacDecoder_ConfigRaw(handle.0, conf.as_mut_ptr(), length.as_mut_ptr());
-
-            // aacDecoder_ConfigRaw の戻り値はエラーコードではなく、バッファポインタなので
-            // 通常のエラーチェックは行わない
             if code != sys::AAC_DECODER_ERROR_AAC_DEC_OK {
                 return Err(Error {
                     code,
@@ -308,7 +303,6 @@ impl Decoder {
             let mut bytes_valid = encoded.len() as sys::UINT;
 
             // デコーダーの入力バッファにデータを充填する
-            // aacDecoder_Fill はエラーコードを返さないため、結果はチェックしない
             let _ = sys::aacDecoder_Fill(
                 self.handle.0,
                 buf.as_mut_ptr(),
@@ -346,19 +340,22 @@ impl Decoder {
 
             let stream_info = &*stream_info;
             let frame_size = stream_info.frameSize as usize;
-            let num_channels = stream_info.numChannels as usize;
-            let samples = frame_size * num_channels;
+            let num_channels = stream_info.numChannels as u8;
+            let sample_rate = stream_info.sampleRate as u32;
+            let total_samples = frame_size * num_channels as usize;
 
             // バッファを実際のサンプル数に縮小
-            decode_buf.truncate(samples);
+            decode_buf.truncate(total_samples);
 
-            if samples == 0 {
+            if total_samples == 0 {
                 return Ok(None);
             }
 
             Ok(Some(DecodedFrame {
                 data: decode_buf,
                 samples: frame_size,
+                channels: num_channels,
+                sample_rate,
             }))
         }
     }
@@ -383,8 +380,21 @@ pub struct DecodedFrame {
     /// PCM データ
     pub data: Vec<i16>,
 
-    /// フレーム内のサンプル数
+    /// フレーム内のサンプル数（チャネル数は含まない）
     pub samples: usize,
+
+    /// チャネル数
+    pub channels: u8,
+
+    /// サンプルレート (Hz)
+    pub sample_rate: u32,
+}
+
+impl DecodedFrame {
+    /// フレーム内の総サンプル数 (チャネル数 * samples)
+    pub fn total_samples(&self) -> usize {
+        self.samples * self.channels as usize
+    }
 }
 
 #[cfg(test)]
@@ -472,6 +482,8 @@ mod tests {
         let mut total_decoded = 0;
         for frame in encoded_frames {
             if let Some(decoded) = decoder.decode(&frame.data).expect("failed to decode") {
+                assert_eq!(decoded.channels as usize, CHANNELS);
+                assert_eq!(decoded.sample_rate as usize, SAMPLE_RATE);
                 total_decoded += decoded.samples;
             }
         }
