@@ -39,6 +39,7 @@ fn main() {
             output_bindings_path,
             concat!(
                 "pub struct AACENC_ERROR;",
+                "pub struct AAC_DECODER_ERROR;",
                 "pub struct HANDLE_AACENCODER;",
                 "pub struct HANDLE_AACDECODER;",
             ),
