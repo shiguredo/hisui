@@ -88,7 +88,7 @@ impl AudioToolboxDecoder {
             source_id: self.source_id.clone(),
             data: decoded_samples
                 .iter()
-                .flat_map(|v| v.to_be_bytes().into_iter())
+                .flat_map(|v| v.to_be_bytes())
                 .collect(),
             format: AudioFormat::I16Be,
             stereo: true,
