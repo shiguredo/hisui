@@ -4,7 +4,7 @@ use std::time::Duration;
 use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioData, AudioFormat};
+use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
 use crate::metadata::SourceId;
 
 #[derive(Debug)]
@@ -69,7 +69,7 @@ impl AudioToolboxDecoder {
         }
 
         let final_duration = duration.unwrap_or_else(|| {
-            Duration::from_secs(decoded_samples.len() as u64 / 2) / crate::audio::SAMPLE_RATE as u32
+            Duration::from_secs(decoded_samples.len() as u64 / CHANNELS as u64) / SAMPLE_RATE as u32
         });
 
         Ok(AudioData {
@@ -80,7 +80,7 @@ impl AudioToolboxDecoder {
                 .collect(),
             format: AudioFormat::I16Be,
             stereo: true,
-            sample_rate: crate::audio::SAMPLE_RATE,
+            sample_rate: SAMPLE_RATE,
             timestamp,
             duration: final_duration,
             sample_entry: None,
