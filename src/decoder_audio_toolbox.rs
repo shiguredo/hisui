@@ -35,19 +35,18 @@ impl AudioToolboxDecoder {
     }
 
     pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
-        if let Some(_) = &mut self.inner {
-            let inner = self.inner.as_mut().or_fail()?;
-            inner.finish().or_fail()?;
+        let Some(inner) = &mut self.inner else {
+            return Ok(None);
+        };
 
-            let audio_data = self.build_audio_data(None, Duration::ZERO, None)?;
+        inner.finish().or_fail()?;
 
-            if audio_data.data.is_empty() {
-                return Ok(None);
-            }
-
-            return Ok(Some(audio_data));
+        let audio_data = self.build_audio_data(None, Duration::ZERO, None)?;
+        if audio_data.data.is_empty() {
+            return Ok(None);
         }
-        Ok(None)
+
+        Ok(Some(audio_data))
     }
 
     /// デコード済みデータをAudioDataに変換する共通処理
