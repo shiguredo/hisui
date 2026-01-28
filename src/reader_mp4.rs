@@ -296,14 +296,28 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
 fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> orfail::Result<Option<u32>> {
     let mut has_audio_track = false;
     while let Some(sample) = demuxer.next_sample().or_fail()? {
+        if sample.track.kind != TrackKind::Audio {
+            continue;
+        }
+        has_audio_track = true;
+
         if let Some(sample_entry) = sample.sample_entry {
-            // サポートされているコーデックかどうかをチェック
-            let is_supported = matches!(sample_entry, SampleEntry::Opus(_) | SampleEntry::Mp4a(_));
+            // hisui がサポートしているコーデックかどうかをチェック
+            let is_supported = match &sample_entry {
+                SampleEntry::Opus(_) => true,
+                SampleEntry::Mp4a(mp4a) => is_aac_codec(&mp4a.esds_box),
+                _ => false,
+            };
+
             if is_supported {
                 return Ok(Some(sample.track.track_id));
+            } else {
+                log::warn!(
+                    "Unsupported audio codec in track {}: {:?}",
+                    sample.track.track_id,
+                    sample_entry
+                );
             }
-        } else if sample.track.kind == TrackKind::Audio {
-            has_audio_track = true;
         }
     }
 
@@ -316,4 +330,17 @@ fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> orfail::Result<Option<u32>>
         // そもそも音声トラックがない場合には空扱いをする
         Ok(None)
     }
+}
+
+/// AAC コーデックであることを確認する
+fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
+    // DecoderConfigDescriptor の object_type_indication が AAC を示しているかチェック
+    // AAC LC は 0x40 (64)
+    // AAC Main Profile は 0x41 (65)
+    // AAC SSR は 0x42 (66)
+    // AAC LTP は 0x43 (67)
+    matches!(
+        esds_box.es.dec_config_descr.object_type_indication,
+        0x40 | 0x41 | 0x42 | 0x43
+    )
 }
