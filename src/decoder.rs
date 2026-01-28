@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
+use crate::audio::AudioFormat;
 #[cfg(feature = "libvpx")]
 use crate::decoder_libvpx::LibvpxDecoder;
 #[cfg(feature = "nvcodec")]
@@ -32,7 +33,7 @@ pub struct AudioDecoder {
     stats: AudioDecoderStats,
     decoded: VecDeque<AudioData>,
     eos: bool,
-    inner: AudioDecoderInner,
+    inner: Option<AudioDecoderInner>,
 }
 
 impl AudioDecoder {
@@ -51,13 +52,18 @@ impl AudioDecoder {
             stats,
             decoded: VecDeque::new(),
             eos: false,
-            inner: AudioDecoderInner::new_opus().or_fail()?,
+            inner: None,
         })
     }
 
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
         match codec {
-            CodecName::Aac => vec![],
+            CodecName::Aac => {
+                #[cfg(target_os = "macos")]
+                return vec![EngineName::AudioToolbox];
+                #[cfg(not(target_os = "macos"))]
+                return vec![];
+            }
             CodecName::Opus => vec![EngineName::Opus],
             _ => unreachable!(),
         }
@@ -81,7 +87,13 @@ impl MediaProcessor for AudioDecoder {
         };
         let data = sample.expect_audio_data().or_fail()?;
 
-        let decoded = self.inner.decode(&data).or_fail()?;
+        // 遅延初期化
+        if self.inner.is_none() {
+            self.inner = Some(AudioDecoderInner::new(&data).or_fail()?);
+        }
+
+        let inner = self.inner.as_mut().or_fail()?;
+        let decoded = inner.decode(&data).or_fail()?;
         self.stats.total_audio_data_count.add(1);
         if let Some(id) = &data.source_id {
             self.stats.source_id.set_once(|| id.clone());
@@ -98,6 +110,16 @@ impl MediaProcessor for AudioDecoder {
                 sample: MediaSample::audio_data(data),
             })
         } else if self.eos {
+            if let Some(inner) = self.inner.as_mut() {
+                if let Some(remaining_data) = inner.finish().or_fail()? {
+                    self.stats.total_audio_data_count.add(1);
+                    self.decoded.push_back(remaining_data);
+                    return Ok(MediaProcessorOutput::Processed {
+                        stream_id: self.output_stream_id,
+                        sample: MediaSample::audio_data(self.decoded.pop_front().or_fail()?),
+                    });
+                }
+            }
             Ok(MediaProcessorOutput::Finished)
         } else {
             Ok(MediaProcessorOutput::Pending {
@@ -110,16 +132,48 @@ impl MediaProcessor for AudioDecoder {
 #[derive(Debug)]
 enum AudioDecoderInner {
     Opus(OpusDecoder),
+    #[cfg(target_os = "macos")]
+    AudioToolbox(crate::decoder_audio_toolbox::AudioToolboxDecoder),
 }
 
 impl AudioDecoderInner {
-    fn new_opus() -> orfail::Result<Self> {
-        OpusDecoder::new().or_fail().map(Self::Opus)
+    fn new(data: &AudioData) -> orfail::Result<Self> {
+        match data.format {
+            AudioFormat::Opus => OpusDecoder::new().or_fail().map(Self::Opus),
+            AudioFormat::Aac => {
+                #[cfg(target_os = "macos")]
+                {
+                    crate::decoder_audio_toolbox::AudioToolboxDecoder::new()
+                        .or_fail()
+                        .map(Self::AudioToolbox)
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(orfail::Failure::new(
+                        "AAC decoding is only available on macOS",
+                    ))
+                }
+            }
+            _ => Err(orfail::Failure::new(format!(
+                "Unsupported audio format: {:?}",
+                data.format
+            ))),
+        }
     }
 
     fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
         match self {
             Self::Opus(decoder) => decoder.decode(data).or_fail(),
+            #[cfg(target_os = "macos")]
+            Self::AudioToolbox(decoder) => decoder.decode(data).or_fail(),
+        }
+    }
+
+    fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
+        match self {
+            Self::Opus(_decoder) => Ok(None),
+            #[cfg(target_os = "macos")]
+            Self::AudioToolbox(decoder) => decoder.finish().or_fail(),
         }
     }
 }
