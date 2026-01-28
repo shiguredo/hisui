@@ -445,13 +445,11 @@ mod tests {
         let encoder = Encoder::new(config).expect("failed to create encoder");
         let asc = encoder.audio_specific_config();
 
-        // OK - valid ASC
+        // OK: Audio Specific Config が正しい
         assert!(Decoder::new(asc).is_ok());
 
-        // OK - empty ASC (decoder initialization may still succeed)
-        let result = Decoder::new(&[]);
-        // We don't assert on this as FDK behavior may vary
-        let _ = result;
+        // NG: Audio Specific Config が空
+        assert!(Decoder::new(&[]).is_err());
     }
 
     #[test]
