@@ -26,7 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
-      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -42,8 +41,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
-      - run: rustup default stable
-      - run: rustup component add clippy
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -59,7 +56,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
-      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -113,7 +109,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
-      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -146,7 +141,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
-      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -176,7 +170,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
-      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -229,7 +222,6 @@ jobs:
           cuda_version: ${{ env.CUDA_VERSION }}
           platform: ${{ matrix.platform.runs-on }}
       - run: rustup update stable
-      - run: rustup default stable
 
       # x86_64 では nvcodec feature を有効化
       - name: Build with NVCODEC (x86_64)
@@ -283,7 +275,6 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - run: rustup update stable
-      - run: rustup default stable
       - name: Install packages to build external dependencies
         run: |
           brew update
@@ -309,7 +300,6 @@ jobs:
       # docs.rs 向けでは外部ライブラリのビルドは走らないので依存パッケージなどのインストールは不要
       - uses: actions/checkout@v6
       - run: rustup update stable
-      - run: rustup default stable
       - run: cargo doc --workspace --exclude hisui
 
   slack_notify_failed:
