@@ -327,7 +327,7 @@ impl Decoder {
                 && code != sys::AAC_DECODER_ERROR_AAC_DEC_NOT_ENOUGH_BITS
             {
                 return Err(Error {
-                    code: sys::AAC_DECODER_ERROR_AAC_DEC_UNKNOWN,
+                    code,
                     function: "aacDecoder_DecodeFrame",
                 });
             }
