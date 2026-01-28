@@ -341,6 +341,6 @@ fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
     // AAC LTP は 0x43 (67)
     matches!(
         esds_box.es.dec_config_descr.object_type_indication,
-        0x40 | 0x41 | 0x42 | 0x43
+        0x40..=0x43
     )
 }
