@@ -111,7 +111,11 @@ pub fn resample(pcm_data: &[i16], input_sample_rate: u32) -> Vec<i16> {
 
         // 線形補間
         let sample0 = pcm_data.get(in_idx).copied().unwrap_or(0) as f64;
-        let sample1 = pcm_data.get(in_idx + 1).copied().unwrap_or(0) as f64;
+        let sample1 = if in_idx + 1 < pcm_data.len() {
+            pcm_data[in_idx + 1] as f64
+        } else {
+            sample0 // 境界では前のサンプルを使用
+        };
 
         let interpolated = sample0 * (1.0 - frac) + sample1 * frac;
         output.push(interpolated.round() as i16);
