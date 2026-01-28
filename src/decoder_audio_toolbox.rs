@@ -75,8 +75,8 @@ impl AudioToolboxDecoder {
             decoded_samples.extend(samples);
         }
 
-        if self.sample_rate != SAMPLE_RATE as u32 {
-            decoded_samples = crate::audio::resample(&decoded_samples, self.sample_rate);
+        if let Some(resized) = crate::audio::resample(&decoded_samples, self.sample_rate) {
+            decoded_samples = resized;
         }
 
         let duration = Duration::from_secs(decoded_samples.len() as u64 / CHANNELS as u64)

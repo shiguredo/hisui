@@ -94,10 +94,10 @@ pub fn sample_entry_audio_fields() -> AudioSampleEntryFields {
 // リサンプリング関数
 // 入力: 任意のサンプルレートの PCM データ（i16 のインターリーブステレオ）
 // 出力: SAMPLE_RATE (48000Hz) へリサンプリングされた PCM データ
-pub fn resample(pcm_data: &[i16], input_sample_rate: u32) -> Vec<i16> {
+pub fn resample(pcm_data: &[i16], input_sample_rate: u32) -> Option<Vec<i16>> {
     // すでに目標レートの場合はそのまま返す
     if input_sample_rate == SAMPLE_RATE as u32 {
-        return pcm_data.to_vec();
+        return None;
     }
 
     let ratio = SAMPLE_RATE as f64 / input_sample_rate as f64;
@@ -121,5 +121,5 @@ pub fn resample(pcm_data: &[i16], input_sample_rate: u32) -> Vec<i16> {
         output.push(interpolated.round() as i16);
     }
 
-    output
+    Some(output)
 }
