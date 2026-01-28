@@ -143,6 +143,7 @@ pub struct Mp4AudioReader {
     file: File,
     demuxer: Mp4FileDemuxer,
     source_id: SourceId,
+    audio_track_id: u32,
     format: AudioFormat,
     stereo: bool,
     sample_rate: u16,
@@ -160,10 +161,17 @@ impl Mp4AudioReader {
         let mut demuxer = Mp4FileDemuxer::new();
         initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
 
+        // 利用可能な音声トラックがあるかをチェックする
+        //
+        // チェックのためにサンプルエントリーを取得するためには、
+        // demuxer のサンプル読み込みが必要なので、clone して別インスタンスで行っている
+        let audio_track_id = check_audio_track(demuxer.clone()).or_fail()?;
+
         Ok(Self {
             file,
             demuxer,
             source_id,
+            audio_track_id,
             stats,
             // 後で更新されるので適当な初期値を設定しておく
             format: AudioFormat::Opus,
@@ -185,6 +193,7 @@ impl Mp4AudioReader {
             {
                 None => return Ok(None),
                 Some(sample) if sample.track.kind != TrackKind::Audio => {}
+                Some(sample) if sample.track.track_id != self.audio_track_id => {}
                 Some(sample) => break 'next_sample sample,
             }
         };
@@ -282,4 +291,21 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
         demuxer.handle_input(input);
     }
     Ok(())
+}
+
+/// 音声トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
+fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> orfail::Result<u32> {
+    while let Some(sample) = demuxer.next_sample().or_fail()? {
+        if let Some(sample_entry) = sample.sample_entry {
+            // サポートされているコーデックかどうかをチェック
+            let is_supported = matches!(sample_entry, SampleEntry::Opus(_) | SampleEntry::Mp4a(_));
+            if is_supported {
+                return Ok(sample.track.track_id);
+            }
+        }
+    }
+
+    Err(orfail::Failure::new(
+        "No supported audio track found in the file".to_owned(),
+    ))
 }
