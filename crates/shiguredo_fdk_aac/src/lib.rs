@@ -290,9 +290,9 @@ impl Decoder {
 
             // aacDecoder_ConfigRaw の戻り値はエラーコードではなく、バッファポインタなので
             // 通常のエラーチェックは行わない
-            if code.is_null() {
+            if code != sys::AAC_DECODER_ERROR_AAC_DEC_OK {
                 return Err(Error {
-                    code: sys::AACENC_ERROR_AACENC_INVALID_HANDLE,
+                    code,
                     function: "aacDecoder_ConfigRaw",
                 });
             }
@@ -334,9 +334,11 @@ impl Decoder {
 
             // デコードエラーをチェック
             // AAC_DEC_NOT_ENOUGH_BITS は正常な終了を示す
-            if code != sys::AAC_DEC_OK && code != sys::AAC_DEC_NOT_ENOUGH_BITS {
+            if code != sys::AAC_DECODER_ERROR_AAC_DEC_OK
+                && code != sys::AAC_DECODER_ERROR_AAC_DEC_NOT_ENOUGH_BITS
+            {
                 return Err(Error {
-                    code: sys::AACENC_ERROR_AACENC_UNKNOWN,
+                    code: sys::AAC_DECODER_ERROR_AAC_DEC_UNKNOWN,
                     function: "aacDecoder_DecodeFrame",
                 });
             }
