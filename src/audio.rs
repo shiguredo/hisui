@@ -90,3 +90,32 @@ pub fn sample_entry_audio_fields() -> AudioSampleEntryFields {
         samplerate: FixedPointNumber::new(SAMPLE_RATE, 0),
     }
 }
+
+// リサンプリング関数
+// 入力: 任意のサンプルレートの PCM データ（i16 のインターリーブステレオ）
+// 出力: SAMPLE_RATE (48000Hz) へリサンプリングされた PCM データ
+pub fn resample(pcm_data: &[i16], input_sample_rate: u32) -> Vec<i16> {
+    // すでに目標レートの場合はそのまま返す
+    if input_sample_rate == SAMPLE_RATE as u32 {
+        return pcm_data.to_vec();
+    }
+
+    let ratio = SAMPLE_RATE as f64 / input_sample_rate as f64;
+    let output_len = ((pcm_data.len() as f64) * ratio).ceil() as usize;
+    let mut output = Vec::with_capacity(output_len);
+
+    for out_idx in 0..output_len {
+        let in_pos = out_idx as f64 / ratio;
+        let in_idx = in_pos.floor() as usize;
+        let frac = in_pos.fract();
+
+        // 線形補間
+        let sample0 = pcm_data.get(in_idx).copied().unwrap_or(0) as f64;
+        let sample1 = pcm_data.get(in_idx + 1).copied().unwrap_or(0) as f64;
+
+        let interpolated = sample0 * (1.0 - frac) + sample1 * frac;
+        output.push(interpolated.round() as i16);
+    }
+
+    output
+}
