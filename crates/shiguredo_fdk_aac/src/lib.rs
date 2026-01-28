@@ -262,7 +262,6 @@ pub struct EncodedFrame {
 #[derive(Debug)]
 pub struct Decoder {
     handle: DecoderHandle,
-    audio_specific_config: Vec<u8>,
 }
 
 impl Decoder {
@@ -297,10 +296,7 @@ impl Decoder {
                 });
             }
 
-            Ok(Self {
-                handle,
-                audio_specific_config: audio_specific_config.to_vec(),
-            })
+            Ok(Self { handle })
         }
     }
 
@@ -312,14 +308,13 @@ impl Decoder {
             let mut bytes_valid = encoded.len() as sys::UINT;
 
             // デコーダーの入力バッファにデータを充填する
-            let code = sys::aacDecoder_Fill(
+            // aacDecoder_Fill はエラーコードを返さないため、結果はチェックしない
+            let _ = sys::aacDecoder_Fill(
                 self.handle.0,
                 buf.as_mut_ptr(),
                 buf_size.as_mut_ptr(),
                 &mut bytes_valid,
             );
-
-            // aacDecoder_Fill はエラーコードを返さないため、チェックしない
 
             // デコード用バッファを準備
             let mut decode_buf = vec![0i16; DECODE_BUF_SIZE];
