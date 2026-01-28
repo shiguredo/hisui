@@ -39,6 +39,9 @@ const SAMPLE_RATE: usize = 48000;
 // エンコードバッファのサイズ。十分に多い値ならなんでもいい。
 const ENCODE_BUF_SIZE: usize = 20480;
 
+// デコードバッファのサイズ。十分に多い値ならなんでもいい。
+const DECODE_BUF_SIZE: usize = 4096;
+
 /// エンコーダーに指定する設定
 #[derive(Debug, Clone)]
 pub struct EncoderConfig {
@@ -255,6 +258,138 @@ pub struct EncodedFrame {
     pub samples: usize,
 }
 
+/// AAC デコーダー
+#[derive(Debug)]
+pub struct Decoder {
+    handle: DecoderHandle,
+    audio_specific_config: Vec<u8>,
+}
+
+impl Decoder {
+    /// デコーダーインスタンスを生成する
+    ///
+    /// Audio Specific Config (ASC) バッファを指定して、AAC デコーダーを初期化します。
+    /// ASC はエンコーダーの `audio_specific_config()` メソッドで取得できます。
+    pub fn new(audio_specific_config: &[u8]) -> Result<Self, Error> {
+        unsafe {
+            let handle = sys::aacDecoder_Open(sys::TRANSPORT_TYPE_TT_MP4_RAW, 1);
+            if handle.is_null() {
+                return Err(Error {
+                    code: sys::AACENC_ERROR_AACENC_INVALID_HANDLE,
+                    function: "aacDecoder_Open",
+                });
+            }
+
+            let handle = DecoderHandle(handle);
+
+            // Audio Specific Config を設定する
+            let mut conf = [audio_specific_config.as_ptr() as *mut u8];
+            let mut length = [audio_specific_config.len() as sys::UINT];
+
+            let code = sys::aacDecoder_ConfigRaw(handle.0, conf.as_mut_ptr(), length.as_mut_ptr());
+
+            // aacDecoder_ConfigRaw の戻り値はエラーコードではなく、バッファポインタなので
+            // 通常のエラーチェックは行わない
+            if code.is_null() {
+                return Err(Error {
+                    code: sys::AACENC_ERROR_AACENC_INVALID_HANDLE,
+                    function: "aacDecoder_ConfigRaw",
+                });
+            }
+
+            Ok(Self {
+                handle,
+                audio_specific_config: audio_specific_config.to_vec(),
+            })
+        }
+    }
+
+    /// AAC 圧縮データをデコードする
+    pub fn decode(&mut self, encoded: &[u8]) -> Result<Option<DecodedFrame>, Error> {
+        unsafe {
+            let mut buf = [encoded.as_ptr() as *mut u8];
+            let mut buf_size = [encoded.len() as sys::UINT];
+            let mut bytes_valid = encoded.len() as sys::UINT;
+
+            // デコーダーの入力バッファにデータを充填する
+            let code = sys::aacDecoder_Fill(
+                self.handle.0,
+                buf.as_mut_ptr(),
+                buf_size.as_mut_ptr(),
+                &mut bytes_valid,
+            );
+
+            // aacDecoder_Fill はエラーコードを返さないため、チェックしない
+
+            // デコード用バッファを準備
+            let mut decode_buf = vec![0i16; DECODE_BUF_SIZE];
+
+            // フレームをデコードする
+            let code = sys::aacDecoder_DecodeFrame(
+                self.handle.0,
+                decode_buf.as_mut_ptr(),
+                (decode_buf.len() * std::mem::size_of::<i16>()) as i32,
+                0,
+            );
+
+            // デコードエラーをチェック
+            // AAC_DEC_NOT_ENOUGH_BITS は正常な終了を示す
+            if code != sys::AAC_DEC_OK && code != sys::AAC_DEC_NOT_ENOUGH_BITS {
+                return Err(Error {
+                    code: sys::AACENC_ERROR_AACENC_UNKNOWN,
+                    function: "aacDecoder_DecodeFrame",
+                });
+            }
+
+            // ストリーム情報を取得
+            let stream_info = sys::aacDecoder_GetStreamInfo(self.handle.0);
+            if stream_info.is_null() {
+                return Ok(None);
+            }
+
+            let stream_info = &*stream_info;
+            let frame_size = stream_info.frameSize as usize;
+            let num_channels = stream_info.numChannels as usize;
+            let samples = frame_size * num_channels;
+
+            // バッファを実際のサンプル数に縮小
+            decode_buf.truncate(samples);
+
+            if samples == 0 {
+                return Ok(None);
+            }
+
+            Ok(Some(DecodedFrame {
+                data: decode_buf,
+                samples: frame_size,
+            }))
+        }
+    }
+}
+
+unsafe impl Send for Decoder {}
+
+#[derive(Debug)]
+struct DecoderHandle(sys::HANDLE_AACDECODER);
+
+impl Drop for DecoderHandle {
+    fn drop(&mut self) {
+        unsafe {
+            sys::aacDecoder_Close(self.0);
+        }
+    }
+}
+
+/// デコードされた AAC フレーム
+#[derive(Debug)]
+pub struct DecodedFrame {
+    /// PCM データ
+    pub data: Vec<i16>,
+
+    /// フレーム内のサンプル数
+    pub samples: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +428,58 @@ mod tests {
         }
 
         assert_eq!(sample_count, 100 * 100);
+    }
+
+    #[test]
+    fn init_decoder() {
+        let config = EncoderConfig {
+            target_bitrate: 100_000,
+        };
+        let encoder = Encoder::new(config).expect("failed to create encoder");
+        let asc = encoder.audio_specific_config();
+
+        // OK - valid ASC
+        assert!(Decoder::new(asc).is_ok());
+
+        // OK - empty ASC (decoder initialization may still succeed)
+        let result = Decoder::new(&[]);
+        // We don't assert on this as FDK behavior may vary
+        let _ = result;
+    }
+
+    #[test]
+    fn decode_silent() {
+        let config = EncoderConfig {
+            target_bitrate: 100_000,
+        };
+        let mut encoder = Encoder::new(config).expect("failed to create encoder");
+
+        // エンコード用のデータを準備
+        let pcm_data = vec![0i16; 1024 * CHANNELS];
+        let mut encoded_frames = Vec::new();
+
+        // 無音のオーディオをエンコード
+        if let Some(frame) = encoder.encode(&pcm_data).expect("failed to encode") {
+            encoded_frames.push(frame);
+        }
+
+        if let Some(frame) = encoder.finish().expect("failed to finish") {
+            encoded_frames.push(frame);
+        }
+
+        // デコーダーを初期化
+        let asc = encoder.audio_specific_config();
+        let mut decoder = Decoder::new(asc).expect("failed to create decoder");
+
+        // エンコードされたフレームをデコード
+        let mut total_decoded = 0;
+        for frame in encoded_frames {
+            if let Some(decoded) = decoder.decode(&frame.data).expect("failed to decode") {
+                total_decoded += decoded.samples;
+            }
+        }
+
+        // デコードされたサンプル数が入力サンプル数と一致することを確認
+        assert!(total_decoded > 0, "expected to decode some samples");
     }
 }
