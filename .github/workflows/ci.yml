@@ -20,7 +20,7 @@ env:
   CUDA_VERSION: 13.0.2
 
 jobs:
-  check:
+  ci:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -33,36 +33,9 @@ jobs:
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
           toolchain: stable
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
-
-  clippy:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-      - run: rustup update stable
-      - name: Install packages to build external dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
-      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
-        with:
-          toolchain: stable
-      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- --deny warnings
-
-  test:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-      - run: rustup update stable
-      - name: Install packages to build external dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
-      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
-        with:
-          toolchain: stable
+      - run: cargo fmt --all --check
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- --deny warnings
       - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   test-nvidia-video-codec:
@@ -191,7 +164,7 @@ jobs:
 
   ubuntu-binary:
     name: "Upload Binary for Ubuntu"
-    needs: [test]
+    needs: [ci]
     strategy:
       matrix:
         platform:
@@ -222,6 +195,9 @@ jobs:
           cuda_version: ${{ env.CUDA_VERSION }}
           platform: ${{ matrix.platform.runs-on }}
       - run: rustup update stable
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          toolchain: stable
 
       # x86_64 では nvcodec feature を有効化
       - name: Build with NVCODEC (x86_64)
@@ -279,6 +255,9 @@ jobs:
         run: |
           brew update
           brew install meson nasm yasm automake autoconf libtool pkg-config
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          toolchain: stable
       - run: cargo build --release
       - run: |
           mkdir -p hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
@@ -304,9 +283,7 @@ jobs:
 
   slack_notify_failed:
     needs:
-      - check
-      - clippy
-      - test
+      - ci
       - test-nvidia-video-codec
       - test-apple-toolbox
       - test-fdk-aac
