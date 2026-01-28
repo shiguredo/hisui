@@ -22,6 +22,13 @@ impl Error {
         }
         Err(Self { code, function })
     }
+
+    fn check_decoder(code: sys::AAC_DECODER_ERROR, function: &'static str) -> Result<(), Self> {
+        if code == sys::AAC_DECODER_ERROR_AAC_DEC_OK {
+            return Ok(());
+        }
+        Err(Self { code, function })
+    }
 }
 
 impl std::fmt::Display for Error {
@@ -284,12 +291,7 @@ impl Decoder {
             let mut length = [audio_specific_config.len() as sys::UINT];
 
             let code = sys::aacDecoder_ConfigRaw(handle.0, conf.as_mut_ptr(), length.as_mut_ptr());
-            if code != sys::AAC_DECODER_ERROR_AAC_DEC_OK {
-                return Err(Error {
-                    code,
-                    function: "aacDecoder_ConfigRaw",
-                });
-            }
+            Error::check_decoder(code, "aacDecoder_ConfigRaw")?;
 
             Ok(Self { handle })
         }
@@ -303,12 +305,13 @@ impl Decoder {
             let mut bytes_valid = encoded.len() as sys::UINT;
 
             // デコーダーの入力バッファにデータを充填する
-            let _ = sys::aacDecoder_Fill(
+            let code = sys::aacDecoder_Fill(
                 self.handle.0,
                 buf.as_mut_ptr(),
                 buf_size.as_mut_ptr(),
                 &mut bytes_valid,
             );
+            Error::check_decoder(code, "aacDecoder_Fill")?;
 
             // デコード用バッファを準備
             let mut decode_buf = vec![0i16; DECODE_BUF_SIZE];
