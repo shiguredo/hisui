@@ -2,9 +2,10 @@ use std::num::NonZeroU8;
 use std::time::Duration;
 
 use orfail::OrFail;
+use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioData, AudioFormat};
-use shiguredo_mp4::boxes::SampleEntry;
+use crate::metadata::SourceId;
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
@@ -30,13 +31,49 @@ impl AudioToolboxDecoder {
         let inner = self.inner.as_mut().or_fail()?;
         inner.decode(&data.data).or_fail()?;
 
+        self.build_audio_data(data.source_id.clone(), data.timestamp, Some(data.duration))
+    }
+
+    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
+        if let Some(_) = &mut self.inner {
+            let inner = self.inner.as_mut().or_fail()?;
+            inner.finish().or_fail()?;
+
+            let audio_data = self.build_audio_data(None, Duration::ZERO, None)?;
+
+            if audio_data.data.is_empty() {
+                return Ok(None);
+            }
+
+            return Ok(Some(audio_data));
+        }
+        Ok(None)
+    }
+
+    /// デコード済みデータをAudioDataに変換する共通処理
+    fn build_audio_data(
+        &mut self,
+        source_id: Option<SourceId>,
+        timestamp: Duration,
+        duration: Option<Duration>,
+    ) -> orfail::Result<AudioData> {
         let mut decoded_samples = Vec::new();
-        while let Some(samples) = inner.next_decoded_data().or_fail()? {
+        while let Some(samples) = self
+            .inner
+            .as_mut()
+            .or_fail()?
+            .next_decoded_data()
+            .or_fail()?
+        {
             decoded_samples.extend(samples);
         }
 
-        let decoded = AudioData {
-            source_id: data.source_id.clone(),
+        let final_duration = duration.unwrap_or_else(|| {
+            Duration::from_secs(decoded_samples.len() as u64 / 2) / crate::audio::SAMPLE_RATE as u32
+        });
+
+        Ok(AudioData {
+            source_id,
             data: decoded_samples
                 .iter()
                 .flat_map(|v| v.to_be_bytes().into_iter())
@@ -44,45 +81,10 @@ impl AudioToolboxDecoder {
             format: AudioFormat::I16Be,
             stereo: true,
             sample_rate: crate::audio::SAMPLE_RATE,
-            timestamp: data.timestamp,
-            duration: data.duration,
+            timestamp,
+            duration: final_duration,
             sample_entry: None,
-        };
-
-        Ok(decoded)
-    }
-
-    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
-        if let Some(inner) = &mut self.inner {
-            inner.finish().or_fail()?;
-
-            let mut decoded_samples = Vec::new();
-            while let Some(samples) = inner.next_decoded_data().or_fail()? {
-                decoded_samples.extend(samples);
-            }
-
-            if decoded_samples.is_empty() {
-                return Ok(None);
-            }
-
-            let decoded = AudioData {
-                source_id: None,
-                data: decoded_samples
-                    .iter()
-                    .flat_map(|v| v.to_be_bytes().into_iter())
-                    .collect(),
-                format: AudioFormat::I16Be,
-                stereo: true,
-                sample_rate: crate::audio::SAMPLE_RATE,
-                timestamp: Duration::ZERO,
-                duration: Duration::from_secs(decoded_samples.len() as u64 / 2)
-                    / crate::audio::SAMPLE_RATE as u32,
-                sample_entry: None,
-            };
-
-            return Ok(Some(decoded));
-        }
-        Ok(None)
+        })
     }
 }
 
@@ -93,6 +95,8 @@ fn extract_audio_config(sample_entry: &SampleEntry) -> orfail::Result<(u32, NonZ
             let channels = NonZeroU8::new(mp4a.audio.channelcount as u8).or_fail()?;
             Ok((sample_rate, channels))
         }
-        _ => Err(orfail::Failure::new("TODO"))?,
+        _ => Err(orfail::Failure::new(
+            "Only MP4a audio sample entries are currently supported",
+        ))?,
     }
 }
