@@ -95,7 +95,7 @@ with Hisui() as hisui:
 ## デコーダー/エンコーダー
 
 - [Opus](https://github.com/xiph/opus) のソフトウェアによるデコード/エンコードに対応しています
-- [Apple Audio Toolbox](https://developer.apple.com/documentation/audiotoolbox) を利用した AAC のエンコードに対応しています
+- [Apple Audio Toolbox](https://developer.apple.com/documentation/audiotoolbox) を利用した AAC のデコード/エンコードに対応しています
 - [libvpx](https://chromium.googlesource.com/webm/libvpx) を利用した VP8 / VP9 のソフトウェアによるデコード/エンコードに対応しています
 - [SVT-AV1](https://gitlab.com/AOMediaCodec/SVT-AV1/) を利用した AV1 のソフトウェアによるエンコードに対応しています
 - [dav1d](https://code.videolan.org/videolan/dav1d/) を利用した AV1 のソフトウェアによるデコードに対応しています
@@ -244,7 +244,7 @@ Hisui レガシー機能は Hisui 2025.1.x でのみ利用できます。
 ### 新しい Hisui とレガシー版 Hisui の違い
 
 - Rust で実装されています
-- macOS の Audio Toolbox を利用した AAC の音声エンコードに対応しています
+- macOS の Audio Toolbox を利用した AAC の音声デコード/エンコードに対応しています
 - macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
 - MP4 と WebM の入力形式に対応しています
 - 分割録画機能が出力するファイル形式に対応しています

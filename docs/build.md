@@ -82,7 +82,7 @@ sudo apt-get install -y libfdk-aac-dev
 cargo install hisui --features fdk-aac
 ```
 
-なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。
+なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードおよびデコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。
 
 ## ビルド結果の確認方法
 
