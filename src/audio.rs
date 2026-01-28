@@ -92,19 +92,17 @@ pub fn sample_entry_audio_fields() -> AudioSampleEntryFields {
 }
 
 pub fn resample(
-    pcm_data: &[i16],
-    input_sample_rate: u32,
-    original_samples: u64,
-    resampled_samples: u64,
+    pcm_data: &[i16],       // 現在のフレームのオリジナルの音声データ（入力）
+    prev_pcm_data: &[i16],  // 前フレームの音声データ（フレーム境界での補間に使用）
+    input_sample_rate: u32, // 入力サンプルレート。出力は SAMPLE_RATE 固定
+    original_samples: u64,  // これまでに処理された pcm_data.len() の累計
+    resampled_samples: u64, // これまでに出力されたリサンプリング後のサンプル数の累計
 ) -> Option<Vec<i16>> {
-    // すでに目標レートの場合はそのまま返す
     if input_sample_rate == SAMPLE_RATE as u32 {
         return None;
     }
 
     let ratio = SAMPLE_RATE as f64 / input_sample_rate as f64;
-
-    // 累積サンプル数を考慮して、理想的な出力位置を計算
     let total_original_samples = (original_samples + pcm_data.len() as u64) as f64;
     let ideal_resampled_len = (total_original_samples * ratio).floor() as usize;
     let output_len = ideal_resampled_len.saturating_sub(resampled_samples as usize);
@@ -112,16 +110,25 @@ pub fn resample(
     let mut output = Vec::with_capacity(output_len);
 
     for out_idx in 0..output_len {
-        // Use cumulative samples to avoid rounding error accumulation
         let target_sample = resampled_samples as f64 + out_idx as f64;
-        let in_pos = target_sample / ratio;
+        let in_pos_global = target_sample / ratio;
+        let in_pos = in_pos_global - original_samples as f64;
         let in_idx = in_pos.floor() as usize;
+
+        if in_idx >= pcm_data.len() {
+            continue;
+        }
+
         let frac = in_pos.fract();
 
-        // 線形補間
-        let sample0 = pcm_data.get(in_idx).copied().unwrap_or(0) as f64;
+        let sample0 = pcm_data[in_idx] as f64;
+
+        // 補間サンプルを取得
         let sample1 = if in_idx + 1 < pcm_data.len() {
             pcm_data[in_idx + 1] as f64
+        } else if !prev_pcm_data.is_empty() {
+            // フレーム境界：前フレームの最後を参照
+            *prev_pcm_data.last().unwrap() as f64
         } else {
             sample0
         };

@@ -14,6 +14,7 @@ pub struct AudioToolboxDecoder {
     source_id: Option<SourceId>,
     original_samples: u64,
     resampled_samples: u64,
+    prev_decoded_original_samples: Vec<i16>,
 }
 
 impl AudioToolboxDecoder {
@@ -25,6 +26,7 @@ impl AudioToolboxDecoder {
             source_id: None,
             original_samples: 0,
             resampled_samples: 0,
+            prev_decoded_original_samples: Vec::new(),
         })
     }
 
@@ -77,16 +79,21 @@ impl AudioToolboxDecoder {
             decoded_samples.extend(samples);
         }
 
-        let original_decoded_samples_len = decoded_samples.len() as u64;
-        if let Some(resized) = crate::audio::resample(
+        let decoded_samples_len = decoded_samples.len() as u64;
+        if let Some(resampled) = crate::audio::resample(
             &decoded_samples,
+            &self.prev_decoded_original_samples,
             self.sample_rate,
             self.original_samples,
             self.resampled_samples,
         ) {
-            decoded_samples = resized;
+            self.prev_decoded_original_samples = decoded_samples;
+            decoded_samples = resampled;
+        } else {
+            self.prev_decoded_original_samples = decoded_samples.clone();
         }
-        self.original_samples += original_decoded_samples_len;
+
+        self.original_samples += decoded_samples_len;
         self.resampled_samples += decoded_samples.len() as u64;
 
         let duration = Duration::from_secs(decoded_samples.len() as u64 / CHANNELS as u64)
