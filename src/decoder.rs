@@ -37,7 +37,7 @@ pub struct AudioDecoder {
 }
 
 impl AudioDecoder {
-    pub fn new_opus(
+    pub fn new(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
     ) -> orfail::Result<Self> {

@@ -71,7 +71,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     if decode {
         let decoder =
-            AudioDecoder::new_opus(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
+            AudioDecoder::new(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
         scheduler.register(decoder).or_fail()?;
     }
 

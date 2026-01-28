@@ -198,8 +198,7 @@ fn aac_decode() -> orfail::Result<()> {
     let source_id = SourceId::new("beep-aac-audio");
     let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4", Default::default())
         .or_fail()?;
-    let mut decoder =
-        AudioDecoder::new_opus(MediaStreamId::new(0), MediaStreamId::new(1)).or_fail()?;
+    let mut decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1)).or_fail()?;
 
     let mut decoded_count = 0;
 
