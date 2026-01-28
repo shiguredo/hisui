@@ -194,6 +194,7 @@ impl Mp4AudioReader {
             // 新しいサンプルエントリーが来たのでハンドリングする
             let (metadata, format) = match sample_entry {
                 SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
+                SampleEntry::Mp4a(b) => (&b.audio, AudioFormat::Aac),
                 entry => {
                     return Err(orfail::Failure::new(format!(
                         "unsupported sample entry: {entry:?}"
