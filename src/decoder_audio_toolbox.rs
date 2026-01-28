@@ -11,8 +11,9 @@ use crate::metadata::SourceId;
 pub struct AudioToolboxDecoder {
     inner: Option<shiguredo_audio_toolbox::Decoder>,
     sample_rate: u32,
-    timestamp: Duration,
     source_id: Option<SourceId>,
+    original_samples: u64,
+    resampled_samples: u64,
 }
 
 impl AudioToolboxDecoder {
@@ -21,8 +22,9 @@ impl AudioToolboxDecoder {
         Ok(Self {
             inner: None,
             sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
-            timestamp: Duration::ZERO,
             source_id: None,
+            original_samples: 0,
+            resampled_samples: 0,
         })
     }
 
@@ -75,14 +77,22 @@ impl AudioToolboxDecoder {
             decoded_samples.extend(samples);
         }
 
-        if let Some(resized) = crate::audio::resample(&decoded_samples, self.sample_rate) {
+        let original_decoded_samples_len = decoded_samples.len() as u64;
+        if let Some(resized) = crate::audio::resample(
+            &decoded_samples,
+            self.sample_rate,
+            self.original_samples,
+            self.resampled_samples,
+        ) {
             decoded_samples = resized;
         }
+        self.original_samples += original_decoded_samples_len;
+        self.resampled_samples += decoded_samples.len() as u64;
 
         let duration = Duration::from_secs(decoded_samples.len() as u64 / CHANNELS as u64)
             / SAMPLE_RATE as u32;
-        let timestamp = self.timestamp;
-        self.timestamp += duration;
+        let timestamp =
+            Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
 
         Ok(AudioData {
             source_id: self.source_id.clone(),

@@ -91,21 +91,30 @@ pub fn sample_entry_audio_fields() -> AudioSampleEntryFields {
     }
 }
 
-// リサンプリング関数
-// 入力: 任意のサンプルレートの PCM データ（i16 のインターリーブステレオ）
-// 出力: SAMPLE_RATE (48000Hz) へリサンプリングされた PCM データ
-pub fn resample(pcm_data: &[i16], input_sample_rate: u32) -> Option<Vec<i16>> {
+pub fn resample(
+    pcm_data: &[i16],
+    input_sample_rate: u32,
+    original_samples: u64,
+    resampled_samples: u64,
+) -> Option<Vec<i16>> {
     // すでに目標レートの場合はそのまま返す
     if input_sample_rate == SAMPLE_RATE as u32 {
         return None;
     }
 
     let ratio = SAMPLE_RATE as f64 / input_sample_rate as f64;
-    let output_len = ((pcm_data.len() as f64) * ratio).ceil() as usize;
+
+    // 累積サンプル数を考慮して、理想的な出力位置を計算
+    let total_original_samples = (original_samples + pcm_data.len() as u64) as f64;
+    let ideal_resampled_len = (total_original_samples * ratio).floor() as usize;
+    let output_len = ideal_resampled_len.saturating_sub(resampled_samples as usize);
+
     let mut output = Vec::with_capacity(output_len);
 
     for out_idx in 0..output_len {
-        let in_pos = out_idx as f64 / ratio;
+        // Use cumulative samples to avoid rounding error accumulation
+        let target_sample = resampled_samples as f64 + out_idx as f64;
+        let in_pos = target_sample / ratio;
         let in_idx = in_pos.floor() as usize;
         let frac = in_pos.fract();
 
@@ -114,7 +123,7 @@ pub fn resample(pcm_data: &[i16], input_sample_rate: u32) -> Option<Vec<i16>> {
         let sample1 = if in_idx + 1 < pcm_data.len() {
             pcm_data[in_idx + 1] as f64
         } else {
-            sample0 // 境界では前のサンプルを使用
+            sample0
         };
 
         let interpolated = sample0 * (1.0 - frac) + sample1 * frac;
