@@ -37,7 +37,11 @@ fn main() {
         // See also: https://docs.rs/about/builds
         std::fs::write(
             output_bindings_path,
-            concat!("pub struct AACENC_ERROR;", "pub struct HANDLE_AACENCODER;",),
+            concat!(
+                "pub struct AACENC_ERROR;",
+                "pub struct HANDLE_AACENCODER;",
+                "pub struct HANDLE_AACDECODER;",
+            ),
         )
         .expect("write file error");
         return;
@@ -51,12 +55,19 @@ fn main() {
         // ヘッダファイルの配置構成が異なっている
         let source_dir = PathBuf::from(source_dir);
         let libaacenc_include_dir = source_dir.join("libAACenc/include/");
+        let libaacdec_include_dir = source_dir.join("libAACdec/include/");
         let libsys_include_dir = source_dir.join("libSYS/include/");
         bindgen::Builder::default()
             .clang_arg(format!("-I{}", libsys_include_dir.display()))
             .header(
                 libaacenc_include_dir
                     .join("aacenc_lib.h")
+                    .display()
+                    .to_string(),
+            )
+            .header(
+                libaacdec_include_dir
+                    .join("aacdecoder_lib.h")
                     .display()
                     .to_string(),
             )
@@ -72,6 +83,7 @@ fn main() {
         );
         bindgen::Builder::default()
             .header(include_dir.join("aacenc_lib.h").display().to_string())
+            .header(include_dir.join("aacdecoder_lib.h").display().to_string())
             .generate()
             .expect("failed to generate bindings")
             .write_to_file(output_bindings_path)
