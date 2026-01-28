@@ -11,13 +11,20 @@ mod sys;
 /// エラー
 #[derive(Debug)]
 pub struct Error {
-    code: sys::AACENC_ERROR,
+    code: std::os::raw::c_uint,
     function: &'static str,
 }
 
 impl Error {
     fn check(code: sys::AACENC_ERROR, function: &'static str) -> Result<(), Self> {
         if code == sys::AACENC_ERROR_AACENC_OK {
+            return Ok(());
+        }
+        Err(Self { code, function })
+    }
+
+    fn check_decoder(code: sys::AAC_DECODER_ERROR, function: &'static str) -> Result<(), Self> {
+        if code == sys::AAC_DECODER_ERROR_AAC_DEC_OK {
             return Ok(());
         }
         Err(Self { code, function })
@@ -38,6 +45,9 @@ const SAMPLE_RATE: usize = 48000;
 
 // エンコードバッファのサイズ。十分に多い値ならなんでもいい。
 const ENCODE_BUF_SIZE: usize = 20480;
+
+// デコードバッファのサイズ。十分に多い値ならなんでもいい。
+const DECODE_BUF_SIZE: usize = 4096;
 
 /// エンコーダーに指定する設定
 #[derive(Debug, Clone)]
@@ -255,6 +265,145 @@ pub struct EncodedFrame {
     pub samples: usize,
 }
 
+/// AAC デコーダー
+#[derive(Debug)]
+pub struct Decoder {
+    handle: DecoderHandle,
+}
+
+impl Decoder {
+    /// デコーダーインスタンスを生成する
+    ///
+    /// Audio Specific Config バッファを指定して、AAC デコーダーを初期化します。
+    pub fn new(audio_specific_config: &[u8]) -> Result<Self, Error> {
+        if audio_specific_config.is_empty() {
+            // 空が指定されると decode() の中で SIGSEGV となることがあるのでここで弾く
+            return Err(Error {
+                code: sys::AAC_DECODER_ERROR_AAC_DEC_UNKNOWN,
+                function: "Decoder::new(audio_specific_config is empty)",
+            });
+        }
+
+        unsafe {
+            let handle = sys::aacDecoder_Open(sys::TRANSPORT_TYPE_TT_MP4_RAW, 1);
+            if handle.is_null() {
+                return Err(Error {
+                    code: sys::AACENC_ERROR_AACENC_INVALID_HANDLE,
+                    function: "aacDecoder_Open",
+                });
+            }
+            let handle = DecoderHandle(handle);
+
+            // Audio Specific Config を設定する
+            let mut conf = [audio_specific_config.as_ptr() as *mut u8];
+            let mut length = [audio_specific_config.len() as sys::UINT];
+
+            let code = sys::aacDecoder_ConfigRaw(handle.0, conf.as_mut_ptr(), length.as_mut_ptr());
+            Error::check_decoder(code, "aacDecoder_ConfigRaw")?;
+
+            Ok(Self { handle })
+        }
+    }
+
+    /// AAC 圧縮データをデコードする
+    pub fn decode(&mut self, encoded: &[u8]) -> Result<Option<DecodedFrame>, Error> {
+        unsafe {
+            let mut buf = [encoded.as_ptr() as *mut u8];
+            let mut buf_size = [encoded.len() as sys::UINT];
+            let mut bytes_valid = encoded.len() as sys::UINT;
+
+            // デコーダーの入力バッファにデータを充填する
+            let code = sys::aacDecoder_Fill(
+                self.handle.0,
+                buf.as_mut_ptr(),
+                buf_size.as_mut_ptr(),
+                &mut bytes_valid,
+            );
+            Error::check_decoder(code, "aacDecoder_Fill")?;
+
+            // デコード用バッファを準備
+            let mut decode_buf = vec![0i16; DECODE_BUF_SIZE];
+
+            // フレームをデコードする
+            let code = sys::aacDecoder_DecodeFrame(
+                self.handle.0,
+                decode_buf.as_mut_ptr(),
+                (decode_buf.len() * std::mem::size_of::<i16>()) as i32,
+                0,
+            );
+
+            // デコードエラーをチェック
+            // AAC_DEC_NOT_ENOUGH_BITS は正常な終了を示す
+            if code != sys::AAC_DECODER_ERROR_AAC_DEC_OK
+                && code != sys::AAC_DECODER_ERROR_AAC_DEC_NOT_ENOUGH_BITS
+            {
+                return Err(Error {
+                    code,
+                    function: "aacDecoder_DecodeFrame",
+                });
+            }
+
+            // ストリーム情報を取得
+            let stream_info = sys::aacDecoder_GetStreamInfo(self.handle.0);
+            if stream_info.is_null() {
+                return Ok(None);
+            }
+
+            let stream_info = &*stream_info;
+            let frame_size = stream_info.frameSize as usize;
+            let num_channels = stream_info.numChannels as u8;
+            let sample_rate = stream_info.sampleRate as u32;
+            let total_samples = frame_size * num_channels as usize;
+
+            // バッファを実際のサンプル数に縮小
+            decode_buf.truncate(total_samples);
+
+            Ok(Some(DecodedFrame {
+                data: decode_buf,
+                samples: frame_size,
+                channels: num_channels,
+                sample_rate,
+            }))
+        }
+    }
+}
+
+unsafe impl Send for Decoder {}
+
+#[derive(Debug)]
+struct DecoderHandle(sys::HANDLE_AACDECODER);
+
+impl Drop for DecoderHandle {
+    fn drop(&mut self) {
+        unsafe {
+            sys::aacDecoder_Close(self.0);
+        }
+    }
+}
+
+/// デコードされた AAC フレーム
+#[derive(Debug)]
+pub struct DecodedFrame {
+    /// PCM データ
+    pub data: Vec<i16>,
+
+    /// フレーム内のサンプル数（チャネル数は含まない）
+    pub samples: usize,
+
+    /// チャネル数
+    pub channels: u8,
+
+    /// サンプルレート (Hz)
+    pub sample_rate: u32,
+}
+
+impl DecodedFrame {
+    /// フレーム内の総サンプル数 (チャネル数 * samples)
+    pub fn total_samples(&self) -> usize {
+        self.samples * self.channels as usize
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +442,58 @@ mod tests {
         }
 
         assert_eq!(sample_count, 100 * 100);
+    }
+
+    #[test]
+    fn init_decoder() {
+        let config = EncoderConfig {
+            target_bitrate: 100_000,
+        };
+        let encoder = Encoder::new(config).expect("failed to create encoder");
+        let asc = encoder.audio_specific_config();
+
+        // Audio Specific Config が正しい
+        assert!(Decoder::new(asc).is_ok());
+
+        // Audio Specific Config が空の場合はエラーになる
+        assert!(Decoder::new(&[]).is_err());
+    }
+
+    #[test]
+    fn decode_silent() {
+        let config = EncoderConfig {
+            target_bitrate: 100_000,
+        };
+        let mut encoder = Encoder::new(config).expect("failed to create encoder");
+
+        // エンコード用のデータを準備
+        let pcm_data = vec![0i16; 1024 * CHANNELS];
+        let mut encoded_frames = Vec::new();
+
+        // 無音のオーディオをエンコード
+        if let Some(frame) = encoder.encode(&pcm_data).expect("failed to encode") {
+            encoded_frames.push(frame);
+        }
+
+        if let Some(frame) = encoder.finish().expect("failed to finish") {
+            encoded_frames.push(frame);
+        }
+
+        // デコーダーを初期化
+        let asc = encoder.audio_specific_config();
+        let mut decoder = Decoder::new(asc).expect("failed to create decoder");
+
+        // エンコードされたフレームをデコード
+        let mut total_decoded = 0;
+        for frame in encoded_frames {
+            if let Some(decoded) = decoder.decode(&frame.data).expect("failed to decode") {
+                assert_eq!(decoded.channels as usize, CHANNELS);
+                assert_eq!(decoded.sample_rate as usize, SAMPLE_RATE);
+                total_decoded += decoded.samples;
+            }
+        }
+
+        // デコードされたサンプル数が入力サンプル数と一致することを確認
+        assert!(total_decoded > 0, "expected to decode some samples");
     }
 }
