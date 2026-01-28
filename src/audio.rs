@@ -116,6 +116,7 @@ pub fn resample(
         let in_idx = in_pos.floor() as usize;
 
         if in_idx >= pcm_data.len() {
+            // 通常はここに到達しないはずだが、念のためにスキップしておく
             continue;
         }
 
