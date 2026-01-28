@@ -448,6 +448,7 @@ mod tests {
         assert!(Decoder::new(asc).is_ok());
 
         // Audio Specific Config が空でも初期化はできる
+        // TODO: 空で初期化した場合に実際のデコードが失敗することを確認するテストを追加する
         assert!(Decoder::new(&[]).is_ok());
     }
 
@@ -487,5 +488,40 @@ mod tests {
 
         // デコードされたサンプル数が入力サンプル数と一致することを確認
         assert!(total_decoded > 0, "expected to decode some samples");
+    }
+
+    #[test]
+    fn decode_fails_with_empty_config() {
+        let config = EncoderConfig {
+            target_bitrate: 100_000,
+        };
+        let mut encoder = Encoder::new(config).expect("failed to create encoder");
+
+        // オーディオデータを準備してエンコード
+        let pcm_data = vec![0i16; 1024 * CHANNELS];
+        let mut encoded_frames = Vec::new();
+
+        if let Some(frame) = encoder.encode(&pcm_data).expect("failed to encode") {
+            encoded_frames.push(frame);
+        }
+
+        if let Some(frame) = encoder.finish().expect("failed to finish") {
+            encoded_frames.push(frame);
+        }
+
+        // 空の Audio Specific Config でデコーダーを初期化
+        let mut decoder = Decoder::new(&[]).expect("failed to create decoder");
+
+        // エンコードされたフレームのデコードを試みる - 失敗するはず
+        let mut decoded_any = false;
+        for frame in encoded_frames {
+            if let Ok(Some(_)) = decoder.decode(&frame.data) {
+                decoded_any = true;
+                break;
+            }
+        }
+
+        // 空の設定ではデコードが失敗することを確認
+        assert!(!decoded_any, "expected decoding to fail with empty config");
     }
 }
