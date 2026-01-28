@@ -110,15 +110,15 @@ impl MediaProcessor for AudioDecoder {
                 sample: MediaSample::audio_data(data),
             })
         } else if self.eos {
-            if let Some(inner) = self.inner.as_mut() {
-                if let Some(remaining_data) = inner.finish().or_fail()? {
-                    self.stats.total_audio_data_count.add(1);
-                    self.decoded.push_back(remaining_data);
-                    return Ok(MediaProcessorOutput::Processed {
-                        stream_id: self.output_stream_id,
-                        sample: MediaSample::audio_data(self.decoded.pop_front().or_fail()?),
-                    });
-                }
+            if let Some(inner) = self.inner.as_mut()
+                && let Some(remaining_data) = inner.finish().or_fail()?
+            {
+                self.stats.total_audio_data_count.add(1);
+                self.decoded.push_back(remaining_data);
+                return Ok(MediaProcessorOutput::Processed {
+                    stream_id: self.output_stream_id,
+                    sample: MediaSample::audio_data(self.decoded.pop_front().or_fail()?),
+                });
             }
             Ok(MediaProcessorOutput::Finished)
         } else {
