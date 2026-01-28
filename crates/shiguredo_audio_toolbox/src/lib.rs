@@ -223,8 +223,7 @@ impl Decoder {
     ///
     /// 入力の AAC フォーマット（サンプルレート、チャンネル数）は引数で指定できます。
     ///
-    /// 出力フォーマットは Hisui の仕様に合わせて固定されており、
-    /// PCM 48kHz ステレオ（2チャンネル）で出力されます。
+    /// 出力チャネル数はステレオ固定で、サンプルレートは入力と同じとなります。
     pub fn new(input_sample_rate: u32, input_channels: NonZeroU8) -> Result<Self, Error> {
         unsafe {
             let mut input_format =
