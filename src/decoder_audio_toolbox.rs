@@ -10,12 +10,20 @@ use crate::metadata::SourceId;
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
     inner: Option<shiguredo_audio_toolbox::Decoder>,
+    sample_rate: u32,
+    timestamp: Duration,
+    source_id: Option<SourceId>,
 }
 
 impl AudioToolboxDecoder {
     pub fn new() -> orfail::Result<Self> {
         // サンプルレートなどの情報が実際にデータが届くまで不明なので遅延初期化している
-        Ok(Self { inner: None })
+        Ok(Self {
+            inner: None,
+            sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
+            timestamp: Duration::ZERO,
+            source_id: None,
+        })
     }
 
     pub fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
@@ -29,12 +37,14 @@ impl AudioToolboxDecoder {
             );
             self.inner =
                 Some(shiguredo_audio_toolbox::Decoder::new(sample_rate, channels).or_fail()?);
+            self.sample_rate = sample_rate;
+            self.source_id = data.source_id.clone();
         }
 
         let inner = self.inner.as_mut().or_fail()?;
         inner.decode(&data.data).or_fail()?;
 
-        self.build_audio_data(data.source_id.clone(), data.timestamp, Some(data.duration))
+        self.build_audio_data()
     }
 
     pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
@@ -44,7 +54,7 @@ impl AudioToolboxDecoder {
 
         inner.finish().or_fail()?;
 
-        let audio_data = self.build_audio_data(None, Duration::ZERO, None)?;
+        let audio_data = self.build_audio_data()?;
         if audio_data.data.is_empty() {
             return Ok(None);
         }
@@ -53,12 +63,7 @@ impl AudioToolboxDecoder {
     }
 
     /// デコード済みデータをAudioDataに変換する共通処理
-    fn build_audio_data(
-        &mut self,
-        source_id: Option<SourceId>,
-        timestamp: Duration,
-        duration: Option<Duration>,
-    ) -> orfail::Result<AudioData> {
+    fn build_audio_data(&mut self) -> orfail::Result<AudioData> {
         let mut decoded_samples = Vec::new();
         while let Some(samples) = self
             .inner
@@ -70,12 +75,13 @@ impl AudioToolboxDecoder {
             decoded_samples.extend(samples);
         }
 
-        let final_duration = duration.unwrap_or_else(|| {
-            Duration::from_secs(decoded_samples.len() as u64 / CHANNELS as u64) / SAMPLE_RATE as u32
-        });
+        let duration = Duration::from_secs(decoded_samples.len() as u64 / CHANNELS as u64)
+            / SAMPLE_RATE as u32;
+        let timestamp = self.timestamp;
+        self.timestamp += duration;
 
         Ok(AudioData {
-            source_id,
+            source_id: self.source_id.clone(),
             data: decoded_samples
                 .iter()
                 .flat_map(|v| v.to_be_bytes().into_iter())
@@ -84,7 +90,7 @@ impl AudioToolboxDecoder {
             stereo: true,
             sample_rate: SAMPLE_RATE,
             timestamp,
-            duration: final_duration,
+            duration,
             sample_entry: None,
         })
     }
