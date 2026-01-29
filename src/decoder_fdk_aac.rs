@@ -56,6 +56,9 @@ impl FdkAacDecoder {
             .map_err(|e| orfail::Failure::new(format!("Failed to decode AAC: {}", e)))?;
 
         if let Some(frame) = decoded_frame {
+            // いったんステレオチャネル以外は非対応にする
+            (frame.channels == 2).or_fail_with(|()| format!("TODO"))?;
+
             self.sample_rate = frame.sample_rate;
             self.build_audio_data(&frame.data)
         } else {
@@ -71,22 +74,6 @@ impl FdkAacDecoder {
                 sample_entry: None,
             })
         }
-    }
-
-    /// バッファ内に残っているデータを取得する
-    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
-        // FDK AAC デコーダーには明示的な finish() メソッドがないため、
-        // 空のデータを decode() に渡して残りのサンプルを取得することもできるが、
-        // 通常は最後のフレームが decode() で処理されるため None を返す
-        if self.prev_decoded_original_samples.is_empty() {
-            return Ok(None);
-        }
-
-        let decoded_samples = self
-            .prev_decoded_original_samples
-            .drain(..)
-            .collect::<Vec<_>>();
-        Ok(Some(self.build_audio_data(&decoded_samples)?))
     }
 
     /// デコード済みデータを AudioData に変換する共通処理
@@ -133,15 +120,17 @@ fn extract_audio_specific_config(sample_entry: &SampleEntry) -> orfail::Result<V
     match sample_entry {
         SampleEntry::Mp4a(mp4a) => {
             // esds (Elementary Stream Descriptor) ボックスから Audio Specific Config を取得
-            if let Some(esds) = &mp4a.esds {
-                // ESDS ボックスの構造は複雑だが、ここでは Audio Specific Config を直接取得
-                // 通常、AudioSpecificConfig はデコーダースペシフィック情報として保存される
-                Ok(esds.decoder_specific_info.clone())
-            } else {
-                Err(orfail::Failure::new(
-                    "Audio Specific Config not found in mp4a sample entry",
-                ))?
-            }
+            let esds = &mp4a.esds_box;
+            // ESDS ボックスの構造は複雑だが、ここでは Audio Specific Config を直接取得
+            // 通常、AudioSpecificConfig はデコーダースペシフィック情報として保存される
+            Ok(esds
+                .es
+                .dec_config_descr
+                .dec_specific_info
+                .as_ref()
+                .or_fail()?
+                .payload
+                .clone())
         }
         _ => Err(orfail::Failure::new(
             "Only MP4a audio sample entries are currently supported",
