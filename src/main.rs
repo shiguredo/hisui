@@ -25,6 +25,8 @@ const RTMP_PUBLISH_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-publish")
     .doc("指定された入力ファイルを RTMP クライアントとして配信します（実験的機能）");
 const RTMP_OUTBOUND_ENDPOINT_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-outbound-endpoint")
     .doc("指定された入力ファイルを RTMP サーバーとして配信します（実験的機能）");
+const RTMP_INBOUND_ENDPOINT_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-inbound-endpoint")
+    .doc("RTMP サーバーに配信されたストリームを入力ファイルに保存します（実験的機能）");
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
@@ -69,6 +71,8 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_rtmp_publish::run(args)?;
     } else if experimental && RTMP_OUTBOUND_ENDPOINT_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_rtmp_outbound_endpoint::run(args)?;
+    } else if experimental && RTMP_INBOUND_ENDPOINT_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_rtmp_inbound_endpoint::run(args)?;
     } else if let Some(help) = args.finish()? {
         print!("{help}");
     }
