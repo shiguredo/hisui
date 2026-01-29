@@ -119,7 +119,7 @@ impl RtmpOutgoingFrameHandler {
             if let Some(entry) = &video.sample_entry {
                 // サンプルエントリーから nalu_length_size を取得
                 if self.video_nalu_length_size.is_none() {
-                    self.video_nalu_length_size = Some(extract_nalu_length_size(entry)?);
+                    self.video_nalu_length_size = Some(extract_nalu_length_size(entry)?)
                 }
 
                 let seq_header_data = create_video_sequence_header(entry)?;
@@ -176,6 +176,7 @@ impl RtmpOutgoingFrameHandler {
 #[derive(Debug)]
 pub struct RtmpIncomingFrameHandler {
     audio_codec_info: Option<AudioCodecInfo>,
+    audio_sample_entry: Option<SampleEntry>,
     video_sample_entry: Option<SampleEntry>,
     video_nalu_length_size: Option<u8>,
     received_video_keyframe: bool,
@@ -188,13 +189,13 @@ struct AudioCodecInfo {
     format: crate::audio::AudioFormat,
     sample_rate: u32,
     channels: u8,
-    aac_config: Vec<u8>,
 }
 
 impl RtmpIncomingFrameHandler {
     pub fn new(stats: RtmpIncomingFrameHandlerStats) -> Self {
         Self {
             audio_codec_info: None,
+            audio_sample_entry: None,
             video_sample_entry: None,
             video_nalu_length_size: None,
             received_video_keyframe: false,
@@ -212,18 +213,25 @@ impl RtmpIncomingFrameHandler {
         if frame.is_aac_sequence_header {
             self.stats.total_audio_sequence_header_count.increment();
 
-            // TODO: ダミー値、AAC の場合は audio specific config バイナリから取得する必要がある
-            let sample_rate = 44000;
-            let channels = 2;
+            // AAC シーケンスヘッダー（Audio Specific Config）をパース
+            let (sample_rate, channels) = parse_aac_audio_specific_config(&frame.data)?;
+
+            // SampleEntry を生成
+            let sample_entry = create_audio_sample_entry(&frame.data, sample_rate, channels)?;
 
             self.audio_codec_info = Some(AudioCodecInfo {
                 format: crate::audio::AudioFormat::Aac,
                 sample_rate,
                 channels,
-                aac_config: frame.data.clone(),
             });
 
-            log::debug!("Received AAC sequence header");
+            self.audio_sample_entry = Some(sample_entry);
+
+            log::debug!(
+                "Received AAC sequence header: {}Hz, {} channels",
+                sample_rate,
+                channels
+            );
         }
 
         self.stats.total_audio_frame_count.increment();
@@ -234,11 +242,11 @@ impl RtmpIncomingFrameHandler {
             timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
-            sample_rate: codec_info.sample_rate as u16, // TODO: 理屈上は精度が落ちる可能性があるキャスト
+            sample_rate: codec_info.sample_rate as u16,
             stereo: codec_info.channels == 2,
-            sample_entry: None,
+            sample_entry: self.audio_sample_entry.clone(),
             data: frame.data,
-            source_id: None, // TODO: ちゃんとする
+            source_id: None,
         })
     }
 
@@ -326,7 +334,7 @@ impl RtmpIncomingFrameHandler {
             format: crate::video::VideoFormat::H264,
             width: width as usize,
             height: height as usize,
-            source_id: None, // TODO: ここは外側から指定すべき or URL の値を採用する
+            source_id: None,
             data: converted_data,
         }))
     }
@@ -415,4 +423,99 @@ pub fn convert_annexb_to_nalu(data: &[u8], nalu_length_size: u8) -> orfail::Resu
     }
 
     Ok(result)
+}
+
+/// AAC Audio Specific Config をパースしてサンプルレートとチャンネル数を取得
+fn parse_aac_audio_specific_config(data: &[u8]) -> orfail::Result<(u32, u8)> {
+    (data.len() >= 2).or_fail()?;
+
+    let byte0 = data[0];
+    let byte1 = data[1];
+
+    // Audio Object Type (5 bits): byte0 >> 3
+    // Sampling Frequency Index (4 bits): ((byte0 & 0x07) << 1) | (byte1 >> 7)
+    let sample_rate_index = ((byte0 & 0x07) << 1) | (byte1 >> 7);
+
+    // Channel Configuration (4 bits): (byte1 >> 3) & 0x0F
+    let channels = (byte1 >> 3) & 0x0F;
+
+    let sample_rate = match sample_rate_index {
+        0 => 96000,
+        1 => 88200,
+        2 => 64000,
+        3 => 48000,
+        4 => 44100,
+        5 => 32000,
+        6 => 24000,
+        7 => 22050,
+        8 => 16000,
+        9 => 12000,
+        10 => 11025,
+        11 => 8000,
+        12 => 7350,
+        _ => return Err(orfail::Failure::new("Invalid AAC sample rate index")),
+    };
+
+    let num_channels = match channels {
+        0 => {
+            return Err(orfail::Failure::new(
+                "AAC channel configuration 0 is invalid",
+            ));
+        }
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        4 => 4,
+        5 => 5,
+        6 => 6,
+        7 => 8,
+        _ => return Err(orfail::Failure::new("Invalid AAC channel configuration")),
+    };
+
+    Ok((sample_rate, num_channels as u8))
+}
+
+/// AAC SampleEntry を生成
+fn create_audio_sample_entry(
+    audio_specific_config: &[u8],
+    sample_rate: u32,
+    channels: u8,
+) -> orfail::Result<SampleEntry> {
+    use shiguredo_mp4::{
+        FixedPointNumber, Uint,
+        boxes::{AudioSampleEntryFields, EsdsBox, Mp4aBox, SampleEntry},
+        descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
+    };
+
+    Ok(SampleEntry::Mp4a(Mp4aBox {
+        audio: AudioSampleEntryFields {
+            data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
+            channelcount: channels as u16,
+            samplesize: 16,
+            samplerate: FixedPointNumber::new(sample_rate as u16, 0),
+        },
+        esds_box: EsdsBox {
+            es: EsDescriptor {
+                es_id: EsDescriptor::MIN_ES_ID,
+                stream_priority: EsDescriptor::LOWEST_STREAM_PRIORITY,
+                depends_on_es_id: None,
+                url_string: None,
+                ocr_es_id: None,
+                dec_config_descr: DecoderConfigDescriptor {
+                    object_type_indication:
+                        DecoderConfigDescriptor::OBJECT_TYPE_INDICATION_AUDIO_ISO_IEC_14496_3,
+                    stream_type: DecoderConfigDescriptor::STREAM_TYPE_AUDIO,
+                    up_stream: DecoderConfigDescriptor::UP_STREAM_FALSE,
+                    dec_specific_info: Some(DecoderSpecificInfo {
+                        payload: audio_specific_config.to_vec(),
+                    }),
+                    buffer_size_db: Uint::new(65536),
+                    max_bitrate: 256000,
+                    avg_bitrate: 128000,
+                },
+                sl_config_descr: shiguredo_mp4::descriptors::SlConfigDescriptor,
+            },
+        },
+        unknown_boxes: Vec::new(),
+    }))
 }

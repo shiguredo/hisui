@@ -62,6 +62,8 @@ impl RtmpInboundEndpoint {
 
         let stats_clone = stats.clone();
 
+        // TODO: 一時期に複数クライアントが存在しないようにする
+        // TODO: 二回目のクライアントではタイムスタンプを調整する（オフセットを入れる）
         runtime.spawn(async move {
             let mut server = RtmpPublishServer {
                 url: url.clone(),
