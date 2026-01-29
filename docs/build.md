@@ -72,9 +72,9 @@ export CUDA_INCLUDE_PATH=/path/to/cuda/include
 cargo install hisui --features nvcodec
 ```
 
-### FDK-AAC を使った AAC エンコードを有効にする場合
+### FDK-AAC を使った AAC エンコードやデコードを有効にする場合
 
-Ubuntu で FDK-AAC を使った AAC エンコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
+Ubuntu で FDK-AAC を使った AAC エンコードやデコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
 `--features fdk-aac` を指定して Hisui をビルドする必要があります。
 
 ```bash
