@@ -70,13 +70,17 @@ impl FdkAacDecoder {
             self.build_audio_data(&audio_data)
         } else {
             // デコード可能なフレームがない場合は空のデータを返す
+            //
+            // TODO: そもそも将来的には decoder.rs のインタフェースを見直して、このようなワークアラウンドを不要にする
+            let timestamp =
+                Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
             Ok(AudioData {
                 source_id: self.source_id.clone(),
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
                 stereo: true,
                 sample_rate: SAMPLE_RATE,
-                timestamp: Duration::from_secs(0),
+                timestamp,
                 duration: Duration::from_secs(0),
                 sample_entry: None,
             })
