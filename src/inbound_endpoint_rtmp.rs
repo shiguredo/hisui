@@ -295,7 +295,13 @@ impl RtmpPublisherHandler {
     async fn run(&mut self) -> orfail::Result<()> {
         loop {
             while let Some(event) = self.connection.next_event() {
-                log::debug!("RTMP event: {:?}", event);
+                if !matches!(
+                    event,
+                    shiguredo_rtmp::RtmpConnectionEvent::AudioReceived(_)
+                        | shiguredo_rtmp::RtmpConnectionEvent::VideoReceived(_)
+                ) {
+                    log::debug!("RTMP event: {:?}", event);
+                }
                 self.stats.total_event_count.increment();
                 self.handle_event(event).or_fail()?;
             }
@@ -358,18 +364,18 @@ impl RtmpPublisherHandler {
     /// オーディオフレームを処理する
     fn handle_audio_frame(&mut self, frame: shiguredo_rtmp::AudioFrame) -> orfail::Result<()> {
         let audio_data = self.frame_handler.process_audio_frame(frame)?;
-        let _ = self
-            .tx
-            .try_send(MediaSample::Audio(std::sync::Arc::new(audio_data)));
+        self.tx
+            .try_send(MediaSample::Audio(std::sync::Arc::new(audio_data)))
+            .or_fail()?;
         Ok(())
     }
 
     /// ビデオフレームを処理する
     fn handle_video_frame(&mut self, frame: shiguredo_rtmp::VideoFrame) -> orfail::Result<()> {
         if let Some(video_frame) = self.frame_handler.process_video_frame(frame).or_fail()? {
-            let _ = self
-                .tx
-                .try_send(MediaSample::Video(std::sync::Arc::new(video_frame)));
+            self.tx
+                .try_send(MediaSample::Video(std::sync::Arc::new(video_frame)))
+                .or_fail()?;
         }
         Ok(())
     }
