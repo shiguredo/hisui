@@ -119,6 +119,18 @@ pub fn h264_sample_entry_from_annexb(
     }))
 }
 
+/// AVC1 サンプルエントリーから width, height を抽出
+pub fn extract_video_dimensions(entry: &SampleEntry) -> orfail::Result<(u32, u32)> {
+    match entry {
+        SampleEntry::Avc1(avc1) => {
+            let width = avc1.visual.width as u32;
+            let height = avc1.visual.height as u32;
+            Ok((width, height))
+        }
+        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
+    }
+}
+
 /// MP4 ファイルの H.264 映像フレームの形式を RTMP がサポートしている Annex B 形式に変換する
 pub fn convert_nalu_to_annexb(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
     let mut result = Vec::new();

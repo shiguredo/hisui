@@ -176,7 +176,7 @@ impl RtmpOutgoingFrameHandler {
 #[derive(Debug)]
 pub struct RtmpIncomingFrameHandler {
     audio_codec_info: Option<AudioCodecInfo>,
-    video_codec_info: Option<VideoCodecInfo>,
+    video_sample_entry: Option<SampleEntry>,
     received_video_keyframe: bool,
     stats: RtmpIncomingFrameHandlerStats,
 }
@@ -189,18 +189,11 @@ struct AudioCodecInfo {
     aac_config: Vec<u8>,
 }
 
-#[derive(Debug, Clone)]
-struct VideoCodecInfo {
-    width: u32,
-    height: u32,
-    nalu_length_size: u8,
-}
-
 impl RtmpIncomingFrameHandler {
     pub fn new(stats: RtmpIncomingFrameHandlerStats) -> Self {
         Self {
             audio_codec_info: None,
-            video_codec_info: None,
+            video_sample_entry: None,
             received_video_keyframe: false,
             stats,
         }
@@ -254,13 +247,15 @@ impl RtmpIncomingFrameHandler {
         if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::SequenceHeader) {
             self.stats.total_video_sequence_header_count.increment();
 
-            // Annex B 形式の SPS/PPS から codec info を作成
-            let (width, height, nalu_length_size) = parse_video_sequence_header(&frame.data)?;
-            self.video_codec_info = Some(VideoCodecInfo {
-                width,
-                height,
-                nalu_length_size, // TODO: これは使わないので削除していい
-            });
+            // Annex B 形式の SPS/PPS からサンプルエントリーを生成
+            // TODO: SPS から実際の width, height を抽出する
+            let sample_entry = crate::video_h264::h264_sample_entry_from_annexb(
+                1920, // placeholder: 実装時に SPS から抽出
+                1080, // placeholder: 実装時に SPS から抽出
+                &frame.data,
+            )?;
+
+            self.video_sample_entry = Some(sample_entry);
 
             log::debug!("Received H.264 sequence header");
             return Ok(None); // シーケンスヘッダー自体はスキップ
@@ -280,17 +275,20 @@ impl RtmpIncomingFrameHandler {
 
         self.stats.total_video_frame_count.increment();
 
-        let codec_info = self.video_codec_info.as_ref().or_fail()?;
+        let sample_entry = self.video_sample_entry.as_ref().or_fail()?;
+
+        // サンプルエントリーから寸法を取得
+        let (width, height) = crate::video_h264::extract_video_dimensions(sample_entry)?;
 
         Ok(Some(VideoFrame {
             // TODO: タイムスタンプのラップアラウンドを考慮する
             timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
             duration: std::time::Duration::ZERO, // TODO: ちゃんとする（遅延は少し増えるけど、次のフレームとの差分を取るとか）
             keyframe: frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame,
-            sample_entry: None,
+            sample_entry: Some(sample_entry.clone()),
             format: crate::video::VideoFormat::H264AnnexB,
-            width: codec_info.width as usize, // TODO: webm と同様にここはダミー値でもいいかも（ただ後ろにデコーダーがいる前提）
-            height: codec_info.height as usize, // TODO: webm と同様にここはダミー値でもいいかも（ただ後ろにデコーダーがいる前提）
+            width: width as usize,
+            height: height as usize,
             source_id: None, // TODO: ここは外側から指定すべき or URL の値を採用する
             data: frame.data,
         }))
@@ -330,50 +328,6 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
         }
         _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }
-}
-
-/// Annex B 形式のシーケンスヘッダーをパース
-fn parse_video_sequence_header(data: &[u8]) -> orfail::Result<(u32, u32, u8)> {
-    // 簡略化されたパースロジック：SPS から width, height を抽出
-    // 実際のSPS構造は複雑なので、ここでは固定値を返す
-    // 実装が必要な場合は H.264 ビットストリーム仕様を参照のこと
-
-    // Annex B から SPS を抽出
-    let mut sps_data = None;
-    let mut offset = 0;
-
-    while offset < data.len() {
-        // Start code を探す
-        if offset + 4 <= data.len() && data[offset..offset + 4] == [0, 0, 0, 1] {
-            offset += 4;
-            if offset < data.len() {
-                let nal_type = data[offset] & 0x1f;
-                if nal_type == 7 {
-                    // SPS found
-                    let start = offset;
-                    offset += 1;
-                    while offset + 4 <= data.len() {
-                        if data[offset..offset + 4] == [0, 0, 0, 1] {
-                            break;
-                        }
-                        offset += 1;
-                    }
-                    sps_data = Some(&data[start..offset]);
-                    break;
-                }
-            }
-        } else {
-            offset += 1;
-        }
-    }
-
-    // SPS から profile, level を抽出（簡略版）
-    // 本来は複雑なビット操作が必要だが、ここでは固定値を返す
-    let _sps = sps_data.ok_or_else(|| orfail::Failure::new("No SPS found"))?;
-
-    // TODO: 実装する - SPS をパースして実際の width/height/profile を取得
-    // 現在は仮の値を返している
-    Ok((1920, 1080, 4))
 }
 
 /// Annex B 形式から NALU長プレフィックス形式に変換
