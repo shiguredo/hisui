@@ -193,7 +193,7 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 }
 
 #[test]
-#[cfg(or(target_os = "macos", feature = "fdk-aac"))]
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> orfail::Result<()> {
     let source_id = SourceId::new("beep-aac-audio");
     let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4", Default::default())
