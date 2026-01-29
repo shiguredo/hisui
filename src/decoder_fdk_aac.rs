@@ -56,12 +56,18 @@ impl FdkAacDecoder {
             .map_err(|e| orfail::Failure::new(format!("Failed to decode AAC: {}", e)))?;
 
         if let Some(frame) = decoded_frame {
-            // いったんステレオチャネル以外は非対応にする
-            // TODO: 内部的にモノラルを持ち回せるようになったタイミングでサポートする
-            (frame.channels == 2).or_fail_with(|()| format!("Only stereo input is supported"))?;
-
+            let audio_data = match frame.channels {
+                1 => crate::audio::mono_to_stereo(&frame.data),
+                2 => frame.data,
+                _ => {
+                    return Err(orfail::Failure::new(format!(
+                        "Unsupported channel count: {}",
+                        frame.channels
+                    )));
+                }
+            };
             self.sample_rate = frame.sample_rate;
-            self.build_audio_data(&frame.data)
+            self.build_audio_data(&audio_data)
         } else {
             // デコード可能なフレームがない場合は空のデータを返す
             Ok(AudioData {
