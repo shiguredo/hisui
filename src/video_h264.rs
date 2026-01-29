@@ -79,6 +79,230 @@ pub struct H264NalUnit<'a> {
     pub data: &'a [u8],
 }
 
+/// FLV の AVCDecoderConfigurationRecord (シーケンスヘッダ) を解析・変換する構造体
+#[derive(Debug, Clone)]
+pub struct FlvAvcSequenceHeader {
+    pub configuration_version: u8,
+    pub avc_profile_indication: u8,
+    pub profile_compatibility: u8,
+    pub avc_level_indication: u8,
+    pub length_size_minus_one: u8,
+    pub sps_list: Vec<Vec<u8>>,
+    pub pps_list: Vec<Vec<u8>>,
+}
+
+impl FlvAvcSequenceHeader {
+    /// FLV バイト列から AVCDecoderConfigurationRecord をパースする
+    pub fn from_bytes(data: &[u8]) -> orfail::Result<Self> {
+        (data.len() >= 7)
+            .or_fail_with(|()| "AVCDecoderConfigurationRecord too short".to_owned())?;
+
+        let configuration_version = data[0];
+        (configuration_version == 1).or_fail_with(|()| {
+            format!(
+                "unsupported configuration version: {}",
+                configuration_version
+            )
+        })?;
+
+        let avc_profile_indication = data[1];
+        let profile_compatibility = data[2];
+        let avc_level_indication = data[3];
+        let length_size_minus_one = data[4] & 0x03;
+
+        let mut offset = 5;
+        let mut sps_list = Vec::new();
+        let mut pps_list = Vec::new();
+
+        // SPS ユニット群をパース
+        let num_sps = (data[offset] & 0x1F) as usize;
+        offset += 1;
+
+        for _ in 0..num_sps {
+            (offset + 2 <= data.len()).or_fail()?;
+            let sps_length = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
+            offset += 2;
+
+            (offset + sps_length <= data.len()).or_fail()?;
+            sps_list.push(data[offset..offset + sps_length].to_vec());
+            offset += sps_length;
+        }
+
+        // PPS ユニット群をパース
+        (offset < data.len()).or_fail()?;
+        let num_pps = data[offset] as usize;
+        offset += 1;
+
+        for _ in 0..num_pps {
+            (offset + 2 <= data.len()).or_fail()?;
+            let pps_length = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
+            offset += 2;
+
+            (offset + pps_length <= data.len()).or_fail()?;
+            pps_list.push(data[offset..offset + pps_length].to_vec());
+            offset += pps_length;
+        }
+
+        Ok(Self {
+            configuration_version,
+            avc_profile_indication,
+            profile_compatibility,
+            avc_level_indication,
+            length_size_minus_one,
+            sps_list,
+            pps_list,
+        })
+    }
+
+    /// Annex B 形式のバイト列に変換する
+    pub fn to_annexb(&self) -> Vec<u8> {
+        create_sequence_header_annexb(&self.sps_list, &self.pps_list)
+    }
+
+    /// SampleEntry を生成する
+    pub fn to_sample_entry(&self, width: usize, height: usize) -> orfail::Result<SampleEntry> {
+        Ok(SampleEntry::Avc1(Avc1Box {
+            visual: crate::video::sample_entry_visual_fields(width, height),
+            avcc_box: AvccBox {
+                sps_list: self.sps_list.clone(),
+                pps_list: self.pps_list.clone(),
+                avc_profile_indication: self.avc_profile_indication,
+                avc_level_indication: self.avc_level_indication,
+                profile_compatibility: self.profile_compatibility,
+                length_size_minus_one: Uint::new(self.length_size_minus_one),
+                chroma_format: None,
+                bit_depth_luma_minus8: None,
+                bit_depth_chroma_minus8: None,
+                sps_ext_list: Vec::new(),
+            },
+            unknown_boxes: Vec::new(),
+        }))
+    }
+}
+
+/// シンプルなビットリーダー（Exp-Golomb デコード用）
+struct BitReader<'a> {
+    data: &'a [u8],
+    bit_pos: usize,
+}
+
+impl<'a> BitReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, bit_pos: 0 }
+    }
+
+    fn read(&mut self, bits: usize) -> orfail::Result<u32> {
+        let mut result: u32 = 0;
+        for _ in 0..bits {
+            let byte_pos = self.bit_pos / 8;
+            let bit_offset = 7 - (self.bit_pos % 8);
+            (byte_pos < self.data.len()).or_fail()?;
+            let bit = (self.data[byte_pos] >> bit_offset) & 1;
+            result = (result << 1) | (bit as u32);
+            self.bit_pos += 1;
+        }
+        Ok(result)
+    }
+
+    fn read_ue(&mut self) -> orfail::Result<u32> {
+        // Exp-Golomb デコード
+        let mut leading_zeros = 0;
+        while self.read(1)? == 0 {
+            leading_zeros += 1;
+        }
+        if leading_zeros == 0 {
+            Ok(0)
+        } else {
+            let info = self.read(leading_zeros)?;
+            Ok((1 << leading_zeros) - 1 + info)
+        }
+    }
+
+    fn read_se(&mut self) -> orfail::Result<i32> {
+        let ue = self.read_ue()?;
+        Ok(if ue & 1 == 0 {
+            -((ue >> 1) as i32)
+        } else {
+            ((ue + 1) >> 1) as i32
+        })
+    }
+
+    fn skip(&mut self, bits: usize) {
+        self.bit_pos += bits;
+    }
+
+    fn skip_ue(&mut self) -> orfail::Result<()> {
+        let _ue = self.read_ue()?;
+        Ok(())
+    }
+
+    fn skip_se(&mut self) -> orfail::Result<()> {
+        let _se = self.read_se()?;
+        Ok(())
+    }
+}
+
+/// H.264 の SPS から width と height を抽出する
+pub fn extract_dimensions_from_sps(sps: &[u8]) -> orfail::Result<(usize, usize)> {
+    (sps.len() >= 4).or_fail()?;
+
+    // ビット位置を追跡するための構造体
+    let mut bit_reader = BitReader::new(sps);
+
+    // profile_idc
+    bit_reader.skip(8);
+    // constraint flags
+    bit_reader.skip(8);
+    // level_idc
+    bit_reader.skip(8);
+    // seq_parameter_set_id
+    bit_reader.skip_ue()?;
+
+    // log2_max_frame_num_minus4
+    bit_reader.skip_ue()?;
+    // pic_order_cnt_type
+    let pic_order_cnt_type = bit_reader.read_ue()?;
+
+    if pic_order_cnt_type == 0 {
+        // log2_max_pic_order_cnt_lsb_minus4
+        bit_reader.skip_ue()?;
+    } else if pic_order_cnt_type == 1 {
+        // delta_pic_order_always_zero_flag
+        bit_reader.skip(1);
+        // offset_for_non_ref_pic
+        bit_reader.skip_se()?;
+        // offset_for_top_to_bottom_field
+        bit_reader.skip_se()?;
+        // num_ref_frames_in_pic_order_cnt_cycle
+        let num_ref_frames = bit_reader.read_ue()?;
+        for _ in 0..num_ref_frames {
+            bit_reader.skip_se()?;
+        }
+    }
+
+    // num_ref_frames
+    bit_reader.skip_ue()?;
+    // gaps_in_frame_num_value_allowed_flag
+    bit_reader.skip(1);
+
+    // pic_width_in_mbs_minus1
+    let pic_width = bit_reader.read_ue()? + 1;
+    // pic_height_in_map_units_minus1
+    let pic_height = bit_reader.read_ue()? + 1;
+
+    // frame_mbs_only_flag
+    let frame_mbs_only_flag = bit_reader.read(1)?;
+    if frame_mbs_only_flag == 0 {
+        // mb_adaptive_frame_field_flag
+        bit_reader.skip(1);
+    }
+
+    let width = (pic_width * 16) as usize;
+    let height = (pic_height * 16 * (if frame_mbs_only_flag == 0 { 2 } else { 1 })) as usize;
+
+    Ok((width, height))
+}
+
 pub fn h264_sample_entry_from_annexb(
     width: usize,
     height: usize,

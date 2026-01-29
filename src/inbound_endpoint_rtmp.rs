@@ -364,7 +364,7 @@ impl RtmpPublisherHandler {
 
     /// ビデオフレームを処理する
     fn handle_video_frame(&mut self, frame: shiguredo_rtmp::VideoFrame) -> orfail::Result<()> {
-        if let Some(video_frame) = self.frame_handler.process_video_frame(frame)? {
+        if let Some(video_frame) = self.frame_handler.process_video_frame(frame).or_fail()? {
             let _ = self
                 .tx
                 .try_send(MediaSample::Video(std::sync::Arc::new(video_frame)));

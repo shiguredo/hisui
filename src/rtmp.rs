@@ -251,20 +251,25 @@ impl RtmpIncomingFrameHandler {
         if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::SequenceHeader) {
             self.stats.total_video_sequence_header_count.increment();
 
-            // Annex B 形式の SPS/PPS からサンプルエントリーを生成
-            // TODO: SPS から実際の width, height を抽出する
-            let sample_entry = crate::video_h264::h264_sample_entry_from_annexb(
-                1920, // placeholder: 実装時に SPS から抽出
-                1080, // placeholder: 実装時に SPS から抽出
-                &frame.data,
-            )?;
+            // FLV の AVCDecoderConfigurationRecord をパース
+            let seq_header = crate::video_h264::FlvAvcSequenceHeader::from_bytes(&frame.data)?;
 
-            // サンプルエントリーから nalu_length_size を取得して保存
-            self.video_nalu_length_size = Some(extract_nalu_length_size(&sample_entry)?);
+            // SPS から実際の width, height を抽出
+            let (width, height) = if !seq_header.sps_list.is_empty() {
+                crate::video_h264::extract_dimensions_from_sps(&seq_header.sps_list[0])?
+            } else {
+                return Err(orfail::Failure::new("No SPS in sequence header"));
+            };
+
+            // SampleEntry を生成
+            let sample_entry = seq_header.to_sample_entry(width, height)?;
+
+            // nalu_length_size を保存
+            self.video_nalu_length_size = Some(seq_header.length_size_minus_one + 1);
             self.video_sample_entry = Some(sample_entry);
 
-            log::debug!("Received H.264 sequence header");
-            return Ok(None); // シーケンスヘッダー自体はスキップ
+            log::debug!("Received H.264 sequence header: {}x{}", width, height);
+            return Ok(None);
         }
 
         // キーフレームを待っている場合はスキップ
@@ -287,7 +292,8 @@ impl RtmpIncomingFrameHandler {
             .ok_or_else(|| orfail::Failure::new("nalu_length_size not initialized"))?;
 
         // サンプルエントリーから寸法を取得
-        let (width, height) = crate::video_h264::extract_video_dimensions(sample_entry)?;
+        let (width, height) =
+            crate::video_h264::extract_video_dimensions(sample_entry).or_fail()?;
 
         // Annex B 形式から NALU長プレフィックス形式に変換
         let converted_data = convert_annexb_to_nalu(&frame.data, nalu_length_size)?;
