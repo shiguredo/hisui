@@ -57,7 +57,8 @@ impl FdkAacDecoder {
 
         if let Some(frame) = decoded_frame {
             // いったんステレオチャネル以外は非対応にする
-            (frame.channels == 2).or_fail_with(|()| format!("TODO"))?;
+            // TODO: 内部的にモノラルを持ち回せるようになったタイミングでサポートする
+            (frame.channels == 2).or_fail_with(|()| format!("Only stereo input is supported"))?;
 
             self.sample_rate = frame.sample_rate;
             self.build_audio_data(&frame.data)

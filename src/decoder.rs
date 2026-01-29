@@ -59,10 +59,16 @@ impl AudioDecoder {
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
         match codec {
             CodecName::Aac => {
+                let mut engines = Vec::new();
+                #[cfg(feature = "fdk-aac")]
+                {
+                    engines.push(EngineName::FdkAac);
+                }
                 #[cfg(target_os = "macos")]
-                return vec![EngineName::AudioToolbox];
-                #[cfg(not(target_os = "macos"))]
-                return vec![];
+                {
+                    engines.push(EngineName::AudioToolbox);
+                }
+                if engines.is_empty() { engines } else { engines }
             }
             CodecName::Opus => vec![EngineName::Opus],
             _ => unreachable!(),
@@ -134,6 +140,8 @@ enum AudioDecoderInner {
     Opus(OpusDecoder),
     #[cfg(target_os = "macos")]
     AudioToolbox(crate::decoder_audio_toolbox::AudioToolboxDecoder),
+    #[cfg(feature = "fdk-aac")]
+    FdkAac(crate::decoder_fdk_aac::FdkAacDecoder),
 }
 
 impl AudioDecoderInner {
@@ -141,16 +149,22 @@ impl AudioDecoderInner {
         match data.format {
             AudioFormat::Opus => OpusDecoder::new().or_fail().map(Self::Opus),
             AudioFormat::Aac => {
-                #[cfg(target_os = "macos")]
+                #[cfg(feature = "fdk-aac")]
+                {
+                    crate::decoder_fdk_aac::FdkAacDecoder::new()
+                        .or_fail()
+                        .map(Self::FdkAac)
+                }
+                #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
                 {
                     crate::decoder_audio_toolbox::AudioToolboxDecoder::new()
                         .or_fail()
                         .map(Self::AudioToolbox)
                 }
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
                 {
                     Err(orfail::Failure::new(
-                        "AAC decoding is only available on macOS",
+                        "AAC decoding is only available on macOS or with fdk-aac feature enabled",
                     ))
                 }
             }
@@ -166,6 +180,8 @@ impl AudioDecoderInner {
             Self::Opus(decoder) => decoder.decode(data).or_fail(),
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(decoder) => decoder.decode(data).or_fail(),
+            #[cfg(feature = "fdk-aac")]
+            Self::FdkAac(decoder) => decoder.decode(data).or_fail(),
         }
     }
 
@@ -174,6 +190,8 @@ impl AudioDecoderInner {
             Self::Opus(_decoder) => Ok(None),
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(decoder) => decoder.finish().or_fail(),
+            #[cfg(feature = "fdk-aac")]
+            Self::FdkAac(_decoder) => Ok(None),
         }
     }
 }
