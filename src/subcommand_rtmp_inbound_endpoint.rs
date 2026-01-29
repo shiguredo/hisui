@@ -19,7 +19,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    let _output_file_path: PathBuf = noargs::opt("output-file")
+    let output_file_path: PathBuf = noargs::opt("output-file")
         .short('o')
         .doc("出力ファイル（.mp4 ないし .webm）")
         .default("output.mp4")
@@ -41,7 +41,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     let mut scheduler = Scheduler::new();
-    let _dummy_source_id = crate::metadata::SourceId::new("rtmp");
 
     // RTMP サーバーを登録
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -57,6 +56,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         crate::inbound_endpoint_rtmp::RtmpInboundEndpointOptions::default(),
     );
     scheduler.register(inbound_endpoint).or_fail()?;
+
+    // ライターを登録
+    let writer = crate::writer_mp4::Mp4Writer::new(
+        output_file_path,
+        None,
+        Some(AUDIO_STREAM_ID),
+        Some(VIDEO_STREAM_ID),
+    )
+    .or_fail()?;
+    scheduler.register(writer).or_fail()?;
 
     // スケジューラー実行
     scheduler.run().or_fail()?;
