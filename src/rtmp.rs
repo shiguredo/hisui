@@ -177,8 +177,10 @@ impl RtmpOutgoingFrameHandler {
 pub struct RtmpIncomingFrameHandler {
     audio_codec_info: Option<AudioCodecInfo>,
     video_sample_entry: Option<SampleEntry>,
+    video_nalu_length_size: Option<u8>,
     received_video_keyframe: bool,
     stats: RtmpIncomingFrameHandlerStats,
+    last_video_timestamp: Option<std::time::Duration>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,8 +196,10 @@ impl RtmpIncomingFrameHandler {
         Self {
             audio_codec_info: None,
             video_sample_entry: None,
+            video_nalu_length_size: None,
             received_video_keyframe: false,
             stats,
+            last_video_timestamp: None,
         }
     }
 
@@ -255,6 +259,8 @@ impl RtmpIncomingFrameHandler {
                 &frame.data,
             )?;
 
+            // サンプルエントリーから nalu_length_size を取得して保存
+            self.video_nalu_length_size = Some(extract_nalu_length_size(&sample_entry)?);
             self.video_sample_entry = Some(sample_entry);
 
             log::debug!("Received H.264 sequence header");
@@ -276,21 +282,46 @@ impl RtmpIncomingFrameHandler {
         self.stats.total_video_frame_count.increment();
 
         let sample_entry = self.video_sample_entry.as_ref().or_fail()?;
+        let nalu_length_size = self
+            .video_nalu_length_size
+            .ok_or_else(|| orfail::Failure::new("nalu_length_size not initialized"))?;
 
         // サンプルエントリーから寸法を取得
         let (width, height) = crate::video_h264::extract_video_dimensions(sample_entry)?;
 
+        // Annex B 形式から NALU長プレフィックス形式に変換
+        let converted_data = convert_annexb_to_nalu(&frame.data, nalu_length_size)?;
+
+        // 現在のタイムスタンプを計算
+        let current_timestamp =
+            std::time::Duration::from_millis(frame.timestamp.as_millis() as u64);
+
+        // durationを計算
+        let duration = if let Some(last_ts) = self.last_video_timestamp {
+            if current_timestamp > last_ts {
+                current_timestamp - last_ts
+            } else {
+                // タイムスタンプがリセットされた場合は20msのデフォルト値
+                std::time::Duration::from_millis(20)
+            }
+        } else {
+            // 最初のフレームは20msで決め打ち
+            std::time::Duration::from_millis(20)
+        };
+
+        // 次のフレーム処理用に現在のタイムスタンプを記録
+        self.last_video_timestamp = Some(current_timestamp);
+
         Ok(Some(VideoFrame {
-            // TODO: タイムスタンプのラップアラウンドを考慮する
-            timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
-            duration: std::time::Duration::ZERO, // TODO: ちゃんとする（遅延は少し増えるけど、次のフレームとの差分を取るとか）
+            timestamp: current_timestamp,
+            duration,
             keyframe: frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame,
             sample_entry: Some(sample_entry.clone()),
-            format: crate::video::VideoFormat::H264AnnexB,
+            format: crate::video::VideoFormat::H264,
             width: width as usize,
             height: height as usize,
             source_id: None, // TODO: ここは外側から指定すべき or URL の値を採用する
-            data: frame.data,
+            data: converted_data,
         }))
     }
 }
