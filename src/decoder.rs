@@ -59,7 +59,10 @@ impl AudioDecoder {
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
         match codec {
             CodecName::Aac => {
+                // cfg によって mut が必要だったり不要だったりするので警告は抑制する
+                #[allow(unused_mut)]
                 let mut engines = Vec::new();
+
                 #[cfg(feature = "fdk-aac")]
                 {
                     engines.push(EngineName::FdkAac);
@@ -68,7 +71,8 @@ impl AudioDecoder {
                 {
                     engines.push(EngineName::AudioToolbox);
                 }
-                if engines.is_empty() { engines } else { engines }
+
+                engines
             }
             CodecName::Opus => vec![EngineName::Opus],
             _ => unreachable!(),
