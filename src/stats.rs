@@ -74,6 +74,7 @@ pub enum ProcessorStats {
     Mp4Writer(Mp4WriterStats),
     RtmpPublisher(crate::publisher_rtmp::RtmpPublisherStats),
     RtmpOutboundEndpoint(crate::outbound_endpoint_rtmp::RtmpOutboundEndpointStats),
+    RtmpInboundEndpoint(crate::inbound_endpoint_rtmp::RtmpInboundEndpointStats),
     Other {
         processor_type: String,
         total_processing_duration: SharedAtomicDuration,
@@ -105,6 +106,7 @@ impl ProcessorStats {
             ProcessorStats::Mp4Writer(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::RtmpPublisher(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::RtmpOutboundEndpoint(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::RtmpInboundEndpoint(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::Other {
                 total_processing_duration,
                 ..
@@ -127,6 +129,7 @@ impl ProcessorStats {
             ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
             ProcessorStats::RtmpPublisher(stats) => stats.error.set(true),
             ProcessorStats::RtmpOutboundEndpoint(stats) => stats.error.set(true),
+            ProcessorStats::RtmpInboundEndpoint(stats) => stats.error.set(true),
             ProcessorStats::Other { error, .. } => error.set(true),
         }
     }
@@ -148,6 +151,7 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
             ProcessorStats::RtmpPublisher(stats) => stats.fmt(f),
             ProcessorStats::RtmpOutboundEndpoint(stats) => stats.fmt(f),
+            ProcessorStats::RtmpInboundEndpoint(stats) => stats.fmt(f),
             ProcessorStats::Other {
                 processor_type,
                 total_processing_duration,

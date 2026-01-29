@@ -80,7 +80,7 @@ impl MediaProcessor for RtmpInboundEndpoint {
                 .into_iter()
                 .chain(self.output_video_stream_id)
                 .collect(),
-            stats: ProcessorStats::other("rtmp_inbound_endpoint"),
+            stats: ProcessorStats::RtmpInboundEndpoint(self.stats.clone()),
             workload_hint: MediaProcessorWorkloadHint::ASYNC_IO,
         }
     }
