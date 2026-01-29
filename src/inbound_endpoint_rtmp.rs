@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use orfail::OrFail;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,13 +18,26 @@ use crate::{
 /// メディアフレーム用チャネルサイズ
 const FRAME_CHANNEL_SIZE: usize = 500;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RtmpInboundEndpointOptions {
     /// TLS接続時の証明書ファイルパス（オプション）
     pub cert_path: Option<PathBuf>,
 
     /// TLS接続時の秘密鍵ファイルパス（オプション）
     pub key_path: Option<PathBuf>,
+
+    // サーバーの起動時間指定
+    pub lifetime: Duration,
+}
+
+impl Default for RtmpInboundEndpointOptions {
+    fn default() -> Self {
+        Self {
+            cert_path: None,
+            key_path: None,
+            lifetime: Duration::from_secs(60), // TODO: 暫定値（当面はこれでいいけど将来的には変更する）
+        }
+    }
 }
 
 /// クライアントからの publish リクエストを受け付けてメディアストリームを受信するサーバー
@@ -145,60 +159,85 @@ impl RtmpPublishServer {
             None
         };
 
+        // lifetime タイムアウトを設定
+        let timeout = self.options.lifetime;
+        let start_time = tokio::time::Instant::now();
+
         loop {
-            let (stream, peer_addr) = listener.accept().await.or_fail()?;
-            log::debug!("New RTMP client connection from: {peer_addr}");
+            // 残り時間を計算
+            let elapsed = start_time.elapsed();
+            if elapsed >= timeout {
+                log::info!("RTMP server lifetime expired, shutting down");
+                break;
+            }
+            let remaining = timeout - elapsed;
 
-            let stats = self.stats.clone();
-            let tx = self.tx.clone();
-            let expected_app = self.url.app.clone();
-            let expected_stream_name = self.url.stream_name.clone();
-            let tls_acceptor = tls_acceptor.clone();
+            // 残り時間でタイムアウトを設定して accept を待機
+            match tokio::time::timeout(remaining, listener.accept()).await {
+                Ok(Ok((stream, peer_addr))) => {
+                    log::debug!("New RTMP client connection from: {peer_addr}");
 
-            tokio::spawn(async move {
-                let frame_handler_stats = crate::rtmp::RtmpIncomingFrameHandlerStats {
-                    total_audio_frame_count: stats.total_audio_frame_count.clone(),
-                    total_video_frame_count: stats.total_video_frame_count.clone(),
-                    total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
-                    total_audio_sequence_header_count: stats
-                        .total_audio_sequence_header_count
-                        .clone(),
-                    total_video_sequence_header_count: stats
-                        .total_video_sequence_header_count
-                        .clone(),
-                };
+                    let stats = self.stats.clone();
+                    let tx = self.tx.clone();
+                    let expected_app = self.url.app.clone();
+                    let expected_stream_name = self.url.stream_name.clone();
+                    let tls_acceptor = tls_acceptor.clone();
 
-                stats.total_connected_clients.increment();
+                    tokio::spawn(async move {
+                        let frame_handler_stats = crate::rtmp::RtmpIncomingFrameHandlerStats {
+                            total_audio_frame_count: stats.total_audio_frame_count.clone(),
+                            total_video_frame_count: stats.total_video_frame_count.clone(),
+                            total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
+                            total_audio_sequence_header_count: stats
+                                .total_audio_sequence_header_count
+                                .clone(),
+                            total_video_sequence_header_count: stats
+                                .total_video_sequence_header_count
+                                .clone(),
+                        };
 
-                match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await {
-                    Ok(tls_stream) => {
-                        if tls_acceptor.is_some() {
-                            log::debug!("TLS handshake successful with {peer_addr}");
+                        stats.total_connected_clients.increment();
+
+                        match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref())
+                            .await
+                        {
+                            Ok(tls_stream) => {
+                                if tls_acceptor.is_some() {
+                                    log::debug!("TLS handshake successful with {peer_addr}");
+                                }
+                                let mut handler = RtmpPublisherHandler::new(
+                                    tls_stream,
+                                    tx,
+                                    stats.clone(),
+                                    expected_app,
+                                    expected_stream_name,
+                                    frame_handler_stats,
+                                );
+
+                                if let Err(e) = handler.run().await.or_fail() {
+                                    log::error!("RTMP publisher handler error: {e}");
+                                    handler.stats.total_error_disconnected_clients.increment();
+                                }
+                                handler.stats.total_disconnected_clients.increment();
+                                log::debug!("RTMP publisher disconnected: {peer_addr}");
+                            }
+                            Err(e) => {
+                                log::error!("Connection setup failed with {peer_addr}: {e}");
+                                stats.total_error_disconnected_clients.increment();
+                                stats.total_disconnected_clients.increment();
+                            }
                         }
-                        let mut handler = RtmpPublisherHandler::new(
-                            tls_stream,
-                            tx,
-                            stats.clone(),
-                            expected_app,
-                            expected_stream_name,
-                            frame_handler_stats,
-                        );
-
-                        if let Err(e) = handler.run().await.or_fail() {
-                            log::error!("RTMP publisher handler error: {e}");
-                            handler.stats.total_error_disconnected_clients.increment();
-                        }
-                        handler.stats.total_disconnected_clients.increment();
-                        log::debug!("RTMP publisher disconnected: {peer_addr}");
-                    }
-                    Err(e) => {
-                        log::error!("Connection setup failed with {peer_addr}: {e}");
-                        stats.total_error_disconnected_clients.increment();
-                        stats.total_disconnected_clients.increment();
-                    }
+                    });
                 }
-            });
+                Ok(Err(e)) => return Err(e).or_fail(),
+                Err(_) => {
+                    log::info!("RTMP server lifetime expired, shutting down");
+                    break;
+                }
+            }
         }
+
+        Ok(())
     }
 
     /// 証明書と秘密鍵のパスを取得する
