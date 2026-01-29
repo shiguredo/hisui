@@ -1,5 +1,7 @@
-use shiguredo_mp4::boxes::SampleEntry;
 use std::sync::Arc;
+
+use orfail::OrFail;
+use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
 
@@ -213,18 +215,9 @@ impl RtmpIncomingFrameHandler {
         if frame.is_aac_sequence_header {
             self.stats.total_audio_sequence_header_count.increment();
 
-            let sample_rate = match frame.sample_rate {
-                shiguredo_rtmp::AudioSampleRate::_5_5kHz => 5500,
-                shiguredo_rtmp::AudioSampleRate::_11kHz => 11000,
-                shiguredo_rtmp::AudioSampleRate::_22kHz => 22000,
-                shiguredo_rtmp::AudioSampleRate::_44kHz => 44000,
-                shiguredo_rtmp::AudioSampleRate::_8kHz => 8000,
-                shiguredo_rtmp::AudioSampleRate::_16kHz => 16000,
-                shiguredo_rtmp::AudioSampleRate::_32kHz => 32000,
-                shiguredo_rtmp::AudioSampleRate::_48kHz => 48000,
-            };
-
-            let channels = if frame.is_stereo { 2 } else { 1 };
+            // TODO: ダミー値、AAC の場合は audio specific config バイナリから取得する必要がある
+            let sample_rate = 44000;
+            let channels = 2;
 
             self.audio_codec_info = Some(AudioCodecInfo {
                 format: crate::audio::AudioFormat::Aac,
@@ -244,10 +237,11 @@ impl RtmpIncomingFrameHandler {
             timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
-            sample_rate: codec_info.sample_rate,
-            channels: codec_info.channels,
+            sample_rate: codec_info.sample_rate as u16, // TODO: 理屈上は精度が落ちる可能性があるキャスト
+            stereo: codec_info.channels == 2,
             sample_entry: None,
             data: frame.data,
+            source_id: None, // TODO: ちゃんとする
         })
     }
 
@@ -265,7 +259,7 @@ impl RtmpIncomingFrameHandler {
             self.video_codec_info = Some(VideoCodecInfo {
                 width,
                 height,
-                nalu_length_size,
+                nalu_length_size, // TODO: これは使わないので削除していい
             });
 
             log::debug!("Received H.264 sequence header");
@@ -288,20 +282,17 @@ impl RtmpIncomingFrameHandler {
 
         let codec_info = self.video_codec_info.as_ref().or_fail()?;
 
-        // Annex B 形式をNALU長プレフィックス形式に変換
-        let frame_data =
-            crate::video_h264::convert_annexb_to_nalu(&frame.data, codec_info.nalu_length_size)?;
-
         Ok(Some(VideoFrame {
+            // TODO: タイムスタンプのラップアラウンドを考慮する
             timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
-            duration: std::time::Duration::ZERO,
+            duration: std::time::Duration::ZERO, // TODO: ちゃんとする（遅延は少し増えるけど、次のフレームとの差分を取るとか）
             keyframe: frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame,
             sample_entry: None,
-            format: crate::video::VideoFormat::H264,
-            width: codec_info.width,
-            height: codec_info.height,
-            source_id: 0, // Not available from RTMP
-            data: frame_data,
+            format: crate::video::VideoFormat::H264AnnexB,
+            width: codec_info.width as usize, // TODO: webm と同様にここはダミー値でもいいかも（ただ後ろにデコーダーがいる前提）
+            height: codec_info.height as usize, // TODO: webm と同様にここはダミー値でもいいかも（ただ後ろにデコーダーがいる前提）
+            source_id: None, // TODO: ここは外側から指定すべき or URL の値を採用する
+            data: frame.data,
         }))
     }
 }
@@ -317,11 +308,11 @@ fn extract_nalu_length_size(entry: &SampleEntry) -> orfail::Result<u8> {
 pub fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
     match entry {
         SampleEntry::Mp4a(mp4a) => mp4a
-            .audio
             .esds_box
+            .es
+            .dec_config_descr
+            .dec_specific_info
             .as_ref()
-            .and_then(|esds| esds.es.dec_config_descr.as_ref())
-            .and_then(|dec| dec.dec_specific_info.as_ref())
             .map(|info| info.payload.clone())
             .ok_or_else(|| orfail::Failure::new("No decoder specific info available")),
         _ => Err(orfail::Failure::new("Not an audio sample entry")),
