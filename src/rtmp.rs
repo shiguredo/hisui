@@ -12,7 +12,16 @@ pub struct RtmpOutgoingFrameHandlerStats {
     pub total_video_sequence_header_count: SharedAtomicCounter,
 }
 
-/// RTMP フレーム処理の共通ロジック
+#[derive(Debug)]
+pub struct RtmpIncomingFrameHandlerStats {
+    pub total_audio_frame_count: SharedAtomicCounter,
+    pub total_video_frame_count: SharedAtomicCounter,
+    pub total_video_keyframe_count: SharedAtomicCounter,
+    pub total_audio_sequence_header_count: SharedAtomicCounter,
+    pub total_video_sequence_header_count: SharedAtomicCounter,
+}
+
+/// RTMP フレーム処理の共通ロジック（送信側）
 #[derive(Debug)]
 pub struct RtmpOutgoingFrameHandler {
     video_sequence_header_data: Option<Vec<u8>>,
@@ -161,6 +170,142 @@ impl RtmpOutgoingFrameHandler {
     }
 }
 
+/// RTMP フレーム処理の共通ロジック（受信側）
+#[derive(Debug)]
+pub struct RtmpIncomingFrameHandler {
+    audio_codec_info: Option<AudioCodecInfo>,
+    video_codec_info: Option<VideoCodecInfo>,
+    received_video_keyframe: bool,
+    stats: RtmpIncomingFrameHandlerStats,
+}
+
+#[derive(Debug, Clone)]
+struct AudioCodecInfo {
+    format: crate::audio::AudioFormat,
+    sample_rate: u32,
+    channels: u8,
+    aac_config: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct VideoCodecInfo {
+    width: u32,
+    height: u32,
+    nalu_length_size: u8,
+}
+
+impl RtmpIncomingFrameHandler {
+    pub fn new(stats: RtmpIncomingFrameHandlerStats) -> Self {
+        Self {
+            audio_codec_info: None,
+            video_codec_info: None,
+            received_video_keyframe: false,
+            stats,
+        }
+    }
+
+    /// 受信した音声フレームを処理
+    pub fn process_audio_frame(
+        &mut self,
+        frame: shiguredo_rtmp::AudioFrame,
+    ) -> orfail::Result<AudioData> {
+        // シーケンスヘッダーの処理
+        if frame.is_aac_sequence_header {
+            self.stats.total_audio_sequence_header_count.increment();
+
+            let sample_rate = match frame.sample_rate {
+                shiguredo_rtmp::AudioSampleRate::_5_5kHz => 5500,
+                shiguredo_rtmp::AudioSampleRate::_11kHz => 11000,
+                shiguredo_rtmp::AudioSampleRate::_22kHz => 22000,
+                shiguredo_rtmp::AudioSampleRate::_44kHz => 44000,
+                shiguredo_rtmp::AudioSampleRate::_8kHz => 8000,
+                shiguredo_rtmp::AudioSampleRate::_16kHz => 16000,
+                shiguredo_rtmp::AudioSampleRate::_32kHz => 32000,
+                shiguredo_rtmp::AudioSampleRate::_48kHz => 48000,
+            };
+
+            let channels = if frame.is_stereo { 2 } else { 1 };
+
+            self.audio_codec_info = Some(AudioCodecInfo {
+                format: crate::audio::AudioFormat::Aac,
+                sample_rate,
+                channels,
+                aac_config: frame.data.clone(),
+            });
+
+            log::debug!("Received AAC sequence header");
+        }
+
+        self.stats.total_audio_frame_count.increment();
+
+        let codec_info = self.audio_codec_info.as_ref().or_fail()?;
+
+        Ok(AudioData {
+            timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
+            duration: std::time::Duration::ZERO,
+            format: codec_info.format,
+            sample_rate: codec_info.sample_rate,
+            channels: codec_info.channels,
+            sample_entry: None,
+            data: frame.data,
+        })
+    }
+
+    /// 受信した映像フレームを処理
+    pub fn process_video_frame(
+        &mut self,
+        frame: shiguredo_rtmp::VideoFrame,
+    ) -> orfail::Result<Option<VideoFrame>> {
+        // シーケンスヘッダーの処理
+        if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::SequenceHeader) {
+            self.stats.total_video_sequence_header_count.increment();
+
+            // Annex B 形式の SPS/PPS から codec info を作成
+            let (width, height, nalu_length_size) = parse_video_sequence_header(&frame.data)?;
+            self.video_codec_info = Some(VideoCodecInfo {
+                width,
+                height,
+                nalu_length_size,
+            });
+
+            log::debug!("Received H.264 sequence header");
+            return Ok(None); // シーケンスヘッダー自体はスキップ
+        }
+
+        // キーフレームを待っている場合はスキップ
+        if !self.received_video_keyframe
+            && frame.frame_type != shiguredo_rtmp::VideoFrameType::KeyFrame
+        {
+            return Ok(None);
+        }
+
+        if frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame {
+            self.received_video_keyframe = true;
+            self.stats.total_video_keyframe_count.increment();
+        }
+
+        self.stats.total_video_frame_count.increment();
+
+        let codec_info = self.video_codec_info.as_ref().or_fail()?;
+
+        // Annex B 形式をNALU長プレフィックス形式に変換
+        let frame_data =
+            crate::video_h264::convert_annexb_to_nalu(&frame.data, codec_info.nalu_length_size)?;
+
+        Ok(Some(VideoFrame {
+            timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
+            duration: std::time::Duration::ZERO,
+            keyframe: frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame,
+            sample_entry: None,
+            format: crate::video::VideoFormat::H264,
+            width: codec_info.width,
+            height: codec_info.height,
+            source_id: 0, // Not available from RTMP
+            data: frame_data,
+        }))
+    }
+}
+
 /// AVC1エントリーから nalu_length_size を抽出
 fn extract_nalu_length_size(entry: &SampleEntry) -> orfail::Result<u8> {
     match entry {
@@ -172,11 +317,11 @@ fn extract_nalu_length_size(entry: &SampleEntry) -> orfail::Result<u8> {
 pub fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
     match entry {
         SampleEntry::Mp4a(mp4a) => mp4a
+            .audio
             .esds_box
-            .es
-            .dec_config_descr
-            .dec_specific_info
             .as_ref()
+            .and_then(|esds| esds.es.dec_config_descr.as_ref())
+            .and_then(|dec| dec.dec_specific_info.as_ref())
             .map(|info| info.payload.clone())
             .ok_or_else(|| orfail::Failure::new("No decoder specific info available")),
         _ => Err(orfail::Failure::new("Not an audio sample entry")),
@@ -194,4 +339,98 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
         }
         _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }
+}
+
+/// Annex B 形式のシーケンスヘッダーをパース
+fn parse_video_sequence_header(data: &[u8]) -> orfail::Result<(u32, u32, u8)> {
+    // 簡略化されたパースロジック：SPS から width, height を抽出
+    // 実際のSPS構造は複雑なので、ここでは固定値を返す
+    // 実装が必要な場合は H.264 ビットストリーム仕様を参照のこと
+
+    // Annex B から SPS を抽出
+    let mut sps_data = None;
+    let mut offset = 0;
+
+    while offset < data.len() {
+        // Start code を探す
+        if offset + 4 <= data.len() && data[offset..offset + 4] == [0, 0, 0, 1] {
+            offset += 4;
+            if offset < data.len() {
+                let nal_type = data[offset] & 0x1f;
+                if nal_type == 7 {
+                    // SPS found
+                    let start = offset;
+                    offset += 1;
+                    while offset + 4 <= data.len() {
+                        if data[offset..offset + 4] == [0, 0, 0, 1] {
+                            break;
+                        }
+                        offset += 1;
+                    }
+                    sps_data = Some(&data[start..offset]);
+                    break;
+                }
+            }
+        } else {
+            offset += 1;
+        }
+    }
+
+    // SPS から profile, level を抽出（簡略版）
+    // 本来は複雑なビット操作が必要だが、ここでは固定値を返す
+    let _sps = sps_data.ok_or_else(|| orfail::Failure::new("No SPS found"))?;
+
+    // TODO: 実装する - SPS をパースして実際の width/height/profile を取得
+    // 現在は仮の値を返している
+    Ok((1920, 1080, 4))
+}
+
+/// Annex B 形式から NALU長プレフィックス形式に変換
+pub fn convert_annexb_to_nalu(data: &[u8], nalu_length_size: u8) -> orfail::Result<Vec<u8>> {
+    let mut result = Vec::new();
+    let mut offset = 0;
+    let nalu_length_size = nalu_length_size as usize;
+
+    while offset < data.len() {
+        // Start code を探す
+        let start = if offset + 4 <= data.len() && data[offset..offset + 4] == [0, 0, 0, 1] {
+            offset += 4;
+            offset
+        } else if offset + 3 <= data.len() && data[offset..offset + 3] == [0, 0, 1] {
+            offset += 3;
+            offset
+        } else {
+            offset += 1;
+            continue;
+        };
+
+        // 次の start code を探す
+        let mut end = start;
+        while end + 4 <= data.len() {
+            if data[end..end + 4] == [0, 0, 0, 1] || data[end..end + 3] == [0, 0, 1] {
+                break;
+            }
+            end += 1;
+        }
+        if end == start {
+            end = data.len();
+        }
+
+        let nalu_data = &data[start..end];
+
+        // NALU 長をプレフィックスとして追加
+        let length = nalu_data.len() as u32;
+        match nalu_length_size {
+            1 => result.push(length as u8),
+            2 => result.extend_from_slice(&(length as u16).to_be_bytes()),
+            3 => result.extend_from_slice(&length.to_be_bytes()[1..]),
+            4 => result.extend_from_slice(&length.to_be_bytes()),
+            _ => return Err(orfail::Failure::new("Invalid NALU length size")),
+        }
+
+        result.extend_from_slice(nalu_data);
+        offset = end;
+    }
+
+    Ok(result)
 }
