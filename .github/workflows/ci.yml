@@ -182,26 +182,6 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v6
 
-      - name: Display system information
-        run: |
-          echo "=== OS Information ==="
-          cat /etc/os-release
-          echo ""
-          echo "=== GCC Version ==="
-          gcc --version
-          echo ""
-          echo "=== GCC Architecture ==="
-          gcc -v 2>&1 | grep -E "^Target:|configure"
-          echo ""
-          echo "=== Glibc Version ==="
-          ldd --version
-          echo ""
-          echo "=== Libc Location ==="
-          find /lib* -name "libc.so.6" -o -name "libc.a" 2>/dev/null
-          echo ""
-          echo "=== Glibc Symbols Check ==="
-          nm -D /lib/*/libc.so.6 2>/dev/null | grep -E "__isoc23_sscanf|__isoc23_strtol" || echo "ISO C23 symbols not found"
-
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
