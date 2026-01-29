@@ -30,6 +30,8 @@
   - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.1.0 にあげる
   - @sile
+- [ADD] FDK-AAC を使った AAC デコードに対応する
+  - @sile
 - [ADD] macOS で Audio Toolbox を使った AAC デコードに対応する
   - @sile
 - [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
