@@ -141,7 +141,7 @@ pub fn resample(
     Some(output)
 }
 
-/// モノラルからステレオへ変換する
+// モノラルを複製してステレオに変換する
 pub fn mono_to_stereo(mono_samples: &[i16]) -> Vec<i16> {
     mono_samples
         .iter()
