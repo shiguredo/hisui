@@ -24,7 +24,7 @@ fn sync_channel_size() -> usize {
     let size = std::env::var("HISUI_SYNC_CHANNEL_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
+        .unwrap_or(500); // TODO: 暫定修正
     log::debug!("SYNC_CHANNEL_SIZE={size}");
     size
 }

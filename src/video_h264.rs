@@ -166,7 +166,7 @@ impl FlvAvcSequenceHeader {
             avcc_box: AvccBox {
                 sps_list: self.sps_list.clone(),
                 pps_list: self.pps_list.clone(),
-                avc_profile_indication: self.avc_profile_indication,
+                avc_profile_indication: H264_PROFILE_BASELINE, // TODO: 実際の値を使う (ただし profile によっては chroma format とかの指定が必要になる）: self.avc_profile_indication,
                 avc_level_indication: self.avc_level_indication,
                 profile_compatibility: self.profile_compatibility,
                 length_size_minus_one: Uint::new(self.length_size_minus_one),

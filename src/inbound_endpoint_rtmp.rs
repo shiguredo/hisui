@@ -107,20 +107,23 @@ impl MediaProcessor for RtmpInboundEndpoint {
     }
 
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        match self.rx.try_recv() {
-            Ok(sample) => {
-                let stream_id = match &sample {
-                    MediaSample::Audio(_) => self.output_audio_stream_id.or_fail()?,
-                    MediaSample::Video(_) => self.output_video_stream_id.or_fail()?,
-                };
-                Ok(MediaProcessorOutput::Processed { stream_id, sample })
-            }
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                // 特に入力を待っている訳ではないけど、現状では他に適切なものがないので awaiting_any() を返しておく
-                Ok(MediaProcessorOutput::awaiting_any())
-            }
-            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                Ok(MediaProcessorOutput::Finished)
+        loop {
+            match self.rx.try_recv() {
+                Ok(sample) => {
+                    let stream_id = match &sample {
+                        MediaSample::Audio(_) => self.output_audio_stream_id.or_fail()?,
+                        MediaSample::Video(_) => self.output_video_stream_id.or_fail()?,
+                    };
+                    return Ok(MediaProcessorOutput::Processed { stream_id, sample });
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    // 特に入力を待っている訳ではないけど、現状では他に適切なものがないので awaiting_any() を返しておく
+                    // TODO: Ok(MediaProcessorOutput::awaiting_any())
+                    std::thread::sleep(std::time::Duration::from_millis(10)); // TODO
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    return Ok(MediaProcessorOutput::Finished);
+                }
             }
         }
     }
