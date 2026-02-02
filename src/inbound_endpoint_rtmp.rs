@@ -67,7 +67,6 @@ impl RtmpInboundEndpoint {
 
         let stats_clone = stats.clone();
 
-        // TODO: 一時期に複数クライアントが存在しないようにする
         // TODO: 二回目のクライアントではタイムスタンプを調整する（オフセットを入れる）
         runtime.spawn(async move {
             let mut server = RtmpPublishServer {
@@ -188,6 +187,17 @@ impl RtmpPublishServer {
                     log::debug!("New RTMP client connection from: {peer_addr}");
 
                     let stats = self.stats.clone();
+
+                    // 他のクライアントがすでに接続済みかどうかをチェックする
+                    // （同じエンドポイントに一度に配信できるのは一人のみ）
+                    if stats.is_client_connected() {
+                        log::warn!(
+                            "Another client is already connected, rejecting new connection from {peer_addr}"
+                        );
+                        drop(stream);
+                        continue;
+                    }
+
                     let tx = self.tx.clone();
                     let expected_app = self.url.app.clone();
                     let expected_stream_name = self.url.stream_name.clone();
@@ -438,6 +448,13 @@ pub struct RtmpInboundEndpointStats {
     pub total_disconnected_clients: SharedAtomicCounter,
     pub total_error_disconnected_clients: SharedAtomicCounter,
     pub error: SharedAtomicFlag,
+}
+
+impl RtmpInboundEndpointStats {
+    /// クライアントが接続中かどうかを判定する
+    fn is_client_connected(&self) -> bool {
+        self.total_connected_clients.get() > self.total_disconnected_clients.get()
+    }
 }
 
 impl nojson::DisplayJson for RtmpInboundEndpointStats {
