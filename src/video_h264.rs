@@ -190,7 +190,7 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Ve
     let mut result = Vec::new();
 
     (length_size > 0 && length_size <= 4)
-        .or_fail_with(|()| format!("invalid NALU length size: {}", length_size))?;
+        .or_fail_with(|()| format!("invalid NALU length size: {length_size}"))?;
 
     for nalu in H264AnnexBNalUnits::new(data) {
         let nalu = nalu.or_fail()?;
@@ -198,10 +198,10 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Ve
         // サイズをバイト列に変換
         let size = nalu.data.len() as u32;
         let size_bytes = match length_size {
-            1 => vec![size as u8],
-            2 => (size as u16).to_be_bytes().to_vec(),
-            3 => [0, (size >> 16) as u8, (size >> 8) as u8, size as u8][1..].to_vec(),
-            4 => size.to_be_bytes().to_vec(),
+            1 => &[size as u8][..],
+            2 => &(size as u16).to_be_bytes()[..],
+            3 => &[0, (size >> 16) as u8, (size >> 8) as u8, size as u8][1..],
+            4 => &size.to_be_bytes()[..],
             _ => unreachable!(),
         };
 

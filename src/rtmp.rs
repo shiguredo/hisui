@@ -1,6 +1,8 @@
 use shiguredo_mp4::boxes::SampleEntry;
 use std::sync::Arc;
 
+use orfail::OrFail;
+
 use crate::{audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
 
 #[derive(Debug)]
@@ -131,7 +133,7 @@ impl RtmpOutgoingFrameHandler {
             None
         };
 
-        // 映像フレームデータをRTMP形式（AVC パケット形式）に処理
+        // 映像フレームデータをRTMP形式（AVC パケット形式）で処理
         let frame_data = match video.format {
             crate::video::VideoFormat::H264 => {
                 // MP4形式（NALUヘッダ付き）のデータはそのまま使用
@@ -200,9 +202,9 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
                 sps_list: avc1.avcc_box.sps_list.clone(),
                 pps_list: avc1.avcc_box.pps_list.clone(),
             };
-            avc_header.to_bytes().map_err(|e| {
-                orfail::Failure::new(format!("Failed to create AVC sequence header: {}", e))
-            })
+            avc_header
+                .to_bytes()
+                .or_fail_with(|e| format!("Failed to create AVC sequence header: {e}"))
         }
         _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }
