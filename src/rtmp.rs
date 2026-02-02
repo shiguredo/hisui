@@ -369,56 +369,6 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
     }
 }
 
-/// Annex B 形式から NALU長プレフィックス形式に変換
-pub fn convert_annexb_to_nalu(data: &[u8], nalu_length_size: u8) -> orfail::Result<Vec<u8>> {
-    let mut result = Vec::new();
-    let mut offset = 0;
-    let nalu_length_size = nalu_length_size as usize;
-
-    while offset < data.len() {
-        // Start code を探す
-        let start = if offset + 4 <= data.len() && data[offset..offset + 4] == [0, 0, 0, 1] {
-            offset += 4;
-            offset
-        } else if offset + 3 <= data.len() && data[offset..offset + 3] == [0, 0, 1] {
-            offset += 3;
-            offset
-        } else {
-            offset += 1;
-            continue;
-        };
-
-        // 次の start code を探す
-        let mut end = start;
-        while end + 4 <= data.len() {
-            if data[end..end + 4] == [0, 0, 0, 1] || data[end..end + 3] == [0, 0, 1] {
-                break;
-            }
-            end += 1;
-        }
-        if end == start {
-            end = data.len();
-        }
-
-        let nalu_data = &data[start..end];
-
-        // NALU 長をプレフィックスとして追加
-        let length = nalu_data.len() as u32;
-        match nalu_length_size {
-            1 => result.push(length as u8),
-            2 => result.extend_from_slice(&(length as u16).to_be_bytes()),
-            3 => result.extend_from_slice(&length.to_be_bytes()[1..]),
-            4 => result.extend_from_slice(&length.to_be_bytes()),
-            _ => return Err(orfail::Failure::new("Invalid NALU length size")),
-        }
-
-        result.extend_from_slice(nalu_data);
-        offset = end;
-    }
-
-    Ok(result)
-}
-
 /// AAC Audio Specific Config をパースしてサンプルレートとチャンネル数を取得
 fn parse_aac_audio_specific_config(data: &[u8]) -> orfail::Result<(u32, u8)> {
     (data.len() >= 2).or_fail()?;
