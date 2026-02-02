@@ -260,12 +260,10 @@ impl RtmpIncomingFrameHandler {
             let seq_header =
                 shiguredo_rtmp::AvcSequenceHeader::from_bytes(&frame.data).or_fail()?;
 
-            // SPS から実際の width, height を抽出
-            let (width, height) = if !seq_header.sps_list.is_empty() {
-                crate::video_h264::extract_dimensions_from_sps(&seq_header.sps_list[0])?
-            } else {
-                return Err(orfail::Failure::new("No SPS in sequence header"));
-            };
+            // いったん解像度は 0 扱いにしておく
+            // TODO: SPS から実際の width, height を抽出
+            let width = 0;
+            let height = 0;
 
             // SampleEntry を生成
             let sample_entry = avc_sequence_header_to_sample_entry(&seq_header, width, height)?;
