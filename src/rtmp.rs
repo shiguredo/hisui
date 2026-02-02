@@ -295,17 +295,10 @@ impl RtmpIncomingFrameHandler {
         self.stats.total_video_frame_count.increment();
 
         let sample_entry = self.video_sample_entry.as_ref().or_fail()?;
-        let nalu_length_size = self
-            .video_nalu_length_size
-            .ok_or_else(|| orfail::Failure::new("nalu_length_size not initialized"))?;
 
         // サンプルエントリーから寸法を取得
         let (width, height) =
             crate::video_h264::extract_video_dimensions(sample_entry).or_fail()?;
-
-        // TODO: RTMP は元々 annex b 形式ではないのでこの変換は不要
-        // Annex B 形式から NALU長プレフィックス形式に変換
-        let converted_data = convert_annexb_to_nalu(&frame.data, nalu_length_size)?;
 
         // 現在のタイムスタンプを計算
         let current_timestamp =
@@ -336,7 +329,7 @@ impl RtmpIncomingFrameHandler {
             width: width as usize,
             height: height as usize,
             source_id: None,
-            data: converted_data,
+            data: frame.data,
         }))
     }
 }
