@@ -122,8 +122,7 @@ impl MediaProcessor for RtmpInboundEndpoint {
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                     // 特に入力を待っている訳ではないけど、現状では他に適切なものがないので awaiting_any() を返しておく
-                    // TODO: Ok(MediaProcessorOutput::awaiting_any())
-                    std::thread::sleep(std::time::Duration::from_millis(10)); // TODO
+                    return Ok(MediaProcessorOutput::awaiting_any());
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                     return Ok(MediaProcessorOutput::Finished);

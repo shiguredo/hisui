@@ -27,7 +27,7 @@ fn sync_channel_size() -> usize {
         // NOTE: ここが小さいと mp4_writer の処理方法的にブロックすることがあるので大きめにしている。
         //       近い将来にそもそも今の scheduler.rs はなくなって tokio ベースに切り替わる予定なので、
         //       この暫定修正で問題ない。
-        .unwrap_or(100);
+        .unwrap_or(500);
     log::debug!("SYNC_CHANNEL_SIZE={size}");
     size
 }
