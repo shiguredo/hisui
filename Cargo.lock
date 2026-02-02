@@ -844,9 +844,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_rtmp"
-version = "2026.1.0-canary.4"
+version = "2026.1.0-canary.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7d061d0a89c9a745440ed07b435b16c64c1f8e927dd0c764ab336a9d96014be"
+checksum = "d4142bac693153ac233ed799c74043412cd01c6ecaaad62a2d3e94f2e00681e1"
 
 [[package]]
 name = "shiguredo_svt_av1"

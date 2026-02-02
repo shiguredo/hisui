@@ -1,6 +1,8 @@
 use shiguredo_mp4::boxes::SampleEntry;
 use std::sync::Arc;
 
+use orfail::OrFail;
+
 use crate::{audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
 
 #[derive(Debug)]
@@ -17,7 +19,7 @@ pub struct RtmpOutgoingFrameHandlerStats {
 pub struct RtmpOutgoingFrameHandler {
     video_sequence_header_data: Option<Vec<u8>>,
     audio_sequence_header_data: Option<Vec<u8>>,
-    video_nalu_length_size: Option<u8>,
+    video_nalu_length_size: u8,
     received_keyframe: bool,
     stats: RtmpOutgoingFrameHandlerStats,
 }
@@ -27,7 +29,7 @@ impl RtmpOutgoingFrameHandler {
         Self {
             video_sequence_header_data: None,
             audio_sequence_header_data: None,
-            video_nalu_length_size: None,
+            video_nalu_length_size: 4, // 後でちゃんとした値で更新されるが、最初は典型的な値を設定しておく
             received_keyframe: false,
             stats,
         }
@@ -107,9 +109,7 @@ impl RtmpOutgoingFrameHandler {
 
             if let Some(entry) = &video.sample_entry {
                 // サンプルエントリーから nalu_length_size を取得
-                if self.video_nalu_length_size.is_none() {
-                    self.video_nalu_length_size = Some(extract_nalu_length_size(entry)?);
-                }
+                self.video_nalu_length_size = extract_nalu_length_size(entry)?;
 
                 let seq_header_data = create_video_sequence_header(entry)?;
                 let frame = shiguredo_rtmp::VideoFrame {
@@ -131,15 +131,16 @@ impl RtmpOutgoingFrameHandler {
             None
         };
 
-        // 映像フレームデータを Annex B 形式に変換
+        // 映像フレームデータをRTMP形式（AVC 形式）で処理
         let frame_data = match video.format {
             crate::video::VideoFormat::H264 => {
-                let nalu_length_size = self
-                    .video_nalu_length_size
-                    .ok_or_else(|| orfail::Failure::new("nalu_length_size not initialized"))?;
-                crate::video_h264::convert_nalu_to_annexb(&video.data, nalu_length_size)?
+                // もともと AVC 形式の場合は変換は不要
+                video.data.clone()
             }
-            crate::video::VideoFormat::H264AnnexB => video.data.clone(),
+            crate::video::VideoFormat::H264AnnexB => {
+                // Annex B 形式（開始コード付き）から AVC 形式に変換が必要
+                crate::video_h264::convert_annexb_to_nalu(&video.data, self.video_nalu_length_size)?
+            }
             _ => return Err(orfail::Failure::new("unsupported video format")),
         };
 
@@ -186,11 +187,18 @@ pub fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
 pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
     match entry {
         SampleEntry::Avc1(avc1) => {
-            let sps_list = &avc1.avcc_box.sps_list;
-            let pps_list = &avc1.avcc_box.pps_list;
-            Ok(crate::video_h264::create_sequence_header_annexb(
-                sps_list, pps_list,
-            ))
+            // shiguredo_rtmp::AvcSequenceHeader を使用して生成
+            let avc_header = shiguredo_rtmp::AvcSequenceHeader {
+                avc_profile_indication: avc1.avcc_box.avc_profile_indication,
+                profile_compatibility: avc1.avcc_box.profile_compatibility,
+                avc_level_indication: avc1.avcc_box.avc_level_indication,
+                length_size_minus_one: avc1.avcc_box.length_size_minus_one.get(),
+                sps_list: avc1.avcc_box.sps_list.clone(),
+                pps_list: avc1.avcc_box.pps_list.clone(),
+            };
+            avc_header
+                .to_bytes()
+                .or_fail_with(|e| format!("Failed to create AVC sequence header: {e}"))
         }
         _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }

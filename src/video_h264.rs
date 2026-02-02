@@ -119,49 +119,6 @@ pub fn h264_sample_entry_from_annexb(
     }))
 }
 
-/// MP4 ファイルの H.264 映像フレームの形式を RTMP がサポートしている Annex B 形式に変換する
-pub fn convert_nalu_to_annexb(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
-    let mut result = Vec::new();
-    let mut offset = 0;
-    let length_size = length_size as usize;
-
-    (length_size > 0 && length_size <= 4)
-        .or_fail_with(|()| format!("invalid NALU length size: {}", length_size))?;
-
-    while offset < data.len() {
-        if offset + length_size > data.len() {
-            break;
-        }
-
-        // MP4 ファイル形式で H.264 の NALU 長を読み取る
-        let length = match length_size {
-            1 => data[offset] as usize,
-            2 => u16::from_be_bytes([data[offset], data[offset + 1]]) as usize,
-            3 => u32::from_be_bytes([0, data[offset], data[offset + 1], data[offset + 2]]) as usize,
-            4 => u32::from_be_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ]) as usize,
-            _ => unreachable!(),
-        };
-
-        offset += length_size;
-
-        (offset + length <= data.len())
-            .or_fail_with(|()| "NALU data exceeds buffer length".to_owned())?;
-
-        // Annex B の形式（先頭に固定の区切りバイト列が付与される）に変換する
-        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        result.extend_from_slice(&data[offset..offset + length]);
-
-        offset += length;
-    }
-
-    Ok(result)
-}
-
 /// H.264 のシーケンスヘッダを Annex B 形式で作成する
 ///
 /// SPS (Sequence Parameter Set) と PPS (Picture Parameter Set) を
@@ -183,4 +140,43 @@ pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>])
     }
 
     result
+}
+
+/// Annex.B 形式の H.264 を RTMP 用の AVC パケット形式（サイズ付き NALU）に変換
+pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
+    let mut result = Vec::new();
+
+    (length_size > 0 && length_size <= 4)
+        .or_fail_with(|()| format!("invalid NALU length size: {length_size}"))?;
+
+    for nalu in H264AnnexBNalUnits::new(data) {
+        let nalu = nalu.or_fail()?;
+
+        // サイズをバイト列に変換
+        let size_bytes = match length_size {
+            1 => {
+                let size = u8::try_from(nalu.data.len()).or_fail()?;
+                &[size][..]
+            }
+            2 => {
+                let size = u16::try_from(nalu.data.len()).or_fail()?;
+                &size.to_be_bytes()[..]
+            }
+            3 => {
+                let size = u32::try_from(nalu.data.len()).or_fail()?;
+                (size <= 0x00FF_FFFF).or_fail()?;
+                &[(size >> 16) as u8, (size >> 8) as u8, size as u8]
+            }
+            4 => {
+                let size = u32::try_from(nalu.data.len()).or_fail()?;
+                &size.to_be_bytes()[..]
+            }
+            _ => unreachable!(),
+        };
+
+        result.extend_from_slice(size_bytes);
+        result.extend_from_slice(nalu.data);
+    }
+
+    Ok(result)
 }
