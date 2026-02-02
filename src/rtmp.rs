@@ -177,7 +177,6 @@ pub struct RtmpIncomingFrameHandler {
     audio_codec_info: Option<AudioCodecInfo>,
     audio_sample_entry: Option<SampleEntry>,
     video_sample_entry: Option<SampleEntry>,
-    video_nalu_length_size: Option<u8>,
     received_video_keyframe: bool,
     stats: RtmpIncomingFrameHandlerStats,
     last_video_timestamp: Option<std::time::Duration>,
@@ -196,7 +195,6 @@ impl RtmpIncomingFrameHandler {
             audio_codec_info: None,
             audio_sample_entry: None,
             video_sample_entry: None,
-            video_nalu_length_size: None,
             received_video_keyframe: false,
             stats,
             last_video_timestamp: None,
@@ -271,9 +269,6 @@ impl RtmpIncomingFrameHandler {
 
             // SampleEntry を生成
             let sample_entry = avc_sequence_header_to_sample_entry(&seq_header, width, height)?;
-
-            // nalu_length_size を保存
-            self.video_nalu_length_size = Some(seq_header.length_size_minus_one + 1);
             self.video_sample_entry = Some(sample_entry);
 
             log::debug!("Received H.264 sequence header: {}x{}", width, height);
