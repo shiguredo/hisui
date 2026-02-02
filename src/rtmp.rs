@@ -180,6 +180,8 @@ pub struct RtmpIncomingFrameHandler {
     received_video_keyframe: bool,
     stats: RtmpIncomingFrameHandlerStats,
     last_video_timestamp: Option<std::time::Duration>,
+    rtmp_base_timestamp: Option<u32>,
+    timestamp_offset: std::time::Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -190,7 +192,10 @@ struct AudioCodecInfo {
 }
 
 impl RtmpIncomingFrameHandler {
-    pub fn new(stats: RtmpIncomingFrameHandlerStats) -> Self {
+    pub fn new(
+        timestamp_offset: std::time::Duration,
+        stats: RtmpIncomingFrameHandlerStats,
+    ) -> Self {
         Self {
             audio_codec_info: None,
             audio_sample_entry: None,
@@ -198,7 +203,26 @@ impl RtmpIncomingFrameHandler {
             received_video_keyframe: false,
             stats,
             last_video_timestamp: None,
+            rtmp_base_timestamp: None,
+            timestamp_offset,
         }
+    }
+
+    /// タイムスタンプを調整する
+    /// 計算式: `RTMP timestamp - RTMP base timestamp + offset timestamp`
+    fn adjust_timestamp(&mut self, rtmp_timestamp_ms: u64) -> u64 {
+        let rtmp_ts = rtmp_timestamp_ms as u32;
+
+        // 最初のタイムスタンプを基準値として記録
+        if self.rtmp_base_timestamp.is_none() {
+            self.rtmp_base_timestamp = Some(rtmp_ts);
+        }
+
+        let base = self.rtmp_base_timestamp.unwrap();
+        // RTMP timestamp - RTMP base timestamp + offset timestamp
+        let adjusted_ms =
+            (rtmp_ts as i64 - base as i64) as u64 + self.timestamp_offset.as_millis() as u64;
+        adjusted_ms
     }
 
     /// 受信した音声フレームを処理
@@ -233,10 +257,13 @@ impl RtmpIncomingFrameHandler {
 
         self.stats.total_audio_frame_count.increment();
 
+        // タイムスタンプを調整
+        let adjusted_timestamp_ms = self.adjust_timestamp(frame.timestamp.as_millis() as u64);
+
         let codec_info = self.audio_codec_info.as_ref().or_fail()?;
 
         Ok(AudioData {
-            timestamp: std::time::Duration::from_millis(frame.timestamp.as_millis() as u64),
+            timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
             sample_rate: codec_info.sample_rate as u16,
@@ -287,15 +314,16 @@ impl RtmpIncomingFrameHandler {
 
         self.stats.total_video_frame_count.increment();
 
+        // タイムスタンプを調整
+        let adjusted_timestamp_ms = self.adjust_timestamp(frame.timestamp.as_millis() as u64);
+        let current_timestamp = std::time::Duration::from_millis(adjusted_timestamp_ms);
+
+        // サンプルエントリーを処理
         let sample_entry = self.video_sample_entry.as_ref().or_fail()?;
 
         // サンプルエントリーから解像度を取得
         let (width, height) =
             crate::video_h264::extract_video_dimensions(sample_entry).or_fail()?;
-
-        // 現在のタイムスタンプを計算
-        let current_timestamp =
-            std::time::Duration::from_millis(frame.timestamp.as_millis() as u64);
 
         // durationを計算
         //

@@ -68,6 +68,11 @@ impl RtmpInboundEndpoint {
         let stats_clone = stats.clone();
 
         // TODO: 二回目のクライアントではタイムスタンプを調整する（オフセットを入れる）
+        // 二回目、というか以下の処理にする:
+        // - 1. RtmpPublishServer の起動時時刻を覚えておく => すでに start_time が存在するのでそれを使う
+        // - 2. 新しいクライアントの受け入れ時には、そこからの経過時刻をオフセットとして渡す
+        // - 3. 最初に受信した RTMP のメディアスタンプを起点として、以下の処理でタイムスタンプを調整する
+        //  - `RTMP timestamp - RTMP base timestamp + offset timestamp`
         runtime.spawn(async move {
             let mut server = RtmpPublishServer {
                 url: url.clone(),
@@ -200,6 +205,7 @@ impl RtmpPublishServer {
                     let expected_stream_name = self.url.stream_name.clone();
                     let tls_acceptor = tls_acceptor.clone();
 
+                    let timestamp_offset = start_time.elapsed();
                     tokio::spawn(async move {
                         let frame_handler_stats = crate::rtmp::RtmpIncomingFrameHandlerStats {
                             total_audio_frame_count: stats.total_audio_frame_count.clone(),
@@ -229,6 +235,7 @@ impl RtmpPublishServer {
                                     expected_app,
                                     expected_stream_name,
                                     frame_handler_stats,
+                                    timestamp_offset,
                                 );
 
                                 if let Err(e) = handler.run().await.or_fail() {
@@ -294,6 +301,7 @@ impl RtmpPublisherHandler {
         expected_app: String,
         expected_stream_name: String,
         frame_handler_stats: crate::rtmp::RtmpIncomingFrameHandlerStats,
+        timestamp_offset: std::time::Duration,
     ) -> Self {
         Self {
             stream,
@@ -303,7 +311,10 @@ impl RtmpPublisherHandler {
             stats,
             expected_app,
             expected_stream_name,
-            frame_handler: crate::rtmp::RtmpIncomingFrameHandler::new(frame_handler_stats),
+            frame_handler: crate::rtmp::RtmpIncomingFrameHandler::new(
+                timestamp_offset,
+                frame_handler_stats,
+            ),
         }
     }
 
