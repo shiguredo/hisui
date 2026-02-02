@@ -451,7 +451,6 @@ pub struct RtmpInboundEndpointStats {
 }
 
 impl RtmpInboundEndpointStats {
-    /// クライアントが接続中かどうかを判定する
     fn is_client_connected(&self) -> bool {
         self.total_connected_clients.get() > self.total_disconnected_clients.get()
     }
