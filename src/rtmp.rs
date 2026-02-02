@@ -298,6 +298,8 @@ impl RtmpIncomingFrameHandler {
             std::time::Duration::from_millis(frame.timestamp.as_millis() as u64);
 
         // durationを計算
+        //
+        // TODO: 将来的には VideoFrame 側で「duration が不明」を表現できるようにする
         let duration = if let Some(last_ts) = self.last_video_timestamp {
             if current_timestamp > last_ts {
                 current_timestamp - last_ts
