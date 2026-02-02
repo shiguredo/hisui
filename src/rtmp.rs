@@ -220,9 +220,7 @@ impl RtmpIncomingFrameHandler {
 
         let base = self.rtmp_base_timestamp.unwrap();
         // RTMP timestamp - RTMP base timestamp + offset timestamp
-        let adjusted_ms =
-            (rtmp_ts as i64 - base as i64) as u64 + self.timestamp_offset.as_millis() as u64;
-        adjusted_ms
+        (rtmp_ts as i64 - base as i64) as u64 + self.timestamp_offset.as_millis() as u64
     }
 
     /// 受信した音声フレームを処理
