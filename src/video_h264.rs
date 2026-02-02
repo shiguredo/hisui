@@ -119,49 +119,6 @@ pub fn h264_sample_entry_from_annexb(
     }))
 }
 
-/// MP4 ファイルの H.264 映像フレームの形式を RTMP がサポートしている Annex B 形式に変換する
-pub fn convert_nalu_to_annexb(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
-    let mut result = Vec::new();
-    let mut offset = 0;
-    let length_size = length_size as usize;
-
-    (length_size > 0 && length_size <= 4)
-        .or_fail_with(|()| format!("invalid NALU length size: {}", length_size))?;
-
-    while offset < data.len() {
-        if offset + length_size > data.len() {
-            break;
-        }
-
-        // MP4 ファイル形式で H.264 の NALU 長を読み取る
-        let length = match length_size {
-            1 => data[offset] as usize,
-            2 => u16::from_be_bytes([data[offset], data[offset + 1]]) as usize,
-            3 => u32::from_be_bytes([0, data[offset], data[offset + 1], data[offset + 2]]) as usize,
-            4 => u32::from_be_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ]) as usize,
-            _ => unreachable!(),
-        };
-
-        offset += length_size;
-
-        (offset + length <= data.len())
-            .or_fail_with(|()| "NALU data exceeds buffer length".to_owned())?;
-
-        // Annex B の形式（先頭に固定の区切りバイト列が付与される）に変換する
-        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        result.extend_from_slice(&data[offset..offset + length]);
-
-        offset += length;
-    }
-
-    Ok(result)
-}
-
 /// H.264 のシーケンスヘッダを Annex B 形式で作成する
 ///
 /// SPS (Sequence Parameter Set) と PPS (Picture Parameter Set) を
