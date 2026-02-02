@@ -19,7 +19,7 @@ pub struct RtmpOutgoingFrameHandlerStats {
 pub struct RtmpOutgoingFrameHandler {
     video_sequence_header_data: Option<Vec<u8>>,
     audio_sequence_header_data: Option<Vec<u8>>,
-    video_nalu_length_size: Option<u8>,
+    video_nalu_length_size: u8,
     received_keyframe: bool,
     stats: RtmpOutgoingFrameHandlerStats,
 }
@@ -29,7 +29,7 @@ impl RtmpOutgoingFrameHandler {
         Self {
             video_sequence_header_data: None,
             audio_sequence_header_data: None,
-            video_nalu_length_size: None,
+            video_nalu_length_size: 4, // 後でちゃんとした値で更新されるが、最初は典型的な値を設定しておく
             received_keyframe: false,
             stats,
         }
@@ -109,9 +109,7 @@ impl RtmpOutgoingFrameHandler {
 
             if let Some(entry) = &video.sample_entry {
                 // サンプルエントリーから nalu_length_size を取得
-                if self.video_nalu_length_size.is_none() {
-                    self.video_nalu_length_size = Some(extract_nalu_length_size(entry)?);
-                }
+                self.video_nalu_length_size = extract_nalu_length_size(entry)?;
 
                 let seq_header_data = create_video_sequence_header(entry)?;
                 let frame = shiguredo_rtmp::VideoFrame {
@@ -133,19 +131,15 @@ impl RtmpOutgoingFrameHandler {
             None
         };
 
-        // 映像フレームデータをRTMP形式（AVC パケット形式）で処理
+        // 映像フレームデータをRTMP形式（AVC 形式）で処理
         let frame_data = match video.format {
             crate::video::VideoFormat::H264 => {
-                // MP4形式（NALUヘッダ付き）のデータはそのまま使用
-                // RTMPではAVC形式（サイズ付きNALU）で送信
+                // もともと AVC 形式の場合は変換は不要
                 video.data.clone()
             }
             crate::video::VideoFormat::H264AnnexB => {
-                // Annex B形式（開始コード付き）からAVC形式に変換が必要
-                let nalu_length_size = self
-                    .video_nalu_length_size
-                    .ok_or_else(|| orfail::Failure::new("nalu_length_size not initialized"))?;
-                crate::video_h264::convert_annexb_to_nalu(&video.data, nalu_length_size)?
+                // Annex B 形式（開始コード付き）から AVC 形式に変換が必要
+                crate::video_h264::convert_annexb_to_nalu(&video.data, self.video_nalu_length_size)?
             }
             _ => return Err(orfail::Failure::new("unsupported video format")),
         };

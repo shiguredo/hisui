@@ -196,12 +196,24 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Ve
         let nalu = nalu.or_fail()?;
 
         // サイズをバイト列に変換
-        let size = nalu.data.len() as u32;
         let size_bytes = match length_size {
-            1 => &[size as u8][..],
-            2 => &(size as u16).to_be_bytes()[..],
-            3 => &[0, (size >> 16) as u8, (size >> 8) as u8, size as u8][1..],
-            4 => &size.to_be_bytes()[..],
+            1 => {
+                let size = u8::try_from(nalu.data.len()).or_fail()?;
+                &[size][..]
+            }
+            2 => {
+                let size = u16::try_from(nalu.data.len()).or_fail()?;
+                &size.to_be_bytes()[..]
+            }
+            3 => {
+                let size = u32::try_from(nalu.data.len()).or_fail()?;
+                (size <= 0x00FF_FFFF).or_fail()?;
+                &[(size >> 16) as u8, (size >> 8) as u8, size as u8]
+            }
+            4 => {
+                let size = u32::try_from(nalu.data.len()).or_fail()?;
+                &size.to_be_bytes()[..]
+            }
             _ => unreachable!(),
         };
 
