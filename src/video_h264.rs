@@ -184,3 +184,30 @@ pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>])
 
     result
 }
+
+/// Annex.B 形式の H.264 を RTMP 用の AVC パケット形式（サイズ付き NALU）に変換
+pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
+    let mut result = Vec::new();
+
+    (length_size > 0 && length_size <= 4)
+        .or_fail_with(|()| format!("invalid NALU length size: {}", length_size))?;
+
+    for nalu in H264AnnexBNalUnits::new(data) {
+        let nalu = nalu.or_fail()?;
+
+        // サイズをバイト列に変換
+        let size = nalu.data.len() as u32;
+        let size_bytes = match length_size {
+            1 => vec![size as u8],
+            2 => (size as u16).to_be_bytes().to_vec(),
+            3 => [0, (size >> 16) as u8, (size >> 8) as u8, size as u8][1..].to_vec(),
+            4 => size.to_be_bytes().to_vec(),
+            _ => unreachable!(),
+        };
+
+        result.extend_from_slice(&size_bytes);
+        result.extend_from_slice(nalu.data);
+    }
+
+    Ok(result)
+}

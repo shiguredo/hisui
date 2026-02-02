@@ -131,15 +131,20 @@ impl RtmpOutgoingFrameHandler {
             None
         };
 
-        // 映像フレームデータを Annex B 形式に変換
+        // 映像フレームデータをRTMP形式（AVC パケット形式）に処理
         let frame_data = match video.format {
             crate::video::VideoFormat::H264 => {
+                // MP4形式（NALUヘッダ付き）のデータはそのまま使用
+                // RTMPではAVC形式（サイズ付きNALU）で送信
+                video.data.clone()
+            }
+            crate::video::VideoFormat::H264AnnexB => {
+                // Annex B形式（開始コード付き）からAVC形式に変換が必要
                 let nalu_length_size = self
                     .video_nalu_length_size
                     .ok_or_else(|| orfail::Failure::new("nalu_length_size not initialized"))?;
-                crate::video_h264::convert_nalu_to_annexb(&video.data, nalu_length_size)?
+                crate::video_h264::convert_annexb_to_nalu(&video.data, nalu_length_size)?
             }
-            crate::video::VideoFormat::H264AnnexB => video.data.clone(),
             _ => return Err(orfail::Failure::new("unsupported video format")),
         };
 
@@ -186,11 +191,18 @@ pub fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
 pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
     match entry {
         SampleEntry::Avc1(avc1) => {
-            let sps_list = &avc1.avcc_box.sps_list;
-            let pps_list = &avc1.avcc_box.pps_list;
-            Ok(crate::video_h264::create_sequence_header_annexb(
-                sps_list, pps_list,
-            ))
+            // shiguredo_rtmp::AvcSequenceHeader を使用して生成
+            let avc_header = shiguredo_rtmp::AvcSequenceHeader {
+                avc_profile_indication: avc1.avcc_box.avc_profile_indication,
+                profile_compatibility: avc1.avcc_box.profile_compatibility,
+                avc_level_indication: avc1.avcc_box.avc_level_indication,
+                length_size_minus_one: avc1.avcc_box.length_size_minus_one.get(),
+                sps_list: avc1.avcc_box.sps_list.clone(),
+                pps_list: avc1.avcc_box.pps_list.clone(),
+            };
+            avc_header.to_bytes().map_err(|e| {
+                orfail::Failure::new(format!("Failed to create AVC sequence header: {}", e))
+            })
         }
         _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
     }
