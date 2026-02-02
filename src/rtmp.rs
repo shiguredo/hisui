@@ -289,7 +289,7 @@ impl RtmpIncomingFrameHandler {
 
         let sample_entry = self.video_sample_entry.as_ref().or_fail()?;
 
-        // サンプルエントリーから寸法を取得
+        // サンプルエントリーから解像度を取得
         let (width, height) =
             crate::video_h264::extract_video_dimensions(sample_entry).or_fail()?;
 
