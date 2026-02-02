@@ -258,8 +258,9 @@ impl RtmpIncomingFrameHandler {
         if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::SequenceHeader) {
             self.stats.total_video_sequence_header_count.increment();
 
-            // FLV の AVCDecoderConfigurationRecord をパース
-            let seq_header = crate::video_h264::FlvAvcSequenceHeader::from_bytes(&frame.data)?;
+            // Use shiguredo_rtmp::AvcSequenceHeader directly
+            let seq_header =
+                shiguredo_rtmp::AvcSequenceHeader::from_bytes(&frame.data).or_fail()?;
 
             // SPS から実際の width, height を抽出
             let (width, height) = if !seq_header.sps_list.is_empty() {
@@ -269,7 +270,7 @@ impl RtmpIncomingFrameHandler {
             };
 
             // SampleEntry を生成
-            let sample_entry = seq_header.to_sample_entry(width, height)?;
+            let sample_entry = avc_sequence_header_to_sample_entry(&seq_header, width, height)?;
 
             // nalu_length_size を保存
             self.video_nalu_length_size = Some(seq_header.length_size_minus_one + 1);
@@ -302,6 +303,7 @@ impl RtmpIncomingFrameHandler {
         let (width, height) =
             crate::video_h264::extract_video_dimensions(sample_entry).or_fail()?;
 
+        // TODO: RTMP は元々 annex b 形式ではないのでこの変換は不要
         // Annex B 形式から NALU長プレフィックス形式に変換
         let converted_data = convert_annexb_to_nalu(&frame.data, nalu_length_size)?;
 
@@ -521,6 +523,32 @@ fn create_audio_sample_entry(
                 },
                 sl_config_descr: shiguredo_mp4::descriptors::SlConfigDescriptor,
             },
+        },
+        unknown_boxes: Vec::new(),
+    }))
+}
+
+/// AvcSequenceHeader から SampleEntry を生成（RTMP 受信用）
+fn avc_sequence_header_to_sample_entry(
+    seq_header: &shiguredo_rtmp::AvcSequenceHeader,
+    width: usize,
+    height: usize,
+) -> orfail::Result<SampleEntry> {
+    use shiguredo_mp4::{Uint, boxes::Avc1Box, boxes::AvccBox};
+
+    Ok(SampleEntry::Avc1(Avc1Box {
+        visual: crate::video::sample_entry_visual_fields(width, height),
+        avcc_box: AvccBox {
+            sps_list: seq_header.sps_list.clone(),
+            pps_list: seq_header.pps_list.clone(),
+            avc_profile_indication: seq_header.avc_profile_indication,
+            avc_level_indication: seq_header.avc_level_indication,
+            profile_compatibility: seq_header.profile_compatibility,
+            length_size_minus_one: Uint::new(seq_header.length_size_minus_one),
+            chroma_format: None,
+            bit_depth_luma_minus8: None,
+            bit_depth_chroma_minus8: None,
+            sps_ext_list: Vec::new(),
         },
         unknown_boxes: Vec::new(),
     }))
