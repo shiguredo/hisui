@@ -205,7 +205,7 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Ve
             _ => unreachable!(),
         };
 
-        result.extend_from_slice(&size_bytes);
+        result.extend_from_slice(size_bytes);
         result.extend_from_slice(nalu.data);
     }
 
