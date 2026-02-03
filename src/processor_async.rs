@@ -56,8 +56,16 @@ impl ProcessorManagerHandle {
 }
 
 #[derive(Debug)]
+struct TrackState {
+    publisher: ProcessorId,
+    subscribers: std::collections::HashSet<ProcessorId>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Debug)]
 struct ProcessorManagerRunner {
     processors: std::collections::HashMap<ProcessorId, u64>, // value=seqno
+    tracks: std::collections::HashMap<TrackId, TrackState>,
     handle: ProcessorManagerHandle,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
     processor_seqno: u64,
@@ -70,6 +78,7 @@ impl ProcessorManagerRunner {
     ) -> Self {
         Self {
             processors: std::collections::HashMap::new(),
+            tracks: std::collections::HashMap::new(),
             handle: ProcessorManagerHandle { command_tx },
             command_rx,
             processor_seqno: 0,
@@ -96,6 +105,13 @@ impl ProcessorManagerRunner {
                 }
                 Command::DeregisterProcessor { processor_id } => {
                     self.processors.remove(&processor_id);
+                }
+                Command::PublishTrack {
+                    processor_id,
+                    track_id,
+                    reply_tx,
+                } => {
+                    todo!()
                 }
             }
         }
@@ -142,6 +158,13 @@ impl ProcessorManagerRunner {
 }
 
 #[derive(Debug)]
+pub struct TrackPublishHandle {
+    inner: ProcessorManagerHandle,
+    processor_id: ProcessorId,
+    track_id: TrackId,
+}
+
+#[derive(Debug)]
 pub struct ProcessorHandle {
     inner: ProcessorManagerHandle,
     processor_id: ProcessorId,
@@ -153,8 +176,15 @@ impl ProcessorHandle {
         &self.processor_id
     }
 
-    pub fn publish_track(&self, _track_id: TrackId) {
-        //
+    pub async fn publish_track(&self, track_id: TrackId) -> Option<TrackPublishHandle> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let command = Command::PublishTrack {
+            processor_id: self.processor_id.clone(),
+            track_id,
+            reply_tx,
+        };
+        self.inner.send(command);
+        reply_rx.await.unwrap_or(None)
     }
 }
 
@@ -179,12 +209,14 @@ enum Command {
     },
     DeregisterProcessor {
         processor_id: ProcessorId,
-        //processor_seqno: u64,
+        // processor_seqno: u64,
     },
-    /*PublishTrack {
+    PublishTrack {
+        processor_id: ProcessorId,
         track_id: TrackId,
+        reply_tx: tokio::sync::oneshot::Sender<Option<TrackPublishHandle>>,
     },
-    UnpublishTrack {
+    /*UnpublishTrack {
         track_id: TrackId,
     },*/
 }
@@ -208,7 +240,7 @@ pub struct JsonRpcRequest(pub nojson::RawJsonOwned);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProcessorId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TrackId;
 
 #[derive(Debug)]
