@@ -1,26 +1,17 @@
 #![expect(dead_code)]
 
 #[derive(Debug)]
-pub struct ProcessorManager {
-    // [NOTE]
-    // 今は一つだけだが、将来的には特殊用途向け（e.g., CPU ヘビーなエンコード処理など）に
-    // 専用のランタイムを追加する可能性があるため、それを意識した名前となっている
-    default_runtime_handle: tokio::runtime::Handle,
-}
+pub struct ProcessorManager {}
 
 impl ProcessorManager {
-    pub fn new(default_runtime_handle: tokio::runtime::Handle) -> Self {
-        Self {
-            default_runtime_handle,
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 
     pub fn start(self) -> ProcessorManagerHandle {
-        let handle = self.default_runtime_handle.clone();
-
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
-        let runner = ProcessorManagerRunner::new(command_tx.clone(), command_rx, handle.clone());
-        handle.spawn(runner.run());
+        let runner = ProcessorManagerRunner::new(command_tx.clone(), command_rx);
+        tokio::task::spawn(runner.run());
 
         ProcessorManagerHandle { command_tx }
     }
@@ -64,20 +55,17 @@ struct ProcessorManagerRunner {
     processors: std::collections::HashMap<ProcessorId, ()>,
     command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
-    default_runtime_handle: tokio::runtime::Handle,
 }
 
 impl ProcessorManagerRunner {
     fn new(
         command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
         command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
-        default_runtime_handle: tokio::runtime::Handle,
     ) -> Self {
         Self {
             processors: std::collections::HashMap::new(),
             command_tx,
             command_rx,
-            default_runtime_handle,
         }
     }
 
@@ -112,7 +100,7 @@ impl ProcessorManagerRunner {
         }
 
         let command_tx = self.command_tx.clone();
-        self.default_runtime_handle.spawn(async move {
+        tokio::task::spawn(async move {
             if let Err(_e) = future.0.await {
                 todo!("error handling");
             }
@@ -142,6 +130,10 @@ enum Command {
         future: ProcessorFuture,
         reply_tx: tokio::sync::oneshot::Sender<bool>,
     },
+    /*RegisterProcessor {
+        name: String,
+        reply_tx: tokio::sync::oneshot::Sender<bool>,
+    },*/
     NotifyProcessorFinish {
         processor_id: ProcessorId,
     },
