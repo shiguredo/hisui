@@ -14,7 +14,6 @@ use crate::media::{MediaStreamName, MediaStreamNameRegistry};
 use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
 use crate::mixer_audio::AudioMixer;
 use crate::mixer_video::{VideoMixer, VideoMixerSpec};
-use crate::plugin::PluginCommand;
 use crate::processor::{BoxedMediaProcessor, RealtimePacer};
 use crate::reader::{AudioReader, VideoReader};
 use crate::types::{CodecName, EvenUsize, TimeOffset};
@@ -74,7 +73,6 @@ pub enum PipelineComponent {
         input_stream: Vec<MediaStreamName>,
         output_file: PathBuf,
     },
-    PluginCommand(PluginCommand),
     RealtimePacer {
         input_stream: Vec<MediaStreamName>,
         output_stream: Vec<MediaStreamName>,
@@ -296,10 +294,6 @@ impl PipelineComponent {
 
                 Ok(BoxedMediaProcessor::new(processor))
             }
-            Self::PluginCommand(plugin) => {
-                let processor = plugin.start(registry).or_fail()?;
-                Ok(BoxedMediaProcessor::new(processor))
-            }
             Self::RealtimePacer {
                 input_stream,
                 output_stream,
@@ -369,7 +363,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PipelineCompone
                 input_stream: obj.get_required("input_stream")?,
                 output_file: obj.get_required("output_file")?,
             }),
-            "plugin_command" => PluginCommand::try_from(value).map(Self::PluginCommand),
             "realtime_pacer" => Ok(Self::RealtimePacer {
                 input_stream: obj.get_required("input_stream")?,
                 output_stream: obj.get_required("output_stream")?,

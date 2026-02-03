@@ -53,7 +53,6 @@ pub mod mixer_video;
 pub mod optuna;
 pub mod outbound_endpoint_rtmp;
 pub mod pipeline;
-pub mod plugin;
 pub mod processor;
 pub mod publisher_rtmp;
 pub mod reader;
