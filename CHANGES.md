@@ -69,6 +69,9 @@
   - @voluntas
 - [ADD] python/tests に Hisui Python バインディングのテストコードを追加する
   - @voluntas
+- [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
+  - 内部的な PoC 目的の機能だったが、不要となったので削除する
+  - @sile
 
 ## 2025.3.1
 
