@@ -57,7 +57,7 @@ impl ProcessorManagerHandle {
 
 #[derive(Debug)]
 struct ProcessorManagerRunner {
-    processors: std::collections::HashMap<ProcessorId, ()>,
+    processors: std::collections::HashMap<ProcessorId, u64>, // value=seqno
     handle: ProcessorManagerHandle,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
     processor_seqno: u64,
@@ -94,7 +94,7 @@ impl ProcessorManagerRunner {
                     let result = self.handle_register_processor(processor_id);
                     let _ = reply_tx.send(result);
                 }
-                Command::NotifyProcessorFinish { processor_id } => {
+                Command::DeregisterProcessor { processor_id } => {
                     self.processors.remove(&processor_id);
                 }
             }
@@ -113,12 +113,10 @@ impl ProcessorManagerRunner {
             return false;
         }
 
-        let command_tx = self.handle.command_tx.clone();
         tokio::task::spawn(async move {
             if let Err(_e) = future.0.await {
                 todo!("error handling");
             }
-            let _ = command_tx.send(Command::NotifyProcessorFinish { processor_id });
         });
 
         true
@@ -129,10 +127,11 @@ impl ProcessorManagerRunner {
             return None;
         }
 
-        self.processors.insert(processor_id.clone(), ());
-
         let processor_seqno = self.processor_seqno;
         self.processor_seqno += 1;
+
+        self.processors
+            .insert(processor_id.clone(), processor_seqno);
 
         Some(ProcessorHandle {
             inner: self.handle.clone(),
@@ -142,16 +141,24 @@ impl ProcessorManagerRunner {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProcessorHandle {
     inner: ProcessorManagerHandle,
     processor_id: ProcessorId,
-    processor_seqno: u64,
+    processor_seqno: u64, // TDOO: 不要かも
 }
 
 impl ProcessorHandle {
     pub fn processor_id(&self) -> &ProcessorId {
         &self.processor_id
+    }
+}
+
+impl Drop for ProcessorHandle {
+    fn drop(&mut self) {
+        self.inner.send(Command::DeregisterProcessor {
+            processor_id: self.processor_id.clone(),
+        });
     }
 }
 
@@ -166,8 +173,9 @@ enum Command {
         processor_id: ProcessorId,
         reply_tx: tokio::sync::oneshot::Sender<Option<ProcessorHandle>>,
     },
-    NotifyProcessorFinish {
+    DeregisterProcessor {
         processor_id: ProcessorId,
+        //processor_seqno: u64,
     },
     /*PublishTrack {
         track_id: TrackId,
