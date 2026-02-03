@@ -39,6 +39,7 @@ pub mod encoder_svt_av1_params;
 pub mod encoder_video_toolbox;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox_params;
+pub mod inbound_endpoint_rtmp;
 pub mod json;
 pub mod layout;
 pub mod layout_decode_params;
@@ -65,6 +66,7 @@ pub mod subcommand_compose;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
 pub mod subcommand_pipeline;
+pub mod subcommand_rtmp_inbound_endpoint;
 pub mod subcommand_rtmp_outbound_endpoint;
 pub mod subcommand_rtmp_publish;
 pub mod subcommand_tune;
