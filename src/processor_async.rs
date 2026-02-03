@@ -1,19 +1,58 @@
-pub trait AsyncProcessor {
-    //
+#[derive(Debug)]
+pub struct ProcessorManager {
+    // [NOTE]
+    // 今は一つだけだが、将来的には特殊用途向け（e.g., CPU ヘビーなエンコード処理など）に
+    // 専用のランタイムを追加する可能性があるため、それを意識した名前となっている
+    default_runtime_handle: tokio::runtime::Handle,
+}
+
+impl ProcessorManager {
+    pub fn new(default_runtime_handle: tokio::runtime::Handle) -> Self {
+        Self {
+            default_runtime_handle,
+        }
+    }
+
+    pub fn start(self) -> ProcessorManagerHandle {
+        let handle = self.default_runtime_handle.clone();
+
+        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let runner = ProcessorManagerRunner { command_rx };
+        handle.spawn(runner.run());
+
+        ProcessorManagerHandle { command_tx }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProcessorManagerHandle {
+    command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
+}
+
+impl ProcessorManagerHandle {
+    pub fn hello(&self) {
+        self.send(Command::Hello);
+    }
+
+    fn send(&self, command: Command) {
+        let _ = self.command_tx.send(command);
+    }
 }
 
 #[derive(Debug)]
-pub struct AsyncProcessorChannel {}
+struct ProcessorManagerRunner {
+    command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
+}
 
-impl AsyncProcessorChannel {
-    /// プロセッサに対する RPC 呼び出しを行う
-    pub fn invoke_rpc(&self, _req: JsonRpcRequest) {}
+impl ProcessorManagerRunner {
+    async fn run(mut self) {
+        while self.command_rx.recv().await.is_some() {}
+    }
+}
 
-    /// 次のプロセッサ群にメディアフレームを伝える
-    pub fn send_frame(&self, _frame: ()) {}
-
-    /// 前のプロセッサにフィードバック情報を伝える
-    pub fn send_feedback(&self, _feedback: ()) {}
+#[derive(Debug)]
+enum Command {
+    Hello,
 }
 
 #[derive(Debug)]
