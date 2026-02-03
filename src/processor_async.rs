@@ -42,9 +42,9 @@ impl ChannelSender {
 
     pub fn unpublish_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
 
-    pub fn send_output(&mut self, _frame: ()) {}
+    pub fn send_output(&mut self, _tid: TrackId, _frame: ()) {}
 
-    pub fn send_feedback(&mut self, _feedback: ()) {}
+    pub fn send_feedback(&mut self, _tid: TrackId, _feedback: ()) {}
 }
 
 #[derive(Debug)]
@@ -66,7 +66,23 @@ impl ChannelReceiver {
 
 #[derive(Debug)]
 pub enum Recv {
-    MediaFrame,
-    Feedback,
-    Rpc { from: (), data: () },
+    MediaFrame {
+        pid: ProcessorId,
+        tid: TrackId,
+        data: (),
+    },
+    Feedback {
+        pid: ProcessorId,
+        tid: TrackId,
+        data: Feedback,
+    },
+    Rpc {
+        from: (),
+        data: (),
+    },
+}
+
+#[derive(Debug)]
+pub enum Feedback {
+    KeyFrameRequired,
 }
