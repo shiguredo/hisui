@@ -33,7 +33,7 @@ impl ProcessorManagerHandle {
     // ID が衝突した場合は false が返される
     pub async fn spawn_processor<F>(&self, processor_id: ProcessorId, future: F) -> bool
     where
-        F: Future<Output = Result<(), ProcessorError>> + Send + 'static,
+        F: Future<Output = Result<(), ProcessorError>> + Send + Unpin + 'static,
     {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::SpawnProcessor {
@@ -83,7 +83,9 @@ impl ProcessorManagerRunner {
                     let result = self.handle_spawn_processor(processor_id, future);
                     let _ = reply_tx.send(result);
                 }
-                Command::NotifyProcessorFinish { processor_id } => {}
+                Command::NotifyProcessorFinish { processor_id } => {
+                    self.processors.remove(&processor_id);
+                }
             }
         }
 
@@ -100,7 +102,13 @@ impl ProcessorManagerRunner {
             return false;
         }
 
-        self.default_runtime_handle.spawn(future.0);
+        let command_tx = self.command_tx.clone();
+        self.default_runtime_handle.spawn(async move {
+            if let Err(_e) = future.0.await {
+                todo!("error handling");
+            }
+            let _ = command_tx.send(Command::NotifyProcessorFinish { processor_id });
+        });
 
         true
     }
@@ -118,7 +126,9 @@ enum Command {
     },
 }
 
-pub struct ProcessorFuture(Box<dyn Future<Output = Result<(), ProcessorError>> + Send + 'static>);
+pub struct ProcessorFuture(
+    Box<dyn Future<Output = Result<(), ProcessorError>> + Send + Unpin + 'static>,
+);
 
 impl std::fmt::Debug for ProcessorFuture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
