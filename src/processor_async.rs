@@ -31,14 +31,21 @@ pub struct ProcessorManagerHandle {
 
 impl ProcessorManagerHandle {
     // ID が衝突した場合は false が返される
-    pub async fn spawn_processor<F>(&self, processor_id: ProcessorId, future: F) -> bool
+    //
+    // TODO: ここで統計構造体を登録できてもいいかも
+    pub async fn spawn_processor<F, Fut>(&self, processor_id: ProcessorId, f: F) -> bool
     where
-        F: Future<Output = Result<(), ProcessorError>> + Send + Unpin + 'static,
+        F: FnOnce(ProcessorHandle) -> Fut,
+        Fut: Future<Output = Result<(), ProcessorError>> + Send + Unpin + 'static,
     {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let handle = ProcessorHandle {
+            inner: self.clone(),
+            processor_id: processor_id.clone(),
+        };
         let command = Command::SpawnProcessor {
             processor_id,
-            future: ProcessorFuture(Box::new(future)),
+            future: ProcessorFuture(Box::new(f(handle))),
             reply_tx,
         };
         self.send(command);
@@ -114,6 +121,18 @@ impl ProcessorManagerRunner {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ProcessorHandle {
+    inner: ProcessorManagerHandle,
+    processor_id: ProcessorId,
+}
+
+impl ProcessorHandle {
+    pub fn processor_id(&self) -> &ProcessorId {
+        &self.processor_id
+    }
+}
+
 #[derive(Debug)]
 enum Command {
     SpawnProcessor {
@@ -124,6 +143,12 @@ enum Command {
     NotifyProcessorFinish {
         processor_id: ProcessorId,
     },
+    /*PublishTrack {
+        track_id: TrackId,
+    },
+    UnpublishTrack {
+        track_id: TrackId,
+    },*/
 }
 
 pub struct ProcessorFuture(
