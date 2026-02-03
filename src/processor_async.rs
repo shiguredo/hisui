@@ -32,13 +32,18 @@ impl ChannelRegistry {
     pub fn register(&mut self, _pid: ProcessorId) -> Option<(ChannelSender, ChannelReceiver)> {
         todo!()
     }
+
+    // list_tracks(), list_processors()
 }
+
+#[derive(Debug)]
+pub struct TrackInfo {}
 
 #[derive(Debug)]
 pub struct ChannelSender {}
 
 impl ChannelSender {
-    pub fn publish_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
+    pub fn publish_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId, _info: TrackInfo) {}
 
     pub fn unpublish_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
 
@@ -48,12 +53,29 @@ impl ChannelSender {
 }
 
 #[derive(Debug)]
+pub struct SubscribeOptions {
+    pub channel_size: usize,
+}
+
+#[derive(Debug)]
 pub struct ChannelReceiver {}
 
 impl ChannelReceiver {
-    pub fn subscribe_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
+    pub fn subscribe_track(
+        &mut self,
+        _reg: &ChannelRegistry,
+        _tid: TrackId,
+        _options: SubscribeOptions,
+    ) {
+    }
 
-    pub fn subscribe_processor(&mut self, _reg: &ChannelRegistry, _pid: ProcessorId) {}
+    pub fn subscribe_processor(
+        &mut self,
+        _reg: &ChannelRegistry,
+        _pid: ProcessorId,
+        _options: SubscribeOptions,
+    ) {
+    }
 
     pub fn unsubscribe_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
 
