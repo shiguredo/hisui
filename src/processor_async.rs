@@ -1,3 +1,5 @@
+#![expect(dead_code)]
+
 #[derive(Debug)]
 pub struct ProcessorManager {
     // [NOTE]
