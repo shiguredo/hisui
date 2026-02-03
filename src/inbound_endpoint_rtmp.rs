@@ -67,12 +67,6 @@ impl RtmpInboundEndpoint {
 
         let stats_clone = stats.clone();
 
-        // TODO: 二回目のクライアントではタイムスタンプを調整する（オフセットを入れる）
-        // 二回目、というか以下の処理にする:
-        // - 1. RtmpPublishServer の起動時時刻を覚えておく => すでに start_time が存在するのでそれを使う
-        // - 2. 新しいクライアントの受け入れ時には、そこからの経過時刻をオフセットとして渡す
-        // - 3. 最初に受信した RTMP のメディアスタンプを起点として、以下の処理でタイムスタンプを調整する
-        //  - `RTMP timestamp - RTMP base timestamp + offset timestamp`
         runtime.spawn(async move {
             let mut server = RtmpPublishServer {
                 url: url.clone(),
