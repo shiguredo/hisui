@@ -30,8 +30,15 @@ pub struct ProcessorManagerHandle {
 }
 
 impl ProcessorManagerHandle {
-    pub fn hello(&self) {
-        self.send(Command::Hello);
+    pub fn spawn_processor<F>(&self, processor_id: ProcessorId, future: F)
+    where
+        F: Future<Output = Result<(), ProcessorError>> + Send + 'static,
+    {
+        let command = Command::SpawnProcessor {
+            processor_id,
+            future: ProcessorFuture(Box::new(future)),
+        };
+        self.send(command);
     }
 
     fn send(&self, command: Command) {
@@ -46,14 +53,42 @@ struct ProcessorManagerRunner {
 
 impl ProcessorManagerRunner {
     async fn run(mut self) {
-        while self.command_rx.recv().await.is_some() {}
+        while let Some(command) = self.command_rx.recv().await {
+            match command {
+                Command::SpawnProcessor {
+                    processor_id,
+                    future,
+                } => self.handle_spawn_processor(processor_id, future),
+            }
+        }
+
+        // 全てのハンドルがいなくなったらここに来る（これ以上何もできないので終了するだけ）
+        log::info!("processor manager finished");
+    }
+
+    fn handle_spawn_processor(&mut self, _processor_id: ProcessorId, _future: ProcessorFuture) {
+        todo!()
     }
 }
 
 #[derive(Debug)]
 enum Command {
-    Hello,
+    SpawnProcessor {
+        processor_id: ProcessorId,
+        future: ProcessorFuture,
+    },
 }
+
+pub struct ProcessorFuture(Box<dyn Future<Output = Result<(), ProcessorError>> + Send + 'static>);
+
+impl std::fmt::Debug for ProcessorFuture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessorFuture").finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
+pub struct ProcessorError;
 
 #[derive(Debug)]
 pub struct JsonRpcRequest(pub nojson::RawJsonOwned);
