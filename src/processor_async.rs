@@ -17,7 +17,7 @@ impl ProcessorManager {
         let handle = self.default_runtime_handle.clone();
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
-        let runner = ProcessorManagerRunner { command_rx };
+        let runner = ProcessorManagerRunner::new(command_tx.clone(), command_rx, handle.clone());
         handle.spawn(runner.run());
 
         ProcessorManagerHandle { command_tx }
@@ -30,15 +30,19 @@ pub struct ProcessorManagerHandle {
 }
 
 impl ProcessorManagerHandle {
-    pub fn spawn_processor<F>(&self, processor_id: ProcessorId, future: F)
+    // ID が衝突した場合は false が返される
+    pub async fn spawn_processor<F>(&self, processor_id: ProcessorId, future: F) -> bool
     where
         F: Future<Output = Result<(), ProcessorError>> + Send + 'static,
     {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::SpawnProcessor {
             processor_id,
             future: ProcessorFuture(Box::new(future)),
+            reply_tx,
         };
         self.send(command);
+        reply_rx.await.unwrap_or(false)
     }
 
     fn send(&self, command: Command) {
@@ -48,26 +52,57 @@ impl ProcessorManagerHandle {
 
 #[derive(Debug)]
 struct ProcessorManagerRunner {
+    processors: std::collections::HashMap<ProcessorId, ()>,
+    command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
+    default_runtime_handle: tokio::runtime::Handle,
 }
 
 impl ProcessorManagerRunner {
+    fn new(
+        command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
+        command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
+        default_runtime_handle: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            processors: std::collections::HashMap::new(),
+            command_tx,
+            command_rx,
+            default_runtime_handle,
+        }
+    }
+
     async fn run(mut self) {
         while let Some(command) = self.command_rx.recv().await {
             match command {
                 Command::SpawnProcessor {
                     processor_id,
                     future,
-                } => self.handle_spawn_processor(processor_id, future),
+                    reply_tx,
+                } => {
+                    let result = self.handle_spawn_processor(processor_id, future);
+                    let _ = reply_tx.send(result);
+                }
+                Command::NotifyProcessorFinish { processor_id } => {}
             }
         }
 
-        // 全てのハンドルがいなくなったらここに来る（これ以上何もできないので終了するだけ）
-        log::info!("processor manager finished");
+        // 自分が command_tx の参照を保持しているので、ここに来ることはない
+        unreachable!()
     }
 
-    fn handle_spawn_processor(&mut self, _processor_id: ProcessorId, _future: ProcessorFuture) {
-        todo!()
+    fn handle_spawn_processor(
+        &mut self,
+        processor_id: ProcessorId,
+        future: ProcessorFuture,
+    ) -> bool {
+        if self.processors.contains_key(&processor_id) {
+            return false;
+        }
+
+        self.default_runtime_handle.spawn(future.0);
+
+        true
     }
 }
 
@@ -76,6 +111,10 @@ enum Command {
     SpawnProcessor {
         processor_id: ProcessorId,
         future: ProcessorFuture,
+        reply_tx: tokio::sync::oneshot::Sender<bool>,
+    },
+    NotifyProcessorFinish {
+        processor_id: ProcessorId,
     },
 }
 
@@ -93,7 +132,7 @@ pub struct ProcessorError;
 #[derive(Debug)]
 pub struct JsonRpcRequest(pub nojson::RawJsonOwned);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProcessorId;
 
 #[derive(Debug)]
