@@ -26,23 +26,28 @@ impl ProcessorManagerHandle {
     // ID が衝突した場合は false が返される
     //
     // TODO: ここで統計構造体を登録できてもいいかも
-    pub async fn spawn_processor<F, Fut>(&self, processor_id: ProcessorId, f: F) -> bool
+    pub async fn spawn_processor<F>(&self, processor_id: ProcessorId, future: F) -> bool
     where
-        F: FnOnce(ProcessorHandle) -> Fut,
-        Fut: Future<Output = Result<(), ProcessorError>> + Send + Unpin + 'static,
+        F: Future<Output = Result<(), ProcessorError>> + Send + Unpin + 'static,
     {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let handle = ProcessorHandle {
-            inner: self.clone(),
-            processor_id: processor_id.clone(),
-        };
         let command = Command::SpawnProcessor {
             processor_id,
-            future: ProcessorFuture(Box::new(f(handle))),
+            future: ProcessorFuture(Box::new(future)),
             reply_tx,
         };
         self.send(command);
         reply_rx.await.unwrap_or(false)
+    }
+
+    pub async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let command = Command::RegisterProcessor {
+            processor_id,
+            reply_tx,
+        };
+        self.send(command);
+        reply_rx.await.unwrap_or(None)
     }
 
     fn send(&self, command: Command) {
@@ -53,8 +58,9 @@ impl ProcessorManagerHandle {
 #[derive(Debug)]
 struct ProcessorManagerRunner {
     processors: std::collections::HashMap<ProcessorId, ()>,
-    command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
+    handle: ProcessorManagerHandle,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
+    processor_seqno: u64,
 }
 
 impl ProcessorManagerRunner {
@@ -64,8 +70,9 @@ impl ProcessorManagerRunner {
     ) -> Self {
         Self {
             processors: std::collections::HashMap::new(),
-            command_tx,
+            handle: ProcessorManagerHandle { command_tx },
             command_rx,
+            processor_seqno: 0,
         }
     }
 
@@ -78,6 +85,13 @@ impl ProcessorManagerRunner {
                     reply_tx,
                 } => {
                     let result = self.handle_spawn_processor(processor_id, future);
+                    let _ = reply_tx.send(result);
+                }
+                Command::RegisterProcessor {
+                    processor_id,
+                    reply_tx,
+                } => {
+                    let result = self.handle_register_processor(processor_id);
                     let _ = reply_tx.send(result);
                 }
                 Command::NotifyProcessorFinish { processor_id } => {
@@ -99,7 +113,7 @@ impl ProcessorManagerRunner {
             return false;
         }
 
-        let command_tx = self.command_tx.clone();
+        let command_tx = self.handle.command_tx.clone();
         tokio::task::spawn(async move {
             if let Err(_e) = future.0.await {
                 todo!("error handling");
@@ -109,12 +123,30 @@ impl ProcessorManagerRunner {
 
         true
     }
+
+    fn handle_register_processor(&mut self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+        if self.processors.contains_key(&processor_id) {
+            return None;
+        }
+
+        self.processors.insert(processor_id.clone(), ());
+
+        let processor_seqno = self.processor_seqno;
+        self.processor_seqno += 1;
+
+        Some(ProcessorHandle {
+            inner: self.handle.clone(),
+            processor_id,
+            processor_seqno,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ProcessorHandle {
     inner: ProcessorManagerHandle,
     processor_id: ProcessorId,
+    processor_seqno: u64,
 }
 
 impl ProcessorHandle {
@@ -130,10 +162,10 @@ enum Command {
         future: ProcessorFuture,
         reply_tx: tokio::sync::oneshot::Sender<bool>,
     },
-    /*RegisterProcessor {
-        name: String,
-        reply_tx: tokio::sync::oneshot::Sender<bool>,
-    },*/
+    RegisterProcessor {
+        processor_id: ProcessorId,
+        reply_tx: tokio::sync::oneshot::Sender<Option<ProcessorHandle>>,
+    },
     NotifyProcessorFinish {
         processor_id: ProcessorId,
     },
