@@ -56,10 +56,24 @@ impl ProcessorManagerHandle {
 }
 
 #[derive(Debug)]
+struct TrackRunner {}
+
+impl TrackRunner {
+    fn new() -> (Self, TrackHandle) {
+        todo!()
+    }
+
+    async fn run(self) {}
+}
+
+#[derive(Debug, Clone)]
+struct TrackHandle {}
+
+#[derive(Debug)]
 struct TrackState {
-    publisher: ProcessorId,
+    publisher: Option<ProcessorId>,
     subscribers: std::collections::HashSet<ProcessorId>,
-    handle: tokio::task::JoinHandle<()>,
+    handle: TrackHandle,
 }
 
 #[derive(Debug)]
@@ -111,13 +125,44 @@ impl ProcessorManagerRunner {
                     track_id,
                     reply_tx,
                 } => {
-                    todo!()
+                    let result = self.handle_publish_track(processor_id, track_id);
+                    let _ = reply_tx.send(result);
                 }
             }
         }
 
         // 自分が command_tx の参照を保持しているので、ここに来ることはない
         unreachable!()
+    }
+
+    fn handle_publish_track(
+        &mut self,
+        processor_id: ProcessorId,
+        track_id: TrackId,
+    ) -> Option<TrackPublishHandle> {
+        assert!(self.processors.contains_key(&processor_id));
+
+        let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
+            let (runner, handle) = TrackRunner::new();
+            tokio::task::spawn(runner.run());
+            TrackState {
+                publisher: None,
+                subscribers: std::collections::HashSet::new(),
+                handle,
+            }
+        });
+        if track.publisher.is_some() {
+            return None;
+        }
+
+        track.publisher = Some(processor_id.clone());
+
+        Some(TrackPublishHandle {
+            inner: self.handle.clone(),
+            processor_id,
+            track_id,
+            track_handle: track.handle.clone(),
+        })
     }
 
     fn handle_spawn_processor(
@@ -157,11 +202,14 @@ impl ProcessorManagerRunner {
     }
 }
 
+// TODO: clone 可能なやつと無理なやつで両方 "XxxHandle" という命名にしているのは紛らわしいのでどちらかを変えたい
+// こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
     inner: ProcessorManagerHandle,
     processor_id: ProcessorId,
     track_id: TrackId,
+    track_handle: TrackHandle,
 }
 
 #[derive(Debug)]
