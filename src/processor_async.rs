@@ -17,4 +17,56 @@ impl AsyncProcessorChannel {
 }
 
 #[derive(Debug)]
-pub struct JsonRpcRequest(nojson::RawJsonOwned);
+pub struct JsonRpcRequest(pub nojson::RawJsonOwned);
+
+#[derive(Debug)]
+pub struct ProcessorId;
+
+#[derive(Debug)]
+pub struct TrackId;
+
+#[derive(Debug)]
+pub struct ChannelRegistry {}
+
+impl ChannelRegistry {
+    pub fn register(&mut self, _pid: ProcessorId) -> Option<(ChannelSender, ChannelReceiver)> {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct ChannelSender {}
+
+impl ChannelSender {
+    pub fn publish_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
+
+    pub fn unpublish_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
+
+    pub fn send_output(&mut self, _frame: ()) {}
+
+    pub fn send_feedback(&mut self, _feedback: ()) {}
+}
+
+#[derive(Debug)]
+pub struct ChannelReceiver {}
+
+impl ChannelReceiver {
+    pub fn subscribe_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
+
+    pub fn subscribe_processor(&mut self, _reg: &ChannelRegistry, _pid: ProcessorId) {}
+
+    pub fn unsubscribe_track(&mut self, _reg: &ChannelRegistry, _tid: TrackId) {}
+
+    pub fn unsubscribe_processor(&mut self, _reg: &ChannelRegistry, _pid: ProcessorId) {}
+
+    pub fn recv(&mut self) -> Recv {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub enum Recv {
+    MediaFrame,
+    Feedback,
+    Rpc { from: (), data: () },
+}
