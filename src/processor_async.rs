@@ -152,6 +152,10 @@ impl ProcessorHandle {
     pub fn processor_id(&self) -> &ProcessorId {
         &self.processor_id
     }
+
+    pub fn publish_track(&self, _track_id: TrackId) {
+        //
+    }
 }
 
 impl Drop for ProcessorHandle {
