@@ -13,6 +13,8 @@ on:
 
 env:
   RUST_BACKTRACE: 1
+  CC: cl
+  CXX: cl
 
 jobs:
   ci-windows:
@@ -20,6 +22,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      - uses: ilammy/msvc-dev-cmd@v1
       - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
@@ -45,6 +48,7 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v6
+      - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install packages to build external dependencies
         run: |

@@ -56,20 +56,13 @@ fn main() {
     // 依存ライブラリをビルドする
     std::fs::create_dir(&src_build_dir).expect("failed to create build directory");
 
-    let mut meson_cmd = Command::new("meson");
-    meson_cmd
+    let success = Command::new("meson")
         .arg("setup")
         .arg("--default-library=static")
         .arg("..")
-        .current_dir(&src_build_dir);
-
-    // Windows (MSVC) では meson が MinGW GCC を誤検出しないよう、明示的に cl.exe を指定する
-    if cfg!(target_os = "windows") {
-        meson_cmd.env("CC", "cl");
-        meson_cmd.env("CC_LD", "link");
-    }
-
-    let success = meson_cmd.status().is_ok_and(|status| status.success());
+        .current_dir(&src_build_dir)
+        .status()
+        .is_ok_and(|status| status.success());
     if !success {
         panic!("[meson] failed to build {LIB_NAME}");
     }
