@@ -67,7 +67,6 @@ struct TrackPublisherState {
 #[derive(Debug)]
 struct TrackSubscriberState {
     outgoing_tx: tokio::sync::mpsc::Sender<MediaSample>,
-    feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
 }
 
 #[derive(Debug)]
@@ -108,11 +107,15 @@ struct TrackRunner {
     command_rx: tokio::sync::mpsc::UnboundedReceiver<TrackCommand>,
     publisher: Option<TrackPublisherState>,
     subscribers: Vec<TrackSubscriberState>,
+    subscriber_feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
+    subscriber_feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
 }
 
 impl TrackRunner {
     fn new(track_id: TrackId, handle: ProcessorManagerHandle) -> (Self, TrackHandle) {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (subscriber_feedback_tx, subscriber_feedback_rx) =
+            tokio::sync::mpsc::unbounded_channel();
         (
             Self {
                 track_id,
@@ -120,6 +123,8 @@ impl TrackRunner {
                 command_rx,
                 publisher: None,
                 subscribers: Vec::new(),
+                subscriber_feedback_tx,
+                subscriber_feedback_rx,
             },
             TrackHandle { command_tx },
         )
@@ -137,18 +142,9 @@ impl TrackRunner {
                 } => {
                     self.handle_sample(sample).await;
                 }
-                feedback = async {
-                    for subscriber in &mut self.subscribers {
-                        if let Ok(feedback) = subscriber.feedback_rx.try_recv() {
-                            return Some(feedback);
-                        }
-                    }
-                    std::future::pending().await
-                }, if self.publisher.is_some() => {
-                    if let Some(feedback) = feedback {
-                        if let Some(publisher) = &mut self.publisher {
-                            let _ = publisher.feedback_tx.send(feedback);
-                        }
+                Some(feedback) = self.subscriber_feedback_rx.recv() => {
+                    if let Some(publisher) = &mut self.publisher {
+                        let _ = publisher.feedback_tx.send(feedback);
                     }
                 }
                 else => break,
@@ -201,17 +197,13 @@ impl TrackRunner {
 
     fn handle_subscribe(&mut self) -> TrackSubscribeHandle {
         let (outgoing_tx, outgoing_rx) = tokio::sync::mpsc::channel(100);
-        let (feedback_tx, feedback_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let subscriber_state = TrackSubscriberState {
-            outgoing_tx,
-            feedback_rx,
-        };
+        let subscriber_state = TrackSubscriberState { outgoing_tx };
         self.subscribers.push(subscriber_state);
 
         TrackSubscribeHandle {
             outgoing_rx,
-            feedback_tx,
+            feedback_tx: self.subscriber_feedback_tx.clone(),
         }
     }
 
