@@ -65,11 +65,31 @@ struct TrackPublisherState {
 }
 
 #[derive(Debug)]
+struct TrackSubscriberState {
+    outgoing_tx: tokio::sync::mpsc::Sender<MediaSample>,
+}
+
+#[derive(Debug)]
 enum TrackCommand {
     Publish {
         publisher_id: ProcessorId,
         reply_tx: tokio::sync::oneshot::Sender<Option<TrackPublishHandle>>,
     },
+    Subscribe {
+        // TODO: size_limit
+        reply_tx: tokio::sync::oneshot::Sender<Option<TrackSubscribeHandle>>,
+    },
+}
+
+#[derive(Debug)]
+pub struct TrackSubscribeHandle {
+    outgoing_rx: tokio::sync::mpsc::Receiver<MediaSample>,
+}
+
+impl TrackSubscribeHandle {
+    pub async fn recv_media(&mut self) -> Option<MediaSample> {
+        self.outgoing_rx.recv().await
+    }
 }
 
 #[derive(Debug)]
@@ -78,7 +98,7 @@ struct TrackRunner {
     handle: ProcessorManagerHandle,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<TrackCommand>,
     publisher: Option<TrackPublisherState>,
-    //outgoing_txs: std::collections::HashMap<ProcessorId, tokio::sync::mpsc::Sender<MediaSample>>,
+    subscribers: Vec<TrackSubscriberState>,
 }
 
 impl TrackRunner {
@@ -90,6 +110,7 @@ impl TrackRunner {
                 handle,
                 command_rx,
                 publisher: None,
+                subscribers: Vec::new(),
             },
             TrackHandle { command_tx },
         )
@@ -99,7 +120,7 @@ impl TrackRunner {
         loop {
             tokio::select! {
                 Some(command) = self.command_rx.recv() => self.handle_command(command),
-                Some(sample) = async {
+                sample = async {
                     match &mut self.publisher {
                         Some(publisher) => publisher.incoming_rx.recv().await,
                         None => std::future::pending().await,
@@ -113,7 +134,11 @@ impl TrackRunner {
     }
 
     // TODO: 最終的にはこの処理は publish handle 側に持っていく
-    fn handle_sample(&mut self, _sample: MediaSample) {
+    fn handle_sample(&mut self, sample: Option<MediaSample>) {
+        let Some(_sample) = sample else {
+            self.publisher = None;
+            return;
+        };
         //
     }
 
@@ -126,7 +151,19 @@ impl TrackRunner {
                 let result = self.handle_publish(publisher_id);
                 let _ = reply_tx.send(result);
             }
+            TrackCommand::Subscribe { reply_tx } => {
+                let result = self.handle_subscribe();
+                let _ = reply_tx.send(result);
+            }
         }
+    }
+
+    fn handle_subscribe(&mut self) -> Option<TrackSubscribeHandle> {
+        let (outgoing_tx, outgoing_rx) = tokio::sync::mpsc::channel(100); // TODO: 上限は指定可能にする
+        let subscriber_state = TrackSubscriberState { outgoing_tx };
+        self.subscribers.push(subscriber_state);
+
+        Some(TrackSubscribeHandle { outgoing_rx })
     }
 
     fn handle_publish(&mut self, _publisher_id: ProcessorId) -> Option<TrackPublishHandle> {
