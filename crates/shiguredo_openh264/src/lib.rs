@@ -633,7 +633,7 @@ impl Encoder {
             let code = (**inner).SetOption.ok_or(Error::UnavailableMethod(name))?(
                 inner,
                 sys::ENCODER_OPTION_ENCODER_OPTION_DATAFORMAT,
-                ((&mut i420) as *mut u32).cast(),
+                std::ptr::addr_of_mut!(i420).cast(),
             );
             Error::check(code, name)?;
 
