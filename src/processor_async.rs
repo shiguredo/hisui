@@ -69,13 +69,13 @@ impl ProcessorManagerHandle {
 
 #[derive(Debug)]
 struct TrackPublisherState {
-    incoming_rx: tokio::sync::mpsc::UnboundedReceiver<MediaSample>,
+    incoming_rx: tokio::sync::mpsc::UnboundedReceiver<Option<MediaSample>>,
     feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
 }
 
 #[derive(Debug)]
 struct TrackSubscriberState {
-    outgoing_tx: tokio::sync::mpsc::Sender<MediaSample>,
+    outgoing_tx: tokio::sync::mpsc::Sender<Option<MediaSample>>,
 }
 
 #[derive(Debug)]
@@ -92,13 +92,17 @@ enum TrackCommand {
 
 #[derive(Debug)]
 pub struct TrackSubscribeHandle {
-    outgoing_rx: tokio::sync::mpsc::Receiver<MediaSample>,
+    outgoing_rx: tokio::sync::mpsc::Receiver<Option<MediaSample>>,
     feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
 }
 
 impl TrackSubscribeHandle {
     pub async fn recv_media(&mut self) -> Option<MediaSample> {
-        self.outgoing_rx.recv().await
+        if let Some(x) = self.outgoing_rx.recv().await {
+            x
+        } else {
+            std::future::pending().await
+        }
     }
 
     pub fn send_feedback(
@@ -162,7 +166,7 @@ impl TrackRunner {
     }
 
     // TODO: 最終的にはこの処理は publish handle 側に持っていく
-    async fn handle_sample(&mut self, sample: Option<MediaSample>) {
+    async fn handle_sample(&mut self, sample: Option<Option<MediaSample>>) {
         let Some(sample) = sample else {
             self.publisher = None;
             return;
@@ -405,13 +409,13 @@ impl ProcessorManagerRunner {
 #[derive(Debug)]
 pub struct TrackPublishHandle {
     // publish 側は unbounded
-    incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
+    incoming_tx: tokio::sync::mpsc::UnboundedSender<Option<MediaSample>>,
 
     feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
 }
 
 impl TrackPublishHandle {
-    pub fn send_media(&self, sample: MediaSample) {
+    pub fn send_media(&self, sample: Option<MediaSample>) {
         // TODO: 最終的には TrackRunner を経由しないようにする
         let _ = self.incoming_tx.send(sample);
     }
