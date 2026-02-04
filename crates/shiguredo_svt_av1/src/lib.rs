@@ -288,22 +288,22 @@ impl Encoder {
             let mut svt_config = svt_config.assume_init();
 
             // === 基本設定 ===
-            svt_config.source_width = config.width as u32;
-            svt_config.source_height = config.height as u32;
-            svt_config.frame_rate_numerator = config.fps_numerator as u32;
-            svt_config.frame_rate_denominator = config.fps_denominator as u32;
-            svt_config.target_bit_rate = config.target_bitrate as u32;
+            svt_config.source_width = config.width as _;
+            svt_config.source_height = config.height as _;
+            svt_config.frame_rate_numerator = config.fps_numerator as _;
+            svt_config.frame_rate_denominator = config.fps_denominator as _;
+            svt_config.target_bit_rate = config.target_bitrate as _;
 
             // === 品質・速度制御 ===
             svt_config.enc_mode = config.enc_mode as i8;
             if let Some(qp) = config.qp {
-                svt_config.qp = qp as u32;
+                svt_config.qp = qp as _;
             }
             if let Some(min_qp) = config.min_qp_allowed {
-                svt_config.min_qp_allowed = min_qp as u32;
+                svt_config.min_qp_allowed = min_qp as _;
             }
             if let Some(max_qp) = config.max_qp_allowed {
-                svt_config.max_qp_allowed = max_qp as u32;
+                svt_config.max_qp_allowed = max_qp as _;
             }
 
             // === レート制御 ===
@@ -314,24 +314,24 @@ impl Encoder {
             } as u8;
 
             if let Some(max_bitrate) = config.max_bit_rate {
-                svt_config.max_bit_rate = max_bitrate as u32;
+                svt_config.max_bit_rate = max_bitrate as _;
             }
-            svt_config.over_shoot_pct = config.over_shoot_pct as u32;
-            svt_config.under_shoot_pct = config.under_shoot_pct as u32;
+            svt_config.over_shoot_pct = config.over_shoot_pct as _;
+            svt_config.under_shoot_pct = config.under_shoot_pct as _;
 
             // === GOP・フレーム構造 ===
             svt_config.intra_period_length = config.intra_period_length as i32;
-            svt_config.hierarchical_levels = config.hierarchical_levels as u32;
+            svt_config.hierarchical_levels = config.hierarchical_levels as _;
             svt_config.pred_structure = match config.rate_control_mode {
                 RateControlMode::CqpOrCrf => config.pred_structure,
                 RateControlMode::Vbr => 2, // VBR の場合にはランダムアクセスのみサポート
                 RateControlMode::Cbr => 1, // CBR の場合には低遅延のみサポート
             };
-            svt_config.scene_change_detection = config.scene_change_detection as u32;
-            svt_config.look_ahead_distance = config.look_ahead_distance as u32;
+            svt_config.scene_change_detection = config.scene_change_detection as _;
+            svt_config.look_ahead_distance = config.look_ahead_distance as _;
 
             // === 並列処理 ===
-            svt_config.pin_threads = config.pin_threads.map_or(0, |v| v.get()) as u32;
+            svt_config.pin_threads = config.pin_threads.map_or(0, |v| v.get()) as _;
             svt_config.tile_columns = config.tile_columns.map_or(0, |v| v.get()) as i32;
             svt_config.tile_rows = config.tile_rows.map_or(0, |v| v.get()) as i32;
             svt_config.target_socket = config.target_socket as i32;
@@ -344,23 +344,23 @@ impl Encoder {
             // === 高度な設定 ===
             svt_config.enable_tf = config.enable_tf as u8;
             svt_config.enable_overlays = config.enable_overlays;
-            svt_config.film_grain_denoise_strength = config.film_grain_denoise_strength as u32;
+            svt_config.film_grain_denoise_strength = config.film_grain_denoise_strength as _;
             svt_config.enable_tpl_la = config.enable_tpl_la as u8;
             svt_config.force_key_frames = config.force_key_frames;
-            svt_config.stat_report = config.stat_report as u32;
+            svt_config.stat_report = config.stat_report as _;
             svt_config.recon_enabled = config.recon_enabled;
 
             // === エンコーダー固有設定 ===
-            svt_config.encoder_bit_depth = config.encoder_bit_depth as u32;
+            svt_config.encoder_bit_depth = config.encoder_bit_depth as _;
             svt_config.encoder_color_format = match config.encoder_color_format {
                 ColorFormat::Yuv400 => sys::EbColorFormat_EB_YUV400,
                 ColorFormat::Yuv420 => sys::EbColorFormat_EB_YUV420,
                 ColorFormat::Yuv422 => sys::EbColorFormat_EB_YUV422,
                 ColorFormat::Yuv444 => sys::EbColorFormat_EB_YUV444,
             };
-            svt_config.profile = config.profile as u32;
-            svt_config.level = config.level as u32;
-            svt_config.tier = config.tier as u32;
+            svt_config.profile = config.profile as _;
+            svt_config.level = config.level as _;
+            svt_config.tier = config.tier as _;
             svt_config.fast_decode = config.fast_decode as u8;
 
             // core dump する場合を予防する (C++ 版からの移植コード）
@@ -378,7 +378,7 @@ impl Encoder {
             let mut buffer_header = buffer.assume_init();
             let mut buffer = Box::new(buffer_format.assume_init());
             buffer_header.p_buffer = (&raw mut *buffer).cast();
-            buffer_header.size = size_of_val(&buffer_header) as u32;
+            buffer_header.size = size_of_val(&buffer_header) as _;
             buffer_header.p_app_private = std::ptr::null_mut();
             buffer_header.pic_type = sys::EbAv1PictureType_EB_AV1_INVALID_PICTURE;
             buffer_header.metadata = std::ptr::null_mut();
@@ -391,7 +391,7 @@ impl Encoder {
             buffer.luma = input_yuv.as_mut_ptr();
             buffer.cb = input_yuv.as_mut_ptr().add(y_size);
             buffer.cr = input_yuv.as_mut_ptr().add(y_size + u_size);
-            buffer_header.n_filled_len = input_yuv.len() as u32;
+            buffer_header.n_filled_len = input_yuv.len() as _;
 
             let mut stream_header = std::ptr::null_mut();
             let code = sys::svt_av1_enc_stream_header(handle.inner, &mut stream_header);
@@ -449,9 +449,9 @@ impl Encoder {
         self.buffer_header.pts = self.frame_count as i64;
         self.buffer_header.pic_type = sys::EbAv1PictureType_EB_AV1_INVALID_PICTURE;
         self.buffer_header.metadata = std::ptr::null_mut();
-        self.buffer.y_stride = self.width as u32;
-        self.buffer.cb_stride = self.width.div_ceil(2) as u32;
-        self.buffer.cr_stride = self.width.div_ceil(2) as u32;
+        self.buffer.y_stride = self.width as _;
+        self.buffer.cb_stride = self.width.div_ceil(2) as _;
+        self.buffer.cr_stride = self.width.div_ceil(2) as _;
 
         let code =
             unsafe { sys::svt_av1_enc_send_picture(self.handle.inner, &mut self.buffer_header) };
