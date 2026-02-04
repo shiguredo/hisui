@@ -263,6 +263,12 @@ impl TrackHandle {
         });
         reply_rx.await.unwrap_or(None)
     }
+
+    async fn subscribe(&self) -> TrackSubscribeHandle {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let _ = self.command_tx.send(TrackCommand::Subscribe { reply_tx });
+        reply_rx.await.expect("bug")
+    }
 }
 
 // TODO: remove
@@ -457,8 +463,17 @@ impl ProcessorHandle {
         track_handle.publish(self.processor_id.clone()).await
     }
 
-    pub async fn subscribe_track(&self, track_id: TrackId) -> Option<TrackSubscribeHandle> {
-        todo!()
+    pub async fn subscribe_track(&self, track_id: TrackId) -> TrackSubscribeHandle {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let command = Command::CreateTrack {
+            processor_id: self.processor_id.clone(),
+            track_id,
+            reply_tx,
+        };
+        self.inner.send(command);
+        let track_handle = reply_rx.await.expect("bug");
+
+        track_handle.subscribe().await
     }
 
     pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {

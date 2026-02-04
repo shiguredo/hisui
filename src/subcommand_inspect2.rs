@@ -225,17 +225,11 @@ impl OutputPrinter {
 
         let audio_track_id =
             crate::processor_async::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
-        let mut audio_track = processor_handle
-            .subscribe_track(audio_track_id)
-            .await
-            .or_fail()?;
+        let mut audio_track = processor_handle.subscribe_track(audio_track_id).await;
 
         let video_track_id =
             crate::processor_async::TrackId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
-        let mut video_track = processor_handle
-            .subscribe_track(video_track_id)
-            .await
-            .or_fail()?;
+        let mut video_track = processor_handle.subscribe_track(video_track_id).await;
 
         let mut audio_finished = false;
         let mut video_finished = false;
