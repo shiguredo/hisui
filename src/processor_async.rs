@@ -30,7 +30,7 @@ pub struct ProcessorManagerHandle {
 impl ProcessorManagerHandle {
     // ID が衝突した場合は false が返される
     //
-    // TODO: ここで統計構造体を登録できてもいいかも
+    // TODO: remove
     pub async fn spawn_processor<F>(&self, processor_id: ProcessorId, future: F) -> bool
     where
         F: Future<Output = Result<(), ProcessorError>> + Send + Unpin + 'static,
@@ -46,6 +46,8 @@ impl ProcessorManagerHandle {
     }
 
     pub async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+        log::debug!("register processor: {}", processor_id.get());
+
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::RegisterProcessor {
             processor_id,
@@ -180,6 +182,7 @@ impl TrackRunner {
                     // publisher に通知してからブロッキング送信に移る
                     if let Some(publisher) = &mut self.publisher {
                         let _ = publisher.feedback_tx.send(Feedback::SizeLimitReached);
+                        // TODO: 詰まりが解消したことも送るべき
                     }
                     let _ = self.subscribers[i].outgoing_tx.send(sample).await;
                 }
@@ -315,9 +318,11 @@ impl ProcessorManagerRunner {
                     let _ = reply_tx.send(result);
                 }
                 Command::DeregisterProcessor { processor_id } => {
+                    log::debug!("deregister processor: {}", processor_id.get());
                     self.processors.remove(&processor_id);
 
-                    if !self.finish_waitings.is_empty() && self.processors.is_empty() {
+                    // TODO: 判定場所は変える
+                    if self.processors.is_empty() {
                         for waiting in self.finish_waitings {
                             let _ = waiting.send(());
                         }
@@ -512,11 +517,31 @@ pub struct ProcessorError;
 pub struct JsonRpcRequest(pub nojson::RawJsonOwned); // TODO: reply_tx を追加する
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProcessorId;
+pub struct ProcessorId(String);
+
+impl ProcessorId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn get(&self) -> &str {
+        &self.0
+    }
+}
 
 // TODO: この中に processor id を含んでいても良さそう
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TrackId;
+pub struct TrackId(String);
+
+impl TrackId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn get(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Debug)]
 pub struct ChannelRegistry {}
