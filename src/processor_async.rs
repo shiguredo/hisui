@@ -362,10 +362,14 @@ impl ProcessorManagerRunner {
         self.processors
             .insert(processor_id.clone(), processor_seqno);
 
+        let (rpc_tx, rpc_rx) = tokio::sync::mpsc::channel(10); // TODO: これは共通設定でいいけど、最初に変更できるようにはする
+        let _ = rpc_tx; // ProcessorState を追加して、外から ID => rpc sender を解決できるようにする
+
         Some(ProcessorHandle {
             inner: self.handle.clone(),
             processor_id,
             processor_seqno,
+            rpc_rx,
         })
     }
 }
@@ -401,7 +405,8 @@ pub struct ProcessorHandle {
     inner: ProcessorManagerHandle,
     processor_id: ProcessorId,
     processor_seqno: u64, // TDOO: 不要かも
-                          // TODO: add rx for RPC requests
+    // TODO: add rx for RPC requests
+    rpc_rx: tokio::sync::mpsc::Receiver<JsonRpcRequest>,
 }
 
 impl ProcessorHandle {
@@ -420,6 +425,13 @@ impl ProcessorHandle {
         let track_handle = reply_rx.await.ok()?;
 
         track_handle.publish(self.processor_id.clone()).await
+    }
+
+    pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {
+        match self.rpc_rx.recv().await {
+            Some(request) => request,
+            None => std::future::pending().await,
+        }
     }
 }
 
@@ -473,7 +485,7 @@ impl std::fmt::Debug for ProcessorFuture {
 pub struct ProcessorError;
 
 #[derive(Debug)]
-pub struct JsonRpcRequest(pub nojson::RawJsonOwned);
+pub struct JsonRpcRequest(pub nojson::RawJsonOwned); // TODO: reply_tx を追加する
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProcessorId;
