@@ -72,7 +72,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           brew update
-          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config openssl
       - run: cargo check --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx
       - run: cargo clippy --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx -- --deny warnings
       - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx --exclude shiguredo_openh264
