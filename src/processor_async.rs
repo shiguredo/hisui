@@ -1,4 +1,5 @@
 #![expect(dead_code)]
+use crate::media::MediaSample;
 
 #[derive(Debug)]
 pub struct ProcessorManager {}
@@ -59,11 +60,28 @@ impl ProcessorManagerHandle {
 struct TrackRunner {
     track_id: TrackId,
     handle: ProcessorManagerHandle,
+    incoming_rx: tokio::sync::mpsc::UnboundedReceiver<MediaSample>,
+    feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
+    outgoing_txs: std::collections::HashMap<ProcessorId, tokio::sync::mpsc::Sender<MediaSample>>,
 }
 
 impl TrackRunner {
     fn new(track_id: TrackId, handle: ProcessorManagerHandle) -> (Self, TrackHandle) {
-        (Self { track_id, handle }, TrackHandle {})
+        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (feedback_tx, feedback_rx) = tokio::sync::mpsc::unbounded_channel();
+        (
+            Self {
+                track_id,
+                handle,
+                incoming_rx,
+                feedback_tx,
+                outgoing_txs: std::collections::HashMap::new(),
+            },
+            TrackHandle {
+                //incoming_tx,
+//                feedback_rx,
+            },
+        )
     }
 
     async fn run(self) {
@@ -81,9 +99,18 @@ impl Drop for TrackRunner {
 
 #[derive(Debug, Clone)]
 struct TrackHandle {
-    //incoming_tx: mio::sync::mpsc::Sender
+    // publish 側は unbounded
+    //incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
+    //feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
 }
 
+impl TrackHandle {
+    async fn publish(&self, processor_id: ProcessorId) -> Option<TrackPublishHandle> {
+        todo!()
+    }
+}
+
+// TODO: remove
 #[derive(Debug)]
 struct TrackState {
     publisher: Option<ProcessorId>,
@@ -94,7 +121,7 @@ struct TrackState {
 #[derive(Debug)]
 struct ProcessorManagerRunner {
     processors: std::collections::HashMap<ProcessorId, u64>, // value=seqno
-    tracks: std::collections::HashMap<TrackId, TrackState>,
+    tracks: std::collections::HashMap<TrackId, TrackHandle>,
     handle: ProcessorManagerHandle,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
     processor_seqno: u64,
@@ -135,12 +162,12 @@ impl ProcessorManagerRunner {
                 Command::DeregisterProcessor { processor_id } => {
                     self.processors.remove(&processor_id);
                 }
-                Command::PublishTrack {
+                Command::CreateTrack {
                     processor_id,
                     track_id,
                     reply_tx,
                 } => {
-                    let result = self.handle_publish_track(processor_id, track_id);
+                    let result = self.handle_create_track(processor_id, track_id);
                     let _ = reply_tx.send(result);
                 }
                 Command::RemoveTrack { track_id } => {
@@ -153,34 +180,16 @@ impl ProcessorManagerRunner {
         unreachable!()
     }
 
-    fn handle_publish_track(
-        &mut self,
-        processor_id: ProcessorId,
-        track_id: TrackId,
-    ) -> Option<TrackPublishHandle> {
+    fn handle_create_track(&mut self, processor_id: ProcessorId, track_id: TrackId) -> TrackHandle {
         assert!(self.processors.contains_key(&processor_id));
 
-        let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
+        let track_handle = self.tracks.entry(track_id.clone()).or_insert_with(|| {
             let (runner, handle) = TrackRunner::new(track_id.clone(), self.handle.clone());
             tokio::task::spawn(runner.run());
-            TrackState {
-                publisher: None,
-                subscribers: std::collections::HashSet::new(),
-                handle,
-            }
+            handle
         });
-        if track.publisher.is_some() {
-            return None;
-        }
 
-        track.publisher = Some(processor_id.clone());
-
-        Some(TrackPublishHandle {
-            inner: self.handle.clone(),
-            processor_id,
-            track_id,
-            track_handle: track.handle.clone(),
-        })
+        track_handle.clone()
     }
 
     fn handle_spawn_processor(
@@ -246,13 +255,15 @@ impl ProcessorHandle {
 
     pub async fn publish_track(&self, track_id: TrackId) -> Option<TrackPublishHandle> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let command = Command::PublishTrack {
+        let command = Command::CreateTrack {
             processor_id: self.processor_id.clone(),
             track_id,
             reply_tx,
         };
         self.inner.send(command);
-        reply_rx.await.unwrap_or(None)
+        let track_handle = reply_rx.await.ok()?;
+
+        track_handle.publish(self.processor_id.clone()).await
     }
 }
 
@@ -279,10 +290,10 @@ enum Command {
         processor_id: ProcessorId,
         // processor_seqno: u64,
     },
-    PublishTrack {
+    CreateTrack {
         processor_id: ProcessorId,
         track_id: TrackId,
-        reply_tx: tokio::sync::oneshot::Sender<Option<TrackPublishHandle>>,
+        reply_tx: tokio::sync::oneshot::Sender<TrackHandle>,
     },
     RemoveTrack {
         track_id: TrackId,
