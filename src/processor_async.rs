@@ -11,6 +11,8 @@ impl ProcessorManager {
         Self {}
     }
 
+    // TODO: start 前に processor を登録できるようにする (空になったら終了したいので）
+
     pub fn start(self) -> ProcessorManagerHandle {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let runner = ProcessorManagerRunner::new(command_tx.clone(), command_rx);
@@ -51,6 +53,13 @@ impl ProcessorManagerHandle {
         };
         self.send(command);
         reply_rx.await.unwrap_or(None)
+    }
+
+    pub async fn wait_finish(&self) {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let command = Command::WaitFinish { reply_tx };
+        self.send(command);
+        let _ = reply_rx.await;
     }
 
     fn send(&self, command: Command) {
@@ -266,6 +275,7 @@ struct ProcessorManagerRunner {
     handle: ProcessorManagerHandle,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
     processor_seqno: u64,
+    finish_waitings: Vec<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl ProcessorManagerRunner {
@@ -279,12 +289,16 @@ impl ProcessorManagerRunner {
             handle: ProcessorManagerHandle { command_tx },
             command_rx,
             processor_seqno: 0,
+            finish_waitings: Vec::new(),
         }
     }
 
     async fn run(mut self) {
         while let Some(command) = self.command_rx.recv().await {
             match command {
+                Command::WaitFinish { reply_tx } => {
+                    self.finish_waitings.push(reply_tx);
+                }
                 Command::SpawnProcessor {
                     processor_id,
                     future,
@@ -302,6 +316,13 @@ impl ProcessorManagerRunner {
                 }
                 Command::DeregisterProcessor { processor_id } => {
                     self.processors.remove(&processor_id);
+
+                    if !self.finish_waitings.is_empty() && self.processors.is_empty() {
+                        for waiting in self.finish_waitings {
+                            let _ = waiting.send(());
+                        }
+                        return;
+                    }
                 }
                 Command::CreateTrack {
                     processor_id,
@@ -445,6 +466,9 @@ impl Drop for ProcessorHandle {
 
 #[derive(Debug)]
 enum Command {
+    WaitFinish {
+        reply_tx: tokio::sync::oneshot::Sender<()>,
+    },
     SpawnProcessor {
         processor_id: ProcessorId,
         future: ProcessorFuture,

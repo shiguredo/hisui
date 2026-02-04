@@ -46,6 +46,17 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     let format = ContainerFormat::from_path(&input_file_path).or_fail()?;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .or_fail()?;
+    let _guard = runtime.enter();
+    let manager = crate::processor_async::ProcessorManager::new();
+    let manager_handler = manager.start();
+    runtime.block_on(manager_handler.wait_finish());
+
     let mut scheduler = Scheduler::new();
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
