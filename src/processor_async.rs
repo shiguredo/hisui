@@ -67,6 +67,7 @@ struct TrackPublisherState {
 #[derive(Debug)]
 struct TrackSubscriberState {
     outgoing_tx: tokio::sync::mpsc::Sender<MediaSample>,
+    feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
 }
 
 #[derive(Debug)]
@@ -77,18 +78,26 @@ enum TrackCommand {
     },
     Subscribe {
         // TODO: size_limit
-        reply_tx: tokio::sync::oneshot::Sender<Option<TrackSubscribeHandle>>,
+        reply_tx: tokio::sync::oneshot::Sender<TrackSubscribeHandle>,
     },
 }
 
 #[derive(Debug)]
 pub struct TrackSubscribeHandle {
     outgoing_rx: tokio::sync::mpsc::Receiver<MediaSample>,
+    feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
 }
 
 impl TrackSubscribeHandle {
     pub async fn recv_media(&mut self) -> Option<MediaSample> {
         self.outgoing_rx.recv().await
+    }
+
+    pub fn send_feedback(
+        &self,
+        feedback: Feedback,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<Feedback>> {
+        self.feedback_tx.send(feedback)
     }
 }
 
@@ -158,12 +167,20 @@ impl TrackRunner {
         }
     }
 
-    fn handle_subscribe(&mut self) -> Option<TrackSubscribeHandle> {
-        let (outgoing_tx, outgoing_rx) = tokio::sync::mpsc::channel(100); // TODO: 上限は指定可能にする
-        let subscriber_state = TrackSubscriberState { outgoing_tx };
+    fn handle_subscribe(&mut self) -> TrackSubscribeHandle {
+        let (outgoing_tx, outgoing_rx) = tokio::sync::mpsc::channel(100);
+        let (feedback_tx, feedback_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let subscriber_state = TrackSubscriberState {
+            outgoing_tx,
+            feedback_rx,
+        };
         self.subscribers.push(subscriber_state);
 
-        Some(TrackSubscribeHandle { outgoing_rx })
+        TrackSubscribeHandle {
+            outgoing_rx,
+            feedback_tx,
+        }
     }
 
     fn handle_publish(&mut self, _publisher_id: ProcessorId) -> Option<TrackPublishHandle> {
