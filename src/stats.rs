@@ -72,6 +72,9 @@ pub enum ProcessorStats {
     AudioEncoder(AudioEncoderStats),
     VideoEncoder(VideoEncoderStats),
     Mp4Writer(Mp4WriterStats),
+    RtmpPublisher(crate::publisher_rtmp::RtmpPublisherStats),
+    RtmpOutboundEndpoint(crate::outbound_endpoint_rtmp::RtmpOutboundEndpointStats),
+    RtmpInboundEndpoint(crate::inbound_endpoint_rtmp::RtmpInboundEndpointStats),
     Other {
         processor_type: String,
         total_processing_duration: SharedAtomicDuration,
@@ -101,6 +104,9 @@ impl ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::VideoEncoder(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::Mp4Writer(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::RtmpPublisher(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::RtmpOutboundEndpoint(stats) => stats.total_processing_duration.clone(),
+            ProcessorStats::RtmpInboundEndpoint(stats) => stats.total_processing_duration.clone(),
             ProcessorStats::Other {
                 total_processing_duration,
                 ..
@@ -121,6 +127,9 @@ impl ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.error.set(true),
             ProcessorStats::VideoEncoder(stats) => stats.error.set(true),
             ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
+            ProcessorStats::RtmpPublisher(stats) => stats.error.set(true),
+            ProcessorStats::RtmpOutboundEndpoint(stats) => stats.error.set(true),
+            ProcessorStats::RtmpInboundEndpoint(stats) => stats.error.set(true),
             ProcessorStats::Other { error, .. } => error.set(true),
         }
     }
@@ -140,6 +149,9 @@ impl nojson::DisplayJson for ProcessorStats {
             ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
             ProcessorStats::VideoEncoder(stats) => stats.fmt(f),
             ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
+            ProcessorStats::RtmpPublisher(stats) => stats.fmt(f),
+            ProcessorStats::RtmpOutboundEndpoint(stats) => stats.fmt(f),
+            ProcessorStats::RtmpInboundEndpoint(stats) => stats.fmt(f),
             ProcessorStats::Other {
                 processor_type,
                 total_processing_duration,
@@ -338,10 +350,10 @@ impl nojson::DisplayJson for AudioEncoderStats {
 #[derive(Debug, Clone)]
 pub struct VideoEncoderStats {
     /// エンコーダーの種類
-    pub engine: EngineName,
+    pub engine: SharedOption<EngineName>,
 
     /// コーデック
-    pub codec: CodecName,
+    pub codec: SharedOption<CodecName>,
 
     /// エンコード対象の `VideoFrame` の数
     pub total_input_video_frame_count: SharedAtomicCounter,
@@ -356,11 +368,17 @@ pub struct VideoEncoderStats {
     pub error: SharedAtomicFlag,
 }
 
+impl Default for VideoEncoderStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VideoEncoderStats {
-    pub fn new(engine: EngineName, codec: CodecName) -> Self {
+    pub fn new() -> Self {
         Self {
-            engine,
-            codec,
+            engine: SharedOption::new(None),
+            codec: SharedOption::new(None),
             total_input_video_frame_count: Default::default(),
             total_output_video_frame_count: Default::default(),
             total_processing_duration: Default::default(),
@@ -373,8 +391,8 @@ impl nojson::DisplayJson for VideoEncoderStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", "video_encoder")?;
-            f.member("engine", self.engine)?;
-            f.member("codec", self.codec)?;
+            f.member("engine", &self.engine)?;
+            f.member("codec", &self.codec)?;
             f.member(
                 "total_input_video_frame_count",
                 self.total_input_video_frame_count.get(),
@@ -511,6 +529,10 @@ impl SharedAtomicCounter {
         self.0.fetch_add(n, Ordering::Relaxed);
     }
 
+    pub fn increment(&self) {
+        self.add(1);
+    }
+
     pub fn set(&self, n: u64) {
         // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
         self.0.store(n, Ordering::Relaxed);
@@ -519,6 +541,12 @@ impl SharedAtomicCounter {
     pub fn get(&self) -> u64 {
         // 取得結果が一時的に古くても問題はないので Relaxed で十分
         self.0.load(Ordering::Relaxed)
+    }
+}
+
+impl nojson::DisplayJson for SharedAtomicCounter {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get())
     }
 }
 
@@ -542,6 +570,12 @@ impl SharedAtomicDuration {
 
     pub fn get(&self) -> Duration {
         Duration::from_nanos(self.0.get())
+    }
+}
+
+impl nojson::DisplayJson for SharedAtomicDuration {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get().as_secs_f32())
     }
 }
 
@@ -600,6 +634,12 @@ impl<T: Clone> SharedOption<T> {
 impl<T> Default for SharedOption<T> {
     fn default() -> Self {
         Self::new(None)
+    }
+}
+
+impl<T: Clone + nojson::DisplayJson> nojson::DisplayJson for SharedOption<T> {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get())
     }
 }
 

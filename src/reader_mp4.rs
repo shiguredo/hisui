@@ -143,6 +143,7 @@ pub struct Mp4AudioReader {
     file: File,
     demuxer: Mp4FileDemuxer,
     source_id: SourceId,
+    audio_track_id: Option<u32>,
     format: AudioFormat,
     stereo: bool,
     sample_rate: u16,
@@ -160,10 +161,17 @@ impl Mp4AudioReader {
         let mut demuxer = Mp4FileDemuxer::new();
         initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
 
+        // 利用可能な音声トラックがあるかをチェックする
+        //
+        // チェックのためにサンプルエントリーを取得するためには、
+        // demuxer のサンプル読み込みが必要なので、clone して別インスタンスで行っている
+        let audio_track_id = check_audio_track(demuxer.clone()).or_fail()?;
+
         Ok(Self {
             file,
             demuxer,
             source_id,
+            audio_track_id,
             stats,
             // 後で更新されるので適当な初期値を設定しておく
             format: AudioFormat::Opus,
@@ -184,7 +192,7 @@ impl Mp4AudioReader {
                 .or_fail_with(|e| format!("Read sample error: {e}"))?
             {
                 None => return Ok(None),
-                Some(sample) if sample.track.kind != TrackKind::Audio => {}
+                Some(sample) if Some(sample.track.track_id) != self.audio_track_id => {}
                 Some(sample) => break 'next_sample sample,
             }
         };
@@ -194,6 +202,7 @@ impl Mp4AudioReader {
             // 新しいサンプルエントリーが来たのでハンドリングする
             let (metadata, format) = match sample_entry {
                 SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
+                SampleEntry::Mp4a(b) => (&b.audio, AudioFormat::Aac),
                 entry => {
                     return Err(orfail::Failure::new(format!(
                         "unsupported sample entry: {entry:?}"
@@ -281,4 +290,57 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
         demuxer.handle_input(input);
     }
     Ok(())
+}
+
+/// 音声トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
+fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> orfail::Result<Option<u32>> {
+    let mut has_audio_track = false;
+    while let Some(sample) = demuxer.next_sample().or_fail()? {
+        if sample.track.kind != TrackKind::Audio {
+            continue;
+        }
+        has_audio_track = true;
+
+        if let Some(sample_entry) = sample.sample_entry {
+            // hisui がサポートしているコーデックかどうかをチェック
+            let is_supported = match &sample_entry {
+                SampleEntry::Opus(_) => true,
+                SampleEntry::Mp4a(mp4a) => is_aac_codec(&mp4a.esds_box),
+                _ => false,
+            };
+
+            if is_supported {
+                return Ok(Some(sample.track.track_id));
+            } else {
+                log::warn!(
+                    "Unsupported audio codec in track {}: {:?}",
+                    sample.track.track_id,
+                    sample_entry
+                );
+            }
+        }
+    }
+
+    if has_audio_track {
+        // 音声トラックがあるのにサポートしているコーデックがない場合はエラーにする
+        Err(orfail::Failure::new(
+            "No supported audio track found in the file".to_owned(),
+        ))
+    } else {
+        // そもそも音声トラックがない場合には空扱いをする
+        Ok(None)
+    }
+}
+
+/// AAC コーデックであることを確認する
+fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
+    // DecoderConfigDescriptor の object_type_indication が AAC を示しているかチェック
+    // AAC LC は 0x40 (64)
+    // AAC Main Profile は 0x41 (65)
+    // AAC SSR は 0x42 (66)
+    // AAC LTP は 0x43 (67)
+    matches!(
+        esds_box.es.dec_config_descr.object_type_indication,
+        0x40..=0x43
+    )
 }

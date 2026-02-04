@@ -45,21 +45,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    let format = match input_file_path
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .as_ref()
-    {
-        "mp4" => ContainerFormat::Mp4,
-        "webm" => ContainerFormat::Webm,
-        ext => {
-            return Err(
-                orfail::Failure::new(format!("unsupported container format: {ext}")).into(),
-            );
-        }
-    };
-
+    let format = ContainerFormat::from_path(&input_file_path).or_fail()?;
     let mut scheduler = Scheduler::new();
     let dummy_source_id = SourceId::new("inspect"); // 使われないのでなんでもいい
 
@@ -85,7 +71,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     if decode {
         let decoder =
-            AudioDecoder::new_opus(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
+            AudioDecoder::new(AUDIO_ENCODED_STREAM_ID, AUDIO_DECODED_STREAM_ID).or_fail()?;
         scheduler.register(decoder).or_fail()?;
     }
 

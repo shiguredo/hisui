@@ -73,6 +73,7 @@ impl MediaProcessorWorkloadHint {
     // 今のようなヒューリスティックな値を使って運用してみて、様子を見ることにする。
     pub const READER: Self = Self::IoIntensive;
     pub const WRITER: Self = Self::IoIntensive;
+    pub const ASYNC_IO: Self = Self::IoIntensive;
     pub const CPU_MISC: Self = Self::cpu_intensive(1);
     pub const AUDIO_DECODER: Self = Self::cpu_intensive(1);
     pub const AUDIO_MIXER: Self = Self::cpu_intensive(1);
@@ -139,6 +140,11 @@ pub enum MediaProcessorOutput {
         stream_id: MediaStreamId,
         sample: MediaSample,
     },
+    // TODO: 入力側にフィードバックするバリアントを追加する:
+    //   例: Feedback { input_stream_id: ..., kind: Overloaded | KeyframeRequired }
+    //
+    // ただし、この枠組みだと、そもそも Processor に入力を伝えるためのキューが詰まっている時にそれを伝えるのが難しい。
+    // （それは別の枠組みで対処するか、Processor の代わりにその runner がつまりを検知してフィードバックメッセージを生成するとかする必要がありそう）
     Pending {
         // 入力を待機しているストリームの ID
         //

@@ -11,6 +11,9 @@
 
 ## develop
 
+- [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
+  - 今までは事前に解像度情報を指定していたが、ライブストリームの場合にはそれが難しいことがあるため遅延初期化をするようにする
+  - @sile
 - [UPDATE] indicatif crate のバージョンを 0.18.3 に上げる
   - @sile
 - [UPDATE] log crate のバージョンを 0.4.29 に上げる
@@ -27,9 +30,27 @@
   - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.1.0 にあげる
   - @sile
+- [ADD] FDK-AAC を使った AAC デコードに対応する
+  - @sile
+- [ADD] macOS で Audio Toolbox を使った AAC デコードに対応する
+  - @sile
 - [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
   - バージョンが `-canary.X` は `.devX` 形式に変換される
   - @voluntas
+- [ADD] 実験的コマンドとして rtmp-inbound-endpoint を追加する
+  - RTMP サーバーとして受信したストリームを出力ファイル（.mp4）に保存するためのコマンド
+  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+  - @sile
+- [ADD] 実験的コマンドとして rtmp-outbound-endpoint を追加する
+  - 入力ファイル（.mp4 or .webm）を RTMP サーバーとして配信するためのコマンド
+  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+  - @sile
+- [ADD] 実験的コマンドとして rtmp-publish を追加する
+  - 入力ファイル（.mp4 or .webm）を RTMP サーバーに配信するためのコマンド
+  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+  - @sile
+- [ADD] 依存ライブラリに shiguredo_rtmp を追加する
+  - @sile
 - [CHANGE] コマンドライン引数に `--experimental(-x)` フラグを追加して `pipeline` サブコマンドはこのフラグ指定時にのみ有効になるようにする
   - `pipeline` サブコマンドは元々実験的機能扱いであったが、実験的機能を扱うためのフラグを追加して、より明確にハンドリングするようにする
   - @sile
@@ -48,6 +69,9 @@
   - @voluntas
 - [ADD] python/tests に Hisui Python バインディングのテストコードを追加する
   - @voluntas
+- [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
+  - 内部的な PoC 目的の機能だったが、不要となったので削除する
+  - @sile
 
 ## 2025.3.1
 

@@ -118,3 +118,77 @@ pub fn h264_sample_entry_from_annexb(
         unknown_boxes: Vec::new(),
     }))
 }
+
+/// AVC1 サンプルエントリーから width, height を抽出
+pub fn extract_video_dimensions(entry: &SampleEntry) -> orfail::Result<(u32, u32)> {
+    match entry {
+        SampleEntry::Avc1(avc1) => {
+            let width = avc1.visual.width as u32;
+            let height = avc1.visual.height as u32;
+            Ok((width, height))
+        }
+        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
+    }
+}
+
+/// H.264 のシーケンスヘッダを Annex B 形式で作成する
+///
+/// SPS (Sequence Parameter Set) と PPS (Picture Parameter Set) を
+/// Annex B 形式で連結してシーケンスヘッダを生成します。
+/// 各NALユニットの前には開始コード `0x00 0x00 0x00 0x01` が付与されます。
+pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>]) -> Vec<u8> {
+    let mut result = Vec::new();
+
+    // 全ての SPS を追加
+    for sps in sps_list {
+        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        result.extend_from_slice(sps);
+    }
+
+    // 全ての PPS を追加
+    for pps in pps_list {
+        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        result.extend_from_slice(pps);
+    }
+
+    result
+}
+
+/// Annex.B 形式の H.264 を RTMP 用の AVC パケット形式（サイズ付き NALU）に変換
+pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
+    let mut result = Vec::new();
+
+    (length_size > 0 && length_size <= 4)
+        .or_fail_with(|()| format!("invalid NALU length size: {length_size}"))?;
+
+    for nalu in H264AnnexBNalUnits::new(data) {
+        let nalu = nalu.or_fail()?;
+
+        // サイズをバイト列に変換
+        let size_bytes = match length_size {
+            1 => {
+                let size = u8::try_from(nalu.data.len()).or_fail()?;
+                &[size][..]
+            }
+            2 => {
+                let size = u16::try_from(nalu.data.len()).or_fail()?;
+                &size.to_be_bytes()[..]
+            }
+            3 => {
+                let size = u32::try_from(nalu.data.len()).or_fail()?;
+                (size <= 0x00FF_FFFF).or_fail()?;
+                &[(size >> 16) as u8, (size >> 8) as u8, size as u8]
+            }
+            4 => {
+                let size = u32::try_from(nalu.data.len()).or_fail()?;
+                &size.to_be_bytes()[..]
+            }
+            _ => unreachable!(),
+        };
+
+        result.extend_from_slice(size_bytes);
+        result.extend_from_slice(nalu.data);
+    }
+
+    Ok(result)
+}

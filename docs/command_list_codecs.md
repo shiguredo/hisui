@@ -35,7 +35,7 @@ $ hisui list-codecs
     {
       "name": "AAC",
       "type": "audio",
-      "decoders": [],
+      "decoders": ["audio_toolbox"],
       "encoders": ["audio_toolbox"]
     },
     {

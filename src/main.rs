@@ -1,11 +1,13 @@
 use hisui::logger::Logger;
 
+// 共通引数定義
 const HELP_FLAG: noargs::FlagSpec = noargs::HELP_FLAG
     .doc("このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)");
 const VERSION_FLAG: noargs::FlagSpec = noargs::VERSION_FLAG.doc("バージョン番号を表示します");
 const VERBOSE_FLAG: noargs::FlagSpec =
     noargs::flag("verbose").doc("警告未満のログメッセージも出力します");
 
+// サブコマンド定義
 const INSPECT_COMMAND: noargs::CmdSpec =
     noargs::cmd("inspect").doc("録画ファイルの情報を取得します");
 const LIST_CODECS_COMMAND: noargs::CmdSpec =
@@ -15,8 +17,16 @@ const VMAF_COMMAND: noargs::CmdSpec =
     noargs::cmd("vmaf").doc("VMAF を用いた映像エンコード品質の評価を行います");
 const TUNE_COMMAND: noargs::CmdSpec =
     noargs::cmd("tune").doc("Optuna を用いた映像エンコードパラメーターの調整を行います");
+
+// 以降は実験的なサブコマンドの定義
 const PIPELINE_COMMAND: noargs::CmdSpec =
     noargs::cmd("pipeline").doc("ユーザー定義のパイプラインを実行します（実験的機能）");
+const RTMP_PUBLISH_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-publish")
+    .doc("指定された入力ファイルを RTMP クライアントとして配信します（実験的機能）");
+const RTMP_OUTBOUND_ENDPOINT_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-outbound-endpoint")
+    .doc("指定された入力ファイルを RTMP サーバーとして配信します（実験的機能）");
+const RTMP_INBOUND_ENDPOINT_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-inbound-endpoint")
+    .doc("RTMP サーバーに配信されたストリームを入力ファイルに保存します（実験的機能）");
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
@@ -57,6 +67,12 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_tune::run(args)?;
     } else if experimental && PIPELINE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_pipeline::run(args)?;
+    } else if experimental && RTMP_PUBLISH_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_rtmp_publish::run(args)?;
+    } else if experimental && RTMP_OUTBOUND_ENDPOINT_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_rtmp_outbound_endpoint::run(args)?;
+    } else if experimental && RTMP_INBOUND_ENDPOINT_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_rtmp_inbound_endpoint::run(args)?;
     } else if let Some(help) = args.finish()? {
         print!("{help}");
     }

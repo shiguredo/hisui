@@ -4,7 +4,7 @@
 //! [Audio Toolbox]: https://developer.apple.com/documentation/audiotoolbox/
 #![warn(missing_docs)]
 
-use std::{ffi::c_void, mem::MaybeUninit};
+use std::{ffi::c_void, mem::MaybeUninit, num::NonZeroU8};
 
 mod sys;
 
@@ -76,7 +76,7 @@ impl Encoder {
             input_format.mFramesPerPacket = 1;
             input_format.mBytesPerFrame = 4;
             input_format.mChannelsPerFrame = CHANNELS as sys::UInt32;
-            input_format.mBitsPerChannel = CHANNELS as sys::UInt32 * 8;
+            input_format.mBitsPerChannel = 16; // i16 = 16 bits per sample
 
             // 以下の Table 2-6 が参考になる:
             // https://developer.apple.com/library/archive/documentation/MusicAudio/Reference/CAFSpec/CAF_spec/CAF_spec.html
@@ -176,11 +176,10 @@ impl Encoder {
             let size = packets * CHANNELS as u32 * size_of::<i16>() as u32;
             io_data.mNumberBuffers = 1;
             io_data.mBuffers[0].mNumberChannels = 2;
-            std::slice::from_raw_parts_mut(
-                io_data.mBuffers[0].mData.cast(),
-                size as usize / CHANNELS,
-            )
-            .copy_from_slice(&this.pcm_buf[..size as usize / CHANNELS]);
+
+            let num_samples = (size / size_of::<i16>() as u32) as usize;
+            std::slice::from_raw_parts_mut(io_data.mBuffers[0].mData.cast(), num_samples)
+                .copy_from_slice(&this.pcm_buf[..num_samples]);
 
             io_data.mBuffers[0].mDataByteSize = size;
             this.pcm_buf.drain(0..packets as usize * CHANNELS);
@@ -208,6 +207,184 @@ pub struct EncodedFrame {
     /// フレームに含まれているサンプルの数
     pub samples: usize,
 }
+
+/// AAC デコーダー
+#[derive(Debug)]
+pub struct Decoder {
+    converter: sys::AudioConverterRef,
+    encoded_buf: Vec<u8>,
+    eos: bool,
+    packet_desc: Box<sys::AudioStreamPacketDescription>,
+    input_channels: NonZeroU8,
+}
+
+impl Decoder {
+    /// デコーダーインスタンスを生成する
+    ///
+    /// 入力の AAC フォーマット（サンプルレート、チャンネル数）は引数で指定できます。
+    ///
+    /// 出力チャネル数はステレオ固定で、サンプルレートは入力と同じとなります。
+    pub fn new(input_sample_rate: u32, input_channels: NonZeroU8) -> Result<Self, Error> {
+        unsafe {
+            let mut input_format =
+                MaybeUninit::<sys::AudioStreamBasicDescription>::zeroed().assume_init();
+            let mut output_format =
+                MaybeUninit::<sys::AudioStreamBasicDescription>::zeroed().assume_init();
+
+            // AAC 入力フォーマット
+            input_format.mSampleRate = input_sample_rate as f64;
+            input_format.mFormatID = sys::kAudioFormatMPEG4AAC;
+            input_format.mFormatFlags = sys::kMPEG4Object_AAC_LC;
+            input_format.mChannelsPerFrame = input_channels.get() as sys::UInt32;
+            input_format.mFramesPerPacket = 1024;
+            input_format.mBitsPerChannel = 0;
+            input_format.mBytesPerPacket = 0;
+
+            // PCM 出力フォーマット（Hisui の仕様に合わせて固定）
+            output_format.mFormatID = sys::kAudioFormatLinearPCM;
+            output_format.mFormatFlags =
+                sys::kAudioFormatFlagIsSignedInteger | sys::kAudioFormatFlagIsPacked;
+            output_format.mBytesPerPacket = 4;
+            output_format.mFramesPerPacket = 1;
+            output_format.mBytesPerFrame = 4;
+            output_format.mChannelsPerFrame = CHANNELS as sys::UInt32; // ステレオ固定
+            output_format.mBitsPerChannel = 16; // i16 = 16 bits per sample
+
+            // これは入力に合わせる（固定だとデコード後の音声が変になることがあるため）
+            output_format.mSampleRate = input_sample_rate as f64;
+
+            let mut converter = std::ptr::null_mut();
+            let status = sys::AudioConverterNew(&input_format, &output_format, &mut converter);
+            Error::check(status, "AudioConverterNew")?;
+
+            Ok(Self {
+                converter,
+                encoded_buf: Vec::new(),
+                eos: false,
+                packet_desc: Box::new(sys::AudioStreamPacketDescription {
+                    mStartOffset: 0,
+                    mVariableFramesInPacket: 0,
+                    mDataByteSize: 0,
+                }),
+                input_channels,
+            })
+        }
+    }
+
+    /// AAC 圧縮データをデコーダーに入力する
+    pub fn decode(&mut self, encoded: &[u8]) -> Result<(), Error> {
+        self.encoded_buf.extend_from_slice(encoded);
+        Ok(())
+    }
+
+    /// デコーダーに、これ以上データが来ないこと、を伝える
+    pub fn finish(&mut self) -> Result<(), Error> {
+        self.eos = true;
+        Ok(())
+    }
+
+    /// デコードされたデータを取得する
+    ///
+    /// `Ok(Some(_))` が返される間はこのメソッドをループして呼び出す。
+    /// `Ok(None)` が返されたら、それ以上デコード結果がないことを意味する。
+    pub fn next_decoded_data(&mut self) -> Result<Option<Vec<i16>>, Error> {
+        self.decode_impl()
+    }
+
+    fn decode_impl(&mut self) -> Result<Option<Vec<i16>>, Error> {
+        let pcm_buf_size = 1024;
+        let mut pcm_buf = vec![0i16; pcm_buf_size * CHANNELS];
+
+        // PCM 出力の場合、io_packets はフレーム数を意味する
+        // AAC 1 パケット = 1024 フレームなので、バッファサイズに合わせて 1024 を設定
+        let mut io_packets = pcm_buf_size as u32;
+
+        let mut output_buffer_list =
+            unsafe { MaybeUninit::<sys::AudioBufferList>::zeroed().assume_init() };
+        output_buffer_list.mNumberBuffers = 1;
+        output_buffer_list.mBuffers[0].mNumberChannels = CHANNELS as sys::UInt32;
+        output_buffer_list.mBuffers[0].mData = pcm_buf.as_mut_ptr().cast();
+        output_buffer_list.mBuffers[0].mDataByteSize = (pcm_buf.len() * size_of::<i16>()) as u32;
+
+        let status = unsafe {
+            sys::AudioConverterFillComplexBuffer(
+                self.converter,
+                Some(Self::callback),
+                (self as *mut Self).cast(),
+                &mut io_packets,
+                &mut output_buffer_list,
+                std::ptr::null_mut(),
+            )
+        };
+        if status == K_NO_MORE_INPUT {
+            return Ok(None);
+        }
+        Error::check(status, "AudioConverterFillComplexBuffer")?;
+
+        // 処理が終わったらバッファはクリアする
+        self.encoded_buf.clear();
+
+        let byte_size = output_buffer_list.mBuffers[0].mDataByteSize as usize;
+        let size = byte_size / size_of::<i16>();
+        if size == 0 {
+            return Ok(None);
+        }
+
+        pcm_buf.truncate(size);
+        Ok(Some(pcm_buf))
+    }
+
+    unsafe extern "C" fn callback(
+        _in_audio_converter: sys::AudioConverterRef,
+        io_number_data_packets: *mut u32,
+        io_data: *mut sys::AudioBufferList,
+        out_data_packet_description: *mut *mut sys::AudioStreamPacketDescription,
+        in_user_data: *mut c_void,
+    ) -> i32 {
+        unsafe {
+            let this: &mut Decoder = &mut *(in_user_data as *mut Decoder);
+            let requested_packets = *io_number_data_packets; // 要求されたパケット数を取得
+
+            if this.encoded_buf.is_empty() {
+                if this.eos {
+                    *io_number_data_packets = 0;
+                    return sys::noErr as i32;
+                }
+                return K_NO_MORE_INPUT;
+            }
+
+            // 要求されたパケット数に応じて処理（一度に1パケットまで）
+            *io_number_data_packets = requested_packets.min(1);
+
+            let io_data = &mut *io_data;
+            io_data.mNumberBuffers = 1;
+            io_data.mBuffers[0].mNumberChannels = this.input_channels.get() as sys::UInt32;
+            io_data.mBuffers[0].mData = this.encoded_buf.as_mut_ptr().cast();
+            io_data.mBuffers[0].mDataByteSize = this.encoded_buf.len() as u32;
+
+            // パケット記述情報の設定
+            if !out_data_packet_description.is_null() {
+                // this の packet_desc フィールドを更新して、そのポインタを設定
+                this.packet_desc.mStartOffset = 0;
+                this.packet_desc.mVariableFramesInPacket = 0;
+                this.packet_desc.mDataByteSize = this.encoded_buf.len() as u32;
+
+                *out_data_packet_description = &mut *this.packet_desc as *mut _;
+            }
+        }
+        sys::noErr as i32
+    }
+}
+
+impl Drop for Decoder {
+    fn drop(&mut self) {
+        unsafe {
+            sys::AudioConverterDispose(self.converter);
+        }
+    }
+}
+
+unsafe impl Send for Decoder {}
 
 #[cfg(test)]
 mod tests {
@@ -237,5 +414,41 @@ mod tests {
         }
 
         assert_eq!(sample_count, 100 * 100);
+    }
+
+    #[test]
+    fn decode_silent() {
+        // 有効な AAC データを取得するためにエンコーダーを使用する
+        let mut encoder = Encoder::new(128_000).expect("create encoder error");
+        let mut decoder = Decoder::new(
+            SAMPLE_RATE as u32,
+            NonZeroU8::new(CHANNELS as u8).expect("infallible"),
+        )
+        .expect("create decoder error");
+
+        // 無音のオーディオをエンコードする
+        let mut acc_encoded_data = Vec::new();
+        let encoded = encoder
+            .encode(&[0; 1024 * CHANNELS])
+            .expect("encode error")
+            .expect("no encoded frame");
+        acc_encoded_data.extend(encoded.data);
+
+        if let Some(encoded) = encoder.finish().expect("finish error") {
+            acc_encoded_data.extend(encoded.data);
+        }
+
+        // エンコードされたデータをデコードする
+        decoder.decode(&acc_encoded_data).expect("decode error");
+        decoder.finish().expect("finish error");
+
+        let mut total_decoded = Vec::new();
+        while let Some(data) = decoder.next_decoded_data().expect("decode error") {
+            total_decoded.extend(data);
+        }
+
+        // デコード結果が入力と一致することを確認する
+        assert_eq!(total_decoded.len(), 1024 * CHANNELS);
+        assert!(total_decoded.iter().all(|v| *v == 0));
     }
 }

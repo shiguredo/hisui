@@ -296,6 +296,8 @@ pub struct PixelPosition {
 pub struct EvenUsize(usize);
 
 impl EvenUsize {
+    pub const ZERO: Self = Self(0);
+
     pub const MIN_CELL_SIZE: Self = Self(16);
 
     pub const fn new(n: usize) -> Option<Self> {

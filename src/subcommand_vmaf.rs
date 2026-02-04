@@ -215,7 +215,6 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         openh264_lib.clone(),
     )
     .or_fail()?;
-    let encode_engine = encoder.name();
     let encoder_stats = encoder.encoder_stats().clone();
     scheduler.register(encoder).or_fail()?;
 
@@ -279,7 +278,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         reference_yuv_file_path,
         distorted_yuv_file_path,
         vmaf_output_file_path,
-        encode_engine,
+        encode_engine: encoder_stats.engine.get().or_fail()?,
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,

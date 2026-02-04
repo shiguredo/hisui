@@ -61,8 +61,8 @@ impl Composer {
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
-            let decoder = AudioDecoder::new_opus(reader_output_stream_id, decoder_output_stream_id)
-                .or_fail()?;
+            let decoder =
+                AudioDecoder::new(reader_output_stream_id, decoder_output_stream_id).or_fail()?;
             scheduler.register(decoder).or_fail()?;
 
             audio_mixer_input_stream_ids.push(decoder_output_stream_id);
