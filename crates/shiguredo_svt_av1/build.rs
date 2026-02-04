@@ -5,6 +5,7 @@ use std::{
     process::Command,
 };
 
+use cmake::Config;
 use sha2::Digest;
 
 // 依存ライブラリの名前
@@ -40,8 +41,6 @@ fn main() {
 
     let src_dir = out_build_dir.join(format!("{LIB_NAME}-{version}"));
     let input_header_path = src_dir.join("Source/API/EbSvtAv1Enc.h");
-    let output_lib_dir = src_dir.join("Bin/Release/");
-
     if std::env::var("DOCS_RS").is_ok() {
         // Docs.rs 向けのビルドでは curl ができないので build.rs の処理はスキップして、
         // 代わりに、ドキュメント生成時に最低限必要な定義だけをダミーで出力している。
@@ -64,15 +63,11 @@ fn main() {
     download_external_lib(&out_build_dir, &version);
 
     // 依存ライブラリをビルドする
-    let success = Command::new(src_dir.join("Build/linux/build.sh"))
-        .arg("release")
-        .arg("--static")
-        .arg("--disable-lto") // LTO が有効だと Ubuntu でリンクに失敗する
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[build.sh] failed to build {LIB_NAME}");
-    }
+    let dst = Config::new(&src_dir)
+        .define("BUILD_SHARED_LIBS", "OFF")
+        .define("SVT_AV1_LTO", "OFF")
+        .profile("Release")
+        .build();
 
     // バインディングを生成する
     bindgen::Builder::default()
@@ -82,7 +77,10 @@ fn main() {
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    println!("cargo::rustc-link-search={}", output_lib_dir.display());
+    println!(
+        "cargo::rustc-link-search=native={}",
+        dst.join("lib").display()
+    );
     println!("cargo::rustc-link-lib=static={LINK_NAME}");
 }
 

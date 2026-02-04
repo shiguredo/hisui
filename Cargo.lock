@@ -806,6 +806,7 @@ name = "shiguredo_libyuv"
 version = "2025.2.0"
 dependencies = [
  "bindgen",
+ "cmake",
  "toml",
 ]
 
@@ -853,6 +854,7 @@ name = "shiguredo_svt_av1"
 version = "2025.1.0"
 dependencies = [
  "bindgen",
+ "cmake",
  "log",
  "sha2",
  "toml",

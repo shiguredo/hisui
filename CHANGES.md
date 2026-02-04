@@ -72,6 +72,10 @@
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
   - 内部的な PoC 目的の機能だったが、不要となったので削除する
   - @sile
+- [CHANGE] shiguredo_libyuv の CMake 呼び出しを cmake crate に置き換える
+  - @voluntas
+- [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
+  - @voluntas
 
 ## 2025.3.1
 
