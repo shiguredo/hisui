@@ -840,6 +840,7 @@ name = "shiguredo_opus"
 version = "2025.1.0"
 dependencies = [
  "bindgen",
+ "cmake",
  "toml",
 ]
 

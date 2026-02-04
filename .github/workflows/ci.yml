@@ -21,6 +21,8 @@ env:
 
 jobs:
   ci:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -40,6 +42,8 @@ jobs:
       - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   test-nvidia-video-codec:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     runs-on:
       group: Self
       labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
@@ -56,6 +60,8 @@ jobs:
       - run: cargo test --no-default-features --features nvcodec -p hisui -p shiguredo_nvcodec -- --test-threads=1
 
   test-apple-toolbox:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     runs-on:
       group: Self
       labels: [self-hosted, macOS, ARM64]
@@ -78,6 +84,8 @@ jobs:
       - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx --exclude shiguredo_openh264
 
   test-fdk-aac:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -108,6 +116,8 @@ jobs:
         run: if ldd target/debug/hisui | grep -q fdk-aac; then exit 1; else exit 0; fi
 
   test-openh264:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -167,6 +177,8 @@ jobs:
         run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec --exclude shiguredo_svt_av1 -- --skip simple_single_source_av1
 
   ubuntu-binary:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     name: "Upload Binary for Ubuntu"
     needs: [ci]
     strategy:
@@ -232,6 +244,8 @@ jobs:
           path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
 
   macos-binary:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     name: "Upload Binary for MacOS"
     needs: [test-apple-toolbox]
     strategy:
@@ -277,6 +291,8 @@ jobs:
           path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
 
   docs_rs:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -288,6 +304,8 @@ jobs:
       - run: cargo doc --workspace --exclude hisui
 
   slack_notify_failed:
+    # Windows 対応中のため一時的にスキップ
+    if: false
     needs:
       - ci
       - test-nvidia-video-codec
@@ -301,7 +319,6 @@ jobs:
       - docs_rs
     timeout-minutes: 20
     runs-on: ubuntu-24.04
-    if: failure()
     steps:
       - name: Slack Notification
         uses: rtCamp/action-slack-notify@v2

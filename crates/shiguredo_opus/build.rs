@@ -15,8 +15,6 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("infallible"));
     let out_build_dir = out_dir.join("build/");
     let src_dir = out_build_dir.join(LIB_NAME);
-    let input_header_path = src_dir.join("include/opus.h");
-    let output_lib_dir = src_dir.join("lib/");
     let output_metadata_path = out_dir.join("metadata.rs");
     let output_bindings_path = out_dir.join("bindings.rs");
     let _ = std::fs::remove_dir_all(&out_build_dir);
@@ -52,57 +50,31 @@ fn main() {
     // 依存ライブラリのリポジトリを取得する
     git_clone_external_lib(&out_build_dir);
 
-    // 依存ライブラリをビルドする
+    // cmake で依存ライブラリをビルドする
+    let dst = cmake::Config::new(&src_dir)
+        .define("BUILD_SHARED_LIBS", "OFF")
+        .define("OPUS_BUILD_PROGRAMS", "OFF")
+        .define("OPUS_BUILD_TESTING", "OFF")
+        .profile("Release")
+        .build();
 
-    // opus の README.md では autogen.sh を呼ぶ手順になっているけど、
-    // これだと Hisui では使わないモデルのダウンロードが走って重いので、
-    // autoreconf を直接呼ぶようにしている
-    let success = Command::new("autoreconf")
-        .arg("-isf")
-        .current_dir(&src_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[autoreconf] failed to build {LIB_NAME}");
-    }
-
-    let success = Command::new("./configure")
-        .arg("--disable-shared")
-        .arg("--prefix")
-        .arg(src_dir.display().to_string())
-        .current_dir(&src_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[configure] failed to build {LIB_NAME}");
-    }
-
-    let success = Command::new("make")
-        .current_dir(&src_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[make] failed to build {LIB_NAME}");
-    }
-
-    let success = Command::new("make")
-        .arg("install")
-        .current_dir(&src_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[make] failed to build {LIB_NAME}");
-    }
+    let include_dir = dst.join("include");
+    let input_header_path = include_dir.join("opus").join("opus.h");
+    let output_lib_dir = dst.join("lib");
 
     // バインディングを生成する
     bindgen::Builder::default()
         .header(input_header_path.to_str().expect("invalid header path"))
+        .clang_arg(format!("-I{}", include_dir.display()))
         .generate()
         .expect("failed to generate bindings")
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    println!("cargo::rustc-link-search={}", output_lib_dir.display());
+    println!(
+        "cargo::rustc-link-search=native={}",
+        output_lib_dir.display()
+    );
     println!("cargo::rustc-link-lib=static={LIB_NAME}");
 }
 
