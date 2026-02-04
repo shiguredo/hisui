@@ -67,6 +67,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     .or_fail()?;
     runtime.spawn(reader.start(manager_handler.clone()));
 
+    let reader = VideoReader::new(
+        VIDEO_ENCODED_STREAM_ID,
+        dummy_source_id.clone(),
+        format,
+        Duration::ZERO,
+        vec![input_file_path.clone()],
+    )
+    .or_fail()?;
+    runtime.spawn(reader.start(manager_handler.clone()));
+
     runtime.block_on(manager_handler.wait_finish());
 
     let mut scheduler = Scheduler::new();

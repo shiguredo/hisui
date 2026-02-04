@@ -234,6 +234,40 @@ pub struct VideoReader {
 }
 
 impl VideoReader {
+    pub async fn start(
+        mut self,
+        handle: crate::processor_async::ProcessorManagerHandle,
+    ) -> orfail::Result<()> {
+        let id = crate::processor_async::ProcessorId::new(self.output_stream_id.get().to_string());
+        let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
+
+        let track_id = crate::processor_async::TrackId::new(id.get());
+        let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+
+        // TODO: feedback 処理
+        loop {
+            match self.inner.next() {
+                None => {
+                    if !self.start_next_input_file().or_fail()? {
+                        // 全てのファイルの末尾に達した
+                        break;
+                    }
+                    self.timestamp_offset = self.next_timestamp_offset;
+                    self.inner.set_timestamp_offset(self.timestamp_offset);
+                }
+                Some(Err(e)) => return Err(e),
+                Some(Ok(mut frame)) => {
+                    frame.timestamp += self.timestamp_offset;
+                    self.next_timestamp_offset = frame.timestamp + frame.duration;
+
+                    track_handle.send_media(MediaSample::new_video(frame));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn from_source_info(
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
