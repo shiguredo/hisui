@@ -4,7 +4,7 @@
 //! [libyuv]: https://chromium.googlesource.com/libyuv/libyuv/
 #![warn(missing_docs)]
 
-use std::ffi::{c_int, c_uint};
+use std::ffi::c_int;
 
 mod sys;
 
@@ -74,7 +74,7 @@ pub enum FilterMode {
 }
 
 impl FilterMode {
-    fn to_libyuv_filter_mode(self) -> c_uint {
+    fn to_libyuv_filter_mode(self) -> sys::FilterMode {
         match self {
             FilterMode::None => sys::FilterMode_kFilterNone,
             FilterMode::Linear => sys::FilterMode_kFilterLinear,
