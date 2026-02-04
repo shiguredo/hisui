@@ -60,7 +60,6 @@ impl ProcessorManagerHandle {
 
 #[derive(Debug)]
 struct TrackPublisherState {
-    incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
     incoming_rx: tokio::sync::mpsc::UnboundedReceiver<MediaSample>,
     feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
 }
@@ -96,8 +95,44 @@ impl TrackRunner {
         )
     }
 
-    async fn run(self) {
-        //
+    async fn run(mut self) {
+        loop {
+            tokio::select! {
+                Some(command) = self.command_rx.recv() => self.handle_command(command),
+                else => break,
+            }
+        }
+    }
+
+    fn handle_command(&mut self, command: TrackCommand) {
+        match command {
+            TrackCommand::Publish {
+                publisher_id,
+                reply_tx,
+            } => {
+                let result = self.handle_publish(publisher_id);
+                let _ = reply_tx.send(result);
+            }
+        }
+    }
+
+    fn handle_publish(&mut self, _publisher_id: ProcessorId) -> Option<TrackPublishHandle> {
+        if self.publisher.is_some() {
+            return None;
+        }
+
+        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (feedback_tx, feedback_rx) = tokio::sync::mpsc::unbounded_channel();
+        self.publisher = Some(TrackPublisherState {
+            incoming_rx,
+            feedback_tx,
+        });
+
+        let handle = TrackPublishHandle {
+            incoming_tx,
+            feedback_rx,
+        };
+        Some(handle)
     }
 }
 
@@ -248,11 +283,18 @@ impl ProcessorManagerRunner {
 // こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
-    handle: TrackHandle,
-
     // publish 側は unbounded
     incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
-    feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
+
+    // TODO: メソッドに包んで呼び出しても select! のキャンセルで問題ないならそうする
+    pub feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
+}
+
+impl TrackPublishHandle {
+    pub fn send_media(&self, sample: MediaSample) {
+        // TODO: 最終的には TrackRunner を経由しないようにする
+        let _ = self.incoming_tx.send(sample);
+    }
 }
 
 // TODO: clone 不可なものは名前を変える
