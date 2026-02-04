@@ -135,20 +135,62 @@ impl TrackRunner {
                         None => std::future::pending().await,
                     }
                 } => {
-                    self.handle_sample(sample);
+                    self.handle_sample(sample).await;
                 }
+                // TODO: subscribers からのフィードバックをチェックして、来ていたら publisher に転送する
                 else => break,
             }
         }
     }
 
     // TODO: 最終的にはこの処理は publish handle 側に持っていく
-    fn handle_sample(&mut self, sample: Option<MediaSample>) {
-        let Some(_sample) = sample else {
+    async fn handle_sample(&mut self, sample: Option<MediaSample>) {
+        let Some(sample) = sample else {
             self.publisher = None;
             return;
         };
-        //
+
+        // Remove closed subscribers and send sample to open ones
+        self.subscribers.retain_mut(|subscriber| {
+            // Check if the receiver is closed
+            if subscriber.outgoing_tx.is_closed() {
+                return false; // Remove this subscriber
+            }
+
+            // Try to send the sample
+            match subscriber.outgoing_tx.try_send(sample.clone()) {
+                Ok(()) => {
+                    // Successfully sent
+                    true
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    // Channel is closed, remove this subscriber
+                    false
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    // Buffer is full, need to handle backpressure
+                    // For now, keep the subscriber
+                    true
+                }
+            }
+        });
+
+        // Handle backpressure: if any subscriber's buffer is full,
+        // send feedback to publisher and block until space is available
+        for subscriber in &mut self.subscribers {
+            if subscriber.outgoing_tx.capacity() == 0 {
+                // Buffer is at capacity
+                if let Some(publisher) = &self.publisher {
+                    // Send feedback to publisher about size limit
+                    let _ = publisher.feedback_tx.send(Feedback::SizeLimitReached);
+                }
+
+                // Block until there's space
+                if let Err(_) = subscriber.outgoing_tx.send(sample.clone()).await {
+                    // Subscriber closed while waiting
+                }
+            }
+        }
     }
 
     fn handle_command(&mut self, command: TrackCommand) {
@@ -163,7 +205,7 @@ impl TrackRunner {
             TrackCommand::Subscribe { reply_tx } => {
                 let result = self.handle_subscribe();
                 let _ = reply_tx.send(result);
-            }
+            } // TODO: subscriber 側は Unsubscribe も必要
         }
     }
 
@@ -540,4 +582,5 @@ pub enum Recv {
 #[derive(Debug)]
 pub enum Feedback {
     KeyFrameRequired,
+    SizeLimitReached,
 }
