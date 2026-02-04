@@ -46,8 +46,6 @@ impl ProcessorManagerHandle {
     }
 
     pub async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
-        log::debug!("register processor: {}", processor_id.get());
-
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::RegisterProcessor {
             processor_id,
@@ -326,6 +324,7 @@ impl ProcessorManagerRunner {
                         for waiting in self.finish_waitings {
                             let _ = waiting.send(());
                         }
+                        log::debug!("finish processor manager");
                         return;
                     }
                 }
@@ -378,6 +377,7 @@ impl ProcessorManagerRunner {
     }
 
     fn handle_register_processor(&mut self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+        log::debug!("register processor: {}", processor_id.get());
         if self.processors.contains_key(&processor_id) {
             return None;
         }
