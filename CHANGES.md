@@ -9,6 +9,28 @@
 - FIX
   - バグ修正
 
+## feature/windows
+
+- [ADD] Windows 向け CI (`ci-windows.yml`) を追加する
+  - cargo fmt / check / clippy / test の実行と、リリースバイナリのアップロードに対応
+  - @voluntas
+- [ADD] Windows 向けリリースバイナリのビルドに対応する
+  - @voluntas
+- [CHANGE] shiguredo_opus のビルドシステムを autotools から cmake に移行する
+  - Windows (MSVC) 環境では autotools が利用できないため cmake に切り替える
+  - @voluntas
+- [FIX] shiguredo_openh264 のキャストを Windows MSVC 環境でもビルドできるように修正する
+  - Windows MSVC の bindgen では C の enum が `i32` として生成されるため、`u32` へのキャストが失敗していた
+  - @voluntas
+- [FIX] shiguredo_libyuv の FilterMode 戻り値型をクロスプラットフォーム対応にする
+  - `c_uint` ではなく `sys::FilterMode` を使用するように修正する
+  - @voluntas
+- [FIX] shiguredo_svt_av1 の型キャストをクロスプラットフォーム対応にする
+  - `as u32` を `as _` に置換し、プラットフォームごとの enum 型の違いを吸収する
+  - @voluntas
+- [FIX] shiguredo_dav1d の meson ビルドが Windows で MinGW ではなく MSVC を使用するように修正する
+  - @voluntas
+
 ## develop
 
 - [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
