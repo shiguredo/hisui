@@ -223,7 +223,6 @@ impl OutputPrinter {
         let id = crate::processor_async::ProcessorId::new("output_printer");
         let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
 
-        // Subscribe to tracks instead of publishing
         let audio_track_id =
             crate::processor_async::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
         let mut audio_track = processor_handle
@@ -238,7 +237,6 @@ impl OutputPrinter {
             .await
             .or_fail()?;
 
-        // Sample receive loop
         let mut audio_finished = false;
         let mut video_finished = false;
 
@@ -250,28 +248,15 @@ impl OutputPrinter {
             tokio::select! {
                 sample = async {
                     if !audio_finished {
-                        audio_track.recv_media().await
+                         audio_track.recv_media().await
                     } else {
                         std::future::pending::<Option<MediaSample>>().await
                     }
                 } => {
-                    match sample {
-                        Some(media_sample) => {
-                             let audio_data = media_sample.expect_audio_data().or_fail()?;
-                                if self.audio_codec.is_none() {
-                                    self.audio_codec = audio_data.format.codec_name();
-                                }
-                                self.audio_samples.push(AudioSampleInfo {
-                                    timestamp: audio_data.timestamp,
-                                    duration: audio_data.duration,
-                                    data_size: audio_data.data.len(),
-                                });
-                        }
-                        None => {
-                            audio_finished = true;
-                            self.active_streams.remove(&AUDIO_ENCODED_STREAM_ID);
-                        }
+                    if sample.is_none() {
+                        audio_finished = true;
                     }
+                    self.handle_audio_sample(sample)?;
                 }
                 sample = async {
                     if !video_finished {
@@ -280,31 +265,57 @@ impl OutputPrinter {
                         std::future::pending::<Option<MediaSample>>().await
                     }
                 } => {
-                    match sample {
-                        Some(media_sample) => {
-                            let video_frame = media_sample.expect_video_frame().or_fail()?;
-                                if self.video_codec.is_none() {
-                                    self.video_codec = video_frame.format.codec_name();
-                                }
-                                self.video_samples.push(VideoSampleInfo {
-                                    timestamp: video_frame.timestamp,
-                                    duration: video_frame.duration,
-                                    data_size: video_frame.data.len(),
-                                    keyframe: video_frame.keyframe,
-                                    codec_specific_info: VideoCodecSpecificInfo::new(&video_frame),
-                                });
-                        }
-                        None => {
-                            video_finished = true;
-                            self.active_streams.remove(&VIDEO_ENCODED_STREAM_ID);
-                        }
+                    if sample.is_none() {
+                        video_finished = true;
                     }
+                    self.handle_video_sample(sample)?;
                 }
             }
         }
 
-        // Output results
         crate::json::pretty_print(&self).or_fail()?;
+        Ok(())
+    }
+
+    fn handle_audio_sample(&mut self, sample: Option<MediaSample>) -> orfail::Result<()> {
+        match sample {
+            Some(media_sample) => {
+                let audio_data = media_sample.expect_audio_data().or_fail()?;
+                if self.audio_codec.is_none() {
+                    self.audio_codec = audio_data.format.codec_name();
+                }
+                self.audio_samples.push(AudioSampleInfo {
+                    timestamp: audio_data.timestamp,
+                    duration: audio_data.duration,
+                    data_size: audio_data.data.len(),
+                });
+            }
+            None => {
+                self.active_streams.remove(&AUDIO_ENCODED_STREAM_ID);
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_video_sample(&mut self, sample: Option<MediaSample>) -> orfail::Result<()> {
+        match sample {
+            Some(media_sample) => {
+                let video_frame = media_sample.expect_video_frame().or_fail()?;
+                if self.video_codec.is_none() {
+                    self.video_codec = video_frame.format.codec_name();
+                }
+                self.video_samples.push(VideoSampleInfo {
+                    timestamp: video_frame.timestamp,
+                    duration: video_frame.duration,
+                    data_size: video_frame.data.len(),
+                    keyframe: video_frame.keyframe,
+                    codec_specific_info: VideoCodecSpecificInfo::new(&video_frame),
+                });
+            }
+            None => {
+                self.active_streams.remove(&VIDEO_ENCODED_STREAM_ID);
+            }
+        }
         Ok(())
     }
 }
