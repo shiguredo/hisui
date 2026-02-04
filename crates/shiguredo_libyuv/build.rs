@@ -3,6 +3,8 @@ use std::{
     process::Command,
 };
 
+use cmake::Config;
+
 // 依存ライブラリの名前
 const LIB_NAME: &str = "libyuv";
 const LINK_NAME: &str = "yuv";
@@ -14,14 +16,12 @@ fn main() {
 
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("infallible"));
-    let out_build_dir = out_dir.join("build/");
-    let src_dir = out_build_dir.join(LIB_NAME);
-    let input_header_dir = src_dir.join("include/");
-    let cmake_dir = src_dir.join("out");
+    let out_source_dir = out_dir.join("source/");
+    let src_dir = out_source_dir.join(LIB_NAME);
     let output_metadata_path = out_dir.join("metadata.rs");
     let output_bindings_path = out_dir.join("bindings.rs");
-    let _ = std::fs::remove_dir_all(&out_build_dir);
-    std::fs::create_dir(&out_build_dir).expect("failed to create build directory");
+    let _ = std::fs::remove_dir_all(&out_source_dir);
+    std::fs::create_dir(&out_source_dir).expect("failed to create source directory");
 
     // 各種メタデータを書き込む
     let (git_url, version) = get_git_url_and_version();
@@ -48,45 +48,25 @@ fn main() {
     }
 
     // 依存ライブラリのリポジトリを取得する
-    git_clone_external_lib(&out_build_dir);
+    git_clone_external_lib(&out_source_dir);
 
     // 依存ライブラリをビルドする
-    std::fs::create_dir(&cmake_dir).expect("failed to create build directory");
-
-    // CMakeの設定を追加（リリースビルド、静的ライブラリ）
-    let success = Command::new("cmake")
-        .arg("..")
-        .arg("-DCMAKE_BUILD_TYPE=Release")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .current_dir(&cmake_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[cmake configure] failed to build {LIB_NAME}");
-    }
-
-    let success = Command::new("cmake")
-        .arg("--build")
-        .arg(".")
-        .arg("--config")
-        .arg("Release")
-        .current_dir(&cmake_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[cmake build] failed to build {LIB_NAME}");
-    }
+    let dst = Config::new(&src_dir)
+        .define("BUILD_SHARED_LIBS", "OFF")
+        .profile("Release")
+        .build();
 
     // バインディングを生成する
+    let install_include_dir = dst.join("include");
     bindgen::Builder::default()
-        .clang_arg(format!("-I{}", input_header_dir.display()))
-        .header(input_header_dir.join("libyuv.h").display().to_string())
+        .clang_arg(format!("-I{}", install_include_dir.display()))
+        .header(install_include_dir.join("libyuv.h").display().to_string())
         .generate()
         .expect("failed to generate bindings")
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    println!("cargo::rustc-link-search={}", cmake_dir.display());
+    println!("cargo::rustc-link-search=native={}", dst.join("lib").display());
     println!("cargo::rustc-link-lib=static={LINK_NAME}");
 }
 
