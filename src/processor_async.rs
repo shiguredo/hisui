@@ -1,4 +1,6 @@
 #![expect(dead_code)]
+#![expect(clippy::new_without_default)]
+
 use crate::media::MediaSample;
 
 #[derive(Debug)]
@@ -57,30 +59,40 @@ impl ProcessorManagerHandle {
 }
 
 #[derive(Debug)]
+struct TrackPublisherState {
+    incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
+    incoming_rx: tokio::sync::mpsc::UnboundedReceiver<MediaSample>,
+    feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
+}
+
+#[derive(Debug)]
+enum TrackCommand {
+    Publish {
+        publisher_id: ProcessorId,
+        reply_tx: tokio::sync::oneshot::Sender<Option<TrackPublishHandle>>,
+    },
+}
+
+#[derive(Debug)]
 struct TrackRunner {
     track_id: TrackId,
     handle: ProcessorManagerHandle,
-    incoming_rx: tokio::sync::mpsc::UnboundedReceiver<MediaSample>,
-    feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
-    outgoing_txs: std::collections::HashMap<ProcessorId, tokio::sync::mpsc::Sender<MediaSample>>,
+    command_rx: tokio::sync::mpsc::UnboundedReceiver<TrackCommand>,
+    publisher: Option<TrackPublisherState>,
+    //outgoing_txs: std::collections::HashMap<ProcessorId, tokio::sync::mpsc::Sender<MediaSample>>,
 }
 
 impl TrackRunner {
     fn new(track_id: TrackId, handle: ProcessorManagerHandle) -> (Self, TrackHandle) {
-        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (feedback_tx, feedback_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         (
             Self {
                 track_id,
                 handle,
-                incoming_rx,
-                feedback_tx,
-                outgoing_txs: std::collections::HashMap::new(),
+                command_rx,
+                publisher: None,
             },
-            TrackHandle {
-                //incoming_tx,
-//                feedback_rx,
-            },
+            TrackHandle { command_tx },
         )
     }
 
@@ -99,14 +111,17 @@ impl Drop for TrackRunner {
 
 #[derive(Debug, Clone)]
 struct TrackHandle {
-    // publish 側は unbounded
-    //incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
-    //feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
+    command_tx: tokio::sync::mpsc::UnboundedSender<TrackCommand>,
 }
 
 impl TrackHandle {
-    async fn publish(&self, processor_id: ProcessorId) -> Option<TrackPublishHandle> {
-        todo!()
+    async fn publish(&self, publisher_id: ProcessorId) -> Option<TrackPublishHandle> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let _ = self.command_tx.send(TrackCommand::Publish {
+            publisher_id,
+            reply_tx,
+        });
+        reply_rx.await.unwrap_or(None)
     }
 }
 
@@ -233,10 +248,11 @@ impl ProcessorManagerRunner {
 // こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
-    inner: ProcessorManagerHandle,
-    processor_id: ProcessorId,
-    track_id: TrackId,
-    track_handle: TrackHandle,
+    handle: TrackHandle,
+
+    // publish 側は unbounded
+    incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
+    feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
 }
 
 // TODO: clone 不可なものは名前を変える
