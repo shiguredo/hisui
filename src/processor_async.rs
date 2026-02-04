@@ -99,9 +99,22 @@ impl TrackRunner {
         loop {
             tokio::select! {
                 Some(command) = self.command_rx.recv() => self.handle_command(command),
+                Some(sample) = async {
+                    match &mut self.publisher {
+                        Some(publisher) => publisher.incoming_rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.handle_sample(sample);
+                }
                 else => break,
             }
         }
+    }
+
+    // TODO: 最終的にはこの処理は publish handle 側に持っていく
+    fn handle_sample(&mut self, _sample: MediaSample) {
+        //
     }
 
     fn handle_command(&mut self, command: TrackCommand) {
@@ -286,14 +299,21 @@ pub struct TrackPublishHandle {
     // publish 側は unbounded
     incoming_tx: tokio::sync::mpsc::UnboundedSender<MediaSample>,
 
-    // TODO: メソッドに包んで呼び出しても select! のキャンセルで問題ないならそうする
-    pub feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
+    feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
 }
 
 impl TrackPublishHandle {
     pub fn send_media(&self, sample: MediaSample) {
         // TODO: 最終的には TrackRunner を経由しないようにする
         let _ = self.incoming_tx.send(sample);
+    }
+
+    pub async fn recv_feedback(&mut self) -> Feedback {
+        if let Some(x) = self.feedback_rx.recv().await {
+            x
+        } else {
+            std::future::pending().await
+        }
     }
 }
 
