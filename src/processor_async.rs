@@ -137,7 +137,20 @@ impl TrackRunner {
                 } => {
                     self.handle_sample(sample).await;
                 }
-                // TODO: subscribers からのフィードバックをチェックして、来ていたら publisher に転送する
+                feedback = async {
+                    for subscriber in &mut self.subscribers {
+                        if let Ok(feedback) = subscriber.feedback_rx.try_recv() {
+                            return Some(feedback);
+                        }
+                    }
+                    std::future::pending().await
+                }, if self.publisher.is_some() => {
+                    if let Some(feedback) = feedback {
+                        if let Some(publisher) = &mut self.publisher {
+                            let _ = publisher.feedback_tx.send(feedback);
+                        }
+                    }
+                }
                 else => break,
             }
         }
@@ -182,7 +195,7 @@ impl TrackRunner {
             TrackCommand::Subscribe { reply_tx } => {
                 let result = self.handle_subscribe();
                 let _ = reply_tx.send(result);
-            } // TODO: subscriber 側は Unsubscribe も必要
+            } // TODO: subscriber 側は Unsubscribe も必要（必須ではないけど publish がないと残り続けてしまう）
         }
     }
 
