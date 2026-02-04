@@ -66,7 +66,10 @@ fn main() {
         .write_to_file(output_bindings_path)
         .expect("failed to write bindings");
 
-    println!("cargo::rustc-link-search=native={}", dst.join("lib").display());
+    println!(
+        "cargo::rustc-link-search=native={}",
+        dst.join("lib").display()
+    );
     println!("cargo::rustc-link-lib=static={LINK_NAME}");
 }
 
