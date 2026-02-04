@@ -67,7 +67,9 @@ impl TrackRunner {
 }
 
 #[derive(Debug, Clone)]
-struct TrackHandle {}
+struct TrackHandle {
+    //incoming_tx: mio::sync::mpsc::Sender
+}
 
 #[derive(Debug)]
 struct TrackState {
@@ -212,11 +214,13 @@ pub struct TrackPublishHandle {
     track_handle: TrackHandle,
 }
 
+// TODO: clone 不可なものは名前を変える
 #[derive(Debug)]
 pub struct ProcessorHandle {
     inner: ProcessorManagerHandle,
     processor_id: ProcessorId,
     processor_seqno: u64, // TDOO: 不要かも
+                          // TODO: add rx for RPC requests
 }
 
 impl ProcessorHandle {
