@@ -150,46 +150,23 @@ impl TrackRunner {
             return;
         };
 
-        // Remove closed subscribers and send sample to open ones
-        self.subscribers.retain_mut(|subscriber| {
-            // Check if the receiver is closed
-            if subscriber.outgoing_tx.is_closed() {
-                return false; // Remove this subscriber
-            }
-
-            // Try to send the sample
-            match subscriber.outgoing_tx.try_send(sample.clone()) {
-                Ok(()) => {
-                    // Successfully sent
-                    true
-                }
+        let mut i = 0;
+        while i < self.subscribers.len() {
+            match self.subscribers[i].outgoing_tx.try_send(sample.clone()) {
+                Ok(()) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                    // Channel is closed, remove this subscriber
-                    false
+                    self.subscribers.swap_remove(i);
+                    continue;
                 }
-                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                    // Buffer is full, need to handle backpressure
-                    // For now, keep the subscriber
-                    true
-                }
-            }
-        });
-
-        // Handle backpressure: if any subscriber's buffer is full,
-        // send feedback to publisher and block until space is available
-        for subscriber in &mut self.subscribers {
-            if subscriber.outgoing_tx.capacity() == 0 {
-                // Buffer is at capacity
-                if let Some(publisher) = &self.publisher {
-                    // Send feedback to publisher about size limit
-                    let _ = publisher.feedback_tx.send(Feedback::SizeLimitReached);
-                }
-
-                // Block until there's space
-                if let Err(_) = subscriber.outgoing_tx.send(sample.clone()).await {
-                    // Subscriber closed while waiting
+                Err(tokio::sync::mpsc::error::TrySendError::Full(sample)) => {
+                    // publisher に通知してからブロッキング送信に移る
+                    if let Some(publisher) = &mut self.publisher {
+                        let _ = publisher.feedback_tx.send(Feedback::SizeLimitReached);
+                    }
+                    let _ = self.subscribers[i].outgoing_tx.send(sample).await;
                 }
             }
+            i += 1;
         }
     }
 
