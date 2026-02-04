@@ -854,6 +854,7 @@ name = "shiguredo_svt_av1"
 version = "2025.1.0"
 dependencies = [
  "bindgen",
+ "cmake",
  "log",
  "sha2",
  "toml",
