@@ -457,6 +457,10 @@ impl ProcessorHandle {
         track_handle.publish(self.processor_id.clone()).await
     }
 
+    pub async fn subscribe_track(&self, track_id: TrackId) -> Option<TrackSubscribeHandle> {
+        todo!()
+    }
+
     pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {
         match self.rpc_rx.recv().await {
             Some(request) => request,
