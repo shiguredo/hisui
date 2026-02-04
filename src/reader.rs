@@ -41,9 +41,8 @@ impl AudioReader {
         let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
 
         let track_id = crate::processor_async::TrackId::new(id.get());
-        let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
-        // TODO: feedback 処理
         loop {
             match self.inner.next() {
                 None => {
@@ -59,12 +58,16 @@ impl AudioReader {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
 
-                    track_handle.send_media(Some(MediaSample::new_audio(data)));
+                    track_handle
+                        .send_media(Some(MediaSample::new_audio(data)))
+                        .await;
                 }
             }
+
+            while track_handle.try_recv_feedback().is_some() {}
         }
 
-        track_handle.send_media(None);
+        track_handle.send_media(None).await;
 
         Ok(())
     }
@@ -244,9 +247,8 @@ impl VideoReader {
         let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
 
         let track_id = crate::processor_async::TrackId::new(id.get());
-        let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
-        // TODO: feedback 処理
         loop {
             match self.inner.next() {
                 None => {
@@ -262,11 +264,15 @@ impl VideoReader {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
 
-                    track_handle.send_media(Some(MediaSample::new_video(frame)));
+                    track_handle
+                        .send_media(Some(MediaSample::new_video(frame)))
+                        .await;
                 }
             }
+
+            while track_handle.try_recv_feedback().is_some() {}
         }
-        track_handle.send_media(None);
+        track_handle.send_media(None).await;
 
         Ok(())
     }

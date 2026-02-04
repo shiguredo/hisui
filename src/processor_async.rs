@@ -69,7 +69,7 @@ impl ProcessorManagerHandle {
 
 #[derive(Debug)]
 struct TrackPublisherState {
-    incoming_rx: tokio::sync::mpsc::UnboundedReceiver<Option<MediaSample>>,
+    incoming_rx: tokio::sync::mpsc::Receiver<Option<MediaSample>>,
     feedback_tx: tokio::sync::mpsc::UnboundedSender<Feedback>,
 }
 
@@ -183,8 +183,8 @@ impl TrackRunner {
                 Err(tokio::sync::mpsc::error::TrySendError::Full(sample)) => {
                     // publisher に通知してからブロッキング送信に移る
                     if let Some(publisher) = &mut self.publisher {
+                        // TODO: ここでこれ送る必要はないかも（次にブロックすることで自然と publish 側も止まるので）
                         let _ = publisher.feedback_tx.send(Feedback::SizeLimitReached);
-                        // TODO: 詰まりが解消したことも送るべき
                     }
                     let _ = self.subscribers[i].outgoing_tx.send(sample).await;
                 }
@@ -226,7 +226,7 @@ impl TrackRunner {
             return None;
         }
 
-        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::channel(100); // TODO: 可変にする
         let (feedback_tx, feedback_rx) = tokio::sync::mpsc::unbounded_channel();
         self.publisher = Some(TrackPublisherState {
             incoming_rx,
@@ -414,16 +414,15 @@ impl ProcessorManagerRunner {
 // こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
-    // publish 側は unbounded
-    incoming_tx: tokio::sync::mpsc::UnboundedSender<Option<MediaSample>>,
+    incoming_tx: tokio::sync::mpsc::Sender<Option<MediaSample>>,
 
     feedback_rx: tokio::sync::mpsc::UnboundedReceiver<Feedback>,
 }
 
 impl TrackPublishHandle {
-    pub fn send_media(&self, sample: Option<MediaSample>) {
+    pub async fn send_media(&self, sample: Option<MediaSample>) {
         // TODO: 最終的には TrackRunner を経由しないようにする
-        let _ = self.incoming_tx.send(sample);
+        let _ = self.incoming_tx.send(sample).await;
     }
 
     pub async fn recv_feedback(&mut self) -> Feedback {
@@ -432,6 +431,10 @@ impl TrackPublishHandle {
         } else {
             std::future::pending().await
         }
+    }
+
+    pub fn try_recv_feedback(&mut self) -> Option<Feedback> {
+        self.feedback_rx.try_recv().ok()
     }
 }
 
@@ -648,5 +651,11 @@ pub enum Recv {
 #[derive(Debug)]
 pub enum Feedback {
     KeyFrameRequired,
-    SizeLimitReached,
+    SizeLimitReached, // TODO: rename
+}
+
+impl Feedback {
+    pub fn is_size_limit_reached(&self) -> bool {
+        matches!(self, Self::SizeLimitReached)
+    }
 }
