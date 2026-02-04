@@ -74,6 +74,8 @@
   - @sile
 - [CHANGE] shiguredo_libyuv の CMake 呼び出しを cmake crate に置き換える
   - @voluntas
+- [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
+  - @voluntas
 
 ## 2025.3.1
 
