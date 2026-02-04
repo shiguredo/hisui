@@ -56,14 +56,27 @@ impl ProcessorManagerHandle {
 }
 
 #[derive(Debug)]
-struct TrackRunner {}
+struct TrackRunner {
+    track_id: TrackId,
+    handle: ProcessorManagerHandle,
+}
 
 impl TrackRunner {
-    fn new() -> (Self, TrackHandle) {
-        todo!()
+    fn new(track_id: TrackId, handle: ProcessorManagerHandle) -> (Self, TrackHandle) {
+        (Self { track_id, handle }, TrackHandle {})
     }
 
-    async fn run(self) {}
+    async fn run(self) {
+        //
+    }
+}
+
+impl Drop for TrackRunner {
+    fn drop(&mut self) {
+        self.handle.send(Command::RemoveTrack {
+            track_id: self.track_id.clone(),
+        });
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +143,9 @@ impl ProcessorManagerRunner {
                     let result = self.handle_publish_track(processor_id, track_id);
                     let _ = reply_tx.send(result);
                 }
+                Command::RemoveTrack { track_id } => {
+                    self.tracks.remove(&track_id);
+                }
             }
         }
 
@@ -145,7 +161,7 @@ impl ProcessorManagerRunner {
         assert!(self.processors.contains_key(&processor_id));
 
         let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
-            let (runner, handle) = TrackRunner::new();
+            let (runner, handle) = TrackRunner::new(track_id.clone(), self.handle.clone());
             tokio::task::spawn(runner.run());
             TrackState {
                 publisher: None,
@@ -268,6 +284,9 @@ enum Command {
         track_id: TrackId,
         reply_tx: tokio::sync::oneshot::Sender<Option<TrackPublishHandle>>,
     },
+    RemoveTrack {
+        track_id: TrackId,
+    },
     /*UnpublishTrack {
         track_id: TrackId,
     },*/
@@ -292,6 +311,7 @@ pub struct JsonRpcRequest(pub nojson::RawJsonOwned);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProcessorId;
 
+// TODO: この中に processor id を含んでいても良さそう
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TrackId;
 
