@@ -119,14 +119,11 @@ pub struct TrackSubscribeHandle {
 }
 
 impl TrackSubscribeHandle {
-    pub async fn recv_media(&mut self) -> Option<MediaSample> {
-        loop {
-            match self.outgoing_rx.recv().await {
-                Some(Message::Media(sample)) => return Some(sample),
-                Some(Message::Eos) => return None,
-                Some(Message::Syn(_)) => todo!(),
-                None => std::future::pending().await,
-            }
+    // TODO: rename
+    pub async fn recv_media(&mut self) -> Message {
+        match self.outgoing_rx.recv().await {
+            Some(m) => m,
+            None => std::future::pending().await,
         }
     }
 }

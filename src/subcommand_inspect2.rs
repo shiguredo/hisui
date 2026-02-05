@@ -240,25 +240,35 @@ impl OutputPrinter {
             }
 
             tokio::select! {
-                sample = async {
+                message = async {
                     if !audio_finished {
                          audio_track.recv_media().await
                     } else {
-                        std::future::pending::<Option<MediaSample>>().await
+                         std::future::pending::<crate::processor_async::Message>().await
                     }
                 } => {
+                    let sample = match message {
+                        crate::processor_async::Message::Media(sample) => Some(sample),
+                        crate::processor_async::Message::Eos => None,
+                        crate::processor_async::Message::Syn(_) => continue,
+                    };
                     if sample.is_none() {
                         audio_finished = true;
                     }
                     self.handle_audio_sample(sample)?;
                 }
-                sample = async {
+                message = async {
                     if !video_finished {
                         video_track.recv_media().await
                     } else {
-                        std::future::pending::<Option<MediaSample>>().await
+                        std::future::pending::<crate::processor_async::Message>().await
                     }
                 } => {
+                    let sample = match message {
+                        crate::processor_async::Message::Media(sample) => Some(sample),
+                        crate::processor_async::Message::Eos => None,
+                        crate::processor_async::Message::Syn(_) => continue,
+                    };
                     if sample.is_none() {
                         video_finished = true;
                     }
