@@ -23,6 +23,22 @@ impl ProcessorManager {
 }
 
 #[derive(Debug, Clone)]
+pub enum Message {
+    Media(MediaSample),
+    Eos,
+}
+
+impl Message {
+    pub fn audio(data: crate::audio::AudioData) -> Self {
+        Self::Media(MediaSample::new_audio(data))
+    }
+
+    pub fn video(frame: crate::video::VideoFrame) -> Self {
+        Self::Media(MediaSample::new_video(frame))
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ProcessorManagerHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
 }
@@ -69,12 +85,12 @@ impl ProcessorManagerHandle {
 
 #[derive(Debug)]
 struct TrackPublisherState {
-    incoming_rx: tokio::sync::mpsc::Receiver<Option<MediaSample>>,
+    incoming_rx: tokio::sync::mpsc::Receiver<Message>,
 }
 
 #[derive(Debug)]
 struct TrackSubscriberState {
-    outgoing_tx: tokio::sync::mpsc::Sender<Option<MediaSample>>,
+    outgoing_tx: tokio::sync::mpsc::Sender<Message>,
 }
 
 #[derive(Debug)]
@@ -91,15 +107,17 @@ enum TrackCommand {
 
 #[derive(Debug)]
 pub struct TrackSubscribeHandle {
-    outgoing_rx: tokio::sync::mpsc::Receiver<Option<MediaSample>>,
+    outgoing_rx: tokio::sync::mpsc::Receiver<Message>,
 }
 
 impl TrackSubscribeHandle {
     pub async fn recv_media(&mut self) -> Option<MediaSample> {
-        if let Some(x) = self.outgoing_rx.recv().await {
-            x
-        } else {
-            std::future::pending().await
+        loop {
+            match self.outgoing_rx.recv().await {
+                Some(Message::Media(sample)) => return Some(sample),
+                Some(Message::Eos) => return None,
+                None => std::future::pending().await,
+            }
         }
     }
 }
@@ -145,8 +163,7 @@ impl TrackRunner {
         }
     }
 
-    // TODO: 最終的にはこの処理は publish handle 側に持っていく
-    async fn handle_sample(&mut self, sample: Option<Option<MediaSample>>) {
+    async fn handle_sample(&mut self, sample: Option<Message>) {
         let Some(sample) = sample else {
             self.publisher = None;
             return;
@@ -383,13 +400,16 @@ impl ProcessorManagerRunner {
 // こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
-    incoming_tx: tokio::sync::mpsc::Sender<Option<MediaSample>>,
+    incoming_tx: tokio::sync::mpsc::Sender<Message>,
 }
 
 impl TrackPublishHandle {
-    pub async fn send_media(&self, sample: Option<MediaSample>) {
-        // TODO: 最終的には TrackRunner を経由しないようにする
-        let _ = self.incoming_tx.send(sample).await;
+    pub async fn send_media(&self, sample: MediaSample) {
+        let _ = self.incoming_tx.send(Message::Media(sample)).await;
+    }
+
+    pub async fn send_eos(&self) {
+        let _ = self.incoming_tx.send(Message::Eos).await;
     }
 }
 

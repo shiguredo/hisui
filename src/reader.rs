@@ -58,14 +58,12 @@ impl AudioReader {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
 
-                    track_handle
-                        .send_media(Some(MediaSample::new_audio(data)))
-                        .await;
+                    track_handle.send_media(MediaSample::new_audio(data)).await;
                 }
             }
         }
 
-        track_handle.send_media(None).await;
+        track_handle.send_eos().await;
 
         Ok(())
     }
@@ -262,13 +260,11 @@ impl VideoReader {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
 
-                    track_handle
-                        .send_media(Some(MediaSample::new_video(frame)))
-                        .await;
+                    track_handle.send_media(MediaSample::new_video(frame)).await;
                 }
             }
         }
-        track_handle.send_media(None).await;
+        track_handle.send_eos().await;
 
         Ok(())
     }
