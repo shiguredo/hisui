@@ -41,7 +41,7 @@ impl AudioReader {
         let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
 
         let track_id = crate::processor_async::TrackId::new(id.get());
-        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+        let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
         loop {
             match self.inner.next() {
@@ -63,8 +63,6 @@ impl AudioReader {
                         .await;
                 }
             }
-
-            while track_handle.try_recv_feedback().is_some() {}
         }
 
         track_handle.send_media(None).await;
@@ -247,7 +245,7 @@ impl VideoReader {
         let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
 
         let track_id = crate::processor_async::TrackId::new(id.get());
-        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+        let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
         loop {
             match self.inner.next() {
@@ -269,8 +267,6 @@ impl VideoReader {
                         .await;
                 }
             }
-
-            while track_handle.try_recv_feedback().is_some() {}
         }
         track_handle.send_media(None).await;
 
