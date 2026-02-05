@@ -72,6 +72,12 @@ impl MediaPipeline {
     }
 }
 
+impl Default for MediaPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MediaPipelineHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
@@ -130,6 +136,45 @@ impl std::fmt::Display for ProcessorId {
 pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
     processor_id: ProcessorId,
+}
+
+impl ProcessorHandle {
+    pub fn processor_id(&self) -> &ProcessorId {
+        &self.processor_id
+    }
+
+    /*pub async fn publish_track(&self, track_id: TrackId) -> Option<TrackPublishHandle> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let command = Command::CreateTrack {
+            processor_id: self.processor_id.clone(),
+            track_id,
+            reply_tx,
+        };
+        self.inner.send(command);
+        let track_handle = reply_rx.await.ok()?;
+
+        track_handle.publish(self.processor_id.clone()).await
+    }
+
+    pub async fn subscribe_track(&self, track_id: TrackId) -> TrackSubscribeHandle {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let command = Command::CreateTrack {
+            processor_id: self.processor_id.clone(),
+            track_id,
+            reply_tx,
+        };
+        self.inner.send(command);
+        let track_handle = reply_rx.await.expect("bug");
+
+        track_handle.subscribe().await
+    }
+
+    pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {
+        match self.rpc_rx.recv().await {
+            Some(request) => request,
+            None => std::future::pending().await,
+        }
+    }*/
 }
 
 impl Drop for ProcessorHandle {
