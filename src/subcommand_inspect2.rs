@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Duration};
 use orfail::OrFail;
 
 use crate::{
-    media::{MediaSample, MediaStreamId},
+    media::MediaStreamId,
     metadata::{ContainerFormat, SourceId},
     reader::{AudioReader, VideoReader},
     types::CodecName,
@@ -221,48 +221,15 @@ impl OutputPrinter {
             crate::processor_async::TrackId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
         let mut video_track = processor_handle.subscribe_track(video_track_id).await;
 
-        let mut audio_finished = false;
-        let mut video_finished = false;
-
-        loop {
-            if audio_finished && video_finished {
-                break;
-            }
-
+        while !self.active_streams.is_empty() {
             tokio::select! {
-                message = async {
-                    if !audio_finished {
-                         audio_track.recv_media().await
-                    } else {
-                         std::future::pending::<crate::processor_async::Message>().await
-                    }
-                } => {
-                    let sample = match message {
-                        crate::processor_async::Message::Media(sample) => Some(sample),
-                        crate::processor_async::Message::Eos => None,
-                        crate::processor_async::Message::Syn(_) => continue,
-                    };
-                    if sample.is_none() {
-                        audio_finished = true;
-                    }
-                    self.handle_audio_sample(sample)?;
+                message = audio_track.recv_media(),
+                          if self.active_streams.contains(&AUDIO_ENCODED_STREAM_ID) => {
+                    self.handle_audio_sample(message)?;
                 }
-                message = async {
-                    if !video_finished {
-                        video_track.recv_media().await
-                    } else {
-                        std::future::pending::<crate::processor_async::Message>().await
-                    }
-                } => {
-                    let sample = match message {
-                        crate::processor_async::Message::Media(sample) => Some(sample),
-                        crate::processor_async::Message::Eos => None,
-                        crate::processor_async::Message::Syn(_) => continue,
-                    };
-                    if sample.is_none() {
-                        video_finished = true;
-                    }
-                    self.handle_video_sample(sample)?;
+                message = video_track.recv_media(),
+                          if self.active_streams.contains(&VIDEO_ENCODED_STREAM_ID) => {
+                    self.handle_video_sample(message)?;
                 }
             }
         }
@@ -271,9 +238,12 @@ impl OutputPrinter {
         Ok(())
     }
 
-    fn handle_audio_sample(&mut self, sample: Option<MediaSample>) -> orfail::Result<()> {
-        match sample {
-            Some(media_sample) => {
+    fn handle_audio_sample(
+        &mut self,
+        message: crate::processor_async::Message,
+    ) -> orfail::Result<()> {
+        match message {
+            crate::processor_async::Message::Media(media_sample) => {
                 let audio_data = media_sample.expect_audio_data().or_fail()?;
                 if self.audio_codec.is_none() {
                     self.audio_codec = audio_data.format.codec_name();
@@ -284,16 +254,20 @@ impl OutputPrinter {
                     data_size: audio_data.data.len(),
                 });
             }
-            None => {
+            crate::processor_async::Message::Eos => {
                 self.active_streams.remove(&AUDIO_ENCODED_STREAM_ID);
             }
+            crate::processor_async::Message::Syn(_) => {}
         }
         Ok(())
     }
 
-    fn handle_video_sample(&mut self, sample: Option<MediaSample>) -> orfail::Result<()> {
-        match sample {
-            Some(media_sample) => {
+    fn handle_video_sample(
+        &mut self,
+        message: crate::processor_async::Message,
+    ) -> orfail::Result<()> {
+        match message {
+            crate::processor_async::Message::Media(media_sample) => {
                 let video_frame = media_sample.expect_video_frame().or_fail()?;
                 if self.video_codec.is_none() {
                     self.video_codec = video_frame.format.codec_name();
@@ -306,9 +280,10 @@ impl OutputPrinter {
                     codec_specific_info: VideoCodecSpecificInfo::new(&video_frame),
                 });
             }
-            None => {
+            crate::processor_async::Message::Eos => {
                 self.active_streams.remove(&VIDEO_ENCODED_STREAM_ID);
             }
+            crate::processor_async::Message::Syn(_) => {}
         }
         Ok(())
     }
