@@ -26,6 +26,20 @@ impl ProcessorManager {
 #[derive(Debug, Clone)]
 pub struct Syn(tokio::sync::mpsc::Sender<()>);
 
+#[derive(Debug)]
+pub struct Ack(tokio::sync::mpsc::Receiver<()>);
+
+impl std::future::Future for Ack {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.0).poll_recv(cx).map(|_| ())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Media(MediaSample),
@@ -406,7 +420,7 @@ impl ProcessorManagerRunner {
 // こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
-    incoming_tx: tokio::sync::mpsc::Sender<Message>,
+    incoming_tx: tokio::sync::mpsc::Sender<Message>, // TODO: unbounded にする
 }
 
 impl TrackPublishHandle {
@@ -416,6 +430,12 @@ impl TrackPublishHandle {
 
     pub async fn send_eos(&self) {
         let _ = self.incoming_tx.send(Message::Eos).await;
+    }
+
+    pub async fn send_sync(&self) -> Ack {
+        let (tx, rx) = tokio::sync::mpsc::channel(0);
+        let _ = self.incoming_tx.send(Message::Syn(Syn(tx))).await;
+        Ack(rx)
     }
 }
 
