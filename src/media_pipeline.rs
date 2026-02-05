@@ -221,33 +221,55 @@ pub enum Message {
 }
 
 #[derive(Debug)]
+enum TrackCommand {
+    AddSubscriber(tokio::sync::mpsc::UnboundedSender<Message>),
+}
+
+#[derive(Debug)]
 pub struct MessageSender {
-    tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<TrackCommand>,
+    txs: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
 }
 
 impl MessageSender {
     // MediaPipeline が途中終了した場合は false が返される
-    pub fn send(&self, message: Message) -> bool {
-        self.tx.send(message).is_ok()
+    pub fn send(&mut self, message: Message) -> bool {
+        loop {
+            match self.rx.try_recv() {
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.txs.clear();
+                    return false;
+                }
+                Ok(TrackCommand::AddSubscriber(tx)) => {
+                    self.txs.push(tx);
+                }
+            }
+        }
+
+        self.txs.retain_mut(|tx| tx.send(message.clone()).is_ok());
+        true
     }
 
-    pub fn send_media(&self, sample: crate::MediaSample) -> bool {
+    pub fn send_media(&mut self, sample: crate::MediaSample) -> bool {
         self.send(Message::Media(sample))
     }
 
-    pub fn send_audio(&self, data: crate::AudioData) -> bool {
+    pub fn send_audio(&mut self, data: crate::AudioData) -> bool {
         self.send(Message::Media(crate::MediaSample::new_audio(data)))
     }
 
-    pub fn send_video(&self, frame: crate::VideoFrame) -> bool {
+    pub fn send_video(&mut self, frame: crate::VideoFrame) -> bool {
         self.send(Message::Media(crate::MediaSample::new_video(frame)))
     }
 
-    pub fn send_eos(&self) -> bool {
+    pub fn send_eos(&mut self) -> bool {
         self.send(Message::Eos)
     }
 
-    pub fn send_syn(&self) -> Ack {
+    pub fn send_syn(&mut self) -> Ack {
         let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
         let _ = self.send(Message::Syn(Syn(tx))); // NOTE: ここでは false を特別扱いする必要はないので無視する
         Ack(rx)
