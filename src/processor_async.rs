@@ -29,6 +29,12 @@ pub struct Syn(tokio::sync::mpsc::Sender<()>);
 #[derive(Debug)]
 pub struct Ack(tokio::sync::mpsc::Receiver<()>);
 
+impl Ack {
+    pub fn is_acked(&self) -> bool {
+        self.0.is_closed()
+    }
+}
+
 impl std::future::Future for Ack {
     type Output = ();
 
@@ -420,20 +426,23 @@ impl ProcessorManagerRunner {
 // こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
-    incoming_tx: tokio::sync::mpsc::Sender<Message>, // TODO: unbounded にする
+    incoming_tx: tokio::sync::mpsc::Sender<Message>,
 }
 
 impl TrackPublishHandle {
+    // TODO: 普通の fn にする
     pub async fn send_media(&self, sample: MediaSample) {
         let _ = self.incoming_tx.send(Message::Media(sample)).await;
     }
 
+    // TODO: 普通の fn にする
     pub async fn send_eos(&self) {
         let _ = self.incoming_tx.send(Message::Eos).await;
     }
 
-    pub async fn send_sync(&self) -> Ack {
-        let (tx, rx) = tokio::sync::mpsc::channel(0);
+    // TODO: 普通の fn にする
+    pub async fn send_syn(&self) -> Ack {
+        let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
         let _ = self.incoming_tx.send(Message::Syn(Syn(tx))).await;
         Ack(rx)
     }

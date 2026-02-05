@@ -43,7 +43,15 @@ impl AudioReader {
         let track_id = crate::processor_async::TrackId::new(id.get());
         let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
+        let mut ack = track_handle.send_syn().await;
+        let mut noacked_sent = 0;
         loop {
+            if noacked_sent > 100 {
+                ack.await;
+                ack = track_handle.send_syn().await;
+                noacked_sent = 0;
+            }
+
             match self.inner.next() {
                 None => {
                     if !self.start_next_input_file().or_fail()? {
@@ -59,6 +67,7 @@ impl AudioReader {
                     self.next_timestamp_offset = data.timestamp + data.duration;
 
                     track_handle.send_media(MediaSample::new_audio(data)).await;
+                    noacked_sent += 1;
                 }
             }
         }
@@ -245,7 +254,15 @@ impl VideoReader {
         let track_id = crate::processor_async::TrackId::new(id.get());
         let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
+        let mut ack = track_handle.send_syn().await;
+        let mut noacked_sent = 0;
         loop {
+            if noacked_sent > 100 {
+                ack.await;
+                ack = track_handle.send_syn().await;
+                noacked_sent = 0;
+            }
+
             match self.inner.next() {
                 None => {
                     if !self.start_next_input_file().or_fail()? {
@@ -261,6 +278,7 @@ impl VideoReader {
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
 
                     track_handle.send_media(MediaSample::new_video(frame)).await;
+                    noacked_sent += 1;
                 }
             }
         }
