@@ -86,6 +86,6 @@ pub use audio::AudioData;
 pub use media::MediaSample;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineHandle, Message, MessageReceiver, MessageSender,
-    ProcessorHandle, ProcessorId, Syn,
+    ProcessorHandle, ProcessorId, Syn, TrackId,
 };
 pub use video::VideoFrame;

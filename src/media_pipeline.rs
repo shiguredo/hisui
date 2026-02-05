@@ -51,7 +51,34 @@ impl MediaPipeline {
             Command::DeregisterProcessor { processor_id } => {
                 self.handle_deregister_processor(processor_id);
             }
+            Command::PublishTrack {
+                processor_id,
+                track_id,
+                reply_tx,
+            } => {
+                let result = self.handle_publish_track(processor_id, track_id);
+                let _ = reply_tx.send(result);
+            }
         }
+    }
+
+    fn handle_publish_track(
+        &mut self,
+        processor_id: ProcessorId,
+        track_id: TrackId,
+    ) -> Option<MessageSender> {
+        log::debug!("publish track: processor={processor_id}, track={track_id}");
+
+        if !self.processors.contains(&processor_id) {
+            log::warn!("attempt to publish track from unregistered processor: {processor_id}");
+            return None;
+        }
+
+        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        Some(MessageSender {
+            rx: command_rx,
+            txs: Vec::new(),
+        })
     }
 
     fn handle_register_processor(&mut self, processor_id: ProcessorId) -> bool {
@@ -115,6 +142,11 @@ enum Command {
     DeregisterProcessor {
         processor_id: ProcessorId,
     },
+    PublishTrack {
+        processor_id: ProcessorId,
+        track_id: TrackId,
+        reply_tx: tokio::sync::oneshot::Sender<Option<MessageSender>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -136,6 +168,24 @@ impl std::fmt::Display for ProcessorId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TrackId(String);
+
+impl TrackId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn get(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TrackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 #[derive(Debug)]
 pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
@@ -147,21 +197,18 @@ impl ProcessorHandle {
         &self.processor_id
     }
 
-    //  TODO: TrackPublishHandle を MessageSender にリネームするのはどうでしょう？（subscribe 側も同様）
-    /*pub async fn publish_track(&self, track_id: TrackId) -> Option<TrackPublishHandle> {
+    pub async fn publish_track(&self, track_id: TrackId) -> Option<MessageSender> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let command = Command::CreateTrack {
+        let command = Command::PublishTrack {
             processor_id: self.processor_id.clone(),
             track_id,
             reply_tx,
         };
-        self.inner.send(command);
-        let track_handle = reply_rx.await.ok()?;
-
-        track_handle.publish(self.processor_id.clone()).await
+        self.pipeline_handle.send(command);
+        reply_rx.await.ok()?
     }
 
-    pub async fn subscribe_track(&self, track_id: TrackId) -> TrackSubscribeHandle {
+    /*pub async fn subscribe_track(&self, track_id: TrackId) -> TrackSubscribeHandle {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::CreateTrack {
             processor_id: self.processor_id.clone(),
