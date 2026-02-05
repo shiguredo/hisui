@@ -82,4 +82,4 @@ pub mod video_h265;
 pub mod writer_mp4;
 pub mod writer_yuv;
 
-pub use media_pipeline::{MediaPipeline, MediaPipelineHandle, ProcessorId};
+pub use media_pipeline::{MediaPipeline, MediaPipelineHandle, ProcessorHandle, ProcessorId};

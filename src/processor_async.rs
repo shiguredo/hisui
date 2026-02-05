@@ -409,7 +409,7 @@ impl ProcessorManagerRunner {
 }
 
 // TODO: clone 可能なやつと無理なやつで両方 "XxxHandle" という命名にしているのは紛らわしいのでどちらかを変えたい
-// こっちは "er" 形式にしてしまう？
+// こっちは "er" 形式にしてしまう？ or XxxToken とか？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
     incoming_tx: tokio::sync::mpsc::UnboundedSender<Message>,
