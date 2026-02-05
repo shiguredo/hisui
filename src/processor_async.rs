@@ -3,7 +3,6 @@
 
 use crate::media::MediaSample;
 
-// TODO: Manager 以外にいい名前がないかを検討する
 #[derive(Debug)]
 pub struct ProcessorManager {}
 

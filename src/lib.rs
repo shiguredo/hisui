@@ -47,6 +47,7 @@ pub mod layout_encode_params;
 pub mod layout_region;
 pub mod logger;
 pub mod media;
+pub mod media_pipeline;
 pub mod metadata;
 pub mod mixer_audio;
 pub mod mixer_video;
@@ -80,3 +81,5 @@ pub mod video_h264;
 pub mod video_h265;
 pub mod writer_mp4;
 pub mod writer_yuv;
+
+pub use media_pipeline::{MediaPipeline, MediaPipelineHandle, ProcessorId};
