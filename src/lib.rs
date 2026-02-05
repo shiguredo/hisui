@@ -82,4 +82,10 @@ pub mod video_h265;
 pub mod writer_mp4;
 pub mod writer_yuv;
 
-pub use media_pipeline::{MediaPipeline, MediaPipelineHandle, ProcessorHandle, ProcessorId};
+pub use audio::AudioData;
+pub use media::MediaSample;
+pub use media_pipeline::{
+    Ack, MediaPipeline, MediaPipelineHandle, Message, MessageReceiver, MessageSender,
+    ProcessorHandle, ProcessorId, Syn,
+};
+pub use video::VideoFrame;

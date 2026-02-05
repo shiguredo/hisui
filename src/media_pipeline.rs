@@ -90,7 +90,7 @@ impl MediaPipelineHandle {
             processor_id: processor_id.clone(),
             reply_tx,
         };
-        let _ = self.command_tx.send(command);
+        self.send(command);
         if let Ok(true) = reply_rx.await {
             Some(ProcessorHandle {
                 pipeline_handle: self.clone(),
@@ -99,6 +99,10 @@ impl MediaPipelineHandle {
         } else {
             None
         }
+    }
+
+    fn send(&self, command: Command) {
+        self.command_tx.send(command).expect("bug");
     }
 }
 
@@ -143,6 +147,7 @@ impl ProcessorHandle {
         &self.processor_id
     }
 
+    //  TODO: TrackPublishHandle を MessageSender にリネームするのはどうでしょう？（subscribe 側も同様）
     /*pub async fn publish_track(&self, track_id: TrackId) -> Option<TrackPublishHandle> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::CreateTrack {
@@ -167,23 +172,100 @@ impl ProcessorHandle {
         let track_handle = reply_rx.await.expect("bug");
 
         track_handle.subscribe().await
-    }
-
-    pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {
-        match self.rpc_rx.recv().await {
-            Some(request) => request,
-            None => std::future::pending().await,
-        }
     }*/
+
+    // TODO: これは実際に必要になったタイミングで実装する
+    // （publish / susbscribe と同様に RPC 用のチャネルの作成を MediaPipeline に依頼するのが良さそう）
+    //
+    // pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {
+    //    match self.rpc_rx.recv().await {
+    //        Some(request) => request,
+    //        None => std::future::pending().await,
+    //    }
+    // }
 }
 
 impl Drop for ProcessorHandle {
     fn drop(&mut self) {
-        let _ = self
-            .pipeline_handle
-            .command_tx
-            .send(Command::DeregisterProcessor {
-                processor_id: self.processor_id.clone(),
-            });
+        self.pipeline_handle.send(Command::DeregisterProcessor {
+            processor_id: self.processor_id.clone(),
+        });
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Syn(#[expect(dead_code)] tokio::sync::mpsc::Sender<()>);
+
+#[derive(Debug)]
+pub struct Ack(tokio::sync::mpsc::Receiver<()>);
+
+impl std::future::Future for Ack {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.0).poll_recv(cx).map(|_| ())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    Media(crate::MediaSample),
+    Eos,
+
+    /// 送信側がメッセージグラフの末端まで到達したか確認するための制御メッセージ。
+    /// mpsc チャネルの受信側でクローズを確認することで、メッセージが完全に処理されたこと（= Ack を受け取った）を検知できる。
+    Syn(Syn),
+}
+
+#[derive(Debug)]
+pub struct MessageSender {
+    tx: tokio::sync::mpsc::UnboundedSender<Message>,
+}
+
+impl MessageSender {
+    // MediaPipeline が途中終了した場合は false が返される
+    pub fn send(&self, message: Message) -> bool {
+        self.tx.send(message).is_ok()
+    }
+
+    pub fn send_media(&self, sample: crate::MediaSample) -> bool {
+        self.send(Message::Media(sample))
+    }
+
+    pub fn send_audio(&self, data: crate::AudioData) -> bool {
+        self.send(Message::Media(crate::MediaSample::new_audio(data)))
+    }
+
+    pub fn send_video(&self, frame: crate::VideoFrame) -> bool {
+        self.send(Message::Media(crate::MediaSample::new_video(frame)))
+    }
+
+    pub fn send_eos(&self) -> bool {
+        self.send(Message::Eos)
+    }
+
+    pub fn send_syn(&self) -> Ack {
+        let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
+        let _ = self.send(Message::Syn(Syn(tx))); // NOTE: ここでは false を特別扱いする必要はないので無視する
+        Ack(rx)
+    }
+}
+
+#[derive(Debug)]
+pub struct MessageReceiver {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Message>,
+}
+
+impl MessageReceiver {
+    pub async fn recv(&mut self) -> Message {
+        if let Some(m) = self.rx.recv().await {
+            m
+        } else {
+            // MediaPipeline::run() が何らかの理由で途中で終了した場合にはここに来る（EOS 扱いにする）
+            Message::Eos
+        }
     }
 }
