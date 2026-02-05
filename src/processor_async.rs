@@ -22,10 +22,18 @@ impl ProcessorManager {
     }
 }
 
+// [NOTE] Arc<Foo<Notify>> みたいな構造体を追加して drop() の中で通知を行うので実現できそう
+#[derive(Debug, Clone)]
+pub struct Syn(tokio::sync::mpsc::Sender<()>);
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Media(MediaSample),
     Eos,
+
+    /// 送信側がメッセージグラフの末端まで到達したか確認するための制御メッセージ。
+    /// mpsc チャネルの受信側でクローズを確認することで、メッセージが完全に処理されたこと（= Ack を受け取った）を検知できる。
+    Syn(Syn),
 }
 
 impl Message {
@@ -116,6 +124,7 @@ impl TrackSubscribeHandle {
             match self.outgoing_rx.recv().await {
                 Some(Message::Media(sample)) => return Some(sample),
                 Some(Message::Eos) => return None,
+                Some(Message::Syn(_)) => todo!(),
                 None => std::future::pending().await,
             }
         }
