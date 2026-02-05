@@ -3,6 +3,7 @@ pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<Command>>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
     processors: std::collections::HashSet<ProcessorId>,
+    tracks: std::collections::HashMap<TrackId, TrackState>,
 }
 
 impl MediaPipeline {
@@ -12,6 +13,7 @@ impl MediaPipeline {
             command_tx: Some(command_tx),
             command_rx,
             processors: std::collections::HashSet::new(),
+            tracks: std::collections::HashMap::new(),
         }
     }
 
@@ -74,7 +76,15 @@ impl MediaPipeline {
             return None;
         }
 
+        let track = self.tracks.entry(track_id.clone()).or_default();
+        if track.publisher_command_tx.is_some() {
+            log::warn!("publisher conflict for track: processor={processor_id}, track={track_id}");
+            return None;
+        }
+
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        track.publisher_command_tx = Some(command_tx);
+
         Some(MessageSender {
             rx: command_rx,
             txs: Vec::new(),
@@ -186,6 +196,12 @@ impl std::fmt::Display for TrackId {
         write!(f, "{}", self.0)
     }
 }
+
+#[derive(Debug, Default)]
+struct TrackState {
+    publisher_command_tx: Option<tokio::sync::mpsc::UnboundedSender<TrackCommand>>,
+}
+
 #[derive(Debug)]
 pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
