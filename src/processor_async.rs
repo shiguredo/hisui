@@ -3,6 +3,7 @@
 
 use crate::media::MediaSample;
 
+// TODO: Manager 以外にいい名前がないかを検討する
 #[derive(Debug)]
 pub struct ProcessorManager {}
 
@@ -286,11 +287,10 @@ struct TrackState {
 
 #[derive(Debug)]
 struct ProcessorManagerRunner {
-    processors: std::collections::HashMap<ProcessorId, u64>, // value=seqno
+    processors: std::collections::HashSet<ProcessorId>,
     tracks: std::collections::HashMap<TrackId, TrackHandle>,
     handle: ProcessorManagerHandle,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
-    processor_seqno: u64,
     finish_waitings: Vec<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -300,11 +300,10 @@ impl ProcessorManagerRunner {
         command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
     ) -> Self {
         Self {
-            processors: std::collections::HashMap::new(),
+            processors: std::collections::HashSet::new(),
             tracks: std::collections::HashMap::new(),
             handle: ProcessorManagerHandle { command_tx },
             command_rx,
-            processor_seqno: 0,
             finish_waitings: Vec::new(),
         }
     }
@@ -362,7 +361,7 @@ impl ProcessorManagerRunner {
     }
 
     fn handle_create_track(&mut self, processor_id: ProcessorId, track_id: TrackId) -> TrackHandle {
-        assert!(self.processors.contains_key(&processor_id));
+        assert!(self.processors.contains(&processor_id));
 
         let track_handle = self.tracks.entry(track_id.clone()).or_insert_with(|| {
             let (runner, handle) = TrackRunner::new(track_id.clone(), self.handle.clone());
@@ -378,7 +377,7 @@ impl ProcessorManagerRunner {
         processor_id: ProcessorId,
         future: ProcessorFuture,
     ) -> bool {
-        if self.processors.contains_key(&processor_id) {
+        if self.processors.contains(&processor_id) {
             return false;
         }
 
@@ -393,15 +392,11 @@ impl ProcessorManagerRunner {
 
     fn handle_register_processor(&mut self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
         log::debug!("register processor: {}", processor_id.get());
-        if self.processors.contains_key(&processor_id) {
+        if self.processors.contains(&processor_id) {
             return None;
         }
 
-        let processor_seqno = self.processor_seqno;
-        self.processor_seqno += 1;
-
-        self.processors
-            .insert(processor_id.clone(), processor_seqno);
+        self.processors.insert(processor_id.clone());
 
         let (rpc_tx, rpc_rx) = tokio::sync::mpsc::channel(10); // TODO: これは共通設定でいいけど、最初に変更できるようにはする
         let _ = rpc_tx; // ProcessorState を追加して、外から ID => rpc sender を解決できるようにする
@@ -409,7 +404,6 @@ impl ProcessorManagerRunner {
         Some(ProcessorHandle {
             inner: self.handle.clone(),
             processor_id,
-            processor_seqno,
             rpc_rx,
         })
     }
@@ -443,8 +437,6 @@ impl TrackPublishHandle {
 pub struct ProcessorHandle {
     inner: ProcessorManagerHandle,
     processor_id: ProcessorId,
-    processor_seqno: u64, // TDOO: 不要かも
-    // TODO: add rx for RPC requests
     rpc_rx: tokio::sync::mpsc::Receiver<JsonRpcRequest>,
 }
 
