@@ -43,12 +43,12 @@ impl AudioReader {
         let track_id = crate::processor_async::TrackId::new(id.get());
         let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
-        let mut ack = track_handle.send_syn().await;
+        let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
         loop {
             if noacked_sent > 100 {
                 ack.await;
-                ack = track_handle.send_syn().await;
+                ack = track_handle.send_syn();
                 noacked_sent = 0;
             }
 
@@ -66,13 +66,13 @@ impl AudioReader {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
 
-                    track_handle.send_media(MediaSample::new_audio(data)).await;
+                    track_handle.send_media(MediaSample::new_audio(data));
                     noacked_sent += 1;
                 }
             }
         }
 
-        track_handle.send_eos().await;
+        track_handle.send_eos();
 
         Ok(())
     }
@@ -254,12 +254,12 @@ impl VideoReader {
         let track_id = crate::processor_async::TrackId::new(id.get());
         let track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
 
-        let mut ack = track_handle.send_syn().await;
+        let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
         loop {
             if noacked_sent > 100 {
                 ack.await;
-                ack = track_handle.send_syn().await;
+                ack = track_handle.send_syn();
                 noacked_sent = 0;
             }
 
@@ -277,12 +277,12 @@ impl VideoReader {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
 
-                    track_handle.send_media(MediaSample::new_video(frame)).await;
+                    track_handle.send_media(MediaSample::new_video(frame));
                     noacked_sent += 1;
                 }
             }
         }
-        track_handle.send_eos().await;
+        track_handle.send_eos();
 
         Ok(())
     }

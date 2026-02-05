@@ -113,12 +113,12 @@ impl ProcessorManagerHandle {
 
 #[derive(Debug)]
 struct TrackPublisherState {
-    incoming_rx: tokio::sync::mpsc::Receiver<Message>,
+    incoming_rx: tokio::sync::mpsc::UnboundedReceiver<Message>,
 }
 
 #[derive(Debug)]
 struct TrackSubscriberState {
-    outgoing_tx: tokio::sync::mpsc::Sender<Message>,
+    outgoing_tx: tokio::sync::mpsc::UnboundedSender<Message>,
 }
 
 #[derive(Debug)]
@@ -135,7 +135,7 @@ enum TrackCommand {
 
 #[derive(Debug)]
 pub struct TrackSubscribeHandle {
-    outgoing_rx: tokio::sync::mpsc::Receiver<Message>,
+    outgoing_rx: tokio::sync::mpsc::UnboundedReceiver<Message>,
 }
 
 impl TrackSubscribeHandle {
@@ -197,18 +197,11 @@ impl TrackRunner {
 
         let mut i = 0;
         while i < self.subscribers.len() {
-            match self.subscribers[i].outgoing_tx.try_send(sample.clone()) {
+            match self.subscribers[i].outgoing_tx.send(sample.clone()) {
                 Ok(()) => {}
-                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                Err(_) => {
                     self.subscribers.swap_remove(i);
                     continue;
-                }
-                Err(tokio::sync::mpsc::error::TrySendError::Full(sample)) => {
-                    // publisher に通知してからブロッキング送信に移る
-                    if let Some(_publisher) = &mut self.publisher {
-                        // TODO: remove
-                    }
-                    let _ = self.subscribers[i].outgoing_tx.send(sample).await;
                 }
             }
             i += 1;
@@ -232,7 +225,7 @@ impl TrackRunner {
     }
 
     fn handle_subscribe(&mut self) -> TrackSubscribeHandle {
-        let (outgoing_tx, outgoing_rx) = tokio::sync::mpsc::channel(100);
+        let (outgoing_tx, outgoing_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let subscriber_state = TrackSubscriberState { outgoing_tx };
         self.subscribers.push(subscriber_state);
@@ -245,7 +238,7 @@ impl TrackRunner {
             return None;
         }
 
-        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::channel(100); // TODO: 可変にする
+        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::unbounded_channel();
         self.publisher = Some(TrackPublisherState { incoming_rx });
 
         let handle = TrackPublishHandle { incoming_tx };
@@ -426,24 +419,21 @@ impl ProcessorManagerRunner {
 // こっちは "er" 形式にしてしまう？
 #[derive(Debug)]
 pub struct TrackPublishHandle {
-    incoming_tx: tokio::sync::mpsc::Sender<Message>,
+    incoming_tx: tokio::sync::mpsc::UnboundedSender<Message>,
 }
 
 impl TrackPublishHandle {
-    // TODO: 普通の fn にする
-    pub async fn send_media(&self, sample: MediaSample) {
-        let _ = self.incoming_tx.send(Message::Media(sample)).await;
+    pub fn send_media(&self, sample: MediaSample) {
+        let _ = self.incoming_tx.send(Message::Media(sample));
     }
 
-    // TODO: 普通の fn にする
-    pub async fn send_eos(&self) {
-        let _ = self.incoming_tx.send(Message::Eos).await;
+    pub fn send_eos(&self) {
+        let _ = self.incoming_tx.send(Message::Eos);
     }
 
-    // TODO: 普通の fn にする
-    pub async fn send_syn(&self) -> Ack {
+    pub fn send_syn(&self) -> Ack {
         let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
-        let _ = self.incoming_tx.send(Message::Syn(Syn(tx))).await;
+        let _ = self.incoming_tx.send(Message::Syn(Syn(tx)));
         Ack(rx)
     }
 }
