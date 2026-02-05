@@ -33,7 +33,7 @@ pub struct AudioReader {
 }
 
 impl AudioReader {
-    pub async fn start(
+    pub async fn run(
         mut self,
         handle: crate::processor_async::ProcessorManagerHandle,
     ) -> orfail::Result<()> {
@@ -244,7 +244,7 @@ pub struct VideoReader {
 }
 
 impl VideoReader {
-    pub async fn start(
+    pub async fn run(
         mut self,
         handle: crate::processor_async::ProcessorManagerHandle,
     ) -> orfail::Result<()> {

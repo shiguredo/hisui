@@ -15,12 +15,6 @@ const AUDIO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const VIDEO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
-    let _openh264: Option<PathBuf> = noargs::opt("openh264")
-        .ty("PATH")
-        .env("HISUI_OPENH264_PATH")
-        .doc("OpenH264 の共有ライブラリのパス")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/archive.mp4")
         .doc("情報取得対象の録画ファイル(.mp4|.webm)")
@@ -43,9 +37,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let manager = crate::processor_async::ProcessorManager::new();
     let manager_handler = manager.start();
 
-    // OutputPrinter を spawn
     let output_printer = OutputPrinter::new(input_file_path.clone(), format);
-    runtime.spawn(output_printer.start(manager_handler.clone()));
+    runtime.spawn(output_printer.run(manager_handler.clone()));
 
     let reader = AudioReader::new(
         AUDIO_ENCODED_STREAM_ID,
@@ -55,7 +48,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         vec![input_file_path.clone()],
     )
     .or_fail()?;
-    runtime.spawn(reader.start(manager_handler.clone()));
+    runtime.spawn(reader.run(manager_handler.clone()));
 
     let reader = VideoReader::new(
         VIDEO_ENCODED_STREAM_ID,
@@ -65,7 +58,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         vec![input_file_path.clone()],
     )
     .or_fail()?;
-    runtime.spawn(reader.start(manager_handler.clone()));
+    runtime.spawn(reader.run(manager_handler.clone()));
 
     runtime.block_on(manager_handler.wait_finish());
 
@@ -110,11 +103,8 @@ impl nojson::DisplayJson for VideoSampleInfo {
             f.member("duration_us", self.duration.as_micros())?;
             f.member("data_size", self.data_size)?;
             f.member("keyframe", self.keyframe)?;
-            match &self.codec_specific_info {
-                None => {}
-                Some(VideoCodecSpecificInfo::H264 { nalus }) => {
-                    f.member("nalus", nalus)?;
-                }
+            if let Some(VideoCodecSpecificInfo::H264 { nalus }) = &self.codec_specific_info {
+                f.member("nalus", nalus)?;
             }
             Ok(())
         })?;
@@ -216,7 +206,7 @@ impl OutputPrinter {
         }
     }
 
-    pub async fn start(
+    pub async fn run(
         mut self,
         handle: crate::processor_async::ProcessorManagerHandle,
     ) -> orfail::Result<()> {
