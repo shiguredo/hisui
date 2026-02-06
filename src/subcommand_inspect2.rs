@@ -56,7 +56,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 vec![input_file_path.clone()],
             )
             .or_fail()?;
-            runtime.spawn(reader.run(pipeline_handle.clone()));
+            let id = crate::ProcessorId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
+            pipeline_handle
+                .spawn_processor(id, |handle| reader.run(handle))
+                .await
+                .or_fail()?;
 
             let reader = VideoReader::new(
                 VIDEO_ENCODED_STREAM_ID,
@@ -66,7 +70,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 vec![input_file_path.clone()],
             )
             .or_fail()?;
-            runtime.spawn(reader.run(pipeline_handle.clone()));
+            let id = crate::ProcessorId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
+            pipeline_handle
+                .spawn_processor(id, |handle| reader.run(handle))
+                .await
+                .or_fail()?;
         }
         pipeline.run().await;
         Ok::<(), orfail::Failure>(())
