@@ -63,7 +63,10 @@ impl AudioReader {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
 
-                    track_handle.send_media(MediaSample::new_audio(data));
+                    if !track_handle.send_media(MediaSample::new_audio(data)) {
+                        // パイプライン処理が中断された
+                        break;
+                    }
                     noacked_sent += 1;
                 }
             }
@@ -271,7 +274,10 @@ impl VideoReader {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
 
-                    track_handle.send_media(MediaSample::new_video(frame));
+                    if !track_handle.send_media(MediaSample::new_video(frame)) {
+                        // パイプライン処理が中断された
+                        break;
+                    }
                     noacked_sent += 1;
                 }
             }
