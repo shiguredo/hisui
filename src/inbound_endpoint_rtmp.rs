@@ -206,6 +206,7 @@ struct RtmpPublisherHandler {
 }
 
 impl RtmpPublisherHandler {
+    #[expect(clippy::too_many_arguments)]
     fn new(
         stream: ServerTcpOrTlsStream,
         stats: RtmpInboundEndpointStats,
