@@ -61,6 +61,40 @@ impl MediaPipeline {
                 let result = self.handle_publish_track(processor_id, track_id);
                 let _ = reply_tx.send(result);
             }
+            Command::SubscribeTrack {
+                processor_id,
+                track_id,
+                tx,
+            } => {
+                self.handle_subscribe_track(processor_id, track_id, tx);
+            }
+        }
+    }
+
+    fn handle_subscribe_track(
+        &mut self,
+        processor_id: ProcessorId,
+        track_id: TrackId,
+        tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    ) {
+        log::debug!("subscribe track: processor={processor_id}, track={track_id}");
+
+        if !self.processors.contains(&processor_id) {
+            log::warn!("attempt to subscribe to track from unregistered processor: {processor_id}");
+            return;
+        }
+
+        // トラックが存在しない場合は新規作成
+        let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
+            log::debug!("creating new track: {track_id}");
+            TrackState::default()
+        });
+
+        if let Some(publisher_tx) = &track.publisher_command_tx {
+            let _ = publisher_tx.send(TrackCommand::AddSubscriber(tx));
+        } else {
+            // publisher がまだ登録されていない場合は、subscriber を待機させる
+            log::debug!("publisher not yet registered for track: {track_id}");
         }
     }
 
@@ -76,11 +110,18 @@ impl MediaPipeline {
             return None;
         }
 
-        let track = self.tracks.entry(track_id.clone()).or_default();
+        // トラックが存在しない場合は新規作成
+        let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
+            log::debug!("creating new track: {track_id}");
+            TrackState::default()
+        });
+
         if track.publisher_command_tx.is_some() {
             log::warn!("publisher conflict for track: processor={processor_id}, track={track_id}");
             return None;
         }
+
+        // TODO: すでに存在する subscriber の情報を伝えるべき
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         track.publisher_command_tx = Some(command_tx);
@@ -157,6 +198,11 @@ enum Command {
         track_id: TrackId,
         reply_tx: tokio::sync::oneshot::Sender<Option<MessageSender>>,
     },
+    SubscribeTrack {
+        processor_id: ProcessorId,
+        track_id: TrackId,
+        tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -224,18 +270,19 @@ impl ProcessorHandle {
         reply_rx.await.ok()?
     }
 
-    /*pub async fn subscribe_track(&self, track_id: TrackId) -> TrackSubscribeHandle {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let command = Command::CreateTrack {
+    pub fn subscribe_track(&self, track_id: TrackId) -> MessageReceiver {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let command = Command::SubscribeTrack {
             processor_id: self.processor_id.clone(),
             track_id,
-            reply_tx,
+            tx,
         };
-        self.inner.send(command);
-        let track_handle = reply_rx.await.expect("bug");
+        self.pipeline_handle.send(command);
 
-        track_handle.subscribe().await
-    }*/
+        // トラックが存在しなかったりした場合は、すぐに受信側が閉じるだけなので、
+        // 上のコマンドの結果はまたない
+        MessageReceiver { rx }
+    }
 
     // TODO: これは実際に必要になったタイミングで実装する
     // （publish / susbscribe と同様に RPC 用のチャネルの作成を MediaPipeline に依頼するのが良さそう）
