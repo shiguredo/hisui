@@ -93,8 +93,9 @@ impl MediaPipeline {
         if let Some(publisher_tx) = &track.publisher_command_tx {
             let _ = publisher_tx.send(TrackCommand::AddSubscriber(tx));
         } else {
-            // publisher がまだ登録されていない場合は、subscriber を待機させる
+            // publisher がまだ登録されていない場合は、subscriber を待機キューに追加
             log::debug!("publisher not yet registered for track: {track_id}");
+            track.pending_subscribers.push(tx);
         }
     }
 
@@ -121,10 +122,13 @@ impl MediaPipeline {
             return None;
         }
 
-        // TODO: すでに存在する subscriber の情報を伝えるべき
-
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
-        track.publisher_command_tx = Some(command_tx);
+        track.publisher_command_tx = Some(command_tx.clone());
+
+        // 既に待機中の subscriber に通知
+        for subscriber_tx in track.pending_subscribers.drain(..) {
+            let _ = command_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
+        }
 
         Some(MessageSender {
             rx: command_rx,
@@ -246,6 +250,7 @@ impl std::fmt::Display for TrackId {
 #[derive(Debug, Default)]
 struct TrackState {
     publisher_command_tx: Option<tokio::sync::mpsc::UnboundedSender<TrackCommand>>,
+    pending_subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
 }
 
 #[derive(Debug)]
