@@ -486,7 +486,7 @@ impl MediaProcessor for FrameCountLimiter {
 struct ProgressBar {
     input_stream_id: MediaStreamId,
     eos: bool,
-    bar: indicatif::ProgressBar,
+    bar: crate::progress::ProgressBar,
 }
 
 impl ProgressBar {

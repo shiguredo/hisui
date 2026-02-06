@@ -1,7 +1,5 @@
 use std::{path::PathBuf, time::Duration};
 
-use indicatif::{ProgressBar, ProgressStyle};
-
 pub fn parse_non_default_opt<T>(opt: noargs::Opt) -> Result<Option<T>, T::Err>
 where
     T: std::str::FromStr,
@@ -30,28 +28,11 @@ pub fn validate_existing_directory_path(
 }
 
 /// 時間ベースのプログレスバーを作成する
-pub fn create_time_progress_bar(total_duration: Duration) -> ProgressBar {
-    create_progress_bar(
-        total_duration.as_secs(),
-        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] complete {percent}% of {len}s total output duration",
-    )
+pub fn create_time_progress_bar(total_duration: Duration) -> crate::progress::ProgressBar {
+    crate::progress::create_time_progress_bar(total_duration)
 }
 
 /// フレームベースのプログレスバーを作成する
-pub fn create_frame_progress_bar(total_frames: u64) -> ProgressBar {
-    create_progress_bar(
-        total_frames,
-        "{spinner:.green} [{elapsed_precise} (ETA: {eta})] [{bar:40.cyan/blue}] complete {percent}% of {len} total frames",
-    )
-}
-
-fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
-    let progress_bar = ProgressBar::new(total);
-    progress_bar.set_style(
-        ProgressStyle::default_bar()
-            .template(template)
-            .unwrap()
-            .progress_chars("#>-"),
-    );
-    progress_bar
+pub fn create_frame_progress_bar(total_frames: u64) -> crate::progress::ProgressBar {
+    crate::progress::create_frame_progress_bar(total_frames)
 }

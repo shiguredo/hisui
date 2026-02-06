@@ -173,7 +173,7 @@ impl Composer {
 #[derive(Debug)]
 struct ProgressBar {
     input_stream_ids: Vec<MediaStreamId>,
-    bar: indicatif::ProgressBar,
+    bar: crate::progress::ProgressBar,
     max_timestamp: Duration,
 }
 
