@@ -13,12 +13,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("ストリーム名（省略時には RTMP_URL 引数にストリーム名が含まれるものとして扱われる）")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
-    let _openh264: Option<PathBuf> = noargs::opt("openh264")
-        .ty("PATH")
-        .env("HISUI_OPENH264_PATH")
-        .doc("OpenH264 の共有ライブラリのパス")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
     let output_file_path: PathBuf = noargs::opt("output-file")
         .short('o')
         .doc("出力ファイル（.mp4 ないし .webm）")
