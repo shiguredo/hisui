@@ -345,3 +345,79 @@ impl MediaProcessor for Mp4Writer {
         }
     }
 }
+
+impl Mp4Writer {
+    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
+        let id = crate::ProcessorId::new("mp4_writer");
+        let processor_handle = handle.register_processor(id).await.or_fail()?;
+
+        // 入力トラックをサブスクライブ
+        let mut audio_receiver = self.input_audio_stream_id.map(|stream_id| {
+            let track_id = crate::TrackId::new(stream_id.get().to_string());
+            processor_handle.subscribe_track(track_id)
+        });
+        let mut video_receiver = self.input_video_stream_id.map(|stream_id| {
+            let track_id = crate::TrackId::new(stream_id.get().to_string());
+            processor_handle.subscribe_track(track_id)
+        });
+
+        loop {
+            // 受信可能なトラックから入力を取得
+            tokio::select! {
+                msg = async {
+                    if let Some(ref mut rx) = audio_receiver {
+                        Some((true, rx.recv().await))
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    if let Some((_, msg)) = msg {
+                        match msg {
+                            crate::Message::Media(crate::MediaSample::Audio(sample)) => {
+                                self.input_audio_queue.push_back(sample);
+                            }
+                            crate::Message::Eos => {
+                                self.input_audio_stream_id = None;
+                                audio_receiver = None;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                msg = async {
+                    if let Some(ref mut rx) = video_receiver {
+                        Some((false, rx.recv().await))
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    if let Some((_, msg)) = msg {
+                        match msg {
+                            crate::Message::Media(crate::MediaSample::Video(sample)) => {
+                                self.input_video_queue.push_back(sample);
+                            }
+                            crate::Message::Eos => {
+                                self.input_video_stream_id = None;
+                                video_receiver = None;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
+            let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
+
+            let in_progress = self
+                .handle_next_audio_and_video(audio_timestamp, video_timestamp)
+                .or_fail()?;
+
+            if !in_progress {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+}
