@@ -191,8 +191,8 @@ impl MediaPipelineHandle {
         }
     }
 
-    fn send(&self, command: Command) {
-        self.command_tx.send(command).expect("bug");
+    fn send(&self, command: Command) -> bool {
+        self.command_tx.send(command).is_ok()
     }
 }
 
