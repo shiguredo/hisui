@@ -351,51 +351,32 @@ impl Mp4Writer {
         let id = crate::ProcessorId::new("mp4_writer");
         let processor_handle = handle.register_processor(id).await.or_fail()?;
 
-        let mut audio_receiver = self.input_audio_stream_id.map(|stream_id| {
+        let mut audio_rx = self.input_audio_stream_id.map(|stream_id| {
             let track_id = crate::TrackId::new(stream_id.get().to_string());
             processor_handle.subscribe_track(track_id)
         });
-        let mut video_receiver = self.input_video_stream_id.map(|stream_id| {
+        let mut video_rx = self.input_video_stream_id.map(|stream_id| {
             let track_id = crate::TrackId::new(stream_id.get().to_string());
             processor_handle.subscribe_track(track_id)
         });
 
-        loop {
+        let mut in_progress = audio_rx.is_some() || video_rx.is_some();
+        while in_progress {
             tokio::select! {
-                msg = async {
-                    if let Some(ref mut rx) = audio_receiver {
-                        Some(rx.recv().await)
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
-                    if let Some(msg) = msg {
-                        self.handle_audio_message(msg, &mut audio_receiver);
-                    }
+                msg = crate::future::recv_or_pending(&mut audio_rx) => {
+                    self.handle_audio_message(msg, &mut audio_rx);
                 }
-                msg = async {
-                    if let Some(ref mut rx) = video_receiver {
-                        Some(rx.recv().await)
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
-                    if let Some(msg) = msg {
-                        self.handle_video_message(msg, &mut video_receiver);
-                    }
+                msg = crate::future::recv_or_pending(&mut video_rx) => {
+                    self.handle_video_message(msg, &mut video_rx);
                 }
             }
 
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
             let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
 
-            let in_progress = self
+            in_progress = self
                 .handle_next_audio_and_video(audio_timestamp, video_timestamp)
                 .or_fail()?;
-
-            if !in_progress {
-                break;
-            }
         }
 
         Ok(())
@@ -404,7 +385,7 @@ impl Mp4Writer {
     fn handle_audio_message(
         &mut self,
         msg: crate::Message,
-        audio_receiver: &mut Option<crate::MessageReceiver>,
+        audio_rx: &mut Option<crate::MessageReceiver>,
     ) {
         match msg {
             crate::Message::Media(crate::MediaSample::Audio(sample)) => {
@@ -412,7 +393,7 @@ impl Mp4Writer {
             }
             crate::Message::Eos => {
                 self.input_audio_stream_id = None;
-                *audio_receiver = None;
+                *audio_rx = None;
             }
             _ => {}
         }
@@ -421,7 +402,7 @@ impl Mp4Writer {
     fn handle_video_message(
         &mut self,
         msg: crate::Message,
-        video_receiver: &mut Option<crate::MessageReceiver>,
+        video_rx: &mut Option<crate::MessageReceiver>,
     ) {
         match msg {
             crate::Message::Media(crate::MediaSample::Video(sample)) => {
@@ -429,7 +410,7 @@ impl Mp4Writer {
             }
             crate::Message::Eos => {
                 self.input_video_stream_id = None;
-                *video_receiver = None;
+                *video_rx = None;
             }
             _ => {}
         }
