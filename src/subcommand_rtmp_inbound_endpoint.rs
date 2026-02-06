@@ -45,6 +45,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let pipeline_handle = pipeline.handle();
 
     runtime.spawn(async move {
+        let stream_name = endpoint_rtmp_url.stream_name.clone();
+
         // RTMP Inbound Endpoint を起動
         let endpoint = crate::inbound_endpoint_rtmp::RtmpInboundEndpoint::new(
             endpoint_rtmp_url,
@@ -66,8 +68,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         )
         .or_fail()?;
         pipeline_handle
-            .spawn_processor(crate::ProcessorId::new("mp4_writer"), |handle| {
-                writer.run(handle)
+            .spawn_processor(crate::ProcessorId::new("mp4_writer"), move |handle| {
+                writer.run(
+                    handle,
+                    Some(crate::TrackId::new(format!("{stream_name}_audio"))),
+                    Some(crate::TrackId::new(format!("{stream_name}_video"))),
+                )
             })
             .await
             .or_fail()?;
