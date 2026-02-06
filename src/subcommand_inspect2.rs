@@ -35,51 +35,48 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .or_fail()?;
     let _guard = runtime.enter();
 
-    let _ = runtime.block_on(async {
-        let pipeline = crate::MediaPipeline::new();
-        {
-            let pipeline_handle = pipeline.handle();
-
-            let output_printer = OutputPrinter::new(input_file_path.clone(), format);
-            pipeline_handle
-                .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
-                    output_printer.run(handle)
-                })
-                .await
-                .or_fail()?;
-
-            let reader = AudioReader::new(
-                AUDIO_ENCODED_STREAM_ID,
-                dummy_source_id.clone(),
-                format,
-                Duration::ZERO,
-                vec![input_file_path.clone()],
-            )
+    let pipeline = crate::MediaPipeline::new();
+    let pipeline_handle = pipeline.handle();
+    runtime.spawn(async move {
+        let output_printer = OutputPrinter::new(input_file_path.clone(), format);
+        pipeline_handle
+            .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
+                output_printer.run(handle)
+            })
+            .await
             .or_fail()?;
-            let id = crate::ProcessorId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
-            pipeline_handle
-                .spawn_processor(id, |handle| reader.run(handle))
-                .await
-                .or_fail()?;
+        dbg!("here2");
 
-            let reader = VideoReader::new(
-                VIDEO_ENCODED_STREAM_ID,
-                dummy_source_id.clone(),
-                format,
-                Duration::ZERO,
-                vec![input_file_path.clone()],
-            )
+        let reader = AudioReader::new(
+            AUDIO_ENCODED_STREAM_ID,
+            dummy_source_id.clone(),
+            format,
+            Duration::ZERO,
+            vec![input_file_path.clone()],
+        )
+        .or_fail()?;
+        let id = crate::ProcessorId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
+        pipeline_handle
+            .spawn_processor(id, |handle| reader.run(handle))
+            .await
             .or_fail()?;
-            let id = crate::ProcessorId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
-            pipeline_handle
-                .spawn_processor(id, |handle| reader.run(handle))
-                .await
-                .or_fail()?;
-        }
-        pipeline.run().await;
+
+        let reader = VideoReader::new(
+            VIDEO_ENCODED_STREAM_ID,
+            dummy_source_id.clone(),
+            format,
+            Duration::ZERO,
+            vec![input_file_path.clone()],
+        )
+        .or_fail()?;
+        let id = crate::ProcessorId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
+        pipeline_handle
+            .spawn_processor(id, |handle| reader.run(handle))
+            .await
+            .or_fail()?;
         Ok::<(), orfail::Failure>(())
     });
-
+    runtime.block_on(pipeline.run());
     Ok(())
 }
 
