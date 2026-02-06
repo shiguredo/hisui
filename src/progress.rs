@@ -193,8 +193,6 @@ fn render_bar(total: u64, position: u64, width: usize, use_color: bool) -> Strin
     };
     let (filled_len, head_len, empty_len) = if filled >= width {
         (width, 0, 0)
-    } else if total == 0 {
-        (width, 0, 0)
     } else if filled == 0 {
         (0, 1, width - 1)
     } else {
