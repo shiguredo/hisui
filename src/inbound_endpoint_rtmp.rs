@@ -101,8 +101,19 @@ impl RtmpInboundEndpoint {
                     let tls_acceptor = tls_acceptor.clone();
                     let timestamp_offset = start_time.elapsed();
 
-                    let track_tx = handle
-                        .publish_track(crate::TrackId::new(self.url.stream_name.clone()))
+                    let video_track_tx = handle
+                        .publish_track(crate::TrackId::new(format!(
+                            "{}_video",
+                            self.url.stream_name
+                        )))
+                        .await
+                        .or_fail()?;
+
+                    let audio_track_tx = handle
+                        .publish_track(crate::TrackId::new(format!(
+                            "{}_audio",
+                            self.url.stream_name
+                        )))
                         .await
                         .or_fail()?;
 
@@ -135,7 +146,8 @@ impl RtmpInboundEndpoint {
                                     expected_stream_name,
                                     frame_handler_stats,
                                     timestamp_offset,
-                                    track_tx,
+                                    video_track_tx,
+                                    audio_track_tx,
                                 );
 
                                 if let Err(e) = handler.run().await.or_fail() {
@@ -189,7 +201,8 @@ struct RtmpPublisherHandler {
     expected_app: String,
     expected_stream_name: String,
     frame_handler: crate::rtmp::RtmpIncomingFrameHandler,
-    track_tx: crate::MessageSender,
+    video_track_tx: crate::MessageSender,
+    audio_track_tx: crate::MessageSender,
 }
 
 impl RtmpPublisherHandler {
@@ -200,7 +213,8 @@ impl RtmpPublisherHandler {
         expected_stream_name: String,
         frame_handler_stats: crate::rtmp::RtmpIncomingFrameHandlerStats,
         timestamp_offset: std::time::Duration,
-        track_tx: crate::MessageSender,
+        video_track_tx: crate::MessageSender,
+        audio_track_tx: crate::MessageSender,
     ) -> Self {
         Self {
             stream,
@@ -213,7 +227,8 @@ impl RtmpPublisherHandler {
                 timestamp_offset,
                 frame_handler_stats,
             ),
-            track_tx,
+            video_track_tx,
+            audio_track_tx,
         }
     }
 
@@ -242,6 +257,9 @@ impl RtmpPublisherHandler {
                 }
             }
         }
+
+        self.video_track_tx.send_eos();
+        self.audio_track_tx.send_eos();
 
         Ok(())
     }
@@ -304,8 +322,8 @@ impl RtmpPublisherHandler {
         frame: shiguredo_rtmp::AudioFrame,
     ) -> orfail::Result<()> {
         let audio_data = self.frame_handler.process_audio_frame(frame)?;
-        self.send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)))
-            .await;
+        self.audio_track_tx
+            .send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
         Ok(())
     }
 
@@ -315,15 +333,10 @@ impl RtmpPublisherHandler {
         frame: shiguredo_rtmp::VideoFrame,
     ) -> orfail::Result<()> {
         if let Some(video_frame) = self.frame_handler.process_video_frame(frame).or_fail()? {
-            self.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)))
-                .await;
+            self.video_track_tx
+                .send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
         }
         Ok(())
-    }
-
-    /// MediaSample を送信する
-    async fn send_media(&mut self, sample: crate::MediaSample) {
-        self.track_tx.send_media(sample);
     }
 
     /// TCP/TLS ストリームからデータを読み込む
