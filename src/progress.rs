@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 const BAR_WIDTH: usize = 40;
 const DRAW_INTERVAL: Duration = Duration::from_millis(200);
 const CLEAR_LINE: &str = "\r\x1b[2K";
-const NO_ETA: &str = "--:--:--";
+const NO_ETA: &str = "?";
 const SPINNER: [char; 4] = ['|', '/', '-', '\\'];
 
 #[derive(Debug, Clone, Copy)]
@@ -177,7 +177,8 @@ fn format_eta(total: u64, position: u64, elapsed: Duration) -> String {
     if !remaining.is_finite() || remaining < 0.0 {
         return NO_ETA.to_string();
     }
-    format_duration(Duration::from_secs_f64(remaining))
+    let remaining_secs = remaining.floor().max(0.0) as u64;
+    format_eta_text(remaining_secs)
 }
 
 fn render_bar(total: u64, position: u64, width: usize, use_color: bool) -> String {
@@ -218,6 +219,19 @@ fn render_bar(total: u64, position: u64, width: usize, use_color: bool) -> Strin
     }
 }
 
+fn format_eta_text(total_secs: u64) -> String {
+    let hours = total_secs / 3600;
+    let minutes = (total_secs / 60) % 60;
+    let seconds = total_secs % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m {seconds}s")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,5 +257,13 @@ mod tests {
             format_eta(100, 0, Duration::from_secs(0)),
             NO_ETA.to_string()
         );
+    }
+
+    #[test]
+    fn format_eta_text_formats_human_readable() {
+        assert_eq!(format_eta_text(0), "0s");
+        assert_eq!(format_eta_text(59), "59s");
+        assert_eq!(format_eta_text(60), "1m 0s");
+        assert_eq!(format_eta_text(3661), "1h 1m 1s");
     }
 }
