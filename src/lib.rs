@@ -55,7 +55,6 @@ pub mod optuna;
 pub mod outbound_endpoint_rtmp;
 pub mod pipeline;
 pub mod processor;
-pub mod processor_async;
 pub mod publisher_rtmp;
 pub mod reader;
 pub mod reader_mp4;

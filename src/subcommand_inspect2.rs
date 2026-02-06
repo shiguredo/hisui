@@ -34,33 +34,35 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .build()
         .or_fail()?;
     let _guard = runtime.enter();
-    let manager = crate::processor_async::ProcessorManager::new();
-    let manager_handler = manager.start();
 
-    let output_printer = OutputPrinter::new(input_file_path.clone(), format);
-    runtime.spawn(output_printer.run(manager_handler.clone()));
+    let pipeline = crate::MediaPipeline::new();
+    {
+        let pipeline_handle = pipeline.handle();
 
-    let reader = AudioReader::new(
-        AUDIO_ENCODED_STREAM_ID,
-        dummy_source_id.clone(),
-        format,
-        Duration::ZERO,
-        vec![input_file_path.clone()],
-    )
-    .or_fail()?;
-    runtime.spawn(reader.run(manager_handler.clone()));
+        let output_printer = OutputPrinter::new(input_file_path.clone(), format);
+        runtime.spawn(output_printer.run(pipeline_handle.clone()));
 
-    let reader = VideoReader::new(
-        VIDEO_ENCODED_STREAM_ID,
-        dummy_source_id.clone(),
-        format,
-        Duration::ZERO,
-        vec![input_file_path.clone()],
-    )
-    .or_fail()?;
-    runtime.spawn(reader.run(manager_handler.clone()));
+        let reader = AudioReader::new(
+            AUDIO_ENCODED_STREAM_ID,
+            dummy_source_id.clone(),
+            format,
+            Duration::ZERO,
+            vec![input_file_path.clone()],
+        )
+        .or_fail()?;
+        runtime.spawn(reader.run(pipeline_handle.clone()));
 
-    runtime.block_on(manager_handler.wait_finish());
+        let reader = VideoReader::new(
+            VIDEO_ENCODED_STREAM_ID,
+            dummy_source_id.clone(),
+            format,
+            Duration::ZERO,
+            vec![input_file_path.clone()],
+        )
+        .or_fail()?;
+        runtime.spawn(reader.run(pipeline_handle.clone()));
+    }
+    runtime.block_on(pipeline.run());
 
     Ok(())
 }
@@ -206,28 +208,23 @@ impl OutputPrinter {
         }
     }
 
-    pub async fn run(
-        mut self,
-        handle: crate::processor_async::ProcessorManagerHandle,
-    ) -> orfail::Result<()> {
-        let id = crate::processor_async::ProcessorId::new("output_printer");
+    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
+        let id = crate::ProcessorId::new("output_printer");
         let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
 
-        let audio_track_id =
-            crate::processor_async::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
-        let mut audio_track = processor_handle.subscribe_track(audio_track_id).await;
+        let audio_track_id = crate::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
+        let mut audio_track = processor_handle.subscribe_track(audio_track_id);
 
-        let video_track_id =
-            crate::processor_async::TrackId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
-        let mut video_track = processor_handle.subscribe_track(video_track_id).await;
+        let video_track_id = crate::TrackId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
+        let mut video_track = processor_handle.subscribe_track(video_track_id);
 
         while !self.active_streams.is_empty() {
             tokio::select! {
-                message = audio_track.recv_media(),
+                message = audio_track.recv(),
                           if self.active_streams.contains(&AUDIO_ENCODED_STREAM_ID) => {
                     self.handle_audio_sample(message)?;
                 }
-                message = video_track.recv_media(),
+                message = video_track.recv(),
                           if self.active_streams.contains(&VIDEO_ENCODED_STREAM_ID) => {
                     self.handle_video_sample(message)?;
                 }
@@ -238,12 +235,9 @@ impl OutputPrinter {
         Ok(())
     }
 
-    fn handle_audio_sample(
-        &mut self,
-        message: crate::processor_async::Message,
-    ) -> orfail::Result<()> {
+    fn handle_audio_sample(&mut self, message: crate::Message) -> orfail::Result<()> {
         match message {
-            crate::processor_async::Message::Media(media_sample) => {
+            crate::Message::Media(media_sample) => {
                 let audio_data = media_sample.expect_audio_data().or_fail()?;
                 if self.audio_codec.is_none() {
                     self.audio_codec = audio_data.format.codec_name();
@@ -254,20 +248,17 @@ impl OutputPrinter {
                     data_size: audio_data.data.len(),
                 });
             }
-            crate::processor_async::Message::Eos => {
+            crate::Message::Eos => {
                 self.active_streams.remove(&AUDIO_ENCODED_STREAM_ID);
             }
-            crate::processor_async::Message::Syn(_) => {}
+            crate::Message::Syn(_) => {}
         }
         Ok(())
     }
 
-    fn handle_video_sample(
-        &mut self,
-        message: crate::processor_async::Message,
-    ) -> orfail::Result<()> {
+    fn handle_video_sample(&mut self, message: crate::Message) -> orfail::Result<()> {
         match message {
-            crate::processor_async::Message::Media(media_sample) => {
+            crate::Message::Media(media_sample) => {
                 let video_frame = media_sample.expect_video_frame().or_fail()?;
                 if self.video_codec.is_none() {
                     self.video_codec = video_frame.format.codec_name();
@@ -280,10 +271,10 @@ impl OutputPrinter {
                     codec_specific_info: VideoCodecSpecificInfo::new(&video_frame),
                 });
             }
-            crate::processor_async::Message::Eos => {
+            crate::Message::Eos => {
                 self.active_streams.remove(&VIDEO_ENCODED_STREAM_ID);
             }
-            crate::processor_async::Message::Syn(_) => {}
+            crate::Message::Syn(_) => {}
         }
         Ok(())
     }
