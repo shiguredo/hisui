@@ -8,9 +8,6 @@ use tokio::net::TcpListener;
 use crate::stats::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag};
 use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 
-/// メディアフレーム用チャネルサイズ
-const FRAME_CHANNEL_SIZE: usize = 500;
-
 #[derive(Debug, Clone)]
 pub struct RtmpInboundEndpointOptions {
     /// TLS接続時の証明書ファイルパス（オプション）
@@ -33,10 +30,8 @@ impl Default for RtmpInboundEndpointOptions {
     }
 }
 
-/// RTMP Inbound Endpoint（MediaPipeline ベース実装）
-pub struct RtmpInboundEndpoint {
-    stats: RtmpInboundEndpointStats,
-}
+/// RTMP Inbound Endpoint
+pub struct RtmpInboundEndpoint {}
 
 impl RtmpInboundEndpoint {
     /// RTMP Inbound Endpoint を起動する

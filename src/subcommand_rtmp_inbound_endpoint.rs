@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use orfail::OrFail;
 
-use crate::{media::MediaStreamId, scheduler::Scheduler};
+use crate::media::MediaStreamId;
 
 const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
@@ -34,34 +34,47 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    let mut scheduler = Scheduler::new();
-
-    // RTMP サーバーを登録
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
+        .worker_threads(2)
         .enable_all()
         .build()
         .or_fail()?;
-    let inbound_endpoint = crate::inbound_endpoint_rtmp::RtmpInboundEndpoint::start(
-        &runtime,
-        Some(AUDIO_STREAM_ID),
-        Some(VIDEO_STREAM_ID),
-        endpoint_rtmp_url,
-        crate::inbound_endpoint_rtmp::RtmpInboundEndpointOptions::default(),
-    );
-    scheduler.register(inbound_endpoint).or_fail()?;
+    let _guard = runtime.enter();
 
-    // ライターを登録
-    let writer = crate::writer_mp4::Mp4Writer::new(
-        output_file_path,
-        None,
-        Some(AUDIO_STREAM_ID),
-        Some(VIDEO_STREAM_ID),
-    )
-    .or_fail()?;
-    scheduler.register(writer).or_fail()?;
+    let pipeline = crate::MediaPipeline::new();
+    let pipeline_handle = pipeline.handle();
 
-    // スケジューラー実行
-    scheduler.run().or_fail()?;
+    runtime.spawn(async move {
+        // RTMP Inbound Endpoint を起動
+        pipeline_handle
+            .spawn_processor(crate::ProcessorId::new("rtmp_inbound"), |handle| {
+                crate::inbound_endpoint_rtmp::RtmpInboundEndpoint::run(
+                    handle,
+                    endpoint_rtmp_url,
+                    Default::default(),
+                )
+            })
+            .await
+            .or_fail()?;
+
+        // MP4 Writer を起動
+        let writer = crate::writer_mp4::Mp4Writer::new(
+            output_file_path,
+            None,
+            Some(AUDIO_STREAM_ID),
+            Some(VIDEO_STREAM_ID),
+        )
+        .or_fail()?;
+        pipeline_handle
+            .spawn_processor(crate::ProcessorId::new("mp4_writer"), |handle| {
+                writer.run(handle)
+            })
+            .await
+            .or_fail()?;
+
+        Ok::<(), orfail::Failure>(())
+    });
+
+    runtime.block_on(pipeline.run());
     Ok(())
 }
