@@ -347,17 +347,14 @@ impl MediaProcessor for Mp4Writer {
 }
 
 impl Mp4Writer {
-    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
-        let id = crate::ProcessorId::new("mp4_writer");
-        let processor_handle = handle.register_processor(id).await.or_fail()?;
-
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let mut audio_rx = self.input_audio_stream_id.map(|stream_id| {
             let track_id = crate::TrackId::new(stream_id.get().to_string());
-            processor_handle.subscribe_track(track_id)
+            handle.subscribe_track(track_id)
         });
         let mut video_rx = self.input_video_stream_id.map(|stream_id| {
             let track_id = crate::TrackId::new(stream_id.get().to_string());
-            processor_handle.subscribe_track(track_id)
+            handle.subscribe_track(track_id)
         });
 
         let mut in_progress = audio_rx.is_some() || video_rx.is_some();

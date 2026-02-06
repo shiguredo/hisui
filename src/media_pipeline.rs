@@ -193,8 +193,7 @@ impl MediaPipelineHandle {
         Ok(())
     }
 
-    // TODO: private にする？
-    pub async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+    async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::RegisterProcessor {
             processor_id: processor_id.clone(),
