@@ -53,7 +53,7 @@ impl ProgressBar {
         if self.finished {
             return;
         }
-        self.position = position.min(self.total);
+        self.position = position;
         self.draw(false);
     }
 
