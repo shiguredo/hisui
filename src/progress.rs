@@ -120,7 +120,7 @@ impl AnsiColor {
 }
 
 fn colorize(text: &str, color: AnsiColor, use_color: bool) -> String {
-    if !use_color || text.is_empty() {
+    if !use_color {
         return text.to_string();
     }
     format!("{}{}{}", color.code(), text, "\x1b[0m")
