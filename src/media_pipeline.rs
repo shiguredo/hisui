@@ -1,3 +1,5 @@
+use orfail::OrFail;
+
 #[derive(Debug)]
 pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<Command>>,
@@ -174,6 +176,24 @@ pub struct MediaPipelineHandle {
 }
 
 impl MediaPipelineHandle {
+    pub async fn spawn_processor<F, T>(&self, processor_id: ProcessorId, f: F) -> orfail::Result<()>
+    where
+        F: FnOnce(ProcessorHandle) -> T + Send + 'static,
+        T: Future<Output = orfail::Result<()>> + Send,
+    {
+        let handle = self
+            .register_processor(processor_id.clone())
+            .await
+            .or_fail()?;
+        tokio::task::spawn(async move {
+            if let Err(e) = f(handle).await {
+                log::error!("failed to run processor {processor_id}: {e}");
+            }
+        });
+        Ok(())
+    }
+
+    // TODO: private にする？
     pub async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::RegisterProcessor {

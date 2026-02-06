@@ -35,34 +35,42 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .or_fail()?;
     let _guard = runtime.enter();
 
-    let pipeline = crate::MediaPipeline::new();
-    {
-        let pipeline_handle = pipeline.handle();
+    let _ = runtime.block_on(async {
+        let pipeline = crate::MediaPipeline::new();
+        {
+            let pipeline_handle = pipeline.handle();
 
-        let output_printer = OutputPrinter::new(input_file_path.clone(), format);
-        runtime.spawn(output_printer.run(pipeline_handle.clone()));
+            let output_printer = OutputPrinter::new(input_file_path.clone(), format);
+            pipeline_handle
+                .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
+                    output_printer.run(handle)
+                })
+                .await
+                .or_fail()?;
 
-        let reader = AudioReader::new(
-            AUDIO_ENCODED_STREAM_ID,
-            dummy_source_id.clone(),
-            format,
-            Duration::ZERO,
-            vec![input_file_path.clone()],
-        )
-        .or_fail()?;
-        runtime.spawn(reader.run(pipeline_handle.clone()));
+            let reader = AudioReader::new(
+                AUDIO_ENCODED_STREAM_ID,
+                dummy_source_id.clone(),
+                format,
+                Duration::ZERO,
+                vec![input_file_path.clone()],
+            )
+            .or_fail()?;
+            runtime.spawn(reader.run(pipeline_handle.clone()));
 
-        let reader = VideoReader::new(
-            VIDEO_ENCODED_STREAM_ID,
-            dummy_source_id.clone(),
-            format,
-            Duration::ZERO,
-            vec![input_file_path.clone()],
-        )
-        .or_fail()?;
-        runtime.spawn(reader.run(pipeline_handle.clone()));
-    }
-    runtime.block_on(pipeline.run());
+            let reader = VideoReader::new(
+                VIDEO_ENCODED_STREAM_ID,
+                dummy_source_id.clone(),
+                format,
+                Duration::ZERO,
+                vec![input_file_path.clone()],
+            )
+            .or_fail()?;
+            runtime.spawn(reader.run(pipeline_handle.clone()));
+        }
+        pipeline.run().await;
+        Ok::<(), orfail::Failure>(())
+    });
 
     Ok(())
 }
@@ -208,15 +216,12 @@ impl OutputPrinter {
         }
     }
 
-    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
-        let id = crate::ProcessorId::new("output_printer");
-        let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
-
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let audio_track_id = crate::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
-        let mut audio_track = processor_handle.subscribe_track(audio_track_id);
+        let mut audio_track = handle.subscribe_track(audio_track_id);
 
         let video_track_id = crate::TrackId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
-        let mut video_track = processor_handle.subscribe_track(video_track_id);
+        let mut video_track = handle.subscribe_track(video_track_id);
 
         while !self.active_streams.is_empty() {
             tokio::select! {
