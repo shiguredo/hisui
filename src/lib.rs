@@ -47,6 +47,7 @@ pub mod layout_encode_params;
 pub mod layout_region;
 pub mod logger;
 pub mod media;
+pub mod media_pipeline;
 pub mod metadata;
 pub mod mixer_audio;
 pub mod mixer_video;
@@ -63,6 +64,7 @@ pub mod scheduler;
 pub mod stats;
 pub mod subcommand_compose;
 pub mod subcommand_inspect;
+pub mod subcommand_inspect2;
 pub mod subcommand_list_codecs;
 pub mod subcommand_pipeline;
 pub mod subcommand_rtmp_inbound_endpoint;
@@ -78,3 +80,11 @@ pub mod video_h264;
 pub mod video_h265;
 pub mod writer_mp4;
 pub mod writer_yuv;
+
+pub use audio::AudioData;
+pub use media::MediaSample;
+pub use media_pipeline::{
+    Ack, MediaPipeline, MediaPipelineHandle, Message, MessageReceiver, MessageSender,
+    ProcessorHandle, ProcessorId, Syn, TrackId,
+};
+pub use video::VideoFrame;

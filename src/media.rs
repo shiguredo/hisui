@@ -107,6 +107,14 @@ pub enum MediaSample {
 }
 
 impl MediaSample {
+    pub fn new_audio(data: AudioData) -> Self {
+        Self::Audio(Arc::new(data))
+    }
+
+    pub fn new_video(frame: VideoFrame) -> Self {
+        Self::Video(Arc::new(frame))
+    }
+
     pub fn timestamp(&self) -> Duration {
         match self {
             Self::Audio(x) => x.timestamp,

@@ -37,6 +37,11 @@
 - [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
   - バージョンが `-canary.X` は `.devX` 形式に変換される
   - @voluntas
+- [ADD] 実験的コマンドとして inspect2 を追加する
+  - inspect コマンドとほぼ同様だが、内部的に tokio ベースの仕組みを使っている点が異なる
+  - 将来的にはこちらの実装で inspect コマンドを置き換える想定
+  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+  - @sile
 - [ADD] 実験的コマンドとして rtmp-inbound-endpoint を追加する
   - RTMP サーバーとして受信したストリームを出力ファイル（.mp4）に保存するためのコマンド
   - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる

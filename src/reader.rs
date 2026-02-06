@@ -6,7 +6,7 @@ use orfail::OrFail;
 use crate::{
     audio::AudioData,
     layout::AggregatedSourceInfo,
-    media::MediaStreamId,
+    media::{MediaSample, MediaStreamId},
     metadata::{ContainerFormat, SourceId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -33,6 +33,52 @@ pub struct AudioReader {
 }
 
 impl AudioReader {
+    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
+        let id = crate::ProcessorId::new(self.output_stream_id.get().to_string());
+        let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
+
+        let track_id = crate::TrackId::new(id.get());
+        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+
+        let mut ack = track_handle.send_syn();
+        let mut noacked_sent = 0;
+        loop {
+            // 100 はとりあえずの暫定値。
+            // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
+            if noacked_sent > 100 {
+                ack.await;
+                ack = track_handle.send_syn();
+                noacked_sent = 0;
+            }
+
+            match self.inner.next() {
+                None => {
+                    if !self.start_next_input_file().or_fail()? {
+                        // 全てのファイルの末尾に達した
+                        break;
+                    }
+                    self.timestamp_offset = self.next_timestamp_offset;
+                    self.inner.set_timestamp_offset(self.timestamp_offset);
+                }
+                Some(Err(e)) => return Err(e),
+                Some(Ok(mut data)) => {
+                    data.timestamp += self.timestamp_offset;
+                    self.next_timestamp_offset = data.timestamp + data.duration;
+
+                    if !track_handle.send_media(MediaSample::new_audio(data)) {
+                        // パイプライン処理が中断された
+                        break;
+                    }
+                    noacked_sent += 1;
+                }
+            }
+        }
+
+        track_handle.send_eos();
+
+        Ok(())
+    }
+
     pub fn from_source_info(
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
@@ -200,6 +246,51 @@ pub struct VideoReader {
 }
 
 impl VideoReader {
+    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
+        let id = crate::ProcessorId::new(self.output_stream_id.get().to_string());
+        let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
+
+        let track_id = crate::TrackId::new(id.get());
+        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+
+        let mut ack = track_handle.send_syn();
+        let mut noacked_sent = 0;
+        loop {
+            // 100 はとりあえずの暫定値。
+            // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
+            if noacked_sent > 100 {
+                ack.await;
+                ack = track_handle.send_syn();
+                noacked_sent = 0;
+            }
+
+            match self.inner.next() {
+                None => {
+                    if !self.start_next_input_file().or_fail()? {
+                        // 全てのファイルの末尾に達した
+                        break;
+                    }
+                    self.timestamp_offset = self.next_timestamp_offset;
+                    self.inner.set_timestamp_offset(self.timestamp_offset);
+                }
+                Some(Err(e)) => return Err(e),
+                Some(Ok(mut frame)) => {
+                    frame.timestamp += self.timestamp_offset;
+                    self.next_timestamp_offset = frame.timestamp + frame.duration;
+
+                    if !track_handle.send_media(MediaSample::new_video(frame)) {
+                        // パイプライン処理が中断された
+                        break;
+                    }
+                    noacked_sent += 1;
+                }
+            }
+        }
+        track_handle.send_eos();
+
+        Ok(())
+    }
+
     pub fn from_source_info(
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,

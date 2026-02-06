@@ -10,6 +10,8 @@ const VERBOSE_FLAG: noargs::FlagSpec =
 // サブコマンド定義
 const INSPECT_COMMAND: noargs::CmdSpec =
     noargs::cmd("inspect").doc("録画ファイルの情報を取得します");
+const INSPECT2_COMMAND: noargs::CmdSpec =
+    noargs::cmd("inspect2").doc("録画ファイルの情報を取得します（実験的に tokio を使っている）");
 const LIST_CODECS_COMMAND: noargs::CmdSpec =
     noargs::cmd("list-codecs").doc("利用可能なコーデック一覧を表示します");
 const COMPOSE_COMMAND: noargs::CmdSpec = noargs::cmd("compose").doc("録画ファイルの合成を行います");
@@ -57,6 +59,8 @@ fn main() -> noargs::Result<()> {
     // サブコマンドで分岐する
     if INSPECT_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_inspect::run(args)?;
+    } else if experimental && INSPECT2_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_inspect2::run(args)?;
     } else if LIST_CODECS_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_list_codecs::run(args)?;
     } else if COMPOSE_COMMAND.take(&mut args).is_present() {
