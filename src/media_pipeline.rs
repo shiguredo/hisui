@@ -97,6 +97,14 @@ impl MediaPipeline {
             log::debug!("publisher not yet registered for track: {track_id}");
             track.pending_subscribers.push(tx);
         }
+
+        // TODO: 将来的には不要となったトラックの削除の仕組みを追加する
+        //
+        // 例えば、
+        // - 参照していた全ての publisher がいなくなったら削除する
+        // - Message{Sender,Receiver} のドロップ時に解除コマンドを送る
+        //
+        // ただし、現状ではこの対応を入れなくても別に困らないため、実際に削除が必要になるまでは残り続けて構わない
     }
 
     fn handle_publish_track(
