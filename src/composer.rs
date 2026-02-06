@@ -181,7 +181,10 @@ impl ProgressBar {
     fn new(input_stream_ids: Vec<MediaStreamId>, output_duration: Duration) -> Self {
         Self {
             input_stream_ids,
-            bar: crate::arg_utils::create_time_progress_bar(output_duration),
+            bar: crate::progress::ProgressBar::new(
+                output_duration.as_secs(),
+                crate::progress::ProgressKind::Time,
+            ),
             max_timestamp: Duration::ZERO,
         }
     }

@@ -7,7 +7,7 @@ const CLEAR_LINE: &str = "\r\x1b[2K";
 const NO_ETA: &str = "?";
 
 #[derive(Debug, Clone, Copy)]
-enum ProgressKind {
+pub enum ProgressKind {
     Time,
     Frame,
 }
@@ -25,7 +25,7 @@ pub struct ProgressBar {
 }
 
 impl ProgressBar {
-    fn new(total: u64, kind: ProgressKind) -> Self {
+    pub fn new(total: u64, kind: ProgressKind) -> Self {
         let stderr = io::stderr();
         let enabled = stderr.is_terminal();
         let use_color = enabled;
@@ -102,14 +102,6 @@ impl ProgressBar {
             ),
         }
     }
-}
-
-pub fn create_time_progress_bar(total_duration: Duration) -> ProgressBar {
-    ProgressBar::new(total_duration.as_secs(), ProgressKind::Time)
-}
-
-pub fn create_frame_progress_bar(total_frames: u64) -> ProgressBar {
-    ProgressBar::new(total_frames, ProgressKind::Frame)
 }
 
 #[derive(Clone, Copy)]

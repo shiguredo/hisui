@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 pub fn parse_non_default_opt<T>(opt: noargs::Opt) -> Result<Option<T>, T::Err>
 where
@@ -25,14 +25,4 @@ pub fn validate_existing_directory_path(
     }
 
     Ok(path)
-}
-
-/// 時間ベースのプログレスバーを作成する
-pub fn create_time_progress_bar(total_duration: Duration) -> crate::progress::ProgressBar {
-    crate::progress::create_time_progress_bar(total_duration)
-}
-
-/// フレームベースのプログレスバーを作成する
-pub fn create_frame_progress_bar(total_frames: u64) -> crate::progress::ProgressBar {
-    crate::progress::create_frame_progress_bar(total_frames)
 }
