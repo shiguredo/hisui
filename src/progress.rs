@@ -5,7 +5,6 @@ const BAR_WIDTH: usize = 40;
 const DRAW_INTERVAL: Duration = Duration::from_millis(200);
 const CLEAR_LINE: &str = "\r\x1b[2K";
 const NO_ETA: &str = "?";
-const SPINNER: [char; 4] = ['|', '/', '-', '\\'];
 
 #[derive(Debug, Clone, Copy)]
 enum ProgressKind {
@@ -88,19 +87,17 @@ impl ProgressBar {
     }
 
     fn render_line(&self, elapsed: Duration) -> String {
-        let spinner = SPINNER[spinner_index(elapsed)];
-        let spinner_text = colorize(&spinner.to_string(), AnsiColor::Green, self.use_color);
         let elapsed_text = format_duration(elapsed);
         let eta_text = format_eta(self.total, self.position, elapsed);
         let bar_text = render_bar(self.total, self.position, BAR_WIDTH, self.use_color);
         let percent = calc_percent(self.total, self.position);
         match self.kind {
             ProgressKind::Time => format!(
-                "{spinner_text} [{elapsed_text} (ETA: {eta_text})] [{bar_text}] complete {percent}% of {len}s total output duration",
+                "[{elapsed_text} (ETA: {eta_text})] [{bar_text}] complete {percent}% of {len}s total output duration",
                 len = self.total
             ),
             ProgressKind::Frame => format!(
-                "{spinner_text} [{elapsed_text} (ETA: {eta_text})] [{bar_text}] complete {percent}% of {len} total frames",
+                "[{elapsed_text} (ETA: {eta_text})] [{bar_text}] complete {percent}% of {len} total frames",
                 len = self.total
             ),
         }
@@ -117,7 +114,6 @@ pub fn create_frame_progress_bar(total_frames: u64) -> ProgressBar {
 
 #[derive(Clone, Copy)]
 enum AnsiColor {
-    Green,
     Cyan,
     Blue,
 }
@@ -125,7 +121,6 @@ enum AnsiColor {
 impl AnsiColor {
     fn code(self) -> &'static str {
         match self {
-            AnsiColor::Green => "\x1b[32m",
             AnsiColor::Cyan => "\x1b[36m",
             AnsiColor::Blue => "\x1b[34m",
         }
@@ -137,12 +132,6 @@ fn colorize(text: &str, color: AnsiColor, use_color: bool) -> String {
         return text.to_string();
     }
     format!("{}{}{}", color.code(), text, "\x1b[0m")
-}
-
-fn spinner_index(elapsed: Duration) -> usize {
-    let interval_ms = DRAW_INTERVAL.as_millis().max(1);
-    let ticks = elapsed.as_millis() / interval_ms;
-    (ticks as usize) % SPINNER.len()
 }
 
 fn calc_percent(total: u64, position: u64) -> u64 {
