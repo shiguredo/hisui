@@ -31,49 +31,29 @@ impl Default for RtmpInboundEndpointOptions {
 }
 
 /// RTMP Inbound Endpoint
-pub struct RtmpInboundEndpoint {}
-
-impl RtmpInboundEndpoint {
-    /// RTMP Inbound Endpoint を起動する
-    pub async fn run(
-        handle: crate::ProcessorHandle,
-        url: shiguredo_rtmp::RtmpUrl,
-        options: RtmpInboundEndpointOptions,
-    ) -> orfail::Result<()> {
-        let stats = RtmpInboundEndpointStats::default();
-
-        let mut server = RtmpPublishServer {
-            url: url.clone(),
-            stats: stats.clone(),
-            options,
-        };
-
-        if let Err(e) = server.run(handle).await.or_fail() {
-            log::error!("RTMP publish server error: {e}");
-            stats.error.set(true);
-            return Err(e);
-        }
-
-        Ok(())
-    }
-}
-
-/// RTMP Publish サーバー
-#[derive(Debug)]
-struct RtmpPublishServer {
+pub struct RtmpInboundEndpoint {
     url: shiguredo_rtmp::RtmpUrl,
     stats: RtmpInboundEndpointStats,
     options: RtmpInboundEndpointOptions,
 }
 
-impl RtmpPublishServer {
-    async fn run(&mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
+impl RtmpInboundEndpoint {
+    /// Create a new RTMP Inbound Endpoint
+    pub fn new(url: shiguredo_rtmp::RtmpUrl, options: RtmpInboundEndpointOptions) -> Self {
+        Self {
+            url,
+            stats: RtmpInboundEndpointStats::default(),
+            options,
+        }
+    }
+
+    /// Start the RTMP Inbound Endpoint
+    pub async fn run(self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let addr = format!("{}:{}", self.url.host, self.url.port);
         log::debug!("Starting RTMP inbound endpoint on {addr}");
 
         let listener = TcpListener::bind(&addr).await.or_fail()?;
 
-        // URL スキームから TLS を判定
         let tls_enabled = self.url.tls;
         log::debug!(
             "TLS is {}",
@@ -91,7 +71,6 @@ impl RtmpPublishServer {
             None
         };
 
-        // lifetime タイムアウト
         let timeout = self.options.lifetime;
         let start_time = tokio::time::Instant::now();
 
@@ -109,7 +88,6 @@ impl RtmpPublishServer {
 
                     let stats = self.stats.clone();
 
-                    // 同時接続は1クライアントのみ
                     if stats.is_client_connected() {
                         log::warn!(
                             "Another client is already connected, rejecting new connection from {peer_addr}"

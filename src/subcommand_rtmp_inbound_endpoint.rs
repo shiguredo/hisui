@@ -35,7 +35,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(1)
         .enable_all()
         .build()
         .or_fail()?;
@@ -46,13 +46,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     runtime.spawn(async move {
         // RTMP Inbound Endpoint を起動
+        let endpoint = crate::inbound_endpoint_rtmp::RtmpInboundEndpoint::new(
+            endpoint_rtmp_url,
+            Default::default(),
+        );
         pipeline_handle
             .spawn_processor(crate::ProcessorId::new("rtmp_inbound"), |handle| {
-                crate::inbound_endpoint_rtmp::RtmpInboundEndpoint::run(
-                    handle,
-                    endpoint_rtmp_url,
-                    Default::default(),
-                )
+                endpoint.run(handle)
             })
             .await
             .or_fail()?;
