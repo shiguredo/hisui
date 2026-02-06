@@ -314,6 +314,8 @@ impl ProcessorHandle {
 
 impl Drop for ProcessorHandle {
     fn drop(&mut self) {
+        // 登録を解除する。
+        //パイプラインが中断されている場合には送信に失敗するが、そもそもその状況ではすでにエントリは削除されているので問題ないため、結果は無視する。
         self.pipeline_handle.send(Command::DeregisterProcessor {
             processor_id: self.processor_id.clone(),
         });
