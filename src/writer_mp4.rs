@@ -351,7 +351,6 @@ impl Mp4Writer {
         let id = crate::ProcessorId::new("mp4_writer");
         let processor_handle = handle.register_processor(id).await.or_fail()?;
 
-        // 入力トラックをサブスクライブ
         let mut audio_receiver = self.input_audio_stream_id.map(|stream_id| {
             let track_id = crate::TrackId::new(stream_id.get().to_string());
             processor_handle.subscribe_track(track_id)
@@ -362,46 +361,27 @@ impl Mp4Writer {
         });
 
         loop {
-            // 受信可能なトラックから入力を取得
             tokio::select! {
                 msg = async {
                     if let Some(ref mut rx) = audio_receiver {
-                        Some((true, rx.recv().await))
+                        Some(rx.recv().await)
                     } else {
                         std::future::pending().await
                     }
                 } => {
-                    if let Some((_, msg)) = msg {
-                        match msg {
-                            crate::Message::Media(crate::MediaSample::Audio(sample)) => {
-                                self.input_audio_queue.push_back(sample);
-                            }
-                            crate::Message::Eos => {
-                                self.input_audio_stream_id = None;
-                                audio_receiver = None;
-                            }
-                            _ => {}
-                        }
+                    if let Some(msg) = msg {
+                        self.handle_audio_message(msg, &mut audio_receiver);
                     }
                 }
                 msg = async {
                     if let Some(ref mut rx) = video_receiver {
-                        Some((false, rx.recv().await))
+                        Some(rx.recv().await)
                     } else {
                         std::future::pending().await
                     }
                 } => {
-                    if let Some((_, msg)) = msg {
-                        match msg {
-                            crate::Message::Media(crate::MediaSample::Video(sample)) => {
-                                self.input_video_queue.push_back(sample);
-                            }
-                            crate::Message::Eos => {
-                                self.input_video_stream_id = None;
-                                video_receiver = None;
-                            }
-                            _ => {}
-                        }
+                    if let Some(msg) = msg {
+                        self.handle_video_message(msg, &mut video_receiver);
                     }
                 }
             }
@@ -419,5 +399,39 @@ impl Mp4Writer {
         }
 
         Ok(())
+    }
+
+    fn handle_audio_message(
+        &mut self,
+        msg: crate::Message,
+        audio_receiver: &mut Option<crate::MessageReceiver>,
+    ) {
+        match msg {
+            crate::Message::Media(crate::MediaSample::Audio(sample)) => {
+                self.input_audio_queue.push_back(sample);
+            }
+            crate::Message::Eos => {
+                self.input_audio_stream_id = None;
+                *audio_receiver = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_video_message(
+        &mut self,
+        msg: crate::Message,
+        video_receiver: &mut Option<crate::MessageReceiver>,
+    ) {
+        match msg {
+            crate::Message::Media(crate::MediaSample::Video(sample)) => {
+                self.input_video_queue.push_back(sample);
+            }
+            crate::Message::Eos => {
+                self.input_video_stream_id = None;
+                *video_receiver = None;
+            }
+            _ => {}
+        }
     }
 }
