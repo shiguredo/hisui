@@ -151,6 +151,7 @@ fn format_duration(duration: Duration) -> String {
 }
 
 fn format_eta(total: u64, position: u64, elapsed: Duration) -> String {
+    // ETA を計算できない条件は早期に ? を返す。
     if total == 0 || position == 0 {
         return NO_ETA.to_string();
     }
@@ -163,6 +164,7 @@ fn format_eta(total: u64, position: u64, elapsed: Duration) -> String {
         return NO_ETA.to_string();
     }
     let remaining = total.saturating_sub(position) as f64 / rate;
+    // 理論上は 0 以上だが、想定外の負値に備えてガードする。
     if !remaining.is_finite() || remaining < 0.0 {
         return NO_ETA.to_string();
     }
