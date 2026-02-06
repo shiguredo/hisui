@@ -298,7 +298,7 @@ impl ProcessorHandle {
     }
 
     // TODO: これは実際に必要になったタイミングで実装する
-    // （publish / susbscribe と同様に RPC 用のチャネルの作成を MediaPipeline に依頼するのが良さそう）
+    // （publish / subscribe と同様に RPC 用のチャネルの作成を MediaPipeline に依頼するのが良さそう）
     //
     // pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {
     //    match self.rpc_rx.recv().await {
