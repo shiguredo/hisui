@@ -139,7 +139,7 @@ fn calc_percent(total: u64, position: u64) -> u64 {
         return 100;
     }
     let clamped = position.min(total);
-    clamped.saturating_mul(100) / total
+    ((clamped as u128) * 100 / total as u128) as u64
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -252,5 +252,23 @@ mod tests {
         assert_eq!(format_eta_text(59), "59s");
         assert_eq!(format_eta_text(60), "1m 0s");
         assert_eq!(format_eta_text(3661), "1h 1m 1s");
+    }
+
+    #[test]
+    fn calc_percent_handles_zero_total() {
+        assert_eq!(calc_percent(0, 0), 100);
+        assert_eq!(calc_percent(0, 42), 100);
+    }
+
+    #[test]
+    fn calc_percent_clamps_position() {
+        assert_eq!(calc_percent(100, 150), 100);
+        assert_eq!(calc_percent(100, 99), 99);
+    }
+
+    #[test]
+    fn calc_percent_avoids_overflow() {
+        let total = u64::MAX;
+        assert_eq!(calc_percent(total, total), 100);
     }
 }
