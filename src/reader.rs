@@ -43,6 +43,8 @@ impl AudioReader {
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
         loop {
+            // 100 はとりあえずの暫定値。
+            // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
             if noacked_sent > 100 {
                 ack.await;
                 ack = track_handle.send_syn();
@@ -254,6 +256,8 @@ impl VideoReader {
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
         loop {
+            // 100 はとりあえずの暫定値。
+            // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
             if noacked_sent > 100 {
                 ack.await;
                 ack = track_handle.send_syn();
