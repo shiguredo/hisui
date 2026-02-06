@@ -185,7 +185,7 @@ impl MediaPipelineHandle {
             .register_processor(processor_id.clone())
             .await
             .or_fail()?;
-        tokio::task::spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = f(handle).await {
                 log::error!("failed to run processor {processor_id}: {e}");
             }
