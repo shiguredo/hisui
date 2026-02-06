@@ -191,6 +191,10 @@ impl MediaPipelineHandle {
         }
     }
 
+    // すでに MediaPipeline が終了（中断）されている場合には false が返される。
+    // なお、通常はこの結果をハンドリングする必要はない。
+    // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
+    //   応答を受け取らない場合にはそもそもここの成功・失敗に依存するようなコマンドであるべきではないため）
     fn send(&self, command: Command) -> bool {
         self.command_tx.send(command).is_ok()
     }
