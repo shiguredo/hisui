@@ -33,12 +33,9 @@ pub struct AudioReader {
 }
 
 impl AudioReader {
-    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
-        let id = crate::ProcessorId::new(self.output_stream_id.get().to_string());
-        let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
-
-        let track_id = crate::TrackId::new(id.get());
-        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
+        let track_id = crate::TrackId::new(handle.processor_id().get());
+        let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
 
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
@@ -246,12 +243,9 @@ pub struct VideoReader {
 }
 
 impl VideoReader {
-    pub async fn run(mut self, handle: crate::MediaPipelineHandle) -> orfail::Result<()> {
-        let id = crate::ProcessorId::new(self.output_stream_id.get().to_string());
-        let processor_handle = handle.register_processor(id.clone()).await.or_fail()?;
-
-        let track_id = crate::TrackId::new(id.get());
-        let mut track_handle = processor_handle.publish_track(track_id).await.or_fail()?;
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
+        let track_id = crate::TrackId::new(handle.processor_id().get());
+        let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
 
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;

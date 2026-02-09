@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use orfail::OrFail;
 
-use crate::{media::MediaStreamId, scheduler::Scheduler};
+use crate::media::MediaStreamId;
 
 const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
@@ -13,12 +13,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("ストリーム名（省略時には RTMP_URL 引数にストリーム名が含まれるものとして扱われる）")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
-    let _openh264: Option<PathBuf> = noargs::opt("openh264")
-        .ty("PATH")
-        .env("HISUI_OPENH264_PATH")
-        .doc("OpenH264 の共有ライブラリのパス")
-        .take(&mut args)
-        .present_and_then(|a| a.value().parse())?;
     let output_file_path: PathBuf = noargs::opt("output-file")
         .short('o')
         .doc("出力ファイル（.mp4 ないし .webm）")
@@ -40,34 +34,53 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    let mut scheduler = Scheduler::new();
-
-    // RTMP サーバーを登録
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
         .build()
         .or_fail()?;
-    let inbound_endpoint = crate::inbound_endpoint_rtmp::RtmpInboundEndpoint::start(
-        &runtime,
-        Some(AUDIO_STREAM_ID),
-        Some(VIDEO_STREAM_ID),
-        endpoint_rtmp_url,
-        crate::inbound_endpoint_rtmp::RtmpInboundEndpointOptions::default(),
-    );
-    scheduler.register(inbound_endpoint).or_fail()?;
+    let _guard = runtime.enter();
 
-    // ライターを登録
-    let writer = crate::writer_mp4::Mp4Writer::new(
-        output_file_path,
-        None,
-        Some(AUDIO_STREAM_ID),
-        Some(VIDEO_STREAM_ID),
-    )
-    .or_fail()?;
-    scheduler.register(writer).or_fail()?;
+    let pipeline = crate::MediaPipeline::new();
+    let pipeline_handle = pipeline.handle();
 
-    // スケジューラー実行
-    scheduler.run().or_fail()?;
+    runtime.spawn(async move {
+        let stream_name = endpoint_rtmp_url.stream_name.clone();
+
+        // RTMP Inbound Endpoint を起動
+        let endpoint = crate::inbound_endpoint_rtmp::RtmpInboundEndpoint::new(
+            endpoint_rtmp_url,
+            Default::default(),
+        );
+        pipeline_handle
+            .spawn_processor(crate::ProcessorId::new("rtmp_inbound"), |handle| {
+                endpoint.run(handle)
+            })
+            .await
+            .or_fail()?;
+
+        // MP4 Writer を起動
+        let writer = crate::writer_mp4::Mp4Writer::new(
+            output_file_path,
+            None,
+            Some(AUDIO_STREAM_ID),
+            Some(VIDEO_STREAM_ID),
+        )
+        .or_fail()?;
+        pipeline_handle
+            .spawn_processor(crate::ProcessorId::new("mp4_writer"), move |handle| {
+                writer.run(
+                    handle,
+                    Some(crate::TrackId::new(format!("{stream_name}_audio"))),
+                    Some(crate::TrackId::new(format!("{stream_name}_video"))),
+                )
+            })
+            .await
+            .or_fail()?;
+
+        Ok::<(), orfail::Failure>(())
+    });
+
+    runtime.block_on(pipeline.run());
     Ok(())
 }

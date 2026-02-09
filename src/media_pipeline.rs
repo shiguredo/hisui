@@ -1,3 +1,5 @@
+use orfail::OrFail;
+
 #[derive(Debug)]
 pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<Command>>,
@@ -48,7 +50,7 @@ impl MediaPipeline {
                 reply_tx,
             } => {
                 let result = self.handle_register_processor(processor_id);
-                let _ = reply_tx.send(result);
+                let _ = reply_tx.send(result); // 応答では受信側がすでに閉じていても問題ないので、結果の確認は不要（以降も同様）
             }
             Command::DeregisterProcessor { processor_id } => {
                 self.handle_deregister_processor(processor_id);
@@ -174,7 +176,24 @@ pub struct MediaPipelineHandle {
 }
 
 impl MediaPipelineHandle {
-    pub async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+    pub async fn spawn_processor<F, T>(&self, processor_id: ProcessorId, f: F) -> orfail::Result<()>
+    where
+        F: FnOnce(ProcessorHandle) -> T + Send + 'static,
+        T: Future<Output = orfail::Result<()>> + Send,
+    {
+        let handle = self
+            .register_processor(processor_id.clone())
+            .await
+            .or_fail()?;
+        tokio::spawn(async move {
+            if let Err(e) = f(handle).await {
+                log::error!("failed to run processor {processor_id}: {e}");
+            }
+        });
+        Ok(())
+    }
+
+    async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::RegisterProcessor {
             processor_id: processor_id.clone(),
