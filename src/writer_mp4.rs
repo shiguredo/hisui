@@ -35,6 +35,8 @@ const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
 // 映像・音声キューの件数差が大きい場合に、軽い音声側だけが先行して
 // メモリを消費し続ける事態を避けるために、件数差が閾値を超えたら
 // 大きい方の rx 受信を一時的に抑制するための閾値
+//
+// 適当に大きな値ならなんでもいい
 const MAX_INPUT_QUEUE_GAP: usize = 200;
 
 #[derive(Debug, Clone)]
