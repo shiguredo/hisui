@@ -299,7 +299,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
 fn non_pcm_audio_input_error() -> orfail::Result<()> {
     let (source, input_stream_id) = source(0, 0, 100);
     let mut mixer = AudioMixer::new(
-        layout(&[source.clone()], None).trim_spans,
+        layout(std::slice::from_ref(&source), None).trim_spans,
         vec![input_stream_id],
         OUTPUT_STREAM_ID,
     );

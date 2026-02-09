@@ -1011,12 +1011,12 @@ mod tests {
         let mut decoded_count = 0;
 
         decoder.decode(&data).expect("failed to decode");
-        while let Some(_) = decoder.next_frame() {
+        while decoder.next_frame().is_some() {
             decoded_count += 1;
         }
 
         decoder.finish().expect("failed to finish");
-        while let Some(_) = decoder.next_frame() {
+        while decoder.next_frame().is_some() {
             decoded_count += 1;
         }
 
@@ -1035,12 +1035,12 @@ mod tests {
         let mut decoded_count = 0;
 
         decoder.decode(&data).expect("failed to decode");
-        while let Some(_) = decoder.next_frame() {
+        while decoder.next_frame().is_some() {
             decoded_count += 1;
         }
 
         decoder.finish().expect("failed to finish");
-        while let Some(_) = decoder.next_frame() {
+        while decoder.next_frame().is_some() {
             decoded_count += 1;
         }
 
@@ -1083,12 +1083,12 @@ mod tests {
         let v = vec![0; size / 4];
 
         encoder.encode(&y, &u, &v).expect("failed to encode");
-        while let Some(_) = encoder.next_frame() {
+        while encoder.next_frame().is_some() {
             encoded_count += 1;
         }
 
         encoder.finish().expect("failed to finish");
-        while let Some(_) = encoder.next_frame() {
+        while encoder.next_frame().is_some() {
             encoded_count += 1;
         }
 
@@ -1107,12 +1107,12 @@ mod tests {
         let v = vec![0; size / 4];
 
         encoder.encode(&y, &u, &v).expect("failed to encode");
-        while let Some(_) = encoder.next_frame() {
+        while encoder.next_frame().is_some() {
             encoded_count += 1;
         }
 
         encoder.finish().expect("failed to finish");
-        while let Some(_) = encoder.next_frame() {
+        while encoder.next_frame().is_some() {
             encoded_count += 1;
         }
 
