@@ -20,6 +20,8 @@ const VMAF_COMMAND: noargs::CmdSpec =
 const TUNE_COMMAND: noargs::CmdSpec =
     noargs::cmd("tune").doc("Optuna を用いた映像エンコードパラメーターの調整を行います");
 
+const SERVER_COMMAND: noargs::CmdSpec = noargs::cmd("server").doc("HTTP サーバーを起動します");
+
 // 以降は実験的なサブコマンドの定義
 const PIPELINE_COMMAND: noargs::CmdSpec =
     noargs::cmd("pipeline").doc("ユーザー定義のパイプラインを実行します（実験的機能）");
@@ -69,6 +71,8 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_tune::run(args)?;
+    } else if experimental && SERVER_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_server::run(args)?;
     } else if experimental && PIPELINE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_pipeline::run(args)?;
     } else if experimental && RTMP_PUBLISH_COMMAND.take(&mut args).is_present() {

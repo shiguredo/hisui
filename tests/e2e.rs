@@ -236,15 +236,15 @@ fn check_engine_in_stats(
 
         match processor_type.as_ref() {
             "video_decoder" => {
-                if let Some(engine_value) = processor.to_member("engine")?.get() {
-                    if let Ok(engine_str) = engine_value.to_unquoted_string_str() {
-                        assert_eq!(
-                            engine_str.as_ref(),
-                            expected_engine.as_str(),
-                            "video decoder engine mismatch"
-                        );
-                        found_decoder = true;
-                    }
+                if let Some(engine_value) = processor.to_member("engine")?.get()
+                    && let Ok(engine_str) = engine_value.to_unquoted_string_str()
+                {
+                    assert_eq!(
+                        engine_str.as_ref(),
+                        expected_engine.as_str(),
+                        "video decoder engine mismatch"
+                    );
+                    found_decoder = true;
                 }
             }
             "video_encoder" => {
@@ -593,7 +593,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         // NOTE: +4 は枠線用
-        [(320 * 3 + 4, 240 * 1)]
+        [(320 * 3 + 4, 240)]
     );
 
     // 一秒分 (25 fps = 40 ms)
@@ -843,7 +843,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
                     assert!(matches!(y, 0..=2), "y={y}");
                 } else if i / width < 16 + 2 + 16 {
                     // 次の 16 行は緑
-                    assert!(matches!(y, 186 | 187 | 188 | 189), "y={y}");
+                    assert!(matches!(y, 186..=189), "y={y}");
                 } else if i / width < 16 + 2 + 16 + 2 {
                     // 次の 2 行は黒色（枠線）
                     assert!(matches!(y, 0..=2), "y={y}");

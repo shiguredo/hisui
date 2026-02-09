@@ -1,9 +1,11 @@
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+use hisui::{decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use hisui::{
-    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    decoder::{VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::SourceId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
-    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
+    reader_mp4::Mp4VideoReader,
     video::VideoFrame,
 };
 use orfail::OrFail;

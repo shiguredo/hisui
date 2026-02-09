@@ -24,7 +24,7 @@ const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 fn write_audio_only_mp4() -> orfail::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let source = source(0, secs(0), secs(60));
-    let layout = layout(&[source.clone()], &[]);
+    let layout = layout(std::slice::from_ref(&source), &[]);
 
     // ライターを作成する
     let mut writer = Mp4Writer::new(
@@ -81,7 +81,7 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
 fn write_video_only_mp4() -> orfail::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let source = source(0, secs(0), secs(60));
-    let layout = layout(&[], &[source.clone()]);
+    let layout = layout(&[], std::slice::from_ref(&source));
 
     // ライターを作成する
     let mut writer = Mp4Writer::new(
@@ -139,7 +139,10 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let audio_source = source(0, secs(0), secs(60));
     let video_source = source(1, secs(0), secs(60));
-    let layout = layout(&[audio_source.clone()], &[video_source.clone()]);
+    let layout = layout(
+        std::slice::from_ref(&audio_source),
+        std::slice::from_ref(&video_source),
+    );
 
     // ライターを作成する
     let mut writer = Mp4Writer::new(
@@ -363,7 +366,7 @@ fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame 
         source_id: Some(source.id.clone()),
         data: vec![0], // 中身はなんでもいい
         format: VideoFormat::I420,
-        keyframe: i % 2 == 0,
+        keyframe: i.is_multiple_of(2),
         width: EvenUsize::MIN_CELL_SIZE.get(),
         height: EvenUsize::MIN_CELL_SIZE.get(),
         timestamp: source.start_timestamp + duration * i as u32,

@@ -1,0 +1,34 @@
+name: E2E Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - feature/**
+    paths-ignore:
+      - "**.md"
+      - "python/**"
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ubuntu-24.04
+          toolchain: stable
+      - run: cargo build
+      - uses: astral-sh/setup-uv@v7
+      - name: Run e2e tests
+        run: |
+          uv sync
+          uv run pytest -v
+        working-directory: e2e-tests

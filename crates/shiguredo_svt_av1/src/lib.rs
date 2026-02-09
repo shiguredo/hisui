@@ -594,7 +594,7 @@ mod tests {
 
     fn encoder_config() -> EncoderConfig {
         EncoderConfig {
-            target_bitrate: 1000_000,
+            target_bitrate: 1_000_000,
             width: 320,
             height: 320,
             fps_numerator: 1,

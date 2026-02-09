@@ -401,9 +401,9 @@ mod tests {
     fn test_parse_single_line_malformed_json() {
         let malformed_json = r#"{"key": "value", "another": 123"#; // 閉じカッコがない
 
-        let mut error = parse_str::<()>(malformed_json).err().expect("bug");
+        let mut error = parse_str::<()>(malformed_json).expect_err("bug");
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
-        eprintln!("{}", error.to_string());
+        eprintln!("{}", error);
 
         let expected = r#"unexpected EOS while parsing Object at byte position 31
 
@@ -425,9 +425,9 @@ BACKTRACE:
         "missing_comma": true
     }"#;
 
-        let mut error = parse_str::<()>(malformed_json).err().expect("bug");
+        let mut error = parse_str::<()>(malformed_json).expect_err("bug");
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
-        eprintln!("{}", error.to_string());
+        eprintln!("{}", error);
 
         let expected = r#"unexpected char while parsing Object at byte position 57
 
@@ -450,9 +450,9 @@ BACKTRACE:
             long_value
         );
 
-        let mut error = parse_str::<()>(&invalid_json).err().expect("bug");
+        let mut error = parse_str::<()>(&invalid_json).expect_err("bug");
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
-        eprintln!("{}", error.to_string());
+        eprintln!("{}", error);
 
         // エラーメッセージの行が MAX_ERROR_LINE_CHARS 文字に収まるように切りつめられる
         let expected = r#"unexpected char while parsing Object at byte position 47
@@ -478,9 +478,9 @@ BACKTRACE:
             long_value
         );
 
-        let mut error = parse_str::<()>(&invalid_json).err().expect("bug");
+        let mut error = parse_str::<()>(&invalid_json).expect_err("bug");
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
-        eprintln!("{}", error.to_string());
+        eprintln!("{}", error);
 
         // エラーメッセージの行が MAX_ERROR_LINE_CHARS 文字に収まるように切りつめられる
         let expected = r#"unexpected char while parsing Object at byte position 191
@@ -500,9 +500,9 @@ BACKTRACE:
         // 文法的には正しいけど値が不正な JSON
         let invalid_json = r#""not_a_number""#;
 
-        let mut error = parse_str::<i32>(invalid_json).err().expect("bug");
+        let mut error = parse_str::<i32>(invalid_json).expect_err("bug");
         error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
-        eprintln!("{}", error.to_string());
+        eprintln!("{}", error);
 
         let expected = r#"JSON String at byte position 0 is invalid: expected Integer, but found String
 
