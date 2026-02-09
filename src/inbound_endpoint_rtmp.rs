@@ -17,6 +17,11 @@ pub struct RtmpInboundEndpointOptions {
     pub key_path: Option<PathBuf>,
 
     // サーバーの起動時間指定
+    //
+    // TODO: 暫定値（当面はこれでいいけど将来的には変更する）
+    //       そもそも将来的には外部から停止できるようにするべきだが、今はそのための口が hisui にないのと、
+    //       WriterMp4 が fmp4 に対応しておらず、finalize() を呼ばずにプロセスを停止すると再生できない
+    //       MP4 ファイルができてしまうため、この設定を用意しているが、あくまでも暫定的なもの
     pub lifetime: Duration,
 }
 
