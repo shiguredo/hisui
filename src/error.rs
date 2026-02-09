@@ -43,10 +43,10 @@ impl std::fmt::Display for Error {
         if self.backtrace.status() == BacktraceStatus::Disabled {
             write!(f, " [RUST_BACKTRACE=1 for backtrace]")?;
         }
-
         if self.backtrace.status() == BacktraceStatus::Captured {
             write!(f, "\n\nBacktrace:\n{}", self.backtrace)?;
         }
+
         Ok(())
     }
 }
