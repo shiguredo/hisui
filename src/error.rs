@@ -39,6 +39,11 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.reason)?;
         write!(f, " (at {}:{})", self.location.file(), self.location.line())?;
+
+        if self.backtrace.status() == BacktraceStatus::Disabled {
+            write!(f, " [RUST_BACKTRACE=1 for backtrace]")?;
+        }
+
         if self.backtrace.status() == BacktraceStatus::Captured {
             write!(f, "\n\nBacktrace:\n{}", self.backtrace)?;
         }
