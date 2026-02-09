@@ -91,7 +91,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                     }
                 };
 
-                if let Err(e) = handle_client(stream, peer_addr).await {
+                if let Err(e) = handle_connection(stream, peer_addr).await {
                     log::warn!("Client error from {peer_addr}: {e}");
                 }
             });
@@ -99,7 +99,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     })
 }
 
-async fn handle_client(
+async fn handle_connection(
     stream: ServerTcpOrTlsStream,
     peer_addr: std::net::SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -122,7 +122,9 @@ async fn handle_client(
             let keep_alive = request.is_keep_alive();
 
             let response = match request.uri.as_str() {
-                "/rpc" | "/bootstrap" | "/.ok" => Response::new(204, "No Content"),
+                "/.ok" => Response::new(204, "No Content"),
+                "/rpc" => Response::new(204, "No Content"),
+                "/bootstrap" => Response::new(204, "No Content"),
                 _ => Response::new(404, "Not Found"),
             };
 
