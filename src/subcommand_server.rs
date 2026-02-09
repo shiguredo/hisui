@@ -317,7 +317,13 @@ async fn proxy_to_upstream(
                 }
                 return Err(e.into());
             }
-            downstream.flush().await?;
+            if let Err(e) = downstream.flush().await {
+                if is_client_disconnect(&e) {
+                    log::warn!("499 Client Closed Request from {client_addr}");
+                    return Ok(());
+                }
+                return Err(e.into());
+            }
             return Ok(());
         }
     }
