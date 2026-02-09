@@ -7,11 +7,9 @@ use std::{
 
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
-use crate::{
-    Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
-};
 use crate::audio::AudioFormat;
 use crate::video::VideoFormat;
+use crate::{Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame};
 
 const MAX_NOACKED_COUNT: u64 = 100;
 
@@ -86,11 +84,8 @@ impl Mp4FileReader {
         let start_instant = tokio::time::Instant::now();
 
         loop {
-            let mut state = ReaderState::open(
-                &self.path,
-                audio_sender.is_some(),
-                video_sender.is_some(),
-            )?;
+            let mut state =
+                ReaderState::open(&self.path, audio_sender.is_some(), video_sender.is_some())?;
             if state.audio_track_id.is_none() && state.video_track_id.is_none() {
                 break;
             }
@@ -123,7 +118,8 @@ impl Mp4FileReader {
                     }
 
                     let data = state.read_sample_data(data_offset, data_size)?;
-                    let (timestamp, duration) = calculate_timestamps(timescale, timestamp, duration);
+                    let (timestamp, duration) =
+                        calculate_timestamps(timescale, timestamp, duration);
                     let effective_timestamp = base_offset + timestamp;
 
                     if self.options.realtime {
@@ -162,7 +158,8 @@ impl Mp4FileReader {
                     }
 
                     let data = state.read_sample_data(data_offset, data_size)?;
-                    let (timestamp, duration) = calculate_timestamps(timescale, timestamp, duration);
+                    let (timestamp, duration) =
+                        calculate_timestamps(timescale, timestamp, duration);
                     let effective_timestamp = base_offset + timestamp;
 
                     if self.options.realtime {
@@ -334,9 +331,7 @@ impl ReaderState {
             SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
             SampleEntry::Mp4a(b) => (&b.audio, AudioFormat::Aac),
             entry => {
-                return Err(Error::new(format!(
-                    "unsupported sample entry: {entry:?}"
-                )));
+                return Err(Error::new(format!("unsupported sample entry: {entry:?}")));
             }
         };
 
@@ -356,9 +351,7 @@ impl ReaderState {
             SampleEntry::Vp09(b) => (&b.visual, VideoFormat::Vp9),
             SampleEntry::Av01(b) => (&b.visual, VideoFormat::Av1),
             entry => {
-                return Err(Error::new(format!(
-                    "unsupported sample entry: {entry:?}"
-                )));
+                return Err(Error::new(format!("unsupported sample entry: {entry:?}")));
             }
         };
 
@@ -379,7 +372,6 @@ impl ReaderState {
             .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
         Ok(data)
     }
-
 }
 
 fn calculate_timestamps(timescale: u32, timestamp: u64, duration: u64) -> (Duration, Duration) {

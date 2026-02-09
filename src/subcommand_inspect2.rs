@@ -1,8 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    Error,
-    Result as HisuiResult,
+    Error, Result as HisuiResult,
     file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions},
     media::MediaStreamId,
     metadata::ContainerFormat,
@@ -255,8 +254,7 @@ impl OutputPrinter {
             }
         }
 
-        crate::json::pretty_print(&self)
-            .map_err(|e| Error::new(e.to_string()))?;
+        crate::json::pretty_print(&self).map_err(|e| Error::new(e.to_string()))?;
         Ok(())
     }
 
