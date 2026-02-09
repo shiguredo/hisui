@@ -1,5 +1,6 @@
 """hisui e2e テスト用 pytest fixtures"""
 
+import asyncio
 import datetime
 import signal
 import socket
@@ -13,6 +14,7 @@ from typing import Generator
 
 import httpx
 import pytest
+from aiohttp import web
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -215,6 +217,124 @@ def hisui_https_server(
         )
 
     yield port, cert_path
+
+    # teardown: SIGTERM → wait → kill
+    try:
+        process.send_signal(signal.SIGTERM)
+    except OSError:
+        pass
+
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+
+    log_handle.close()
+    tmp_dir.cleanup()
+
+
+async def _handle_root(request: web.Request) -> web.Response:
+    return web.Response(text="Hello, World!", content_type="text/plain")
+
+
+async def _handle_sub_path(request: web.Request) -> web.Response:
+    return web.Response(text="Sub Path", content_type="text/plain")
+
+
+async def _handle_json(request: web.Request) -> web.Response:
+    return web.json_response({"message": "hello"})
+
+
+async def _handle_slow(request: web.Request) -> web.Response:
+    """レスポンスを遅延させ、大きなレスポンスを返す（499 テスト用）"""
+    await asyncio.sleep(3)
+    # 大きなレスポンスを返して write_all 途中でのエラー検出を確実にする
+    body = "x" * 1024 * 1024
+    return web.Response(text=body, content_type="text/plain")
+
+
+def _create_upstream_app() -> web.Application:
+    """upstream テスト用 aiohttp アプリケーションを作成する"""
+    app = web.Application()
+    app.router.add_get("/", _handle_root)
+    app.router.add_get("/sub/path", _handle_sub_path)
+    app.router.add_get("/json", _handle_json)
+    app.router.add_get("/slow", _handle_slow)
+    return app
+
+
+@pytest.fixture(scope="module")
+def upstream_server() -> Generator[int, None, None]:
+    """upstream テスト用 aiohttp サーバーを起動してポート番号を yield する"""
+    port, sock = _reserve_ephemeral_port()
+    sock.close()
+
+    loop = asyncio.new_event_loop()
+    app = _create_upstream_app()
+    runner = web.AppRunner(app)
+    loop.run_until_complete(runner.setup())
+    site = web.TCPSite(runner, "127.0.0.1", port)
+    loop.run_until_complete(site.start())
+
+    # イベントループをバックグラウンドスレッドで実行する
+    import threading
+
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+
+    yield port
+
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=5)
+    loop.run_until_complete(runner.cleanup())
+    loop.close()
+
+
+@pytest.fixture(scope="module")
+def hisui_proxy_server(
+    binary_path: Path,
+    upstream_server: int,
+) -> Generator[tuple[int, Path], None, None]:
+    """--ui-remote-url 付きで hisui server を起動して (port, log_file) を yield する"""
+    port, sock = _reserve_ephemeral_port()
+
+    tmp_dir = tempfile.TemporaryDirectory()
+    tmp_path = Path(tmp_dir.name)
+    log_file = tmp_path / "hisui-proxy-server.log"
+    log_handle = open(log_file, "w")
+
+    # バイナリ起動直前に予約ソケットを解放する
+    sock.close()
+
+    process = subprocess.Popen(
+        [
+            str(binary_path),
+            "--verbose",
+            "--experimental",
+            "server",
+            "--http-port",
+            str(port),
+            "--ui-remote-url",
+            f"http://127.0.0.1:{upstream_server}",
+        ],
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+    )
+
+    if not _wait_for_server(port):
+        process.kill()
+        log_handle.close()
+        log_content = log_file.read_text() if log_file.exists() else "(no log)"
+        tmp_dir.cleanup()
+        raise RuntimeError(
+            f"hisui proxy server failed to start on port {port}.\nlog: {log_content}"
+        )
+
+    yield port, log_file
 
     # teardown: SIGTERM → wait → kill
     try:
