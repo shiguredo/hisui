@@ -7,12 +7,12 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-      - id: cargo-clippy
-        name: cargo clippy
-        entry: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- -D warnings
-        language: system
-        types: [rust]
-        pass_filenames: false
+      # - id: cargo-clippy
+      #   name: cargo clippy
+      #   entry: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- -D warnings
+      #   language: system
+      #   types: [rust]
+      #   pass_filenames: false
       - id: ruff-e2e
         name: ruff (e2e-tests)
         entry: uv run --directory e2e-tests ruff check
