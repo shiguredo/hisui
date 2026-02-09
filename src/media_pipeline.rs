@@ -50,7 +50,7 @@ impl MediaPipeline {
                 reply_tx,
             } => {
                 let result = self.handle_register_processor(processor_id);
-                let _ = reply_tx.send(result);
+                let _ = reply_tx.send(result); // 応答では受信側がすでに閉じていても問題ないので、結果の確認は不要（以降も同様）
             }
             Command::DeregisterProcessor { processor_id } => {
                 self.handle_deregister_processor(processor_id);
