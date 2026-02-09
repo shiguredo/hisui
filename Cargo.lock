@@ -286,6 +286,7 @@ dependencies = [
  "shiguredo_audio_toolbox",
  "shiguredo_dav1d",
  "shiguredo_fdk_aac",
+ "shiguredo_http11",
  "shiguredo_libvpx",
  "shiguredo_libyuv",
  "shiguredo_mp4",
@@ -731,6 +732,12 @@ version = "2025.1.1"
 dependencies = [
  "bindgen",
 ]
+
+[[package]]
+name = "shiguredo_http11"
+version = "2026.1.0-canary.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b48daa3ba978fc33bd28958e63038f59bf67b0508478e940b8f3571595999ad7"
 
 [[package]]
 name = "shiguredo_libvpx"

@@ -11,6 +11,13 @@
 
 ## develop
 
+- [ADD] server サブコマンドを追加する
+  - `hisui server --http-port <PORT>` で HTTP サーバーを起動する
+  - `/rpc`, `/bootstrap`, `/.ok` に 204 No Content を返す
+  - それ以外のパスには 404 Not Found を返す
+  - @voluntas
+- [ADD] 依存ライブラリに shiguredo_http11 を追加する
+  - @voluntas
 - [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
   - 今までは事前に解像度情報を指定していたが、ライブストリームの場合にはそれが難しいことがあるため遅延初期化をするようにする
   - @sile
