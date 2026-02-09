@@ -265,7 +265,7 @@ impl RtmpPublisherHandler {
         Ok(())
     }
 
-    /// RTMP イベントを処理する（MediaPipeline へ送信）
+    /// RTMP イベントを処理する
     async fn process_event(
         &mut self,
         event: shiguredo_rtmp::RtmpConnectionEvent,

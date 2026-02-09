@@ -31,6 +31,12 @@ const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 // 映像・音声混在時のチャンクの尺の最大値（映像か音声の片方だけの場合はチャンクは一つだけ）
 const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
 
+// 入力がリアルタイムではなくファイルで、
+// 映像・音声キューの件数差が大きい場合に、軽い音声側だけが先行して
+// メモリを消費し続ける事態を避けるために、件数差が閾値を超えたら
+// 大きい方の rx 受信を一時的に抑制するための閾値
+const MAX_INPUT_QUEUE_GAP: usize = 200;
+
 #[derive(Debug, Clone)]
 pub struct Mp4WriterOptions {
     pub duration: Duration,
@@ -358,11 +364,23 @@ impl Mp4Writer {
 
         let mut in_progress = audio_rx.is_some() || video_rx.is_some();
         while in_progress {
+            let audio_len = self.input_audio_queue.len();
+            let video_len = self.input_video_queue.len();
+            let mut suppress_audio = false;
+            let mut suppress_video = false;
+            if audio_rx.is_some() && video_rx.is_some() {
+                if audio_len > video_len + MAX_INPUT_QUEUE_GAP {
+                    suppress_audio = true;
+                } else if video_len > audio_len + MAX_INPUT_QUEUE_GAP {
+                    suppress_video = true;
+                }
+            }
+
             tokio::select! {
-                msg = crate::future::recv_or_pending(&mut audio_rx) => {
+                msg = crate::future::recv_or_pending(&mut audio_rx), if !suppress_audio => {
                     self.handle_audio_message(msg, &mut audio_rx);
                 }
-                msg = crate::future::recv_or_pending(&mut video_rx) => {
+                msg = crate::future::recv_or_pending(&mut video_rx), if !suppress_video => {
                     self.handle_video_message(msg, &mut video_rx);
                 }
             }
