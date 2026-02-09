@@ -1,11 +1,11 @@
 use std::{path::PathBuf, time::Duration};
 
-use orfail::OrFail;
-
 use crate::{
+    Error,
+    Result as HisuiResult,
+    file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions},
     media::MediaStreamId,
-    metadata::{ContainerFormat, SourceId},
-    reader::{AudioReader, VideoReader},
+    metadata::ContainerFormat,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
@@ -17,63 +17,78 @@ const VIDEO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/archive.mp4")
-        .doc("情報取得対象の録画ファイル(.mp4|.webm)")
+        .doc("情報取得対象の録画ファイル (.mp4)")
         .take(&mut args)
         .then(|a| a.value().parse())?;
+    let metadata = args.metadata();
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
     }
 
-    let format = ContainerFormat::from_path(&input_file_path).or_fail()?;
-    let dummy_source_id = SourceId::new("inspect");
+    run_internal(input_file_path).map_err(|e| noargs::Error::Other {
+        metadata: Some(metadata),
+        error: Box::new(e),
+    })
+}
+
+fn run_internal(input_file_path: PathBuf) -> HisuiResult<()> {
+    let format = ContainerFormat::Mp4;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
         .build()
-        .or_fail()?;
+        .map_err(|e| Error::new(e.to_string()))?;
     let _guard = runtime.enter();
 
     let pipeline = crate::MediaPipeline::new();
     let pipeline_handle = pipeline.handle();
+    let options = Mp4FileReaderOptions {
+        realtime: false,
+        loop_playback: false,
+        audio_track_id: Some(crate::TrackId::new(
+            AUDIO_ENCODED_STREAM_ID.get().to_string(),
+        )),
+        video_track_id: Some(crate::TrackId::new(
+            VIDEO_ENCODED_STREAM_ID.get().to_string(),
+        )),
+    };
+    let reader = Mp4FileReader::new(input_file_path.clone(), options)?;
     runtime.spawn(async move {
         let output_printer = OutputPrinter::new(input_file_path.clone(), format);
-        pipeline_handle
+        if let Err(e) = pipeline_handle
             .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
-                output_printer.run(handle)
+                let output_printer = output_printer;
+                async move {
+                    if let Err(e) = output_printer.run(handle).await {
+                        log::error!("output_printer failed: {e}");
+                    }
+                    Ok(())
+                }
             })
             .await
-            .or_fail()?;
+        {
+            log::error!("output_printer spawn failed: {e}");
+            return;
+        }
 
-        let reader = AudioReader::new(
-            AUDIO_ENCODED_STREAM_ID,
-            dummy_source_id.clone(),
-            format,
-            Duration::ZERO,
-            vec![input_file_path.clone()],
-        )
-        .or_fail()?;
-        let id = crate::ProcessorId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
-        pipeline_handle
-            .spawn_processor(id, |handle| reader.run(handle))
+        let id = crate::ProcessorId::new("mp4_file_reader");
+        if let Err(e) = pipeline_handle
+            .spawn_processor(id, |handle| {
+                let reader = reader;
+                async move {
+                    if let Err(e) = reader.run(handle).await {
+                        log::error!("mp4_file_reader failed: {e}");
+                    }
+                    Ok(())
+                }
+            })
             .await
-            .or_fail()?;
-
-        let reader = VideoReader::new(
-            VIDEO_ENCODED_STREAM_ID,
-            dummy_source_id.clone(),
-            format,
-            Duration::ZERO,
-            vec![input_file_path.clone()],
-        )
-        .or_fail()?;
-        let id = crate::ProcessorId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
-        pipeline_handle
-            .spawn_processor(id, |handle| reader.run(handle))
-            .await
-            .or_fail()?;
-        Ok::<(), orfail::Failure>(())
+        {
+            log::error!("mp4_file_reader spawn failed: {e}");
+            return;
+        }
     });
     runtime.block_on(pipeline.run());
     Ok(())
@@ -220,7 +235,7 @@ impl OutputPrinter {
         }
     }
 
-    pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> HisuiResult<()> {
         let audio_track_id = crate::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
         let mut audio_track = handle.subscribe_track(audio_track_id);
 
@@ -240,14 +255,22 @@ impl OutputPrinter {
             }
         }
 
-        crate::json::pretty_print(&self).or_fail()?;
+        crate::json::pretty_print(&self)
+            .map_err(|e| Error::new(e.to_string()))?;
         Ok(())
     }
 
-    fn handle_audio_sample(&mut self, message: crate::Message) -> orfail::Result<()> {
+    fn handle_audio_sample(&mut self, message: crate::Message) -> HisuiResult<()> {
         match message {
             crate::Message::Media(media_sample) => {
-                let audio_data = media_sample.expect_audio_data().or_fail()?;
+                let audio_data = match media_sample {
+                    crate::MediaSample::Audio(sample) => sample,
+                    crate::MediaSample::Video(_) => {
+                        return Err(Error::new(
+                            "expected an audio sample, but got a video sample",
+                        ));
+                    }
+                };
                 if self.audio_codec.is_none() {
                     self.audio_codec = audio_data.format.codec_name();
                 }
@@ -265,10 +288,17 @@ impl OutputPrinter {
         Ok(())
     }
 
-    fn handle_video_sample(&mut self, message: crate::Message) -> orfail::Result<()> {
+    fn handle_video_sample(&mut self, message: crate::Message) -> HisuiResult<()> {
         match message {
             crate::Message::Media(media_sample) => {
-                let video_frame = media_sample.expect_video_frame().or_fail()?;
+                let video_frame = match media_sample {
+                    crate::MediaSample::Video(sample) => sample,
+                    crate::MediaSample::Audio(_) => {
+                        return Err(Error::new(
+                            "expected a video sample, but got an audio sample",
+                        ));
+                    }
+                };
                 if self.video_codec.is_none() {
                     self.video_codec = video_frame.format.codec_name();
                 }
