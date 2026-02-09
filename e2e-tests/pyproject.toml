@@ -6,6 +6,7 @@ dependencies = [
     "pytest",
     "pytest-timeout",
     "httpx",
+    "cryptography",
     "ruff",
     "ty",
 ]
