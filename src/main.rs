@@ -71,7 +71,7 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_tune::run(args)?;
-    } else if SERVER_COMMAND.take(&mut args).is_present() {
+    } else if experimental && SERVER_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_server::run(args)?;
     } else if experimental && PIPELINE_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_pipeline::run(args)?;
