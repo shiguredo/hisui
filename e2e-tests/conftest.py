@@ -88,7 +88,7 @@ def hisui_server(binary_path: Path) -> Generator[int, None, None]:
     sock.close()
 
     process = subprocess.Popen(
-        [str(binary_path), "--verbose", "server", "--http-port", str(port)],
+        [str(binary_path), "--verbose", "--experimental", "server", "--http-port", str(port)],
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )
@@ -191,6 +191,7 @@ def hisui_https_server(
         [
             str(binary_path),
             "--verbose",
+            "--experimental",
             "server",
             "--http-port",
             str(port),
