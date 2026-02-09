@@ -1,0 +1,15 @@
+[project]
+name = "hisui-e2e-tests"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pytest",
+    "pytest-timeout",
+    "httpx",
+    "ruff",
+    "ty",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["server"]
+timeout = 30
