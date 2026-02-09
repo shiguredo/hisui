@@ -24,7 +24,7 @@ impl NvcodecEncoder {
     pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
-        log::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
+        tracing::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
 
         let config = shiguredo_nvcodec::EncoderConfig {
             width: width as u32,
@@ -34,7 +34,7 @@ impl NvcodecEncoder {
             target_bitrate: Some(options.bitrate as u32),
             ..options.encode_params.nvcodec_h264.clone()
         };
-        log::debug!("nvcodec h264 encoder config: {config:?}");
+        tracing::debug!("nvcodec h264 encoder config: {config:?}");
 
         let mut inner = shiguredo_nvcodec::Encoder::new_h264(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
@@ -54,7 +54,7 @@ impl NvcodecEncoder {
     pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
-        log::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
+        tracing::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
 
         let config = shiguredo_nvcodec::EncoderConfig {
             width: width as u32,
@@ -64,7 +64,7 @@ impl NvcodecEncoder {
             target_bitrate: Some(options.bitrate as u32),
             ..options.encode_params.nvcodec_h265.clone()
         };
-        log::debug!("nvcodec h265 encoder config: {config:?}");
+        tracing::debug!("nvcodec h265 encoder config: {config:?}");
 
         let mut inner = shiguredo_nvcodec::Encoder::new_h265(config).or_fail()?;
         let seq_params = inner.get_sequence_params().or_fail()?;
@@ -89,7 +89,7 @@ impl NvcodecEncoder {
     pub fn new_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let width = options.width;
         let height = options.height;
-        log::debug!(
+        tracing::debug!(
             "create nvcodec(AV1) encoder: {}x{}",
             width.get(),
             height.get()
@@ -103,7 +103,7 @@ impl NvcodecEncoder {
             target_bitrate: Some(options.bitrate as u32),
             ..options.encode_params.nvcodec_av1.clone()
         };
-        log::debug!("nvcodec av1 encoder config: {config:?}");
+        tracing::debug!("nvcodec av1 encoder config: {config:?}");
 
         let mut inner = shiguredo_nvcodec::Encoder::new_av1(config).or_fail()?;
 
@@ -200,7 +200,7 @@ impl NvcodecEncoder {
 
                 // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
                 if keyframe && !self.has_sequence_header(&data) {
-                    log::debug!(
+                    tracing::debug!(
                         "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
                         self.av1_sequence_header.len(),
                         data.len()

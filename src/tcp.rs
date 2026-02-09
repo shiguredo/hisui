@@ -166,7 +166,7 @@ pub async fn create_server_tls_acceptor(
     cert_path: &PathBuf,
     key_path: &PathBuf,
 ) -> std::io::Result<Arc<tokio_rustls::TlsAcceptor>> {
-    log::debug!("Loading TLS certificates from {}", cert_path.display());
+    tracing::debug!("Loading TLS certificates from {}", cert_path.display());
 
     let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert_path)
         .map_err(|e| std::io::Error::other(format!("Failed to open certificate file: {e}")))?
@@ -180,9 +180,9 @@ pub async fn create_server_tls_acceptor(
         ));
     }
 
-    log::debug!("Loaded {} certificate(s)", certs.len());
+    tracing::debug!("Loaded {} certificate(s)", certs.len());
 
-    log::debug!("Loading private key from {}", key_path.display());
+    tracing::debug!("Loading private key from {}", key_path.display());
     let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_path)
         .map_err(|e| std::io::Error::other(format!("Failed to load private key: {e}")))?;
 

@@ -29,7 +29,7 @@ impl MediaPipeline {
     }
 
     pub async fn run(mut self) {
-        log::debug!("MediaPipeline started");
+        tracing::debug!("MediaPipeline started");
 
         self.command_tx = None; // 参照カウントから自分を外すために None にする
 
@@ -40,7 +40,7 @@ impl MediaPipeline {
             }
         }
 
-        log::debug!("MediaPipeline stopped");
+        tracing::debug!("MediaPipeline stopped");
     }
 
     fn handle_command(&mut self, command: Command) {
@@ -79,16 +79,18 @@ impl MediaPipeline {
         track_id: TrackId,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
-        log::debug!("subscribe track: processor={processor_id}, track={track_id}");
+        tracing::debug!("subscribe track: processor={processor_id}, track={track_id}");
 
         if !self.processors.contains(&processor_id) {
-            log::warn!("attempt to subscribe to track from unregistered processor: {processor_id}");
+            tracing::warn!(
+                "attempt to subscribe to track from unregistered processor: {processor_id}"
+            );
             return;
         }
 
         // トラックが存在しない場合は新規作成
         let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
-            log::debug!("creating new track: {track_id}");
+            tracing::debug!("creating new track: {track_id}");
             TrackState::default()
         });
 
@@ -96,7 +98,7 @@ impl MediaPipeline {
             let _ = publisher_tx.send(TrackCommand::AddSubscriber(tx));
         } else {
             // publisher がまだ登録されていない場合は、subscriber を待機キューに追加
-            log::debug!("publisher not yet registered for track: {track_id}");
+            tracing::debug!("publisher not yet registered for track: {track_id}");
             track.pending_subscribers.push(tx);
         }
 
@@ -114,21 +116,23 @@ impl MediaPipeline {
         processor_id: ProcessorId,
         track_id: TrackId,
     ) -> Option<MessageSender> {
-        log::debug!("publish track: processor={processor_id}, track={track_id}");
+        tracing::debug!("publish track: processor={processor_id}, track={track_id}");
 
         if !self.processors.contains(&processor_id) {
-            log::warn!("attempt to publish track from unregistered processor: {processor_id}");
+            tracing::warn!("attempt to publish track from unregistered processor: {processor_id}");
             return None;
         }
 
         // トラックが存在しない場合は新規作成
         let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
-            log::debug!("creating new track: {track_id}");
+            tracing::debug!("creating new track: {track_id}");
             TrackState::default()
         });
 
         if track.publisher_command_tx.is_some() {
-            log::warn!("publisher conflict for track: processor={processor_id}, track={track_id}");
+            tracing::warn!(
+                "publisher conflict for track: processor={processor_id}, track={track_id}"
+            );
             return None;
         }
 
@@ -147,10 +151,10 @@ impl MediaPipeline {
     }
 
     fn handle_register_processor(&mut self, processor_id: ProcessorId) -> bool {
-        log::debug!("register processor: {processor_id}");
+        tracing::debug!("register processor: {processor_id}");
 
         if self.processors.contains(&processor_id) {
-            log::warn!("processor already registered: {processor_id}");
+            tracing::warn!("processor already registered: {processor_id}");
             return false;
         }
 
@@ -159,7 +163,7 @@ impl MediaPipeline {
     }
 
     fn handle_deregister_processor(&mut self, processor_id: ProcessorId) {
-        log::debug!("deregister processor: {processor_id}");
+        tracing::debug!("deregister processor: {processor_id}");
         self.processors.remove(&processor_id);
     }
 }
@@ -187,7 +191,7 @@ impl MediaPipelineHandle {
             .or_fail()?;
         tokio::spawn(async move {
             if let Err(e) = f(handle).await {
-                log::error!("failed to run processor {processor_id}: {e}");
+                tracing::error!("failed to run processor {processor_id}: {e}");
             }
         });
         Ok(())

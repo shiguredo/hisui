@@ -36,7 +36,7 @@ impl AudioToolboxDecoder {
         if self.inner.is_none() {
             let sample_entry = data.sample_entry.as_ref().or_fail()?;
             let (sample_rate, channels) = extract_audio_config(sample_entry)?;
-            log::debug!(
+            tracing::debug!(
                 "Audio Toolbox AAC decoder configuration: sample_rate={sample_rate}Hz, channels={channels}"
             );
             self.inner =

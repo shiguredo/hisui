@@ -98,7 +98,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         DEFAULT_LAYOUT_JSON,
     )
     .or_fail()?;
-    log::debug!("layout: {layout:?}");
+    tracing::debug!("layout: {layout:?}");
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
     let openh264_lib = if let Some(path) = args.openh264.as_ref().filter(|_| layout.has_video()) {

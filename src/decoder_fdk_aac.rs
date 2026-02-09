@@ -38,7 +38,7 @@ impl FdkAacDecoder {
         if self.inner.is_none() {
             let sample_entry = data.sample_entry.as_ref().or_fail()?;
             let audio_specific_config = extract_audio_specific_config(sample_entry)?;
-            log::debug!(
+            tracing::debug!(
                 "FDK AAC decoder initialized with config length: {}",
                 audio_specific_config.len()
             );

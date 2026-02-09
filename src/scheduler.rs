@@ -28,7 +28,7 @@ fn sync_channel_size() -> usize {
         //       近い将来にそもそも今の scheduler.rs はなくなって tokio ベースに切り替わる予定なので、
         //       この暫定修正で問題ない。
         .unwrap_or(500);
-    log::debug!("SYNC_CHANNEL_SIZE={size}");
+    tracing::debug!("SYNC_CHANNEL_SIZE={size}");
     size
 }
 
@@ -297,7 +297,7 @@ impl Scheduler {
                 // エラーフラグを立てて、ワーカースレッドを終了処理に移行させる
                 handle.stats.error.set(true);
                 timeout_expired = true;
-                log::debug!(
+                tracing::debug!(
                     "Timeout expired after {} seconds, signaling worker threads to terminate",
                     timeout.as_secs_f32()
                 );
@@ -389,7 +389,7 @@ impl TaskRunner {
 
             match result {
                 Err(e) => {
-                    log::error!("{e}");
+                    tracing::error!("{e}");
                     self.error_flag.set(true);
                     self.tasks[i].stats.set_error();
                     self.tasks.swap_remove(i);

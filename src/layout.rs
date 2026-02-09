@@ -591,7 +591,7 @@ fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
             // `split-archive-end-*.json` ファイルも展開結果に含まれてしまうのを防止するための処理
             //
             // 分割録画では普通に発生する状況なので、警告ではなくデバッグでログを出すに留めている
-            log::debug!(
+            tracing::debug!(
                 "skipping source file '{}' as no corresponding media file exists",
                 entry.path().display()
             );

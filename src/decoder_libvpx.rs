@@ -13,7 +13,7 @@ pub struct LibvpxDecoder {
 
 impl LibvpxDecoder {
     pub fn new_vp8() -> orfail::Result<Self> {
-        log::debug!("create libvpx(VP8) decoder");
+        tracing::debug!("create libvpx(VP8) decoder");
         Ok(Self {
             inner: shiguredo_libvpx::Decoder::new_vp8().or_fail()?,
             input_queue: VecDeque::new(),
@@ -22,7 +22,7 @@ impl LibvpxDecoder {
     }
 
     pub fn new_vp9() -> orfail::Result<Self> {
-        log::debug!("create libvpx(VP9) decoder");
+        tracing::debug!("create libvpx(VP9) decoder");
         Ok(Self {
             inner: shiguredo_libvpx::Decoder::new_vp9().or_fail()?,
             input_queue: VecDeque::new(),

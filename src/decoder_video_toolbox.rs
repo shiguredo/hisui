@@ -21,7 +21,7 @@ pub struct VideoToolboxDecoder {
 impl VideoToolboxDecoder {
     pub fn new_h264(frame: &VideoFrame) -> orfail::Result<Self> {
         let (sps, pps) = get_h264_sps_pps(frame).or_fail()?;
-        log::debug!("Initialize H.264 decoder: sps={sps:?}, pps={pps:?}");
+        tracing::debug!("Initialize H.264 decoder: sps={sps:?}, pps={pps:?}");
 
         let inner =
             shiguredo_video_toolbox::Decoder::new_h264(&sps, &pps, NALU_HEADER_LENGTH).or_fail()?;
@@ -36,7 +36,7 @@ impl VideoToolboxDecoder {
 
     pub fn new_h265(frame: &VideoFrame) -> orfail::Result<Self> {
         let (vps, sps, pps) = get_h265_vps_sps_pps(frame).or_fail()?;
-        log::debug!("Initialize H.264 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
+        tracing::debug!("Initialize H.264 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
 
         let inner = shiguredo_video_toolbox::Decoder::new_h265(vps, sps, pps, NALU_HEADER_LENGTH)
             .or_fail()?;
