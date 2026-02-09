@@ -11,6 +11,10 @@
 
 ## develop
 
+- [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
+  - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
+  - 未指定の場合は従来通り 404 を返す
+  - @voluntas
 - [ADD] server サブコマンドを追加する
   - `hisui server --http-port <PORT>` で HTTP サーバーを起動する
   - `/rpc`, `/bootstrap`, `/.ok` に 204 No Content を返す
