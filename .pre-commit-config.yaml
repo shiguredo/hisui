@@ -13,3 +13,9 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+      - id: ruff-e2e
+        name: ruff (e2e-tests)
+        entry: uv run --directory e2e-tests ruff check
+        language: system
+        files: ^e2e-tests/.*\.py$
+        pass_filenames: false
