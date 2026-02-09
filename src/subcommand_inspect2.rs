@@ -45,7 +45,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             })
             .await
             .or_fail()?;
-        dbg!("here2");
 
         let reader = AudioReader::new(
             AUDIO_ENCODED_STREAM_ID,
