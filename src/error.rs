@@ -50,3 +50,10 @@ impl std::fmt::Display for Error {
         Ok(())
     }
 }
+
+impl<E: std::error::Error> From<E> for Error {
+    #[track_caller]
+    fn from(e: E) -> Self {
+        Self::new(e.to_string())
+    }
+}
