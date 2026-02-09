@@ -77,6 +77,8 @@
 
 ### misc
 
+- [ADD] e2e テスト用の GitHub Actions `e2e-test.yml` を追加する
+  - @voluntas
 - [ADD] Hisui Python バインディングテスト用の GitHub Actions `pytest.yml` を追加する
   - @voluntas
 - [ADD] python/tests に Hisui Python バインディングのテストコードを追加する
