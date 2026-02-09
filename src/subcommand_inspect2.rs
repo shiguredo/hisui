@@ -86,7 +86,6 @@ fn run_internal(input_file_path: PathBuf) -> HisuiResult<()> {
             .await
         {
             log::error!("mp4_file_reader spawn failed: {e}");
-            return;
         }
     });
     runtime.block_on(pipeline.run());

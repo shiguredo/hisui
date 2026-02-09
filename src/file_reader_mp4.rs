@@ -14,6 +14,7 @@ use crate::{Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, Track
 const MAX_NOACKED_COUNT: u64 = 100;
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct Mp4FileReaderOptions {
     pub realtime: bool,
     pub loop_playback: bool,
@@ -21,16 +22,6 @@ pub struct Mp4FileReaderOptions {
     pub video_track_id: Option<TrackId>,
 }
 
-impl Default for Mp4FileReaderOptions {
-    fn default() -> Self {
-        Self {
-            realtime: false,
-            loop_playback: false,
-            audio_track_id: None,
-            video_track_id: None,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct Mp4FileReader {
