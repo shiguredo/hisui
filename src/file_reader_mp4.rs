@@ -36,13 +36,50 @@ impl Mp4FileReader {
     }
 
     pub async fn run(mut self, handle: ProcessorHandle) -> Result<()> {
+        let loop_enabled = self.resolve_loop_enabled();
+        let (mut audio_sender, mut video_sender) = self.build_track_senders(handle).await?;
+
+        if audio_sender.is_none() && video_sender.is_none() {
+            return Ok(());
+        }
+
+        let mut base_offset = Duration::ZERO;
+        let mut last_emitted_end = Duration::ZERO;
+        let start_instant = tokio::time::Instant::now();
+
+        let should_stop = self
+            .run_loop(
+                &mut audio_sender,
+                &mut video_sender,
+                loop_enabled,
+                &mut base_offset,
+                &mut last_emitted_end,
+                start_instant,
+            )
+            .await?;
+        if should_stop {
+            return Ok(());
+        }
+
+        Self::send_eos(&mut audio_sender, &mut video_sender);
+
+        Ok(())
+    }
+
+    fn resolve_loop_enabled(&self) -> bool {
         let mut loop_enabled = self.options.loop_playback;
         if loop_enabled && !self.options.realtime {
             log::warn!("Loop playback is ignored because realtime is disabled");
             loop_enabled = false;
         }
+        loop_enabled
+    }
 
-        let mut audio_sender = match self.options.audio_track_id.take() {
+    async fn build_track_senders(
+        &mut self,
+        handle: ProcessorHandle,
+    ) -> Result<(Option<TrackSender>, Option<TrackSender>)> {
+        let audio_sender = match self.options.audio_track_id.take() {
             Some(track_id) => {
                 let sender = handle
                     .publish_track(track_id)
@@ -53,7 +90,7 @@ impl Mp4FileReader {
             None => None,
         };
 
-        let mut video_sender = match self.options.video_track_id.take() {
+        let video_sender = match self.options.video_track_id.take() {
             Some(track_id) => {
                 let sender = handle
                     .publish_track(track_id)
@@ -64,14 +101,18 @@ impl Mp4FileReader {
             None => None,
         };
 
-        if audio_sender.is_none() && video_sender.is_none() {
-            return Ok(());
-        }
+        Ok((audio_sender, video_sender))
+    }
 
-        let mut base_offset = Duration::ZERO;
-        let mut last_emitted_end = Duration::ZERO;
-        let start_instant = tokio::time::Instant::now();
-
+    async fn run_loop(
+        &self,
+        audio_sender: &mut Option<TrackSender>,
+        video_sender: &mut Option<TrackSender>,
+        loop_enabled: bool,
+        base_offset: &mut Duration,
+        last_emitted_end: &mut Duration,
+        start_instant: tokio::time::Instant,
+    ) -> Result<bool> {
         loop {
             let mut state =
                 ReaderState::open(&self.path, audio_sender.is_some(), video_sender.is_some())?;
@@ -80,103 +121,22 @@ impl Mp4FileReader {
             }
 
             let mut emitted_in_loop = false;
-            loop {
-                let sample = match state.next_sample()? {
-                    Some(sample) => sample,
-                    None => break,
-                };
-
-                let track_kind = sample.track.kind;
-                let track_id = sample.track.track_id;
-                let timescale = sample.track.timescale.get();
-                let timestamp = sample.timestamp;
-                let duration = sample.duration as u64;
-                let data_offset = sample.data_offset;
-                let data_size = sample.data_size;
-                let keyframe = sample.keyframe;
-                let sample_entry = sample.sample_entry.cloned();
-
-                if track_kind == TrackKind::Audio {
-                    if !state.is_audio_enabled(track_id) {
-                        continue;
-                    }
-
-                    if let Some(entry) = &sample_entry {
-                        state.update_audio_format(entry)?;
-                    }
-
-                    let data = state.read_sample_data(data_offset, data_size)?;
-                    let (timestamp, duration) =
-                        calculate_timestamps(timescale, timestamp, duration);
-                    let effective_timestamp = base_offset + timestamp;
-
-                    if self.options.realtime {
-                        let target = start_instant + effective_timestamp;
-                        tokio::time::sleep_until(target).await;
-                    }
-
-                    let audio_data = AudioData {
-                        source_id: None,
-                        data,
-                        format: state.audio_format,
-                        stereo: state.audio_stereo,
-                        sample_rate: state.audio_sample_rate,
-                        timestamp: effective_timestamp,
-                        duration,
-                        sample_entry,
-                    };
-
-                    if let Some(sender) = &mut audio_sender {
-                        if !sender.send_audio(audio_data).await {
-                            return Ok(());
-                        }
-                        emitted_in_loop = true;
-                        let end = effective_timestamp + duration;
-                        if end > last_emitted_end {
-                            last_emitted_end = end;
-                        }
-                    }
-                } else if track_kind == TrackKind::Video {
-                    if !state.is_video_enabled(track_id) {
-                        continue;
-                    }
-
-                    if let Some(entry) = &sample_entry {
-                        state.update_video_format(entry)?;
-                    }
-
-                    let data = state.read_sample_data(data_offset, data_size)?;
-                    let (timestamp, duration) =
-                        calculate_timestamps(timescale, timestamp, duration);
-                    let effective_timestamp = base_offset + timestamp;
-
-                    if self.options.realtime {
-                        let target = start_instant + effective_timestamp;
-                        tokio::time::sleep_until(target).await;
-                    }
-
-                    let video_frame = VideoFrame {
-                        source_id: None,
-                        data,
-                        format: state.video_format,
-                        keyframe,
-                        width: state.video_width,
-                        height: state.video_height,
-                        timestamp: effective_timestamp,
-                        duration,
-                        sample_entry,
-                    };
-
-                    if let Some(sender) = &mut video_sender {
-                        if !sender.send_video(video_frame).await {
-                            return Ok(());
-                        }
-                        emitted_in_loop = true;
-                        let end = effective_timestamp + duration;
-                        if end > last_emitted_end {
-                            last_emitted_end = end;
-                        }
-                    }
+            while let Some(sample) = state.next_sample()? {
+                let context = SampleContext::from_sample(&sample);
+                let should_stop = self
+                    .handle_sample(
+                        &mut state,
+                        context,
+                        audio_sender,
+                        video_sender,
+                        *base_offset,
+                        start_instant,
+                        last_emitted_end,
+                        &mut emitted_in_loop,
+                    )
+                    .await?;
+                if should_stop {
+                    return Ok(true);
                 }
             }
 
@@ -185,20 +145,156 @@ impl Mp4FileReader {
                     log::warn!("Loop playback stopped because no samples were read");
                     break;
                 }
-                base_offset = last_emitted_end;
+                *base_offset = *last_emitted_end;
                 continue;
             }
             break;
         }
 
-        if let Some(sender) = &mut audio_sender {
-            sender.send_eos();
-        }
-        if let Some(sender) = &mut video_sender {
-            sender.send_eos();
+        Ok(false)
+    }
+
+    async fn handle_sample(
+        &self,
+        state: &mut ReaderState,
+        context: SampleContext,
+        audio_sender: &mut Option<TrackSender>,
+        video_sender: &mut Option<TrackSender>,
+        base_offset: Duration,
+        start_instant: tokio::time::Instant,
+        last_emitted_end: &mut Duration,
+        emitted_in_loop: &mut bool,
+    ) -> Result<bool> {
+        let track_kind = context.track_kind;
+        let track_id = context.track_id;
+        let timescale = context.timescale;
+        let timestamp = context.timestamp;
+        let duration = context.duration;
+        let data_offset = context.data_offset;
+        let data_size = context.data_size;
+        let keyframe = context.keyframe;
+        let sample_entry = context.sample_entry;
+
+        if track_kind == TrackKind::Audio {
+            if !state.is_audio_enabled(track_id) {
+                return Ok(false);
+            }
+
+            if let Some(entry) = &sample_entry {
+                state.update_audio_format(entry)?;
+            }
+
+            let data = state.read_sample_data(data_offset, data_size)?;
+            let (timestamp, duration) = calculate_timestamps(timescale, timestamp, duration);
+            let effective_timestamp = base_offset + timestamp;
+
+            if self.options.realtime {
+                let target = start_instant + effective_timestamp;
+                tokio::time::sleep_until(target).await;
+            }
+
+            let audio_data = AudioData {
+                source_id: None,
+                data,
+                format: state.audio_format,
+                stereo: state.audio_stereo,
+                sample_rate: state.audio_sample_rate,
+                timestamp: effective_timestamp,
+                duration,
+                sample_entry,
+            };
+
+            if let Some(sender) = audio_sender.as_mut() {
+                if !sender.send_audio(audio_data).await {
+                    return Ok(true);
+                }
+                *emitted_in_loop = true;
+                let end = effective_timestamp + duration;
+                if end > *last_emitted_end {
+                    *last_emitted_end = end;
+                }
+            }
+        } else if track_kind == TrackKind::Video {
+            if !state.is_video_enabled(track_id) {
+                return Ok(false);
+            }
+
+            if let Some(entry) = &sample_entry {
+                state.update_video_format(entry)?;
+            }
+
+            let data = state.read_sample_data(data_offset, data_size)?;
+            let (timestamp, duration) = calculate_timestamps(timescale, timestamp, duration);
+            let effective_timestamp = base_offset + timestamp;
+
+            if self.options.realtime {
+                let target = start_instant + effective_timestamp;
+                tokio::time::sleep_until(target).await;
+            }
+
+            let video_frame = VideoFrame {
+                source_id: None,
+                data,
+                format: state.video_format,
+                keyframe,
+                width: state.video_width,
+                height: state.video_height,
+                timestamp: effective_timestamp,
+                duration,
+                sample_entry,
+            };
+
+            if let Some(sender) = video_sender.as_mut() {
+                if !sender.send_video(video_frame).await {
+                    return Ok(true);
+                }
+                *emitted_in_loop = true;
+                let end = effective_timestamp + duration;
+                if end > *last_emitted_end {
+                    *last_emitted_end = end;
+                }
+            }
         }
 
-        Ok(())
+        Ok(false)
+    }
+
+    fn send_eos(audio_sender: &mut Option<TrackSender>, video_sender: &mut Option<TrackSender>) {
+        if let Some(sender) = audio_sender.as_mut() {
+            sender.send_eos();
+        }
+        if let Some(sender) = video_sender.as_mut() {
+            sender.send_eos();
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SampleContext {
+    track_kind: TrackKind,
+    track_id: u32,
+    timescale: u32,
+    timestamp: u64,
+    duration: u64,
+    data_offset: u64,
+    data_size: usize,
+    keyframe: bool,
+    sample_entry: Option<SampleEntry>,
+}
+
+impl SampleContext {
+    fn from_sample(sample: &shiguredo_mp4::demux::Sample<'_>) -> Self {
+        Self {
+            track_kind: sample.track.kind,
+            track_id: sample.track.track_id,
+            timescale: sample.track.timescale.get(),
+            timestamp: sample.timestamp,
+            duration: sample.duration as u64,
+            data_offset: sample.data_offset,
+            data_size: sample.data_size,
+            keyframe: sample.keyframe,
+            sample_entry: sample.sample_entry.cloned(),
+        }
     }
 }
 
