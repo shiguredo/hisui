@@ -25,6 +25,12 @@ pub struct Mp4FileReaderOptions {
 pub struct Mp4FileReader {
     path: PathBuf,
     options: Mp4FileReaderOptions,
+    audio_sender: Option<TrackSender>,
+    video_sender: Option<TrackSender>,
+    base_offset: Duration,
+    last_emitted_end: Duration,
+    start_instant: tokio::time::Instant,
+    emitted_in_loop: bool,
 }
 
 impl Mp4FileReader {
@@ -32,36 +38,31 @@ impl Mp4FileReader {
         Ok(Self {
             path: path.as_ref().to_path_buf(),
             options,
+            audio_sender: None,
+            video_sender: None,
+            base_offset: Duration::ZERO,
+            last_emitted_end: Duration::ZERO,
+            start_instant: tokio::time::Instant::now(),
+            emitted_in_loop: false,
         })
     }
 
     pub async fn run(mut self, handle: ProcessorHandle) -> Result<()> {
         let loop_enabled = self.resolve_loop_enabled();
-        let (mut audio_sender, mut video_sender) = self.build_track_senders(handle).await?;
+        (self.audio_sender, self.video_sender) = self.build_track_senders(handle).await?;
 
-        if audio_sender.is_none() && video_sender.is_none() {
+        if self.audio_sender.is_none() && self.video_sender.is_none() {
             return Ok(());
         }
 
-        let mut base_offset = Duration::ZERO;
-        let mut last_emitted_end = Duration::ZERO;
-        let start_instant = tokio::time::Instant::now();
+        self.start_instant = tokio::time::Instant::now();
 
-        let should_stop = self
-            .run_loop(
-                &mut audio_sender,
-                &mut video_sender,
-                loop_enabled,
-                &mut base_offset,
-                &mut last_emitted_end,
-                start_instant,
-            )
-            .await?;
+        let should_stop = self.run_loop(loop_enabled).await?;
         if should_stop {
             return Ok(());
         }
 
-        Self::send_eos(&mut audio_sender, &mut video_sender);
+        Self::send_eos(&mut self.audio_sender, &mut self.video_sender);
 
         Ok(())
     }
@@ -104,47 +105,32 @@ impl Mp4FileReader {
         Ok((audio_sender, video_sender))
     }
 
-    async fn run_loop(
-        &self,
-        audio_sender: &mut Option<TrackSender>,
-        video_sender: &mut Option<TrackSender>,
-        loop_enabled: bool,
-        base_offset: &mut Duration,
-        last_emitted_end: &mut Duration,
-        start_instant: tokio::time::Instant,
-    ) -> Result<bool> {
+    async fn run_loop(&mut self, loop_enabled: bool) -> Result<bool> {
         loop {
-            let mut state =
-                ReaderState::open(&self.path, audio_sender.is_some(), video_sender.is_some())?;
+            let mut state = ReaderState::open(
+                &self.path,
+                self.audio_sender.is_some(),
+                self.video_sender.is_some(),
+            )?;
             if state.audio_track_id.is_none() && state.video_track_id.is_none() {
                 break;
             }
 
-            let mut emitted_in_loop = false;
+            self.emitted_in_loop = false;
             while let Some(sample) = state.demuxer.next_sample()? {
                 let context = SampleContext::from_sample(&sample);
-                let handle_context = SampleHandleContext {
-                    audio_sender,
-                    video_sender,
-                    base_offset: *base_offset,
-                    start_instant,
-                    last_emitted_end,
-                    emitted_in_loop: &mut emitted_in_loop,
-                };
-                let should_stop = self
-                    .handle_sample(&mut state, context, handle_context)
-                    .await?;
+                let should_stop = self.handle_sample(&mut state, context).await?;
                 if should_stop {
                     return Ok(true);
                 }
             }
 
             if loop_enabled {
-                if !emitted_in_loop {
+                if !self.emitted_in_loop {
                     log::warn!("Loop playback stopped because no samples were read");
                     break;
                 }
-                *base_offset = *last_emitted_end;
+                self.base_offset = self.last_emitted_end;
                 continue;
             }
             break;
@@ -154,57 +140,20 @@ impl Mp4FileReader {
     }
 
     async fn handle_sample(
-        &self,
+        &mut self,
         state: &mut ReaderState,
         context: SampleContext,
-        handle_context: SampleHandleContext<'_>,
     ) -> Result<bool> {
-        let SampleHandleContext {
-            audio_sender,
-            video_sender,
-            base_offset,
-            start_instant,
-            last_emitted_end,
-            emitted_in_loop,
-        } = handle_context;
-
         match context.track_kind {
-            TrackKind::Audio => {
-                self.handle_audio_sample(
-                    state,
-                    context,
-                    audio_sender,
-                    base_offset,
-                    start_instant,
-                    last_emitted_end,
-                    emitted_in_loop,
-                )
-                .await
-            }
-            TrackKind::Video => {
-                self.handle_video_sample(
-                    state,
-                    context,
-                    video_sender,
-                    base_offset,
-                    start_instant,
-                    last_emitted_end,
-                    emitted_in_loop,
-                )
-                .await
-            }
+            TrackKind::Audio => self.handle_audio_sample(state, context).await,
+            TrackKind::Video => self.handle_video_sample(state, context).await,
         }
     }
 
     async fn handle_audio_sample(
-        &self,
+        &mut self,
         state: &mut ReaderState,
         context: SampleContext,
-        audio_sender: &mut Option<TrackSender>,
-        base_offset: Duration,
-        start_instant: tokio::time::Instant,
-        last_emitted_end: &mut Duration,
-        emitted_in_loop: &mut bool,
     ) -> Result<bool> {
         if !state.is_audio_enabled(context.track_id) {
             return Ok(false);
@@ -217,10 +166,10 @@ impl Mp4FileReader {
         let data = state.read_sample_data(context.data_offset, context.data_size)?;
         let (timestamp, duration) =
             calculate_timestamps(context.timescale, context.timestamp, context.duration);
-        let effective_timestamp = base_offset + timestamp;
+        let effective_timestamp = self.base_offset + timestamp;
 
         if self.options.realtime {
-            let target = start_instant + effective_timestamp;
+            let target = self.start_instant + effective_timestamp;
             tokio::time::sleep_until(target).await;
         }
 
@@ -235,14 +184,14 @@ impl Mp4FileReader {
             sample_entry: context.sample_entry,
         };
 
-        if let Some(sender) = audio_sender.as_mut() {
+        if let Some(sender) = self.audio_sender.as_mut() {
             if !sender.send_audio(audio_data).await {
                 return Ok(true);
             }
-            *emitted_in_loop = true;
+            self.emitted_in_loop = true;
             let end = effective_timestamp + duration;
-            if end > *last_emitted_end {
-                *last_emitted_end = end;
+            if end > self.last_emitted_end {
+                self.last_emitted_end = end;
             }
         }
 
@@ -250,14 +199,9 @@ impl Mp4FileReader {
     }
 
     async fn handle_video_sample(
-        &self,
+        &mut self,
         state: &mut ReaderState,
         context: SampleContext,
-        video_sender: &mut Option<TrackSender>,
-        base_offset: Duration,
-        start_instant: tokio::time::Instant,
-        last_emitted_end: &mut Duration,
-        emitted_in_loop: &mut bool,
     ) -> Result<bool> {
         if !state.is_video_enabled(context.track_id) {
             return Ok(false);
@@ -270,10 +214,10 @@ impl Mp4FileReader {
         let data = state.read_sample_data(context.data_offset, context.data_size)?;
         let (timestamp, duration) =
             calculate_timestamps(context.timescale, context.timestamp, context.duration);
-        let effective_timestamp = base_offset + timestamp;
+        let effective_timestamp = self.base_offset + timestamp;
 
         if self.options.realtime {
-            let target = start_instant + effective_timestamp;
+            let target = self.start_instant + effective_timestamp;
             tokio::time::sleep_until(target).await;
         }
 
@@ -289,14 +233,14 @@ impl Mp4FileReader {
             sample_entry: context.sample_entry,
         };
 
-        if let Some(sender) = video_sender.as_mut() {
+        if let Some(sender) = self.video_sender.as_mut() {
             if !sender.send_video(video_frame).await {
                 return Ok(true);
             }
-            *emitted_in_loop = true;
+            self.emitted_in_loop = true;
             let end = effective_timestamp + duration;
-            if end > *last_emitted_end {
-                *last_emitted_end = end;
+            if end > self.last_emitted_end {
+                self.last_emitted_end = end;
             }
         }
 
@@ -311,16 +255,6 @@ impl Mp4FileReader {
             sender.send_eos();
         }
     }
-}
-
-#[derive(Debug)]
-struct SampleHandleContext<'a> {
-    audio_sender: &'a mut Option<TrackSender>,
-    video_sender: &'a mut Option<TrackSender>,
-    base_offset: Duration,
-    start_instant: tokio::time::Instant,
-    last_emitted_end: &'a mut Duration,
-    emitted_in_loop: &'a mut bool,
 }
 
 #[derive(Debug, Clone)]
