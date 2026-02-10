@@ -123,17 +123,16 @@ impl Mp4FileReader {
             let mut emitted_in_loop = false;
             while let Some(sample) = state.next_sample()? {
                 let context = SampleContext::from_sample(&sample);
+                let handle_context = SampleHandleContext {
+                    audio_sender,
+                    video_sender,
+                    base_offset: *base_offset,
+                    start_instant,
+                    last_emitted_end,
+                    emitted_in_loop: &mut emitted_in_loop,
+                };
                 let should_stop = self
-                    .handle_sample(
-                        &mut state,
-                        context,
-                        audio_sender,
-                        video_sender,
-                        *base_offset,
-                        start_instant,
-                        last_emitted_end,
-                        &mut emitted_in_loop,
-                    )
+                    .handle_sample(&mut state, context, handle_context)
                     .await?;
                 if should_stop {
                     return Ok(true);
@@ -158,13 +157,16 @@ impl Mp4FileReader {
         &self,
         state: &mut ReaderState,
         context: SampleContext,
-        audio_sender: &mut Option<TrackSender>,
-        video_sender: &mut Option<TrackSender>,
-        base_offset: Duration,
-        start_instant: tokio::time::Instant,
-        last_emitted_end: &mut Duration,
-        emitted_in_loop: &mut bool,
+        handle_context: SampleHandleContext<'_>,
     ) -> Result<bool> {
+        let SampleHandleContext {
+            audio_sender,
+            video_sender,
+            base_offset,
+            start_instant,
+            last_emitted_end,
+            emitted_in_loop,
+        } = handle_context;
         let track_kind = context.track_kind;
         let track_id = context.track_id;
         let timescale = context.timescale;
@@ -267,6 +269,16 @@ impl Mp4FileReader {
             sender.send_eos();
         }
     }
+}
+
+#[derive(Debug)]
+struct SampleHandleContext<'a> {
+    audio_sender: &'a mut Option<TrackSender>,
+    video_sender: &'a mut Option<TrackSender>,
+    base_offset: Duration,
+    start_instant: tokio::time::Instant,
+    last_emitted_end: &'a mut Duration,
+    emitted_in_loop: &'a mut bool,
 }
 
 #[derive(Debug, Clone)]
