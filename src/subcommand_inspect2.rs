@@ -223,10 +223,7 @@ impl OutputPrinter {
             video_codec: None,
             audio_samples: Vec::new(),
             video_samples: Vec::new(),
-            active_streams: [
-                audio_track_id.clone(),
-                video_track_id.clone(),
-            ]
+            active_streams: [audio_track_id.clone(), video_track_id.clone()]
                 .into_iter()
                 .collect(),
             audio_track_id,
