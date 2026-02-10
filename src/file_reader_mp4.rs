@@ -487,10 +487,7 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
 /// 音声トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
 fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     let mut has_audio_track = false;
-    while let Some(sample) = demuxer
-        .next_sample()
-        .map_err(|e| Error::new(format!("Read sample error: {e}")))?
-    {
+    while let Some(sample) = demuxer.next_sample()? {
         if sample.track.kind != TrackKind::Audio {
             continue;
         }
@@ -527,10 +524,7 @@ fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
 /// 映像トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
 fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     let mut has_video_track = false;
-    while let Some(sample) = demuxer
-        .next_sample()
-        .map_err(|e| Error::new(format!("Read sample error: {e}")))?
-    {
+    while let Some(sample) = demuxer.next_sample()? {
         if sample.track.kind != TrackKind::Video {
             continue;
         }
