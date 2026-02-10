@@ -13,15 +13,13 @@ use crate::{Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, Track
 
 const MAX_NOACKED_COUNT: u64 = 100;
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Mp4FileReaderOptions {
     pub realtime: bool,
     pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
     pub video_track_id: Option<TrackId>,
 }
-
 
 #[derive(Debug)]
 pub struct Mp4FileReader {
@@ -97,7 +95,6 @@ impl Mp4FileReader {
                 let data_size = sample.data_size;
                 let keyframe = sample.keyframe;
                 let sample_entry = sample.sample_entry.cloned();
-                drop(sample);
 
                 if track_kind == TrackKind::Audio {
                     if !state.is_audio_enabled(track_id) {

@@ -11,11 +11,7 @@ use crate::decoder_nvcodec::NvcodecDecoder;
 #[cfg(target_os = "macos")]
 use crate::decoder_video_toolbox::VideoToolboxDecoder;
 use crate::{
-    Error,
-    Message,
-    ProcessorHandle,
-    Result,
-    TrackId,
+    Error, Message, ProcessorHandle, Result, TrackId,
     audio::AudioData,
     decoder_dav1d::Dav1dDecoder,
     decoder_openh264::Openh264Decoder,
@@ -79,11 +75,8 @@ impl AudioDecoder {
 
             match message {
                 Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(
-                        self.input_stream_id,
-                        sample,
-                    ))
-                    .map_err(|e| Error::new(e.to_string()))?;
+                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
+                        .map_err(|e| Error::new(e.to_string()))?;
                 }
                 Message::Eos => {
                     self.process_input(MediaProcessorInput::eos(self.input_stream_id))
@@ -303,11 +296,8 @@ impl VideoDecoder {
 
             match message {
                 Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(
-                        self.input_stream_id,
-                        sample,
-                    ))
-                    .map_err(|e| Error::new(e.to_string()))?;
+                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
+                        .map_err(|e| Error::new(e.to_string()))?;
                 }
                 Message::Eos => {
                     self.process_input(MediaProcessorInput::eos(self.input_stream_id))
