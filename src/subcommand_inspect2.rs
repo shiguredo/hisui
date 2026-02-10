@@ -3,15 +3,14 @@ use std::{path::PathBuf, time::Duration};
 use crate::{
     Error, Result,
     file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions},
-    media::MediaStreamId,
     metadata::ContainerFormat,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,
 };
 
-const AUDIO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
-const VIDEO_ENCODED_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+const AUDIO_TRACK_ID: &str = "audio";
+const VIDEO_TRACK_ID: &str = "video";
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
@@ -44,12 +43,8 @@ fn run_internal(input_file_path: PathBuf) -> Result<()> {
     let options = Mp4FileReaderOptions {
         realtime: false,
         loop_playback: false,
-        audio_track_id: Some(crate::TrackId::new(
-            AUDIO_ENCODED_STREAM_ID.get().to_string(),
-        )),
-        video_track_id: Some(crate::TrackId::new(
-            VIDEO_ENCODED_STREAM_ID.get().to_string(),
-        )),
+        audio_track_id: Some(crate::TrackId::new(AUDIO_TRACK_ID)),
+        video_track_id: Some(crate::TrackId::new(VIDEO_TRACK_ID)),
     };
     let reader = Mp4FileReader::new(input_file_path.clone(), options)?;
     runtime.spawn(async move {
@@ -212,11 +207,15 @@ pub struct OutputPrinter {
     video_codec: Option<CodecName>,
     audio_samples: Vec<AudioSampleInfo>,
     video_samples: Vec<VideoSampleInfo>,
-    active_streams: std::collections::HashSet<MediaStreamId>,
+    active_streams: std::collections::HashSet<crate::TrackId>,
+    audio_track_id: crate::TrackId,
+    video_track_id: crate::TrackId,
 }
 
 impl OutputPrinter {
     fn new(path: PathBuf, format: ContainerFormat) -> Self {
+        let audio_track_id = crate::TrackId::new(AUDIO_TRACK_ID);
+        let video_track_id = crate::TrackId::new(VIDEO_TRACK_ID);
         Self {
             path,
             format,
@@ -224,28 +223,32 @@ impl OutputPrinter {
             video_codec: None,
             audio_samples: Vec::new(),
             video_samples: Vec::new(),
-            active_streams: [AUDIO_ENCODED_STREAM_ID, VIDEO_ENCODED_STREAM_ID]
-                .iter()
-                .copied()
+            active_streams: [
+                audio_track_id.clone(),
+                video_track_id.clone(),
+            ]
+                .into_iter()
                 .collect(),
+            audio_track_id,
+            video_track_id,
         }
     }
 
     pub async fn run(mut self, handle: crate::ProcessorHandle) -> Result<()> {
-        let audio_track_id = crate::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
-        let mut audio_track = handle.subscribe_track(audio_track_id);
+        let audio_track_id = self.audio_track_id.clone();
+        let mut audio_track = handle.subscribe_track(audio_track_id.clone());
 
-        let video_track_id = crate::TrackId::new(VIDEO_ENCODED_STREAM_ID.get().to_string());
-        let mut video_track = handle.subscribe_track(video_track_id);
+        let video_track_id = self.video_track_id.clone();
+        let mut video_track = handle.subscribe_track(video_track_id.clone());
 
         while !self.active_streams.is_empty() {
             tokio::select! {
                 message = audio_track.recv(),
-                          if self.active_streams.contains(&AUDIO_ENCODED_STREAM_ID) => {
+                          if self.active_streams.contains(&audio_track_id) => {
                     self.handle_audio_sample(message)?;
                 }
                 message = video_track.recv(),
-                          if self.active_streams.contains(&VIDEO_ENCODED_STREAM_ID) => {
+                          if self.active_streams.contains(&video_track_id) => {
                     self.handle_video_sample(message)?;
                 }
             }
@@ -276,7 +279,7 @@ impl OutputPrinter {
                 });
             }
             crate::Message::Eos => {
-                self.active_streams.remove(&AUDIO_ENCODED_STREAM_ID);
+                self.active_streams.remove(&self.audio_track_id);
             }
             crate::Message::Syn(_) => {}
         }
@@ -306,7 +309,7 @@ impl OutputPrinter {
                 });
             }
             crate::Message::Eos => {
-                self.active_streams.remove(&VIDEO_ENCODED_STREAM_ID);
+                self.active_streams.remove(&self.video_track_id);
             }
             crate::Message::Syn(_) => {}
         }
