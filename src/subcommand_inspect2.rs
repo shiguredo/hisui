@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    Error, Result as HisuiResult,
+    Error, Result,
     file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions},
     media::MediaStreamId,
     metadata::ContainerFormat,
@@ -19,19 +19,17 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("情報取得対象の録画ファイル (.mp4)")
         .take(&mut args)
         .then(|a| a.value().parse())?;
-    let metadata = args.metadata();
+
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
     }
 
-    run_internal(input_file_path).map_err(|e| noargs::Error::Other {
-        metadata: Some(metadata),
-        error: Box::new(e),
-    })
+    run_internal(input_file_path)?;
+    Ok(())
 }
 
-fn run_internal(input_file_path: PathBuf) -> HisuiResult<()> {
+fn run_internal(input_file_path: PathBuf) -> Result<()> {
     let format = ContainerFormat::Mp4;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -233,7 +231,7 @@ impl OutputPrinter {
         }
     }
 
-    pub async fn run(mut self, handle: crate::ProcessorHandle) -> HisuiResult<()> {
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> Result<()> {
         let audio_track_id = crate::TrackId::new(AUDIO_ENCODED_STREAM_ID.get().to_string());
         let mut audio_track = handle.subscribe_track(audio_track_id);
 
@@ -257,7 +255,7 @@ impl OutputPrinter {
         Ok(())
     }
 
-    fn handle_audio_sample(&mut self, message: crate::Message) -> HisuiResult<()> {
+    fn handle_audio_sample(&mut self, message: crate::Message) -> Result<()> {
         match message {
             crate::Message::Media(media_sample) => {
                 let audio_data = match media_sample {
@@ -285,7 +283,7 @@ impl OutputPrinter {
         Ok(())
     }
 
-    fn handle_video_sample(&mut self, message: crate::Message) -> HisuiResult<()> {
+    fn handle_video_sample(&mut self, message: crate::Message) -> Result<()> {
         match message {
             crate::Message::Media(media_sample) => {
                 let video_frame = match media_sample {
