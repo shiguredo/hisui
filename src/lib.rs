@@ -39,6 +39,8 @@ pub mod encoder_svt_av1_params;
 pub mod encoder_video_toolbox;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox_params;
+pub mod error;
+pub mod file_reader_mp4;
 pub mod future;
 pub mod inbound_endpoint_rtmp;
 pub mod json;
@@ -85,9 +87,12 @@ pub mod writer_mp4;
 pub mod writer_yuv;
 
 pub use audio::AudioData;
+pub use error::Error;
 pub use media::MediaSample;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineHandle, Message, MessageReceiver, MessageSender,
     ProcessorHandle, ProcessorId, Syn, TrackId,
 };
 pub use video::VideoFrame;
+
+pub type Result<T> = std::result::Result<T, Error>;
