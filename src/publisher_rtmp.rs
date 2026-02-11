@@ -75,7 +75,7 @@ impl RtmpPublisher {
         };
         runtime.spawn(async move {
             if let Err(e) = runner.run().await.or_fail() {
-                log::error!("RTMP publish error: {e}");
+                tracing::error!("RTMP publish error: {e}");
                 runner.stats.error.set(true);
             }
         });
@@ -162,7 +162,7 @@ struct RtmpPublishRunner {
 
 impl RtmpPublishRunner {
     async fn run(&mut self) -> orfail::Result<()> {
-        log::debug!("Starting RTMP publisher: {}", self.url);
+        tracing::debug!("Starting RTMP publisher: {}", self.url);
 
         // TCP または TLS 接続を確立
         let mut stream =
@@ -174,7 +174,7 @@ impl RtmpPublishRunner {
         loop {
             // イベント処理
             while let Some(event) = self.connection.next_event() {
-                log::debug!("RTMP event: {:?}", event);
+                tracing::debug!("RTMP event: {:?}", event);
                 self.stats.total_event_count.increment();
                 if matches!(
                     event,
@@ -211,7 +211,7 @@ impl RtmpPublishRunner {
             }
         }
 
-        log::debug!("RTMP publisher finished");
+        tracing::debug!("RTMP publisher finished");
         Ok(())
     }
 

@@ -39,7 +39,7 @@ impl Stats {
         .to_string();
         if let Err(e) = std::fs::write(output_file_path, json) {
             // 統計が出力できなくても全体を失敗扱いにはしない
-            log::warn!(
+            tracing::warn!(
                 "failed to write stats JSON: path={}, reason={e}",
                 output_file_path.display()
             );

@@ -50,7 +50,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // パイプライン定義ファイルを読み込み
     let pipeline_def: PipelineDefinition = crate::json::parse_file(&args.pipeline_file_path)?;
-    log::debug!("Pipeline definition: {pipeline_def:?}");
+    tracing::debug!("Pipeline definition: {pipeline_def:?}");
 
     // メディアストリーム名レジストリを初期化
     let mut registry = MediaStreamNameRegistry::new();
@@ -63,19 +63,19 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // パイプライン内の各コンポーネントをプロセッサに変換してスケジューラーに登録
     for component in &pipeline_def.pipeline {
-        log::debug!("Creating processor for component: {component:?}");
+        tracing::debug!("Creating processor for component: {component:?}");
         let processor = component.create_processor(&mut registry).or_fail()?;
         scheduler.register(processor).or_fail()?;
     }
 
-    log::info!("Starting pipeline execution...");
+    tracing::info!("Starting pipeline execution...");
     let start_time = std::time::Instant::now();
 
     // スケジューラーを実行
     let stats = scheduler.run().or_fail()?;
 
     let elapsed = start_time.elapsed();
-    log::info!(
+    tracing::info!(
         "Pipeline execution finished in {:.2}s",
         elapsed.as_secs_f32()
     );

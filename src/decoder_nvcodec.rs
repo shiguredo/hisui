@@ -20,7 +20,7 @@ pub struct NvcodecDecoder {
 
 impl NvcodecDecoder {
     pub fn new_h264(params: &LayoutDecodeParams) -> orfail::Result<Self> {
-        log::debug!("create nvcodec(H264) decoder");
+        tracing::debug!("create nvcodec(H264) decoder");
         let config = params.nvcodec_h264.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_h264(config).or_fail()?,
@@ -31,7 +31,7 @@ impl NvcodecDecoder {
     }
 
     pub fn new_h265(params: &LayoutDecodeParams) -> orfail::Result<Self> {
-        log::debug!("create nvcodec(H265) decoder");
+        tracing::debug!("create nvcodec(H265) decoder");
         let config = params.nvcodec_h265.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_h265(config).or_fail()?,
@@ -42,7 +42,7 @@ impl NvcodecDecoder {
     }
 
     pub fn new_av1(params: &LayoutDecodeParams) -> orfail::Result<Self> {
-        log::debug!("create nvcodec(AV1) decoder");
+        tracing::debug!("create nvcodec(AV1) decoder");
         let config = params.nvcodec_av1.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_av1(config).or_fail()?,
@@ -53,7 +53,7 @@ impl NvcodecDecoder {
     }
 
     pub fn new_vp8(params: &LayoutDecodeParams) -> orfail::Result<Self> {
-        log::debug!("create nvcodec(VP8) decoder");
+        tracing::debug!("create nvcodec(VP8) decoder");
         let config = params.nvcodec_vp8.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_vp8(config).or_fail()?,
@@ -64,7 +64,7 @@ impl NvcodecDecoder {
     }
 
     pub fn new_vp9(params: &LayoutDecodeParams) -> orfail::Result<Self> {
-        log::debug!("create nvcodec(VP9) decoder");
+        tracing::debug!("create nvcodec(VP9) decoder");
         let config = params.nvcodec_vp9.clone();
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new_vp9(config).or_fail()?,

@@ -312,7 +312,7 @@ fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> orfail::Result<Option<u32>>
             if is_supported {
                 return Ok(Some(sample.track.track_id));
             } else {
-                log::warn!(
+                tracing::warn!(
                     "Unsupported audio codec in track {}: {:?}",
                     sample.track.track_id,
                     sample_entry

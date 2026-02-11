@@ -153,7 +153,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     } else {
         crate::json::parse_str(DEFAULT_LAYOUT_JSON).or_fail()?
     };
-    log::debug!("layout template: {layout_template:?}");
+    tracing::debug!("layout template: {layout_template:?}");
 
     // 探索空間ファイルを読み込む
     let mut search_space: SearchSpace = if let Some(path) = &args.search_space_file_path {
@@ -166,7 +166,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     search_space
         .params
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
-    log::debug!("search space: {search_space:?}");
+    tracing::debug!("search space: {search_space:?}");
 
     (!search_space.params.is_empty()).or_fail_with(|()| {
         concat!(
@@ -224,7 +224,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
         let mut layout = layout_template.clone();
         ask_output.apply_params_to_layout(&mut layout).or_fail()?;
-        log::debug!("actual layout: {layout:?}");
+        tracing::debug!("actual layout: {layout:?}");
 
         match run_trial_evaluation(&args, ask_output.number, &layout).or_fail() {
             Ok(metrics) => {

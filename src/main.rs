@@ -1,4 +1,4 @@
-use hisui::logger::Logger;
+use hisui::logger;
 
 // 共通引数定義
 const HELP_FLAG: noargs::FlagSpec = noargs::HELP_FLAG
@@ -46,9 +46,9 @@ fn main() -> noargs::Result<()> {
     }
 
     if VERBOSE_FLAG.take(&mut args).is_present() {
-        Logger::init(log::LevelFilter::Debug)?;
+        logger::init(tracing::level_filters::LevelFilter::DEBUG);
     } else {
-        Logger::init(log::LevelFilter::Warn)?;
+        logger::init(tracing::level_filters::LevelFilter::WARN);
     };
 
     // 実験的機能を有効にするかどうか

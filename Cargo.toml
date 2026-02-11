@@ -20,7 +20,8 @@ libvpx = ["shiguredo_libvpx"]
 [dependencies]
 # NOTE: 通常の依存は突然挙動が変わることが内容に、バージョンは厳密一致で指定している
 
-log = "=0.4.29"
+tracing = "=0.1.41"
+tracing-subscriber = { version = "=0.3.19", features = ["fmt", "std"] }
 noargs = "=0.4.2"
 nojson = "=0.3.6"
 orfail = "=2.0.0"

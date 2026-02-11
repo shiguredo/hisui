@@ -67,7 +67,7 @@ impl RtmpOutgoingFrameHandler {
                 };
                 self.audio_sequence_header_data = Some(seq_header);
                 self.stats.total_audio_sequence_header_count.increment();
-                log::debug!("Sent AAC sequence header");
+                tracing::debug!("Sent AAC sequence header");
                 Some(frame)
             } else {
                 None
@@ -131,7 +131,7 @@ impl RtmpOutgoingFrameHandler {
                 };
                 self.video_sequence_header_data = Some(seq_header_data);
                 self.stats.total_video_sequence_header_count.increment();
-                log::debug!("Sent H.264 sequence header");
+                tracing::debug!("Sent H.264 sequence header");
                 Some(frame)
             } else {
                 None
@@ -246,7 +246,7 @@ impl RtmpIncomingFrameHandler {
 
             self.audio_sample_entry = Some(sample_entry);
 
-            log::debug!(
+            tracing::debug!(
                 "Received AAC sequence header: {}Hz, {} channels",
                 sample_rate,
                 channels
@@ -294,7 +294,7 @@ impl RtmpIncomingFrameHandler {
             let sample_entry = avc_sequence_header_to_sample_entry(&seq_header, width, height)?;
             self.video_sample_entry = Some(sample_entry);
 
-            log::debug!("Received H.264 sequence header: {}x{}", width, height);
+            tracing::debug!("Received H.264 sequence header: {}x{}", width, height);
             return Ok(None);
         }
 

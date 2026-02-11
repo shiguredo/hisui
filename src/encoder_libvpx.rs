@@ -45,7 +45,7 @@ impl LibvpxEncoder {
             target_bitrate: options.bitrate,
             ..options.encode_params.libvpx_vp8.clone()
         };
-        log::debug!("libvpx vp8 encoder config: {config:?}");
+        tracing::debug!("libvpx vp8 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
         let sample_entry = vp8_sample_entry(width, height);
 
@@ -69,7 +69,7 @@ impl LibvpxEncoder {
             target_bitrate: options.bitrate,
             ..options.encode_params.libvpx_vp9.clone()
         };
-        log::debug!("libvpx vp9 encoder config: {config:?}");
+        tracing::debug!("libvpx vp9 encoder config: {config:?}");
         let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;
         let sample_entry = vp9_sample_entry(width, height);
 

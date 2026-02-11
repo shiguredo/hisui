@@ -55,12 +55,12 @@ impl RtmpInboundEndpoint {
     /// Start the RTMP Inbound Endpoint
     pub async fn run(self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let addr = format!("{}:{}", self.url.host, self.url.port);
-        log::debug!("Starting RTMP inbound endpoint on {addr}");
+        tracing::debug!("Starting RTMP inbound endpoint on {addr}");
 
         let listener = TcpListener::bind(&addr).await.or_fail()?;
 
         let tls_enabled = self.url.tls;
-        log::debug!(
+        tracing::debug!(
             "TLS is {}",
             if tls_enabled { "enabled" } else { "disabled" }
         );
@@ -82,19 +82,19 @@ impl RtmpInboundEndpoint {
         loop {
             let elapsed = start_time.elapsed();
             if elapsed >= timeout {
-                log::info!("RTMP server lifetime expired, shutting down");
+                tracing::info!("RTMP server lifetime expired, shutting down");
                 break;
             }
             let remaining = timeout - elapsed;
 
             match tokio::time::timeout(remaining, listener.accept()).await {
                 Ok(Ok((stream, peer_addr))) => {
-                    log::debug!("New RTMP client connection from: {peer_addr}");
+                    tracing::debug!("New RTMP client connection from: {peer_addr}");
 
                     let stats = self.stats.clone();
 
                     if stats.is_client_connected() {
-                        log::warn!(
+                        tracing::warn!(
                             "Another client is already connected, rejecting new connection from {peer_addr}"
                         );
                         drop(stream);
@@ -142,7 +142,7 @@ impl RtmpInboundEndpoint {
                         {
                             Ok(tls_stream) => {
                                 if tls_acceptor.is_some() {
-                                    log::debug!("TLS handshake successful with {peer_addr}");
+                                    tracing::debug!("TLS handshake successful with {peer_addr}");
                                 }
                                 let mut handler = RtmpPublisherHandler::new(
                                     tls_stream,
@@ -156,14 +156,14 @@ impl RtmpInboundEndpoint {
                                 );
 
                                 if let Err(e) = handler.run().await.or_fail() {
-                                    log::error!("RTMP publisher handler error: {e}");
+                                    tracing::error!("RTMP publisher handler error: {e}");
                                     handler.stats.total_error_disconnected_clients.increment();
                                 }
                                 handler.stats.total_disconnected_clients.increment();
-                                log::debug!("RTMP publisher disconnected: {peer_addr}");
+                                tracing::debug!("RTMP publisher disconnected: {peer_addr}");
                             }
                             Err(e) => {
-                                log::error!("Connection setup failed with {peer_addr}: {e}");
+                                tracing::error!("Connection setup failed with {peer_addr}: {e}");
                                 stats.total_error_disconnected_clients.increment();
                                 stats.total_disconnected_clients.increment();
                             }
@@ -172,7 +172,7 @@ impl RtmpInboundEndpoint {
                 }
                 Ok(Err(e)) => return Err(e).or_fail(),
                 Err(_) => {
-                    log::info!("RTMP server lifetime expired, shutting down");
+                    tracing::info!("RTMP server lifetime expired, shutting down");
                     break;
                 }
             }
@@ -246,7 +246,7 @@ impl RtmpPublisherHandler {
                     shiguredo_rtmp::RtmpConnectionEvent::AudioReceived(_)
                         | shiguredo_rtmp::RtmpConnectionEvent::VideoReceived(_)
                 ) {
-                    log::debug!("RTMP event: {:?}", event);
+                    tracing::debug!("RTMP event: {:?}", event);
                 }
                 self.stats.total_event_count.increment();
                 self.handle_event(&event).or_fail()?;
@@ -295,7 +295,7 @@ impl RtmpPublisherHandler {
             } => {
                 if app == &self.expected_app && stream_name == &self.expected_stream_name {
                     self.connection.accept().or_fail()?;
-                    log::debug!("Client started publishing stream: {}/{}", app, stream_name);
+                    tracing::debug!("Client started publishing stream: {}/{}", app, stream_name);
                 } else {
                     self.connection
                         .reject(&format!(
@@ -303,7 +303,7 @@ impl RtmpPublisherHandler {
                             app, stream_name, self.expected_app, self.expected_stream_name
                         ))
                         .or_fail()?;
-                    log::warn!(
+                    tracing::warn!(
                         "Client requested invalid stream: {}/{}, expected: {}/{}",
                         app,
                         stream_name,
@@ -349,7 +349,7 @@ impl RtmpPublisherHandler {
     async fn handle_stream_read(&mut self, result: std::io::Result<usize>) -> orfail::Result<bool> {
         match result {
             Ok(0) => {
-                log::debug!("Connection closed by publisher");
+                tracing::debug!("Connection closed by publisher");
                 Ok(false)
             }
             Ok(n) => {
@@ -360,7 +360,7 @@ impl RtmpPublisherHandler {
                 Ok(true)
             }
             Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
-                log::debug!("Connection closed by publisher");
+                tracing::debug!("Connection closed by publisher");
                 Ok(false)
             }
             Err(e) => Err(e).or_fail(),

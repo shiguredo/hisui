@@ -137,7 +137,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     )
     .or_fail()?;
     layout.audio_source_ids.clear();
-    log::debug!("layout: {layout:?}");
+    tracing::debug!("layout: {layout:?}");
     layout
         .has_video()
         .or_fail_with(|()| "no video sources".to_owned())?;

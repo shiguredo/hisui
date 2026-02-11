@@ -68,7 +68,7 @@ impl RtmpOutboundEndpoint {
             };
 
             if let Err(e) = server.run().await.or_fail() {
-                log::error!("RTMP play server error: {e}");
+                tracing::error!("RTMP play server error: {e}");
                 server.stats.error.set(true);
             }
         });
@@ -159,13 +159,13 @@ struct RtmpPlayServer {
 impl RtmpPlayServer {
     async fn run(&mut self) -> orfail::Result<()> {
         let addr = format!("{}:{}", self.url.host, self.url.port);
-        log::debug!("Starting RTMP outbound endpoint on {addr}");
+        tracing::debug!("Starting RTMP outbound endpoint on {addr}");
 
         let listener = TcpListener::bind(&addr).await.or_fail()?;
 
         // URL スキームから TLS を判定（rtmps:// の場合は TLS を有効化）
         let tls_enabled = self.url.tls;
-        log::debug!(
+        tracing::debug!(
             "TLS is {}",
             if tls_enabled { "enabled" } else { "disabled" }
         );
@@ -196,7 +196,7 @@ impl RtmpPlayServer {
             }
         }
 
-        log::debug!("RTMP outbound endpoint finished");
+        tracing::debug!("RTMP outbound endpoint finished");
         Ok(())
     }
 
@@ -222,7 +222,7 @@ impl RtmpPlayServer {
         tls_acceptor: Option<Arc<tokio_rustls::TlsAcceptor>>,
     ) -> orfail::Result<()> {
         let (stream, peer_addr) = accept_result.or_fail()?;
-        log::debug!("New RTMP client connection from: {peer_addr}");
+        tracing::debug!("New RTMP client connection from: {peer_addr}");
 
         let (client_tx, client_rx) = tokio::sync::mpsc::channel(CLIENT_FRAME_CHANNEL_SIZE);
         self.clients.push(client_tx);
@@ -249,7 +249,7 @@ impl RtmpPlayServer {
             match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await {
                 Ok(tls_stream) => {
                     if tls_acceptor.is_some() {
-                        log::debug!("TLS handshake successful with {peer_addr}");
+                        tracing::debug!("TLS handshake successful with {peer_addr}");
                     }
                     let mut handler = RtmpClientHandler::new(
                         tls_stream,
@@ -261,14 +261,14 @@ impl RtmpPlayServer {
                     );
 
                     if let Err(e) = handler.run().await.or_fail() {
-                        log::error!("RTMP client handler error: {e}");
+                        tracing::error!("RTMP client handler error: {e}");
                         handler.stats.total_error_disconnected_clients.increment();
                     }
                     handler.stats.total_disconnected_clients.increment();
-                    log::debug!("RTMP client disconnected: {peer_addr}");
+                    tracing::debug!("RTMP client disconnected: {peer_addr}");
                 }
                 Err(e) => {
-                    log::error!("Connection setup failed with {peer_addr}: {e}");
+                    tracing::error!("Connection setup failed with {peer_addr}: {e}");
                     stats.total_error_disconnected_clients.increment();
                     stats.total_disconnected_clients.increment();
                 }
@@ -328,7 +328,7 @@ impl RtmpClientHandler {
     async fn run(&mut self) -> orfail::Result<()> {
         loop {
             while let Some(event) = self.connection.next_event() {
-                log::debug!("RTMP event: {:?}", event);
+                tracing::debug!("RTMP event: {:?}", event);
                 self.stats.total_event_count.increment();
                 self.handle_event(event).or_fail()?;
             }
@@ -360,7 +360,7 @@ impl RtmpClientHandler {
             } => {
                 if app == self.expected_app && stream_name == self.expected_stream_name {
                     self.connection.accept().or_fail()?;
-                    log::debug!("Client started playing stream: {}/{}", app, stream_name);
+                    tracing::debug!("Client started playing stream: {}/{}", app, stream_name);
                 } else {
                     self.connection
                         .reject(&format!(
@@ -368,7 +368,7 @@ impl RtmpClientHandler {
                             app, stream_name, self.expected_app, self.expected_stream_name
                         ))
                         .or_fail()?;
-                    log::warn!(
+                    tracing::warn!(
                         "Client requested invalid stream: {}/{}, expected: {}/{}",
                         app,
                         stream_name,
@@ -398,7 +398,7 @@ impl RtmpClientHandler {
                 Ok(true)
             }
             None => {
-                log::debug!("Media feed ended for client");
+                tracing::debug!("Media feed ended for client");
                 Ok(false)
             }
         }
@@ -432,7 +432,7 @@ impl RtmpClientHandler {
     async fn handle_stream_read(&mut self, result: std::io::Result<usize>) -> orfail::Result<bool> {
         match result {
             Ok(0) => {
-                log::debug!("Connection closed by client");
+                tracing::debug!("Connection closed by client");
                 Ok(false)
             }
             Ok(n) => {
@@ -444,7 +444,7 @@ impl RtmpClientHandler {
             }
             Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
                 // 正常終了扱い
-                log::debug!("Connection closed by client");
+                tracing::debug!("Connection closed by client");
                 Ok(false)
             }
             Err(e) => Err(e).or_fail(),

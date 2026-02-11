@@ -106,7 +106,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                     .to_string();
                 let port = uri.port().unwrap_or(if is_https { 443 } else { 80 });
                 let path_prefix = uri.path().to_string();
-                log::info!("Reverse proxy upstream: {url}");
+                tracing::info!("Reverse proxy upstream: {url}");
                 Some(Arc::new(UpstreamConfig {
                     host,
                     port,
@@ -135,7 +135,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
         let addr = format!("0.0.0.0:{http_port}");
         let listener = TcpListener::bind(&addr).await.or_fail()?;
-        log::info!("{scheme} server listening on {scheme}://{addr}");
+        tracing::info!("{scheme} server listening on {scheme}://{addr}");
 
         loop {
             let (stream, peer_addr) = listener.accept().await.or_fail()?;
@@ -151,13 +151,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 {
                     Ok(s) => s,
                     Err(e) => {
-                        log::warn!("TLS handshake error from {peer_addr}: {e}");
+                        tracing::warn!("TLS handshake error from {peer_addr}: {e}");
                         return;
                     }
                 };
 
                 if let Err(e) = handle_connection(stream, peer_addr, upstream_config).await {
-                    log::warn!("Client error from {peer_addr}: {e}");
+                    tracing::warn!("Client error from {peer_addr}: {e}");
                 }
             });
         }
@@ -198,7 +198,7 @@ async fn handle_connection(
             if let Some(response) = local_response {
                 if let Err(e) = write_response(&mut writer, &response).await {
                     if is_client_disconnect(&e) {
-                        log::warn!("499 Client Closed Request from {peer_addr}");
+                        tracing::warn!("499 Client Closed Request from {peer_addr}");
                         return Ok(());
                     }
                     return Err(e.into());
@@ -208,7 +208,7 @@ async fn handle_connection(
                     if let Err(e) =
                         proxy_to_upstream(&mut writer, &request, upstream, peer_addr).await
                     {
-                        log::warn!("Reverse proxy error for {peer_addr}: {e}");
+                        tracing::warn!("Reverse proxy error for {peer_addr}: {e}");
                         let error_response = Response::new(502, "Bad Gateway");
                         // 502 送信失敗は無視する（クライアントが切断している可能性がある）
                         let _ = write_response(&mut writer, &error_response).await;
@@ -217,7 +217,7 @@ async fn handle_connection(
                     let response = Response::new(404, "Not Found");
                     if let Err(e) = write_response(&mut writer, &response).await {
                         if is_client_disconnect(&e) {
-                            log::warn!("499 Client Closed Request from {peer_addr}");
+                            tracing::warn!("499 Client Closed Request from {peer_addr}");
                             return Ok(());
                         }
                         return Err(e.into());
@@ -227,7 +227,7 @@ async fn handle_connection(
                 let response = Response::new(404, "Not Found");
                 if let Err(e) = write_response(&mut writer, &response).await {
                     if is_client_disconnect(&e) {
-                        log::warn!("499 Client Closed Request from {peer_addr}");
+                        tracing::warn!("499 Client Closed Request from {peer_addr}");
                         return Ok(());
                     }
                     return Err(e.into());
@@ -235,7 +235,7 @@ async fn handle_connection(
             }
 
             if !keep_alive {
-                log::debug!("Connection close requested by {peer_addr}");
+                tracing::debug!("Connection close requested by {peer_addr}");
                 return Ok(());
             }
         }
@@ -312,14 +312,14 @@ async fn proxy_to_upstream(
             // レスポンスを downstream に転送する
             if let Err(e) = downstream.write_all(&response.encode()).await {
                 if is_client_disconnect(&e) {
-                    log::warn!("499 Client Closed Request from {client_addr}");
+                    tracing::warn!("499 Client Closed Request from {client_addr}");
                     return Ok(());
                 }
                 return Err(e.into());
             }
             if let Err(e) = downstream.flush().await {
                 if is_client_disconnect(&e) {
-                    log::warn!("499 Client Closed Request from {client_addr}");
+                    tracing::warn!("499 Client Closed Request from {client_addr}");
                     return Ok(());
                 }
                 return Err(e.into());

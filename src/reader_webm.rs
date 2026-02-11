@@ -290,7 +290,7 @@ impl VideoTrackHeader {
             if reader.is_eos() {
                 // 映像トラックが存在しないパターン
                 // コーデックの値は、実際に参照されることはないので、あり得ない値を適当に設定しておく
-                log::warn!("no video track");
+                tracing::warn!("no video track");
                 return Ok(Self {
                     codec: VideoFormat::I420,
                 });
