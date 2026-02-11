@@ -22,7 +22,6 @@ libvpx = ["shiguredo_libvpx"]
 
 tracing = "=0.1.41"
 tracing-subscriber = { version = "=0.3.19", features = ["fmt", "std"] }
-tracing-log = "=0.2.0"
 noargs = "=0.4.2"
 nojson = "=0.3.6"
 orfail = "=2.0.0"

@@ -60,9 +60,8 @@ impl tracing::field::Visit for MessageVisitor<'_> {
 }
 
 pub fn init(level: tracing::level_filters::LevelFilter) {
-    // サブクレートの log 出力を tracing に橋渡しする
-    tracing_log::LogTracer::init().expect("Failed to initialize LogTracer");
-
+    // .init() 内部で tracing_log::LogTracer が自動的に初期化されるため、
+    // サブクレートの log 出力も tracing に橋渡しされる
     tracing_subscriber::fmt()
         .with_max_level(level)
         .event_format(Formatter)

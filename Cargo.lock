@@ -299,7 +299,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
- "tracing-log",
  "tracing-subscriber",
 ]
 
