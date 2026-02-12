@@ -53,11 +53,11 @@ impl RtmpInboundEndpoint {
     }
 
     /// Start the RTMP Inbound Endpoint
-    pub async fn run(self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
+    pub async fn run(self, handle: crate::ProcessorHandle) -> crate::Result<()> {
         let addr = format!("{}:{}", self.url.host, self.url.port);
         tracing::debug!("Starting RTMP inbound endpoint on {addr}");
 
-        let listener = TcpListener::bind(&addr).await.or_fail()?;
+        let listener = TcpListener::bind(&addr).await?;
 
         let tls_enabled = self.url.tls;
         tracing::debug!(
@@ -66,12 +66,10 @@ impl RtmpInboundEndpoint {
         );
 
         let tls_acceptor = if tls_enabled {
-            let (cert_path, key_path) = self.get_cert_and_key_paths().or_fail()?;
-            Some(
-                create_server_tls_acceptor(&cert_path, &key_path)
-                    .await
-                    .or_fail()?,
-            )
+            let (cert_path, key_path) = self
+                .get_cert_and_key_paths()
+                .map_err(|e| crate::Error::new(e.to_string()))?;
+            Some(create_server_tls_acceptor(&cert_path, &key_path).await?)
         } else {
             None
         };
@@ -111,16 +109,14 @@ impl RtmpInboundEndpoint {
                             "{}_video",
                             self.url.stream_name
                         )))
-                        .await
-                        .or_fail()?;
+                        .await?;
 
                     let audio_track_tx = handle
                         .publish_track(crate::TrackId::new(format!(
                             "{}_audio",
                             self.url.stream_name
                         )))
-                        .await
-                        .or_fail()?;
+                        .await?;
 
                     tokio::spawn(async move {
                         let frame_handler_stats = crate::rtmp::RtmpIncomingFrameHandlerStats {
@@ -170,7 +166,7 @@ impl RtmpInboundEndpoint {
                         }
                     });
                 }
-                Ok(Err(e)) => return Err(e).or_fail(),
+                Ok(Err(e)) => return Err(e.into()),
                 Err(_) => {
                     tracing::info!("RTMP server lifetime expired, shutting down");
                     break;

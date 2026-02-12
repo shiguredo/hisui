@@ -53,11 +53,14 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             Default::default(),
         );
         pipeline_handle
-            .spawn_processor(crate::ProcessorId::new("rtmp_inbound"), |handle| {
-                endpoint.run(handle)
-            })
-            .await
-            .or_fail()?;
+            .spawn_processor(
+                crate::ProcessorId::new("rtmp_inbound"),
+                |handle| async move {
+                    endpoint.run(handle).await?;
+                    Ok::<(), crate::Error>(())
+                },
+            )
+            .await?;
 
         // MP4 Writer を起動
         let writer = crate::writer_mp4::Mp4Writer::new(
@@ -66,19 +69,24 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             Some(AUDIO_STREAM_ID),
             Some(VIDEO_STREAM_ID),
         )
-        .or_fail()?;
+        .map_err(|e| crate::Error::new(e.to_string()))?;
         pipeline_handle
-            .spawn_processor(crate::ProcessorId::new("mp4_writer"), move |handle| {
-                writer.run(
-                    handle,
-                    Some(crate::TrackId::new(format!("{stream_name}_audio"))),
-                    Some(crate::TrackId::new(format!("{stream_name}_video"))),
-                )
-            })
-            .await
-            .or_fail()?;
+            .spawn_processor(
+                crate::ProcessorId::new("mp4_writer"),
+                move |handle| async move {
+                    writer
+                        .run(
+                            handle,
+                            Some(crate::TrackId::new(format!("{stream_name}_audio"))),
+                            Some(crate::TrackId::new(format!("{stream_name}_video"))),
+                        )
+                        .await?;
+                    Ok::<(), crate::Error>(())
+                },
+            )
+            .await?;
 
-        Ok::<(), orfail::Failure>(())
+        Ok::<(), crate::Error>(())
     });
 
     runtime.block_on(pipeline.run());

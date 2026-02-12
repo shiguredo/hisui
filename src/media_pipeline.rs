@@ -1,5 +1,3 @@
-use orfail::OrFail;
-
 #[derive(Debug)]
 pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<Command>>,
@@ -115,12 +113,12 @@ impl MediaPipeline {
         &mut self,
         processor_id: ProcessorId,
         track_id: TrackId,
-    ) -> Option<MessageSender> {
+    ) -> Result<MessageSender, PublishTrackError> {
         tracing::debug!("publish track: processor={processor_id}, track={track_id}");
 
         if !self.processors.contains(&processor_id) {
             tracing::warn!("attempt to publish track from unregistered processor: {processor_id}");
-            return None;
+            return Err(PublishTrackError::UnregisteredProcessor);
         }
 
         // トラックが存在しない場合は新規作成
@@ -133,7 +131,7 @@ impl MediaPipeline {
             tracing::warn!(
                 "publisher conflict for track: processor={processor_id}, track={track_id}"
             );
-            return None;
+            return Err(PublishTrackError::DuplicateTrackId);
         }
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -144,7 +142,7 @@ impl MediaPipeline {
             let _ = command_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
         }
 
-        Some(MessageSender {
+        Ok(MessageSender {
             rx: command_rx,
             txs: Vec::new(),
         })
@@ -180,15 +178,16 @@ pub struct MediaPipelineHandle {
 }
 
 impl MediaPipelineHandle {
-    pub async fn spawn_processor<F, T>(&self, processor_id: ProcessorId, f: F) -> orfail::Result<()>
+    pub async fn spawn_processor<F, T>(
+        &self,
+        processor_id: ProcessorId,
+        f: F,
+    ) -> Result<(), RegisterProcessorError>
     where
         F: FnOnce(ProcessorHandle) -> T + Send + 'static,
-        T: Future<Output = orfail::Result<()>> + Send,
+        T: Future<Output = crate::Result<()>> + Send,
     {
-        let handle = self
-            .register_processor(processor_id.clone())
-            .await
-            .or_fail()?;
+        let handle = self.register_processor(processor_id.clone()).await?;
         tokio::spawn(async move {
             if let Err(e) = f(handle).await {
                 tracing::error!("failed to run processor {processor_id}: {e}");
@@ -197,24 +196,30 @@ impl MediaPipelineHandle {
         Ok(())
     }
 
-    async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+    pub async fn register_processor(
+        &self,
+        processor_id: ProcessorId,
+    ) -> Result<ProcessorHandle, RegisterProcessorError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::RegisterProcessor {
             processor_id: processor_id.clone(),
             reply_tx,
         };
+
+        // [NOTE] パイプライン終了は次の rx で判定できるのでここでは返り値の考慮は不要
         self.send(command);
-        if let Ok(true) = reply_rx.await {
-            Some(ProcessorHandle {
+
+        match reply_rx.await {
+            Ok(true) => Ok(ProcessorHandle {
                 pipeline_handle: self.clone(),
                 processor_id,
-            })
-        } else {
-            None
+            }),
+            Ok(false) => Err(RegisterProcessorError::DuplicateProcessorId),
+            Err(_) => Err(RegisterProcessorError::PipelineTerminated),
         }
     }
 
-    // すでに MediaPipeline が終了（中断）されている場合には false が返される。
+    // すでに MediaPipeline が終了している場合には false が返される。
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
     //   応答を受け取らない場合にはそもそもここの成功・失敗に依存するようなコマンドであるべきではないため）
@@ -235,7 +240,7 @@ enum Command {
     PublishTrack {
         processor_id: ProcessorId,
         track_id: TrackId,
-        reply_tx: tokio::sync::oneshot::Sender<Option<MessageSender>>,
+        reply_tx: tokio::sync::oneshot::Sender<Result<MessageSender, PublishTrackError>>,
     },
     SubscribeTrack {
         processor_id: ProcessorId,
@@ -263,6 +268,20 @@ impl std::fmt::Display for ProcessorId {
     }
 }
 
+impl nojson::DisplayJson for ProcessorId {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get())
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ProcessorId {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TrackId(String);
 
@@ -279,6 +298,20 @@ impl TrackId {
 impl std::fmt::Display for TrackId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl nojson::DisplayJson for TrackId {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get())
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for TrackId {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
     }
 }
 
@@ -299,7 +332,10 @@ impl ProcessorHandle {
         &self.processor_id
     }
 
-    pub async fn publish_track(&self, track_id: TrackId) -> Option<MessageSender> {
+    pub async fn publish_track(
+        &self,
+        track_id: TrackId,
+    ) -> Result<MessageSender, PublishTrackError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::PublishTrack {
             processor_id: self.processor_id.clone(),
@@ -307,7 +343,10 @@ impl ProcessorHandle {
             reply_tx,
         };
         self.pipeline_handle.send(command);
-        reply_rx.await.ok()?
+        match reply_rx.await {
+            Ok(result) => result,
+            Err(_) => Err(PublishTrackError::PipelineTerminated),
+        }
     }
 
     pub fn subscribe_track(&self, track_id: TrackId) -> MessageReceiver {
@@ -338,7 +377,7 @@ impl ProcessorHandle {
 impl Drop for ProcessorHandle {
     fn drop(&mut self) {
         // 登録を解除する。
-        //パイプラインが中断されている場合には送信に失敗するが、そもそもその状況ではすでにエントリは削除されているので問題ないため、結果は無視する。
+        //パイプラインが終了している場合には送信に失敗するが、そもそもその状況ではすでにエントリは削除されているので問題ないため、結果は無視する。
         self.pipeline_handle.send(Command::DeregisterProcessor {
             processor_id: self.processor_id.clone(),
         });
@@ -443,3 +482,44 @@ impl MessageReceiver {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterProcessorError {
+    /// パイプラインが終了している
+    PipelineTerminated,
+    /// プロセッサーIDが重複している
+    DuplicateProcessorId,
+}
+
+impl std::fmt::Display for RegisterProcessorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
+            Self::DuplicateProcessorId => write!(f, "Processor ID already registered"),
+        }
+    }
+}
+
+impl std::error::Error for RegisterProcessorError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishTrackError {
+    /// パイプラインが終了している
+    PipelineTerminated,
+    /// トラックIDが重複している
+    DuplicateTrackId,
+    /// プロセッサーが未登録
+    UnregisteredProcessor,
+}
+
+impl std::fmt::Display for PublishTrackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
+            Self::DuplicateTrackId => write!(f, "Track ID already published"),
+            Self::UnregisteredProcessor => write!(f, "Processor is not registered"),
+        }
+    }
+}
+
+impl std::error::Error for PublishTrackError {}
