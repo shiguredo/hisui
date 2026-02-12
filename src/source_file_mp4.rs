@@ -136,6 +136,18 @@ impl Mp4FileSource {
                 .map_err(|e| Error::new(format!("Failed to spawn video decoder: {e}")))?;
         }
 
+        let mut bridge_tasks = Vec::new();
+        if let Some(track_id) = self.audio_track_id.clone() {
+            let task =
+                start_bridge("audio", track_id, &inner_handle, &outer_handle, &base_id).await?;
+            bridge_tasks.push(task);
+        }
+        if let Some(track_id) = self.video_track_id.clone() {
+            let task =
+                start_bridge("video", track_id, &inner_handle, &outer_handle, &base_id).await?;
+            bridge_tasks.push(task);
+        }
+
         let options = Mp4FileReaderOptions {
             realtime: self.realtime,
             loop_playback: self.loop_playback,
@@ -156,18 +168,6 @@ impl Mp4FileSource {
             })
             .await
             .map_err(|e| Error::new(format!("Failed to spawn mp4 file reader: {e}")))?;
-
-        let mut bridge_tasks = Vec::new();
-        if let Some(track_id) = self.audio_track_id.clone() {
-            let task =
-                start_bridge("audio", track_id, &inner_handle, &outer_handle, &base_id).await?;
-            bridge_tasks.push(task);
-        }
-        if let Some(track_id) = self.video_track_id.clone() {
-            let task =
-                start_bridge("video", track_id, &inner_handle, &outer_handle, &base_id).await?;
-            bridge_tasks.push(task);
-        }
 
         drop(inner_handle);
         drop(outer_handle);
@@ -279,6 +279,12 @@ mod tests {
         });
 
         let video_track_id = TrackId::new("mp4_file_source_test_video");
+        let subscriber_handle = handle.clone();
+        let subscriber = subscriber_handle
+            .register_processor(ProcessorId::new("mp4_file_source_test_subscriber"))
+            .await?;
+        let mut rx = subscriber.subscribe_track(video_track_id.clone());
+
         let source = Mp4FileSource::new(
             "testdata/archive-red-320x320-av1.mp4",
             false,
@@ -286,17 +292,10 @@ mod tests {
             None,
             Some(video_track_id.clone()),
         );
-
         let source_handle = handle.clone();
         let source_task = tokio::spawn(async move { source.run(source_handle).await });
 
-        let subscriber_handle = handle.clone();
         drop(handle);
-
-        let subscriber = subscriber_handle
-            .register_processor(ProcessorId::new("mp4_file_source_test_subscriber"))
-            .await?;
-        let mut rx = subscriber.subscribe_track(video_track_id);
 
         let mut decoded_count = 0;
         loop {
