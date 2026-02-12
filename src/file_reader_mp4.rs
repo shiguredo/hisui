@@ -82,10 +82,7 @@ impl Mp4FileReader {
     ) -> Result<(Option<TrackSender>, Option<TrackSender>)> {
         let audio_sender = match self.options.audio_track_id.take() {
             Some(track_id) => {
-                let sender = handle
-                    .publish_track(track_id)
-                    .await
-                    .ok_or_else(|| Error::new("Failed to publish audio track"))?;
+                let sender = handle.publish_track(track_id).await?;
                 Some(TrackSender::new(sender))
             }
             None => None,
@@ -93,10 +90,7 @@ impl Mp4FileReader {
 
         let video_sender = match self.options.video_track_id.take() {
             Some(track_id) => {
-                let sender = handle
-                    .publish_track(track_id)
-                    .await
-                    .ok_or_else(|| Error::new("Failed to publish video track"))?;
+                let sender = handle.publish_track(track_id).await?;
                 Some(TrackSender::new(sender))
             }
             None => None,

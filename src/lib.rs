@@ -91,7 +91,7 @@ pub use error::Error;
 pub use media::MediaSample;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineHandle, Message, MessageReceiver, MessageSender,
-    ProcessorHandle, ProcessorId, RegisterProcessorError, Syn, TrackId,
+    ProcessorHandle, ProcessorId, PublishTrackError, RegisterProcessorError, Syn, TrackId,
 };
 pub use video::VideoFrame;
 

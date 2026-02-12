@@ -113,12 +113,12 @@ impl MediaPipeline {
         &mut self,
         processor_id: ProcessorId,
         track_id: TrackId,
-    ) -> Option<MessageSender> {
+    ) -> Result<MessageSender, PublishTrackError> {
         tracing::debug!("publish track: processor={processor_id}, track={track_id}");
 
         if !self.processors.contains(&processor_id) {
             tracing::warn!("attempt to publish track from unregistered processor: {processor_id}");
-            return None;
+            return Err(PublishTrackError::UnregisteredProcessor);
         }
 
         // トラックが存在しない場合は新規作成
@@ -131,7 +131,7 @@ impl MediaPipeline {
             tracing::warn!(
                 "publisher conflict for track: processor={processor_id}, track={track_id}"
             );
-            return None;
+            return Err(PublishTrackError::DuplicateTrackId);
         }
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -142,7 +142,7 @@ impl MediaPipeline {
             let _ = command_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
         }
 
-        Some(MessageSender {
+        Ok(MessageSender {
             rx: command_rx,
             txs: Vec::new(),
         })
@@ -214,7 +214,7 @@ impl MediaPipelineHandle {
                 pipeline_handle: self.clone(),
                 processor_id,
             }),
-            Ok(false) => Err(RegisterProcessorError::DuplicateId),
+            Ok(false) => Err(RegisterProcessorError::DuplicateProcessorId),
             Err(_) => Err(RegisterProcessorError::PipelineTerminated),
         }
     }
@@ -240,7 +240,7 @@ enum Command {
     PublishTrack {
         processor_id: ProcessorId,
         track_id: TrackId,
-        reply_tx: tokio::sync::oneshot::Sender<Option<MessageSender>>,
+        reply_tx: tokio::sync::oneshot::Sender<Result<MessageSender, PublishTrackError>>,
     },
     SubscribeTrack {
         processor_id: ProcessorId,
@@ -332,7 +332,10 @@ impl ProcessorHandle {
         &self.processor_id
     }
 
-    pub async fn publish_track(&self, track_id: TrackId) -> Option<MessageSender> {
+    pub async fn publish_track(
+        &self,
+        track_id: TrackId,
+    ) -> Result<MessageSender, PublishTrackError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::PublishTrack {
             processor_id: self.processor_id.clone(),
@@ -340,7 +343,10 @@ impl ProcessorHandle {
             reply_tx,
         };
         self.pipeline_handle.send(command);
-        reply_rx.await.ok()?
+        match reply_rx.await {
+            Ok(result) => result,
+            Err(_) => Err(PublishTrackError::PipelineTerminated),
+        }
     }
 
     pub fn subscribe_track(&self, track_id: TrackId) -> MessageReceiver {
@@ -482,16 +488,38 @@ pub enum RegisterProcessorError {
     /// パイプラインが終了している
     PipelineTerminated,
     /// プロセッサーIDが重複している
-    DuplicateId,
+    DuplicateProcessorId,
 }
 
 impl std::fmt::Display for RegisterProcessorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
-            Self::DuplicateId => write!(f, "Processor ID already registered"),
+            Self::DuplicateProcessorId => write!(f, "Processor ID already registered"),
         }
     }
 }
 
 impl std::error::Error for RegisterProcessorError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishTrackError {
+    /// パイプラインが終了している
+    PipelineTerminated,
+    /// トラックIDが重複している
+    DuplicateTrackId,
+    /// プロセッサーが未登録
+    UnregisteredProcessor,
+}
+
+impl std::fmt::Display for PublishTrackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
+            Self::DuplicateTrackId => write!(f, "Track ID already published"),
+            Self::UnregisteredProcessor => write!(f, "Processor is not registered"),
+        }
+    }
+}
+
+impl std::error::Error for PublishTrackError {}

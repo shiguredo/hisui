@@ -64,10 +64,7 @@ impl AudioDecoder {
         output_track_id: TrackId,
     ) -> Result<()> {
         let mut input_rx = handle.subscribe_track(input_track_id);
-        let mut output_tx = handle
-            .publish_track(output_track_id)
-            .await
-            .ok_or_else(|| Error::new("Failed to publish audio track"))?;
+        let mut output_tx = handle.publish_track(output_track_id).await?;
 
         loop {
             let message = input_rx.recv().await;
@@ -285,10 +282,7 @@ impl VideoDecoder {
         output_track_id: TrackId,
     ) -> Result<()> {
         let mut input_rx = handle.subscribe_track(input_track_id);
-        let mut output_tx = handle
-            .publish_track(output_track_id)
-            .await
-            .ok_or_else(|| Error::new("Failed to publish video track"))?;
+        let mut output_tx = handle.publish_track(output_track_id).await?;
 
         loop {
             let message = input_rx.recv().await;
