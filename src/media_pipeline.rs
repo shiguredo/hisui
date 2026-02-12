@@ -196,6 +196,7 @@ impl MediaPipelineHandle {
         Ok(())
     }
 
+    /// [NOTE] こちらは内部寄りなので、可能な限りは spawn_processor() を使うこと
     pub async fn register_processor(
         &self,
         processor_id: ProcessorId,
