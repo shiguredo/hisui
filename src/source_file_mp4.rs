@@ -12,11 +12,11 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Mp4FileSource {
-    path: PathBuf,
-    realtime: bool,
-    loop_playback: bool,
-    audio_track_id: Option<TrackId>,
-    video_track_id: Option<TrackId>,
+    pub path: PathBuf,
+    pub realtime: bool,
+    pub loop_playback: bool,
+    pub audio_track_id: Option<TrackId>,
+    pub video_track_id: Option<TrackId>,
 }
 
 impl nojson::DisplayJson for Mp4FileSource {
@@ -47,33 +47,17 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
         let loop_playback: Option<bool> = value.to_member("loopPlayback")?.try_into()?;
         let audio_track_id: Option<TrackId> = value.to_member("audioTrackId")?.try_into()?;
         let video_track_id: Option<TrackId> = value.to_member("videoTrackId")?.try_into()?;
-        Ok(Self::new(
+        Ok(Self {
             path,
-            realtime.unwrap_or(true),
-            loop_playback.unwrap_or(true),
+            realtime: realtime.unwrap_or(true),
+            loop_playback: loop_playback.unwrap_or(true),
             audio_track_id,
             video_track_id,
-        ))
+        })
     }
 }
 
 impl Mp4FileSource {
-    pub fn new<P: Into<PathBuf>>(
-        path: P,
-        realtime: bool,
-        loop_playback: bool,
-        audio_track_id: Option<TrackId>,
-        video_track_id: Option<TrackId>,
-    ) -> Self {
-        Self {
-            path: path.into(),
-            realtime,
-            loop_playback,
-            audio_track_id,
-            video_track_id,
-        }
-    }
-
     pub async fn run(self, outer_handle: MediaPipelineHandle) -> Result<()> {
         self.validate()?;
         let base_id = self.base_id();
@@ -285,13 +269,13 @@ mod tests {
             .await?;
         let mut rx = subscriber.subscribe_track(video_track_id.clone());
 
-        let source = Mp4FileSource::new(
-            "testdata/archive-red-320x320-av1.mp4",
-            false,
-            false,
-            None,
-            Some(video_track_id.clone()),
-        );
+        let source = Mp4FileSource {
+            path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),
+            realtime: false,
+            loop_playback: false,
+            audio_track_id: None,
+            video_track_id: Some(video_track_id.clone()),
+        };
         let source_handle = handle.clone();
         let source_task = tokio::spawn(async move { source.run(source_handle).await });
 
