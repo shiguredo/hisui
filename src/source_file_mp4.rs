@@ -82,8 +82,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
 
 impl Mp4FileSource {
     pub async fn run(self, outer_handle: MediaPipelineHandle) -> Result<()> {
-        let base_id = self.processor_id.get();
-
         // reader / decoder を繋ぐための内部パイプラインを作成する
         let inner_pipeline = MediaPipeline::new();
         let inner_handle = inner_pipeline.handle();
@@ -92,20 +90,19 @@ impl Mp4FileSource {
         let audio_output = self.audio_track_id.clone();
         let audio_encoded = audio_output
             .as_ref()
-            .map(|id| TrackId::new(format!("{}_encoded", id.get())));
+            .map(|id| TrackId::new(format!("{id}_encoded")));
         let video_output = self.video_track_id.clone();
         let video_encoded = video_output
             .as_ref()
-            .map(|id| TrackId::new(format!("{}_encoded", id.get())));
+            .map(|id| TrackId::new(format!("{id}_encoded")));
 
         if let (Some(input_track_id), Some(output_track_id)) =
             (audio_encoded.clone(), audio_output.clone())
         {
             let decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1))
                 .map_err(|e| Error::new(e.to_string()))?;
-            let processor_id = ProcessorId::new(format!("audio_decoder_{base_id}"));
             inner_handle
-                .spawn_processor(processor_id, |handle| {
+                .spawn_processor(ProcessorId::new("audio_decoder"), |handle| {
                     let decoder = decoder;
                     async move {
                         if let Err(e) = decoder.run(handle, input_track_id, output_track_id).await {
@@ -124,11 +121,11 @@ impl Mp4FileSource {
             let decoder = VideoDecoder::new(
                 MediaStreamId::new(2),
                 MediaStreamId::new(3),
+                // TODO: 将来的には openh264 関連のオプションを渡せるようにする（or 環境変数経由でとってくる）
                 VideoDecoderOptions::default(),
             );
-            let processor_id = ProcessorId::new(format!("video_decoder_{base_id}"));
             inner_handle
-                .spawn_processor(processor_id, |handle| {
+                .spawn_processor(ProcessorId::new("video_decoder"), |handle| {
                     let decoder = decoder;
                     async move {
                         if let Err(e) = decoder.run(handle, input_track_id, output_track_id).await {
@@ -159,9 +156,8 @@ impl Mp4FileSource {
             video_track_id: video_encoded,
         };
         let reader = Mp4FileReader::new(&self.path, options)?;
-        let processor_id = ProcessorId::new(format!("mp4_file_reader_{base_id}"));
         inner_handle
-            .spawn_processor(processor_id, |handle| {
+            .spawn_processor(ProcessorId::new("reader"), |handle| {
                 let reader = reader;
                 async move {
                     if let Err(e) = reader.run(handle).await {
