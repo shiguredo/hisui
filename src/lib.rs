@@ -54,6 +54,7 @@ pub mod media_pipeline;
 pub mod metadata;
 pub mod mixer_audio;
 pub mod mixer_video;
+pub mod mixer_video2;
 pub mod optuna;
 pub mod outbound_endpoint_rtmp;
 pub mod pipeline;
