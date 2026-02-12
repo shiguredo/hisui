@@ -1,5 +1,3 @@
-use orfail::OrFail;
-
 #[derive(Debug)]
 pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<Command>>,
@@ -180,15 +178,16 @@ pub struct MediaPipelineHandle {
 }
 
 impl MediaPipelineHandle {
-    pub async fn spawn_processor<F, T>(&self, processor_id: ProcessorId, f: F) -> orfail::Result<()>
+    pub async fn spawn_processor<F, T>(
+        &self,
+        processor_id: ProcessorId,
+        f: F,
+    ) -> Result<(), RegisterProcessorError>
     where
         F: FnOnce(ProcessorHandle) -> T + Send + 'static,
         T: Future<Output = orfail::Result<()>> + Send,
     {
-        let handle = self
-            .register_processor(processor_id.clone())
-            .await
-            .or_fail()?;
+        let handle = self.register_processor(processor_id.clone()).await?;
         tokio::spawn(async move {
             if let Err(e) = f(handle).await {
                 tracing::error!("failed to run processor {processor_id}: {e}");
@@ -197,20 +196,26 @@ impl MediaPipelineHandle {
         Ok(())
     }
 
-    async fn register_processor(&self, processor_id: ProcessorId) -> Option<ProcessorHandle> {
+    pub async fn register_processor(
+        &self,
+        processor_id: ProcessorId,
+    ) -> Result<ProcessorHandle, RegisterProcessorError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::RegisterProcessor {
             processor_id: processor_id.clone(),
             reply_tx,
         };
+
+        // [NOTE] パイプライン終了は次の rx で判定できるのでここでは返り値の考慮は不要
         self.send(command);
-        if let Ok(true) = reply_rx.await {
-            Some(ProcessorHandle {
+
+        match reply_rx.await {
+            Ok(true) => Ok(ProcessorHandle {
                 pipeline_handle: self.clone(),
                 processor_id,
-            })
-        } else {
-            None
+            }),
+            Ok(false) => Err(RegisterProcessorError::DuplicateId),
+            Err(_) => Err(RegisterProcessorError::PipelineTerminated),
         }
     }
 
@@ -443,3 +448,22 @@ impl MessageReceiver {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterProcessorError {
+    /// パイプラインが終了している
+    PipelineTerminated,
+    /// プロセッサーIDが重複している
+    DuplicateId,
+}
+
+impl std::fmt::Display for RegisterProcessorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
+            Self::DuplicateId => write!(f, "Processor ID already registered"),
+        }
+    }
+}
+
+impl std::error::Error for RegisterProcessorError {}
