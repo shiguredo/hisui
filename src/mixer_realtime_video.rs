@@ -669,4 +669,117 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn video_realtime_mixer_two_tracks_smoke() -> crate::Result<()> {
+        let pipeline = crate::MediaPipeline::new();
+        let pipeline_handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let output_track_id = TrackId::new("mixed-output");
+        let input_track_id_1 = TrackId::new("input-1");
+        let input_track_id_2 = TrackId::new("input-2");
+
+        let mixer = VideoRealtimeMixer {
+            canvas_width: 320,
+            canvas_height: 240,
+            frame_rate: FrameRate::FPS_25,
+            input_tracks: vec![
+                InputTrack {
+                    track_id: input_track_id_1.clone(),
+                    x: 0,
+                    y: 0,
+                    width: 160,
+                    height: 120,
+                    z: 0,
+                },
+                InputTrack {
+                    track_id: input_track_id_2.clone(),
+                    x: 80,
+                    y: 60,
+                    width: 160,
+                    height: 120,
+                    z: 1,
+                },
+            ],
+            output_track_id: output_track_id.clone(),
+        };
+
+        let mixer_processor = pipeline_handle
+            .register_processor(crate::ProcessorId::new("mixer"))
+            .await?;
+        let sink_processor = pipeline_handle
+            .register_processor(crate::ProcessorId::new("sink"))
+            .await?;
+        let sender1_processor = pipeline_handle
+            .register_processor(crate::ProcessorId::new("sender1"))
+            .await?;
+        let sender2_processor = pipeline_handle
+            .register_processor(crate::ProcessorId::new("sender2"))
+            .await?;
+
+        let mixer_task = tokio::spawn(async move { mixer.run(mixer_processor).await });
+
+        let sender1_task = tokio::spawn(async move {
+            let mut tx = sender1_processor.publish_track(input_track_id_1).await?;
+            for i in 0..5 {
+                tx.send_video(dummy_frame(Duration::from_millis(i * 40)));
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            tx.send_eos();
+            Ok::<(), crate::Error>(())
+        });
+
+        let sender2_task = tokio::spawn(async move {
+            let mut tx = sender2_processor.publish_track(input_track_id_2).await?;
+            for i in 0..5 {
+                tx.send_video(dummy_frame(Duration::from_millis(100 + i * 40)));
+                tokio::time::sleep(Duration::from_millis(12)).await;
+            }
+            tx.send_eos();
+            Ok::<(), crate::Error>(())
+        });
+
+        let mut mixed_rx = sink_processor.subscribe_track(output_track_id);
+        let mut received_video_frame_count = 0;
+        while received_video_frame_count < 5 {
+            let message = tokio::time::timeout(Duration::from_secs(2), mixed_rx.recv())
+                .await
+                .map_err(|e| Error::new(e.to_string()))?;
+            if matches!(message, Message::Media(MediaSample::Video(_))) {
+                received_video_frame_count += 1;
+            }
+        }
+
+        assert!(received_video_frame_count >= 5);
+
+        sender1_task
+            .await
+            .map_err(|e| Error::new(e.to_string()))??;
+        sender2_task
+            .await
+            .map_err(|e| Error::new(e.to_string()))??;
+
+        mixer_task.abort();
+        let _ = mixer_task.await;
+
+        drop(mixed_rx);
+        drop(sink_processor);
+        drop(pipeline_handle);
+
+        tokio::time::timeout(Duration::from_secs(2), pipeline_task)
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn dummy_frame(timestamp: Duration) -> VideoFrame {
+        let mut frame =
+            VideoFrame::black(EvenUsize::truncating_new(64), EvenUsize::truncating_new(64));
+        frame.timestamp = timestamp;
+        frame.duration = Duration::from_millis(40);
+        frame
+    }
 }
