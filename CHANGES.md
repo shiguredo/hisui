@@ -81,6 +81,9 @@
 
 ### misc
 
+- [ADD] 内部用に Mp4FileSource 構造体を追加する
+  - MP4 ファイルからの読み込みとデコードをセットで行うための構造体
+  - @sile
 - [ADD] e2e テスト用の GitHub Actions `e2e-test.yml` を追加する
   - @voluntas
 - [ADD] Hisui Python バインディングテスト用の GitHub Actions `pytest.yml` を追加する
