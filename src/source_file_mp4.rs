@@ -82,7 +82,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
 
 impl Mp4FileSource {
     pub async fn run(self, outer_handle: MediaPipelineHandle) -> Result<()> {
-        // reader / decoder を繋ぐための内部パイプラインを作成する
         let inner_pipeline = MediaPipeline::new();
         let inner_handle = inner_pipeline.handle();
         let inner_task = tokio::spawn(inner_pipeline.run());
@@ -102,17 +101,10 @@ impl Mp4FileSource {
             let decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1))
                 .map_err(|e| Error::new(e.to_string()))?;
             inner_handle
-                .spawn_processor(ProcessorId::new("audio_decoder"), |handle| {
-                    let decoder = decoder;
-                    async move {
-                        if let Err(e) = decoder.run(handle, input_track_id, output_track_id).await {
-                            tracing::error!("audio decoder failed: {e}");
-                        }
-                        Ok(())
-                    }
+                .spawn_processor(ProcessorId::new("audio_decoder"), |handle| async move {
+                    decoder.run(handle, input_track_id, output_track_id).await
                 })
-                .await
-                .map_err(|e| Error::new(format!("Failed to spawn audio decoder: {e}")))?;
+                .await?;
         }
 
         if let (Some(input_track_id), Some(output_track_id)) =
@@ -125,17 +117,10 @@ impl Mp4FileSource {
                 VideoDecoderOptions::default(),
             );
             inner_handle
-                .spawn_processor(ProcessorId::new("video_decoder"), |handle| {
-                    let decoder = decoder;
-                    async move {
-                        if let Err(e) = decoder.run(handle, input_track_id, output_track_id).await {
-                            tracing::error!("video decoder failed: {e}");
-                        }
-                        Ok(())
-                    }
+                .spawn_processor(ProcessorId::new("video_decoder"), |handle| async move {
+                    decoder.run(handle, input_track_id, output_track_id).await
                 })
-                .await
-                .map_err(|e| Error::new(format!("Failed to spawn video decoder: {e}")))?;
+                .await?;
         }
 
         let outer_processor = outer_handle
