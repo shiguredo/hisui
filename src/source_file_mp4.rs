@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use tokio::task::JoinHandle;
-
 use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
 use crate::file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions};
 use crate::media::MediaStreamId;
@@ -143,28 +141,15 @@ impl Mp4FileSource {
                 .map_err(|e| Error::new(format!("Failed to spawn video decoder: {e}")))?;
         }
 
-        let mut bridge_tasks = Vec::new();
-        if let Some(track_id) = self.audio_track_id.clone() {
-            let task = start_bridge(
-                track_id,
-                &inner_handle,
-                &outer_handle,
-                &base_id,
-                self.processor_id.clone(),
-            )
+        let outer_processor = outer_handle
+            .register_processor(self.processor_id.clone())
             .await?;
-            bridge_tasks.push(task);
+
+        if let Some(track_id) = self.audio_track_id.clone() {
+            start_bridge(track_id, &inner_handle, &outer_processor).await?;
         }
         if let Some(track_id) = self.video_track_id.clone() {
-            let task = start_bridge(
-                track_id,
-                &inner_handle,
-                &outer_handle,
-                &base_id,
-                self.processor_id.clone(),
-            )
-            .await?;
-            bridge_tasks.push(task);
+            start_bridge(track_id, &inner_handle, &outer_processor).await?;
         }
 
         let options = Mp4FileReaderOptions {
@@ -191,14 +176,6 @@ impl Mp4FileSource {
         drop(inner_handle);
         drop(outer_handle);
 
-        for task in bridge_tasks {
-            match task.await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => return Err(e),
-                Err(e) => return Err(Error::new(format!("bridge task failed: {e}"))),
-            }
-        }
-
         if let Err(e) = inner_task.await {
             return Err(Error::new(format!("internal pipeline task failed: {e}")));
         }
@@ -210,45 +187,33 @@ impl Mp4FileSource {
 async fn start_bridge(
     track_id: TrackId,
     inner_handle: &MediaPipelineHandle,
-    outer_handle: &MediaPipelineHandle,
-    base_id: &str,
-    outer_processor_id: ProcessorId,
-) -> Result<JoinHandle<Result<()>>> {
-    let inner_processor_id = ProcessorId::new(format!("mp4_source_bridge_{base_id}"));
-
-    // [NOTE] inner の方は常に成功するはず
-    let inner_processor = inner_handle.register_processor(inner_processor_id).await?;
-    let outer_processor = outer_handle.register_processor(outer_processor_id).await?;
-
-    Ok(tokio::spawn(forward_track(
-        inner_processor,
-        outer_processor,
-        track_id,
-    )))
-}
-
-async fn forward_track(
-    inner_processor: ProcessorHandle,
-    outer_processor: ProcessorHandle,
-    track_id: TrackId,
+    outer_processor: &ProcessorHandle,
 ) -> Result<()> {
-    let mut rx = inner_processor.subscribe_track(track_id.clone());
-    let mut tx = outer_processor.publish_track(track_id).await?;
+    let mut tx = outer_processor.publish_track(track_id.clone()).await?;
 
-    loop {
-        match rx.recv().await {
-            Message::Media(sample) => {
-                if !tx.send_media(sample) {
-                    break;
+    inner_handle
+        .spawn_processor(
+            ProcessorId::new("mp4_source_bridge"),
+            async move |inner_processor| {
+                let mut rx = inner_processor.subscribe_track(track_id);
+                loop {
+                    match rx.recv().await {
+                        Message::Media(sample) => {
+                            if !tx.send_media(sample) {
+                                break;
+                            }
+                        }
+                        Message::Eos => {
+                            tx.send_eos();
+                            break;
+                        }
+                        Message::Syn(_) => {}
+                    }
                 }
-            }
-            Message::Eos => {
-                tx.send_eos();
-                break;
-            }
-            Message::Syn(_) => {}
-        }
-    }
+                Ok(())
+            },
+        )
+        .await?;
 
     Ok(())
 }
