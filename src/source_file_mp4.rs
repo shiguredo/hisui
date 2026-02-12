@@ -19,6 +19,44 @@ pub struct Mp4FileSource {
     video_track_id: Option<TrackId>,
 }
 
+impl nojson::DisplayJson for Mp4FileSource {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("path", &self.path)?;
+            f.member("realtime", self.realtime)?;
+            f.member("loopPlayback", self.loop_playback)?;
+            if let Some(id) = &self.audio_track_id {
+                f.member("audioTrackId", id)?;
+            }
+            if let Some(id) = &self.video_track_id {
+                f.member("videoTrackId", id)?;
+            }
+            Ok(())
+        })
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(
+        value: nojson::RawJsonValue<'text, 'raw>,
+    ) -> std::result::Result<Self, Self::Error> {
+        let path: PathBuf = value.to_member("path")?.required()?.try_into()?;
+        let realtime: Option<bool> = value.to_member("realtime")?.try_into()?;
+        let loop_playback: Option<bool> = value.to_member("loopPlayback")?.try_into()?;
+        let audio_track_id: Option<TrackId> = value.to_member("audioTrackId")?.try_into()?;
+        let video_track_id: Option<TrackId> = value.to_member("videoTrackId")?.try_into()?;
+        Ok(Self::new(
+            path,
+            realtime.unwrap_or(true),
+            loop_playback.unwrap_or(true),
+            audio_track_id,
+            video_track_id,
+        ))
+    }
+}
+
 impl Mp4FileSource {
     pub fn new<P: Into<PathBuf>>(
         path: P,
@@ -229,6 +267,8 @@ async fn forward_track(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::MediaSample;
 
     #[tokio::test]
     async fn mp4_file_source_decode_smoke() -> Result<()> {
