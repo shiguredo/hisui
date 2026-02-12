@@ -12,6 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Mp4FileSource {
+    pub processor_id: ProcessorId,
     pub path: PathBuf,
     pub realtime: bool,
     pub loop_playback: bool,
@@ -22,6 +23,7 @@ pub struct Mp4FileSource {
 impl nojson::DisplayJson for Mp4FileSource {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
+            f.member("processorId", &self.processor_id)?;
             f.member("path", &self.path)?;
             f.member("realtime", self.realtime)?;
             f.member("loopPlayback", self.loop_playback)?;
@@ -42,6 +44,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
+        let processor_id: ProcessorId = value.to_member("processorId")?.required()?.try_into()?;
         let path: PathBuf = value.to_member("path")?.required()?.try_into()?;
         let realtime: Option<bool> = value.to_member("realtime")?.try_into()?;
         let loop_playback: Option<bool> = value.to_member("loopPlayback")?.try_into()?;
@@ -69,6 +72,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
         }
 
         Ok(Self {
+            processor_id,
             path,
             realtime: realtime.unwrap_or(true),
             loop_playback: loop_playback.unwrap_or(true),
@@ -141,13 +145,27 @@ impl Mp4FileSource {
 
         let mut bridge_tasks = Vec::new();
         if let Some(track_id) = self.audio_track_id.clone() {
-            let task =
-                start_bridge("audio", track_id, &inner_handle, &outer_handle, &base_id).await?;
+            let task = start_bridge(
+                "audio",
+                track_id,
+                &inner_handle,
+                &outer_handle,
+                &base_id,
+                self.processor_id.clone(),
+            )
+            .await?;
             bridge_tasks.push(task);
         }
         if let Some(track_id) = self.video_track_id.clone() {
-            let task =
-                start_bridge("video", track_id, &inner_handle, &outer_handle, &base_id).await?;
+            let task = start_bridge(
+                "video",
+                track_id,
+                &inner_handle,
+                &outer_handle,
+                &base_id,
+                self.processor_id.clone(),
+            )
+            .await?;
             bridge_tasks.push(task);
         }
 
@@ -205,9 +223,9 @@ async fn start_bridge(
     inner_handle: &MediaPipelineHandle,
     outer_handle: &MediaPipelineHandle,
     base_id: &str,
+    outer_processor_id: ProcessorId,
 ) -> Result<JoinHandle<Result<()>>> {
     let inner_processor_id = ProcessorId::new(format!("mp4_source_inner_{kind}_{base_id}"));
-    let outer_processor_id = ProcessorId::new(format!("mp4_source_outer_{kind}_{base_id}"));
 
     let inner_processor = inner_handle
         .register_processor(inner_processor_id)
@@ -271,6 +289,7 @@ mod tests {
         let mut rx = subscriber.subscribe_track(video_track_id.clone());
 
         let source = Mp4FileSource {
+            processor_id: ProcessorId::new("mp4_source_outer"),
             path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),
             realtime: false,
             loop_playback: false,
