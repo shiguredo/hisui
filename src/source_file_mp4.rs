@@ -84,7 +84,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
 
 impl Mp4FileSource {
     pub async fn run(self, outer_handle: MediaPipelineHandle) -> Result<()> {
-        let base_id = self.base_id();
+        let base_id = self.processor_id.get();
 
         // reader / decoder を繋ぐための内部パイプラインを作成する
         let inner_pipeline = MediaPipeline::new();
@@ -146,7 +146,6 @@ impl Mp4FileSource {
         let mut bridge_tasks = Vec::new();
         if let Some(track_id) = self.audio_track_id.clone() {
             let task = start_bridge(
-                "audio",
                 track_id,
                 &inner_handle,
                 &outer_handle,
@@ -158,7 +157,6 @@ impl Mp4FileSource {
         }
         if let Some(track_id) = self.video_track_id.clone() {
             let task = start_bridge(
-                "video",
                 track_id,
                 &inner_handle,
                 &outer_handle,
@@ -207,34 +205,20 @@ impl Mp4FileSource {
 
         Ok(())
     }
-
-    fn base_id(&self) -> String {
-        self.audio_track_id
-            .as_ref()
-            .or(self.video_track_id.as_ref())
-            .map(|id| id.get().to_string())
-            .unwrap_or_else(|| "mp4_file_source".to_string())
-    }
 }
 
 async fn start_bridge(
-    kind: &str,
     track_id: TrackId,
     inner_handle: &MediaPipelineHandle,
     outer_handle: &MediaPipelineHandle,
     base_id: &str,
     outer_processor_id: ProcessorId,
 ) -> Result<JoinHandle<Result<()>>> {
-    let inner_processor_id = ProcessorId::new(format!("mp4_source_inner_{kind}_{base_id}"));
+    let inner_processor_id = ProcessorId::new(format!("mp4_source_bridge_{base_id}"));
 
-    let inner_processor = inner_handle
-        .register_processor(inner_processor_id)
-        .await
-        .map_err(|e| Error::new(format!("Failed to register internal processor: {e}")))?;
-    let outer_processor = outer_handle
-        .register_processor(outer_processor_id)
-        .await
-        .map_err(|e| Error::new(format!("Failed to register external processor: {e}")))?;
+    // [NOTE] inner の方は常に成功するはず
+    let inner_processor = inner_handle.register_processor(inner_processor_id).await?;
+    let outer_processor = outer_handle.register_processor(outer_processor_id).await?;
 
     Ok(tokio::spawn(forward_track(
         inner_processor,
@@ -322,7 +306,7 @@ mod tests {
             .map_err(|e| crate::Error::new(format!("source task failed: {e}")))?;
         source_result?;
 
-        let _ = pipeline_task
+        pipeline_task
             .await
             .map_err(|e| crate::Error::new(format!("pipeline task failed: {e}")))?;
 
