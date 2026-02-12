@@ -225,3 +225,65 @@ async fn forward_track(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn mp4_file_source_decode_smoke() -> Result<()> {
+        let pipeline = MediaPipeline::new();
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(async move {
+            pipeline.run().await;
+        });
+
+        let video_track_id = TrackId::new("mp4_file_source_test_video");
+        let source = Mp4FileSource::new(
+            "testdata/archive-red-320x320-av1.mp4",
+            false,
+            false,
+            None,
+            Some(video_track_id.clone()),
+        );
+
+        let source_handle = handle.clone();
+        let source_task = tokio::spawn(async move { source.run(source_handle).await });
+
+        let subscriber_handle = handle.clone();
+        drop(handle);
+
+        let subscriber = subscriber_handle
+            .register_processor(ProcessorId::new("mp4_file_source_test_subscriber"))
+            .await?;
+        let mut rx = subscriber.subscribe_track(video_track_id);
+
+        let mut decoded_count = 0;
+        loop {
+            match rx.recv().await {
+                crate::Message::Media(MediaSample::Video(_)) => {
+                    decoded_count += 1;
+                }
+                crate::Message::Eos => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        drop(subscriber);
+        drop(subscriber_handle);
+
+        let source_result = source_task
+            .await
+            .map_err(|e| crate::Error::new(format!("source task failed: {e}")))?;
+        source_result?;
+
+        let _ = pipeline_task
+            .await
+            .map_err(|e| crate::Error::new(format!("pipeline task failed: {e}")))?;
+
+        assert!(decoded_count > 0, "Should decode at least one video frame");
+        Ok(())
+    }
+}
