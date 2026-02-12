@@ -80,29 +80,12 @@ impl Mp4FileSource {
     pub async fn run(self, outer_processor: ProcessorHandle) -> Result<()> {
         let inner_pipeline = MediaPipeline::new();
         let inner_handle = inner_pipeline.handle();
+        let task = tokio::spawn(inner_pipeline.run());
 
-        tokio::spawn(Self::setup_and_run_pipeline(
-            self,
-            inner_handle.clone(),
-            outer_processor,
-        ));
-
-        inner_pipeline.run().await;
+        self.initialize_pipeline(inner_handle, outer_processor)
+            .await?;
+        task.await?;
         Ok(())
-    }
-
-    async fn setup_and_run_pipeline(
-        source: Mp4FileSource,
-        inner_handle: MediaPipelineHandle,
-        outer_processor: ProcessorHandle,
-    ) {
-        if let Err(e) = source
-            .initialize_pipeline(inner_handle, outer_processor)
-            .await
-        {
-            tracing::error!("Failed to initialize pipeline: {e}");
-            return;
-        }
     }
 
     async fn initialize_pipeline(
@@ -124,8 +107,8 @@ impl Mp4FileSource {
 
             options.audio_track_id = Some(inner_id.clone());
             inner_handle
-                .spawn_processor(ProcessorId::new("audio_decoder"), |handle| async move {
-                    decoder.run(handle, inner_id, id).await
+                .spawn_processor(ProcessorId::new("audio_decoder"), |handle| {
+                    decoder.run(handle, inner_id, id)
                 })
                 .await?;
         }
@@ -140,8 +123,8 @@ impl Mp4FileSource {
 
             options.video_track_id = Some(inner_id.clone());
             inner_handle
-                .spawn_processor(ProcessorId::new("video_decoder"), |handle| async move {
-                    decoder.run(handle, inner_id, id).await
+                .spawn_processor(ProcessorId::new("video_decoder"), |handle| {
+                    decoder.run(handle, inner_id, id)
                 })
                 .await?;
         }
@@ -155,17 +138,8 @@ impl Mp4FileSource {
 
         let reader = Mp4FileReader::new(&self.path, options)?;
         inner_handle
-            .spawn_processor(ProcessorId::new("reader"), |handle| {
-                let reader = reader;
-                async move {
-                    if let Err(e) = reader.run(handle).await {
-                        tracing::error!("mp4 file reader failed: {e}");
-                    }
-                    Ok(())
-                }
-            })
-            .await
-            .map_err(|e| Error::new(format!("Failed to spawn mp4 file reader: {e}")))?;
+            .spawn_processor(ProcessorId::new("reader"), |handle| reader.run(handle))
+            .await?;
 
         Ok(())
     }
@@ -216,51 +190,47 @@ mod tests {
         let pipeline = MediaPipeline::new();
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
+        {
+            let video_track_id = TrackId::new("mp4_file_source_test_video");
+            let subscriber_handle = handle.clone();
+            let subscriber = subscriber_handle
+                .register_processor(ProcessorId::new("mp4_file_source_test_subscriber"))
+                .await?;
+            let mut rx = subscriber.subscribe_track(video_track_id.clone());
 
-        let video_track_id = TrackId::new("mp4_file_source_test_video");
-        let subscriber_handle = handle.clone();
-        let subscriber = subscriber_handle
-            .register_processor(ProcessorId::new("mp4_file_source_test_subscriber"))
-            .await?;
-        let mut rx = subscriber.subscribe_track(video_track_id.clone());
+            let source = Mp4FileSource {
+                path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),
+                realtime: false,
+                loop_playback: false,
+                audio_track_id: None,
+                video_track_id: Some(video_track_id.clone()),
+            };
+            let source_handle = handle.clone();
+            source_handle
+                .spawn_processor(ProcessorId::new("mp4_source_outer"), |handle| {
+                    source.run(handle)
+                })
+                .await?;
 
-        let source = Mp4FileSource {
-            path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),
-            realtime: false,
-            loop_playback: false,
-            audio_track_id: None,
-            video_track_id: Some(video_track_id.clone()),
-        };
-        let source_handle = handle.clone();
-        source_handle
-            .spawn_processor(ProcessorId::new("mp4_source_outer"), |handle| {
-                source.run(handle)
-            })
-            .await?;
-
-        drop(handle);
-
-        let mut decoded_count = 0;
-        loop {
-            match rx.recv().await {
-                crate::Message::Media(MediaSample::Video(_)) => {
-                    decoded_count += 1;
+            let mut decoded_count = 0;
+            loop {
+                match rx.recv().await {
+                    crate::Message::Media(MediaSample::Video(_)) => {
+                        decoded_count += 1;
+                    }
+                    crate::Message::Eos => {
+                        break;
+                    }
+                    _ => {}
                 }
-                crate::Message::Eos => {
-                    break;
-                }
-                _ => {}
             }
+            assert!(decoded_count > 0, "Should decode at least one video frame");
+
+            drop(handle);
         }
 
-        drop(subscriber);
-        drop(subscriber_handle);
+        pipeline_task.await?;
 
-        pipeline_task
-            .await
-            .map_err(|e| crate::Error::new(format!("pipeline task failed: {e}")))?;
-
-        assert!(decoded_count > 0, "Should decode at least one video frame");
         Ok(())
     }
 }
