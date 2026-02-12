@@ -185,7 +185,7 @@ impl MediaPipelineHandle {
     ) -> Result<(), RegisterProcessorError>
     where
         F: FnOnce(ProcessorHandle) -> T + Send + 'static,
-        T: Future<Output = orfail::Result<()>> + Send,
+        T: Future<Output = crate::Result<()>> + Send,
     {
         let handle = self.register_processor(processor_id.clone()).await?;
         tokio::spawn(async move {
@@ -219,7 +219,7 @@ impl MediaPipelineHandle {
         }
     }
 
-    // すでに MediaPipeline が終了（中断）されている場合には false が返される。
+    // すでに MediaPipeline が終了している場合には false が返される。
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
     //   応答を受け取らない場合にはそもそもここの成功・失敗に依存するようなコマンドであるべきではないため）
@@ -377,7 +377,7 @@ impl ProcessorHandle {
 impl Drop for ProcessorHandle {
     fn drop(&mut self) {
         // 登録を解除する。
-        //パイプラインが中断されている場合には送信に失敗するが、そもそもその状況ではすでにエントリは削除されているので問題ないため、結果は無視する。
+        //パイプラインが終了している場合には送信に失敗するが、そもそもその状況ではすでにエントリは削除されているので問題ないため、結果は無視する。
         self.pipeline_handle.send(Command::DeregisterProcessor {
             processor_id: self.processor_id.clone(),
         });

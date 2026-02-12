@@ -360,7 +360,7 @@ impl Mp4Writer {
         handle: crate::ProcessorHandle,
         input_audio_track_id: Option<crate::TrackId>,
         input_video_track_id: Option<crate::TrackId>,
-    ) -> orfail::Result<()> {
+    ) -> crate::Result<()> {
         let mut audio_rx = input_audio_track_id.map(|id| handle.subscribe_track(id));
         let mut video_rx = input_video_track_id.map(|id| handle.subscribe_track(id));
 
@@ -392,7 +392,7 @@ impl Mp4Writer {
 
             in_progress = self
                 .handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                .or_fail()?;
+                .map_err(|e| crate::Error::new(e.to_string()))?;
         }
 
         Ok(())
