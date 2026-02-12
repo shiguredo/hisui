@@ -540,6 +540,7 @@ fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn video_realtime_mixer_json_parse() -> crate::Result<()> {
