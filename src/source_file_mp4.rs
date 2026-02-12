@@ -54,14 +54,18 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
                 return Err(value.invalid("audioTrackId or videoTrackId is required"));
             }
             (Some(audio), Some(video)) if audio == video => {
-                return Err(value.invalid("audioTrackId and videoTrackId must be different"));
+                let error_value = value.to_member("audioTrackId")?.required()?;
+                return Err(error_value.invalid("audioTrackId and videoTrackId must be different"));
             }
             _ => {}
         }
 
         // ファイルパスのバリデーション
         if !path.exists() {
-            return Err(value.invalid(format!("input path does not exist: {}", path.display())));
+            let error_value = value.to_member("path")?.required()?;
+            return Err(
+                error_value.invalid(format!("input path does not exist: {}", path.display()))
+            );
         }
 
         Ok(Self {
