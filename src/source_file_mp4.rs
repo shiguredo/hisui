@@ -218,9 +218,11 @@ async fn start_bridge(
         .await
         .map_err(|e| Error::new(format!("Failed to register external processor: {e}")))?;
 
-    Ok(tokio::spawn(async move {
-        forward_track(inner_processor, outer_processor, track_id).await
-    }))
+    Ok(tokio::spawn(forward_track(
+        inner_processor,
+        outer_processor,
+        track_id,
+    )))
 }
 
 async fn forward_track(
@@ -259,9 +261,7 @@ mod tests {
     async fn mp4_file_source_decode_smoke() -> Result<()> {
         let pipeline = MediaPipeline::new();
         let handle = pipeline.handle();
-        let pipeline_task = tokio::spawn(async move {
-            pipeline.run().await;
-        });
+        let pipeline_task = tokio::spawn(pipeline.run());
 
         let video_track_id = TrackId::new("mp4_file_source_test_video");
         let subscriber_handle = handle.clone();
@@ -278,7 +278,7 @@ mod tests {
             video_track_id: Some(video_track_id.clone()),
         };
         let source_handle = handle.clone();
-        let source_task = tokio::spawn(async move { source.run(source_handle).await });
+        let source_task = tokio::spawn(source.run(source_handle));
 
         drop(handle);
 
