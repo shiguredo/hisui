@@ -107,13 +107,12 @@ impl Mp4FileSource {
                 .map_err(|e| Error::new(e.to_string()))?;
 
             options.audio_track_id = Some(inner_id.clone());
+            start_bridge(id.clone(), &inner_handle, &outer_processor).await?;
             inner_handle
                 .spawn_processor(ProcessorId::new("audio_decoder"), |handle| {
-                    decoder.run(handle, inner_id, id.clone())
+                    decoder.run(handle, inner_id, id)
                 })
                 .await?;
-
-            start_bridge(id, &inner_handle, &outer_processor).await?;
         }
 
         // 映像トラックがあるならデコーダーを起動する＆結果を外側に転送する
@@ -126,13 +125,12 @@ impl Mp4FileSource {
             );
 
             options.video_track_id = Some(inner_id.clone());
+            start_bridge(id.clone(), &inner_handle, &outer_processor).await?;
             inner_handle
                 .spawn_processor(ProcessorId::new("video_decoder"), |handle| {
-                    decoder.run(handle, inner_id, id.clone())
+                    decoder.run(handle, inner_id, id)
                 })
                 .await?;
-
-            start_bridge(id, &inner_handle, &outer_processor).await?;
         }
 
         // MP4 ファイルリーダーを起動する
