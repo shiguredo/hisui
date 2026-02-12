@@ -86,39 +86,39 @@ impl Mp4FileSource {
         let inner_handle = inner_pipeline.handle();
         let inner_task = tokio::spawn(inner_pipeline.run());
 
-        let audio_output = self.audio_track_id.clone();
-        let audio_encoded = audio_output
-            .as_ref()
-            .map(|id| TrackId::new(format!("{id}_encoded")));
-        let video_output = self.video_track_id.clone();
-        let video_encoded = video_output
-            .as_ref()
-            .map(|id| TrackId::new(format!("{id}_encoded")));
+        let mut options = Mp4FileReaderOptions {
+            realtime: self.realtime,
+            loop_playback: self.loop_playback,
+            audio_track_id: None,
+            video_track_id: None,
+        };
 
-        if let (Some(input_track_id), Some(output_track_id)) =
-            (audio_encoded.clone(), audio_output.clone())
-        {
+        if let Some(id) = self.audio_track_id.clone() {
+            let inner_id = TrackId::new(format!("{id}_encoded"));
             let decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1))
                 .map_err(|e| Error::new(e.to_string()))?;
+
+            options.audio_track_id = Some(inner_id.clone());
             inner_handle
                 .spawn_processor(ProcessorId::new("audio_decoder"), |handle| async move {
-                    decoder.run(handle, input_track_id, output_track_id).await
+                    decoder.run(handle, inner_id, id).await
                 })
                 .await?;
         }
 
-        if let (Some(input_track_id), Some(output_track_id)) =
-            (video_encoded.clone(), video_output.clone())
-        {
+        if let Some(id) = self.video_track_id.clone() {
+            let inner_id = TrackId::new(format!("{id}_encoded"));
             let decoder = VideoDecoder::new(
                 MediaStreamId::new(2),
                 MediaStreamId::new(3),
                 // TODO: 将来的には openh264 関連のオプションを渡せるようにする（or 環境変数経由でとってくる）
                 VideoDecoderOptions::default(),
             );
+
+            options.video_track_id = Some(inner_id.clone());
             inner_handle
                 .spawn_processor(ProcessorId::new("video_decoder"), |handle| async move {
-                    decoder.run(handle, input_track_id, output_track_id).await
+                    decoder.run(handle, inner_id, id).await
                 })
                 .await?;
         }
@@ -134,12 +134,6 @@ impl Mp4FileSource {
             start_bridge(track_id, &inner_handle, &outer_processor).await?;
         }
 
-        let options = Mp4FileReaderOptions {
-            realtime: self.realtime,
-            loop_playback: self.loop_playback,
-            audio_track_id: audio_encoded,
-            video_track_id: video_encoded,
-        };
         let reader = Mp4FileReader::new(&self.path, options)?;
         inner_handle
             .spawn_processor(ProcessorId::new("reader"), |handle| {
