@@ -47,6 +47,23 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
         let loop_playback: Option<bool> = value.to_member("loopPlayback")?.try_into()?;
         let audio_track_id: Option<TrackId> = value.to_member("audioTrackId")?.try_into()?;
         let video_track_id: Option<TrackId> = value.to_member("videoTrackId")?.try_into()?;
+
+        // トラック ID のバリデーション
+        match (&audio_track_id, &video_track_id) {
+            (None, None) => {
+                return Err(value.invalid("audioTrackId or videoTrackId is required"));
+            }
+            (Some(audio), Some(video)) if audio == video => {
+                return Err(value.invalid("audioTrackId and videoTrackId must be different"));
+            }
+            _ => {}
+        }
+
+        // ファイルパスのバリデーション
+        if !path.exists() {
+            return Err(value.invalid(format!("input path does not exist: {}", path.display())));
+        }
+
         Ok(Self {
             path,
             realtime: realtime.unwrap_or(true),
@@ -59,14 +76,12 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
 
 impl Mp4FileSource {
     pub async fn run(self, outer_handle: MediaPipelineHandle) -> Result<()> {
-        self.validate()?;
         let base_id = self.base_id();
 
+        // reader / decoder を繋ぐための内部パイプラインを作成する
         let inner_pipeline = MediaPipeline::new();
         let inner_handle = inner_pipeline.handle();
-        let inner_task = tokio::spawn(async move {
-            inner_pipeline.run().await;
-        });
+        let inner_task = tokio::spawn(inner_pipeline.run());
 
         let audio_output = self.audio_track_id.clone();
         let audio_encoded = audio_output
@@ -168,24 +183,6 @@ impl Mp4FileSource {
             return Err(Error::new(format!("internal pipeline task failed: {e}")));
         }
 
-        Ok(())
-    }
-
-    fn validate(&self) -> Result<()> {
-        if self.audio_track_id.is_none() && self.video_track_id.is_none() {
-            return Err(Error::new("audio_track_id or video_track_id is required"));
-        }
-        if let (Some(audio_id), Some(video_id)) =
-            (self.audio_track_id.as_ref(), self.video_track_id.as_ref())
-            && audio_id == video_id
-        {
-            return Err(Error::new(
-                "audio_track_id and video_track_id must be different",
-            ));
-        }
-        if !self.path.exists() {
-            return Err(Error::new("input path does not exist"));
-        }
         Ok(())
     }
 
