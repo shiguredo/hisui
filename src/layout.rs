@@ -277,11 +277,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
                 }
                 v.to_array()?.map(EngineName::parse_video_decoder).collect()
             })?,
-            frame_rate: object
-                .get_with("frame_rate", |v| {
-                    v.as_raw_str().parse().map_err(|e| v.invalid(e))
-                })?
-                .unwrap_or(FrameRate::FPS_25),
+            frame_rate: object.get("frame_rate")?.unwrap_or(FrameRate::FPS_25),
 
             // エンコードパラメータ群はトップレベルに配置されているので object を経由せずに value を直接変換する
             encode_params: value.try_into()?,

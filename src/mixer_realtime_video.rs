@@ -40,15 +40,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
         let canvas_width: usize = value.to_member("canvasWidth")?.required()?.try_into()?;
         let canvas_height: usize = value.to_member("canvasHeight")?.required()?.try_into()?;
 
-        let frame_rate_value = value.to_member("frameRate")?.required()?;
-        let frame_rate_str = if frame_rate_value.kind() == nojson::JsonValueKind::String {
-            frame_rate_value.to_unquoted_string_str()?.into_owned()
-        } else {
-            frame_rate_value.as_raw_str().to_owned()
-        };
-        let frame_rate: FrameRate = frame_rate_str
-            .parse()
-            .map_err(|e| frame_rate_value.invalid(e))?;
+        let frame_rate: FrameRate = value.to_member("frameRate")?.required()?.try_into()?;
 
         let input_tracks: Vec<InputTrack> =
             value.to_member("inputTracks")?.required()?.try_into()?;
@@ -555,7 +547,7 @@ mod tests {
             r#"{
                 "canvasWidth": 1280,
                 "canvasHeight": 720,
-                "frameRate": "30",
+                "frameRate": 30,
                 "inputTracks": [
                     {
                         "trackId": "input-1",
@@ -586,7 +578,7 @@ mod tests {
             r#"{
                 "canvasWidth": 1280,
                 "canvasHeight": 720,
-                "frameRate": "30",
+                "frameRate": 30,
                 "inputTracks": [
                     {
                         "trackId": "input-1",
@@ -609,6 +601,57 @@ mod tests {
             r#"{
                 "canvasWidth": 1280,
                 "canvasHeight": 720,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1",
+                        "x": 0,
+                        "y": 0,
+                        "width": 640,
+                        "height": 360,
+                        "z": 0
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn video_realtime_mixer_json_parse_fraction_string_frame_rate() -> crate::Result<()> {
+        let mixer: VideoRealtimeMixer = crate::json::parse_str(
+            r#"{
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": "30000/1001",
+                "inputTracks": [
+                    {
+                        "trackId": "input-1",
+                        "x": 0,
+                        "y": 0,
+                        "width": 640,
+                        "height": 360,
+                        "z": 0
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        )
+        .map_err(|e| Error::new(e.to_string()))?;
+
+        assert_eq!(mixer.frame_rate.numerator.get(), 30000);
+        assert_eq!(mixer.frame_rate.denumerator.get(), 1001);
+        Ok(())
+    }
+
+    #[test]
+    fn video_realtime_mixer_json_parse_error_with_integer_string_frame_rate() {
+        let result = crate::json::parse_str::<VideoRealtimeMixer>(
+            r#"{
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": "30",
                 "inputTracks": [
                     {
                         "trackId": "input-1",

@@ -635,6 +635,27 @@ impl FromStr for FrameRate {
     }
 }
 
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for FrameRate {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        match value.kind() {
+            nojson::JsonValueKind::Integer => {
+                let fps: NonZeroUsize = value.try_into()?;
+                Ok(Self {
+                    numerator: fps,
+                    denumerator: NonZeroUsize::MIN,
+                })
+            }
+            nojson::JsonValueKind::String => {
+                let s = value.to_unquoted_string_str()?;
+                Ok(s.parse().map_err(|e| value.invalid(e))?)
+            }
+            _ => Err(value.invalid("frame rate must be an integer or a fraction string")),
+        }
+    }
+}
+
 impl nojson::DisplayJson for FrameRate {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         if self.denumerator.get() == 1 {
