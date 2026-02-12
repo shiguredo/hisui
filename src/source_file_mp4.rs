@@ -191,10 +191,10 @@ mod tests {
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         {
+            let handle = handle; // スコープを抜けたらドロップさせる
             let video_track_id = TrackId::new("mp4_file_source_test_video");
-            let subscriber_handle = handle.clone();
-            let subscriber = subscriber_handle
-                .register_processor(ProcessorId::new("mp4_file_source_test_subscriber"))
+            let subscriber = handle
+                .register_processor(ProcessorId::new("test_subscriber"))
                 .await?;
             let mut rx = subscriber.subscribe_track(video_track_id.clone());
 
@@ -205,11 +205,8 @@ mod tests {
                 audio_track_id: None,
                 video_track_id: Some(video_track_id.clone()),
             };
-            let source_handle = handle.clone();
-            source_handle
-                .spawn_processor(ProcessorId::new("mp4_source_outer"), |handle| {
-                    source.run(handle)
-                })
+            handle
+                .spawn_processor(ProcessorId::new("source"), |handle| source.run(handle))
                 .await?;
 
             let mut decoded_count = 0;
@@ -225,8 +222,6 @@ mod tests {
                 }
             }
             assert!(decoded_count > 0, "Should decode at least one video frame");
-
-            drop(handle);
         }
 
         pipeline_task.await?;
