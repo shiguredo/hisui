@@ -649,7 +649,12 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for FrameRate {
             }
             nojson::JsonValueKind::String => {
                 let s = value.to_unquoted_string_str()?;
-                Ok(s.parse().map_err(|e| value.invalid(e))?)
+                if !s.contains('/') {
+                    return Err(
+                        value.invalid("string frame rate must be a fraction like \"30000/1001\"")
+                    );
+                }
+                s.parse().map_err(|e| value.invalid(e))
             }
             _ => Err(value.invalid("frame rate must be an integer or a fraction string")),
         }
