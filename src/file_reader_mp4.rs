@@ -70,7 +70,7 @@ impl Mp4FileReader {
     fn resolve_loop_enabled(&self) -> bool {
         let mut loop_enabled = self.options.loop_playback;
         if loop_enabled && !self.options.realtime {
-            log::warn!("Loop playback is ignored because realtime is disabled");
+            tracing::warn!("Loop playback is ignored because realtime is disabled");
             loop_enabled = false;
         }
         loop_enabled
@@ -127,7 +127,7 @@ impl Mp4FileReader {
 
             if loop_enabled {
                 if !self.emitted_in_loop {
-                    log::warn!("Loop playback stopped because no samples were read");
+                    tracing::warn!("Loop playback stopped because no samples were read");
                     break;
                 }
                 self.base_offset = self.last_emitted_end;
@@ -503,7 +503,7 @@ fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
             if is_supported {
                 return Ok(Some(sample.track.track_id));
             } else {
-                log::warn!(
+                tracing::warn!(
                     "Unsupported audio codec in track {}: {:?}",
                     sample.track.track_id,
                     sample_entry
@@ -513,9 +513,9 @@ fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     }
 
     if has_audio_track {
-        log::warn!("No supported audio track found in the file");
+        tracing::warn!("No supported audio track found in the file");
     } else {
-        log::warn!("No audio track found in the file");
+        tracing::warn!("No audio track found in the file");
     }
 
     Ok(None)
@@ -544,7 +544,7 @@ fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
             if is_supported {
                 return Ok(Some(sample.track.track_id));
             } else {
-                log::warn!(
+                tracing::warn!(
                     "Unsupported video codec in track {}: {:?}",
                     sample.track.track_id,
                     sample_entry
@@ -554,9 +554,9 @@ fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     }
 
     if has_video_track {
-        log::warn!("No supported video track found in the file");
+        tracing::warn!("No supported video track found in the file");
     } else {
-        log::warn!("No video track found in the file");
+        tracing::warn!("No video track found in the file");
     }
 
     Ok(None)

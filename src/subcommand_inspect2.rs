@@ -54,14 +54,14 @@ fn run_internal(input_file_path: PathBuf) -> Result<()> {
                 let output_printer = output_printer;
                 async move {
                     if let Err(e) = output_printer.run(handle).await {
-                        log::error!("output_printer failed: {e}");
+                        tracing::error!("output_printer failed: {e}");
                     }
                     Ok(())
                 }
             })
             .await
         {
-            log::error!("output_printer spawn failed: {e}");
+            tracing::error!("output_printer spawn failed: {e}");
             return;
         }
 
@@ -71,14 +71,14 @@ fn run_internal(input_file_path: PathBuf) -> Result<()> {
                 let reader = reader;
                 async move {
                     if let Err(e) = reader.run(handle).await {
-                        log::error!("mp4_file_reader failed: {e}");
+                        tracing::error!("mp4_file_reader failed: {e}");
                     }
                     Ok(())
                 }
             })
             .await
         {
-            log::error!("mp4_file_reader spawn failed: {e}");
+            tracing::error!("mp4_file_reader spawn failed: {e}");
         }
     });
     runtime.block_on(pipeline.run());
