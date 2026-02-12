@@ -100,6 +100,7 @@ impl Mp4FileSource {
             video_track_id: None,
         };
 
+        // 音声トラックがあるならデコーダーを起動する＆結果を外側に転送する
         if let Some(id) = self.audio_track_id.clone() {
             let inner_id = TrackId::new(format!("{id}_encoded"));
             let decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1))
@@ -108,11 +109,14 @@ impl Mp4FileSource {
             options.audio_track_id = Some(inner_id.clone());
             inner_handle
                 .spawn_processor(ProcessorId::new("audio_decoder"), |handle| {
-                    decoder.run(handle, inner_id, id)
+                    decoder.run(handle, inner_id, id.clone())
                 })
                 .await?;
+
+            start_bridge(id, &inner_handle, &outer_processor).await?;
         }
 
+        // 映像トラックがあるならデコーダーを起動する＆結果を外側に転送する
         if let Some(id) = self.video_track_id.clone() {
             let inner_id = TrackId::new(format!("{id}_encoded"));
             let decoder = VideoDecoder::new(
@@ -124,18 +128,15 @@ impl Mp4FileSource {
             options.video_track_id = Some(inner_id.clone());
             inner_handle
                 .spawn_processor(ProcessorId::new("video_decoder"), |handle| {
-                    decoder.run(handle, inner_id, id)
+                    decoder.run(handle, inner_id, id.clone())
                 })
                 .await?;
+
+            start_bridge(id, &inner_handle, &outer_processor).await?;
         }
 
-        if let Some(track_id) = self.audio_track_id.clone() {
-            start_bridge(track_id, &inner_handle, &outer_processor).await?;
-        }
-        if let Some(track_id) = self.video_track_id.clone() {
-            start_bridge(track_id, &inner_handle, &outer_processor).await?;
-        }
-
+        // MP4 ファイルリーダーを起動する
+        // （最初に起動すると、デコーダーが冒頭を取りこぼす恐れがあるので、最後に起動する）
         let reader = Mp4FileReader::new(&self.path, options)?;
         inner_handle
             .spawn_processor(ProcessorId::new("reader"), |handle| reader.run(handle))
