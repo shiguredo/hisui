@@ -137,10 +137,15 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         let listener = TcpListener::bind(&addr).await.or_fail()?;
         tracing::info!("{scheme} server listening on {scheme}://{addr}");
 
+        let pipeline = crate::MediaPipeline::new();
+        let pipeline_handle = Arc::new(pipeline.handle());
+        let _pipeline_task = tokio::spawn(pipeline.run());
+
         loop {
             let (stream, peer_addr) = listener.accept().await.or_fail()?;
             let tls_acceptor = tls_acceptor.clone();
             let upstream_config = upstream_config.clone();
+            let pipeline_handle = pipeline_handle.clone();
             tokio::spawn(async move {
                 // TLS ハンドシェイクを行う
                 let stream = match ServerTcpOrTlsStream::accept_with_tls(
@@ -156,7 +161,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                     }
                 };
 
-                if let Err(e) = handle_connection(stream, peer_addr, upstream_config).await {
+                if let Err(e) =
+                    handle_connection(stream, peer_addr, upstream_config, pipeline_handle).await
+                {
                     tracing::warn!("Client error from {peer_addr}: {e}");
                 }
             });
@@ -168,6 +175,7 @@ async fn handle_connection(
     stream: ServerTcpOrTlsStream,
     peer_addr: std::net::SocketAddr,
     upstream_config: Option<Arc<UpstreamConfig>>,
+    pipeline_handle: Arc<crate::MediaPipelineHandle>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, writer) = tokio::io::split(stream);
     let mut reader = tokio::io::BufReader::with_capacity(8192, reader);
@@ -187,15 +195,32 @@ async fn handle_connection(
         while let Some(request) = decoder.decode()? {
             let keep_alive = request.is_keep_alive();
 
-            // ローカルエンドポイント
-            let local_response = match request.uri.as_str() {
-                "/.ok" => Some(Response::new(204, "No Content")),
-                "/rpc" => Some(Response::new(204, "No Content")),
-                "/bootstrap" => Some(Response::new(204, "No Content")),
-                _ => None,
-            };
-
-            if let Some(response) = local_response {
+            if request.uri.as_str() == "/.ok" {
+                let response = Response::new(204, "No Content");
+                if let Err(e) = write_response(&mut writer, &response).await {
+                    if is_client_disconnect(&e) {
+                        tracing::warn!("499 Client Closed Request from {peer_addr}");
+                        return Ok(());
+                    }
+                    return Err(e.into());
+                }
+            } else if request.uri.as_str() == "/bootstrap" {
+                let response = Response::new(204, "No Content");
+                if let Err(e) = write_response(&mut writer, &response).await {
+                    if is_client_disconnect(&e) {
+                        tracing::warn!("499 Client Closed Request from {peer_addr}");
+                        return Ok(());
+                    }
+                    return Err(e.into());
+                }
+            } else if request.uri.as_str() == "/rpc" {
+                let response = if request.method == "POST" {
+                    crate::endpoint_http_rpc::handle_request(&request, &pipeline_handle).await
+                } else {
+                    let mut response = Response::new(405, "Method Not Allowed");
+                    response.add_header("Allow", "POST");
+                    response
+                };
                 if let Err(e) = write_response(&mut writer, &response).await {
                     if is_client_disconnect(&e) {
                         tracing::warn!("499 Client Closed Request from {peer_addr}");
