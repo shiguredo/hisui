@@ -101,16 +101,21 @@ impl VideoRealtimeMixer {
         }
         drop(event_tx);
 
-        VideoRealtimeMixerRunner::new(
-            canvas_width.get(),
-            canvas_height.get(),
+        let mut output_tx = output_tx;
+        let ack = Some(output_tx.send_syn());
+        VideoRealtimeMixerRunner {
+            canvas_width: canvas_width.get(),
+            canvas_height: canvas_height.get(),
             frame_rate,
             output_tx,
             draw_order,
             states,
-            event_rx,
+            event_rx: Some(event_rx),
             mixer_start,
-        )
+            output_frame_index: 0,
+            noacked_sent: 0,
+            ack,
+        }
         .run()
         .await
     }
@@ -191,32 +196,6 @@ struct VideoRealtimeMixerRunner {
 }
 
 impl VideoRealtimeMixerRunner {
-    fn new(
-        canvas_width: usize,
-        canvas_height: usize,
-        frame_rate: FrameRate,
-        mut output_tx: crate::MessageSender,
-        draw_order: Vec<DrawOrder>,
-        states: HashMap<TrackId, InputTrackState>,
-        event_rx: tokio::sync::mpsc::UnboundedReceiver<TrackEvent>,
-        mixer_start: tokio::time::Instant,
-    ) -> Self {
-        let ack = Some(output_tx.send_syn());
-        Self {
-            canvas_width,
-            canvas_height,
-            frame_rate,
-            output_tx,
-            draw_order,
-            states,
-            event_rx: Some(event_rx),
-            mixer_start,
-            output_frame_index: 0,
-            noacked_sent: 0,
-            ack,
-        }
-    }
-
     async fn run(mut self) -> crate::Result<()> {
         let mut event_rx = self.event_rx.take();
         loop {
