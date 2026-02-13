@@ -6,6 +6,18 @@ use crate::media_pipeline::{
 
 type RpcError = (i32, String);
 
+fn parse_params<F, T>(
+    maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    f: F,
+) -> Result<T, RpcError>
+where
+    F: FnOnce(nojson::RawJsonValue<'_, '_>) -> Result<T, nojson::JsonParseError>,
+{
+    let params =
+        maybe_params.ok_or_else(|| invalid_params("Invalid params: params is required"))?;
+    f(params).map_err(|e| invalid_params(format!("Invalid params: {e}")))
+}
+
 fn invalid_params(message: impl Into<String>) -> RpcError {
     (crate::jsonrpc::INVALID_PARAMS, message.into())
 }
@@ -70,20 +82,14 @@ impl MediaPipelineHandle {
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
     ) -> Result<RpcResult, RpcError> {
-        let params =
-            maybe_params.ok_or_else(|| invalid_params("Invalid params: params is required"))?;
-
-        let source: crate::Mp4FileSource = params
-            .try_into()
-            .map_err(|e| invalid_params(format!("Invalid params: {e}")))?;
-        let processor_id: Option<ProcessorId> = params
-            .to_member("processorId")
-            .map_err(|e| invalid_params(format!("Invalid params: {e}")))?
-            .try_into()
-            .map_err(|e| invalid_params(format!("Invalid params: {e}")))?;
-        let processor_id = processor_id.unwrap_or_else(|| {
-            ProcessorId::new(source.path.as_os_str().to_string_lossy().into_owned())
-        });
+        let (source, processor_id): (crate::Mp4FileSource, Option<ProcessorId>) =
+            parse_params(maybe_params, |params| {
+                let source = params.try_into()?;
+                let processor_id = params.to_member("processorId")?.try_into()?;
+                Ok((source, processor_id))
+            })?;
+        let processor_id =
+            processor_id.unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
 
         self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
             .await
@@ -105,17 +111,14 @@ impl MediaPipelineHandle {
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
     ) -> Result<RpcResult, RpcError> {
-        let params =
-            maybe_params.ok_or_else(|| invalid_params("Invalid params: params is required"))?;
-
-        let mixer: crate::mixer_realtime_video::VideoRealtimeMixer = params
-            .try_into()
-            .map_err(|e| invalid_params(format!("Invalid params: {e}")))?;
-        let processor_id: Option<ProcessorId> = params
-            .to_member("processorId")
-            .map_err(|e| invalid_params(format!("Invalid params: {e}")))?
-            .try_into()
-            .map_err(|e| invalid_params(format!("Invalid params: {e}")))?;
+        let (mixer, processor_id): (
+            crate::mixer_realtime_video::VideoRealtimeMixer,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let mixer = params.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((mixer, processor_id))
+        })?;
         let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("videoMixer"));
 
         self.spawn_processor(processor_id.clone(), move |handle| mixer.run(handle))
