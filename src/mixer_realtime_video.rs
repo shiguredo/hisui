@@ -106,7 +106,7 @@ impl VideoRealtimeMixer {
         mixer_start: tokio::time::Instant,
     ) -> crate::Result<()> {
         let mut noacked_sent = 0u64;
-        let mut ack = output_tx.send_syn();
+        let mut ack = Some(output_tx.send_syn());
         let mut event_rx = Some(event_rx);
         let mut output_frame_index = 0u64;
 
@@ -119,47 +119,83 @@ impl VideoRealtimeMixer {
 
             tokio::select! {
                 _ = tokio::time::sleep_until(next_instant) => {
-                    let now = mixer_start.elapsed();
-                    for state in states.values_mut() {
-                        state.advance(now);
-                    }
-
-                    if noacked_sent > MAX_NOACKED_COUNT {
-                        ack.await;
-                        ack = output_tx.send_syn();
-                        noacked_sent = 0;
-                    }
-
-                    let timestamp = frames_to_timestamp(self.frame_rate, output_frame_index);
-                    let duration = frames_to_timestamp(self.frame_rate, output_frame_index + 1)
-                        .saturating_sub(timestamp);
-                    output_frame_index = output_frame_index.saturating_add(1);
-
-                    let frame = compose_frame(
-                        self.canvas_width.get(),
-                        self.canvas_height.get(),
-                        timestamp,
-                        duration,
+                    if !self.handle_output_tick(
+                        &mut output_tx,
+                        &mut noacked_sent,
+                        &mut ack,
+                        &mut output_frame_index,
                         &draw_order,
-                        &states,
-                    )?;
-
-                    if !output_tx.send_video(frame) {
+                        &mut states,
+                        mixer_start,
+                    ).await? {
                         break;
                     }
-                    noacked_sent += 1;
                 }
                 event = recv_track_event_or_pending(&mut event_rx) => {
-                    let Some(event) = event else {
-                        event_rx = None;
-                        continue;
-                    };
-                    handle_track_event(event, &mut states)?;
+                    Self::handle_event(event, &mut event_rx, &mut states)?;
                 }
             }
         }
 
         Ok(())
+    }
+
+    async fn handle_output_tick(
+        &self,
+        output_tx: &mut crate::MessageSender,
+        noacked_sent: &mut u64,
+        ack: &mut Option<crate::Ack>,
+        output_frame_index: &mut u64,
+        draw_order: &[DrawOrder],
+        states: &mut HashMap<TrackId, InputTrackState>,
+        mixer_start: tokio::time::Instant,
+    ) -> crate::Result<bool> {
+        let now = mixer_start.elapsed();
+        for state in states.values_mut() {
+            state.advance(now);
+        }
+
+        if *noacked_sent > MAX_NOACKED_COUNT {
+            if let Some(waiting_ack) = ack.take() {
+                waiting_ack.await;
+            }
+            *ack = Some(output_tx.send_syn());
+            *noacked_sent = 0;
+        }
+
+        let timestamp = frames_to_timestamp(self.frame_rate, *output_frame_index);
+        let duration = frames_to_timestamp(self.frame_rate, output_frame_index.saturating_add(1))
+            .saturating_sub(timestamp);
+        *output_frame_index = output_frame_index.saturating_add(1);
+
+        let frame = compose_frame(
+            self.canvas_width.get(),
+            self.canvas_height.get(),
+            timestamp,
+            duration,
+            draw_order,
+            states,
+        )?;
+
+        if !output_tx.send_video(frame) {
+            return Ok(false);
+        }
+        *noacked_sent = noacked_sent.saturating_add(1);
+
+        Ok(true)
+    }
+
+    fn handle_event(
+        event: Option<TrackEvent>,
+        event_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
+        states: &mut HashMap<TrackId, InputTrackState>,
+    ) -> crate::Result<()> {
+        let Some(event) = event else {
+            *event_rx = None;
+            return Ok(());
+        };
+
+        handle_track_event(event, states)
     }
 }
 
