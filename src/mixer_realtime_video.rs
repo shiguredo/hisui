@@ -64,11 +64,19 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
 
 impl VideoRealtimeMixer {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
-        let output_tx = handle.publish_track(self.output_track_id.clone()).await?;
+        let Self {
+            canvas_width,
+            canvas_height,
+            frame_rate,
+            input_tracks,
+            output_track_id,
+        } = self;
 
-        let mut draw_order = Vec::with_capacity(self.input_tracks.len());
-        let mut states = HashMap::with_capacity(self.input_tracks.len());
-        for (index, input_track) in self.input_tracks.iter().enumerate() {
+        let output_tx = handle.publish_track(output_track_id).await?;
+
+        let mut draw_order = Vec::with_capacity(input_tracks.len());
+        let mut states = HashMap::with_capacity(input_tracks.len());
+        for (index, input_track) in input_tracks.iter().enumerate() {
             let state = InputTrackState::new(input_track.clone())?;
             draw_order.push(DrawOrder {
                 track_id: input_track.track_id.clone(),
@@ -93,109 +101,18 @@ impl VideoRealtimeMixer {
         }
         drop(event_tx);
 
-        self.run_mixer_loop(output_tx, draw_order, states, event_rx, mixer_start)
-            .await
-    }
-
-    async fn run_mixer_loop(
-        &self,
-        mut output_tx: crate::MessageSender,
-        draw_order: Vec<DrawOrder>,
-        mut states: HashMap<TrackId, InputTrackState>,
-        event_rx: tokio::sync::mpsc::UnboundedReceiver<TrackEvent>,
-        mixer_start: tokio::time::Instant,
-    ) -> crate::Result<()> {
-        let mut noacked_sent = 0u64;
-        let mut ack = Some(output_tx.send_syn());
-        let mut event_rx = Some(event_rx);
-        let mut output_frame_index = 0u64;
-
-        loop {
-            let now = mixer_start.elapsed();
-            output_frame_index =
-                catch_up_output_frame_index(self.frame_rate, output_frame_index, now);
-            let next_timestamp = frames_to_timestamp(self.frame_rate, output_frame_index);
-            let next_instant = mixer_start + next_timestamp;
-
-            tokio::select! {
-                _ = tokio::time::sleep_until(next_instant) => {
-                    if !self.handle_output_tick(
-                        &mut output_tx,
-                        &mut noacked_sent,
-                        &mut ack,
-                        &mut output_frame_index,
-                        &draw_order,
-                        &mut states,
-                        mixer_start,
-                    ).await? {
-                        break;
-                    }
-                }
-                event = recv_track_event_or_pending(&mut event_rx) => {
-                    Self::handle_event(event, &mut event_rx, &mut states)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn handle_output_tick(
-        &self,
-        output_tx: &mut crate::MessageSender,
-        noacked_sent: &mut u64,
-        ack: &mut Option<crate::Ack>,
-        output_frame_index: &mut u64,
-        draw_order: &[DrawOrder],
-        states: &mut HashMap<TrackId, InputTrackState>,
-        mixer_start: tokio::time::Instant,
-    ) -> crate::Result<bool> {
-        let now = mixer_start.elapsed();
-        for state in states.values_mut() {
-            state.advance(now);
-        }
-
-        if *noacked_sent > MAX_NOACKED_COUNT {
-            if let Some(waiting_ack) = ack.take() {
-                waiting_ack.await;
-            }
-            *ack = Some(output_tx.send_syn());
-            *noacked_sent = 0;
-        }
-
-        let timestamp = frames_to_timestamp(self.frame_rate, *output_frame_index);
-        let duration = frames_to_timestamp(self.frame_rate, output_frame_index.saturating_add(1))
-            .saturating_sub(timestamp);
-        *output_frame_index = output_frame_index.saturating_add(1);
-
-        let frame = compose_frame(
-            self.canvas_width.get(),
-            self.canvas_height.get(),
-            timestamp,
-            duration,
+        VideoRealtimeMixerRunner::new(
+            canvas_width.get(),
+            canvas_height.get(),
+            frame_rate,
+            output_tx,
             draw_order,
             states,
-        )?;
-
-        if !output_tx.send_video(frame) {
-            return Ok(false);
-        }
-        *noacked_sent = noacked_sent.saturating_add(1);
-
-        Ok(true)
-    }
-
-    fn handle_event(
-        event: Option<TrackEvent>,
-        event_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
-        states: &mut HashMap<TrackId, InputTrackState>,
-    ) -> crate::Result<()> {
-        let Some(event) = event else {
-            *event_rx = None;
-            return Ok(());
-        };
-
-        handle_track_event(event, states)
+            event_rx,
+            mixer_start,
+        )
+        .run()
+        .await
     }
 }
 
@@ -256,6 +173,124 @@ struct DrawOrder {
     track_id: TrackId,
     z: isize,
     index: usize,
+}
+
+#[derive(Debug)]
+struct VideoRealtimeMixerRunner {
+    canvas_width: usize,
+    canvas_height: usize,
+    frame_rate: FrameRate,
+    output_tx: crate::MessageSender,
+    draw_order: Vec<DrawOrder>,
+    states: HashMap<TrackId, InputTrackState>,
+    event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
+    mixer_start: tokio::time::Instant,
+    output_frame_index: u64,
+    noacked_sent: u64,
+    ack: Option<crate::Ack>,
+}
+
+impl VideoRealtimeMixerRunner {
+    fn new(
+        canvas_width: usize,
+        canvas_height: usize,
+        frame_rate: FrameRate,
+        mut output_tx: crate::MessageSender,
+        draw_order: Vec<DrawOrder>,
+        states: HashMap<TrackId, InputTrackState>,
+        event_rx: tokio::sync::mpsc::UnboundedReceiver<TrackEvent>,
+        mixer_start: tokio::time::Instant,
+    ) -> Self {
+        let ack = Some(output_tx.send_syn());
+        Self {
+            canvas_width,
+            canvas_height,
+            frame_rate,
+            output_tx,
+            draw_order,
+            states,
+            event_rx: Some(event_rx),
+            mixer_start,
+            output_frame_index: 0,
+            noacked_sent: 0,
+            ack,
+        }
+    }
+
+    async fn run(mut self) -> crate::Result<()> {
+        let mut event_rx = self.event_rx.take();
+        loop {
+            let next_instant = self.next_output_instant();
+            tokio::select! {
+                _ = tokio::time::sleep_until(next_instant) => {
+                    if !self.handle_output_tick().await? {
+                        break;
+                    }
+                }
+                event = recv_track_event_or_pending(&mut event_rx) => {
+                    self.handle_event(event, &mut event_rx)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn next_output_instant(&mut self) -> tokio::time::Instant {
+        let now = self.mixer_start.elapsed();
+        self.output_frame_index =
+            catch_up_output_frame_index(self.frame_rate, self.output_frame_index, now);
+        let next_timestamp = frames_to_timestamp(self.frame_rate, self.output_frame_index);
+        self.mixer_start + next_timestamp
+    }
+
+    async fn handle_output_tick(&mut self) -> crate::Result<bool> {
+        let now = self.mixer_start.elapsed();
+        for state in self.states.values_mut() {
+            state.advance(now);
+        }
+
+        if self.noacked_sent > MAX_NOACKED_COUNT {
+            if let Some(waiting_ack) = self.ack.take() {
+                waiting_ack.await;
+            }
+            self.ack = Some(self.output_tx.send_syn());
+            self.noacked_sent = 0;
+        }
+
+        let timestamp = frames_to_timestamp(self.frame_rate, self.output_frame_index);
+        let duration =
+            frames_to_timestamp(self.frame_rate, self.output_frame_index.saturating_add(1))
+                .saturating_sub(timestamp);
+        self.output_frame_index = self.output_frame_index.saturating_add(1);
+
+        let frame = compose_frame(
+            self.canvas_width,
+            self.canvas_height,
+            timestamp,
+            duration,
+            &self.draw_order,
+            &self.states,
+        )?;
+
+        if !self.output_tx.send_video(frame) {
+            return Ok(false);
+        }
+        self.noacked_sent = self.noacked_sent.saturating_add(1);
+
+        Ok(true)
+    }
+
+    fn handle_event(
+        &mut self,
+        event: Option<TrackEvent>,
+        event_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
+    ) -> crate::Result<()> {
+        let Some(event) = event else {
+            *event_rx = None;
+            return Ok(());
+        };
+        handle_track_event(event, &mut self.states)
+    }
 }
 
 #[derive(Debug)]
