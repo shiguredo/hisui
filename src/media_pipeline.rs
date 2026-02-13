@@ -1,7 +1,7 @@
 #[derive(Debug)]
 pub struct MediaPipeline {
-    command_tx: Option<tokio::sync::mpsc::UnboundedSender<Command>>,
-    command_rx: tokio::sync::mpsc::UnboundedReceiver<Command>,
+    command_tx: Option<tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>>,
+    command_rx: tokio::sync::mpsc::UnboundedReceiver<MediaPipelineCommand>,
     processors: std::collections::HashSet<ProcessorId>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
 }
@@ -41,19 +41,19 @@ impl MediaPipeline {
         tracing::debug!("MediaPipeline stopped");
     }
 
-    fn handle_command(&mut self, command: Command) {
+    fn handle_command(&mut self, command: MediaPipelineCommand) {
         match command {
-            Command::RegisterProcessor {
+            MediaPipelineCommand::RegisterProcessor {
                 processor_id,
                 reply_tx,
             } => {
                 let result = self.handle_register_processor(processor_id);
                 let _ = reply_tx.send(result); // 応答では受信側がすでに閉じていても問題ないので、結果の確認は不要（以降も同様）
             }
-            Command::DeregisterProcessor { processor_id } => {
+            MediaPipelineCommand::DeregisterProcessor { processor_id } => {
                 self.handle_deregister_processor(processor_id);
             }
-            Command::PublishTrack {
+            MediaPipelineCommand::PublishTrack {
                 processor_id,
                 track_id,
                 reply_tx,
@@ -61,12 +61,18 @@ impl MediaPipeline {
                 let result = self.handle_publish_track(processor_id, track_id);
                 let _ = reply_tx.send(result);
             }
-            Command::SubscribeTrack {
+            MediaPipelineCommand::SubscribeTrack {
                 processor_id,
                 track_id,
                 tx,
             } => {
                 self.handle_subscribe_track(processor_id, track_id, tx);
+            }
+            MediaPipelineCommand::ListTracks { reply_tx } => {
+                let _ = reply_tx.send(self.handle_list_tracks());
+            }
+            MediaPipelineCommand::ListProcessors { reply_tx } => {
+                let _ = reply_tx.send(self.handle_list_processors());
             }
         }
     }
@@ -164,6 +170,14 @@ impl MediaPipeline {
         tracing::debug!("deregister processor: {processor_id}");
         self.processors.remove(&processor_id);
     }
+
+    fn handle_list_tracks(&self) -> Vec<TrackId> {
+        self.tracks.keys().cloned().collect()
+    }
+
+    fn handle_list_processors(&self) -> Vec<ProcessorId> {
+        self.processors.iter().cloned().collect()
+    }
 }
 
 impl Default for MediaPipeline {
@@ -174,7 +188,7 @@ impl Default for MediaPipeline {
 
 #[derive(Debug, Clone)]
 pub struct MediaPipelineHandle {
-    command_tx: tokio::sync::mpsc::UnboundedSender<Command>,
+    command_tx: tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>,
 }
 
 impl MediaPipelineHandle {
@@ -202,7 +216,7 @@ impl MediaPipelineHandle {
         processor_id: ProcessorId,
     ) -> Result<ProcessorHandle, RegisterProcessorError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let command = Command::RegisterProcessor {
+        let command = MediaPipelineCommand::RegisterProcessor {
             processor_id: processor_id.clone(),
             reply_tx,
         };
@@ -224,13 +238,13 @@ impl MediaPipelineHandle {
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
     //   応答を受け取らない場合にはそもそもここの成功・失敗に依存するようなコマンドであるべきではないため）
-    fn send(&self, command: Command) -> bool {
+    pub(crate) fn send(&self, command: MediaPipelineCommand) -> bool {
         self.command_tx.send(command).is_ok()
     }
 }
 
 #[derive(Debug)]
-enum Command {
+pub(crate) enum MediaPipelineCommand {
     RegisterProcessor {
         processor_id: ProcessorId,
         reply_tx: tokio::sync::oneshot::Sender<bool>,
@@ -247,6 +261,12 @@ enum Command {
         processor_id: ProcessorId,
         track_id: TrackId,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    },
+    ListTracks {
+        reply_tx: tokio::sync::oneshot::Sender<Vec<TrackId>>,
+    },
+    ListProcessors {
+        reply_tx: tokio::sync::oneshot::Sender<Vec<ProcessorId>>,
     },
 }
 
@@ -338,7 +358,7 @@ impl ProcessorHandle {
         track_id: TrackId,
     ) -> Result<MessageSender, PublishTrackError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let command = Command::PublishTrack {
+        let command = MediaPipelineCommand::PublishTrack {
             processor_id: self.processor_id.clone(),
             track_id,
             reply_tx,
@@ -352,7 +372,7 @@ impl ProcessorHandle {
 
     pub fn subscribe_track(&self, track_id: TrackId) -> MessageReceiver {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let command = Command::SubscribeTrack {
+        let command = MediaPipelineCommand::SubscribeTrack {
             processor_id: self.processor_id.clone(),
             track_id,
             tx,
@@ -379,9 +399,10 @@ impl Drop for ProcessorHandle {
     fn drop(&mut self) {
         // 登録を解除する。
         //パイプラインが終了している場合には送信に失敗するが、そもそもその状況ではすでにエントリは削除されているので問題ないため、結果は無視する。
-        self.pipeline_handle.send(Command::DeregisterProcessor {
-            processor_id: self.processor_id.clone(),
-        });
+        self.pipeline_handle
+            .send(MediaPipelineCommand::DeregisterProcessor {
+                processor_id: self.processor_id.clone(),
+            });
     }
 }
 

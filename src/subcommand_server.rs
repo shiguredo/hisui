@@ -2,7 +2,6 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use orfail::OrFail;
 use shiguredo_http11::uri::Uri;
 use shiguredo_http11::{Request, RequestDecoder, Response, ResponseDecoder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
@@ -45,25 +44,35 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // デフォルトポートは 8919 (H=8, I=9, S=19 で "His")
     let http_port: u16 = noargs::opt("http-port")
+        .ty("PORT")
         .doc("HTTP サーバーのリッスンポート")
         .default("8919")
         .take(&mut args)
         .then(|o| o.value().parse())?;
 
     let https_cert_path: Option<PathBuf> = noargs::opt("https-cert-path")
+        .ty("PATH")
         .doc("HTTPS 用の証明書ファイルパス（PEM 形式）")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
 
     let https_key_path: Option<PathBuf> = noargs::opt("https-key-path")
+        .ty("PATH")
         .doc("HTTPS 用の秘密鍵ファイルパス（PEM 形式）")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
 
     let ui_remote_url: Option<String> = noargs::opt("ui-remote-url")
+        .ty("URL")
         .doc("UI 用リモートサーバーの URL（GET リクエストをリバースプロキシする）")
         .take(&mut args)
         .present_and_then(|o| Ok::<_, std::convert::Infallible>(o.value().to_string()))?;
+
+    let startup_rpc_file: Option<PathBuf> = noargs::opt("startup-rpc-file")
+        .ty("PATH")
+        .doc("起動時に実行する RPC 通知配列 JSON ファイル")
+        .take(&mut args)
+        .present_and_then(|o| o.value().parse())?;
 
     // 片方のみ指定はエラー
     match (&https_cert_path, &https_key_path) {
@@ -89,20 +98,19 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()
-        .or_fail()?;
+        .build()?;
 
     runtime.block_on(async {
         // upstream 設定をパースする
         let upstream_config = match &ui_remote_url {
             Some(url) => {
                 let uri = Uri::parse(url).map_err(|e| {
-                    orfail::Failure::new(format!("Failed to parse --ui-remote-url: {e}"))
+                    crate::Error::new(format!("Failed to parse --ui-remote-url: {e}"))
                 })?;
                 let is_https = uri.scheme() == Some("https");
                 let host = uri
                     .host()
-                    .ok_or_else(|| orfail::Failure::new("--ui-remote-url has no host".to_string()))?
+                    .ok_or_else(|| crate::Error::new("--ui-remote-url has no host".to_string()))?
                     .to_string();
                 let port = uri.port().unwrap_or(if is_https { 443 } else { 80 });
                 let path_prefix = uri.path().to_string();
@@ -119,11 +127,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
         // TLS が指定されている場合は TlsAcceptor を作成する
         let tls_acceptor = match (&https_cert_path, &https_key_path) {
-            (Some(cert_path), Some(key_path)) => Some(
-                create_server_tls_acceptor(cert_path, key_path)
-                    .await
-                    .or_fail()?,
-            ),
+            (Some(cert_path), Some(key_path)) => {
+                Some(create_server_tls_acceptor(cert_path, key_path).await?)
+            }
             _ => None,
         };
 
@@ -133,14 +139,26 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             "http"
         };
 
+        let pipeline = crate::MediaPipeline::new();
+        let pipeline_handle = pipeline.handle();
+        tokio::spawn(pipeline.run());
+
+        if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
+            crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle)
+                .await
+                .map_err(|e| crate::Error::new(e.to_string()))?;
+            tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
+        }
+
         let addr = format!("0.0.0.0:{http_port}");
-        let listener = TcpListener::bind(&addr).await.or_fail()?;
+        let listener = TcpListener::bind(&addr).await?;
         tracing::info!("{scheme} server listening on {scheme}://{addr}");
 
         loop {
-            let (stream, peer_addr) = listener.accept().await.or_fail()?;
+            let (stream, peer_addr) = listener.accept().await?;
             let tls_acceptor = tls_acceptor.clone();
             let upstream_config = upstream_config.clone();
+            let pipeline_handle = pipeline_handle.clone();
             tokio::spawn(async move {
                 // TLS ハンドシェイクを行う
                 let stream = match ServerTcpOrTlsStream::accept_with_tls(
@@ -156,7 +174,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                     }
                 };
 
-                if let Err(e) = handle_connection(stream, peer_addr, upstream_config).await {
+                if let Err(e) =
+                    handle_connection(stream, peer_addr, upstream_config, pipeline_handle).await
+                {
                     tracing::warn!("Client error from {peer_addr}: {e}");
                 }
             });
@@ -168,6 +188,7 @@ async fn handle_connection(
     stream: ServerTcpOrTlsStream,
     peer_addr: std::net::SocketAddr,
     upstream_config: Option<Arc<UpstreamConfig>>,
+    pipeline_handle: crate::MediaPipelineHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, writer) = tokio::io::split(stream);
     let mut reader = tokio::io::BufReader::with_capacity(8192, reader);
@@ -190,8 +211,10 @@ async fn handle_connection(
             // ローカルエンドポイント
             let local_response = match request.uri.as_str() {
                 "/.ok" => Some(Response::new(204, "No Content")),
-                "/rpc" => Some(Response::new(204, "No Content")),
                 "/bootstrap" => Some(Response::new(204, "No Content")),
+                "/rpc" => {
+                    Some(crate::endpoint_http_rpc::handle_request(&request, &pipeline_handle).await)
+                }
                 _ => None,
             };
 
