@@ -13,8 +13,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct VideoRealtimeMixer {
-    pub canvas_width: usize,
-    pub canvas_height: usize,
+    pub canvas_width: NonZeroUsize,
+    pub canvas_height: NonZeroUsize,
     pub frame_rate: FrameRate,
     pub input_tracks: Vec<InputTrack>,
     pub output_track_id: TrackId,
@@ -38,22 +38,15 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let canvas_width: usize = value.to_member("canvasWidth")?.required()?.try_into()?;
-        let canvas_height: usize = value.to_member("canvasHeight")?.required()?.try_into()?;
-
-        let frame_rate = value
-            .to_member("frameRate")?
-            .try_into()?
-            .unwrap_or(FrameRate::FPS_30);
-
-        let input_tracks: Vec<InputTrack> =
-            value.to_member("inputTracks")?.required()?.try_into()?;
-        let output_track_id: TrackId = value.to_member("outputTrackId")?.required()?.try_into()?;
-
+        let canvas_width = value.to_member("canvasWidth")?.required()?.try_into()?;
+        let canvas_height = value.to_member("canvasHeight")?.required()?.try_into()?;
+        let frame_rate: Option<FrameRate> = value.to_member("frameRate")?.try_into()?;
+        let input_tracks = value.to_member("inputTracks")?.required()?.try_into()?;
+        let output_track_id = value.to_member("outputTrackId")?.required()?.try_into()?;
         Ok(Self {
             canvas_width,
             canvas_height,
-            frame_rate,
+            frame_rate: frame_rate.unwrap_or(FrameRate::FPS_30),
             input_tracks,
             output_track_id,
         })
@@ -62,10 +55,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
 
 impl VideoRealtimeMixer {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
-        if self.canvas_width == 0 || self.canvas_height == 0 {
-            return Err(Error::new("canvas width and height must be positive"));
-        }
-
         let frame_interval = frames_to_timestamp(self.frame_rate, 1);
         if frame_interval.is_zero() {
             return Err(Error::new("frameRate is too high"));
@@ -128,8 +117,8 @@ impl VideoRealtimeMixer {
                     output_frame_count = output_frame_count.saturating_add(1);
 
                     let frame = compose_frame(
-                        self.canvas_width,
-                        self.canvas_height,
+                        self.canvas_width.get(),
+                        self.canvas_height.get(),
                         timestamp,
                         duration,
                         &draw_order,
