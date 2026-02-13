@@ -1,5 +1,3 @@
-use nojson::JsonValueKind;
-
 pub async fn run_rpc_request_file(
     path: &std::path::Path,
     pipeline_handle: &crate::MediaPipelineHandle,
@@ -11,8 +9,8 @@ pub async fn run_rpc_request_file(
     let requests = validate_rpc_requests_file(parsed.value())?;
 
     for request in requests {
-        let request_json = nojson::json(|f| f.value(request)).to_string();
-        let _ = pipeline_handle.rpc(request_json.as_bytes()).await;
+        // 全て通知なので結果は無視する
+        let _ = pipeline_handle.rpc(request.as_raw_str().as_bytes()).await;
     }
 
     Ok(())
@@ -20,43 +18,14 @@ pub async fn run_rpc_request_file(
 
 fn validate_rpc_requests_file<'text, 'raw>(
     value: nojson::RawJsonValue<'text, 'raw>,
-) -> crate::Result<Vec<nojson::RawJsonValue<'text, 'raw>>> {
-    if value.kind() != JsonValueKind::Array {
-        return Err(crate::Error::new(
-            "startup RPC file must be an array of notification requests",
-        ));
-    }
-
-    let requests: Vec<_> = value
-        .to_array()
-        .map_err(|e| crate::Error::new(format!("failed to parse startup RPC file array: {e}")))?
-        .collect();
-
-    for (index, request) in requests.iter().copied().enumerate() {
-        if request.kind() != JsonValueKind::Object {
-            return Err(crate::Error::new(format!(
-                "startup RPC request at index {index} must be an object"
-            )));
-        }
-
-        for (name, _) in request.to_object().map_err(|e| {
-            crate::Error::new(format!(
-                "failed to parse startup RPC request at index {index}: {e}"
-            ))
-        })? {
-            let name = name.to_unquoted_string_str().map_err(|e| {
-                crate::Error::new(format!(
-                    "failed to parse startup RPC request member at index {index}: {e}"
-                ))
-            })?;
-            if name == "id" {
-                return Err(crate::Error::new(format!(
-                    "startup RPC request at index {index} must not contain id"
-                )));
-            }
+) -> Result<Vec<nojson::RawJsonValue<'text, 'raw>>, nojson::JsonParseError> {
+    let requests: Vec<_> = value.to_array()?.collect();
+    for request in requests.iter() {
+        let maybe_id = crate::jsonrpc::validate_request(*request)?;
+        if let Some(id) = maybe_id {
+            return Err(id.invalid("startup RPC request must not contain id"));
         }
     }
-
     Ok(requests)
 }
 

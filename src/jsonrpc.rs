@@ -47,7 +47,7 @@ pub fn parse_request_bytes<'a>(
     Ok(json)
 }
 
-fn validate_request<'text, 'raw>(
+pub fn validate_request<'text, 'raw>(
     value: nojson::RawJsonValue<'text, 'raw>,
 ) -> Result<Option<nojson::RawJsonValue<'text, 'raw>>, nojson::JsonParseError> {
     if value.kind() == nojson::JsonValueKind::Array {
