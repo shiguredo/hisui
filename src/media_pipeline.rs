@@ -255,12 +255,75 @@ impl MediaPipelineHandle {
         })
     }
 
+    async fn handle_create_mp4_file_source_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<CreateMp4FileSourceRpcResult, (i32, String)> {
+        let params = maybe_params.ok_or_else(|| {
+            (
+                crate::jsonrpc::INVALID_PARAMS,
+                "Invalid params: params is required".to_owned(),
+            )
+        })?;
+
+        let source: crate::Mp4FileSource = params.try_into().map_err(|e| {
+            (
+                crate::jsonrpc::INVALID_PARAMS,
+                format!("Invalid params: {e}"),
+            )
+        })?;
+        let processor_id: Option<ProcessorId> = params
+            .to_member("processorId")
+            .map_err(|e| {
+                (
+                    crate::jsonrpc::INVALID_PARAMS,
+                    format!("Invalid params: {e}"),
+                )
+            })?
+            .try_into()
+            .map_err(|e| {
+                (
+                    crate::jsonrpc::INVALID_PARAMS,
+                    format!("Invalid params: {e}"),
+                )
+            })?;
+        let processor_id = processor_id.unwrap_or_else(|| {
+            ProcessorId::new(source.path.as_os_str().to_string_lossy().into_owned())
+        });
+
+        self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
+            .await
+            .map_err(|e| match e {
+                RegisterProcessorError::DuplicateProcessorId => (
+                    crate::jsonrpc::INVALID_PARAMS,
+                    format!("Invalid params: processorId already exists: {processor_id}"),
+                ),
+                RegisterProcessorError::PipelineTerminated => (
+                    crate::jsonrpc::INTERNAL_ERROR,
+                    "Internal error: pipeline has terminated".to_owned(),
+                ),
+            })?;
+
+        Ok(CreateMp4FileSourceRpcResult { processor_id })
+    }
+
     // すでに MediaPipeline が終了している場合には false が返される。
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
     //   応答を受け取らない場合にはそもそもここの成功・失敗に依存するようなコマンドであるべきではないため）
     fn send(&self, command: Command) -> bool {
         self.command_tx.send(command).is_ok()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CreateMp4FileSourceRpcResult {
+    processor_id: ProcessorId,
+}
+
+impl nojson::DisplayJson for CreateMp4FileSourceRpcResult {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| f.member("processorId", &self.processor_id))
     }
 }
 
@@ -559,3 +622,157 @@ impl std::fmt::Display for PublishTrackError {
 }
 
 impl std::error::Error for PublishTrackError {}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    const TEST_MP4_PATH: &str = "testdata/archive-red-320x320-av1.mp4";
+
+    #[tokio::test]
+    async fn create_mp4_file_source_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(error_code(&response), crate::jsonrpc::INVALID_PARAMS);
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_mp4_file_source_validates_mp4_source_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}"}}}}"#
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(error_code(&response), crate::jsonrpc::INVALID_PARAMS);
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_mp4_file_source_uses_path_as_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}","realtime":false,"loopPlayback":false,"videoTrackId":"video-default-id"}}}}"#
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(result_processor_id(&response), TEST_MP4_PATH);
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_mp4_file_source_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}","processorId":"custom-source","realtime":false,"loopPlayback":false,"videoTrackId":"video-custom-id"}}}}"#
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(result_processor_id(&response), "custom-source");
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_mp4_file_source_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}","processorId":"duplicate-source","realtime":true,"loopPlayback":false,"videoTrackId":"video-duplicate-id"}}}}"#
+        );
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(result_processor_id(&first_response), "duplicate-source");
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(error_code(&second_response), crate::jsonrpc::INVALID_PARAMS);
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    fn spawn_test_pipeline() -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
+        let pipeline = MediaPipeline::new();
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+        (handle, pipeline_task)
+    }
+
+    fn error_code(response: &nojson::RawJsonOwned) -> i32 {
+        response
+            .value()
+            .to_member("error")
+            .expect("error member")
+            .required()
+            .expect("error value")
+            .to_member("code")
+            .expect("error.code member")
+            .required()
+            .expect("error.code value")
+            .try_into()
+            .expect("error.code must be i32")
+    }
+
+    fn result_processor_id(response: &nojson::RawJsonOwned) -> String {
+        response
+            .value()
+            .to_member("result")
+            .expect("result member")
+            .required()
+            .expect("result value")
+            .to_member("processorId")
+            .expect("result.processorId member")
+            .required()
+            .expect("result.processorId value")
+            .try_into()
+            .expect("result.processorId must be string")
+    }
+}
