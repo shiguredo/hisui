@@ -83,7 +83,7 @@ impl VideoRealtimeMixer {
             let state = InputTrackState::new(input_track.clone())?;
             draw_order.push(DrawOrder {
                 track_id: input_track.track_id.clone(),
-                z: input_track.z,
+                z: input_track.z.unwrap_or_default(),
                 index,
             });
             states.insert(input_track.track_id.clone(), state);
@@ -153,22 +153,33 @@ impl VideoRealtimeMixer {
 #[derive(Debug, Clone)]
 pub struct InputTrack {
     pub track_id: TrackId,
-    pub x: isize,
-    pub y: isize,
-    pub width: usize,
-    pub height: usize,
-    pub z: isize,
+    pub x: Option<isize>,
+    pub y: Option<isize>,
+    pub z: Option<isize>,
+    pub width: Option<usize>,
+    pub height: Option<usize>,
 }
 
 impl nojson::DisplayJson for InputTrack {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("trackId", &self.track_id)?;
-            f.member("x", self.x)?;
-            f.member("y", self.y)?;
-            f.member("width", self.width)?;
-            f.member("height", self.height)?;
-            f.member("z", self.z)
+            if let Some(x) = self.x {
+                f.member("x", x)?;
+            }
+            if let Some(y) = self.y {
+                f.member("y", y)?;
+            }
+            if let Some(z) = self.z {
+                f.member("z", z)?;
+            }
+            if let Some(width) = self.width {
+                f.member("width", width)?;
+            }
+            if let Some(height) = self.height {
+                f.member("height", height)?;
+            }
+            Ok(())
         })
     }
 }
@@ -180,19 +191,19 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
         let track_id: TrackId = value.to_member("trackId")?.required()?.try_into()?;
-        let x: isize = value.to_member("x")?.required()?.try_into()?;
-        let y: isize = value.to_member("y")?.required()?.try_into()?;
-        let width: usize = value.to_member("width")?.required()?.try_into()?;
-        let height: usize = value.to_member("height")?.required()?.try_into()?;
-        let z: isize = value.to_member("z")?.required()?.try_into()?;
+        let x: Option<isize> = value.to_member("x")?.try_into()?;
+        let y: Option<isize> = value.to_member("y")?.try_into()?;
+        let z: Option<isize> = value.to_member("z")?.try_into()?;
+        let width: Option<usize> = value.to_member("width")?.try_into()?;
+        let height: Option<usize> = value.to_member("height")?.try_into()?;
 
         Ok(Self {
             track_id,
             x,
             y,
+            z,
             width,
             height,
-            z,
         })
     }
 }
@@ -213,8 +224,8 @@ struct PendingVideoFrame {
 #[derive(Debug)]
 struct InputTrackState {
     input_track: InputTrack,
-    target_width: EvenUsize,
-    target_height: EvenUsize,
+    target_width: Option<EvenUsize>,
+    target_height: Option<EvenUsize>,
     first_input_sample_timestamp: Option<Duration>,
     first_input_elapsed: Option<Duration>,
     pending_frames: VecDeque<PendingVideoFrame>,
@@ -224,13 +235,19 @@ struct InputTrackState {
 
 impl InputTrackState {
     fn new(input_track: InputTrack) -> crate::Result<Self> {
-        let target_width = EvenUsize::truncating_new(input_track.width);
-        let target_height = EvenUsize::truncating_new(input_track.height);
+        let target_width = input_track.width.map(EvenUsize::truncating_new);
+        let target_height = input_track.height.map(EvenUsize::truncating_new);
 
-        if target_width.get() == 0 || target_height.get() == 0 {
+        if input_track.width.is_some() && target_width.is_some_and(|w| w.get() == 0) {
             return Err(Error::new(format!(
-                "input track width and height must be at least 2: track={} width={} height={}",
-                input_track.track_id, input_track.width, input_track.height,
+                "input track width must be at least 2: track={} width={:?}",
+                input_track.track_id, input_track.width,
+            )));
+        }
+        if input_track.height.is_some() && target_height.is_some_and(|h| h.get() == 0) {
+            return Err(Error::new(format!(
+                "input track height must be at least 2: track={} height={:?}",
+                input_track.track_id, input_track.height,
             )));
         }
 
@@ -399,24 +416,42 @@ fn compose_frame(
             continue;
         };
 
-        if current.frame.width == state.target_width.get()
-            && current.frame.height == state.target_height.get()
-        {
-            canvas.draw_frame_clipped(state.input_track.x, state.input_track.y, &current.frame)?;
+        let x = state.input_track.x.unwrap_or_default();
+        let y = state.input_track.y.unwrap_or_default();
+        let target_width = state
+            .target_width
+            .map(|w| w.get())
+            .unwrap_or(current.frame.width);
+        let target_height = state
+            .target_height
+            .map(|h| h.get())
+            .unwrap_or(current.frame.height);
+
+        if current.frame.width == target_width && current.frame.height == target_height {
+            canvas.draw_frame_clipped(x, y, &current.frame)?;
             continue;
+        }
+
+        let resize_width = EvenUsize::truncating_new(target_width);
+        let resize_height = EvenUsize::truncating_new(target_height);
+        if resize_width.get() == 0 || resize_height.get() == 0 {
+            return Err(Error::new(format!(
+                "invalid target size: width={} height={}",
+                target_width, target_height
+            )));
         }
 
         let resized = current
             .frame
             .resize(
-                state.target_width,
-                state.target_height,
+                resize_width,
+                resize_height,
                 shiguredo_libyuv::FilterMode::Bilinear,
             )
             .map_err(|e| Error::new(e.to_string()))?
             .ok_or_else(|| Error::new("failed to resize input frame"))?;
 
-        canvas.draw_frame_clipped(state.input_track.x, state.input_track.y, &resized)?;
+        canvas.draw_frame_clipped(x, y, &resized)?;
     }
 
     Ok(VideoFrame {
@@ -554,9 +589,9 @@ mod tests {
                         "trackId": "input-1",
                         "x": 0,
                         "y": 0,
+                        "z": 1,
                         "width": 640,
-                        "height": 360,
-                        "z": 1
+                        "height": 360
                     }
                 ],
                 "outputTrackId": "output"
@@ -568,13 +603,13 @@ mod tests {
         assert_eq!(mixer.canvas_height, 720);
         assert_eq!(mixer.frame_rate.numerator.get(), 30);
         assert_eq!(mixer.input_tracks.len(), 1);
-        assert_eq!(mixer.input_tracks[0].z, 1);
+        assert_eq!(mixer.input_tracks[0].z, Some(1));
 
         Ok(())
     }
 
     #[test]
-    fn video_realtime_mixer_json_parse_error_without_z() {
+    fn video_realtime_mixer_json_parse_without_z() {
         let result = crate::json::parse_str::<VideoRealtimeMixer>(
             r#"{
                 "canvasWidth": 1280,
@@ -593,7 +628,8 @@ mod tests {
             }"#,
         );
 
-        assert!(result.is_err());
+        let mixer = result.expect("infallible");
+        assert_eq!(mixer.input_tracks[0].z, None);
     }
 
     #[test]
@@ -607,9 +643,9 @@ mod tests {
                         "trackId": "input-1",
                         "x": 0,
                         "y": 0,
+                        "z": 0,
                         "width": 640,
-                        "height": 360,
-                        "z": 0
+                        "height": 360
                     }
                 ],
                 "outputTrackId": "output"
@@ -617,6 +653,33 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn video_realtime_mixer_json_parse_defaults_for_optional_position_and_size() -> crate::Result<()>
+    {
+        let mixer: VideoRealtimeMixer = crate::json::parse_str(
+            r#"{
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": 30,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1"
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        )
+        .map_err(|e| Error::new(e.to_string()))?;
+
+        let track = &mixer.input_tracks[0];
+        assert_eq!(track.x, None);
+        assert_eq!(track.y, None);
+        assert_eq!(track.z, None);
+        assert_eq!(track.width, None);
+        assert_eq!(track.height, None);
+        Ok(())
     }
 
     #[test]
@@ -631,9 +694,9 @@ mod tests {
                         "trackId": "input-1",
                         "x": 0,
                         "y": 0,
+                        "z": 0,
                         "width": 640,
-                        "height": 360,
-                        "z": 0
+                        "height": 360
                     }
                 ],
                 "outputTrackId": "output"
@@ -658,9 +721,9 @@ mod tests {
                         "trackId": "input-1",
                         "x": 0,
                         "y": 0,
+                        "z": 0,
                         "width": 640,
-                        "height": 360,
-                        "z": 0
+                        "height": 360
                     }
                 ],
                 "outputTrackId": "output"
@@ -687,19 +750,19 @@ mod tests {
             input_tracks: vec![
                 InputTrack {
                     track_id: input_track_id_1.clone(),
-                    x: 0,
-                    y: 0,
-                    width: 160,
-                    height: 120,
-                    z: 0,
+                    x: Some(0),
+                    y: Some(0),
+                    z: Some(0),
+                    width: Some(160),
+                    height: Some(120),
                 },
                 InputTrack {
                     track_id: input_track_id_2.clone(),
-                    x: 80,
-                    y: 60,
-                    width: 160,
-                    height: 120,
-                    z: 1,
+                    x: Some(80),
+                    y: Some(60),
+                    z: Some(1),
+                    width: Some(160),
+                    height: Some(120),
                 },
             ],
             output_track_id: output_track_id.clone(),
