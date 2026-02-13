@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    num::NonZeroUsize,
     sync::Arc,
     time::Duration,
 };
@@ -15,8 +14,8 @@ const MAX_NOACKED_COUNT: u64 = 100;
 
 #[derive(Debug)]
 pub struct VideoRealtimeMixer {
-    pub canvas_width: NonZeroUsize,
-    pub canvas_height: NonZeroUsize,
+    pub canvas_width: EvenUsize,
+    pub canvas_height: EvenUsize,
     pub frame_rate: FrameRate,
     pub input_tracks: Vec<InputTrack>,
     pub output_track_id: TrackId,
@@ -127,8 +126,8 @@ pub struct InputTrack {
     pub x: isize,
     pub y: isize,
     pub z: isize,
-    pub width: Option<usize>,
-    pub height: Option<usize>,
+    pub width: Option<EvenUsize>,
+    pub height: Option<EvenUsize>,
 }
 
 impl nojson::DisplayJson for InputTrack {
@@ -159,8 +158,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         let x: Option<isize> = value.to_member("x")?.try_into()?;
         let y: Option<isize> = value.to_member("y")?.try_into()?;
         let z: Option<isize> = value.to_member("z")?.try_into()?;
-        let width: Option<usize> = value.to_member("width")?.try_into()?;
-        let height: Option<usize> = value.to_member("height")?.try_into()?;
+        let width: Option<EvenUsize> = value.to_member("width")?.try_into()?;
+        let height: Option<EvenUsize> = value.to_member("height")?.try_into()?;
 
         Ok(Self {
             track_id,
@@ -292,21 +291,8 @@ struct InputTrackState {
 
 impl InputTrackState {
     fn new(input_track: InputTrack) -> crate::Result<Self> {
-        let target_width = input_track.width.map(EvenUsize::truncating_new);
-        let target_height = input_track.height.map(EvenUsize::truncating_new);
-
-        if input_track.width.is_some() && target_width.is_some_and(|w| w.get() == 0) {
-            return Err(Error::new(format!(
-                "input track width must be at least 2: track={} width={:?}",
-                input_track.track_id, input_track.width,
-            )));
-        }
-        if input_track.height.is_some() && target_height.is_some_and(|h| h.get() == 0) {
-            return Err(Error::new(format!(
-                "input track height must be at least 2: track={} height={:?}",
-                input_track.track_id, input_track.height,
-            )));
-        }
+        let target_width = input_track.width;
+        let target_height = input_track.height;
 
         Ok(Self {
             input_track,
@@ -483,11 +469,11 @@ fn compose_frame(
         let y = state.input_track.y;
         let target_width = state
             .target_width
-            .map(|w| w.get())
+            .map(EvenUsize::get)
             .unwrap_or(current.frame.width);
         let target_height = state
             .target_height
-            .map(|h| h.get())
+            .map(EvenUsize::get)
             .unwrap_or(current.frame.height);
 
         if current.frame.width == target_width && current.frame.height == target_height {
@@ -861,6 +847,88 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn video_realtime_mixer_json_parse_error_with_odd_canvas_size() {
+        let result = crate::json::parse_str::<VideoRealtimeMixer>(
+            r#"{
+                "canvasWidth": 1279,
+                "canvasHeight": 720,
+                "frameRate": 30,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1"
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn video_realtime_mixer_json_parse_with_zero_canvas_size() -> crate::Result<()> {
+        let mixer = crate::json::parse_str::<VideoRealtimeMixer>(
+            r#"{
+                "canvasWidth": 0,
+                "canvasHeight": 720,
+                "frameRate": 30,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1"
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        )
+        .map_err(|e| Error::new(e.to_string()))?;
+
+        assert_eq!(mixer.canvas_width.get(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn video_realtime_mixer_json_parse_error_with_odd_input_size() {
+        let result = crate::json::parse_str::<VideoRealtimeMixer>(
+            r#"{
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": 30,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1",
+                        "width": 639
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn video_realtime_mixer_json_parse_with_zero_input_size() -> crate::Result<()> {
+        let mixer = crate::json::parse_str::<VideoRealtimeMixer>(
+            r#"{
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": 30,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1",
+                        "height": 0
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        )
+        .map_err(|e| Error::new(e.to_string()))?;
+
+        assert_eq!(mixer.input_tracks[0].height.map(EvenUsize::get), Some(0));
+        Ok(())
+    }
+
     #[tokio::test]
     async fn video_realtime_mixer_two_tracks_smoke() -> crate::Result<()> {
         let pipeline = crate::MediaPipeline::new();
@@ -872,8 +940,8 @@ mod tests {
         let input_track_id_2 = TrackId::new("input-2");
 
         let mixer = VideoRealtimeMixer {
-            canvas_width: NonZeroUsize::new(320).expect("infallible"),
-            canvas_height: NonZeroUsize::new(240).expect("infallible"),
+            canvas_width: EvenUsize::new(320).expect("infallible"),
+            canvas_height: EvenUsize::new(240).expect("infallible"),
             frame_rate: FrameRate::FPS_25,
             input_tracks: vec![
                 InputTrack {
@@ -881,16 +949,16 @@ mod tests {
                     x: 0,
                     y: 0,
                     z: 0,
-                    width: Some(160),
-                    height: Some(120),
+                    width: Some(EvenUsize::new(160).expect("infallible")),
+                    height: Some(EvenUsize::new(120).expect("infallible")),
                 },
                 InputTrack {
                     track_id: input_track_id_2.clone(),
                     x: 80,
                     y: 60,
                     z: 1,
-                    width: Some(160),
-                    height: Some(120),
+                    width: Some(EvenUsize::new(160).expect("infallible")),
+                    height: Some(EvenUsize::new(120).expect("infallible")),
                 },
             ],
             output_track_id: output_track_id.clone(),
