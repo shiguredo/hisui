@@ -219,7 +219,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(error_code(&response), crate::jsonrpc::INVALID_PARAMS);
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -240,7 +243,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(error_code(&response), crate::jsonrpc::INVALID_PARAMS);
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -261,7 +267,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(result_processor_id(&response), TEST_MP4_PATH);
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            TEST_MP4_PATH
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -282,7 +291,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(result_processor_id(&response), "custom-source");
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-source"
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -302,13 +314,19 @@ mod tests {
             .rpc(request.as_bytes())
             .await
             .expect("response must exist");
-        assert_eq!(result_processor_id(&first_response), "duplicate-source");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-source"
+        );
 
         let second_response = handle
             .rpc(request.as_bytes())
             .await
             .expect("response must exist");
-        assert_eq!(error_code(&second_response), crate::jsonrpc::INVALID_PARAMS);
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -327,7 +345,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(error_code(&response), crate::jsonrpc::INVALID_PARAMS);
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -347,7 +368,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(error_code(&response), crate::jsonrpc::INVALID_PARAMS);
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -374,7 +398,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(result_processor_id(&response), "videoMixer");
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "videoMixer"
+        );
 
         drop(occupied_sender);
         drop(blocker);
@@ -403,7 +430,10 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert_eq!(result_processor_id(&response), "custom-video-mixer");
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-video-mixer"
+        );
 
         drop(occupied_sender);
         drop(blocker);
@@ -425,7 +455,7 @@ mod tests {
             .await
             .expect("response must exist");
         assert_eq!(
-            result_processor_id(&first_response),
+            result_processor_id(&first_response).expect("parse result.processorId"),
             "duplicate-video-mixer"
         );
 
@@ -433,7 +463,10 @@ mod tests {
             .rpc(request.as_bytes())
             .await
             .expect("response must exist");
-        assert_eq!(error_code(&second_response), crate::jsonrpc::INVALID_PARAMS);
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
 
         drop(handle);
         pipeline_task.abort();
@@ -450,7 +483,11 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert!(result_processor_ids(&response).is_empty());
+        assert!(
+            result_processor_ids(&response)
+                .expect("parse result processor ids")
+                .is_empty()
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -476,7 +513,7 @@ mod tests {
             .rpc(request.as_bytes())
             .await
             .expect("response must exist");
-        let processor_ids = result_processor_ids(&response);
+        let processor_ids = result_processor_ids(&response).expect("parse result processor ids");
 
         assert!(processor_ids.contains(&"list-processor-a".to_owned()));
         assert!(processor_ids.contains(&"list-processor-b".to_owned()));
@@ -500,7 +537,11 @@ mod tests {
             .await
             .expect("response must exist");
 
-        assert!(result_track_ids(&response).is_empty());
+        assert!(
+            result_track_ids(&response)
+                .expect("parse result track ids")
+                .is_empty()
+        );
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -530,7 +571,7 @@ mod tests {
             .rpc(request.as_bytes())
             .await
             .expect("response must exist");
-        let track_ids = result_track_ids(&response);
+        let track_ids = result_track_ids(&response).expect("parse result track ids");
 
         assert!(track_ids.contains(&"list-track-a".to_owned()));
         assert!(track_ids.contains(&"list-track-b".to_owned()));
@@ -577,73 +618,49 @@ mod tests {
         (handle, pipeline_task)
     }
 
-    fn error_code(response: &nojson::RawJsonOwned) -> i32 {
+    fn error_code(response: &nojson::RawJsonOwned) -> Result<i32, nojson::JsonParseError> {
         response
             .value()
-            .to_member("error")
-            .expect("error member")
-            .required()
-            .expect("error value")
-            .to_member("code")
-            .expect("error.code member")
-            .required()
-            .expect("error.code value")
+            .to_member("error")?
+            .required()?
+            .to_member("code")?
+            .required()?
             .try_into()
-            .expect("error.code must be i32")
     }
 
-    fn result_processor_id(response: &nojson::RawJsonOwned) -> String {
+    fn result_processor_id(
+        response: &nojson::RawJsonOwned,
+    ) -> Result<String, nojson::JsonParseError> {
         response
             .value()
-            .to_member("result")
-            .expect("result member")
-            .required()
-            .expect("result value")
-            .to_member("processorId")
-            .expect("result.processorId member")
-            .required()
-            .expect("result.processorId value")
+            .to_member("result")?
+            .required()?
+            .to_member("processorId")?
+            .required()?
             .try_into()
-            .expect("result.processorId must be string")
     }
 
-    fn result_track_ids(response: &nojson::RawJsonOwned) -> Vec<String> {
+    fn result_track_ids(
+        response: &nojson::RawJsonOwned,
+    ) -> Result<Vec<String>, nojson::JsonParseError> {
         response
             .value()
-            .to_member("result")
-            .expect("result member")
-            .required()
-            .expect("result value")
-            .to_array()
-            .expect("result must be array")
-            .map(|v| {
-                v.to_member("trackId")
-                    .expect("trackId member")
-                    .required()
-                    .expect("trackId value")
-                    .try_into()
-                    .expect("trackId must be string")
-            })
+            .to_member("result")?
+            .required()?
+            .to_array()?
+            .map(|v| v.to_member("trackId")?.required()?.try_into())
             .collect()
     }
 
-    fn result_processor_ids(response: &nojson::RawJsonOwned) -> Vec<String> {
+    fn result_processor_ids(
+        response: &nojson::RawJsonOwned,
+    ) -> Result<Vec<String>, nojson::JsonParseError> {
         response
             .value()
-            .to_member("result")
-            .expect("result member")
-            .required()
-            .expect("result value")
-            .to_array()
-            .expect("result must be array")
-            .map(|v| {
-                v.to_member("processorId")
-                    .expect("processorId member")
-                    .required()
-                    .expect("processorId value")
-                    .try_into()
-                    .expect("processorId must be string")
-            })
+            .to_member("result")?
+            .required()?
+            .to_array()?
+            .map(|v| v.to_member("processorId")?.required()?.try_into())
             .collect()
     }
 
