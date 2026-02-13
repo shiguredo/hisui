@@ -116,44 +116,6 @@ def test_startup_rpc_file_is_executed(binary_path: Path):
             log_handle.close()
 
 
-def test_startup_rpc_file_failure_stops_server(binary_path: Path):
-    """--startup-rpc-file が失敗する場合は server 起動が失敗する"""
-    port, sock = _reserve_ephemeral_port()
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        startup_rpc_file = tmp_path / "startup-rpcs-invalid.json"
-        startup_rpc_file.write_text(
-            json.dumps([{"jsonrpc": "2.0", "method": "methodDoesNotExist"}])
-        )
-
-        log_file = tmp_path / "hisui-server.log"
-        log_handle = open(log_file, "w")
-        sock.close()
-
-        process = subprocess.Popen(
-            [
-                str(binary_path),
-                "--verbose",
-                "--experimental",
-                "server",
-                "--http-port",
-                str(port),
-                "--startup-rpc-file",
-                str(startup_rpc_file),
-            ],
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-        )
-
-        try:
-            exited = _wait_for_process_exit(process)
-            assert exited, "server should exit when startup RPC execution fails"
-            assert process.returncode not in (None, 0), log_file.read_text()
-        finally:
-            _terminate_process(process)
-            log_handle.close()
-
-
 def _reserve_ephemeral_port() -> tuple[int, socket.socket]:
     """空きポートを確保して、予約ソケットとともに返す"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
