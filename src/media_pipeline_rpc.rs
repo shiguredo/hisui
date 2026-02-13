@@ -4,8 +4,21 @@ use crate::media_pipeline::{
     MediaPipelineCommand, MediaPipelineHandle, ProcessorId, RegisterProcessorError, TrackId,
 };
 
-fn invalid_params(message: impl Into<String>) -> (i32, String) {
+type RpcError = (i32, String);
+
+fn invalid_params(message: impl Into<String>) -> RpcError {
     (crate::jsonrpc::INVALID_PARAMS, message.into())
+}
+
+fn method_not_found() -> RpcError {
+    (
+        crate::jsonrpc::METHOD_NOT_FOUND,
+        "Method not found".to_owned(),
+    )
+}
+
+fn internal_error(message: impl Into<String>) -> RpcError {
+    (crate::jsonrpc::INTERNAL_ERROR, message.into())
 }
 
 impl MediaPipelineHandle {
@@ -35,10 +48,7 @@ impl MediaPipelineHandle {
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
             "listTracks" => self.handle_list_tracks_rpc().await,
             "listProcessors" => self.handle_list_processors_rpc().await,
-            _ => Err((
-                crate::jsonrpc::METHOD_NOT_FOUND,
-                "Method not found".to_owned(),
-            )),
+            _ => Err(method_not_found()),
         };
 
         if let Some(id) = maybe_id {
@@ -59,7 +69,7 @@ impl MediaPipelineHandle {
     async fn handle_create_mp4_file_source_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
-    ) -> Result<RpcResult, (i32, String)> {
+    ) -> Result<RpcResult, RpcError> {
         let params =
             maybe_params.ok_or_else(|| invalid_params("Invalid params: params is required"))?;
 
@@ -78,14 +88,12 @@ impl MediaPipelineHandle {
         self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
             .await
             .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => (
-                    crate::jsonrpc::INVALID_PARAMS,
-                    format!("Invalid params: processorId already exists: {processor_id}"),
-                ),
-                RegisterProcessorError::PipelineTerminated => (
-                    crate::jsonrpc::INTERNAL_ERROR,
-                    "Internal error: pipeline has terminated".to_owned(),
-                ),
+                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                    "Invalid params: processorId already exists: {processor_id}"
+                )),
+                RegisterProcessorError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
             })?;
 
         Ok(RpcResult::CreateMp4FileSource(
@@ -96,7 +104,7 @@ impl MediaPipelineHandle {
     async fn handle_create_video_mixer_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
-    ) -> Result<RpcResult, (i32, String)> {
+    ) -> Result<RpcResult, RpcError> {
         let params =
             maybe_params.ok_or_else(|| invalid_params("Invalid params: params is required"))?;
 
@@ -113,14 +121,12 @@ impl MediaPipelineHandle {
         self.spawn_processor(processor_id.clone(), move |handle| mixer.run(handle))
             .await
             .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => (
-                    crate::jsonrpc::INVALID_PARAMS,
-                    format!("Invalid params: processorId already exists: {processor_id}"),
-                ),
-                RegisterProcessorError::PipelineTerminated => (
-                    crate::jsonrpc::INTERNAL_ERROR,
-                    "Internal error: pipeline has terminated".to_owned(),
-                ),
+                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                    "Invalid params: processorId already exists: {processor_id}"
+                )),
+                RegisterProcessorError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
             })?;
 
         Ok(RpcResult::CreateVideoMixer(CreateVideoMixerRpcResult {
@@ -128,16 +134,13 @@ impl MediaPipelineHandle {
         }))
     }
 
-    async fn handle_list_tracks_rpc(&self) -> Result<RpcResult, (i32, String)> {
+    async fn handle_list_tracks_rpc(&self) -> Result<RpcResult, RpcError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.send(MediaPipelineCommand::ListTracks { reply_tx });
 
-        let track_ids = reply_rx.await.map_err(|_| {
-            (
-                crate::jsonrpc::INTERNAL_ERROR,
-                "Internal error: pipeline has terminated".to_owned(),
-            )
-        })?;
+        let track_ids = reply_rx
+            .await
+            .map_err(|_| internal_error("Internal error: pipeline has terminated"))?;
 
         Ok(RpcResult::ListTracks(
             track_ids
@@ -147,16 +150,13 @@ impl MediaPipelineHandle {
         ))
     }
 
-    async fn handle_list_processors_rpc(&self) -> Result<RpcResult, (i32, String)> {
+    async fn handle_list_processors_rpc(&self) -> Result<RpcResult, RpcError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.send(MediaPipelineCommand::ListProcessors { reply_tx });
 
-        let processor_ids = reply_rx.await.map_err(|_| {
-            (
-                crate::jsonrpc::INTERNAL_ERROR,
-                "Internal error: pipeline has terminated".to_owned(),
-            )
-        })?;
+        let processor_ids = reply_rx
+            .await
+            .map_err(|_| internal_error("Internal error: pipeline has terminated"))?;
 
         Ok(RpcResult::ListProcessors(
             processor_ids
