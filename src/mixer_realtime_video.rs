@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    num::NonZeroUsize,
     sync::Arc,
     time::Duration,
 };
@@ -40,7 +41,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
         let canvas_width: usize = value.to_member("canvasWidth")?.required()?.try_into()?;
         let canvas_height: usize = value.to_member("canvasHeight")?.required()?.try_into()?;
 
-        let frame_rate: FrameRate = value.to_member("frameRate")?.required()?.try_into()?;
+        let frame_rate: Option<FrameRate> = value.to_member("frameRate")?.try_into()?;
+        let frame_rate = frame_rate.unwrap_or(FrameRate {
+            numerator: NonZeroUsize::new(30).expect("infallible"),
+            denumerator: NonZeroUsize::MIN,
+        });
 
         let input_tracks: Vec<InputTrack> =
             value.to_member("inputTracks")?.required()?.try_into()?;
@@ -83,7 +88,7 @@ impl VideoRealtimeMixer {
             let state = InputTrackState::new(input_track.clone())?;
             draw_order.push(DrawOrder {
                 track_id: input_track.track_id.clone(),
-                z: input_track.z.unwrap_or_default(),
+                z: input_track.z,
                 index,
             });
             states.insert(input_track.track_id.clone(), state);
@@ -153,9 +158,9 @@ impl VideoRealtimeMixer {
 #[derive(Debug, Clone)]
 pub struct InputTrack {
     pub track_id: TrackId,
-    pub x: Option<isize>,
-    pub y: Option<isize>,
-    pub z: Option<isize>,
+    pub x: isize,
+    pub y: isize,
+    pub z: isize,
     pub width: Option<usize>,
     pub height: Option<usize>,
 }
@@ -164,15 +169,9 @@ impl nojson::DisplayJson for InputTrack {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("trackId", &self.track_id)?;
-            if let Some(x) = self.x {
-                f.member("x", x)?;
-            }
-            if let Some(y) = self.y {
-                f.member("y", y)?;
-            }
-            if let Some(z) = self.z {
-                f.member("z", z)?;
-            }
+            f.member("x", self.x)?;
+            f.member("y", self.y)?;
+            f.member("z", self.z)?;
             if let Some(width) = self.width {
                 f.member("width", width)?;
             }
@@ -199,9 +198,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
 
         Ok(Self {
             track_id,
-            x,
-            y,
-            z,
+            x: x.unwrap_or_default(),
+            y: y.unwrap_or_default(),
+            z: z.unwrap_or_default(),
             width,
             height,
         })
@@ -416,8 +415,8 @@ fn compose_frame(
             continue;
         };
 
-        let x = state.input_track.x.unwrap_or_default();
-        let y = state.input_track.y.unwrap_or_default();
+        let x = state.input_track.x;
+        let y = state.input_track.y;
         let target_width = state
             .target_width
             .map(|w| w.get())
@@ -603,7 +602,7 @@ mod tests {
         assert_eq!(mixer.canvas_height, 720);
         assert_eq!(mixer.frame_rate.numerator.get(), 30);
         assert_eq!(mixer.input_tracks.len(), 1);
-        assert_eq!(mixer.input_tracks[0].z, Some(1));
+        assert_eq!(mixer.input_tracks[0].z, 1);
 
         Ok(())
     }
@@ -629,12 +628,12 @@ mod tests {
         );
 
         let mixer = result.expect("infallible");
-        assert_eq!(mixer.input_tracks[0].z, None);
+        assert_eq!(mixer.input_tracks[0].z, 0);
     }
 
     #[test]
-    fn video_realtime_mixer_json_parse_error_without_frame_rate() {
-        let result = crate::json::parse_str::<VideoRealtimeMixer>(
+    fn video_realtime_mixer_json_parse_without_frame_rate() -> crate::Result<()> {
+        let mixer = crate::json::parse_str::<VideoRealtimeMixer>(
             r#"{
                 "canvasWidth": 1280,
                 "canvasHeight": 720,
@@ -650,9 +649,12 @@ mod tests {
                 ],
                 "outputTrackId": "output"
             }"#,
-        );
+        )
+        .map_err(|e| Error::new(e.to_string()))?;
 
-        assert!(result.is_err());
+        assert_eq!(mixer.frame_rate.numerator.get(), 30);
+        assert_eq!(mixer.frame_rate.denumerator.get(), 1);
+        Ok(())
     }
 
     #[test]
@@ -674,9 +676,9 @@ mod tests {
         .map_err(|e| Error::new(e.to_string()))?;
 
         let track = &mixer.input_tracks[0];
-        assert_eq!(track.x, None);
-        assert_eq!(track.y, None);
-        assert_eq!(track.z, None);
+        assert_eq!(track.x, 0);
+        assert_eq!(track.y, 0);
+        assert_eq!(track.z, 0);
         assert_eq!(track.width, None);
         assert_eq!(track.height, None);
         Ok(())
@@ -750,17 +752,17 @@ mod tests {
             input_tracks: vec![
                 InputTrack {
                     track_id: input_track_id_1.clone(),
-                    x: Some(0),
-                    y: Some(0),
-                    z: Some(0),
+                    x: 0,
+                    y: 0,
+                    z: 0,
                     width: Some(160),
                     height: Some(120),
                 },
                 InputTrack {
                     track_id: input_track_id_2.clone(),
-                    x: Some(80),
-                    y: Some(60),
-                    z: Some(1),
+                    x: 80,
+                    y: 60,
+                    z: 1,
                     width: Some(160),
                     height: Some(120),
                 },
