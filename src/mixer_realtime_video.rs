@@ -41,11 +41,10 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
         let canvas_width: usize = value.to_member("canvasWidth")?.required()?.try_into()?;
         let canvas_height: usize = value.to_member("canvasHeight")?.required()?.try_into()?;
 
-        let frame_rate: Option<FrameRate> = value.to_member("frameRate")?.try_into()?;
-        let frame_rate = frame_rate.unwrap_or(FrameRate {
-            numerator: NonZeroUsize::new(30).expect("infallible"),
-            denumerator: NonZeroUsize::MIN,
-        });
+        let frame_rate = value
+            .to_member("frameRate")?
+            .try_into()?
+            .unwrap_or(FrameRate::FPS_30);
 
         let input_tracks: Vec<InputTrack> =
             value.to_member("inputTracks")?.required()?.try_into()?;

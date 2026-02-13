@@ -602,6 +602,11 @@ impl FrameRate {
         denumerator: NonZeroUsize::MIN,
     };
 
+    pub const FPS_30: Self = Self {
+        numerator: NonZeroUsize::MIN.saturating_add(29),
+        denumerator: NonZeroUsize::MIN,
+    };
+
     pub fn as_f64(self) -> f64 {
         self.numerator.get() as f64 / self.denumerator.get() as f64
     }
