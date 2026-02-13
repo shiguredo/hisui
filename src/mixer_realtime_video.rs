@@ -56,9 +56,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
 impl VideoRealtimeMixer {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         let frame_interval = frames_to_timestamp(self.frame_rate, 1);
-        if frame_interval.is_zero() {
-            return Err(Error::new("frameRate is too high"));
-        }
 
         let mut output_tx = handle.publish_track(self.output_track_id).await?;
 
@@ -586,8 +583,8 @@ mod tests {
         )
         .map_err(|e| Error::new(e.to_string()))?;
 
-        assert_eq!(mixer.canvas_width, 1280);
-        assert_eq!(mixer.canvas_height, 720);
+        assert_eq!(mixer.canvas_width.get(), 1280);
+        assert_eq!(mixer.canvas_height.get(), 720);
         assert_eq!(mixer.frame_rate.numerator.get(), 30);
         assert_eq!(mixer.input_tracks.len(), 1);
         assert_eq!(mixer.input_tracks[0].z, 1);
@@ -723,6 +720,30 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn video_realtime_mixer_json_parse_error_with_too_high_frame_rate() {
+        let result = crate::json::parse_str::<VideoRealtimeMixer>(
+            r#"{
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": 4294967296,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1",
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "width": 640,
+                        "height": 360
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        );
+
+        assert!(result.is_err());
+    }
+
     #[tokio::test]
     async fn video_realtime_mixer_two_tracks_smoke() -> crate::Result<()> {
         let pipeline = crate::MediaPipeline::new();
@@ -734,8 +755,8 @@ mod tests {
         let input_track_id_2 = TrackId::new("input-2");
 
         let mixer = VideoRealtimeMixer {
-            canvas_width: 320,
-            canvas_height: 240,
+            canvas_width: NonZeroUsize::new(320).expect("infallible"),
+            canvas_height: NonZeroUsize::new(240).expect("infallible"),
             frame_rate: FrameRate::FPS_25,
             input_tracks: vec![
                 InputTrack {
