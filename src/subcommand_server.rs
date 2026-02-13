@@ -45,26 +45,32 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // デフォルトポートは 8919 (H=8, I=9, S=19 で "His")
     let http_port: u16 = noargs::opt("http-port")
+        .ty("PORT")
         .doc("HTTP サーバーのリッスンポート")
         .default("8919")
         .take(&mut args)
         .then(|o| o.value().parse())?;
 
     let https_cert_path: Option<PathBuf> = noargs::opt("https-cert-path")
+        .ty("PATH")
         .doc("HTTPS 用の証明書ファイルパス（PEM 形式）")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
 
     let https_key_path: Option<PathBuf> = noargs::opt("https-key-path")
+        .ty("PATH")
         .doc("HTTPS 用の秘密鍵ファイルパス（PEM 形式）")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
 
     let ui_remote_url: Option<String> = noargs::opt("ui-remote-url")
+        .ty("URL")
         .doc("UI 用リモートサーバーの URL（GET リクエストをリバースプロキシする）")
         .take(&mut args)
         .present_and_then(|o| Ok::<_, std::convert::Infallible>(o.value().to_string()))?;
+
     let startup_rpc_file: Option<PathBuf> = noargs::opt("startup-rpc-file")
+        .ty("PATH")
         .doc("起動時に実行する RPC 通知配列 JSON ファイル")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
@@ -138,8 +144,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         };
 
         let pipeline = crate::MediaPipeline::new();
-        let pipeline_handle = Arc::new(pipeline.handle());
-        let _pipeline_task = tokio::spawn(pipeline.run());
+        let pipeline_handle = pipeline.handle();
+        tokio::spawn(pipeline.run());
 
         if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
             crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle)
@@ -186,7 +192,7 @@ async fn handle_connection(
     stream: ServerTcpOrTlsStream,
     peer_addr: std::net::SocketAddr,
     upstream_config: Option<Arc<UpstreamConfig>>,
-    pipeline_handle: Arc<crate::MediaPipelineHandle>,
+    pipeline_handle: crate::MediaPipelineHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, writer) = tokio::io::split(stream);
     let mut reader = tokio::io::BufReader::with_capacity(8192, reader);
