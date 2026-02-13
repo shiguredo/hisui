@@ -68,7 +68,6 @@ impl MediaPipeline {
             } => {
                 self.handle_subscribe_track(processor_id, track_id, tx);
             }
-            Command::Rpc { .. } => todo!(),
         }
     }
 
@@ -246,28 +245,18 @@ impl MediaPipelineHandle {
             .as_string_str()
             .expect("bug");
         match method {
-            _ => {
-                return maybe_id.map(|id| {
-                    let code = crate::jsonrpc::METHOD_NOT_FOUND;
-                    crate::jsonrpc::error_response(id, code, "Method not found")
-                });
-            }
+            _ => maybe_id.map(|id| {
+                let code = crate::jsonrpc::METHOD_NOT_FOUND;
+                crate::jsonrpc::error_response(id, code, "Method not found")
+            }),
         }
 
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let command = Command::Rpc {
-            request_json,
-            reply_tx,
-        };
-
-        if !self.send(command) {
+        /*if !self.send(command) {
             return maybe_id.map(|id| {
                 let code = crate::jsonrpc::INTERNAL_ERROR;
                 crate::jsonrpc::error_response(id, code, "Media pipeline has terminated")
             });
-        }
-
-        reply_rx.await.ok()
+        }*/
     }
 
     // すでに MediaPipeline が終了している場合には false が返される。
@@ -297,10 +286,6 @@ enum Command {
         processor_id: ProcessorId,
         track_id: TrackId,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
-    },
-    Rpc {
-        request_json: nojson::RawJsonOwned,
-        reply_tx: tokio::sync::oneshot::Sender<nojson::RawJsonOwned>,
     },
 }
 
