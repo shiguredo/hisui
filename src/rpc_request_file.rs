@@ -1,14 +1,13 @@
 use nojson::JsonValueKind;
-use orfail::OrFail;
 
 pub async fn run_rpc_request_file(
     path: &std::path::Path,
     pipeline_handle: &crate::MediaPipelineHandle,
-) -> orfail::Result<()> {
+) -> crate::Result<()> {
     let text = std::fs::read_to_string(path)
-        .or_fail_with(|e| format!("failed to read file {}: {e}", path.display()))?;
+        .map_err(|e| crate::Error::new(format!("failed to read file {}: {e}", path.display())))?;
     let parsed = nojson::RawJson::parse(&text)
-        .or_fail_with(|e| format!("failed to parse file {}: {e}", path.display()))?;
+        .map_err(|e| crate::Error::new(format!("failed to parse file {}: {e}", path.display())))?;
     let requests = validate_rpc_requests_file(parsed.value())?;
 
     for (index, request) in requests.into_iter().enumerate() {
@@ -17,7 +16,7 @@ pub async fn run_rpc_request_file(
             .rpc(request_json.as_bytes())
             .await
             .ok_or_else(|| {
-                orfail::Failure::new(format!(
+                crate::Error::new(format!(
                     "startup RPC request at index {index} returned no response"
                 ))
             })?;
@@ -25,13 +24,15 @@ pub async fn run_rpc_request_file(
         let has_error = response
             .value()
             .to_member("error")
-            .or_fail_with(|e| {
-                format!("failed to parse startup RPC response at index {index}: {e}")
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to parse startup RPC response at index {index}: {e}"
+                ))
             })?
             .get()
             .is_some();
         if has_error {
-            return Err(orfail::Failure::new(format!(
+            return Err(crate::Error::new(format!(
                 "startup RPC request at index {index} failed: {}",
                 response.text()
             )));
@@ -43,33 +44,37 @@ pub async fn run_rpc_request_file(
 
 fn validate_rpc_requests_file<'text, 'raw>(
     value: nojson::RawJsonValue<'text, 'raw>,
-) -> orfail::Result<Vec<nojson::RawJsonValue<'text, 'raw>>> {
+) -> crate::Result<Vec<nojson::RawJsonValue<'text, 'raw>>> {
     if value.kind() != JsonValueKind::Array {
-        return Err(orfail::Failure::new(
+        return Err(crate::Error::new(
             "startup RPC file must be an array of notification requests",
         ));
     }
 
     let requests: Vec<_> = value
         .to_array()
-        .or_fail_with(|e| format!("failed to parse startup RPC file array: {e}"))?
+        .map_err(|e| crate::Error::new(format!("failed to parse startup RPC file array: {e}")))?
         .collect();
 
     for (index, request) in requests.iter().copied().enumerate() {
         if request.kind() != JsonValueKind::Object {
-            return Err(orfail::Failure::new(format!(
+            return Err(crate::Error::new(format!(
                 "startup RPC request at index {index} must be an object"
             )));
         }
 
-        for (name, _) in request.to_object().or_fail_with(|e| {
-            format!("failed to parse startup RPC request at index {index}: {e}")
+        for (name, _) in request.to_object().map_err(|e| {
+            crate::Error::new(format!(
+                "failed to parse startup RPC request at index {index}: {e}"
+            ))
         })? {
-            let name = name.to_unquoted_string_str().or_fail_with(|e| {
-                format!("failed to parse startup RPC request member at index {index}: {e}")
+            let name = name.to_unquoted_string_str().map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to parse startup RPC request member at index {index}: {e}"
+                ))
             })?;
             if name == "id" {
-                return Err(orfail::Failure::new(format!(
+                return Err(crate::Error::new(format!(
                     "startup RPC request at index {index} must not contain id"
                 )));
             }
@@ -82,27 +87,32 @@ fn validate_rpc_requests_file<'text, 'raw>(
 fn build_rpc_request_json_with_index_id(
     request: nojson::RawJsonValue<'_, '_>,
     index: usize,
-) -> orfail::Result<String> {
+) -> crate::Result<String> {
     if request.kind() != JsonValueKind::Object {
-        return Err(orfail::Failure::new(format!(
+        return Err(crate::Error::new(format!(
             "startup RPC request at index {index} must be an object"
         )));
     }
 
     let members: Vec<_> = request
         .to_object()
-        .or_fail_with(|e| format!("failed to parse startup RPC request at index {index}: {e}"))?
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "failed to parse startup RPC request at index {index}: {e}"
+            ))
+        })?
         .map(|(name, value)| {
-            name.to_unquoted_string_str()
-                .map(|name| (name.into_owned(), value))
-                .or_fail_with(|e| {
-                    format!("failed to parse startup RPC request member name at index {index}: {e}")
-                })
+            let name = name.to_unquoted_string_str().map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to parse startup RPC request member name at index {index}: {e}"
+                ))
+            })?;
+            Ok((name.into_owned(), value))
         })
-        .collect::<orfail::Result<Vec<_>>>()?;
+        .collect::<crate::Result<Vec<_>>>()?;
 
     let id = i64::try_from(index)
-        .map_err(|_| orfail::Failure::new(format!("startup RPC index out of range: {index}")))?;
+        .map_err(|_| crate::Error::new(format!("startup RPC index out of range: {index}")))?;
 
     Ok(nojson::json(|f| {
         f.object(|f| {
@@ -117,14 +127,12 @@ fn build_rpc_request_json_with_index_id(
 
 #[cfg(test)]
 mod tests {
-    use orfail::OrFail;
-
     use super::{build_rpc_request_json_with_index_id, validate_rpc_requests_file};
 
     #[test]
-    fn validate_startup_rpc_requests_accepts_notification_array() -> orfail::Result<()> {
-        let parsed =
-            nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors"}]"#).or_fail()?;
+    fn validate_startup_rpc_requests_accepts_notification_array() -> crate::Result<()> {
+        let parsed = nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors"}]"#)
+            .map_err(|e| crate::Error::new(e.to_string()))?;
 
         let requests = validate_rpc_requests_file(parsed.value())?;
 
@@ -133,8 +141,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_startup_rpc_requests_rejects_non_array_root() -> orfail::Result<()> {
-        let parsed = nojson::RawJson::parse(r#"{}"#).or_fail()?;
+    fn validate_startup_rpc_requests_rejects_non_array_root() -> crate::Result<()> {
+        let parsed =
+            nojson::RawJson::parse(r#"{}"#).map_err(|e| crate::Error::new(e.to_string()))?;
         let result = validate_rpc_requests_file(parsed.value());
 
         assert!(result.is_err());
@@ -142,10 +151,10 @@ mod tests {
     }
 
     #[test]
-    fn validate_startup_rpc_requests_rejects_request_with_id() -> orfail::Result<()> {
+    fn validate_startup_rpc_requests_rejects_request_with_id() -> crate::Result<()> {
         let parsed =
             nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors","id":1}]"#)
-                .or_fail()?;
+                .map_err(|e| crate::Error::new(e.to_string()))?;
 
         let result = validate_rpc_requests_file(parsed.value());
 
@@ -154,21 +163,22 @@ mod tests {
     }
 
     #[test]
-    fn build_startup_rpc_request_json_adds_id() -> orfail::Result<()> {
-        let parsed =
-            nojson::RawJson::parse(r#"{"jsonrpc":"2.0","method":"listProcessors"}"#).or_fail()?;
+    fn build_startup_rpc_request_json_adds_id() -> crate::Result<()> {
+        let parsed = nojson::RawJson::parse(r#"{"jsonrpc":"2.0","method":"listProcessors"}"#)
+            .map_err(|e| crate::Error::new(e.to_string()))?;
 
         let request_json = build_rpc_request_json_with_index_id(parsed.value(), 7)?;
-        let parsed = nojson::RawJson::parse(&request_json).or_fail()?;
+        let parsed =
+            nojson::RawJson::parse(&request_json).map_err(|e| crate::Error::new(e.to_string()))?;
         let id = i64::try_from(
             parsed
                 .value()
                 .to_member("id")
-                .or_fail()?
+                .map_err(|e| crate::Error::new(e.to_string()))?
                 .required()
-                .or_fail()?,
+                .map_err(|e| crate::Error::new(e.to_string()))?,
         )
-        .or_fail()?;
+        .map_err(|e| crate::Error::new(e.to_string()))?;
 
         assert_eq!(id, 7);
         Ok(())

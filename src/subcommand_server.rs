@@ -2,7 +2,6 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use orfail::OrFail;
 use shiguredo_http11::uri::Uri;
 use shiguredo_http11::{Request, RequestDecoder, Response, ResponseDecoder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
@@ -99,20 +98,19 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()
-        .or_fail()?;
+        .build()?;
 
     runtime.block_on(async {
         // upstream 設定をパースする
         let upstream_config = match &ui_remote_url {
             Some(url) => {
                 let uri = Uri::parse(url).map_err(|e| {
-                    orfail::Failure::new(format!("Failed to parse --ui-remote-url: {e}"))
+                    crate::Error::new(format!("Failed to parse --ui-remote-url: {e}"))
                 })?;
                 let is_https = uri.scheme() == Some("https");
                 let host = uri
                     .host()
-                    .ok_or_else(|| orfail::Failure::new("--ui-remote-url has no host".to_string()))?
+                    .ok_or_else(|| crate::Error::new("--ui-remote-url has no host".to_string()))?
                     .to_string();
                 let port = uri.port().unwrap_or(if is_https { 443 } else { 80 });
                 let path_prefix = uri.path().to_string();
@@ -129,11 +127,9 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
         // TLS が指定されている場合は TlsAcceptor を作成する
         let tls_acceptor = match (&https_cert_path, &https_key_path) {
-            (Some(cert_path), Some(key_path)) => Some(
-                create_server_tls_acceptor(cert_path, key_path)
-                    .await
-                    .or_fail()?,
-            ),
+            (Some(cert_path), Some(key_path)) => {
+                Some(create_server_tls_acceptor(cert_path, key_path).await?)
+            }
             _ => None,
         };
 
@@ -150,16 +146,16 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
             crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle)
                 .await
-                .or_fail()?;
+                .map_err(|e| crate::Error::new(e.to_string()))?;
             tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
         }
 
         let addr = format!("0.0.0.0:{http_port}");
-        let listener = TcpListener::bind(&addr).await.or_fail()?;
+        let listener = TcpListener::bind(&addr).await?;
         tracing::info!("{scheme} server listening on {scheme}://{addr}");
 
         loop {
-            let (stream, peer_addr) = listener.accept().await.or_fail()?;
+            let (stream, peer_addr) = listener.accept().await?;
             let tls_acceptor = tls_acceptor.clone();
             let upstream_config = upstream_config.clone();
             let pipeline_handle = pipeline_handle.clone();
