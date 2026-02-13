@@ -64,7 +64,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev
 
       # CUDA のインストール (x86_64 のみ)
       - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
