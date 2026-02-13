@@ -8,6 +8,7 @@ use crate::{
     Error, MediaSample, Message, ProcessorHandle, TrackId,
     types::EvenUsize,
     video::{FrameRate, VideoFormat, VideoFrame},
+    video_canvas::I420Canvas,
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -455,7 +456,7 @@ fn compose_frame(
     draw_order: &[DrawOrder],
     states: &HashMap<TrackId, InputTrackState>,
 ) -> crate::Result<VideoFrame> {
-    let mut canvas = Canvas::new(canvas_width, canvas_height);
+    let mut canvas = I420Canvas::new(canvas_width, canvas_height);
 
     for draw in draw_order {
         let Some(state) = states.get(&draw.track_id) else {
@@ -512,108 +513,8 @@ fn compose_frame(
         duration,
         width: canvas_width,
         height: canvas_height,
-        data: canvas.data,
+        data: canvas.into_data(),
     })
-}
-
-#[derive(Debug)]
-struct Canvas {
-    width: usize,
-    height: usize,
-    data: Vec<u8>,
-}
-
-impl Canvas {
-    fn new(width: usize, height: usize) -> Self {
-        Self {
-            width,
-            height,
-            data: black_i420_data(width, height),
-        }
-    }
-
-    fn draw_frame_clipped(&mut self, x: isize, y: isize, frame: &VideoFrame) -> crate::Result<()> {
-        if frame.format != VideoFormat::I420 {
-            return Err(Error::new("unsupported video format: expected I420"));
-        }
-
-        let src_y_size = frame.width.saturating_mul(frame.height);
-        let src_uv_width = frame.width.div_ceil(2);
-        let src_uv_height = frame.height.div_ceil(2);
-        let src_uv_size = src_uv_width.saturating_mul(src_uv_height);
-
-        if frame.data.len() < src_y_size.saturating_add(src_uv_size.saturating_mul(2)) {
-            return Err(Error::new("invalid I420 frame size"));
-        }
-
-        let src_y = &frame.data[..src_y_size];
-        let src_u = &frame.data[src_y_size..][..src_uv_size];
-        let src_v = &frame.data[src_y_size + src_uv_size..][..src_uv_size];
-
-        let (src_x0, dst_x0, copy_width) = clipped_span(frame.width, self.width, x);
-        let (src_y0, dst_y0, copy_height) = clipped_span(frame.height, self.height, y);
-
-        if copy_width == 0 || copy_height == 0 {
-            return Ok(());
-        }
-
-        for row in 0..copy_height {
-            let src_offset = (src_y0 + row) * frame.width + src_x0;
-            let dst_offset = (dst_y0 + row) * self.width + dst_x0;
-            self.data[dst_offset..][..copy_width]
-                .copy_from_slice(&src_y[src_offset..][..copy_width]);
-        }
-
-        let dst_y_size = self.width.saturating_mul(self.height);
-        let dst_uv_width = self.width.div_ceil(2);
-        let dst_uv_height = self.height.div_ceil(2);
-        let dst_uv_size = dst_uv_width.saturating_mul(dst_uv_height);
-
-        let src_uv_x0 = src_x0 / 2;
-        let src_uv_y0 = src_y0 / 2;
-        let dst_uv_x0 = dst_x0 / 2;
-        let dst_uv_y0 = dst_y0 / 2;
-        let copy_uv_width = copy_width.div_ceil(2);
-        let copy_uv_height = copy_height.div_ceil(2);
-
-        for row in 0..copy_uv_height {
-            let src_offset = (src_uv_y0 + row) * src_uv_width + src_uv_x0;
-            let dst_offset = (dst_uv_y0 + row) * dst_uv_width + dst_uv_x0;
-
-            let dst_u_offset = dst_y_size + dst_offset;
-            let dst_v_offset = dst_y_size + dst_uv_size + dst_offset;
-
-            self.data[dst_u_offset..][..copy_uv_width]
-                .copy_from_slice(&src_u[src_offset..][..copy_uv_width]);
-            self.data[dst_v_offset..][..copy_uv_width]
-                .copy_from_slice(&src_v[src_offset..][..copy_uv_width]);
-        }
-
-        Ok(())
-    }
-}
-
-fn clipped_span(src_len: usize, dst_len: usize, dst_pos: isize) -> (usize, usize, usize) {
-    let dst_start = dst_pos.max(0) as usize;
-    let src_start = if dst_pos < 0 {
-        dst_pos.unsigned_abs()
-    } else {
-        0
-    };
-
-    let src_remaining = src_len.saturating_sub(src_start);
-    let dst_remaining = dst_len.saturating_sub(dst_start);
-    let copy_len = src_remaining.min(dst_remaining);
-
-    (src_start, dst_start, copy_len)
-}
-
-fn black_i420_data(width: usize, height: usize) -> Vec<u8> {
-    let y_size = width.saturating_mul(height);
-    let uv_size = width.div_ceil(2).saturating_mul(height.div_ceil(2));
-    let mut data = vec![0; y_size.saturating_add(uv_size.saturating_mul(2))];
-    data[y_size..].fill(128);
-    data
 }
 
 fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
