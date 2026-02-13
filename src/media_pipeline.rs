@@ -1205,7 +1205,6 @@ mod tests {
             .expect("result value")
             .to_array()
             .expect("result must be array")
-            .into_iter()
             .map(|v| {
                 v.to_member("trackId")
                     .expect("trackId member")
@@ -1226,7 +1225,6 @@ mod tests {
             .expect("result value")
             .to_array()
             .expect("result must be array")
-            .into_iter()
             .map(|v| {
                 v.to_member("processorId")
                     .expect("processorId member")
