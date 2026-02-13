@@ -15,9 +15,17 @@
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
   - 未指定の場合は従来通り 404 を返す
   - @voluntas
-- [ADD] server サブコマンドを追加する
+- [ADD] server サブコマンドに `--startup-rpc-file` オプションを追加する
+  - 起動時に実行する RPC リストを指定することができる機能
+  - @sile
+- [ADD] 実験的な server サブコマンドを追加する
   - `hisui server --http-port <PORT>` で HTTP サーバーを起動する
-  - `/rpc`, `/bootstrap`, `/.ok` に 204 No Content を返す
+  - `/bootstrap`, `/.ok` に 204 No Content を返す
+  - `/rpc` では、JSON-RPC リクエストを処理する:
+    - listTracks
+    - listProcessors
+    - createMp4FileSource
+    - createVideoMixer
   - それ以外のパスには 404 Not Found を返す
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_http11 を追加する
