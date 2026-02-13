@@ -1,4 +1,3 @@
-// JSON-RPC 2.0 の仕様で定義されているエラーコードの一部
 pub const PARSE_ERROR: i32 = -32700;
 pub const INVALID_REQUEST: i32 = -32600;
 pub const METHOD_NOT_FOUND: i32 = -32601;
@@ -89,9 +88,7 @@ fn validate_request<'text, 'raw>(
                     return Err(value.invalid("params must be an object or array"));
                 }
             }
-            _ => {
-                // Ignore unknown members
-            }
+            _ => {} // 不明なメンバーは単に無視する
         }
     }
 
