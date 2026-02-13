@@ -394,10 +394,7 @@ enum TrackEvent {
         frame: Arc<VideoFrame>,
         received_at: Duration,
     },
-    Syn {
-        track_id: TrackId,
-        syn: crate::Syn,
-    },
+    Syn(crate::Syn),
     Eos {
         track_id: TrackId,
     },
@@ -439,10 +436,7 @@ fn spawn_input_receiver(
                     break;
                 }
                 Message::Syn(syn) => {
-                    let _ = event_tx.send(TrackEvent::Syn {
-                        track_id: track_id.clone(),
-                        syn,
-                    });
+                    let _ = event_tx.send(TrackEvent::Syn(syn));
                 }
             }
         }
@@ -479,12 +473,7 @@ fn handle_track_event(
                 state.handle_eos();
             }
         }
-        TrackEvent::Syn { track_id, syn } => {
-            if !states.contains_key(&track_id) {
-                return Err(Error::new(format!("unknown input track ID: {}", track_id)));
-            }
-            drop(syn);
-        }
+        TrackEvent::Syn(_syn) => {}
         TrackEvent::Error { track_id, reason } => {
             return Err(Error::new(format!("input track {}: {}", track_id, reason)));
         }
@@ -1047,13 +1036,7 @@ mod tests {
             .await
             .map_err(|e| Error::new(e.to_string()))?
             .ok_or_else(|| Error::new("event channel closed unexpectedly"))?;
-        assert!(matches!(
-            &event,
-            TrackEvent::Syn {
-                track_id: event_track_id,
-                ..
-            } if event_track_id == &track_id
-        ));
+        assert!(matches!(&event, TrackEvent::Syn(_)));
 
         assert!(
             tokio::time::timeout(Duration::from_millis(50), &mut ack)
