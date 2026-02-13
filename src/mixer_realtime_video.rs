@@ -64,13 +64,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
 
 impl VideoRealtimeMixer {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
-        let mut output_tx = handle.publish_track(self.output_track_id).await?;
-        let mut ack = output_tx.send_syn();
-        let mut noacked_sent = 0u64;
+        let output_tx = handle.publish_track(self.output_track_id.clone()).await?;
 
         let mut draw_order = Vec::with_capacity(self.input_tracks.len());
         let mut states = HashMap::with_capacity(self.input_tracks.len());
-        for (index, input_track) in self.input_tracks.into_iter().enumerate() {
+        for (index, input_track) in self.input_tracks.iter().enumerate() {
             let state = InputTrackState::new(input_track.clone())?;
             draw_order.push(DrawOrder {
                 track_id: input_track.track_id.clone(),
@@ -95,9 +93,23 @@ impl VideoRealtimeMixer {
         }
         drop(event_tx);
 
-        let mut event_rx = Some(event_rx);
+        self.run_mixer_loop(output_tx, draw_order, states, event_rx, mixer_start)
+            .await
+    }
 
+    async fn run_mixer_loop(
+        &self,
+        mut output_tx: crate::MessageSender,
+        draw_order: Vec<DrawOrder>,
+        mut states: HashMap<TrackId, InputTrackState>,
+        event_rx: tokio::sync::mpsc::UnboundedReceiver<TrackEvent>,
+        mixer_start: tokio::time::Instant,
+    ) -> crate::Result<()> {
+        let mut noacked_sent = 0u64;
+        let mut ack = output_tx.send_syn();
+        let mut event_rx = Some(event_rx);
         let mut output_frame_index = 0u64;
+
         loop {
             let now = mixer_start.elapsed();
             output_frame_index =
