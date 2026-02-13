@@ -224,8 +224,8 @@ impl MediaPipelineHandle {
     // JSON-RPC リクエストを処理する
     //
     // 通知の場合は None が、それ以外ならクライアントに返すレスポンス JSON が返される
-    pub async fn rpc(&self, request_bytes: Vec<u8>) -> Option<nojson::RawJsonOwned> {
-        let request_json = match crate::jsonrpc::parse_request_bytes(&request_bytes) {
+    pub async fn rpc(&self, request_bytes: &[u8]) -> Option<nojson::RawJsonOwned> {
+        let request_json = match crate::jsonrpc::parse_request_bytes(request_bytes) {
             Err(error_response) => return Some(error_response),
             Ok(json) => json.into_owned(),
         };
@@ -237,6 +237,23 @@ impl MediaPipelineHandle {
             .and_then(|v| v.get())
             .map(|v| v.extract().into_owned());
 
+        let method = request_json
+            .value()
+            .to_member("method")
+            .expect("bug")
+            .required()
+            .expect("bug")
+            .as_string_str()
+            .expect("bug");
+        match method {
+            _ => {
+                return maybe_id.map(|id| {
+                    let code = crate::jsonrpc::METHOD_NOT_FOUND;
+                    crate::jsonrpc::error_response(id, code, "Method not found")
+                });
+            }
+        }
+
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::Rpc {
             request_json,
@@ -244,11 +261,10 @@ impl MediaPipelineHandle {
         };
 
         if !self.send(command) {
-            return Some(crate::jsonrpc::error_response(
-                maybe_id,
-                crate::jsonrpc::INTERNAL_ERROR,
-                "Media pipeline has terminated",
-            ));
+            return maybe_id.map(|id| {
+                let code = crate::jsonrpc::INTERNAL_ERROR;
+                crate::jsonrpc::error_response(id, code, "Media pipeline has terminated")
+            });
         }
 
         reply_rx.await.ok()

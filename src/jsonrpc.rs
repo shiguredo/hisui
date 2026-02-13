@@ -1,6 +1,7 @@
 // JSON-RPC 2.0 の仕様で定義されているエラーコードの一部
 pub const PARSE_ERROR: i32 = -32700;
 pub const INVALID_REQUEST: i32 = -32600;
+pub const METHOD_NOT_FOUND: i32 = -32601;
 pub const INTERNAL_ERROR: i32 = -32603;
 
 pub fn error_response<I, M>(id: I, code: i32, message: M) -> nojson::RawJsonOwned
