@@ -212,32 +212,16 @@ async fn handle_connection(
         while let Some(request) = decoder.decode()? {
             let keep_alive = request.is_keep_alive();
 
-            if request.uri.as_str() == "/.ok" {
-                let response = Response::new(204, "No Content");
-                if let Err(e) = write_response(&mut writer, &response).await {
-                    if is_client_disconnect(&e) {
-                        tracing::warn!("499 Client Closed Request from {peer_addr}");
-                        return Ok(());
-                    }
-                    return Err(e.into());
+            let local_response = match request.uri.as_str() {
+                "/.ok" => Some(Response::new(204, "No Content")),
+                "/bootstrap" => Some(Response::new(204, "No Content")),
+                "/rpc" => {
+                    Some(crate::endpoint_http_rpc::handle_request(&request, &pipeline_handle).await)
                 }
-            } else if request.uri.as_str() == "/bootstrap" {
-                let response = Response::new(204, "No Content");
-                if let Err(e) = write_response(&mut writer, &response).await {
-                    if is_client_disconnect(&e) {
-                        tracing::warn!("499 Client Closed Request from {peer_addr}");
-                        return Ok(());
-                    }
-                    return Err(e.into());
-                }
-            } else if request.uri.as_str() == "/rpc" {
-                let response = if request.method == "POST" {
-                    crate::endpoint_http_rpc::handle_request(&request, &pipeline_handle).await
-                } else {
-                    let mut response = Response::new(405, "Method Not Allowed");
-                    response.add_header("Allow", "POST");
-                    response
-                };
+                _ => None,
+            };
+
+            if let Some(response) = local_response {
                 if let Err(e) = write_response(&mut writer, &response).await {
                     if is_client_disconnect(&e) {
                         tracing::warn!("499 Client Closed Request from {peer_addr}");
