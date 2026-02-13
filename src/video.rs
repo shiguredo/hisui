@@ -602,8 +602,27 @@ impl FrameRate {
         denumerator: NonZeroUsize::MIN,
     };
 
+    pub const FPS_30: Self = Self {
+        numerator: NonZeroUsize::MIN.saturating_add(29),
+        denumerator: NonZeroUsize::MIN,
+    };
+
     pub fn as_f64(self) -> f64 {
         self.numerator.get() as f64 / self.denumerator.get() as f64
+    }
+
+    fn validate(self) -> Result<Self, String> {
+        if self.numerator.get() > u32::MAX as usize {
+            return Err("frame rate is too high".to_owned());
+        }
+
+        let frame_duration =
+            Duration::from_secs(self.denumerator.get() as u64) / self.numerator.get() as u32;
+        if frame_duration.is_zero() {
+            return Err("frame rate is too high".to_owned());
+        }
+
+        Ok(self)
     }
 }
 
@@ -619,18 +638,48 @@ impl FromStr for FrameRate {
             let fraction = NonZeroUsize::from_str(fraction).map_err(|_| {
                 format!("the fraction part of {s:?} is not a valid positive integer")
             })?;
-            Ok(Self {
+            Self {
                 numerator: integer,
                 denumerator: fraction,
-            })
+            }
+            .validate()
         } else {
             // 整数表記
             let integer = NonZeroUsize::from_str(s)
                 .map_err(|_| format!("{s:?} is not a valid positive integer"))?;
-            Ok(Self {
+            Self {
                 numerator: integer,
                 denumerator: NonZeroUsize::MIN,
-            })
+            }
+            .validate()
+        }
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for FrameRate {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        match value.kind() {
+            nojson::JsonValueKind::Integer => {
+                let fps: NonZeroUsize = value.try_into()?;
+                Self {
+                    numerator: fps,
+                    denumerator: NonZeroUsize::MIN,
+                }
+                .validate()
+                .map_err(|e| value.invalid(e))
+            }
+            nojson::JsonValueKind::String => {
+                let s = value.to_unquoted_string_str()?;
+                if !s.contains('/') {
+                    return Err(
+                        value.invalid("string frame rate must be a fraction like \"30000/1001\"")
+                    );
+                }
+                s.parse().map_err(|e| value.invalid(e))
+            }
+            _ => Err(value.invalid("frame rate must be an integer or a fraction string")),
         }
     }
 }
@@ -655,5 +704,27 @@ pub fn sample_entry_visual_fields(width: usize, height: usize) -> VisualSampleEn
         frame_count: VisualSampleEntryFields::DEFAULT_FRAME_COUNT,
         compressorname: VisualSampleEntryFields::NULL_COMPRESSORNAME,
         depth: VisualSampleEntryFields::DEFAULT_DEPTH,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_rate_from_str_rejects_too_high_value() {
+        let too_high = (u32::MAX as usize + 1).to_string();
+        let result = too_high.parse::<FrameRate>();
+
+        assert!(result.is_err());
+        assert_eq!(result.expect_err("infallible"), "frame rate is too high");
+    }
+
+    #[test]
+    fn frame_rate_json_integer_rejects_too_high_value() {
+        let too_high = (u32::MAX as usize + 1).to_string();
+        let result = crate::json::parse_str::<FrameRate>(&too_high);
+
+        assert!(result.is_err());
     }
 }

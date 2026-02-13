@@ -81,6 +81,9 @@
 
 ### misc
 
+- [ADD] 内部用に VideoRealtimeMixer 構造体を追加する
+  - リアルタイム用途に特化した映像合成を行うための構造体
+  - @sile
 - [ADD] 内部用に Mp4FileSource 構造体を追加する
   - MP4 ファイルからの読み込みとデコードをセットで行うための構造体
   - @sile
