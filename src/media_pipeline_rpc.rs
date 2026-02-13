@@ -81,7 +81,7 @@ impl MediaPipelineHandle {
     async fn handle_create_mp4_file_source_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
-    ) -> Result<RpcResult, RpcError> {
+    ) -> Result<RpcSuccessResult, RpcError> {
         let (source, processor_id): (crate::Mp4FileSource, Option<ProcessorId>) =
             parse_params(maybe_params, |params| {
                 let source = params.try_into()?;
@@ -102,15 +102,13 @@ impl MediaPipelineHandle {
                 }
             })?;
 
-        Ok(RpcResult::CreateMp4FileSource(
-            CreateMp4FileSourceRpcResult { processor_id },
-        ))
+        Ok(RpcSuccessResult::CreateMp4FileSource { processor_id })
     }
 
     async fn handle_create_video_mixer_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
-    ) -> Result<RpcResult, RpcError> {
+    ) -> Result<RpcSuccessResult, RpcError> {
         let (mixer, processor_id): (
             crate::mixer_realtime_video::VideoRealtimeMixer,
             Option<ProcessorId>,
@@ -132,12 +130,10 @@ impl MediaPipelineHandle {
                 }
             })?;
 
-        Ok(RpcResult::CreateVideoMixer(CreateVideoMixerRpcResult {
-            processor_id,
-        }))
+        Ok(RpcSuccessResult::CreateVideoMixer { processor_id })
     }
 
-    async fn handle_list_tracks_rpc(&self) -> Result<RpcResult, RpcError> {
+    async fn handle_list_tracks_rpc(&self) -> Result<RpcSuccessResult, RpcError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.send(MediaPipelineCommand::ListTracks { reply_tx });
 
@@ -145,15 +141,10 @@ impl MediaPipelineHandle {
             .await
             .map_err(|_| internal_error("Internal error: pipeline has terminated"))?;
 
-        Ok(RpcResult::ListTracks(
-            track_ids
-                .into_iter()
-                .map(|track_id| ListTrackRpcItem { track_id })
-                .collect(),
-        ))
+        Ok(RpcSuccessResult::ListTracks { track_ids })
     }
 
-    async fn handle_list_processors_rpc(&self) -> Result<RpcResult, RpcError> {
+    async fn handle_list_processors_rpc(&self) -> Result<RpcSuccessResult, RpcError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.send(MediaPipelineCommand::ListProcessors { reply_tx });
 
@@ -161,73 +152,36 @@ impl MediaPipelineHandle {
             .await
             .map_err(|_| internal_error("Internal error: pipeline has terminated"))?;
 
-        Ok(RpcResult::ListProcessors(
-            processor_ids
-                .into_iter()
-                .map(|processor_id| ListProcessorRpcItem { processor_id })
-                .collect(),
-        ))
+        Ok(RpcSuccessResult::ListProcessors { processor_ids })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CreateMp4FileSourceRpcResult {
-    processor_id: ProcessorId,
+enum RpcSuccessResult {
+    CreateMp4FileSource { processor_id: ProcessorId },
+    CreateVideoMixer { processor_id: ProcessorId },
+    ListTracks { track_ids: Vec<TrackId> },
+    ListProcessors { processor_ids: Vec<ProcessorId> },
 }
 
-impl nojson::DisplayJson for CreateMp4FileSourceRpcResult {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| f.member("processorId", &self.processor_id))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CreateVideoMixerRpcResult {
-    processor_id: ProcessorId,
-}
-
-impl nojson::DisplayJson for CreateVideoMixerRpcResult {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| f.member("processorId", &self.processor_id))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ListTrackRpcItem {
-    track_id: TrackId,
-}
-
-impl nojson::DisplayJson for ListTrackRpcItem {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| f.member("trackId", &self.track_id))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ListProcessorRpcItem {
-    processor_id: ProcessorId,
-}
-
-impl nojson::DisplayJson for ListProcessorRpcItem {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| f.member("processorId", &self.processor_id))
-    }
-}
-
-enum RpcResult {
-    CreateMp4FileSource(CreateMp4FileSourceRpcResult),
-    CreateVideoMixer(CreateVideoMixerRpcResult),
-    ListTracks(Vec<ListTrackRpcItem>),
-    ListProcessors(Vec<ListProcessorRpcItem>),
-}
-
-impl nojson::DisplayJson for RpcResult {
+impl nojson::DisplayJson for RpcSuccessResult {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
-            Self::CreateMp4FileSource(v) => v.fmt(f),
-            Self::CreateVideoMixer(v) => v.fmt(f),
-            Self::ListTracks(v) => v.fmt(f),
-            Self::ListProcessors(v) => v.fmt(f),
+            Self::CreateMp4FileSource { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateVideoMixer { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::ListTracks { track_ids } => f.array(|f| {
+                f.elements(track_ids.iter().map(|track_id| {
+                    nojson::json(move |f| f.object(|f| f.member("trackId", track_id)))
+                }))
+            }),
+            Self::ListProcessors { processor_ids } => f.array(|f| {
+                f.elements(processor_ids.iter().map(|processor_id| {
+                    nojson::json(move |f| f.object(|f| f.member("processorId", processor_id)))
+                }))
+            }),
         }
     }
 }
