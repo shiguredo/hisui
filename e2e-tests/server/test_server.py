@@ -1,6 +1,12 @@
 """hisui server サブコマンドの e2e テスト"""
 
+import json
+import signal
+import socket
 import ssl
+import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 import httpx
@@ -69,3 +75,130 @@ def test_https_ok_endpoint_no_verify(hisui_https_server: tuple[int, Path]):
     with httpx.Client(verify=False) as client:
         response = client.get(f"https://127.0.0.1:{port}/.ok")
     assert response.status_code == 204
+
+
+def test_startup_rpc_file_is_executed(binary_path: Path):
+    """--startup-rpc-file で指定した通知配列が起動時に実行される"""
+    port, sock = _reserve_ephemeral_port()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        startup_rpc_file = tmp_path / "startup-rpcs.json"
+        startup_rpc_file.write_text(
+            json.dumps([{"jsonrpc": "2.0", "method": "listProcessors"}])
+        )
+
+        log_file = tmp_path / "hisui-server.log"
+        log_handle = open(log_file, "w")
+        sock.close()
+
+        process = subprocess.Popen(
+            [
+                str(binary_path),
+                "--verbose",
+                "--experimental",
+                "server",
+                "--http-port",
+                str(port),
+                "--startup-rpc-file",
+                str(startup_rpc_file),
+            ],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+
+        try:
+            assert _wait_for_server(port), log_file.read_text()
+            with httpx.Client() as client:
+                response = client.get(f"http://127.0.0.1:{port}/.ok")
+            assert response.status_code == 204
+        finally:
+            _terminate_process(process)
+            log_handle.close()
+
+
+def test_startup_rpc_file_failure_stops_server(binary_path: Path):
+    """--startup-rpc-file が失敗する場合は server 起動が失敗する"""
+    port, sock = _reserve_ephemeral_port()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        startup_rpc_file = tmp_path / "startup-rpcs-invalid.json"
+        startup_rpc_file.write_text(
+            json.dumps([{"jsonrpc": "2.0", "method": "methodDoesNotExist"}])
+        )
+
+        log_file = tmp_path / "hisui-server.log"
+        log_handle = open(log_file, "w")
+        sock.close()
+
+        process = subprocess.Popen(
+            [
+                str(binary_path),
+                "--verbose",
+                "--experimental",
+                "server",
+                "--http-port",
+                str(port),
+                "--startup-rpc-file",
+                str(startup_rpc_file),
+            ],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+
+        try:
+            exited = _wait_for_process_exit(process)
+            assert exited, "server should exit when startup RPC execution fails"
+            assert process.returncode not in (None, 0), log_file.read_text()
+        finally:
+            _terminate_process(process)
+            log_handle.close()
+
+
+def _reserve_ephemeral_port() -> tuple[int, socket.socket]:
+    """空きポートを確保して、予約ソケットとともに返す"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = int(sock.getsockname()[1])
+    return port, sock
+
+
+def _wait_for_server(port: int, timeout: float = 10.0) -> bool:
+    """サーバーの /.ok エンドポイントが 204 を返すまでリトライ"""
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            with httpx.Client() as client:
+                response = client.get(f"http://127.0.0.1:{port}/.ok", timeout=1.0)
+                if response.status_code == 204:
+                    return True
+        except (httpx.ConnectError, httpx.RemoteProtocolError):
+            time.sleep(0.1)
+    return False
+
+
+def _wait_for_process_exit(process: subprocess.Popen[bytes], timeout: float = 10.0) -> bool:
+    """プロセス終了を待つ"""
+    start = time.time()
+    while time.time() - start < timeout:
+        if process.poll() is not None:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def _terminate_process(process: subprocess.Popen[bytes]) -> None:
+    """プロセスを安全に終了する"""
+    if process.poll() is not None:
+        return
+    try:
+        process.send_signal(signal.SIGTERM)
+    except OSError:
+        return
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
