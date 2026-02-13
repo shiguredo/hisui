@@ -10,33 +10,9 @@ pub async fn run_rpc_request_file(
         .map_err(|e| crate::Error::new(format!("failed to parse file {}: {e}", path.display())))?;
     let requests = validate_rpc_requests_file(parsed.value())?;
 
-    for (index, request) in requests.into_iter().enumerate() {
-        let request_json = build_rpc_request_json_with_index_id(request, index)?;
-        let response = pipeline_handle
-            .rpc(request_json.as_bytes())
-            .await
-            .ok_or_else(|| {
-                crate::Error::new(format!(
-                    "startup RPC request at index {index} returned no response"
-                ))
-            })?;
-
-        let has_error = response
-            .value()
-            .to_member("error")
-            .map_err(|e| {
-                crate::Error::new(format!(
-                    "failed to parse startup RPC response at index {index}: {e}"
-                ))
-            })?
-            .get()
-            .is_some();
-        if has_error {
-            return Err(crate::Error::new(format!(
-                "startup RPC request at index {index} failed: {}",
-                response.text()
-            )));
-        }
+    for request in requests {
+        let request_json = nojson::json(|f| f.value(request)).to_string();
+        let _ = pipeline_handle.rpc(request_json.as_bytes()).await;
     }
 
     Ok(())
@@ -84,50 +60,11 @@ fn validate_rpc_requests_file<'text, 'raw>(
     Ok(requests)
 }
 
-fn build_rpc_request_json_with_index_id(
-    request: nojson::RawJsonValue<'_, '_>,
-    index: usize,
-) -> crate::Result<String> {
-    if request.kind() != JsonValueKind::Object {
-        return Err(crate::Error::new(format!(
-            "startup RPC request at index {index} must be an object"
-        )));
-    }
-
-    let members: Vec<_> = request
-        .to_object()
-        .map_err(|e| {
-            crate::Error::new(format!(
-                "failed to parse startup RPC request at index {index}: {e}"
-            ))
-        })?
-        .map(|(name, value)| {
-            let name = name.to_unquoted_string_str().map_err(|e| {
-                crate::Error::new(format!(
-                    "failed to parse startup RPC request member name at index {index}: {e}"
-                ))
-            })?;
-            Ok((name.into_owned(), value))
-        })
-        .collect::<crate::Result<Vec<_>>>()?;
-
-    let id = i64::try_from(index)
-        .map_err(|_| crate::Error::new(format!("startup RPC index out of range: {index}")))?;
-
-    Ok(nojson::json(|f| {
-        f.object(|f| {
-            for (name, value) in &members {
-                f.member(name, value)?;
-            }
-            f.member("id", id)
-        })
-    })
-    .to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{build_rpc_request_json_with_index_id, validate_rpc_requests_file};
+    use std::io::Write;
+
+    use super::{run_rpc_request_file, validate_rpc_requests_file};
 
     #[test]
     fn validate_startup_rpc_requests_accepts_notification_array() -> crate::Result<()> {
@@ -162,25 +99,28 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn build_startup_rpc_request_json_adds_id() -> crate::Result<()> {
-        let parsed = nojson::RawJson::parse(r#"{"jsonrpc":"2.0","method":"listProcessors"}"#)
-            .map_err(|e| crate::Error::new(e.to_string()))?;
-
-        let request_json = build_rpc_request_json_with_index_id(parsed.value(), 7)?;
-        let parsed =
-            nojson::RawJson::parse(&request_json).map_err(|e| crate::Error::new(e.to_string()))?;
-        let id = i64::try_from(
-            parsed
-                .value()
-                .to_member("id")
-                .map_err(|e| crate::Error::new(e.to_string()))?
-                .required()
-                .map_err(|e| crate::Error::new(e.to_string()))?,
+    #[tokio::test]
+    async fn run_rpc_request_file_accepts_notification_array() -> crate::Result<()> {
+        let mut file =
+            tempfile::NamedTempFile::new().map_err(|e| crate::Error::new(e.to_string()))?;
+        write!(
+            file,
+            r#"[{{"jsonrpc":"2.0","method":"listProcessors"}},{{"jsonrpc":"2.0","method":"listTracks"}}]"#
         )
         .map_err(|e| crate::Error::new(e.to_string()))?;
 
-        assert_eq!(id, 7);
+        let pipeline = crate::MediaPipeline::new();
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        run_rpc_request_file(file.path(), &handle).await?;
+
+        drop(handle);
+        tokio::time::timeout(std::time::Duration::from_secs(5), pipeline_task)
+            .await
+            .map_err(|e| crate::Error::new(e.to_string()))?
+            .map_err(|e| crate::Error::new(e.to_string()))?;
+
         Ok(())
     }
 }

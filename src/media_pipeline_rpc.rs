@@ -35,10 +35,20 @@ impl MediaPipelineHandle {
             )),
         };
 
-        maybe_id.map(|id| match result {
-            Ok(v) => crate::jsonrpc::ok_response(id, v),
-            Err((code, e)) => crate::jsonrpc::error_response(id, code, e),
-        })
+        match maybe_id {
+            Some(id) => Some(match result {
+                Ok(v) => crate::jsonrpc::ok_response(id, v),
+                Err((code, e)) => crate::jsonrpc::error_response(id, code, e),
+            }),
+            None => {
+                if let Err((code, message)) = result {
+                    tracing::warn!(
+                        "rpc notification failed: method={method}, code={code}, message={message}"
+                    );
+                }
+                None
+            }
+        }
     }
 
     async fn handle_create_mp4_file_source_rpc(
@@ -256,6 +266,21 @@ mod tests {
     use crate::media_pipeline::{MediaPipeline, MediaPipelineHandle, ProcessorId, TrackId};
 
     const TEST_MP4_PATH: &str = "testdata/archive-red-320x320-av1.mp4";
+
+    #[tokio::test]
+    async fn notification_error_returns_no_response() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","method":"createMp4FileSource"}"#;
+
+        let response = handle.rpc(request.as_bytes()).await;
+        assert!(response.is_none());
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
 
     #[tokio::test]
     async fn create_mp4_file_source_requires_params() {
