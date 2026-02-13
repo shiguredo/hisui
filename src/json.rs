@@ -173,6 +173,7 @@ impl nojson::DisplayJson for JsonNumber {
     }
 }
 
+// NOTE: 基本的に新しいコードではこれを使わずに nojson の型を直接利用すること
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
     Null,
