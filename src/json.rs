@@ -71,6 +71,7 @@ pub fn pretty_print<T: nojson::DisplayJson>(value: T) -> orfail::Result<()> {
     }
 }
 
+// NOTE: 基本的に新しいコードではこれを使わずに nojson の型を直接利用すること
 #[derive(Debug)]
 pub struct JsonObject<'a, 'text> {
     object: nojson::RawJsonValue<'text, 'a>,
