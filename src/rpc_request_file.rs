@@ -31,15 +31,13 @@ fn validate_rpc_requests_file<'text, 'raw>(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use super::*;
 
-    use super::{run_rpc_request_file, validate_rpc_requests_file};
+    use std::io::Write;
 
     #[test]
     fn validate_startup_rpc_requests_accepts_notification_array() -> crate::Result<()> {
-        let parsed = nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors"}]"#)
-            .map_err(|e| crate::Error::new(e.to_string()))?;
-
+        let parsed = nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors"}]"#)?;
         let requests = validate_rpc_requests_file(parsed.value())?;
 
         assert_eq!(requests.len(), 1);
@@ -48,8 +46,7 @@ mod tests {
 
     #[test]
     fn validate_startup_rpc_requests_rejects_non_array_root() -> crate::Result<()> {
-        let parsed =
-            nojson::RawJson::parse(r#"{}"#).map_err(|e| crate::Error::new(e.to_string()))?;
+        let parsed = nojson::RawJson::parse(r#"{}"#)?;
         let result = validate_rpc_requests_file(parsed.value());
 
         assert!(result.is_err());
@@ -59,9 +56,7 @@ mod tests {
     #[test]
     fn validate_startup_rpc_requests_rejects_request_with_id() -> crate::Result<()> {
         let parsed =
-            nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors","id":1}]"#)
-                .map_err(|e| crate::Error::new(e.to_string()))?;
-
+            nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors","id":1}]"#)?;
         let result = validate_rpc_requests_file(parsed.value());
 
         assert!(result.is_err());
@@ -70,13 +65,11 @@ mod tests {
 
     #[tokio::test]
     async fn run_rpc_request_file_accepts_notification_array() -> crate::Result<()> {
-        let mut file =
-            tempfile::NamedTempFile::new().map_err(|e| crate::Error::new(e.to_string()))?;
+        let mut file = tempfile::NamedTempFile::new()?;
         write!(
             file,
             r#"[{{"jsonrpc":"2.0","method":"listProcessors"}},{{"jsonrpc":"2.0","method":"listTracks"}}]"#
-        )
-        .map_err(|e| crate::Error::new(e.to_string()))?;
+        )?;
 
         let pipeline = crate::MediaPipeline::new();
         let handle = pipeline.handle();
