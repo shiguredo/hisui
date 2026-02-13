@@ -11,6 +11,8 @@ use crate::{
     video::{FrameRate, VideoFormat, VideoFrame},
 };
 
+const MAX_NOACKED_COUNT: u64 = 100;
+
 #[derive(Debug)]
 pub struct VideoRealtimeMixer {
     pub canvas_width: NonZeroUsize,
@@ -56,6 +58,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
 impl VideoRealtimeMixer {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         let mut output_tx = handle.publish_track(self.output_track_id).await?;
+        let mut ack = output_tx.send_syn();
+        let mut noacked_sent = 0u64;
 
         let mut seen_track_ids = HashSet::new();
         let mut draw_order = Vec::with_capacity(self.input_tracks.len());
@@ -109,6 +113,12 @@ impl VideoRealtimeMixer {
                         state.advance(now);
                     }
 
+                    if noacked_sent > MAX_NOACKED_COUNT {
+                        ack.await;
+                        ack = output_tx.send_syn();
+                        noacked_sent = 0;
+                    }
+
                     let timestamp = frames_to_timestamp(self.frame_rate, output_frame_index);
                     let duration = frames_to_timestamp(self.frame_rate, output_frame_index + 1)
                         .saturating_sub(timestamp);
@@ -126,6 +136,7 @@ impl VideoRealtimeMixer {
                     if !output_tx.send_video(frame) {
                         break;
                     }
+                    noacked_sent += 1;
                 }
                 event = recv_track_event_or_pending(&mut event_rx) => {
                     let Some(event) = event else {
