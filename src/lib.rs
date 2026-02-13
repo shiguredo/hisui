@@ -67,6 +67,7 @@ pub mod publisher_rtmp;
 pub mod reader;
 pub mod reader_mp4;
 pub mod reader_webm;
+mod rpc_request_file;
 pub mod rtmp;
 pub mod scheduler;
 pub mod source_file_mp4;

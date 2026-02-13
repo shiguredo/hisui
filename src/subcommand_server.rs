@@ -142,7 +142,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         let _pipeline_task = tokio::spawn(pipeline.run());
 
         if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
-            run_startup_rpcs(startup_rpc_file, &pipeline_handle)
+            crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle)
                 .await
                 .or_fail()?;
             tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
@@ -280,85 +280,6 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn run_startup_rpcs(
-    path: &std::path::Path,
-    pipeline_handle: &crate::MediaPipelineHandle,
-) -> orfail::Result<()> {
-    let value: crate::json::JsonValue = crate::json::parse_file(path)?;
-    let requests = validate_startup_rpc_requests(value)?;
-
-    for (index, request) in requests.into_iter().enumerate() {
-        let request_json = build_startup_rpc_request_json(request, index)?;
-        let response = pipeline_handle
-            .rpc(request_json.as_bytes())
-            .await
-            .ok_or_else(|| {
-                orfail::Failure::new(format!(
-                    "startup RPC request at index {index} returned no response"
-                ))
-            })?;
-
-        let has_error = response
-            .value()
-            .to_member("error")
-            .or_fail_with(|e| {
-                format!("failed to parse startup RPC response at index {index}: {e}")
-            })?
-            .get()
-            .is_some();
-        if has_error {
-            return Err(orfail::Failure::new(format!(
-                "startup RPC request at index {index} failed: {}",
-                response.text()
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_startup_rpc_requests(
-    value: crate::json::JsonValue,
-) -> orfail::Result<Vec<crate::json::JsonValue>> {
-    let crate::json::JsonValue::Array(requests) = value else {
-        return Err(orfail::Failure::new(
-            "startup RPC file must be an array of notification requests",
-        ));
-    };
-
-    for (index, request) in requests.iter().enumerate() {
-        let crate::json::JsonValue::Object(object) = request else {
-            return Err(orfail::Failure::new(format!(
-                "startup RPC request at index {index} must be an object"
-            )));
-        };
-        if object.contains_key("id") {
-            return Err(orfail::Failure::new(format!(
-                "startup RPC request at index {index} must not contain id"
-            )));
-        }
-    }
-
-    Ok(requests)
-}
-
-fn build_startup_rpc_request_json(
-    request: crate::json::JsonValue,
-    index: usize,
-) -> orfail::Result<String> {
-    let crate::json::JsonValue::Object(mut object) = request else {
-        return Err(orfail::Failure::new(format!(
-            "startup RPC request at index {index} must be an object"
-        )));
-    };
-    let id = i64::try_from(index)
-        .map_err(|_| orfail::Failure::new(format!("startup RPC index out of range: {index}")))?;
-    object.insert("id".to_owned(), crate::json::JsonValue::Integer(id));
-
-    let request = crate::json::JsonValue::Object(object);
-    Ok(nojson::json(|f| f.value(&request)).to_string())
-}
-
 /// レスポンスを downstream に書き込む
 async fn write_response(
     writer: &mut BufWriter<impl tokio::io::AsyncWrite + Unpin>,
@@ -445,80 +366,4 @@ async fn proxy_to_upstream(
 
     // upstream がレスポンスなしで切断した場合
     Err("Upstream closed connection without sending a response".into())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use orfail::OrFail;
-
-    use crate::json::JsonValue;
-
-    use super::{build_startup_rpc_request_json, validate_startup_rpc_requests};
-
-    #[test]
-    fn validate_startup_rpc_requests_accepts_notification_array() -> orfail::Result<()> {
-        let mut request = BTreeMap::new();
-        request.insert("jsonrpc".to_owned(), JsonValue::String("2.0".to_owned()));
-        request.insert(
-            "method".to_owned(),
-            JsonValue::String("listProcessors".to_owned()),
-        );
-        let value = JsonValue::Array(vec![JsonValue::Object(request)]);
-
-        let requests = validate_startup_rpc_requests(value)?;
-
-        assert_eq!(requests.len(), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn validate_startup_rpc_requests_rejects_non_array_root() {
-        let value = JsonValue::Object(BTreeMap::new());
-        let result = validate_startup_rpc_requests(value);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_startup_rpc_requests_rejects_request_with_id() {
-        let mut request = BTreeMap::new();
-        request.insert("jsonrpc".to_owned(), JsonValue::String("2.0".to_owned()));
-        request.insert(
-            "method".to_owned(),
-            JsonValue::String("listProcessors".to_owned()),
-        );
-        request.insert("id".to_owned(), JsonValue::Integer(1));
-        let value = JsonValue::Array(vec![JsonValue::Object(request)]);
-
-        let result = validate_startup_rpc_requests(value);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_startup_rpc_request_json_adds_id() -> orfail::Result<()> {
-        let mut request = BTreeMap::new();
-        request.insert("jsonrpc".to_owned(), JsonValue::String("2.0".to_owned()));
-        request.insert(
-            "method".to_owned(),
-            JsonValue::String("listProcessors".to_owned()),
-        );
-
-        let request_json = build_startup_rpc_request_json(JsonValue::Object(request), 7)?;
-        let parsed = nojson::RawJson::parse(&request_json).or_fail()?;
-        let id = i64::try_from(
-            parsed
-                .value()
-                .to_member("id")
-                .or_fail()?
-                .required()
-                .or_fail()?,
-        )
-        .or_fail()?;
-
-        assert_eq!(id, 7);
-        Ok(())
-    }
 }
