@@ -1,11 +1,15 @@
+use nojson::JsonValueKind;
 use orfail::OrFail;
 
 pub async fn run_rpc_request_file(
     path: &std::path::Path,
     pipeline_handle: &crate::MediaPipelineHandle,
 ) -> orfail::Result<()> {
-    let value: crate::json::JsonValue = crate::json::parse_file(path)?;
-    let requests = validate_rpc_requests_file(value)?;
+    let text = std::fs::read_to_string(path)
+        .or_fail_with(|e| format!("failed to read file {}: {e}", path.display()))?;
+    let parsed = nojson::RawJson::parse(&text)
+        .or_fail_with(|e| format!("failed to parse file {}: {e}", path.display()))?;
+    let requests = validate_rpc_requests_file(parsed.value())?;
 
     for (index, request) in requests.into_iter().enumerate() {
         let request_json = build_rpc_request_json_with_index_id(request, index)?;
@@ -37,25 +41,38 @@ pub async fn run_rpc_request_file(
     Ok(())
 }
 
-fn validate_rpc_requests_file(
-    value: crate::json::JsonValue,
-) -> orfail::Result<Vec<crate::json::JsonValue>> {
-    let crate::json::JsonValue::Array(requests) = value else {
+fn validate_rpc_requests_file<'text, 'raw>(
+    value: nojson::RawJsonValue<'text, 'raw>,
+) -> orfail::Result<Vec<nojson::RawJsonValue<'text, 'raw>>> {
+    if value.kind() != JsonValueKind::Array {
         return Err(orfail::Failure::new(
             "startup RPC file must be an array of notification requests",
         ));
-    };
+    }
 
-    for (index, request) in requests.iter().enumerate() {
-        let crate::json::JsonValue::Object(object) = request else {
+    let requests: Vec<_> = value
+        .to_array()
+        .or_fail_with(|e| format!("failed to parse startup RPC file array: {e}"))?
+        .collect();
+
+    for (index, request) in requests.iter().copied().enumerate() {
+        if request.kind() != JsonValueKind::Object {
             return Err(orfail::Failure::new(format!(
                 "startup RPC request at index {index} must be an object"
             )));
-        };
-        if object.contains_key("id") {
-            return Err(orfail::Failure::new(format!(
-                "startup RPC request at index {index} must not contain id"
-            )));
+        }
+
+        for (name, _) in request.to_object().or_fail_with(|e| {
+            format!("failed to parse startup RPC request at index {index}: {e}")
+        })? {
+            let name = name.to_unquoted_string_str().or_fail_with(|e| {
+                format!("failed to parse startup RPC request member at index {index}: {e}")
+            })?;
+            if name == "id" {
+                return Err(orfail::Failure::new(format!(
+                    "startup RPC request at index {index} must not contain id"
+                )));
+            }
         }
     }
 
@@ -63,82 +80,85 @@ fn validate_rpc_requests_file(
 }
 
 fn build_rpc_request_json_with_index_id(
-    request: crate::json::JsonValue,
+    request: nojson::RawJsonValue<'_, '_>,
     index: usize,
 ) -> orfail::Result<String> {
-    let crate::json::JsonValue::Object(mut object) = request else {
+    if request.kind() != JsonValueKind::Object {
         return Err(orfail::Failure::new(format!(
             "startup RPC request at index {index} must be an object"
         )));
-    };
+    }
+
+    let members: Vec<_> = request
+        .to_object()
+        .or_fail_with(|e| format!("failed to parse startup RPC request at index {index}: {e}"))?
+        .map(|(name, value)| {
+            name.to_unquoted_string_str()
+                .map(|name| (name.into_owned(), value))
+                .or_fail_with(|e| {
+                    format!("failed to parse startup RPC request member name at index {index}: {e}")
+                })
+        })
+        .collect::<orfail::Result<Vec<_>>>()?;
+
     let id = i64::try_from(index)
         .map_err(|_| orfail::Failure::new(format!("startup RPC index out of range: {index}")))?;
-    object.insert("id".to_owned(), crate::json::JsonValue::Integer(id));
 
-    let request = crate::json::JsonValue::Object(object);
-    Ok(nojson::json(|f| f.value(&request)).to_string())
+    Ok(nojson::json(|f| {
+        f.object(|f| {
+            for (name, value) in &members {
+                f.member(name, value)?;
+            }
+            f.member("id", id)
+        })
+    })
+    .to_string())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use orfail::OrFail;
-
-    use crate::json::JsonValue;
 
     use super::{build_rpc_request_json_with_index_id, validate_rpc_requests_file};
 
     #[test]
     fn validate_startup_rpc_requests_accepts_notification_array() -> orfail::Result<()> {
-        let mut request = BTreeMap::new();
-        request.insert("jsonrpc".to_owned(), JsonValue::String("2.0".to_owned()));
-        request.insert(
-            "method".to_owned(),
-            JsonValue::String("listProcessors".to_owned()),
-        );
-        let value = JsonValue::Array(vec![JsonValue::Object(request)]);
+        let parsed =
+            nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors"}]"#).or_fail()?;
 
-        let requests = validate_rpc_requests_file(value)?;
+        let requests = validate_rpc_requests_file(parsed.value())?;
 
         assert_eq!(requests.len(), 1);
         Ok(())
     }
 
     #[test]
-    fn validate_startup_rpc_requests_rejects_non_array_root() {
-        let value = JsonValue::Object(BTreeMap::new());
-        let result = validate_rpc_requests_file(value);
+    fn validate_startup_rpc_requests_rejects_non_array_root() -> orfail::Result<()> {
+        let parsed = nojson::RawJson::parse(r#"{}"#).or_fail()?;
+        let result = validate_rpc_requests_file(parsed.value());
 
         assert!(result.is_err());
+        Ok(())
     }
 
     #[test]
-    fn validate_startup_rpc_requests_rejects_request_with_id() {
-        let mut request = BTreeMap::new();
-        request.insert("jsonrpc".to_owned(), JsonValue::String("2.0".to_owned()));
-        request.insert(
-            "method".to_owned(),
-            JsonValue::String("listProcessors".to_owned()),
-        );
-        request.insert("id".to_owned(), JsonValue::Integer(1));
-        let value = JsonValue::Array(vec![JsonValue::Object(request)]);
+    fn validate_startup_rpc_requests_rejects_request_with_id() -> orfail::Result<()> {
+        let parsed =
+            nojson::RawJson::parse(r#"[{"jsonrpc":"2.0","method":"listProcessors","id":1}]"#)
+                .or_fail()?;
 
-        let result = validate_rpc_requests_file(value);
+        let result = validate_rpc_requests_file(parsed.value());
 
         assert!(result.is_err());
+        Ok(())
     }
 
     #[test]
     fn build_startup_rpc_request_json_adds_id() -> orfail::Result<()> {
-        let mut request = BTreeMap::new();
-        request.insert("jsonrpc".to_owned(), JsonValue::String("2.0".to_owned()));
-        request.insert(
-            "method".to_owned(),
-            JsonValue::String("listProcessors".to_owned()),
-        );
+        let parsed =
+            nojson::RawJson::parse(r#"{"jsonrpc":"2.0","method":"listProcessors"}"#).or_fail()?;
 
-        let request_json = build_rpc_request_json_with_index_id(JsonValue::Object(request), 7)?;
+        let request_json = build_rpc_request_json_with_index_id(parsed.value(), 7)?;
         let parsed = nojson::RawJson::parse(&request_json).or_fail()?;
         let id = i64::try_from(
             parsed
