@@ -43,7 +43,14 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
         let canvas_width = value.to_member("canvasWidth")?.required()?.try_into()?;
         let canvas_height = value.to_member("canvasHeight")?.required()?.try_into()?;
         let frame_rate: Option<FrameRate> = value.to_member("frameRate")?.try_into()?;
-        let input_tracks = value.to_member("inputTracks")?.required()?.try_into()?;
+        let input_tracks: Vec<InputTrack> =
+            value.to_member("inputTracks")?.required()?.try_into()?;
+        let mut seen_track_ids = HashSet::new();
+        for track in &input_tracks {
+            if !seen_track_ids.insert(track.track_id.clone()) {
+                return Err(value.invalid(format!("duplicate input track ID: {}", track.track_id)));
+            }
+        }
         let output_track_id = value.to_member("outputTrackId")?.required()?.try_into()?;
         Ok(Self {
             canvas_width,
@@ -61,17 +68,9 @@ impl VideoRealtimeMixer {
         let mut ack = output_tx.send_syn();
         let mut noacked_sent = 0u64;
 
-        let mut seen_track_ids = HashSet::new();
         let mut draw_order = Vec::with_capacity(self.input_tracks.len());
         let mut states = HashMap::with_capacity(self.input_tracks.len());
         for (index, input_track) in self.input_tracks.into_iter().enumerate() {
-            if !seen_track_ids.insert(input_track.track_id.clone()) {
-                return Err(Error::new(format!(
-                    "duplicate input track ID: {}",
-                    input_track.track_id
-                )));
-            }
-
             let state = InputTrackState::new(input_track.clone())?;
             draw_order.push(DrawOrder {
                 track_id: input_track.track_id.clone(),
@@ -757,6 +756,34 @@ mod tests {
                         "z": 0,
                         "width": 640,
                         "height": 360
+                    }
+                ],
+                "outputTrackId": "output"
+            }"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn video_realtime_mixer_json_parse_error_with_duplicate_input_track_id() {
+        let result = crate::json::parse_str::<VideoRealtimeMixer>(
+            r#"{
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": 30,
+                "inputTracks": [
+                    {
+                        "trackId": "input-1",
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    {
+                        "trackId": "input-1",
+                        "x": 10,
+                        "y": 10,
+                        "z": 1
                     }
                 ],
                 "outputTrackId": "output"
