@@ -55,8 +55,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
 
 impl VideoRealtimeMixer {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
-        let frame_interval = frames_to_timestamp(self.frame_rate, 1);
-
         let mut output_tx = handle.publish_track(self.output_track_id).await?;
 
         let mut seen_track_ids = HashSet::new();
@@ -96,22 +94,25 @@ impl VideoRealtimeMixer {
 
         let mut event_rx = Some(event_rx);
 
-        let mut ticker = tokio::time::interval(frame_interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        let mut output_frame_count = 0u64;
+        let mut output_frame_index = 0u64;
         loop {
+            let now = mixer_start.elapsed();
+            output_frame_index =
+                catch_up_output_frame_index(self.frame_rate, output_frame_index, now);
+            let next_timestamp = frames_to_timestamp(self.frame_rate, output_frame_index);
+            let next_instant = mixer_start + next_timestamp;
+
             tokio::select! {
-                _ = ticker.tick() => {
+                _ = tokio::time::sleep_until(next_instant) => {
                     let now = mixer_start.elapsed();
                     for state in states.values_mut() {
                         state.advance(now);
                     }
 
-                    let timestamp = frames_to_timestamp(self.frame_rate, output_frame_count);
-                    let duration = frames_to_timestamp(self.frame_rate, output_frame_count + 1)
+                    let timestamp = frames_to_timestamp(self.frame_rate, output_frame_index);
+                    let duration = frames_to_timestamp(self.frame_rate, output_frame_index + 1)
                         .saturating_sub(timestamp);
-                    output_frame_count = output_frame_count.saturating_add(1);
+                    output_frame_index = output_frame_index.saturating_add(1);
 
                     let frame = compose_frame(
                         self.canvas_width.get(),
@@ -556,6 +557,16 @@ fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
         / frame_rate.numerator.get() as u32
 }
 
+fn catch_up_output_frame_index(frame_rate: FrameRate, mut frame_index: u64, now: Duration) -> u64 {
+    loop {
+        let next = frame_index.saturating_add(1);
+        if frames_to_timestamp(frame_rate, next) > now {
+            break frame_index;
+        }
+        frame_index = next;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -855,5 +866,19 @@ mod tests {
         frame.timestamp = timestamp;
         frame.duration = Duration::from_millis(40);
         frame
+    }
+
+    #[test]
+    fn catch_up_output_frame_index_skips_late_frames() {
+        let now = Duration::from_millis(120);
+        let index = catch_up_output_frame_index(FrameRate::FPS_25, 0, now);
+        assert_eq!(index, 3);
+    }
+
+    #[test]
+    fn catch_up_output_frame_index_keeps_current_when_not_late() {
+        let now = Duration::from_millis(39);
+        let index = catch_up_output_frame_index(FrameRate::FPS_25, 0, now);
+        assert_eq!(index, 0);
     }
 }
