@@ -68,6 +68,7 @@ impl MediaPipeline {
             } => {
                 self.handle_subscribe_track(processor_id, track_id, tx);
             }
+            Command::Rpc { .. } => todo!(),
         }
     }
 
@@ -220,6 +221,21 @@ impl MediaPipelineHandle {
         }
     }
 
+    // JSON-RPC リクエストを処理する
+    //
+    // 通知の場合は None が、それ以外ならクライアントに返すレスポンス JSON が返される
+    pub async fn rpc(&self, request_bytes: Vec<u8>) -> Option<nojson::RawJsonOwned> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let command = Command::Rpc {
+            request_bytes,
+            reply_tx,
+        };
+        if !self.send(command) {
+            todo!("エラー応答 JSON を生成して返す")
+        }
+        reply_rx.await.ok()
+    }
+
     // すでに MediaPipeline が終了している場合には false が返される。
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
@@ -247,6 +263,10 @@ enum Command {
         processor_id: ProcessorId,
         track_id: TrackId,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    },
+    Rpc {
+        request_bytes: Vec<u8>,
+        reply_tx: tokio::sync::oneshot::Sender<nojson::RawJsonOwned>,
     },
 }
 
