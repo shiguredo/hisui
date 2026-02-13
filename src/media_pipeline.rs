@@ -227,17 +227,24 @@ impl MediaPipelineHandle {
     pub async fn rpc(&self, request_bytes: Vec<u8>) -> Option<nojson::RawJsonOwned> {
         let request_json = match crate::jsonrpc::parse_request_bytes(&request_bytes) {
             Err(error_response) => return Some(error_response),
-            Ok(json) => json.into_owned(),
+            Ok(json) => json,
         };
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::Rpc {
-            request_json,
+            request_json: request_json.clone().into_owned(),
             reply_tx,
         };
+
         if !self.send(command) {
-            todo!("エラー応答 JSON を生成して返す")
+            let id_member = request_json.value().to_member("id").ok();
+            return Some(crate::jsonrpc::error_response(
+                id_member.and_then(|v| v.get()),
+                crate::jsonrpc::INTERNAL_ERROR,
+                "Media pipeline has terminated",
+            ));
         }
+
         reply_rx.await.ok()
     }
 
