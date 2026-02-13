@@ -226,37 +226,33 @@ impl MediaPipelineHandle {
     pub async fn rpc(&self, request_bytes: &[u8]) -> Option<nojson::RawJsonOwned> {
         let request_json = match crate::jsonrpc::parse_request_bytes(request_bytes) {
             Err(error_response) => return Some(error_response),
-            Ok(json) => json.into_owned(),
+            Ok(json) => json,
         };
+        let request = request_json.value();
 
-        let maybe_id = request_json
-            .value()
-            .to_member("id")
-            .ok()
-            .and_then(|v| v.get())
-            .map(|v| v.extract().into_owned());
-
-        let method = request_json
-            .value()
+        // parse_request_bytes() の中でバリデーションしているので、ここは常に成功する
+        let method = request
             .to_member("method")
             .expect("bug")
             .required()
             .expect("bug")
             .as_string_str()
             .expect("bug");
-        match method {
-            _ => maybe_id.map(|id| {
-                let code = crate::jsonrpc::METHOD_NOT_FOUND;
-                crate::jsonrpc::error_response(id, code, "Method not found")
-            }),
-        }
+        let maybe_id = request.to_member("id").ok().and_then(|v| v.get());
+        let maybe_params = request.to_member("params").ok().and_then(|v| v.get());
 
-        /*if !self.send(command) {
-            return maybe_id.map(|id| {
-                let code = crate::jsonrpc::INTERNAL_ERROR;
-                crate::jsonrpc::error_response(id, code, "Media pipeline has terminated")
-            });
-        }*/
+        let result = match method {
+            "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
+            _ => Err((
+                crate::jsonrpc::METHOD_NOT_FOUND,
+                "Method not found".to_owned(),
+            )),
+        };
+
+        maybe_id.map(|id| match result {
+            Ok(v) => crate::jsonrpc::ok_response(id, v),
+            Err((code, e)) => crate::jsonrpc::error_response(id, code, e),
+        })
     }
 
     // すでに MediaPipeline が終了している場合には false が返される。

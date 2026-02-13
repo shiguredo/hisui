@@ -4,6 +4,19 @@ pub const INVALID_REQUEST: i32 = -32600;
 pub const METHOD_NOT_FOUND: i32 = -32601;
 pub const INTERNAL_ERROR: i32 = -32603;
 
+pub fn ok_response<I, T>(id: I, result: T) -> nojson::RawJsonOwned
+where
+    I: nojson::DisplayJson,
+    T: nojson::DisplayJson,
+{
+    let json = nojson::object(|f| {
+        f.member("jsonrpc", "2.0")?;
+        f.member("id", &id)?;
+        f.member("result", &result)
+    });
+    nojson::RawJsonOwned::parse(json.to_string()).expect("infallible")
+}
+
 pub fn error_response<I, M>(id: I, code: i32, message: M) -> nojson::RawJsonOwned
 where
     I: nojson::DisplayJson,
