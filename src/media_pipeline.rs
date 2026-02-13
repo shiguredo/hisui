@@ -225,9 +225,14 @@ impl MediaPipelineHandle {
     //
     // 通知の場合は None が、それ以外ならクライアントに返すレスポンス JSON が返される
     pub async fn rpc(&self, request_bytes: Vec<u8>) -> Option<nojson::RawJsonOwned> {
+        let request_json = match crate::jsonrpc::parse_request_bytes(&request_bytes) {
+            Err(error_response) => return Some(error_response),
+            Ok(json) => json.into_owned(),
+        };
+
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = Command::Rpc {
-            request_bytes,
+            request_json,
             reply_tx,
         };
         if !self.send(command) {
@@ -265,7 +270,7 @@ enum Command {
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     },
     Rpc {
-        request_bytes: Vec<u8>,
+        request_json: nojson::RawJsonOwned,
         reply_tx: tokio::sync::oneshot::Sender<nojson::RawJsonOwned>,
     },
 }

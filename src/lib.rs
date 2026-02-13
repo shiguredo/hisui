@@ -44,6 +44,7 @@ pub mod file_reader_mp4;
 pub mod future;
 pub mod inbound_endpoint_rtmp;
 pub mod json;
+pub mod jsonrpc;
 pub mod layout;
 pub mod layout_decode_params;
 pub mod layout_encode_params;
