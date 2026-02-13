@@ -68,6 +68,12 @@ impl MediaPipeline {
             } => {
                 self.handle_subscribe_track(processor_id, track_id, tx);
             }
+            Command::ListTracks { reply_tx } => {
+                let _ = reply_tx.send(self.handle_list_tracks());
+            }
+            Command::ListProcessors { reply_tx } => {
+                let _ = reply_tx.send(self.handle_list_processors());
+            }
         }
     }
 
@@ -164,6 +170,14 @@ impl MediaPipeline {
         tracing::debug!("deregister processor: {processor_id}");
         self.processors.remove(&processor_id);
     }
+
+    fn handle_list_tracks(&self) -> Vec<TrackId> {
+        self.tracks.keys().cloned().collect()
+    }
+
+    fn handle_list_processors(&self) -> Vec<ProcessorId> {
+        self.processors.iter().cloned().collect()
+    }
 }
 
 impl Default for MediaPipeline {
@@ -243,6 +257,8 @@ impl MediaPipelineHandle {
 
         let result = match method {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
+            "listTracks" => self.handle_list_tracks_rpc().await,
+            "listProcessors" => self.handle_list_processors_rpc().await,
             _ => Err((
                 crate::jsonrpc::METHOD_NOT_FOUND,
                 "Method not found".to_owned(),
@@ -258,7 +274,7 @@ impl MediaPipelineHandle {
     async fn handle_create_mp4_file_source_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
-    ) -> Result<CreateMp4FileSourceRpcResult, (i32, String)> {
+    ) -> Result<RpcResult, (i32, String)> {
         let params = maybe_params.ok_or_else(|| {
             (
                 crate::jsonrpc::INVALID_PARAMS,
@@ -304,7 +320,47 @@ impl MediaPipelineHandle {
                 ),
             })?;
 
-        Ok(CreateMp4FileSourceRpcResult { processor_id })
+        Ok(RpcResult::CreateMp4FileSource(
+            CreateMp4FileSourceRpcResult { processor_id },
+        ))
+    }
+
+    async fn handle_list_tracks_rpc(&self) -> Result<RpcResult, (i32, String)> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(Command::ListTracks { reply_tx });
+
+        let track_ids = reply_rx.await.map_err(|_| {
+            (
+                crate::jsonrpc::INTERNAL_ERROR,
+                "Internal error: pipeline has terminated".to_owned(),
+            )
+        })?;
+
+        Ok(RpcResult::ListTracks(
+            track_ids
+                .into_iter()
+                .map(|track_id| ListTrackRpcItem { track_id })
+                .collect(),
+        ))
+    }
+
+    async fn handle_list_processors_rpc(&self) -> Result<RpcResult, (i32, String)> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(Command::ListProcessors { reply_tx });
+
+        let processor_ids = reply_rx.await.map_err(|_| {
+            (
+                crate::jsonrpc::INTERNAL_ERROR,
+                "Internal error: pipeline has terminated".to_owned(),
+            )
+        })?;
+
+        Ok(RpcResult::ListProcessors(
+            processor_ids
+                .into_iter()
+                .map(|processor_id| ListProcessorRpcItem { processor_id })
+                .collect(),
+        ))
     }
 
     // すでに MediaPipeline が終了している場合には false が返される。
@@ -327,6 +383,44 @@ impl nojson::DisplayJson for CreateMp4FileSourceRpcResult {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ListTrackRpcItem {
+    track_id: TrackId,
+}
+
+impl nojson::DisplayJson for ListTrackRpcItem {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| f.member("trackId", &self.track_id))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ListProcessorRpcItem {
+    processor_id: ProcessorId,
+}
+
+impl nojson::DisplayJson for ListProcessorRpcItem {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| f.member("processorId", &self.processor_id))
+    }
+}
+
+enum RpcResult {
+    CreateMp4FileSource(CreateMp4FileSourceRpcResult),
+    ListTracks(Vec<ListTrackRpcItem>),
+    ListProcessors(Vec<ListProcessorRpcItem>),
+}
+
+impl nojson::DisplayJson for RpcResult {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::CreateMp4FileSource(v) => v.fmt(f),
+            Self::ListTracks(v) => v.fmt(f),
+            Self::ListProcessors(v) => v.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Command {
     RegisterProcessor {
@@ -345,6 +439,12 @@ enum Command {
         processor_id: ProcessorId,
         track_id: TrackId,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    },
+    ListTracks {
+        reply_tx: tokio::sync::oneshot::Sender<Vec<TrackId>>,
+    },
+    ListProcessors {
+        reply_tx: tokio::sync::oneshot::Sender<Vec<ProcessorId>>,
     },
 }
 
@@ -739,6 +839,136 @@ mod tests {
             .expect("pipeline task failed");
     }
 
+    #[tokio::test]
+    async fn list_processors_returns_empty_array_when_no_processors() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert!(result_processor_ids(&response).is_empty());
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn list_processors_returns_registered_processors() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let processor_a = handle
+            .register_processor(ProcessorId::new("list-processor-a"))
+            .await
+            .expect("register list-processor-a");
+        let processor_b = handle
+            .register_processor(ProcessorId::new("list-processor-b"))
+            .await
+            .expect("register list-processor-b");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        let processor_ids = result_processor_ids(&response);
+
+        assert!(processor_ids.contains(&"list-processor-a".to_owned()));
+        assert!(processor_ids.contains(&"list-processor-b".to_owned()));
+
+        drop(processor_a);
+        drop(processor_b);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn list_tracks_returns_empty_array_when_no_tracks() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"listTracks"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert!(result_track_ids(&response).is_empty());
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn list_tracks_returns_created_tracks() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let publisher = handle
+            .register_processor(ProcessorId::new("list-tracks-publisher"))
+            .await
+            .expect("register list-tracks-publisher");
+        publisher
+            .publish_track(TrackId::new("list-track-a"))
+            .await
+            .expect("publish list-track-a");
+        publisher
+            .publish_track(TrackId::new("list-track-b"))
+            .await
+            .expect("publish list-track-b");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"listTracks"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        let track_ids = result_track_ids(&response);
+
+        assert!(track_ids.contains(&"list-track-a".to_owned()));
+        assert!(track_ids.contains(&"list-track-b".to_owned()));
+
+        drop(publisher);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn list_rpcs_ignore_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let list_tracks_request =
+            r#"{"jsonrpc":"2.0","id":1,"method":"listTracks","params":{"dummy":1}}"#;
+        let list_processors_request =
+            r#"{"jsonrpc":"2.0","id":2,"method":"listProcessors","params":["dummy"]}"#;
+
+        let tracks_response = handle
+            .rpc(list_tracks_request.as_bytes())
+            .await
+            .expect("response must exist");
+        let processors_response = handle
+            .rpc(list_processors_request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert!(tracks_response.value().to_member("result").is_ok());
+        assert!(processors_response.value().to_member("result").is_ok());
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
     fn spawn_test_pipeline() -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
         let pipeline = MediaPipeline::new();
         let handle = pipeline.handle();
@@ -774,5 +1004,47 @@ mod tests {
             .expect("result.processorId value")
             .try_into()
             .expect("result.processorId must be string")
+    }
+
+    fn result_track_ids(response: &nojson::RawJsonOwned) -> Vec<String> {
+        response
+            .value()
+            .to_member("result")
+            .expect("result member")
+            .required()
+            .expect("result value")
+            .to_array()
+            .expect("result must be array")
+            .into_iter()
+            .map(|v| {
+                v.to_member("trackId")
+                    .expect("trackId member")
+                    .required()
+                    .expect("trackId value")
+                    .try_into()
+                    .expect("trackId must be string")
+            })
+            .collect()
+    }
+
+    fn result_processor_ids(response: &nojson::RawJsonOwned) -> Vec<String> {
+        response
+            .value()
+            .to_member("result")
+            .expect("result member")
+            .required()
+            .expect("result value")
+            .to_array()
+            .expect("result must be array")
+            .into_iter()
+            .map(|v| {
+                v.to_member("processorId")
+                    .expect("processorId member")
+                    .required()
+                    .expect("processorId value")
+                    .try_into()
+                    .expect("processorId must be string")
+            })
+            .collect()
     }
 }
