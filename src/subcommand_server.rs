@@ -212,6 +212,7 @@ async fn handle_connection(
         while let Some(request) = decoder.decode()? {
             let keep_alive = request.is_keep_alive();
 
+            // ローカルエンドポイント
             let local_response = match request.uri.as_str() {
                 "/.ok" => Some(Response::new(204, "No Content")),
                 "/bootstrap" => Some(Response::new(204, "No Content")),
