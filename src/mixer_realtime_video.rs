@@ -369,6 +369,8 @@ impl InputTrackState {
     }
 
     fn handle_eos(&mut self) {
+        // realtime 用途では低遅延を優先するため、EOS 到達時点で未表示フレームを破棄し、
+        // 現在フレームも消して即座にレイアウトから除外する。
         self.eos = true;
         self.pending_frames.clear();
         self.current_frame = None;
@@ -391,6 +393,10 @@ enum TrackEvent {
         track_id: TrackId,
         frame: Arc<VideoFrame>,
         received_at: Duration,
+    },
+    Syn {
+        track_id: TrackId,
+        syn: crate::Syn,
     },
     Eos {
         track_id: TrackId,
@@ -432,7 +438,12 @@ fn spawn_input_receiver(
                     });
                     break;
                 }
-                Message::Syn(_) => {}
+                Message::Syn(syn) => {
+                    let _ = event_tx.send(TrackEvent::Syn {
+                        track_id: track_id.clone(),
+                        syn,
+                    });
+                }
             }
         }
     });
@@ -467,6 +478,12 @@ fn handle_track_event(
             if let Some(state) = states.get_mut(&track_id) {
                 state.handle_eos();
             }
+        }
+        TrackEvent::Syn { track_id, syn } => {
+            if !states.contains_key(&track_id) {
+                return Err(Error::new(format!("unknown input track ID: {}", track_id)));
+            }
+            drop(syn);
         }
         TrackEvent::Error { track_id, reason } => {
             return Err(Error::new(format!("input track {}: {}", track_id, reason)));
@@ -977,6 +994,122 @@ mod tests {
             .await
             .map_err(|e| Error::new(e.to_string()))?
             .map_err(|e| Error::new(e.to_string()))?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spawn_input_receiver_forwards_syn_and_ack_waits_until_event_drop() -> crate::Result<()>
+    {
+        let pipeline = crate::MediaPipeline::new();
+        let pipeline_handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let sender_processor = pipeline_handle
+            .register_processor(crate::ProcessorId::new("syn_sender"))
+            .await?;
+        let receiver_processor = pipeline_handle
+            .register_processor(crate::ProcessorId::new("syn_receiver"))
+            .await?;
+
+        let track_id = TrackId::new("syn-track");
+        let mut tx = sender_processor.publish_track(track_id.clone()).await?;
+        let input_rx = receiver_processor.subscribe_track(track_id.clone());
+
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mixer_start = tokio::time::Instant::now();
+        spawn_input_receiver(track_id.clone(), input_rx, event_tx, mixer_start);
+
+        let mut first_event = None;
+        for _ in 0..40 {
+            tx.send_video(dummy_frame(Duration::from_millis(0)));
+            if let Ok(Some(event)) =
+                tokio::time::timeout(Duration::from_millis(50), event_rx.recv()).await
+            {
+                first_event = Some(event);
+                break;
+            }
+        }
+        let first_event =
+            first_event.ok_or_else(|| Error::new("failed to receive first video event"))?;
+        assert!(matches!(
+            first_event,
+            TrackEvent::Video {
+                track_id: event_track_id,
+                ..
+            } if event_track_id == track_id
+        ));
+
+        let ack = tx.send_syn();
+        tokio::pin!(ack);
+
+        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .ok_or_else(|| Error::new("event channel closed unexpectedly"))?;
+        assert!(matches!(
+            &event,
+            TrackEvent::Syn {
+                track_id: event_track_id,
+                ..
+            } if event_track_id == &track_id
+        ));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut ack)
+                .await
+                .is_err()
+        );
+
+        drop(event);
+        tokio::time::timeout(Duration::from_secs(2), &mut ack)
+            .await
+            .map_err(|e| Error::new(e.to_string()))?;
+
+        tx.send_eos();
+
+        drop(receiver_processor);
+        drop(sender_processor);
+        drop(pipeline_handle);
+
+        tokio::time::timeout(Duration::from_secs(2), pipeline_task)
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn input_track_state_handle_eos_clears_pending_and_current_frame() -> crate::Result<()> {
+        let input_track = InputTrack {
+            track_id: TrackId::new("input-1"),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: None,
+            height: None,
+        };
+        let mut state = InputTrackState::new(input_track)?;
+
+        state.handle_video(
+            Arc::new(dummy_frame(Duration::from_millis(10))),
+            Duration::from_millis(5),
+        )?;
+        state.handle_video(
+            Arc::new(dummy_frame(Duration::from_millis(60))),
+            Duration::from_millis(10),
+        )?;
+        state.advance(Duration::from_millis(5));
+
+        assert!(state.current_frame.is_some());
+        assert!(!state.pending_frames.is_empty());
+
+        state.handle_eos();
+
+        assert!(state.eos);
+        assert!(state.current_frame.is_none());
+        assert!(state.pending_frames.is_empty());
 
         Ok(())
     }
