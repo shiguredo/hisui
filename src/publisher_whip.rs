@@ -1,17 +1,11 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use shiguredo_http11::{Request, Response, ResponseDecoder, uri::Uri};
 use shiguredo_webrtc::{
-    AdaptedVideoTrackSource, AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer,
-    AudioEncoderFactory, AudioProcessingBuilder, CreateSessionDescriptionObserver, CxxString,
-    Environment, IceServer, MediaType, PeerConnection, PeerConnectionDependencies,
-    PeerConnectionFactory, PeerConnectionFactoryDependencies, PeerConnectionObserver,
-    PeerConnectionObserverBuilder, PeerConnectionOfferAnswerOptions,
-    PeerConnectionRtcConfiguration, RtcEventLogFactory, RtpCodecCapabilityVector,
-    RtpTransceiverDirection, RtpTransceiverInit, SdpType, SessionDescription,
-    SetLocalDescriptionObserver, SetRemoteDescriptionObserver, Thread, VideoDecoderFactory,
-    VideoEncoderFactory,
+    AdaptedVideoTrackSource, CxxString, IceServer, MediaType, PeerConnection,
+    PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
+    PeerConnectionObserverBuilder, PeerConnectionRtcConfiguration, RtpCodecCapabilityVector,
+    RtpTransceiverDirection, RtpTransceiverInit,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
@@ -131,54 +125,9 @@ impl nojson::DisplayJson for VideoCodecPreference {
     }
 }
 
-struct FactoryHolder {
-    factory: Arc<PeerConnectionFactory>,
-    _network: Thread,
-    _worker: Thread,
-    _signaling: Thread,
-}
-
-impl FactoryHolder {
-    fn new() -> Option<Self> {
-        let env = Environment::new();
-        let mut network = Thread::new_with_socket_server();
-        let mut worker = Thread::new();
-        let mut signaling = Thread::new();
-        network.start();
-        worker.start();
-        signaling.start();
-
-        let mut deps = PeerConnectionFactoryDependencies::new();
-        deps.set_network_thread(&network);
-        deps.set_worker_thread(&worker);
-        deps.set_signaling_thread(&signaling);
-        deps.set_event_log_factory(RtcEventLogFactory::new());
-        let adm = AudioDeviceModule::new(&env, AudioDeviceModuleAudioLayer::Dummy).ok()?;
-        deps.set_audio_device_module(&adm);
-        deps.set_audio_encoder_factory(&AudioEncoderFactory::builtin());
-        deps.set_audio_decoder_factory(&AudioDecoderFactory::builtin());
-        deps.set_video_encoder_factory(VideoEncoderFactory::builtin());
-        deps.set_video_decoder_factory(VideoDecoderFactory::builtin());
-        deps.set_audio_processing_builder(AudioProcessingBuilder::new_builtin());
-        deps.enable_media();
-
-        let factory = PeerConnectionFactory::create_modular(&mut deps).ok()?;
-        Some(Self {
-            factory: Arc::new(factory),
-            _network: network,
-            _worker: worker,
-            _signaling: signaling,
-        })
-    }
-
-    fn factory(&self) -> &PeerConnectionFactory {
-        self.factory.as_ref()
-    }
-}
-
 struct WhipSession {
     #[allow(dead_code)]
-    factory_holder: Arc<FactoryHolder>,
+    factory_bundle: Arc<crate::webrtc_factory::WebRtcFactoryBundle>,
     #[allow(dead_code)]
     observer: PeerConnectionObserver,
     pc: Option<PeerConnection>,
@@ -194,10 +143,8 @@ impl WhipSession {
         video_codec_preferences: &[VideoCodecPreference],
     ) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
-        let factory_holder = Arc::new(
-            FactoryHolder::new()
-                .ok_or_else(|| Error::new("failed to create WebRTC PeerConnectionFactory"))?,
-        );
+        let factory_bundle = Arc::new(crate::webrtc_factory::WebRtcFactoryBundle::new()?);
+        let factory = factory_bundle.factory();
 
         let observer = PeerConnectionObserverBuilder::new()
             .on_connection_change(|state| {
@@ -206,18 +153,17 @@ impl WhipSession {
             .build();
         let mut deps = PeerConnectionDependencies::new(&observer);
         let mut pc_config = PeerConnectionRtcConfiguration::new();
-        let pc = PeerConnection::create(factory_holder.factory(), &mut pc_config, &mut deps)
+        let pc = PeerConnection::create(factory.as_ref(), &mut pc_config, &mut deps)
             .map_err(|e| Error::new(format!("failed to create PeerConnection: {e}")))?;
 
         if audio_mline {
-            add_audio_transceiver(&pc, factory_holder.factory())?;
+            add_audio_transceiver(&pc, factory.as_ref())?;
         }
 
         let video_source = AdaptedVideoTrackSource::new();
         let video_track_source = video_source.cast_to_video_track_source();
         let track_id = shiguredo_webrtc::random_string(16);
-        let video_track = factory_holder
-            .factory()
+        let video_track = factory
             .create_video_track(&video_track_source, &track_id)
             .map_err(|e| Error::new(format!("failed to create video track: {e}")))?;
 
@@ -230,7 +176,7 @@ impl WhipSession {
         let transceiver = pc
             .add_transceiver_with_track(&video_track, &mut init)
             .map_err(|e| Error::new(format!("failed to add video transceiver: {e}")))?;
-        let codecs = select_video_codecs(factory_holder.factory(), video_codec_preferences)?;
+        let codecs = select_video_codecs(factory.as_ref(), video_codec_preferences)?;
         transceiver
             .set_codec_preferences(&codecs)
             .map_err(|e| Error::new(format!("failed to set video codec preferences: {e}")))?;
@@ -238,7 +184,7 @@ impl WhipSession {
         exchange_offer_answer(&pc, whip_url).await?;
 
         Ok(Self {
-            factory_holder,
+            factory_bundle,
             observer,
             pc: Some(pc),
             video_source,
@@ -247,7 +193,7 @@ impl WhipSession {
     }
 
     fn push_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
-        push_i420_frame(&mut self.video_source, frame)
+        crate::webrtc_video::push_i420_frame(&mut self.video_source, frame)
     }
 
     fn disconnect(&mut self) {
@@ -388,8 +334,8 @@ fn select_video_codecs(
 }
 
 async fn exchange_offer_answer(pc: &PeerConnection, whip_url: &str) -> crate::Result<()> {
-    let offer_sdp = create_offer_sdp(pc)?;
-    set_local_offer(pc, &offer_sdp)?;
+    let offer_sdp = crate::webrtc_sdp::create_offer_sdp(pc)?;
+    crate::webrtc_sdp::set_local_offer(pc, &offer_sdp)?;
 
     let response = send_offer(whip_url, &offer_sdp).await?;
     if response.status_code != 201 {
@@ -405,85 +351,7 @@ async fn exchange_offer_answer(pc: &PeerConnection, whip_url: &str) -> crate::Re
     if answer_sdp.trim().is_empty() {
         return Err(Error::new("WHIP endpoint returned empty answer SDP"));
     }
-    set_remote_answer(pc, &answer_sdp)?;
-
-    Ok(())
-}
-
-fn create_offer_sdp(pc: &PeerConnection) -> crate::Result<String> {
-    let mut options = PeerConnectionOfferAnswerOptions::new();
-    options.set_offer_to_receive_audio(0);
-    options.set_offer_to_receive_video(0);
-
-    let (offer_tx, offer_rx) = std::sync::mpsc::channel::<crate::Result<String>>();
-    let offer_tx_err = offer_tx.clone();
-    let mut offer_observer = CreateSessionDescriptionObserver::new(
-        move |description| {
-            let sdp = description
-                .to_string()
-                .map_err(|e| Error::new(format!("failed to convert offer SDP to string: {e}")));
-            let _ = offer_tx.send(sdp);
-        },
-        move |error| {
-            let message = error.message().unwrap_or_else(|_| "unknown".to_owned());
-            let _ = offer_tx_err.send(Err(Error::new(format!("create_offer failed: {message}"))));
-        },
-    );
-    pc.create_offer(&mut offer_observer, &mut options);
-
-    offer_rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| Error::new("create_offer timed out"))?
-}
-
-fn set_local_offer(pc: &PeerConnection, offer_sdp: &str) -> crate::Result<()> {
-    let offer = SessionDescription::new(SdpType::Offer, offer_sdp)
-        .map_err(|e| Error::new(format!("failed to parse local offer SDP: {e}")))?;
-    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
-    let observer = SetLocalDescriptionObserver::new(move |error| {
-        let message = if error.ok() {
-            None
-        } else {
-            Some(error.message().unwrap_or_else(|_| "unknown".to_owned()))
-        };
-        let _ = tx.send(message);
-    });
-    pc.set_local_description(offer, &observer);
-
-    let result = rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| Error::new("set_local_description timed out"))?;
-    if let Some(message) = result {
-        return Err(Error::new(format!(
-            "set_local_description failed: {message}"
-        )));
-    }
-
-    Ok(())
-}
-
-fn set_remote_answer(pc: &PeerConnection, answer_sdp: &str) -> crate::Result<()> {
-    let answer = SessionDescription::new(SdpType::Answer, answer_sdp)
-        .map_err(|e| Error::new(format!("failed to parse remote answer SDP: {e}")))?;
-    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
-    let observer = SetRemoteDescriptionObserver::new(move |error| {
-        let message = if error.ok() {
-            None
-        } else {
-            Some(error.message().unwrap_or_else(|_| "unknown".to_owned()))
-        };
-        let _ = tx.send(message);
-    });
-    pc.set_remote_description(answer, &observer);
-
-    let result = rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| Error::new("set_remote_description timed out"))?;
-    if let Some(message) = result {
-        return Err(Error::new(format!(
-            "set_remote_description failed: {message}"
-        )));
-    }
+    crate::webrtc_sdp::set_remote_answer(pc, &answer_sdp)?;
 
     Ok(())
 }
@@ -666,79 +534,6 @@ fn extract_quoted_param(text: &str, key: &str) -> Option<String> {
     let rest = &text[start..];
     let end = rest.find('"')?;
     Some(rest[..end].to_owned())
-}
-
-fn push_i420_frame(
-    source: &mut AdaptedVideoTrackSource,
-    frame: &crate::VideoFrame,
-) -> crate::Result<()> {
-    if frame.format != crate::video::VideoFormat::I420 {
-        return Err(Error::new(format!(
-            "unsupported video format for WHIP: {} (expected I420)",
-            frame.format
-        )));
-    }
-
-    let width = frame.width;
-    let height = frame.height;
-    if width == 0 || height == 0 {
-        return Err(Error::new("invalid frame size: width or height is zero"));
-    }
-
-    let uv_width = width.div_ceil(2);
-    let uv_height = height.div_ceil(2);
-    let y_size = width * height;
-    let uv_size = uv_width * uv_height;
-    if frame.data.len() < y_size + uv_size * 2 {
-        return Err(Error::new(format!(
-            "insufficient I420 frame data: got {} bytes",
-            frame.data.len()
-        )));
-    }
-
-    let (y_plane, rest) = frame.data.split_at(y_size);
-    let (u_plane, v_plane) = rest.split_at(uv_size);
-    let buffer = shiguredo_webrtc::I420Buffer::new(width as i32, height as i32);
-
-    // I420Buffer の各 plane は API から書き込み可能領域として扱う。
-    unsafe {
-        copy_plane(
-            buffer.y_data().as_ptr() as *mut u8,
-            buffer.stride_y() as usize,
-            y_plane,
-            width,
-            height,
-        );
-        copy_plane(
-            buffer.u_data().as_ptr() as *mut u8,
-            buffer.stride_u() as usize,
-            u_plane,
-            uv_width,
-            uv_height,
-        );
-        copy_plane(
-            buffer.v_data().as_ptr() as *mut u8,
-            buffer.stride_v() as usize,
-            v_plane,
-            uv_width,
-            uv_height,
-        );
-    }
-
-    let timestamp_us = i64::try_from(frame.timestamp.as_micros()).unwrap_or(i64::MAX);
-    let video_frame = shiguredo_webrtc::VideoFrame::from_i420(&buffer, timestamp_us);
-    source.on_frame(&video_frame);
-    Ok(())
-}
-
-unsafe fn copy_plane(dst: *mut u8, dst_stride: usize, src: &[u8], width: usize, height: usize) {
-    for row in 0..height {
-        let src_offset = row * width;
-        let dst_offset = row * dst_stride;
-        unsafe {
-            std::ptr::copy_nonoverlapping(src.as_ptr().add(src_offset), dst.add(dst_offset), width);
-        }
-    }
 }
 
 #[cfg(test)]
