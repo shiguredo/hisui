@@ -234,15 +234,15 @@ impl nojson::DisplayJson for VideoCodecPreference {
 }
 
 struct WhipSession {
-    #[expect(dead_code)]
-    factory_bundle: Rc<crate::webrtc_factory::WebRtcFactoryBundle>,
-    #[expect(dead_code)]
-    observer: PeerConnectionObserver,
+    /// `PeerConnectionFactory` のスコープを保持するために参照を持つ
+    _factory_bundle: Rc<crate::webrtc_factory::WebRtcFactoryBundle>,
+    /// `PeerConnectionObserver` のコールバック登録を維持するために参照を持つ
+    _observer: PeerConnectionObserver,
     pc: Option<PeerConnection>,
     video_source: Option<AdaptedVideoTrackSource>,
     audio_sink: crate::webrtc_audio::WebRtcAudioTransportSink,
-    #[expect(dead_code)]
-    video_track: Option<shiguredo_webrtc::VideoTrack>,
+    /// `VideoTrack` の生存期間を維持するために参照を持つ
+    _video_track: Option<shiguredo_webrtc::VideoTrack>,
 }
 
 impl WhipSession {
@@ -325,12 +325,12 @@ impl WhipSession {
         exchange_offer_answer(&pc, output_url, bearer_token).await?;
 
         Ok(Self {
-            factory_bundle,
-            observer,
+            _factory_bundle: factory_bundle,
+            _observer: observer,
             pc: Some(pc),
             audio_sink,
             video_source,
-            video_track,
+            _video_track: video_track,
         })
     }
 
