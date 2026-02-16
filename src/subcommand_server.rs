@@ -102,111 +102,116 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .enable_all()
         .build()?;
 
-    runtime.block_on(async {
+    Ok(runtime.block_on(async move {
+        // webrtc_p2p_session が spawn_local() で !Send タスクを起動するため、
+        // /bootstrap を扱う server 実行コンテキストは LocalSet 上で動かす必要がある。
         let local = tokio::task::LocalSet::new();
         local
-            .run_until(async move {
-                // upstream 設定をパースする
-                let upstream_config = match &ui_remote_url {
-                    Some(url) => {
-                        let uri = Uri::parse(url).map_err(|e| {
-                            crate::Error::new(format!("Failed to parse --ui-remote-url: {e}"))
-                        })?;
-                        let is_https = uri.scheme() == Some("https");
-                        let host = uri
-                            .host()
-                            .ok_or_else(|| {
-                                crate::Error::new("--ui-remote-url has no host".to_string())
-                            })?
-                            .to_string();
-                        let port = uri.port().unwrap_or(if is_https { 443 } else { 80 });
-                        let path_prefix = uri.path().to_string();
-                        tracing::info!("Reverse proxy upstream: {url}");
-                        Some(Arc::new(UpstreamConfig {
-                            host,
-                            port,
-                            tls: is_https,
-                            path_prefix,
-                        }))
-                    }
-                    None => None,
-                };
-
-                // TLS が指定されている場合は TlsAcceptor を作成する
-                let tls_acceptor = match (&https_cert_path, &https_key_path) {
-                    (Some(cert_path), Some(key_path)) => {
-                        Some(create_server_tls_acceptor(cert_path, key_path).await?)
-                    }
-                    _ => None,
-                };
-
-                let scheme = if tls_acceptor.is_some() {
-                    "https"
-                } else {
-                    "http"
-                };
-
-                let pipeline = crate::MediaPipeline::new();
-                let pipeline_handle = pipeline.handle();
-                tokio::spawn(pipeline.run());
-
-                if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
-                    crate::rpc_request_file::run_rpc_request_file(
-                        startup_rpc_file,
-                        &pipeline_handle,
-                    )
-                    .await
-                    .map_err(|e| crate::Error::new(e.to_string()))?;
-                    tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
-                }
-
-                let bootstrap_endpoint = Rc::new(
-                    BootstrapEndpoint::new(pipeline_handle.clone()).map_err(|e| {
-                        crate::Error::new(format!("Failed to init /bootstrap: {e}"))
-                    })?,
-                );
-
-                let addr = format!("0.0.0.0:{http_port}");
-                let listener = TcpListener::bind(&addr).await?;
-                tracing::info!("{scheme} server listening on {scheme}://{addr}");
-
-                loop {
-                    let (stream, peer_addr) = listener.accept().await?;
-                    let tls_acceptor = tls_acceptor.clone();
-                    let upstream_config = upstream_config.clone();
-                    let pipeline_handle = pipeline_handle.clone();
-                    let bootstrap_endpoint = bootstrap_endpoint.clone();
-                    tokio::task::spawn_local(async move {
-                        // TLS ハンドシェイクを行う
-                        let stream = match ServerTcpOrTlsStream::accept_with_tls(
-                            stream,
-                            tls_acceptor.as_ref(),
-                        )
-                        .await
-                        {
-                            Ok(s) => s,
-                            Err(e) => {
-                                tracing::warn!("TLS handshake error from {peer_addr}: {e}");
-                                return;
-                            }
-                        };
-
-                        if let Err(e) = handle_connection(
-                            stream,
-                            peer_addr,
-                            upstream_config,
-                            pipeline_handle,
-                            bootstrap_endpoint,
-                        )
-                        .await
-                        {
-                            tracing::warn!("Client error from {peer_addr}: {e}");
-                        }
-                    });
-                }
-            })
+            .run_until(run_server(
+                http_port,
+                https_cert_path,
+                https_key_path,
+                ui_remote_url,
+                startup_rpc_file,
+            ))
             .await
-    })
+    })?)
+}
+
+async fn run_server(
+    http_port: u16,
+    https_cert_path: Option<PathBuf>,
+    https_key_path: Option<PathBuf>,
+    ui_remote_url: Option<String>,
+    startup_rpc_file: Option<PathBuf>,
+) -> crate::Result<()> {
+    // upstream 設定をパースする
+    let upstream_config = match &ui_remote_url {
+        Some(url) => {
+            let uri = Uri::parse(url)
+                .map_err(|e| crate::Error::new(format!("Failed to parse --ui-remote-url: {e}")))?;
+            let is_https = uri.scheme() == Some("https");
+            let host = uri
+                .host()
+                .ok_or_else(|| crate::Error::new("--ui-remote-url has no host".to_string()))?
+                .to_string();
+            let port = uri.port().unwrap_or(if is_https { 443 } else { 80 });
+            let path_prefix = uri.path().to_string();
+            tracing::info!("Reverse proxy upstream: {url}");
+            Some(Arc::new(UpstreamConfig {
+                host,
+                port,
+                tls: is_https,
+                path_prefix,
+            }))
+        }
+        None => None,
+    };
+
+    // TLS が指定されている場合は TlsAcceptor を作成する
+    let tls_acceptor = match (&https_cert_path, &https_key_path) {
+        (Some(cert_path), Some(key_path)) => {
+            Some(create_server_tls_acceptor(cert_path, key_path).await?)
+        }
+        _ => None,
+    };
+
+    let scheme = if tls_acceptor.is_some() {
+        "https"
+    } else {
+        "http"
+    };
+
+    let pipeline = crate::MediaPipeline::new();
+    let pipeline_handle = pipeline.handle();
+    tokio::spawn(pipeline.run());
+
+    if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
+        crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle)
+            .await
+            .map_err(|e| crate::Error::new(e.to_string()))?;
+        tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
+    }
+
+    let bootstrap_endpoint = Rc::new(
+        BootstrapEndpoint::new(pipeline_handle.clone())
+            .map_err(|e| crate::Error::new(format!("Failed to init /bootstrap: {e}")))?,
+    );
+
+    let addr = format!("0.0.0.0:{http_port}");
+    let listener = TcpListener::bind(&addr).await?;
+    tracing::info!("{scheme} server listening on {scheme}://{addr}");
+
+    loop {
+        let (stream, peer_addr) = listener.accept().await?;
+        let tls_acceptor = tls_acceptor.clone();
+        let upstream_config = upstream_config.clone();
+        let pipeline_handle = pipeline_handle.clone();
+        let bootstrap_endpoint = bootstrap_endpoint.clone();
+        tokio::task::spawn_local(async move {
+            // TLS ハンドシェイクを行う
+            let stream =
+                match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("TLS handshake error from {peer_addr}: {e}");
+                        return;
+                    }
+                };
+
+            if let Err(e) = handle_connection(
+                stream,
+                peer_addr,
+                upstream_config,
+                pipeline_handle,
+                bootstrap_endpoint,
+            )
+            .await
+            {
+                tracing::warn!("Client error from {peer_addr}: {e}");
+            }
+        });
+    }
 }
 
 async fn handle_connection(
