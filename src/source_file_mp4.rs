@@ -82,7 +82,7 @@ impl Mp4FileSource {
         let inner_handle = inner_pipeline.handle();
         let task = tokio::spawn(inner_pipeline.run());
 
-        self.initialize_pipeline(inner_handle, outer_processor)
+        self.initialize_pipeline(inner_handle, &outer_processor)
             .await?;
         task.await?;
         Ok(())
@@ -91,7 +91,7 @@ impl Mp4FileSource {
     async fn initialize_pipeline(
         &self,
         inner_handle: MediaPipelineHandle,
-        outer_processor: ProcessorHandle,
+        outer_processor: &ProcessorHandle,
     ) -> Result<()> {
         let mut options = Mp4FileReaderOptions {
             realtime: self.realtime,
@@ -107,7 +107,7 @@ impl Mp4FileSource {
                 .map_err(|e| Error::new(e.to_string()))?;
 
             options.audio_track_id = Some(inner_id.clone());
-            start_bridge(id.clone(), &inner_handle, &outer_processor).await?;
+            start_bridge(id.clone(), &inner_handle, outer_processor).await?;
             inner_handle
                 .spawn_processor(ProcessorId::new("audio_decoder"), |handle| {
                     decoder.run(handle, inner_id, id)
@@ -125,7 +125,7 @@ impl Mp4FileSource {
             );
 
             options.video_track_id = Some(inner_id.clone());
-            start_bridge(id.clone(), &inner_handle, &outer_processor).await?;
+            start_bridge(id.clone(), &inner_handle, outer_processor).await?;
             inner_handle
                 .spawn_processor(ProcessorId::new("video_decoder"), |handle| {
                     decoder.run(handle, inner_id, id)

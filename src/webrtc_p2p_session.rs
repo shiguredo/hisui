@@ -587,7 +587,6 @@ async fn handle_rpc_message(sess: &mut Session, data: &[u8], is_binary: bool) {
                 crate::jsonrpc::INTERNAL_ERROR,
                 e.reason
             );
-            return;
         }
     }
 }
@@ -620,11 +619,11 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                 }
             }
             crate::MediaSample::Audio(_) => {
-                if let Some(subscribed) = sess.subscribed_tracks.get_mut(track_id) {
-                    if !matches!(subscribed.state, TrackState::AudioUnsupported) {
-                        tracing::info!("Audio track is not supported yet: {track_id}");
-                        subscribed.state = TrackState::AudioUnsupported;
-                    }
+                if let Some(subscribed) = sess.subscribed_tracks.get_mut(track_id)
+                    && !matches!(subscribed.state, TrackState::AudioUnsupported)
+                {
+                    tracing::info!("Audio track is not supported yet: {track_id}");
+                    subscribed.state = TrackState::AudioUnsupported;
                 }
             }
         },
@@ -724,8 +723,8 @@ fn push_i420_frame(
         return Err(crate::Error::new("invalid frame size"));
     }
 
-    let uv_width = (width + 1) / 2;
-    let uv_height = (height + 1) / 2;
+    let uv_width = width.div_ceil(2);
+    let uv_height = height.div_ceil(2);
     let y_size = width * height;
     let uv_size = uv_width * uv_height;
     if frame.data.len() < y_size + uv_size * 2 {
@@ -796,7 +795,7 @@ async fn handle_subscribe_rpc(
     }
 
     let obj = JsonObject::new(req)?;
-    let params_value = obj.get_required_with("params", |v| Ok(v))?;
+    let params_value = obj.get_required_with("params", Ok)?;
     let mut items: Vec<SubscribeItem> = params_value
         .to_array()?
         .map(|value| {

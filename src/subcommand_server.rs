@@ -1,5 +1,6 @@
 use std::io;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use shiguredo_http11::uri::Uri;
@@ -159,7 +160,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                     tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
                 }
 
-                let bootstrap_endpoint = Arc::new(
+                let bootstrap_endpoint = Rc::new(
                     BootstrapEndpoint::new(pipeline_handle.clone()).map_err(|e| {
                         crate::Error::new(format!("Failed to init /bootstrap: {e}"))
                     })?,
@@ -213,7 +214,7 @@ async fn handle_connection(
     peer_addr: std::net::SocketAddr,
     upstream_config: Option<Arc<UpstreamConfig>>,
     pipeline_handle: crate::MediaPipelineHandle,
-    bootstrap_endpoint: Arc<BootstrapEndpoint>,
+    bootstrap_endpoint: Rc<BootstrapEndpoint>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, writer) = tokio::io::split(stream);
     let mut reader = tokio::io::BufReader::with_capacity(8192, reader);
