@@ -526,13 +526,13 @@ async fn handle_rpc_message(sess: &mut Session, data: &[u8], is_binary: bool) {
         }
     };
     let request = request_json.value();
-    let method = request
-        .to_member("method")
-        .expect("bug")
-        .required()
-        .expect("bug")
-        .as_string_str()
-        .expect("bug");
+    let method = match crate::jsonrpc::get_method(request) {
+        Ok(method) => method,
+        Err(response) => {
+            send_rpc_response(sess, response.to_string().as_bytes(), is_binary);
+            return;
+        }
+    };
     let request_id = request.to_member("id").ok().and_then(|v| v.get());
 
     if method != "subscribe" {

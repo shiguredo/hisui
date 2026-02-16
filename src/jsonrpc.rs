@@ -47,6 +47,16 @@ pub fn parse_request_bytes<'a>(
     Ok(json)
 }
 
+pub fn get_method<'text, 'raw>(
+    request: nojson::RawJsonValue<'text, 'raw>,
+) -> Result<&'text str, nojson::RawJsonOwned> {
+    request
+        .to_member("method")
+        .and_then(|v| v.required())
+        .and_then(|v| v.as_string_str())
+        .map_err(|e| error_response((), INVALID_REQUEST, e))
+}
+
 pub fn validate_request<'text, 'raw>(
     value: nojson::RawJsonValue<'text, 'raw>,
 ) -> Result<Option<nojson::RawJsonValue<'text, 'raw>>, nojson::JsonParseError> {
