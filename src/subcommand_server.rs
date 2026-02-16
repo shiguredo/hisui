@@ -271,24 +271,12 @@ async fn handle_connection(
         decoder.feed(&buf[..n])?;
 
         while let Some(request) = decoder.decode()? {
-            if request.uri.as_str() == "/bootstrap" {
-                let response = bootstrap_endpoint.handle_request(&request).await;
-                if let Err(e) = write_response(&mut writer, &response).await {
-                    if is_client_disconnect(&e) {
-                        tracing::warn!("499 Client Closed Request from {peer_addr}");
-                        return Ok(());
-                    }
-                    return Err(e.into());
-                }
-                tracing::debug!("Connection close requested by /bootstrap from {peer_addr}");
-                return Ok(());
-            }
-
             let keep_alive = request.is_keep_alive();
 
             // ローカルエンドポイント
             let local_response = match request.uri.as_str() {
                 "/.ok" => Some(Response::new(204, "No Content")),
+                "/bootstrap" => Some(bootstrap_endpoint.handle_request(&request).await),
                 "/rpc" => {
                     Some(crate::endpoint_http_rpc::handle_request(&request, &pipeline_handle).await)
                 }
