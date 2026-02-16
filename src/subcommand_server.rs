@@ -43,6 +43,8 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
     "upgrade",
 ];
 
+type TlsAcceptor = Arc<tokio_rustls::TlsAcceptor>;
+
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     // デフォルトポートは 8919 (H=8, I=9, S=19 で "His")
     let http_port: u16 = noargs::opt("http-port")
@@ -125,31 +127,10 @@ async fn run_server(
     ui_remote_url: Option<String>,
     startup_rpc_file: Option<PathBuf>,
 ) -> crate::Result<()> {
-    // upstream 設定をパースする
-    let upstream_config = match &ui_remote_url {
-        Some(url) => {
-            let uri = Uri::parse(url)
-                .map_err(|e| crate::Error::new(format!("Failed to parse --ui-remote-url: {e}")))?;
-            let is_https = uri.scheme() == Some("https");
-            let host = uri
-                .host()
-                .ok_or_else(|| crate::Error::new("--ui-remote-url has no host".to_string()))?
-                .to_string();
-            let port = uri.port().unwrap_or(if is_https { 443 } else { 80 });
-            let path_prefix = uri.path().to_string();
-            tracing::info!("Reverse proxy upstream: {url}");
-            Some(Arc::new(UpstreamConfig {
-                host,
-                port,
-                tls: is_https,
-                path_prefix,
-            }))
-        }
-        None => None,
-    };
+    let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
     // TLS が指定されている場合は TlsAcceptor を作成する
-    let tls_acceptor = match (&https_cert_path, &https_key_path) {
+    let tls_acceptor: Option<TlsAcceptor> = match (&https_cert_path, &https_key_path) {
         (Some(cert_path), Some(key_path)) => {
             Some(create_server_tls_acceptor(cert_path, key_path).await?)
         }
@@ -182,6 +163,49 @@ async fn run_server(
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("{scheme} server listening on {scheme}://{addr}");
 
+    run_accept_loop(
+        listener,
+        tls_acceptor,
+        upstream_config,
+        pipeline_handle,
+        bootstrap_endpoint,
+    )
+    .await
+}
+
+fn parse_upstream_config(
+    ui_remote_url: Option<&str>,
+) -> crate::Result<Option<Arc<UpstreamConfig>>> {
+    match ui_remote_url {
+        Some(url) => {
+            let uri = Uri::parse(url)
+                .map_err(|e| crate::Error::new(format!("Failed to parse --ui-remote-url: {e}")))?;
+            let is_https = uri.scheme() == Some("https");
+            let host = uri
+                .host()
+                .ok_or_else(|| crate::Error::new("--ui-remote-url has no host".to_string()))?
+                .to_string();
+            let port = uri.port().unwrap_or(if is_https { 443 } else { 80 });
+            let path_prefix = uri.path().to_string();
+            tracing::info!("Reverse proxy upstream: {url}");
+            Ok(Some(Arc::new(UpstreamConfig {
+                host,
+                port,
+                tls: is_https,
+                path_prefix,
+            })))
+        }
+        None => Ok(None),
+    }
+}
+
+async fn run_accept_loop(
+    listener: TcpListener,
+    tls_acceptor: Option<TlsAcceptor>,
+    upstream_config: Option<Arc<UpstreamConfig>>,
+    pipeline_handle: crate::MediaPipelineHandle,
+    bootstrap_endpoint: Rc<BootstrapEndpoint>,
+) -> crate::Result<()> {
     loop {
         let (stream, peer_addr) = listener.accept().await?;
         let tls_acceptor = tls_acceptor.clone();
