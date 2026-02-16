@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use shiguredo_http11::{Request, Response, ResponseDecoder, uri::Uri};
 use shiguredo_webrtc::{
@@ -14,9 +15,9 @@ use crate::{Error, MediaSample, Message, ProcessorHandle, TrackId};
 #[derive(Debug, Clone)]
 pub struct WhipPublisher {
     pub output_url: String,
-    pub input_video_track_id: TrackId,
+    pub input_video_track_id: Option<TrackId>,
+    pub input_audio_track_id: Option<TrackId>,
     pub bearer_token: Option<String>,
-    pub audio_mline: bool,
     pub video_codec_preferences: Vec<VideoCodecPreference>,
 }
 
@@ -24,11 +25,15 @@ impl nojson::DisplayJson for WhipPublisher {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("outputUrl", &self.output_url)?;
-            f.member("inputVideoTrackId", &self.input_video_track_id)?;
+            if let Some(track_id) = &self.input_video_track_id {
+                f.member("inputVideoTrackId", track_id)?;
+            }
+            if let Some(track_id) = &self.input_audio_track_id {
+                f.member("inputAudioTrackId", track_id)?;
+            }
             if let Some(token) = &self.bearer_token {
                 f.member("bearerToken", token)?;
             }
-            f.member("audioMline", self.audio_mline)?;
             f.member("videoCodecPreferences", &self.video_codec_preferences)
         })
     }
@@ -45,10 +50,17 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhipPublisher {
             return Err(value.to_member("outputUrl")?.required()?.invalid(e));
         }
 
-        let input_video_track_id: TrackId = value
-            .to_member("inputVideoTrackId")?
-            .required()?
-            .try_into()?;
+        if value.to_member("audioMline")?.get().is_some() {
+            return Err(value
+                .to_member("audioMline")?
+                .required()?
+                .invalid("audioMline is no longer supported"));
+        }
+
+        let input_video_track_id: Option<TrackId> =
+            value.to_member("inputVideoTrackId")?.try_into()?;
+        let input_audio_track_id: Option<TrackId> =
+            value.to_member("inputAudioTrackId")?.try_into()?;
         let bearer_token: Option<String> = value.to_member("bearerToken")?.try_into()?;
         let bearer_token = match bearer_token {
             Some(token) => {
@@ -63,8 +75,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhipPublisher {
             }
             None => None,
         };
-        let audio_mline: Option<bool> = value.to_member("audioMline")?.try_into()?;
-        let audio_mline = audio_mline.unwrap_or(true);
         let codecs_raw: Option<Vec<String>> =
             value.to_member("videoCodecPreferences")?.try_into()?;
         let video_codec_preferences =
@@ -73,8 +83,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhipPublisher {
         Ok(Self {
             output_url,
             input_video_track_id,
+            input_audio_track_id,
             bearer_token,
-            audio_mline,
             video_codec_preferences,
         })
     }
@@ -85,33 +95,113 @@ impl WhipPublisher {
         let mut session = WhipSession::connect(
             &self.output_url,
             self.bearer_token.as_deref(),
-            self.audio_mline,
+            self.input_video_track_id.is_some(),
             &self.video_codec_preferences,
         )
         .await?;
 
-        let mut input_rx = handle.subscribe_track(self.input_video_track_id.clone());
+        let mut video_rx = self
+            .input_video_track_id
+            .clone()
+            .map(|track_id| handle.subscribe_track(track_id));
+        let mut audio_rx = self
+            .input_audio_track_id
+            .clone()
+            .map(|track_id| handle.subscribe_track(track_id));
 
-        loop {
-            match input_rx.recv().await {
-                Message::Media(MediaSample::Video(frame)) => {
-                    session.push_video_frame(&frame)?;
-                }
-                Message::Media(MediaSample::Audio(_)) => {
-                    return Err(Error::new(format!(
-                        "expected a video sample on track {}, but got an audio sample",
-                        self.input_video_track_id
-                    )));
-                }
-                Message::Eos => {
-                    session.disconnect();
-                    break;
-                }
-                Message::Syn(_) => {}
+        if video_rx.is_none() && audio_rx.is_none() {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
             }
         }
 
+        loop {
+            let mut close_video = false;
+            let mut close_audio = false;
+            match (video_rx.as_mut(), audio_rx.as_mut()) {
+                (Some(video_rx), Some(audio_rx)) => {
+                    tokio::select! {
+                        message = video_rx.recv() => {
+                            if handle_video_message(&mut session, &self.input_video_track_id, message)? {
+                                close_video = true;
+                            }
+                        }
+                        message = audio_rx.recv() => {
+                            if handle_audio_message(&mut session, &self.input_audio_track_id, message)? {
+                                close_audio = true;
+                            }
+                        }
+                    }
+                }
+                (Some(video_rx), None) => {
+                    if handle_video_message(
+                        &mut session,
+                        &self.input_video_track_id,
+                        video_rx.recv().await,
+                    )? {
+                        close_video = true;
+                    }
+                }
+                (None, Some(audio_rx)) => {
+                    if handle_audio_message(
+                        &mut session,
+                        &self.input_audio_track_id,
+                        audio_rx.recv().await,
+                    )? {
+                        close_audio = true;
+                    }
+                }
+                (None, None) => break,
+            }
+
+            if close_video {
+                video_rx = None;
+            }
+            if close_audio {
+                audio_rx = None;
+            }
+        }
+
+        session.disconnect();
         Ok(())
+    }
+}
+
+fn handle_video_message(
+    session: &mut WhipSession,
+    track_id: &Option<TrackId>,
+    message: Message,
+) -> crate::Result<bool> {
+    match message {
+        Message::Media(MediaSample::Video(frame)) => {
+            session.push_video_frame(&frame)?;
+            Ok(false)
+        }
+        Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
+            "expected a video sample on track {}, but got an audio sample",
+            track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
+        ))),
+        Message::Eos => Ok(true),
+        Message::Syn(_) => Ok(false),
+    }
+}
+
+fn handle_audio_message(
+    session: &mut WhipSession,
+    track_id: &Option<TrackId>,
+    message: Message,
+) -> crate::Result<bool> {
+    match message {
+        Message::Media(MediaSample::Audio(frame)) => {
+            session.push_audio_frame(&frame)?;
+            Ok(false)
+        }
+        Message::Media(MediaSample::Video(_)) => Err(Error::new(format!(
+            "expected an audio sample on track {}, but got a video sample",
+            track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
+        ))),
+        Message::Eos => Ok(true),
+        Message::Syn(_) => Ok(false),
     }
 }
 
@@ -156,20 +246,24 @@ struct WhipSession {
     #[allow(dead_code)]
     observer: PeerConnectionObserver,
     pc: Option<PeerConnection>,
-    video_source: AdaptedVideoTrackSource,
+    video_source: Option<AdaptedVideoTrackSource>,
+    audio_sink: crate::webrtc_audio::WebRtcAudioTransportSink,
     #[allow(dead_code)]
-    video_track: shiguredo_webrtc::VideoTrack,
+    video_track: Option<shiguredo_webrtc::VideoTrack>,
 }
 
 impl WhipSession {
     async fn connect(
         output_url: &str,
         bearer_token: Option<&str>,
-        audio_mline: bool,
+        create_video_track: bool,
         video_codec_preferences: &[VideoCodecPreference],
     ) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
-        let factory_bundle = Arc::new(crate::webrtc_factory::WebRtcFactoryBundle::new()?);
+        let (factory_bundle, audio_sink) =
+            crate::webrtc_factory::WebRtcFactoryBundle::new_with_audio_transport_sink()?;
+        #[allow(clippy::arc_with_non_send_sync)]
+        let factory_bundle = Arc::new(factory_bundle);
         let factory = factory_bundle.factory();
 
         let observer = PeerConnectionObserverBuilder::new()
@@ -182,30 +276,42 @@ impl WhipSession {
         let pc = PeerConnection::create(factory.as_ref(), &mut pc_config, &mut deps)
             .map_err(|e| Error::new(format!("failed to create PeerConnection: {e}")))?;
 
-        if audio_mline {
-            add_audio_transceiver(&pc, factory.as_ref())?;
-        }
+        add_audio_transceiver(&pc, factory.as_ref())?;
 
-        let video_source = AdaptedVideoTrackSource::new();
-        let video_track_source = video_source.cast_to_video_track_source();
-        let track_id = shiguredo_webrtc::random_string(16);
-        let video_track = factory
-            .create_video_track(&video_track_source, &track_id)
-            .map_err(|e| Error::new(format!("failed to create video track: {e}")))?;
+        let (video_source, video_track) = if create_video_track {
+            let video_source = AdaptedVideoTrackSource::new();
+            let video_track_source = video_source.cast_to_video_track_source();
+            let track_id = shiguredo_webrtc::random_string(16);
+            let video_track = factory
+                .create_video_track(&video_track_source, &track_id)
+                .map_err(|e| Error::new(format!("failed to create video track: {e}")))?;
 
-        let mut init = RtpTransceiverInit::new();
-        init.set_direction(RtpTransceiverDirection::SendOnly);
-        let mut stream_ids = init.stream_ids();
-        let stream_id = CxxString::from_str(&shiguredo_webrtc::random_string(16));
-        stream_ids.push(&stream_id);
+            let mut init = RtpTransceiverInit::new();
+            init.set_direction(RtpTransceiverDirection::SendOnly);
+            let mut stream_ids = init.stream_ids();
+            let stream_id = CxxString::from_str(&shiguredo_webrtc::random_string(16));
+            stream_ids.push(&stream_id);
 
-        let transceiver = pc
-            .add_transceiver_with_track(&video_track, &mut init)
-            .map_err(|e| Error::new(format!("failed to add video transceiver: {e}")))?;
-        let codecs = select_video_codecs(factory.as_ref(), video_codec_preferences)?;
-        transceiver
-            .set_codec_preferences(&codecs)
-            .map_err(|e| Error::new(format!("failed to set video codec preferences: {e}")))?;
+            let transceiver = pc
+                .add_transceiver_with_track(&video_track, &mut init)
+                .map_err(|e| Error::new(format!("failed to add video transceiver: {e}")))?;
+            let codecs = select_video_codecs(factory.as_ref(), video_codec_preferences)?;
+            transceiver
+                .set_codec_preferences(&codecs)
+                .map_err(|e| Error::new(format!("failed to set video codec preferences: {e}")))?;
+            (Some(video_source), Some(video_track))
+        } else {
+            let mut init = RtpTransceiverInit::new();
+            init.set_direction(RtpTransceiverDirection::SendOnly);
+            let transceiver = pc
+                .add_transceiver(MediaType::Video, &mut init)
+                .map_err(|e| Error::new(format!("failed to add video transceiver: {e}")))?;
+            let codecs = select_video_codecs(factory.as_ref(), video_codec_preferences)?;
+            transceiver
+                .set_codec_preferences(&codecs)
+                .map_err(|e| Error::new(format!("failed to set video codec preferences: {e}")))?;
+            (None, None)
+        };
 
         exchange_offer_answer(&pc, output_url, bearer_token).await?;
 
@@ -213,13 +319,26 @@ impl WhipSession {
             factory_bundle,
             observer,
             pc: Some(pc),
+            audio_sink,
             video_source,
             video_track,
         })
     }
 
     fn push_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
-        crate::webrtc_video::push_i420_frame(&mut self.video_source, frame)
+        let source = self
+            .video_source
+            .as_mut()
+            .ok_or_else(|| Error::new("video track is not configured"))?;
+        crate::webrtc_video::push_i420_frame(source, frame)
+    }
+
+    fn push_audio_frame(&mut self, frame: &crate::AudioData) -> crate::Result<()> {
+        match self.audio_sink.push_i16be_stereo_48khz(frame) {
+            Ok(()) => Ok(()),
+            Err(e) if e.reason == "audio transport is not ready" => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     fn disconnect(&mut self) {
@@ -587,9 +706,12 @@ mod tests {
         let publisher: WhipPublisher = crate::json::parse_str(json).expect("parse");
 
         assert_eq!(publisher.output_url, "https://example.com/whip/live");
-        assert_eq!(publisher.input_video_track_id.get(), "video-main");
+        assert_eq!(
+            publisher.input_video_track_id.as_ref().map(|id| id.get()),
+            Some("video-main")
+        );
+        assert!(publisher.input_audio_track_id.is_none());
         assert!(publisher.bearer_token.is_none());
-        assert!(publisher.audio_mline);
         assert_eq!(
             publisher.video_codec_preferences,
             vec![
@@ -638,6 +760,40 @@ mod tests {
             "outputUrl":"https://example.com/whip/live",
             "inputVideoTrackId":"video-main",
             "bearerToken":"   "
+        }"#;
+        let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whip_publisher_accepts_audio_track_id() {
+        let json = r#"{
+            "outputUrl":"https://example.com/whip/live",
+            "inputAudioTrackId":"audio-main"
+        }"#;
+        let publisher: WhipPublisher = crate::json::parse_str(json).expect("parse");
+        assert!(publisher.input_video_track_id.is_none());
+        assert_eq!(
+            publisher.input_audio_track_id.as_ref().map(|id| id.get()),
+            Some("audio-main")
+        );
+    }
+
+    #[test]
+    fn whip_publisher_accepts_without_track_ids() {
+        let json = r#"{
+            "outputUrl":"https://example.com/whip/live"
+        }"#;
+        let publisher: WhipPublisher = crate::json::parse_str(json).expect("parse");
+        assert!(publisher.input_video_track_id.is_none());
+        assert!(publisher.input_audio_track_id.is_none());
+    }
+
+    #[test]
+    fn whip_publisher_rejects_audio_mline_param() {
+        let json = r#"{
+            "outputUrl":"https://example.com/whip/live",
+            "audioMline":true
         }"#;
         let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
         assert!(result.is_err());

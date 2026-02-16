@@ -92,6 +92,7 @@ pub mod video_av1;
 pub mod video_canvas;
 pub mod video_h264;
 pub mod video_h265;
+mod webrtc_audio;
 mod webrtc_factory;
 pub mod webrtc_p2p_session;
 mod webrtc_sdp;

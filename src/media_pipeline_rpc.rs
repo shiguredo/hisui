@@ -577,7 +577,7 @@ mod tests {
     #[tokio::test]
     async fn create_whip_publisher_uses_default_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline();
-        let request = create_whip_publisher_request(None, None);
+        let request = create_whip_publisher_request(None, None, Some("video-main"), None);
 
         let response = handle
             .rpc(request.as_bytes())
@@ -597,7 +597,12 @@ mod tests {
     #[tokio::test]
     async fn create_whip_publisher_uses_explicit_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline();
-        let request = create_whip_publisher_request(Some("custom-whip-publisher"), None);
+        let request = create_whip_publisher_request(
+            Some("custom-whip-publisher"),
+            None,
+            Some("video-main"),
+            None,
+        );
 
         let response = handle
             .rpc(request.as_bytes())
@@ -617,7 +622,8 @@ mod tests {
     #[tokio::test]
     async fn create_whip_publisher_accepts_bearer_token() {
         let (handle, pipeline_task) = spawn_test_pipeline();
-        let request = create_whip_publisher_request(None, Some("test-token"));
+        let request =
+            create_whip_publisher_request(None, Some("test-token"), Some("video-main"), None);
 
         let response = handle
             .rpc(request.as_bytes())
@@ -637,7 +643,7 @@ mod tests {
     #[tokio::test]
     async fn create_whip_publisher_rejects_empty_bearer_token() {
         let (handle, pipeline_task) = spawn_test_pipeline();
-        let request = create_whip_publisher_request(None, Some("   "));
+        let request = create_whip_publisher_request(None, Some("   "), Some("video-main"), None);
 
         let response = handle
             .rpc(request.as_bytes())
@@ -663,7 +669,12 @@ mod tests {
             .register_processor(ProcessorId::new("duplicate-whip-publisher"))
             .await
             .expect("register duplicate-whip-publisher");
-        let request = create_whip_publisher_request(Some("duplicate-whip-publisher"), None);
+        let request = create_whip_publisher_request(
+            Some("duplicate-whip-publisher"),
+            None,
+            Some("video-main"),
+            None,
+        );
 
         let response = handle
             .rpc(request.as_bytes())
@@ -676,6 +687,68 @@ mod tests {
         );
 
         drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_accepts_input_audio_track_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whip_publisher_request(None, None, None, Some("audio-main"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "whipPublisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_accepts_without_input_track_ids() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whip_publisher_request(None, None, None, None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "whipPublisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_rejects_audio_mline_param() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{"outputUrl":"https://example.com/whip/live","audioMline":true}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
             .await
@@ -887,6 +960,8 @@ mod tests {
     fn create_whip_publisher_request(
         processor_id: Option<&str>,
         bearer_token: Option<&str>,
+        input_video_track_id: Option<&str>,
+        input_audio_track_id: Option<&str>,
     ) -> String {
         let processor_id_part = processor_id
             .map(|id| format!(r#","processorId":"{id}""#))
@@ -894,9 +969,15 @@ mod tests {
         let bearer_token_part = bearer_token
             .map(|token| format!(r#","bearerToken":"{token}""#))
             .unwrap_or_default();
+        let input_video_track_id_part = input_video_track_id
+            .map(|id| format!(r#","inputVideoTrackId":"{id}""#))
+            .unwrap_or_default();
+        let input_audio_track_id_part = input_audio_track_id
+            .map(|id| format!(r#","inputAudioTrackId":"{id}""#))
+            .unwrap_or_default();
 
         format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{{"outputUrl":"https://example.com/whip/live","inputVideoTrackId":"video-main"{bearer_token_part}{processor_id_part}}}}}"#
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{{"outputUrl":"https://example.com/whip/live"{input_video_track_id_part}{input_audio_track_id_part}{bearer_token_part}{processor_id_part}}}}}"#
         )
     }
 }
