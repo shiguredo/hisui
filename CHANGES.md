@@ -15,6 +15,11 @@
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
   - 未指定の場合は従来通り 404 を返す
   - @voluntas
+- [ADD] MediaPipeline 用の WHIP publisher を追加する
+  - JSON-RPC に `createWhipPublisher` メソッドを追加する
+  - `whipUrl` と `videoTrackId` を指定して映像トラックを WHIP で publish できる
+  - 初期実装では映像実送信のみ対応し、音声は SDP の m-line のみ追加可能
+  - @sile
 - [ADD] server サブコマンドに `--startup-rpc-file` オプションを追加する
   - 起動時に実行する RPC リストを指定することができる機能
   - @sile

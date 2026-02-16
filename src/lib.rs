@@ -65,6 +65,7 @@ pub mod pipeline;
 pub mod processor;
 pub mod progress;
 pub mod publisher_rtmp;
+pub mod publisher_whip;
 pub mod reader;
 pub mod reader_mp4;
 pub mod reader_webm;
