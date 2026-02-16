@@ -2,10 +2,6 @@ use shiguredo_http11::{Request, Response};
 
 use crate::webrtc_p2p_session::{BootstrapError, WebRtcP2pSessionManager};
 
-// -------------------------
-// HTTP レスポンス
-// -------------------------
-
 fn build_error_response(status: u16, reason: &str) -> Response {
     Response::new(status, reason)
         .header("Content-Type", "text/plain")
@@ -19,10 +15,6 @@ fn build_sdp_response(status: u16, reason: &str, sdp: &str) -> Response {
         .header("Connection", "close")
         .body(sdp.as_bytes().to_vec())
 }
-
-// -------------------------
-// /bootstrap endpoint
-// -------------------------
 
 pub struct BootstrapEndpoint {
     session_manager: WebRtcP2pSessionManager,
