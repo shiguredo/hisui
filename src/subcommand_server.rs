@@ -1,4 +1,5 @@
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -46,6 +47,13 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
 type TlsAcceptor = Arc<tokio_rustls::TlsAcceptor>;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+    let http_listen_address: IpAddr = noargs::opt("http-listen-address")
+        .ty("ADDRESS")
+        .doc("HTTP サーバーのリッスンアドレス")
+        .default("127.0.0.1")
+        .take(&mut args)
+        .then(|o| o.value().parse())?;
+
     // デフォルトポートは 8919 (H=8, I=9, S=19 で "His")
     let http_port: u16 = noargs::opt("http-port")
         .ty("PORT")
@@ -110,6 +118,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(run_server(
+                http_listen_address,
                 http_port,
                 https_cert_path,
                 https_key_path,
@@ -121,6 +130,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 }
 
 async fn run_server(
+    http_listen_address: IpAddr,
     http_port: u16,
     https_cert_path: Option<PathBuf>,
     https_key_path: Option<PathBuf>,
@@ -159,9 +169,9 @@ async fn run_server(
             .map_err(|e| crate::Error::new(format!("Failed to init /bootstrap: {e}")))?,
     );
 
-    let addr = format!("0.0.0.0:{http_port}");
-    let listener = TcpListener::bind(&addr).await?;
-    tracing::info!("{scheme} server listening on {scheme}://{addr}");
+    let listen_addr = SocketAddr::new(http_listen_address, http_port);
+    let listener = TcpListener::bind(listen_addr).await?;
+    tracing::info!("{scheme} server listening on {scheme}://{listen_addr}");
 
     run_accept_loop(
         listener,
