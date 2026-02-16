@@ -146,8 +146,7 @@ impl MediaPipelineHandle {
             })?;
         let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("whipPublisher"));
 
-        let handle = self
-            .register_processor(processor_id.clone())
+        self.spawn_local_processor(processor_id.clone(), move |handle| publisher.run(handle))
             .await
             .map_err(|e| match e {
                 RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
@@ -156,31 +155,6 @@ impl MediaPipelineHandle {
                 RegisterProcessorError::PipelineTerminated => {
                     internal_error("Internal error: pipeline has terminated".to_owned())
                 }
-            })?;
-        let thread_processor_id = processor_id.clone();
-        std::thread::Builder::new()
-            .name(format!("processor-{thread_processor_id}"))
-            .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(runtime) => runtime,
-                    Err(e) => {
-                        tracing::error!(
-                            "failed to create runtime for processor {thread_processor_id}: {e}"
-                        );
-                        return;
-                    }
-                };
-                if let Err(e) = runtime.block_on(publisher.run(handle)) {
-                    tracing::error!("failed to run processor {thread_processor_id}: {e}");
-                }
-            })
-            .map_err(|e| {
-                internal_error(format!(
-                    "Internal error: failed to spawn whip processor thread: {e}"
-                ))
             })?;
 
         Ok(RpcSuccessResult::CreateWhipPublisher { processor_id })

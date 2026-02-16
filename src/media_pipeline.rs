@@ -1,7 +1,11 @@
+type LocalProcessorTask = Box<dyn FnOnce() + Send + 'static>;
+
 #[derive(Debug)]
 pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<MediaPipelineCommand>,
+    local_processor_task_tx: Option<tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>>,
+    local_processor_thread: Option<std::thread::JoinHandle<()>>,
     processors: std::collections::HashSet<ProcessorId>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
 }
@@ -9,9 +13,17 @@ pub struct MediaPipeline {
 impl MediaPipeline {
     pub fn new() -> Self {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (local_processor_task_tx, local_processor_task_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        let local_processor_thread = std::thread::Builder::new()
+            .name("media_pipeline_local".to_owned())
+            .spawn(move || run_local_processor_runtime_thread(local_processor_task_rx))
+            .expect("failed to spawn media pipeline local runtime thread");
         Self {
             command_tx: Some(command_tx),
             command_rx,
+            local_processor_task_tx: Some(local_processor_task_tx),
+            local_processor_thread: Some(local_processor_thread),
             processors: std::collections::HashSet::new(),
             tracks: std::collections::HashMap::new(),
         }
@@ -23,6 +35,7 @@ impl MediaPipeline {
     pub fn handle(&self) -> MediaPipelineHandle {
         MediaPipelineHandle {
             command_tx: self.command_tx.clone().expect("infallible"),
+            local_processor_task_tx: self.local_processor_task_tx.clone().expect("infallible"),
         }
     }
 
@@ -30,12 +43,19 @@ impl MediaPipeline {
         tracing::debug!("MediaPipeline started");
 
         self.command_tx = None; // 参照カウントから自分を外すために None にする
+        self.local_processor_task_tx = None; // 参照カウントから自分を外すために None にする
 
         loop {
             tokio::select! {
                 Some(command) = self.command_rx.recv() => self.handle_command(command),
                 else => break,
             }
+        }
+
+        if let Some(local_processor_thread) = self.local_processor_thread.take()
+            && local_processor_thread.join().is_err()
+        {
+            tracing::error!("media pipeline local runtime thread panicked");
         }
 
         tracing::debug!("MediaPipeline stopped");
@@ -190,6 +210,7 @@ impl Default for MediaPipeline {
 #[derive(Debug, Clone)]
 pub struct MediaPipelineHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>,
+    local_processor_task_tx: tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>,
 }
 
 impl MediaPipelineHandle {
@@ -209,6 +230,28 @@ impl MediaPipelineHandle {
             }
         });
         Ok(())
+    }
+
+    pub async fn spawn_local_processor<F, T>(
+        &self,
+        processor_id: ProcessorId,
+        f: F,
+    ) -> Result<(), RegisterProcessorError>
+    where
+        F: FnOnce(ProcessorHandle) -> T + Send + 'static,
+        T: Future<Output = crate::Result<()>> + 'static,
+    {
+        let handle = self.register_processor(processor_id.clone()).await?;
+        let task: LocalProcessorTask = Box::new(move || {
+            tokio::task::spawn_local(async move {
+                if let Err(e) = f(handle).await {
+                    tracing::error!("failed to run processor {processor_id}: {e}");
+                }
+            });
+        });
+        self.local_processor_task_tx
+            .send(task)
+            .map_err(|_| RegisterProcessorError::PipelineTerminated)
     }
 
     /// [NOTE] こちらは内部寄りなので、可能な限りは spawn_processor() を使うこと
@@ -242,6 +285,27 @@ impl MediaPipelineHandle {
     pub(crate) fn send(&self, command: MediaPipelineCommand) -> bool {
         self.command_tx.send(command).is_ok()
     }
+}
+
+fn run_local_processor_runtime_thread(
+    mut task_rx: tokio::sync::mpsc::UnboundedReceiver<LocalProcessorTask>,
+) {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            tracing::error!("failed to create local runtime for media pipeline: {e}");
+            return;
+        }
+    };
+    let local = tokio::task::LocalSet::new();
+    runtime.block_on(local.run_until(async move {
+        while let Some(task) = task_rx.recv().await {
+            task();
+        }
+    }));
 }
 
 #[derive(Debug)]
@@ -546,3 +610,78 @@ impl std::fmt::Display for PublishTrackError {
 }
 
 impl std::error::Error for PublishTrackError {}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn spawn_local_processor_accepts_non_send_future() {
+        let pipeline = MediaPipeline::new();
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<usize>();
+        handle
+            .spawn_local_processor(
+                ProcessorId::new("local-non-send"),
+                move |_handle| async move {
+                    let value = Rc::new(41usize);
+                    let _ = done_tx.send(*value + 1);
+                    Ok(())
+                },
+            )
+            .await
+            .expect("spawn_local_processor must succeed");
+
+        let value = tokio::time::timeout(Duration::from_secs(5), done_rx)
+            .await
+            .expect("done signal timed out")
+            .expect("done signal channel closed");
+        assert_eq!(value, 42);
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn spawn_local_processor_rejects_duplicate_processor_id() {
+        let pipeline = MediaPipeline::new();
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        handle
+            .spawn_local_processor(
+                ProcessorId::new("duplicate-local"),
+                move |_handle| async move {
+                    let _ = release_rx.await;
+                    Ok(())
+                },
+            )
+            .await
+            .expect("first spawn_local_processor must succeed");
+
+        let result = handle
+            .spawn_local_processor(
+                ProcessorId::new("duplicate-local"),
+                move |_handle| async move { Ok(()) },
+            )
+            .await;
+        assert_eq!(result, Err(RegisterProcessorError::DuplicateProcessorId));
+
+        let _ = release_tx.send(());
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+}
