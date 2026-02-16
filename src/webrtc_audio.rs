@@ -42,12 +42,12 @@ impl WebRtcAudioTransportSink {
                 audio.sample_rate
             )));
         }
-        if audio.data.len() % AUDIO_BYTES_PER_SAMPLE != 0 {
+        if !audio.data.len().is_multiple_of(AUDIO_BYTES_PER_SAMPLE) {
             return Err(crate::Error::new("invalid I16Be audio data length"));
         }
 
         let sample_count_total = audio.data.len() / AUDIO_BYTES_PER_SAMPLE;
-        if sample_count_total % AUDIO_CHANNELS != 0 {
+        if !sample_count_total.is_multiple_of(AUDIO_CHANNELS) {
             return Err(crate::Error::new("invalid stereo audio sample count"));
         }
         let samples_per_channel = sample_count_total / AUDIO_CHANNELS;
