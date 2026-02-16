@@ -97,11 +97,11 @@ fn init_webrtc_log_from_env() {
 
 fn parse_webrtc_log_severity(value: &str) -> Option<Severity> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "verbose" | "trace" | "debug" => Some(Severity::Verbose),
-        "info" | "1" | "true" => Some(Severity::Info),
-        "warning" | "warn" => Some(Severity::Warning),
+        "verbose" => Some(Severity::Verbose),
+        "info" => Some(Severity::Info),
+        "warning" => Some(Severity::Warning),
         "error" => Some(Severity::Error),
-        "none" | "off" | "0" | "false" => Some(Severity::None),
+        "none" => Some(Severity::None),
         _ => None,
     }
 }
