@@ -13,8 +13,9 @@ use crate::{Error, MediaSample, Message, ProcessorHandle, TrackId};
 
 #[derive(Debug, Clone)]
 pub struct WhipPublisher {
-    pub whip_url: String,
-    pub video_track_id: TrackId,
+    pub output_url: String,
+    pub input_video_track_id: TrackId,
+    pub bearer_token: Option<String>,
     pub audio_mline: bool,
     pub video_codec_preferences: Vec<VideoCodecPreference>,
 }
@@ -22,8 +23,11 @@ pub struct WhipPublisher {
 impl nojson::DisplayJson for WhipPublisher {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("whipUrl", &self.whip_url)?;
-            f.member("videoTrackId", &self.video_track_id)?;
+            f.member("outputUrl", &self.output_url)?;
+            f.member("inputVideoTrackId", &self.input_video_track_id)?;
+            if let Some(token) = &self.bearer_token {
+                f.member("bearerToken", token)?;
+            }
             f.member("audioMline", self.audio_mline)?;
             f.member("videoCodecPreferences", &self.video_codec_preferences)
         })
@@ -36,20 +40,40 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhipPublisher {
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let whip_url: String = value.to_member("whipUrl")?.required()?.try_into()?;
-        validate_whip_url(&whip_url)
-            .map_err(|e| value.to_member("whipUrl")?.required()?.invalid(e))?;
+        let output_url: String = value.to_member("outputUrl")?.required()?.try_into()?;
+        if let Err(e) = validate_output_url(&output_url) {
+            return Err(value.to_member("outputUrl")?.required()?.invalid(e));
+        }
 
-        let video_track_id: TrackId = value.to_member("videoTrackId")?.required()?.try_into()?;
-        let audio_mline = value.to_member("audioMline")?.try_into()?.unwrap_or(true);
+        let input_video_track_id: TrackId = value
+            .to_member("inputVideoTrackId")?
+            .required()?
+            .try_into()?;
+        let bearer_token: Option<String> = value.to_member("bearerToken")?.try_into()?;
+        let bearer_token = match bearer_token {
+            Some(token) => {
+                let token = token.trim();
+                if token.is_empty() {
+                    return Err(value
+                        .to_member("bearerToken")?
+                        .required()?
+                        .invalid("bearerToken must not be empty"));
+                }
+                Some(token.to_owned())
+            }
+            None => None,
+        };
+        let audio_mline: Option<bool> = value.to_member("audioMline")?.try_into()?;
+        let audio_mline = audio_mline.unwrap_or(true);
         let codecs_raw: Option<Vec<String>> =
             value.to_member("videoCodecPreferences")?.try_into()?;
         let video_codec_preferences =
             parse_video_codec_preferences(codecs_raw).map_err(|e| value.invalid(e))?;
 
         Ok(Self {
-            whip_url,
-            video_track_id,
+            output_url,
+            input_video_track_id,
+            bearer_token,
             audio_mline,
             video_codec_preferences,
         })
@@ -59,13 +83,14 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhipPublisher {
 impl WhipPublisher {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         let mut session = WhipSession::connect(
-            &self.whip_url,
+            &self.output_url,
+            self.bearer_token.as_deref(),
             self.audio_mline,
             &self.video_codec_preferences,
         )
         .await?;
 
-        let mut input_rx = handle.subscribe_track(self.video_track_id.clone());
+        let mut input_rx = handle.subscribe_track(self.input_video_track_id.clone());
 
         loop {
             match input_rx.recv().await {
@@ -75,7 +100,7 @@ impl WhipPublisher {
                 Message::Media(MediaSample::Audio(_)) => {
                     return Err(Error::new(format!(
                         "expected a video sample on track {}, but got an audio sample",
-                        self.video_track_id
+                        self.input_video_track_id
                     )));
                 }
                 Message::Eos => {
@@ -138,7 +163,8 @@ struct WhipSession {
 
 impl WhipSession {
     async fn connect(
-        whip_url: &str,
+        output_url: &str,
+        bearer_token: Option<&str>,
         audio_mline: bool,
         video_codec_preferences: &[VideoCodecPreference],
     ) -> crate::Result<Self> {
@@ -181,7 +207,7 @@ impl WhipSession {
             .set_codec_preferences(&codecs)
             .map_err(|e| Error::new(format!("failed to set video codec preferences: {e}")))?;
 
-        exchange_offer_answer(&pc, whip_url).await?;
+        exchange_offer_answer(&pc, output_url, bearer_token).await?;
 
         Ok(Self {
             factory_bundle,
@@ -201,16 +227,16 @@ impl WhipSession {
     }
 }
 
-fn validate_whip_url(whip_url: &str) -> Result<(), String> {
-    let uri = Uri::parse(whip_url).map_err(|e| e.to_string())?;
+fn validate_output_url(output_url: &str) -> Result<(), String> {
+    let uri = Uri::parse(output_url).map_err(|e| e.to_string())?;
     let scheme = uri
         .scheme()
-        .ok_or_else(|| "whipUrl must contain URL scheme".to_owned())?;
+        .ok_or_else(|| "outputUrl must contain URL scheme".to_owned())?;
     if scheme != "http" && scheme != "https" {
-        return Err("whipUrl scheme must be http or https".to_owned());
+        return Err("outputUrl scheme must be http or https".to_owned());
     }
     uri.host()
-        .ok_or_else(|| "whipUrl must contain host".to_owned())?;
+        .ok_or_else(|| "outputUrl must contain host".to_owned())?;
     Ok(())
 }
 
@@ -333,11 +359,15 @@ fn select_video_codecs(
     Ok(codecs)
 }
 
-async fn exchange_offer_answer(pc: &PeerConnection, whip_url: &str) -> crate::Result<()> {
+async fn exchange_offer_answer(
+    pc: &PeerConnection,
+    output_url: &str,
+    bearer_token: Option<&str>,
+) -> crate::Result<()> {
     let offer_sdp = crate::webrtc_sdp::create_offer_sdp(pc)?;
     crate::webrtc_sdp::set_local_offer(pc, &offer_sdp)?;
 
-    let response = send_offer(whip_url, &offer_sdp).await?;
+    let response = send_offer(output_url, bearer_token, &offer_sdp).await?;
     if response.status_code != 201 {
         return Err(Error::new(format!(
             "WHIP endpoint returned unexpected status code: {}",
@@ -395,21 +425,21 @@ struct RequestTarget {
     tls: bool,
 }
 
-fn build_request_target(url: &str) -> crate::Result<RequestTarget> {
-    let uri = Uri::parse(url).map_err(|e| Error::new(format!("invalid WHIP URL: {e}")))?;
+fn build_request_target(output_url: &str) -> crate::Result<RequestTarget> {
+    let uri = Uri::parse(output_url).map_err(|e| Error::new(format!("invalid output URL: {e}")))?;
 
     let scheme = uri
         .scheme()
-        .ok_or_else(|| Error::new("whipUrl must contain URL scheme"))?;
+        .ok_or_else(|| Error::new("outputUrl must contain URL scheme"))?;
     let tls = match scheme {
         "http" => false,
         "https" => true,
-        _ => return Err(Error::new("whipUrl scheme must be http or https")),
+        _ => return Err(Error::new("outputUrl scheme must be http or https")),
     };
 
     let host = uri
         .host()
-        .ok_or_else(|| Error::new("whipUrl must contain host"))?
+        .ok_or_else(|| Error::new("outputUrl must contain host"))?
         .to_owned();
     let default_port = if tls { 443 } else { 80 };
     let port = uri.port().unwrap_or(default_port);
@@ -438,14 +468,22 @@ fn build_request_target(url: &str) -> crate::Result<RequestTarget> {
     })
 }
 
-async fn send_offer(whip_url: &str, offer_sdp: &str) -> crate::Result<Response> {
-    let target = build_request_target(whip_url)?;
-    let request = Request::new("POST", &target.path_and_query)
+async fn send_offer(
+    output_url: &str,
+    bearer_token: Option<&str>,
+    offer_sdp: &str,
+) -> crate::Result<Response> {
+    let target = build_request_target(output_url)?;
+    let mut request = Request::new("POST", &target.path_and_query)
         .header("Host", &target.host_header)
         .header("Content-Type", "application/sdp")
         .header("Connection", "close")
-        .header("User-Agent", "Hisui-WhipPublisher")
-        .body(offer_sdp.as_bytes().to_vec());
+        .header("User-Agent", "Hisui-WhipPublisher");
+    let authorization = bearer_token.map(|token| format!("Bearer {token}"));
+    if let Some(value) = authorization.as_deref() {
+        request = request.header("Authorization", value);
+    }
+    let request = request.body(offer_sdp.as_bytes().to_vec());
 
     let mut stream = crate::tcp::TcpOrTlsStream::connect(&target.host, target.port, target.tls)
         .await
@@ -543,13 +581,14 @@ mod tests {
     #[test]
     fn whip_publisher_params_defaults_are_applied() {
         let json = r#"{
-            "whipUrl":"https://example.com/whip/live",
-            "videoTrackId":"video-main"
+            "outputUrl":"https://example.com/whip/live",
+            "inputVideoTrackId":"video-main"
         }"#;
         let publisher: WhipPublisher = crate::json::parse_str(json).expect("parse");
 
-        assert_eq!(publisher.whip_url, "https://example.com/whip/live");
-        assert_eq!(publisher.video_track_id.get(), "video-main");
+        assert_eq!(publisher.output_url, "https://example.com/whip/live");
+        assert_eq!(publisher.input_video_track_id.get(), "video-main");
+        assert!(publisher.bearer_token.is_none());
         assert!(publisher.audio_mline);
         assert_eq!(
             publisher.video_codec_preferences,
@@ -564,8 +603,8 @@ mod tests {
     #[test]
     fn whip_publisher_rejects_invalid_url_scheme() {
         let json = r#"{
-            "whipUrl":"ws://example.com/whip/live",
-            "videoTrackId":"video-main"
+            "outputUrl":"ws://example.com/whip/live",
+            "inputVideoTrackId":"video-main"
         }"#;
         let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
         assert!(result.is_err());
@@ -574,9 +613,31 @@ mod tests {
     #[test]
     fn whip_publisher_rejects_unknown_video_codec() {
         let json = r#"{
-            "whipUrl":"https://example.com/whip/live",
-            "videoTrackId":"video-main",
+            "outputUrl":"https://example.com/whip/live",
+            "inputVideoTrackId":"video-main",
             "videoCodecPreferences":["AV1","H266"]
+        }"#;
+        let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whip_publisher_accepts_bearer_token() {
+        let json = r#"{
+            "outputUrl":"https://example.com/whip/live",
+            "inputVideoTrackId":"video-main",
+            "bearerToken":"  test-token  "
+        }"#;
+        let publisher: WhipPublisher = crate::json::parse_str(json).expect("parse");
+        assert_eq!(publisher.bearer_token.as_deref(), Some("test-token"));
+    }
+
+    #[test]
+    fn whip_publisher_rejects_empty_bearer_token() {
+        let json = r#"{
+            "outputUrl":"https://example.com/whip/live",
+            "inputVideoTrackId":"video-main",
+            "bearerToken":"   "
         }"#;
         let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
         assert!(result.is_err());
