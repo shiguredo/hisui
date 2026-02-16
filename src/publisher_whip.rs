@@ -234,14 +234,14 @@ impl nojson::DisplayJson for VideoCodecPreference {
 }
 
 struct WhipSession {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     factory_bundle: Arc<crate::webrtc_factory::WebRtcFactoryBundle>,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     observer: PeerConnectionObserver,
     pc: Option<PeerConnection>,
     video_source: Option<AdaptedVideoTrackSource>,
     audio_sink: crate::webrtc_audio::WebRtcAudioTransportSink,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     video_track: Option<shiguredo_webrtc::VideoTrack>,
 }
 
@@ -252,10 +252,10 @@ impl WhipSession {
         create_video_track: bool,
         video_codec_preferences: &[VideoCodecPreference],
     ) -> crate::Result<Self> {
-        #[allow(clippy::arc_with_non_send_sync)]
+        #[expect(clippy::arc_with_non_send_sync)]
         let (factory_bundle, audio_sink) =
             crate::webrtc_factory::WebRtcFactoryBundle::new_with_audio_transport_sink()?;
-        #[allow(clippy::arc_with_non_send_sync)]
+        #[expect(clippy::arc_with_non_send_sync)]
         let factory_bundle = Arc::new(factory_bundle);
         let factory = factory_bundle.factory();
 
