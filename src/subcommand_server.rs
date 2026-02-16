@@ -153,7 +153,7 @@ async fn run_server(
         "http"
     };
 
-    let pipeline = crate::MediaPipeline::new();
+    let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
 

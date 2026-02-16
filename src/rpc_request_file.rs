@@ -71,7 +71,7 @@ mod tests {
             r#"[{{"jsonrpc":"2.0","method":"listProcessors"}},{{"jsonrpc":"2.0","method":"listTracks"}}]"#
         )?;
 
-        let pipeline = crate::MediaPipeline::new();
+        let pipeline = crate::MediaPipeline::new()?;
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 

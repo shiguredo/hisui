@@ -41,7 +41,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .or_fail()?;
     let _guard = runtime.enter();
 
-    let pipeline = crate::MediaPipeline::new();
+    let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
 
     runtime.spawn(async move {

@@ -5,28 +5,32 @@ pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<MediaPipelineCommand>,
     local_processor_task_tx: Option<tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>>,
-    local_processor_thread: Option<std::thread::JoinHandle<()>>,
+    local_processor_thread: std::thread::JoinHandle<()>,
     processors: std::collections::HashSet<ProcessorId>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
 }
 
 impl MediaPipeline {
-    pub fn new() -> Self {
+    pub fn new() -> crate::Result<Self> {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (local_processor_task_tx, local_processor_task_rx) =
             tokio::sync::mpsc::unbounded_channel();
         let local_processor_thread = std::thread::Builder::new()
             .name("media_pipeline_local".to_owned())
             .spawn(move || run_local_processor_runtime_thread(local_processor_task_rx))
-            .expect("failed to spawn media pipeline local runtime thread");
-        Self {
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to spawn media pipeline local runtime thread: {e}"
+                ))
+            })?;
+        Ok(Self {
             command_tx: Some(command_tx),
             command_rx,
             local_processor_task_tx: Some(local_processor_task_tx),
-            local_processor_thread: Some(local_processor_thread),
+            local_processor_thread,
             processors: std::collections::HashSet::new(),
             tracks: std::collections::HashMap::new(),
-        }
+        })
     }
 
     /// このパイプラインを操作するためのハンドルを返す
@@ -52,9 +56,7 @@ impl MediaPipeline {
             }
         }
 
-        if let Some(local_processor_thread) = self.local_processor_thread.take()
-            && local_processor_thread.join().is_err()
-        {
+        if self.local_processor_thread.join().is_err() {
             tracing::error!("media pipeline local runtime thread panicked");
         }
 
@@ -198,12 +200,6 @@ impl MediaPipeline {
 
     fn handle_list_processors(&self) -> Vec<ProcessorId> {
         self.processors.iter().cloned().collect()
-    }
-}
-
-impl Default for MediaPipeline {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -620,7 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_local_processor_accepts_non_send_future() {
-        let pipeline = MediaPipeline::new();
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -652,7 +648,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_local_processor_rejects_duplicate_processor_id() {
-        let pipeline = MediaPipeline::new();
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 

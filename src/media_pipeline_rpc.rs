@@ -847,7 +847,7 @@ mod tests {
     }
 
     fn spawn_test_pipeline() -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
-        let pipeline = MediaPipeline::new();
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         (handle, pipeline_task)
