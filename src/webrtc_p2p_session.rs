@@ -16,9 +16,7 @@ use tokio::sync::mpsc;
 use crate::json::JsonObject;
 use shiguredo_webrtc::{AdaptedVideoTrackSource, CxxString, StringVector};
 
-// -------------------------
 // FactoryHolder
-// -------------------------
 
 struct FactoryHolder {
     factory: Arc<PeerConnectionFactory>,
@@ -71,9 +69,7 @@ impl FactoryHolder {
     }
 }
 
-// -------------------------
 // コールバックイベント
-// -------------------------
 
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
@@ -91,9 +87,7 @@ enum PcEvent {
     },
 }
 
-// -------------------------
 // signaling JSON
-// -------------------------
 
 struct SignalingMessage {
     msg_type: String,
@@ -126,9 +120,7 @@ fn make_offer_json(sdp: &str) -> String {
     .to_string()
 }
 
-// -------------------------
 // Session
-// -------------------------
 
 struct Session {
     handle: crate::MediaPipelineHandle,
@@ -160,9 +152,7 @@ struct VideoTrackState {
     _track: shiguredo_webrtc::VideoTrack,
 }
 
-// -------------------------
 // 公開 API
-// -------------------------
 
 pub enum BootstrapError {
     SessionAlreadyExists,
@@ -439,9 +429,7 @@ fn bootstrap_internal(
     Ok((answer_sdp, sess))
 }
 
-// -------------------------
 // DataChannel メッセージ処理
-// -------------------------
 
 /// DataChannel メッセージを処理する。true を返した場合はセッションを終了する。
 fn handle_dc_message(sess: &mut Session, data: &[u8]) -> bool {
