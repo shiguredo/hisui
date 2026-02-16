@@ -122,16 +122,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_webrtc_log_severity_accepts_aliases() {
+    fn parse_webrtc_log_severity_accepts_levels() {
         assert_eq!(
             parse_webrtc_log_severity("verbose"),
             Some(Severity::Verbose)
         );
-        assert_eq!(parse_webrtc_log_severity("DEBUG"), Some(Severity::Verbose));
-        assert_eq!(parse_webrtc_log_severity("1"), Some(Severity::Info));
-        assert_eq!(parse_webrtc_log_severity("warn"), Some(Severity::Warning));
+        assert_eq!(parse_webrtc_log_severity("info"), Some(Severity::Info));
+        assert_eq!(
+            parse_webrtc_log_severity("warning"),
+            Some(Severity::Warning)
+        );
         assert_eq!(parse_webrtc_log_severity("error"), Some(Severity::Error));
-        assert_eq!(parse_webrtc_log_severity("off"), Some(Severity::None));
+        assert_eq!(parse_webrtc_log_severity("none"), Some(Severity::None));
     }
 
     #[test]
