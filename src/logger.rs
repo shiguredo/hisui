@@ -113,7 +113,7 @@ fn webrtc_log_severity_name(severity: Severity) -> &'static str {
         Severity::Warning => "warning",
         Severity::Error => "error",
         Severity::None => "none",
-        Severity::Raw(_) => "raw",
+        _ => unreachable!(),
     }
 }
 
