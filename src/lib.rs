@@ -39,6 +39,7 @@ pub mod encoder_svt_av1_params;
 pub mod encoder_video_toolbox;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox_params;
+pub mod endpoint_http_bootstrap;
 pub mod endpoint_http_rpc;
 pub mod error;
 pub mod file_reader_mp4;
@@ -90,6 +91,7 @@ pub mod video_av1;
 pub mod video_canvas;
 pub mod video_h264;
 pub mod video_h265;
+pub mod webrtc_p2p_session;
 pub mod writer_mp4;
 pub mod writer_yuv;
 

@@ -167,6 +167,7 @@ impl MediaPipeline {
     }
 
     fn handle_deregister_processor(&mut self, processor_id: ProcessorId) {
+        // TODO: トラックが残っている間は deregister 扱いにしない
         tracing::debug!("deregister processor: {processor_id}");
         self.processors.remove(&processor_id);
     }

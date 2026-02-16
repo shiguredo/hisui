@@ -18,18 +18,31 @@
 - [ADD] server サブコマンドに `--startup-rpc-file` オプションを追加する
   - 起動時に実行する RPC リストを指定することができる機能
   - @sile
+- [ADD] server サブコマンドに `--http-listen-address` オプションを追加する
+  - HTTP サーバーのリッスンアドレスを指定可能にする
+  - デフォルトは `127.0.0.1`
+  - @sile
 - [ADD] 実験的な server サブコマンドを追加する
   - `hisui server --http-port <PORT>` で HTTP サーバーを起動する
-  - `/bootstrap`, `/.ok` に 204 No Content を返す
+  - `/.ok` は 204 No Content を返す
+  - `/bootstrap` は WebRTC 向けの SDP ベースのブートストラップを処理する:
+    - `POST /bootstrap` かつ `Content-Type: application/sdp` の場合は 201 Created で SDP を返す
+    - 条件に合わない場合は 400 / 404 / 405 / 409 / 415 / 500 を返す
   - `/rpc` では、JSON-RPC リクエストを処理する:
     - listTracks
     - listProcessors
     - createMp4FileSource
     - createVideoMixer
+    - HTTP メソッドが POST 以外の場合は 405 Method Not Allowed を返す
+    - JSON-RPC 通知（id なし）の場合は 204 No Content を返す
   - それ以外のパスには 404 Not Found を返す
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_http11 を追加する
   - @voluntas
+- [ADD] 依存ライブラリに shiguredo_webrtc を追加する
+  - @sile
+- [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
+  - @sile
 - [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
   - 今までは事前に解像度情報を指定していたが、ライブストリームの場合にはそれが難しいことがあるため遅延初期化をするようにする
   - @sile

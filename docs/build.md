@@ -7,7 +7,7 @@
 Ubuntu の場合には以下のようにして、ビルドに必要なパッケージをインストールしてください。
 
 ```bash
-sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake clang
+sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev clang
 ```
 
 ### macOS の場合
