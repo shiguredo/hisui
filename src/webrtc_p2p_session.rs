@@ -13,10 +13,6 @@ use shiguredo_webrtc::{
 };
 use tokio::sync::mpsc;
 
-use crate::json::JsonObject;
-
-// FactoryHolder
-
 struct FactoryHolder {
     factory: Arc<PeerConnectionFactory>,
     _network: Thread,
@@ -68,8 +64,6 @@ impl FactoryHolder {
     }
 }
 
-// コールバックイベント
-
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
     DataChannel(DataChannel),
@@ -85,8 +79,6 @@ enum PcEvent {
         message: crate::Message,
     },
 }
-
-// signaling JSON
 
 struct SignalingMessage {
     msg_type: String,
@@ -119,8 +111,6 @@ fn make_offer_json(sdp: &str) -> String {
     .to_string()
 }
 
-// Session
-
 struct Session {
     handle: crate::MediaPipelineHandle,
     processor_handle: crate::ProcessorHandle,
@@ -150,8 +140,6 @@ struct VideoTrackState {
     source: AdaptedVideoTrackSource,
     _track: shiguredo_webrtc::VideoTrack,
 }
-
-// 公開 API
 
 pub enum BootstrapError {
     SessionAlreadyExists,
@@ -781,21 +769,21 @@ async fn handle_subscribe_rpc(
         kind: SubscribeKind,
     }
 
-    let obj = JsonObject::new(req)?;
-    let params_value = obj.get_required_with("params", Ok)?;
+    let params_value = req.to_member("params")?.required()?;
     let mut items: Vec<SubscribeItem> = params_value
         .to_array()?
         .map(|value| {
-            let item = JsonObject::new(value)?;
-            let track_id = item.get_required("trackId")?;
-            let kind = item.get_required_with("kind", |v| {
-                let kind = v.as_string_str()?;
-                match kind {
-                    "audio" => Ok(SubscribeKind::Audio),
-                    "video" => Ok(SubscribeKind::Video),
-                    _ => Err(v.invalid("kind must be \"audio\" or \"video\"")),
+            let track_id: crate::TrackId = value.to_member("trackId")?.required()?.try_into()?;
+            let kind = match value.to_member("kind")?.required()?.as_string_str()? {
+                "audio" => SubscribeKind::Audio,
+                "video" => SubscribeKind::Video,
+                _ => {
+                    return Err(value
+                        .to_member("kind")?
+                        .required()?
+                        .invalid("kind must be \"audio\" or \"video\""));
                 }
-            })?;
+            };
             Ok(SubscribeItem { track_id, kind })
         })
         .collect::<Result<_, nojson::JsonParseError>>()?;
