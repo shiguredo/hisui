@@ -735,28 +735,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_whip_publisher_rejects_audio_mline_param() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{"outputUrl":"https://example.com/whip/live","audioMline":true}}"#;
-
-        let response = handle
-            .rpc(request.as_bytes())
-            .await
-            .expect("response must exist");
-
-        assert_eq!(
-            error_code(&response).expect("parse error.code"),
-            crate::jsonrpc::INVALID_PARAMS
-        );
-
-        drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
-    }
-
-    #[tokio::test]
     async fn list_processors_returns_empty_array_when_no_processors() {
         let (handle, pipeline_task) = spawn_test_pipeline();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;

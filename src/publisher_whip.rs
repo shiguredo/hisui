@@ -50,13 +50,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhipPublisher {
             return Err(value.to_member("outputUrl")?.required()?.invalid(e));
         }
 
-        if value.to_member("audioMline")?.get().is_some() {
-            return Err(value
-                .to_member("audioMline")?
-                .required()?
-                .invalid("audioMline is no longer supported"));
-        }
-
         let input_video_track_id: Option<TrackId> =
             value.to_member("inputVideoTrackId")?.try_into()?;
         let input_audio_track_id: Option<TrackId> =
@@ -848,16 +841,6 @@ mod tests {
         let publisher: WhipPublisher = crate::json::parse_str(json).expect("parse");
         assert!(publisher.input_video_track_id.is_none());
         assert!(publisher.input_audio_track_id.is_none());
-    }
-
-    #[test]
-    fn whip_publisher_rejects_audio_mline_param() {
-        let json = r#"{
-            "outputUrl":"https://example.com/whip/live",
-            "audioMline":true
-        }"#;
-        let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
-        assert!(result.is_err());
     }
 
     #[test]
