@@ -1,20 +1,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nojson::RawJson;
 use shiguredo_webrtc::{
-    AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
-    AudioProcessingBuilder, CreateSessionDescriptionObserver, DataChannel, DataChannelInit,
-    DataChannelObserverBuilder, Environment, PeerConnection, PeerConnectionDependencies,
-    PeerConnectionFactory, PeerConnectionFactoryDependencies, PeerConnectionObserverBuilder,
-    PeerConnectionOfferAnswerOptions, PeerConnectionRtcConfiguration, PeerConnectionState,
-    RtcEventLogFactory, SdpType, SessionDescription, SetLocalDescriptionObserver,
-    SetRemoteDescriptionObserver, Thread,
+    AdaptedVideoTrackSource, AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer,
+    AudioEncoderFactory, AudioProcessingBuilder, CreateSessionDescriptionObserver, CxxString,
+    DataChannel, DataChannelInit, DataChannelObserverBuilder, Environment, PeerConnection,
+    PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionFactoryDependencies,
+    PeerConnectionObserverBuilder, PeerConnectionOfferAnswerOptions,
+    PeerConnectionRtcConfiguration, PeerConnectionState, RtcEventLogFactory, SdpType,
+    SessionDescription, SetLocalDescriptionObserver, SetRemoteDescriptionObserver, StringVector,
+    Thread,
 };
 use tokio::sync::mpsc;
 
 use crate::json::JsonObject;
-use shiguredo_webrtc::{AdaptedVideoTrackSource, CxxString, StringVector};
 
 // FactoryHolder
 
@@ -96,7 +95,7 @@ struct SignalingMessage {
 
 fn parse_signaling_message(data: &[u8]) -> Option<SignalingMessage> {
     let text = std::str::from_utf8(data).ok()?;
-    let json = RawJson::parse(text).ok()?;
+    let json = nojson::RawJson::parse(text).ok()?;
     let v = json.value();
     let msg_type: String = v.to_member("type").ok()?.required().ok()?.try_into().ok()?;
     let sdp: Option<String> = v.to_member("sdp").ok()?.try_into().ok()?;
