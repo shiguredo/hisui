@@ -130,12 +130,12 @@ async fn run_server(
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
     // TLS が指定されている場合は TlsAcceptor を作成する
-    let tls_acceptor: Option<TlsAcceptor> = match (&https_cert_path, &https_key_path) {
-        (Some(cert_path), Some(key_path)) => {
-            Some(create_server_tls_acceptor(cert_path, key_path).await?)
-        }
-        _ => None,
-    };
+    let tls_acceptor: Option<TlsAcceptor> =
+        if let Some((cert_path, key_path)) = https_cert_path.zip(https_key_path) {
+            Some(create_server_tls_acceptor(&cert_path, &key_path).await?)
+        } else {
+            None
+        };
 
     let scheme = if tls_acceptor.is_some() {
         "https"
