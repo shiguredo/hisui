@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::Duration;
 
 use shiguredo_http11::{Request, Response, ResponseDecoder, uri::Uri};
@@ -235,7 +235,7 @@ impl nojson::DisplayJson for VideoCodecPreference {
 
 struct WhipSession {
     #[expect(dead_code)]
-    factory_bundle: Arc<crate::webrtc_factory::WebRtcFactoryBundle>,
+    factory_bundle: Rc<crate::webrtc_factory::WebRtcFactoryBundle>,
     #[expect(dead_code)]
     observer: PeerConnectionObserver,
     pc: Option<PeerConnection>,
@@ -252,11 +252,9 @@ impl WhipSession {
         create_video_track: bool,
         video_codec_preferences: &[VideoCodecPreference],
     ) -> crate::Result<Self> {
-        #[expect(clippy::arc_with_non_send_sync)]
         let (factory_bundle, audio_sink) =
             crate::webrtc_factory::WebRtcFactoryBundle::new_with_audio_transport_sink()?;
-        #[expect(clippy::arc_with_non_send_sync)]
-        let factory_bundle = Arc::new(factory_bundle);
+        let factory_bundle = Rc::new(factory_bundle);
         let factory = factory_bundle.factory();
 
         let observer = PeerConnectionObserverBuilder::new()
