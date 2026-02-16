@@ -270,6 +270,24 @@ impl WhipSession {
             .on_connection_change(|state| {
                 tracing::info!("WHIP PeerConnection state changed: {state:?}");
             })
+            .on_ice_candidate(|candidate| {
+                let sdp_mid = candidate
+                    .sdp_mid()
+                    .unwrap_or_else(|_| "<unknown>".to_owned());
+                let sdp_mline_index = candidate.sdp_mline_index();
+                match candidate.to_string() {
+                    Ok(c) => {
+                        tracing::debug!(
+                            "WHIP local ICE candidate gathered: sdpMid={sdp_mid}, sdpMLineIndex={sdp_mline_index}, candidate={c}"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            "WHIP local ICE candidate gathered: sdpMid={sdp_mid}, sdpMLineIndex={sdp_mline_index}, candidate=<failed to stringify: {e}>"
+                        );
+                    }
+                }
+            })
             .build();
         let mut deps = PeerConnectionDependencies::new(&observer);
         let mut pc_config = PeerConnectionRtcConfiguration::new();
@@ -484,7 +502,7 @@ async fn exchange_offer_answer(
     bearer_token: Option<&str>,
 ) -> crate::Result<()> {
     let offer_sdp = crate::webrtc_sdp::create_offer_sdp(pc)?;
-    crate::webrtc_sdp::set_local_offer(pc, &offer_sdp)?;
+    log_sdp_candidates("WHIP offer", &offer_sdp);
 
     let response = send_offer(output_url, bearer_token, &offer_sdp).await?;
     if response.status_code != 201 {
@@ -493,13 +511,18 @@ async fn exchange_offer_answer(
             response.status_code
         )));
     }
+
+    // Link ヘッダーの ICE server を先に適用してから local offer をセットする。
+    // これにより、ICE 候補収集開始時点で TURN/STUN 設定を反映できる。
     apply_ice_servers_from_link_header(pc, &response)?;
+    crate::webrtc_sdp::set_local_offer(pc, &offer_sdp)?;
 
     let answer_sdp = String::from_utf8(response.body)
         .map_err(|e| Error::new(format!("failed to decode answer SDP as UTF-8: {e}")))?;
     if answer_sdp.trim().is_empty() {
         return Err(Error::new("WHIP endpoint returned empty answer SDP"));
     }
+    log_sdp_candidates("WHIP answer", &answer_sdp);
     crate::webrtc_sdp::set_remote_answer(pc, &answer_sdp)?;
 
     Ok(())
@@ -510,12 +533,20 @@ fn apply_ice_servers_from_link_header(
     response: &Response,
 ) -> crate::Result<()> {
     let Some(link_header) = response.get_header("Link") else {
+        tracing::debug!("WHIP response does not contain Link header for ICE servers");
         return Ok(());
     };
     let parsed = parse_link_header(link_header);
     if parsed.urls.is_empty() {
+        tracing::debug!("WHIP Link header does not include ICE server URLs");
         return Ok(());
     }
+    tracing::debug!(
+        "WHIP Link header parsed: urls={:?}, username_present={}, credential_present={}",
+        parsed.urls,
+        parsed.username.is_some(),
+        parsed.credential.is_some()
+    );
 
     let mut config = PeerConnectionRtcConfiguration::new();
     let mut server = IceServer::new();
@@ -534,6 +565,36 @@ fn apply_ice_servers_from_link_header(
         .map_err(|e| Error::new(format!("failed to apply ICE servers from Link header: {e}")))?;
 
     Ok(())
+}
+
+fn log_sdp_candidates(label: &str, sdp: &str) {
+    let mut candidates = Vec::new();
+    let mut has_end_of_candidates = false;
+
+    for line in sdp.lines() {
+        let line = line.trim();
+        if line.starts_with("a=candidate:") {
+            candidates.push(line);
+        } else if line == "a=end-of-candidates" {
+            has_end_of_candidates = true;
+        }
+    }
+
+    tracing::debug!(
+        "{label} SDP candidate summary: count={}, end_of_candidates={}",
+        candidates.len(),
+        has_end_of_candidates
+    );
+
+    for line in candidates.iter().take(10) {
+        tracing::debug!("{label} SDP candidate: {line}");
+    }
+    if candidates.len() > 10 {
+        tracing::debug!(
+            "{label} SDP candidate lines are omitted: {}",
+            candidates.len() - 10
+        );
+    }
 }
 
 struct RequestTarget {
