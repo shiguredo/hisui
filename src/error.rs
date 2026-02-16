@@ -27,6 +27,12 @@ impl Error {
             backtrace: Backtrace::capture(),
         }
     }
+
+    /// 既存の [`Error`] に文脈情報を追加する
+    pub fn with_context(mut self, context: impl AsRef<str>) -> Self {
+        self.reason = format!("{}: {}", context.as_ref(), self.reason);
+        self
+    }
 }
 
 impl std::fmt::Debug for Error {
@@ -55,5 +61,29 @@ impl<E: std::error::Error> From<E> for Error {
     #[track_caller]
     fn from(e: E) -> Self {
         Self::new(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_context_adds_prefix() {
+        let err = Error::new("inner reason").with_context("outer context");
+        assert_eq!(err.reason, "outer context: inner reason");
+    }
+
+    #[test]
+    fn with_context_preserves_location_and_backtrace_status() {
+        let err = Error::new("inner");
+        let location = err.location;
+        let backtrace_status = err.backtrace.status();
+
+        let err = err.with_context("outer");
+
+        assert_eq!(err.location.file(), location.file());
+        assert_eq!(err.location.line(), location.line());
+        assert_eq!(err.backtrace.status(), backtrace_status);
     }
 }

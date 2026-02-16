@@ -15,6 +15,15 @@
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
   - 未指定の場合は従来通り 404 を返す
   - @voluntas
+- [ADD] MediaPipeline 用の WHIP publisher を追加する
+  - JSON-RPC に `createWhipPublisher` メソッドを追加する
+  - `outputUrl` を指定して `inputVideoTrackId` / `inputAudioTrackId` のトラックを WHIP で publish できる
+  - `bearerToken` で Authorization ヘッダーの Bearer トークンを指定できる
+  - `videoCodecPreferences` で映像コーデック優先順を指定できる
+  - @sile
+- [ADD] 環境変数 `HISUI_WEBRTC_LOG` で WebRTC ネイティブログを有効化できるようにする
+  - `verbose` / `info` / `warning` / `error` / `none` を指定できる
+  - @sile
 - [ADD] server サブコマンドに `--startup-rpc-file` オプションを追加する
   - 起動時に実行する RPC リストを指定することができる機能
   - @sile

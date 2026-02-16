@@ -832,7 +832,7 @@ mod tests {
 
     #[tokio::test]
     async fn video_realtime_mixer_two_tracks_smoke() -> crate::Result<()> {
-        let pipeline = crate::MediaPipeline::new();
+        let pipeline = crate::MediaPipeline::new()?;
         let pipeline_handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -938,7 +938,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_input_receiver_forwards_syn_and_ack_waits_until_event_drop() -> crate::Result<()>
     {
-        let pipeline = crate::MediaPipeline::new();
+        let pipeline = crate::MediaPipeline::new()?;
         let pipeline_handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 

@@ -58,6 +58,7 @@ impl MediaPipelineHandle {
         let result = match method {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
+            "createWhipPublisher" => self.handle_create_whip_publisher_rpc(maybe_params).await,
             "listTracks" => self.handle_list_tracks_rpc().await,
             "listProcessors" => self.handle_list_processors_rpc().await,
             _ => Err(method_not_found()),
@@ -133,6 +134,32 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::CreateVideoMixer { processor_id })
     }
 
+    async fn handle_create_whip_publisher_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (publisher, processor_id): (crate::publisher_whip::WhipPublisher, Option<ProcessorId>) =
+            parse_params(maybe_params, |params| {
+                let publisher = params.try_into()?;
+                let processor_id = params.to_member("processorId")?.try_into()?;
+                Ok((publisher, processor_id))
+            })?;
+        let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("whipPublisher"));
+
+        self.spawn_local_processor(processor_id.clone(), move |handle| publisher.run(handle))
+            .await
+            .map_err(|e| match e {
+                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                    "Invalid params: processorId already exists: {processor_id}"
+                )),
+                RegisterProcessorError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
+            })?;
+
+        Ok(RpcSuccessResult::CreateWhipPublisher { processor_id })
+    }
+
     async fn handle_list_tracks_rpc(&self) -> Result<RpcSuccessResult, RpcError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.send(MediaPipelineCommand::ListTracks { reply_tx });
@@ -159,6 +186,7 @@ impl MediaPipelineHandle {
 enum RpcSuccessResult {
     CreateMp4FileSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
+    CreateWhipPublisher { processor_id: ProcessorId },
     ListTracks { track_ids: Vec<TrackId> },
     ListProcessors { processor_ids: Vec<ProcessorId> },
 }
@@ -170,6 +198,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateVideoMixer { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateWhipPublisher { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::ListTracks { track_ids } => f.array(|f| {
@@ -474,6 +505,210 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_whip_publisher_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{"outputUrl":"ws://example.com/whip/live","inputVideoTrackId":"video-main"}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whip_publisher_request(None, None, Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "whipPublisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whip_publisher_request(
+            Some("custom-whip-publisher"),
+            None,
+            Some("video-main"),
+            None,
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-whip-publisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_accepts_bearer_token() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request =
+            create_whip_publisher_request(None, Some("test-token"), Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "whipPublisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_rejects_empty_bearer_token() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whip_publisher_request(None, Some("   "), Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let blocker = handle
+            .register_processor(ProcessorId::new("duplicate-whip-publisher"))
+            .await
+            .expect("register duplicate-whip-publisher");
+        let request = create_whip_publisher_request(
+            Some("duplicate-whip-publisher"),
+            None,
+            Some("video-main"),
+            None,
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_accepts_input_audio_track_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whip_publisher_request(None, None, None, Some("audio-main"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "whipPublisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whip_publisher_accepts_without_input_track_ids() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whip_publisher_request(None, None, None, None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "whipPublisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
     async fn list_processors_returns_empty_array_when_no_processors() {
         let (handle, pipeline_task) = spawn_test_pipeline();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;
@@ -612,7 +847,7 @@ mod tests {
     }
 
     fn spawn_test_pipeline() -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
-        let pipeline = MediaPipeline::new();
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         (handle, pipeline_task)
@@ -671,6 +906,30 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createVideoMixer","params":{{"canvasWidth":640,"canvasHeight":480,"frameRate":30,"inputTracks":[{{"trackId":"video-input-track","x":0,"y":0,"z":0}}],"outputTrackId":"{output_track_id}"{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_whip_publisher_request(
+        processor_id: Option<&str>,
+        bearer_token: Option<&str>,
+        input_video_track_id: Option<&str>,
+        input_audio_track_id: Option<&str>,
+    ) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+        let bearer_token_part = bearer_token
+            .map(|token| format!(r#","bearerToken":"{token}""#))
+            .unwrap_or_default();
+        let input_video_track_id_part = input_video_track_id
+            .map(|id| format!(r#","inputVideoTrackId":"{id}""#))
+            .unwrap_or_default();
+        let input_audio_track_id_part = input_audio_track_id
+            .map(|id| format!(r#","inputAudioTrackId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{{"outputUrl":"https://example.com/whip/live"{input_video_track_id_part}{input_audio_track_id_part}{bearer_token_part}{processor_id_part}}}}}"#
         )
     }
 }

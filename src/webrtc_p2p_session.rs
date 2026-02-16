@@ -1,68 +1,12 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use shiguredo_webrtc::{
-    AdaptedVideoTrackSource, AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer,
-    AudioEncoderFactory, AudioProcessingBuilder, CreateSessionDescriptionObserver, CxxString,
-    DataChannel, DataChannelInit, DataChannelObserverBuilder, Environment, PeerConnection,
-    PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionFactoryDependencies,
-    PeerConnectionObserverBuilder, PeerConnectionOfferAnswerOptions,
-    PeerConnectionRtcConfiguration, PeerConnectionState, RtcEventLogFactory, SdpType,
-    SessionDescription, SetLocalDescriptionObserver, SetRemoteDescriptionObserver, StringVector,
-    Thread,
+    AdaptedVideoTrackSource, CxxString, DataChannel, DataChannelInit, DataChannelObserverBuilder,
+    PeerConnection, PeerConnectionDependencies, PeerConnectionFactory,
+    PeerConnectionObserverBuilder, PeerConnectionRtcConfiguration, PeerConnectionState,
+    StringVector,
 };
 use tokio::sync::mpsc;
-
-struct FactoryHolder {
-    factory: Arc<PeerConnectionFactory>,
-    _network: Thread,
-    _worker: Thread,
-    _signaling: Thread,
-}
-
-impl FactoryHolder {
-    fn new() -> Option<Self> {
-        let env = Environment::new();
-        let mut network = Thread::new_with_socket_server();
-        let mut worker = Thread::new();
-        let mut signaling = Thread::new();
-        network.start();
-        worker.start();
-        signaling.start();
-
-        let mut deps = PeerConnectionFactoryDependencies::new();
-        deps.set_network_thread(&network);
-        deps.set_worker_thread(&worker);
-        deps.set_signaling_thread(&signaling);
-        let event_log = RtcEventLogFactory::new();
-        deps.set_event_log_factory(event_log);
-        let adm = AudioDeviceModule::new(&env, AudioDeviceModuleAudioLayer::Dummy).ok()?;
-        deps.set_audio_device_module(&adm);
-        let audio_enc = AudioEncoderFactory::builtin();
-        let audio_dec = AudioDecoderFactory::builtin();
-        deps.set_audio_encoder_factory(&audio_enc);
-        deps.set_audio_decoder_factory(&audio_dec);
-        let video_enc = shiguredo_webrtc::VideoEncoderFactory::builtin();
-        let video_dec = shiguredo_webrtc::VideoDecoderFactory::builtin();
-        deps.set_video_encoder_factory(video_enc);
-        deps.set_video_decoder_factory(video_dec);
-        let apb = AudioProcessingBuilder::new_builtin();
-        deps.set_audio_processing_builder(apb);
-        deps.enable_media();
-
-        let factory = PeerConnectionFactory::create_modular(&mut deps).ok()?;
-        Some(Self {
-            factory: Arc::new(factory),
-            _network: network,
-            _worker: worker,
-            _signaling: signaling,
-        })
-    }
-
-    fn factory(&self) -> Arc<PeerConnectionFactory> {
-        self.factory.clone()
-    }
-}
 
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
@@ -147,7 +91,7 @@ pub enum BootstrapError {
 }
 
 pub struct WebRtcP2pSessionManager {
-    factory_holder: Arc<FactoryHolder>,
+    factory_bundle: Arc<crate::webrtc_factory::WebRtcFactoryBundle>,
     pipeline_handle: crate::MediaPipelineHandle,
     session: Arc<tokio::sync::Mutex<Option<Session>>>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
@@ -156,10 +100,7 @@ pub struct WebRtcP2pSessionManager {
 impl WebRtcP2pSessionManager {
     pub fn new(handle: crate::MediaPipelineHandle) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
-        let factory_holder = Arc::new(
-            FactoryHolder::new()
-                .ok_or_else(|| crate::Error::new("Failed to create FactoryHolder"))?,
-        );
+        let factory_bundle = Arc::new(crate::webrtc_factory::WebRtcFactoryBundle::new()?);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PcEvent>();
         let session: Arc<tokio::sync::Mutex<Option<Session>>> =
             Arc::new(tokio::sync::Mutex::new(None));
@@ -216,7 +157,7 @@ impl WebRtcP2pSessionManager {
         });
 
         Ok(Self {
-            factory_holder,
+            factory_bundle,
             pipeline_handle: handle,
             session,
             event_tx,
@@ -253,7 +194,7 @@ impl WebRtcP2pSessionManager {
         }
 
         match bootstrap_internal(
-            self.factory_holder.factory(),
+            self.factory_bundle.factory(),
             offer_sdp,
             self.event_tx.clone(),
             self.pipeline_handle.clone(),
@@ -331,71 +272,9 @@ fn bootstrap_internal(
         .build();
     rpc_dc.register_observer(&rpc_observer);
 
-    // リモート SDP (offer) を設定
-    let offer = SessionDescription::new(SdpType::Offer, offer_sdp)
-        .map_err(|e| crate::Error::new(format!("Failed to parse offer SDP: {e}")))?;
-    let (srd_tx, srd_rx) = std::sync::mpsc::channel::<Option<String>>();
-    let srd_obs = SetRemoteDescriptionObserver::new(move |err| {
-        let msg = if err.ok() {
-            None
-        } else {
-            Some(err.message().unwrap_or_else(|_| "unknown".to_string()))
-        };
-        let _ = srd_tx.send(msg);
-    });
-    pc.set_remote_description(offer, &srd_obs);
-    let srd_result = srd_rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| crate::Error::new("set_remote_description timeout"))?;
-    if let Some(err) = srd_result {
-        return Err(crate::Error::new(format!(
-            "set_remote_description error: {err}"
-        )));
-    }
-
-    // Answer を作成
-    let mut opts = PeerConnectionOfferAnswerOptions::new();
-    let (answer_tx, answer_rx) = std::sync::mpsc::channel::<crate::Result<String>>();
-    let answer_tx_ok = answer_tx.clone();
-    let mut answer_obs = CreateSessionDescriptionObserver::new(
-        move |desc| {
-            let sdp = desc
-                .to_string()
-                .map_err(|e| crate::Error::new(format!("Failed to convert answer to string: {e}")));
-            let _ = answer_tx_ok.send(sdp);
-        },
-        move |err| {
-            let msg = err.message().unwrap_or_else(|_| "unknown".to_string());
-            let _ = answer_tx.send(Err(crate::Error::new(msg)));
-        },
-    );
-    pc.create_answer(&mut answer_obs, &mut opts);
-    let answer_sdp = answer_rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| crate::Error::new("create_answer timeout"))?
-        .map_err(|e| crate::Error::new(format!("create_answer error: {e}")))?;
-
-    // ローカル SDP (answer) を設定
-    let answer = SessionDescription::new(SdpType::Answer, &answer_sdp)
-        .map_err(|e| crate::Error::new(format!("Failed to parse answer SDP: {e}")))?;
-    let (sld_tx, sld_rx) = std::sync::mpsc::channel::<Option<String>>();
-    let sld_obs = SetLocalDescriptionObserver::new(move |err| {
-        let msg = if err.ok() {
-            None
-        } else {
-            Some(err.message().unwrap_or_else(|_| "unknown".to_string()))
-        };
-        let _ = sld_tx.send(msg);
-    });
-    pc.set_local_description(answer, &sld_obs);
-    let sld_result = sld_rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| crate::Error::new("set_local_description timeout"))?;
-    if let Some(err) = sld_result {
-        return Err(crate::Error::new(format!(
-            "set_local_description error: {err}"
-        )));
-    }
+    crate::webrtc_sdp::set_remote_offer(&pc, offer_sdp)?;
+    let answer_sdp = crate::webrtc_sdp::create_answer_sdp(&pc)?;
+    crate::webrtc_sdp::set_local_answer(&pc, &answer_sdp)?;
 
     let sess = Session {
         handle,
@@ -460,45 +339,24 @@ fn handle_answer(sess: &mut Session, sdp: Option<&str>) -> bool {
         return true;
     };
 
-    let answer = match SessionDescription::new(SdpType::Answer, sdp) {
-        Ok(d) => d,
-        Err(e) => {
-            send_close(sess, "sdp-error", &format!("{e}"));
+    if let Err(e) = crate::webrtc_sdp::set_remote_answer(&sess.pc, sdp) {
+        if e.reason.contains("timed out") {
+            send_close(sess, "timeout", &e.reason);
+        } else {
+            send_close(sess, "srd-error", &e.reason);
+        }
+        return true;
+    }
+
+    sess.in_flight_offer = false;
+    if sess.pending_renegotiation {
+        sess.pending_renegotiation = false;
+        if let Err(e) = maybe_send_offer(sess) {
+            send_close(sess, "sdp-error", &e.reason);
             return true;
         }
-    };
-
-    let (srd_tx, srd_rx) = std::sync::mpsc::channel::<Option<String>>();
-    let srd_obs = SetRemoteDescriptionObserver::new(move |err| {
-        let msg = if err.ok() {
-            None
-        } else {
-            Some(err.message().unwrap_or_else(|_| "unknown".to_string()))
-        };
-        let _ = srd_tx.send(msg);
-    });
-    sess.pc.set_remote_description(answer, &srd_obs);
-    match srd_rx.recv_timeout(Duration::from_secs(5)) {
-        Ok(None) => {
-            sess.in_flight_offer = false;
-            if sess.pending_renegotiation {
-                sess.pending_renegotiation = false;
-                if let Err(e) = maybe_send_offer(sess) {
-                    send_close(sess, "sdp-error", &e.reason);
-                    return true;
-                }
-            }
-            false
-        }
-        Ok(Some(e)) => {
-            send_close(sess, "srd-error", &e);
-            true
-        }
-        Err(_) => {
-            send_close(sess, "timeout", "set_remote_description timeout");
-            true
-        }
     }
+    false
 }
 
 fn send_close(sess: &Session, code: &str, reason: &str) {
@@ -588,7 +446,8 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     let TrackState::Video(state) = &mut subscribed.state else {
                         return;
                     };
-                    if let Err(e) = push_i420_frame(&mut state.source, &frame) {
+                    if let Err(e) = crate::webrtc_video::push_i420_frame(&mut state.source, &frame)
+                    {
                         tracing::warn!("Failed to send video frame for track {track_id}: {e}");
                     }
                 }
@@ -641,118 +500,12 @@ fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
     }
     sess.pending_renegotiation = false;
 
-    let mut opts = PeerConnectionOfferAnswerOptions::new();
-    let (offer_tx, offer_rx) = std::sync::mpsc::channel::<crate::Result<String>>();
-    let offer_tx_ok = offer_tx.clone();
-    let mut offer_obs = CreateSessionDescriptionObserver::new(
-        move |desc| {
-            let sdp = desc
-                .to_string()
-                .map_err(|e| crate::Error::new(format!("Failed to convert offer to string: {e}")));
-            let _ = offer_tx_ok.send(sdp);
-        },
-        move |err| {
-            let msg = err.message().unwrap_or_else(|_| "unknown".to_string());
-            let _ = offer_tx.send(Err(crate::Error::new(msg)));
-        },
-    );
-    sess.pc.create_offer(&mut offer_obs, &mut opts);
-    let offer_sdp = offer_rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| crate::Error::new("create_offer timeout"))?
-        .map_err(|e| crate::Error::new(format!("create_offer error: {e}")))?;
-
-    let offer = SessionDescription::new(SdpType::Offer, &offer_sdp)
-        .map_err(|e| crate::Error::new(format!("Failed to parse offer SDP: {e}")))?;
-    let (sld_tx, sld_rx) = std::sync::mpsc::channel::<Option<String>>();
-    let sld_obs = SetLocalDescriptionObserver::new(move |err| {
-        let msg = if err.ok() {
-            None
-        } else {
-            Some(err.message().unwrap_or_else(|_| "unknown".to_string()))
-        };
-        let _ = sld_tx.send(msg);
-    });
-    sess.pc.set_local_description(offer, &sld_obs);
-    let sld_result = sld_rx
-        .recv_timeout(Duration::from_secs(5))
-        .map_err(|_| crate::Error::new("set_local_description timeout"))?;
-    if let Some(err) = sld_result {
-        return Err(crate::Error::new(format!(
-            "set_local_description error: {err}"
-        )));
-    }
+    let offer_sdp = crate::webrtc_sdp::create_offer_sdp(&sess.pc)?;
+    crate::webrtc_sdp::set_local_offer(&sess.pc, &offer_sdp)?;
 
     send_dc(sess, &make_offer_json(&offer_sdp));
     sess.in_flight_offer = true;
     Ok(())
-}
-
-fn push_i420_frame(
-    source: &mut AdaptedVideoTrackSource,
-    frame: &crate::VideoFrame,
-) -> crate::Result<()> {
-    let width: usize = frame.width;
-    let height: usize = frame.height;
-    if width == 0 || height == 0 {
-        return Err(crate::Error::new("invalid frame size"));
-    }
-
-    let uv_width = width.div_ceil(2);
-    let uv_height = height.div_ceil(2);
-    let y_size = width * height;
-    let uv_size = uv_width * uv_height;
-    if frame.data.len() < y_size + uv_size * 2 {
-        return Err(crate::Error::new("insufficient I420 data"));
-    }
-
-    let (y_plane, rest) = frame.data.split_at(y_size);
-    let (u_plane, v_plane) = rest.split_at(uv_size);
-
-    let buffer = shiguredo_webrtc::I420Buffer::new(width as i32, height as i32);
-
-    // I420Buffer は内部的に可変領域を持つが、API は読み取り専用参照を返すため、
-    // ここでは安全性を確認した上で raw ポインタに書き込む。
-    unsafe {
-        copy_plane(
-            buffer.y_data().as_ptr() as *mut u8,
-            buffer.stride_y() as usize,
-            y_plane,
-            width,
-            height,
-        );
-        copy_plane(
-            buffer.u_data().as_ptr() as *mut u8,
-            buffer.stride_u() as usize,
-            u_plane,
-            uv_width,
-            uv_height,
-        );
-        copy_plane(
-            buffer.v_data().as_ptr() as *mut u8,
-            buffer.stride_v() as usize,
-            v_plane,
-            uv_width,
-            uv_height,
-        );
-    }
-
-    let timestamp_us = frame.timestamp.as_micros() as i64;
-    let webrtc_frame = shiguredo_webrtc::VideoFrame::from_i420(&buffer, timestamp_us);
-    source.on_frame(&webrtc_frame);
-    Ok(())
-}
-
-unsafe fn copy_plane(dst: *mut u8, dst_stride: usize, src: &[u8], width: usize, height: usize) {
-    for row in 0..height {
-        let src_offset = row * width;
-        let dst_offset = row * dst_stride;
-        unsafe {
-            let src_ptr = src.as_ptr().add(src_offset);
-            let dst_ptr = dst.add(dst_offset);
-            std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, width);
-        }
-    }
 }
 
 async fn handle_subscribe_rpc(

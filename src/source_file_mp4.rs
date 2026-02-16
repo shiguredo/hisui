@@ -78,7 +78,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
 
 impl Mp4FileSource {
     pub async fn run(self, outer_processor: ProcessorHandle) -> Result<()> {
-        let inner_pipeline = MediaPipeline::new();
+        let inner_pipeline = MediaPipeline::new()?;
         let inner_handle = inner_pipeline.handle();
         let task = tokio::spawn(inner_pipeline.run());
 
@@ -186,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn mp4_file_source_decode_smoke() -> Result<()> {
-        let pipeline = MediaPipeline::new();
+        let pipeline = MediaPipeline::new()?;
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         {

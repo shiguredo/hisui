@@ -1,5 +1,6 @@
 use std::time::UNIX_EPOCH;
 
+use shiguredo_webrtc::log::Severity;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::format;
@@ -67,4 +68,76 @@ pub fn init(level: tracing::level_filters::LevelFilter) {
         .event_format(Formatter)
         .with_writer(std::io::stderr)
         .init();
+
+    init_webrtc_log_from_env();
+}
+
+fn init_webrtc_log_from_env() {
+    let Ok(raw) = std::env::var("HISUI_WEBRTC_LOG") else {
+        return;
+    };
+
+    let Some(severity) = parse_webrtc_log_severity(&raw) else {
+        tracing::warn!(
+            "invalid HISUI_WEBRTC_LOG value: {raw} (expected: verbose|info|warning|error|none)"
+        );
+        return;
+    };
+
+    shiguredo_webrtc::log::log_to_debug(severity);
+    if severity != Severity::None {
+        shiguredo_webrtc::log::enable_timestamps();
+        shiguredo_webrtc::log::enable_threads();
+    }
+    tracing::info!(
+        "WebRTC native log enabled: {}",
+        webrtc_log_severity_name(severity)
+    );
+}
+
+fn parse_webrtc_log_severity(value: &str) -> Option<Severity> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "verbose" => Some(Severity::Verbose),
+        "info" => Some(Severity::Info),
+        "warning" => Some(Severity::Warning),
+        "error" => Some(Severity::Error),
+        "none" => Some(Severity::None),
+        _ => None,
+    }
+}
+
+fn webrtc_log_severity_name(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Verbose => "verbose",
+        Severity::Info => "info",
+        Severity::Warning => "warning",
+        Severity::Error => "error",
+        Severity::None => "none",
+        _ => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_webrtc_log_severity_accepts_levels() {
+        assert_eq!(
+            parse_webrtc_log_severity("verbose"),
+            Some(Severity::Verbose)
+        );
+        assert_eq!(parse_webrtc_log_severity("info"), Some(Severity::Info));
+        assert_eq!(
+            parse_webrtc_log_severity("warning"),
+            Some(Severity::Warning)
+        );
+        assert_eq!(parse_webrtc_log_severity("error"), Some(Severity::Error));
+        assert_eq!(parse_webrtc_log_severity("none"), Some(Severity::None));
+    }
+
+    #[test]
+    fn parse_webrtc_log_severity_rejects_unknown_value() {
+        assert_eq!(parse_webrtc_log_severity("loud"), None);
+    }
 }
