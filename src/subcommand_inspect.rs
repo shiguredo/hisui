@@ -70,132 +70,110 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
     runtime.spawn(async move {
-        let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
-        if let Err(e) = pipeline_handle
-            .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
-                output_printer.run(handle)
-            })
-            .await
+        if let Err(e) =
+            setup_pipeline(pipeline_handle, input_file_path, format, decode, openh264).await
         {
-            tracing::error!("output_printer spawn failed: {e}");
-            return;
-        }
-
-        if decode {
-            let openh264_lib = match openh264
-                .clone()
-                .map(Openh264Library::load)
-                .transpose()
-                .map_err(|e| Error::new(e.to_string()))
-            {
-                Ok(lib) => lib,
-                Err(e) => {
-                    tracing::error!("failed to load openh264 library: {e}");
-                    return;
-                }
-            };
-
-            let audio_decoder = match AudioDecoder::new(
-                AUDIO_DECODER_INPUT_STREAM_ID,
-                AUDIO_DECODER_OUTPUT_STREAM_ID,
-            )
-            .map_err(|e| Error::new(e.to_string()))
-            {
-                Ok(decoder) => decoder,
-                Err(e) => {
-                    tracing::error!("failed to create audio decoder: {e}");
-                    return;
-                }
-            };
-            if let Err(e) = pipeline_handle
-                .spawn_processor(crate::ProcessorId::new("audio_decoder"), |handle| {
-                    audio_decoder.run(
-                        handle,
-                        crate::TrackId::new(AUDIO_ENCODED_TRACK_ID),
-                        crate::TrackId::new(AUDIO_DECODED_TRACK_ID),
-                    )
-                })
-                .await
-            {
-                tracing::error!("audio_decoder spawn failed: {e}");
-                return;
-            }
-
-            let video_decoder = VideoDecoder::new(
-                VIDEO_DECODER_INPUT_STREAM_ID,
-                VIDEO_DECODER_OUTPUT_STREAM_ID,
-                VideoDecoderOptions {
-                    openh264_lib,
-                    decode_params: Default::default(),
-                    engines: None,
-                },
-            );
-            if let Err(e) = pipeline_handle
-                .spawn_processor(crate::ProcessorId::new("video_decoder"), |handle| {
-                    video_decoder.run(
-                        handle,
-                        crate::TrackId::new(VIDEO_ENCODED_TRACK_ID),
-                        crate::TrackId::new(VIDEO_DECODED_TRACK_ID),
-                    )
-                })
-                .await
-            {
-                tracing::error!("video_decoder spawn failed: {e}");
-                return;
-            }
-        }
-
-        match format {
-            ContainerFormat::Mp4 => {
-                let reader = match Mp4FileReader::new(
-                    input_file_path,
-                    Mp4FileReaderOptions {
-                        realtime: false,
-                        loop_playback: false,
-                        audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
-                        video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
-                    },
-                ) {
-                    Ok(reader) => reader,
-                    Err(e) => {
-                        tracing::error!("failed to create mp4_file_reader: {e}");
-                        return;
-                    }
-                };
-
-                if let Err(e) = pipeline_handle
-                    .spawn_processor(crate::ProcessorId::new("mp4_file_reader"), |handle| {
-                        let reader = reader;
-                        async move { reader.run(handle).await }
-                    })
-                    .await
-                {
-                    tracing::error!("mp4_file_reader spawn failed: {e}");
-                }
-            }
-            ContainerFormat::Webm => {
-                let reader = WebmFileReader::new(
-                    input_file_path,
-                    WebmFileReaderOptions {
-                        audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
-                        video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
-                    },
-                );
-
-                if let Err(e) = pipeline_handle
-                    .spawn_processor(crate::ProcessorId::new("webm_file_reader"), |handle| {
-                        let reader = reader;
-                        async move { reader.run(handle).await }
-                    })
-                    .await
-                {
-                    tracing::error!("webm_file_reader spawn failed: {e}");
-                }
-            }
+            tracing::error!("pipeline setup failed: {e}");
         }
     });
 
     runtime.block_on(pipeline.run());
+    Ok(())
+}
+
+async fn setup_pipeline(
+    pipeline_handle: crate::MediaPipelineHandle,
+    input_file_path: PathBuf,
+    format: ContainerFormat,
+    decode: bool,
+    openh264: Option<PathBuf>,
+) -> Result<()> {
+    let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
+    pipeline_handle
+        .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
+            output_printer.run(handle)
+        })
+        .await?;
+
+    if decode {
+        let openh264_lib = openh264
+            .clone()
+            .map(Openh264Library::load)
+            .transpose()
+            .map_err(|e| Error::new(e.to_string()))?;
+
+        let audio_decoder = AudioDecoder::new(
+            AUDIO_DECODER_INPUT_STREAM_ID,
+            AUDIO_DECODER_OUTPUT_STREAM_ID,
+        )
+        .map_err(|e| Error::new(e.to_string()))?;
+
+        pipeline_handle
+            .spawn_processor(crate::ProcessorId::new("audio_decoder"), |handle| {
+                audio_decoder.run(
+                    handle,
+                    crate::TrackId::new(AUDIO_ENCODED_TRACK_ID),
+                    crate::TrackId::new(AUDIO_DECODED_TRACK_ID),
+                )
+            })
+            .await?;
+
+        let video_decoder = VideoDecoder::new(
+            VIDEO_DECODER_INPUT_STREAM_ID,
+            VIDEO_DECODER_OUTPUT_STREAM_ID,
+            VideoDecoderOptions {
+                openh264_lib,
+                decode_params: Default::default(),
+                engines: None,
+            },
+        );
+        pipeline_handle
+            .spawn_processor(crate::ProcessorId::new("video_decoder"), |handle| {
+                video_decoder.run(
+                    handle,
+                    crate::TrackId::new(VIDEO_ENCODED_TRACK_ID),
+                    crate::TrackId::new(VIDEO_DECODED_TRACK_ID),
+                )
+            })
+            .await?;
+    }
+
+    match format {
+        ContainerFormat::Mp4 => {
+            let reader = Mp4FileReader::new(
+                input_file_path,
+                Mp4FileReaderOptions {
+                    realtime: false,
+                    loop_playback: false,
+                    audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
+                    video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
+                },
+            )
+            .map_err(|e| Error::new(e.to_string()))?;
+
+            pipeline_handle
+                .spawn_processor(crate::ProcessorId::new("mp4_file_reader"), |handle| {
+                    reader.run(handle)
+                })
+                .await?;
+        }
+        ContainerFormat::Webm => {
+            let reader = WebmFileReader::new(
+                input_file_path,
+                WebmFileReaderOptions {
+                    audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
+                    video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
+                },
+            );
+
+            pipeline_handle
+                .spawn_processor(crate::ProcessorId::new("webm_file_reader"), |handle| {
+                    reader.run(handle)
+                })
+                .await?;
+        }
+    }
+
     Ok(())
 }
 
