@@ -82,7 +82,7 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
             return;
         }
         if ready_rx.await.is_err() {
-            tracing::error!("output_printer initialization failed before subscribing tracks");
+            tracing::error!("output_printer initialization failed before signaling ready");
             return;
         }
 
@@ -417,6 +417,7 @@ impl OutputPrinter {
 
         let video_decoded_track_id = self.video_decoded_track_id.clone();
         let mut video_decoded_track = handle.subscribe_track(video_decoded_track_id.clone());
+        // track の購読完了後、受信ループに入る直前で ready を通知する
         if let Some(ready_tx) = self.ready_tx.take() {
             let _ = ready_tx.send(());
         }
