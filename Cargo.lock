@@ -1161,8 +1161,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_webrtc"
-version = "0.145.0"
-source = "git+https://github.com/shiguredo/webrtc-rs.git#d87a3270da268cbc397a00658673e251b119694d"
+version = "0.145.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cba2e7f512af6e0e8d2798b80f7dfe449c9d4c13eb1d86a8865dccc1bbdaada3"
 dependencies = [
  "aws-lc-rs",
  "bindgen",
