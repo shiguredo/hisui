@@ -546,19 +546,14 @@ impl MessageSender {
     }
 
     async fn wait_for_first_subscriber(&mut self) -> bool {
-        loop {
-            match self.rx.recv().await {
-                Some(TrackCommand::AddSubscriber(tx)) => {
-                    self.txs.push(tx);
-                    self.has_first_subscriber = true;
-                    return self.drain_track_commands();
-                }
-                None => {
-                    self.txs.clear();
-                    return false;
-                }
-            }
+        if let Some(TrackCommand::AddSubscriber(tx)) = self.rx.recv().await {
+            self.txs.push(tx);
+            self.has_first_subscriber = true;
+            return self.drain_track_commands();
         }
+
+        self.txs.clear();
+        false
     }
 
     fn drain_track_commands(&mut self) -> bool {
