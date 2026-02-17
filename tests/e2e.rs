@@ -15,6 +15,173 @@ use hisui::{
 };
 use orfail::OrFail;
 
+fn run_hisui_command(args: &[&str]) -> noargs::Result<std::process::Output> {
+    let hisui_bin = env!("CARGO_BIN_EXE_hisui");
+    let output = std::process::Command::new(hisui_bin)
+        .args(["--verbose"])
+        .args(args)
+        .output()
+        .or_fail()?;
+
+    eprintln!("hisui args: --verbose {}", args.join(" "));
+    eprintln!("hisui stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+    eprintln!("hisui stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+
+    if !output.status.success() {
+        return Err("hisui command failed".into());
+    }
+
+    Ok(output)
+}
+
+#[test]
+fn inspect_mp4_without_decode() -> noargs::Result<()> {
+    let output = run_hisui_command(&["inspect", "testdata/archive-red-320x320-vp9.mp4"])?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+
+    let root = json.value();
+    assert_eq!(
+        root.to_member("format")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "mp4"
+    );
+
+    let mut video_sample_count = 0;
+    let mut has_decoded_data_size = false;
+    for sample in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+        if sample.to_member("decoded_data_size")?.get().is_some() {
+            has_decoded_data_size = true;
+        }
+    }
+
+    assert!(video_sample_count > 0, "video sample must exist");
+    assert!(
+        !has_decoded_data_size,
+        "decoded_data_size must not exist without --decode",
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "libvpx")]
+fn inspect_mp4_with_decode() -> noargs::Result<()> {
+    let output = run_hisui_command(&[
+        "inspect",
+        "--decode",
+        "testdata/archive-red-320x320-vp9.mp4",
+    ])?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+
+    let root = json.value();
+    assert_eq!(
+        root.to_member("format")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "mp4"
+    );
+
+    let mut video_sample_count = 0;
+    let mut has_decoded_data_size = false;
+    let mut has_resolution = false;
+    for sample in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+        if sample.to_member("decoded_data_size")?.get().is_some() {
+            has_decoded_data_size = true;
+        }
+        let has_width = sample.to_member("width")?.get().is_some();
+        let has_height = sample.to_member("height")?.get().is_some();
+        if has_width && has_height {
+            has_resolution = true;
+        }
+    }
+
+    assert!(video_sample_count > 0, "video sample must exist");
+    assert!(
+        has_decoded_data_size,
+        "decoded_data_size must exist with --decode",
+    );
+    assert!(has_resolution, "width and height must exist with --decode");
+    Ok(())
+}
+
+#[test]
+fn inspect_webm_without_decode() -> noargs::Result<()> {
+    let output = run_hisui_command(&["inspect", "testdata/archive-black-silent.webm"])?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+
+    let root = json.value();
+    assert_eq!(
+        root.to_member("format")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "webm"
+    );
+
+    let mut video_sample_count = 0;
+    let mut has_decoded_data_size = false;
+    for sample in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+        if sample.to_member("decoded_data_size")?.get().is_some() {
+            has_decoded_data_size = true;
+        }
+    }
+
+    assert!(video_sample_count > 0, "video sample must exist");
+    assert!(
+        !has_decoded_data_size,
+        "decoded_data_size must not exist without --decode",
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "libvpx")]
+fn inspect_webm_with_decode() -> noargs::Result<()> {
+    let output = run_hisui_command(&["inspect", "--decode", "testdata/archive-black-silent.webm"])?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+
+    let root = json.value();
+    assert_eq!(
+        root.to_member("format")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "webm"
+    );
+
+    let mut video_sample_count = 0;
+    let mut has_decoded_data_size = false;
+    let mut has_resolution = false;
+    for sample in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+        if sample.to_member("decoded_data_size")?.get().is_some() {
+            has_decoded_data_size = true;
+        }
+        let has_width = sample.to_member("width")?.get().is_some();
+        let has_height = sample.to_member("height")?.get().is_some();
+        if has_width && has_height {
+            has_resolution = true;
+        }
+    }
+
+    assert!(video_sample_count > 0, "video sample must exist");
+    assert!(
+        has_decoded_data_size,
+        "decoded_data_size must exist with --decode",
+    );
+    assert!(has_resolution, "width and height must exist with --decode");
+    Ok(())
+}
+
 /// ソースが空の場合
 #[test]
 #[cfg(feature = "libvpx")]

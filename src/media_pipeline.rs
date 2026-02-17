@@ -173,6 +173,7 @@ impl MediaPipeline {
         Ok(MessageSender {
             rx: command_rx,
             txs: Vec::new(),
+            has_first_subscriber: false,
         })
     }
 
@@ -503,50 +504,73 @@ enum TrackCommand {
 pub struct MessageSender {
     rx: tokio::sync::mpsc::UnboundedReceiver<TrackCommand>,
     txs: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
+    has_first_subscriber: bool,
 }
 
 impl MessageSender {
     // MediaPipeline が途中終了した場合は false が返される
-    pub fn send(&mut self, message: Message) -> bool {
-        loop {
-            match self.rx.try_recv() {
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                    break;
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    self.txs.clear();
-                    return false;
-                }
-                Ok(TrackCommand::AddSubscriber(tx)) => {
-                    self.txs.push(tx);
-                }
-            }
+    pub async fn send(&mut self, message: Message) -> bool {
+        if !self.has_first_subscriber && !self.wait_for_first_subscriber().await {
+            return false;
+        }
+        if !self.drain_track_commands() {
+            return false;
         }
 
         self.txs.retain_mut(|tx| tx.send(message.clone()).is_ok());
         true
     }
 
-    pub fn send_media(&mut self, sample: crate::MediaSample) -> bool {
-        self.send(Message::Media(sample))
+    pub async fn send_media(&mut self, sample: crate::MediaSample) -> bool {
+        self.send(Message::Media(sample)).await
     }
 
-    pub fn send_audio(&mut self, data: crate::AudioData) -> bool {
+    pub async fn send_audio(&mut self, data: crate::AudioData) -> bool {
         self.send(Message::Media(crate::MediaSample::new_audio(data)))
+            .await
     }
 
-    pub fn send_video(&mut self, frame: crate::VideoFrame) -> bool {
+    pub async fn send_video(&mut self, frame: crate::VideoFrame) -> bool {
         self.send(Message::Media(crate::MediaSample::new_video(frame)))
+            .await
     }
 
-    pub fn send_eos(&mut self) -> bool {
-        self.send(Message::Eos)
+    pub async fn send_eos(&mut self) -> bool {
+        self.send(Message::Eos).await
     }
 
-    pub fn send_syn(&mut self) -> Ack {
+    pub async fn send_syn(&mut self) -> Ack {
         let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
-        let _ = self.send(Message::Syn(Syn(tx))); // NOTE: ここでは false を特別扱いする必要はないので無視する
+        let _ = self.send(Message::Syn(Syn(tx))).await; // NOTE: ここでは false を特別扱いする必要はないので無視する
         Ack(rx)
+    }
+
+    async fn wait_for_first_subscriber(&mut self) -> bool {
+        if let Some(TrackCommand::AddSubscriber(tx)) = self.rx.recv().await {
+            self.txs.push(tx);
+            self.has_first_subscriber = true;
+            return self.drain_track_commands();
+        }
+
+        self.txs.clear();
+        false
+    }
+
+    fn drain_track_commands(&mut self) -> bool {
+        loop {
+            match self.rx.try_recv() {
+                Ok(TrackCommand::AddSubscriber(tx)) => {
+                    self.txs.push(tx);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    return true;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.txs.clear();
+                    return false;
+                }
+            }
+        }
     }
 }
 
@@ -674,6 +698,122 @@ mod tests {
 
         let _ = release_tx.send(());
 
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn send_waits_until_first_subscriber_arrives() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let sender = handle
+            .register_processor(ProcessorId::new("wait_sender"))
+            .await
+            .expect("failed to register sender");
+        let track_id = TrackId::new("wait-track");
+        let mut tx = sender
+            .publish_track(track_id.clone())
+            .await
+            .expect("failed to publish track");
+
+        let send = tx.send_eos();
+        tokio::pin!(send);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut send)
+                .await
+                .is_err(),
+            "send_eos must wait until first subscriber arrives"
+        );
+
+        let receiver = handle
+            .register_processor(ProcessorId::new("wait_receiver"))
+            .await
+            .expect("failed to register receiver");
+        let mut rx = receiver.subscribe_track(track_id);
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), &mut send)
+                .await
+                .expect("send_eos did not finish after subscriber arrived"),
+            "send_eos must succeed after first subscriber arrives"
+        );
+
+        let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("receiver did not get eos");
+        assert!(matches!(message, Message::Eos));
+
+        drop(rx);
+        drop(receiver);
+        drop(sender);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn send_syn_waits_until_first_subscriber_and_ack_waits_for_drop() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let sender = handle
+            .register_processor(ProcessorId::new("syn_sender"))
+            .await
+            .expect("failed to register sender");
+        let track_id = TrackId::new("syn-track");
+        let mut tx = sender
+            .publish_track(track_id.clone())
+            .await
+            .expect("failed to publish track");
+
+        let send_syn = tx.send_syn();
+        tokio::pin!(send_syn);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut send_syn)
+                .await
+                .is_err(),
+            "send_syn must wait until first subscriber arrives"
+        );
+
+        let receiver = handle
+            .register_processor(ProcessorId::new("syn_receiver"))
+            .await
+            .expect("failed to register receiver");
+        let mut rx = receiver.subscribe_track(track_id);
+
+        let ack = tokio::time::timeout(Duration::from_secs(2), &mut send_syn)
+            .await
+            .expect("send_syn did not finish after subscriber arrived");
+        tokio::pin!(ack);
+
+        let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("receiver did not get syn");
+        assert!(matches!(message, Message::Syn(_)));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut ack)
+                .await
+                .is_err(),
+            "ack must stay pending while syn message is held"
+        );
+
+        drop(message);
+        tokio::time::timeout(Duration::from_secs(2), &mut ack)
+            .await
+            .expect("ack did not complete after dropping syn message");
+
+        drop(rx);
+        drop(receiver);
+        drop(sender);
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
             .await

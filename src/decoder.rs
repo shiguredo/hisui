@@ -85,7 +85,7 @@ impl AudioDecoder {
             let finished = drain_decoder_output(&mut self, &mut output_tx).await?;
 
             if finished {
-                output_tx.send_eos();
+                output_tx.send_eos().await;
                 break;
             }
 
@@ -303,7 +303,7 @@ impl VideoDecoder {
             let finished = drain_decoder_output(&mut self, &mut output_tx).await?;
 
             if finished {
-                output_tx.send_eos();
+                output_tx.send_eos().await;
                 break;
             }
 
@@ -374,7 +374,7 @@ async fn drain_decoder_output<P: MediaProcessor>(
             .map_err(|e| Error::new(e.to_string()))?
         {
             MediaProcessorOutput::Processed { sample, .. } => {
-                if !output_tx.send_media(sample) {
+                if !output_tx.send_media(sample).await {
                     return Ok(true);
                 }
             }

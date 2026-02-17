@@ -37,14 +37,14 @@ impl AudioReader {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
 
-        let mut ack = track_handle.send_syn();
+        let mut ack = track_handle.send_syn().await;
         let mut noacked_sent = 0;
         loop {
             // 100 はとりあえずの暫定値。
             // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
             if noacked_sent > 100 {
                 ack.await;
-                ack = track_handle.send_syn();
+                ack = track_handle.send_syn().await;
                 noacked_sent = 0;
             }
 
@@ -62,7 +62,7 @@ impl AudioReader {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
 
-                    if !track_handle.send_media(MediaSample::new_audio(data)) {
+                    if !track_handle.send_media(MediaSample::new_audio(data)).await {
                         // パイプライン処理が中断された
                         break;
                     }
@@ -71,7 +71,7 @@ impl AudioReader {
             }
         }
 
-        track_handle.send_eos();
+        track_handle.send_eos().await;
 
         Ok(())
     }
@@ -247,14 +247,14 @@ impl VideoReader {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
 
-        let mut ack = track_handle.send_syn();
+        let mut ack = track_handle.send_syn().await;
         let mut noacked_sent = 0;
         loop {
             // 100 はとりあえずの暫定値。
             // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
             if noacked_sent > 100 {
                 ack.await;
-                ack = track_handle.send_syn();
+                ack = track_handle.send_syn().await;
                 noacked_sent = 0;
             }
 
@@ -272,7 +272,7 @@ impl VideoReader {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
 
-                    if !track_handle.send_media(MediaSample::new_video(frame)) {
+                    if !track_handle.send_media(MediaSample::new_video(frame)).await {
                         // パイプライン処理が中断された
                         break;
                     }
@@ -280,7 +280,7 @@ impl VideoReader {
                 }
             }
         }
-        track_handle.send_eos();
+        track_handle.send_eos().await;
 
         Ok(())
     }

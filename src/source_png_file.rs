@@ -75,14 +75,14 @@ impl PngFileSource {
         let mut frame_index = 0u64;
         let mut noacked_sent = 0u64;
         let start = tokio::time::Instant::now();
-        let mut ack = tx.send_syn();
+        let mut ack = tx.send_syn().await;
         loop {
             let timestamp = frames_to_timestamp(self.frame_rate, frame_index);
             tokio::time::sleep_until(start + timestamp).await;
 
             if noacked_sent > MAX_NOACKED_COUNT {
                 ack.await;
-                ack = tx.send_syn();
+                ack = tx.send_syn().await;
                 noacked_sent = 0;
             }
 
@@ -101,7 +101,7 @@ impl PngFileSource {
                 sample_entry: None,
             };
 
-            if !tx.send_video(frame) {
+            if !tx.send_video(frame).await {
                 break;
             }
             noacked_sent = noacked_sent.saturating_add(1);

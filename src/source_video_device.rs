@@ -136,13 +136,13 @@ impl VideoDeviceSource {
                 &mut last_timestamp,
             )?;
             // TODO: send_syn() でペース調整に対応する
-            if !output_video_sender.send_video(frame) {
+            if !output_video_sender.send_video(frame).await {
                 break;
             }
         }
 
         capture.stop();
-        output_video_sender.send_eos();
+        output_video_sender.send_eos().await;
 
         Ok(())
     }

@@ -260,8 +260,8 @@ impl RtmpPublisherHandler {
             }
         }
 
-        self.video_track_tx.send_eos();
-        self.audio_track_tx.send_eos();
+        self.video_track_tx.send_eos().await;
+        self.audio_track_tx.send_eos().await;
 
         Ok(())
     }
@@ -325,7 +325,8 @@ impl RtmpPublisherHandler {
     ) -> orfail::Result<()> {
         let audio_data = self.frame_handler.process_audio_frame(frame)?;
         self.audio_track_tx
-            .send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
+            .send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)))
+            .await;
         Ok(())
     }
 
@@ -336,7 +337,8 @@ impl RtmpPublisherHandler {
     ) -> orfail::Result<()> {
         if let Some(video_frame) = self.frame_handler.process_video_frame(frame).or_fail()? {
             self.video_track_tx
-                .send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
+                .send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)))
+                .await;
         }
         Ok(())
     }
