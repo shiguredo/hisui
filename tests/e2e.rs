@@ -18,13 +18,16 @@ use orfail::OrFail;
 fn run_hisui_command(args: &[&str]) -> noargs::Result<std::process::Output> {
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
     let output = std::process::Command::new(hisui_bin)
+        .args(["--verbose"])
         .args(args)
         .output()
         .or_fail()?;
 
+    eprintln!("hisui args: --verbose {}", args.join(" "));
+    eprintln!("hisui stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+    eprintln!("hisui stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+
     if !output.status.success() {
-        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
         return Err("hisui command failed".into());
     }
 
