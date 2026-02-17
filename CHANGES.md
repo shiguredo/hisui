@@ -11,6 +11,12 @@
 
 ## develop
 
+- [ADD] server サブコマンドの JSON-RPC で Video Device source を作成できるようにする
+  - JSON-RPC に `createVideoDeviceSource` メソッドを追加する
+  - `outputVideoTrackId` にカメラ映像を配信できる
+  - `deviceId` 未指定時は既定デバイスを利用する
+  - `processorId` 未指定時は `videoDeviceSource:default` または `videoDeviceSource:<deviceId>` を既定値として利用する
+  - @sile
 - [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
   - 未指定の場合は従来通り 404 を返す
@@ -117,6 +123,9 @@
 
 ### misc
 
+- [ADD] 内部用に VideoDeviceSource 構造体を追加する
+  - Video Device からの読み込みと I420 への変換を行い、映像トラックに出力する
+  - @sile
 - [ADD] 内部用に VideoRealtimeMixer 構造体を追加する
   - リアルタイム用途に特化した映像合成を行うための構造体
   - @sile
