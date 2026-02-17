@@ -66,6 +66,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev
 
+      # ARM64 Linux ではビルドに Clang 21 以上が必要なため、
+      # apt.llvm.org から Clang 21 をインストールし、clang / clang++ として使えるようにシンボリックリンクを作成する
+      - name: Install Clang 21 for ARM64
+        if: contains(matrix.platform.name, 'arm64')
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21
+          sudo ln -sf /usr/bin/clang-21 /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-21 /usr/bin/clang++
+
       # CUDA のインストール (x86_64 のみ)
       - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
         if: contains(matrix.platform.name, 'x86_64')
