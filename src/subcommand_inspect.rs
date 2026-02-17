@@ -65,7 +65,6 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
         .enable_all()
         .build()
         .map_err(|e| Error::new(e.to_string()))?;
-    let _guard = runtime.enter();
 
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();

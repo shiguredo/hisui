@@ -47,10 +47,10 @@ def test_rpc_post_notification_returns_204(hisui_server: int):
 
 
 def test_bootstrap_endpoint(hisui_server: int):
-    """/bootstrap エンドポイントが 204 No Content を返す"""
+    """/bootstrap への GET は 405 Method Not Allowed を返す"""
     with httpx.Client() as client:
         response = client.get(f"http://127.0.0.1:{hisui_server}/bootstrap")
-    assert response.status_code == 204
+    assert response.status_code == 405
 
 
 def test_unknown_endpoint(hisui_server: int):
