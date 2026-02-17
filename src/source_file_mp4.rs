@@ -84,6 +84,7 @@ impl Mp4FileSource {
 
         self.initialize_pipeline(inner_handle, &outer_processor)
             .await?;
+        drop(outer_processor);
         task.await?;
         Ok(())
     }
