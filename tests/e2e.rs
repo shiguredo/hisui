@@ -67,6 +67,7 @@ fn inspect_mp4_without_decode() -> noargs::Result<()> {
 }
 
 #[test]
+#[cfg(feature = "libvpx")]
 fn inspect_mp4_with_decode() -> noargs::Result<()> {
     let output = run_hisui_command(&[
         "inspect",
@@ -142,6 +143,7 @@ fn inspect_webm_without_decode() -> noargs::Result<()> {
 }
 
 #[test]
+#[cfg(feature = "libvpx")]
 fn inspect_webm_with_decode() -> noargs::Result<()> {
     let output = run_hisui_command(&["inspect", "--decode", "testdata/archive-black-silent.webm"])?;
     let stdout = String::from_utf8_lossy(&output.stdout);
