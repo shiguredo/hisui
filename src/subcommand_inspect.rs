@@ -1,4 +1,8 @@
-use std::{collections::HashSet, path::PathBuf, time::Duration};
+use std::{
+    collections::{HashSet, VecDeque},
+    path::PathBuf,
+    time::Duration,
+};
 
 use crate::{
     Error, Result,
@@ -61,32 +65,50 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
         .enable_all()
         .build()
         .map_err(|e| Error::new(e.to_string()))?;
+    let _guard = runtime.enter();
 
-    runtime.block_on(async move {
-        let pipeline = crate::MediaPipeline::new()?;
-        let pipeline_handle = pipeline.handle();
-
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    runtime.spawn(async move {
         let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
-        pipeline_handle
+        if let Err(e) = pipeline_handle
             .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
                 let output_printer = output_printer;
                 async move { output_printer.run(handle).await }
             })
             .await
-            .map_err(|e| Error::new(e.to_string()))?;
+        {
+            tracing::error!("output_printer spawn failed: {e}");
+            return;
+        }
 
         if decode {
-            let openh264_lib = openh264
+            let openh264_lib = match openh264
                 .clone()
                 .map(Openh264Library::load)
                 .transpose()
-                .map_err(|e| Error::new(e.to_string()))?;
-            let audio_decoder = AudioDecoder::new(
+                .map_err(|e| Error::new(e.to_string()))
+            {
+                Ok(lib) => lib,
+                Err(e) => {
+                    tracing::error!("failed to load openh264 library: {e}");
+                    return;
+                }
+            };
+
+            let audio_decoder = match AudioDecoder::new(
                 AUDIO_DECODER_INPUT_STREAM_ID,
                 AUDIO_DECODER_OUTPUT_STREAM_ID,
             )
-            .map_err(|e| Error::new(e.to_string()))?;
-            pipeline_handle
+            .map_err(|e| Error::new(e.to_string()))
+            {
+                Ok(decoder) => decoder,
+                Err(e) => {
+                    tracing::error!("failed to create audio decoder: {e}");
+                    return;
+                }
+            };
+            if let Err(e) = pipeline_handle
                 .spawn_processor(crate::ProcessorId::new("audio_decoder"), |handle| {
                     audio_decoder.run(
                         handle,
@@ -95,7 +117,10 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
                     )
                 })
                 .await
-                .map_err(|e| Error::new(e.to_string()))?;
+            {
+                tracing::error!("audio_decoder spawn failed: {e}");
+                return;
+            }
 
             let video_decoder = VideoDecoder::new(
                 VIDEO_DECODER_INPUT_STREAM_ID,
@@ -106,7 +131,7 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
                     engines: None,
                 },
             );
-            pipeline_handle
+            if let Err(e) = pipeline_handle
                 .spawn_processor(crate::ProcessorId::new("video_decoder"), |handle| {
                     video_decoder.run(
                         handle,
@@ -115,12 +140,15 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
                     )
                 })
                 .await
-                .map_err(|e| Error::new(e.to_string()))?;
+            {
+                tracing::error!("video_decoder spawn failed: {e}");
+                return;
+            }
         }
 
         match format {
             ContainerFormat::Mp4 => {
-                let reader = Mp4FileReader::new(
+                let reader = match Mp4FileReader::new(
                     input_file_path,
                     Mp4FileReaderOptions {
                         realtime: false,
@@ -128,14 +156,23 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
                         audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
                         video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
                     },
-                )?;
-                pipeline_handle
+                ) {
+                    Ok(reader) => reader,
+                    Err(e) => {
+                        tracing::error!("failed to create mp4_file_reader: {e}");
+                        return;
+                    }
+                };
+
+                if let Err(e) = pipeline_handle
                     .spawn_processor(crate::ProcessorId::new("mp4_file_reader"), |handle| {
                         let reader = reader;
                         async move { reader.run(handle).await }
                     })
                     .await
-                    .map_err(|e| Error::new(e.to_string()))?;
+                {
+                    tracing::error!("mp4_file_reader spawn failed: {e}");
+                }
             }
             ContainerFormat::Webm => {
                 let reader = WebmFileReader::new(
@@ -147,20 +184,22 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
                         video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
                     },
                 );
-                pipeline_handle
+
+                if let Err(e) = pipeline_handle
                     .spawn_processor(crate::ProcessorId::new("webm_file_reader"), |handle| {
                         let reader = reader;
                         async move { reader.run(handle).await }
                     })
                     .await
-                    .map_err(|e| Error::new(e.to_string()))?;
+                {
+                    tracing::error!("webm_file_reader spawn failed: {e}");
+                }
             }
         }
+    });
 
-        drop(pipeline_handle);
-        pipeline.run().await;
-        Ok(())
-    })
+    runtime.block_on(pipeline.run());
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -200,13 +239,7 @@ struct VideoSampleInfo {
     height: Option<usize>,
 }
 
-impl VideoSampleInfo {
-    fn update(&mut self, decoded: &VideoFrame) {
-        self.decoded_data_size = Some(decoded.data.len());
-        self.width = Some(decoded.width);
-        self.height = Some(decoded.height);
-    }
-}
+impl VideoSampleInfo {}
 
 impl nojson::DisplayJson for VideoSampleInfo {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
@@ -312,11 +345,20 @@ pub struct OutputPrinter {
     video_codec: Option<CodecName>,
     audio_samples: Vec<AudioSampleInfo>,
     video_samples: Vec<VideoSampleInfo>,
+    pending_audio_decoded_data_sizes: VecDeque<usize>,
+    pending_video_decoded_infos: VecDeque<DecodedVideoInfo>,
     active_streams: HashSet<crate::TrackId>,
     audio_encoded_track_id: crate::TrackId,
     video_encoded_track_id: crate::TrackId,
     audio_decoded_track_id: crate::TrackId,
     video_decoded_track_id: crate::TrackId,
+}
+
+#[derive(Debug)]
+struct DecodedVideoInfo {
+    decoded_data_size: usize,
+    width: usize,
+    height: usize,
 }
 
 impl OutputPrinter {
@@ -344,6 +386,8 @@ impl OutputPrinter {
             video_codec: None,
             audio_samples: Vec::new(),
             video_samples: Vec::new(),
+            pending_audio_decoded_data_sizes: VecDeque::new(),
+            pending_video_decoded_infos: VecDeque::new(),
             active_streams,
             audio_encoded_track_id,
             video_encoded_track_id,
@@ -410,6 +454,7 @@ impl OutputPrinter {
                     data_size: audio_data.data.len(),
                     decoded_data_size: None,
                 });
+                self.try_apply_pending_audio_decoded_data_sizes();
             }
             crate::Message::Eos => {
                 self.active_streams.remove(&self.audio_encoded_track_id);
@@ -443,6 +488,7 @@ impl OutputPrinter {
                     width: None,
                     height: None,
                 });
+                self.try_apply_pending_video_decoded_infos();
             }
             crate::Message::Eos => {
                 self.active_streams.remove(&self.video_encoded_track_id);
@@ -463,12 +509,9 @@ impl OutputPrinter {
                         ));
                     }
                 };
-                let info = self
-                    .audio_samples
-                    .iter_mut()
-                    .rfind(|s| s.decoded_data_size.is_none())
-                    .ok_or_else(|| Error::new("no undecoded audio sample found"))?;
-                info.decoded_data_size = Some(audio_data.data.len());
+                self.pending_audio_decoded_data_sizes
+                    .push_back(audio_data.data.len());
+                self.try_apply_pending_audio_decoded_data_sizes();
             }
             crate::Message::Eos => {
                 self.active_streams.remove(&self.audio_decoded_track_id);
@@ -489,12 +532,13 @@ impl OutputPrinter {
                         ));
                     }
                 };
-                let info = self
-                    .video_samples
-                    .iter_mut()
-                    .rfind(|s| s.decoded_data_size.is_none())
-                    .ok_or_else(|| Error::new("no undecoded video sample found"))?;
-                info.update(&video_frame);
+                self.pending_video_decoded_infos
+                    .push_back(DecodedVideoInfo {
+                        decoded_data_size: video_frame.data.len(),
+                        width: video_frame.width,
+                        height: video_frame.height,
+                    });
+                self.try_apply_pending_video_decoded_infos();
             }
             crate::Message::Eos => {
                 self.active_streams.remove(&self.video_decoded_track_id);
@@ -502,6 +546,38 @@ impl OutputPrinter {
             crate::Message::Syn(_) => {}
         }
         Ok(())
+    }
+
+    fn try_apply_pending_audio_decoded_data_sizes(&mut self) {
+        while let Some(decoded_data_size) = self.pending_audio_decoded_data_sizes.pop_front() {
+            let Some(info) = self
+                .audio_samples
+                .iter_mut()
+                .find(|s| s.decoded_data_size.is_none())
+            else {
+                self.pending_audio_decoded_data_sizes
+                    .push_front(decoded_data_size);
+                break;
+            };
+            info.decoded_data_size = Some(decoded_data_size);
+        }
+    }
+
+    fn try_apply_pending_video_decoded_infos(&mut self) {
+        while let Some(decoded_info) = self.pending_video_decoded_infos.pop_front() {
+            let Some(info) = self
+                .video_samples
+                .iter_mut()
+                .find(|s| s.decoded_data_size.is_none())
+            else {
+                self.pending_video_decoded_infos.push_front(decoded_info);
+                break;
+            };
+
+            info.decoded_data_size = Some(decoded_info.decoded_data_size);
+            info.width = Some(decoded_info.width);
+            info.height = Some(decoded_info.height);
+        }
     }
 }
 
