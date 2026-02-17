@@ -159,12 +159,12 @@ async fn start_bridge(
                 loop {
                     match rx.recv().await {
                         Message::Media(sample) => {
-                            if !tx.send_media(sample) {
+                            if !tx.send_media(sample).await {
                                 break;
                             }
                         }
                         Message::Eos => {
-                            tx.send_eos();
+                            tx.send_eos().await;
                             break;
                         }
                         Message::Syn(_) => {}

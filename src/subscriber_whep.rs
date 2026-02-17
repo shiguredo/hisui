@@ -105,7 +105,7 @@ impl WhepSubscriber {
         let mut session =
             WhepSession::connect(&self.input_url, self.bearer_token.as_deref()).await?;
         let run_result = session.forward_video(&mut output_video_sender).await;
-        output_video_sender.send_eos();
+        output_video_sender.send_eos().await;
         session.disconnect().await;
         run_result
     }
@@ -270,7 +270,7 @@ impl WhepSession {
                     let Some(frame) = maybe_frame else {
                         break;
                     };
-                    if !output_video_sender.send_video(frame) {
+                    if !output_video_sender.send_video(frame).await {
                         break;
                     }
                 }
