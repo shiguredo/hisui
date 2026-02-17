@@ -70,7 +70,8 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
     runtime.spawn(async move {
-        let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode, ready_tx);
         if let Err(e) = pipeline_handle
             .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
                 let output_printer = output_printer;
@@ -79,6 +80,10 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
             .await
         {
             tracing::error!("output_printer spawn failed: {e}");
+            return;
+        }
+        if ready_rx.await.is_err() {
+            tracing::error!("output_printer initialization failed before subscribing tracks");
             return;
         }
 
@@ -350,6 +355,7 @@ pub struct OutputPrinter {
     video_encoded_track_id: crate::TrackId,
     audio_decoded_track_id: crate::TrackId,
     video_decoded_track_id: crate::TrackId,
+    ready_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 #[derive(Debug)]
@@ -360,7 +366,12 @@ struct DecodedVideoInfo {
 }
 
 impl OutputPrinter {
-    fn new(path: PathBuf, format: ContainerFormat, decode: bool) -> Self {
+    fn new(
+        path: PathBuf,
+        format: ContainerFormat,
+        decode: bool,
+        ready_tx: tokio::sync::oneshot::Sender<()>,
+    ) -> Self {
         let audio_encoded_track_id = crate::TrackId::new(AUDIO_ENCODED_TRACK_ID);
         let video_encoded_track_id = crate::TrackId::new(VIDEO_ENCODED_TRACK_ID);
         let audio_decoded_track_id = crate::TrackId::new(AUDIO_DECODED_TRACK_ID);
@@ -391,6 +402,7 @@ impl OutputPrinter {
             video_encoded_track_id,
             audio_decoded_track_id,
             video_decoded_track_id,
+            ready_tx: Some(ready_tx),
         }
     }
 
@@ -406,6 +418,9 @@ impl OutputPrinter {
 
         let video_decoded_track_id = self.video_decoded_track_id.clone();
         let mut video_decoded_track = handle.subscribe_track(video_decoded_track_id.clone());
+        if let Some(ready_tx) = self.ready_tx.take() {
+            let _ = ready_tx.send(());
+        }
 
         while !self.active_streams.is_empty() {
             tokio::select! {
