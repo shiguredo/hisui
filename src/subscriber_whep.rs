@@ -326,7 +326,7 @@ async fn exchange_offer_answer(
     input_url: &str,
     bearer_token: Option<&str>,
 ) -> crate::Result<Option<String>> {
-    let offer_sdp = crate::webrtc_sdp::create_offer_sdp(pc)?;
+    let offer_sdp = crate::webrtc_sdp::create_offer_sdp_recvonly(pc)?;
     log_sdp_candidates("WHEP offer", &offer_sdp);
 
     let response = send_offer(input_url, bearer_token, &offer_sdp).await?;
@@ -408,9 +408,21 @@ fn apply_ice_servers_from_link_header(
 fn log_sdp_candidates(label: &str, sdp: &str) {
     let mut candidates = Vec::new();
     let mut has_end_of_candidates = false;
+    let mut media_direction_lines = Vec::new();
+    let mut current_media = None::<String>;
 
     for line in sdp.lines() {
         let line = line.trim();
+        if let Some(rest) = line.strip_prefix("m=") {
+            let media = rest.split_whitespace().next().unwrap_or("unknown");
+            current_media = Some(media.to_owned());
+        }
+        if let Some(direction) = line.strip_prefix("a=")
+            && matches!(direction, "sendrecv" | "sendonly" | "recvonly" | "inactive")
+        {
+            let media = current_media.as_deref().unwrap_or("unknown");
+            media_direction_lines.push(format!("{media}:{direction}"));
+        }
         if line.starts_with("a=candidate:") {
             candidates.push(line);
         } else if line == "a=end-of-candidates" {
@@ -423,6 +435,12 @@ fn log_sdp_candidates(label: &str, sdp: &str) {
         candidates.len(),
         has_end_of_candidates
     );
+    if !media_direction_lines.is_empty() {
+        tracing::debug!(
+            "{label} SDP media directions: {}",
+            media_direction_lines.join(", ")
+        );
+    }
 
     for line in candidates.iter().take(10) {
         tracing::debug!("{label} SDP candidate: {line}");
