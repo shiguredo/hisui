@@ -53,20 +53,18 @@ impl WebmFileReader {
         &mut self,
         handle: ProcessorHandle,
     ) -> Result<(Option<TrackSender>, Option<TrackSender>)> {
-        let audio_sender = match self.options.audio_track_id.take() {
-            Some(track_id) => {
-                let sender = handle.publish_track(track_id).await?;
-                Some(TrackSender::new(sender))
-            }
-            None => None,
+        let audio_sender = if let Some(track_id) = self.options.audio_track_id.take() {
+            let sender = handle.publish_track(track_id).await?;
+            Some(TrackSender::new(sender))
+        } else {
+            None
         };
 
-        let video_sender = match self.options.video_track_id.take() {
-            Some(track_id) => {
-                let sender = handle.publish_track(track_id).await?;
-                Some(TrackSender::new(sender))
-            }
-            None => None,
+        let video_sender = if let Some(track_id) = self.options.video_track_id.take() {
+            let sender = handle.publish_track(track_id).await?;
+            Some(TrackSender::new(sender))
+        } else {
+            None
         };
 
         Ok((audio_sender, video_sender))
