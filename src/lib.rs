@@ -74,6 +74,7 @@ pub mod rtmp;
 pub mod scheduler;
 pub mod source_file_mp4;
 pub mod source_png_file;
+pub mod source_video_device;
 pub mod stats;
 pub mod subcommand_compose;
 pub mod subcommand_inspect;
@@ -112,6 +113,7 @@ pub use media_pipeline::{
 };
 pub use source_file_mp4::Mp4FileSource;
 pub use source_png_file::PngFileSource;
+pub use source_video_device::VideoDeviceSource;
 pub use video::VideoFrame;
 
 pub type Result<T> = std::result::Result<T, Error>;
