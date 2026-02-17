@@ -129,7 +129,7 @@ impl MediaPipelineHandle {
             }
         });
 
-        self.spawn_local_processor(processor_id.clone(), move |handle| source.run(handle))
+        self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
             .await
             .map_err(|e| match e {
                 RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
