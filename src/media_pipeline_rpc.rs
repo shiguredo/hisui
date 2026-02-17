@@ -57,6 +57,7 @@ impl MediaPipelineHandle {
 
         let result = match method {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
+            "createPngFileSource" => self.handle_create_png_file_source_rpc(maybe_params).await,
             "createVideoDeviceSource" => {
                 self.handle_create_video_device_source_rpc(maybe_params)
                     .await
@@ -109,6 +110,33 @@ impl MediaPipelineHandle {
             })?;
 
         Ok(RpcSuccessResult::CreateMp4FileSource { processor_id })
+    }
+
+    async fn handle_create_png_file_source_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (source, processor_id): (crate::PngFileSource, Option<ProcessorId>) =
+            parse_params(maybe_params, |params| {
+                let source = params.try_into()?;
+                let processor_id = params.to_member("processorId")?.try_into()?;
+                Ok((source, processor_id))
+            })?;
+        let processor_id =
+            processor_id.unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
+
+        self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
+            .await
+            .map_err(|e| match e {
+                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                    "Invalid params: processorId already exists: {processor_id}"
+                )),
+                RegisterProcessorError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
+            })?;
+
+        Ok(RpcSuccessResult::CreatePngFileSource { processor_id })
     }
 
     async fn handle_create_video_device_source_rpc(
@@ -251,6 +279,7 @@ impl MediaPipelineHandle {
 
 enum RpcSuccessResult {
     CreateMp4FileSource { processor_id: ProcessorId },
+    CreatePngFileSource { processor_id: ProcessorId },
     CreateVideoDeviceSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
     CreateWhipPublisher { processor_id: ProcessorId },
@@ -263,6 +292,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
             Self::CreateMp4FileSource { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreatePngFileSource { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateVideoDeviceSource { processor_id } => {
@@ -293,7 +325,7 @@ impl nojson::DisplayJson for RpcSuccessResult {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{fs::File, io::BufWriter, time::Duration};
 
     use crate::media_pipeline::{MediaPipeline, MediaPipelineHandle, ProcessorId, TrackId};
 
@@ -438,6 +470,138 @@ mod tests {
             .await
             .expect("pipeline task timed out")
             .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_png_file_source_requires_params() -> crate::Result<()> {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createPngFileSource"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_png_file_source_validates_source_params() -> crate::Result<()> {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let png_file = create_test_png_file(2, 2, png::ColorType::Rgba, &[255; 16])?;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}"}}}}"#,
+            png_file.path().display()
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_png_file_source_uses_path_as_default_processor_id() -> crate::Result<()> {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let png_file = create_test_png_file(2, 2, png::ColorType::Rgb, &[0; 12])?;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}","frameRate":1,"outputVideoTrackId":"png-video-default"}}}}"#,
+            png_file.path().display()
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            png_file.path().display().to_string()
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_png_file_source_uses_explicit_processor_id() -> crate::Result<()> {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let png_file = create_test_png_file(2, 2, png::ColorType::Rgb, &[0; 12])?;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}","processorId":"custom-png-source","frameRate":1,"outputVideoTrackId":"png-video-custom"}}}}"#,
+            png_file.path().display()
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-png-source"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_png_file_source_rejects_duplicate_processor_id() -> crate::Result<()> {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let png_file = create_test_png_file(2, 2, png::ColorType::Rgba, &[255; 16])?;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}","processorId":"duplicate-png-source","frameRate":1,"outputVideoTrackId":"png-video-duplicate"}}}}"#,
+            png_file.path().display()
+        );
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-png-source"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+        Ok(())
     }
 
     #[tokio::test]
@@ -1386,5 +1550,25 @@ mod tests {
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber","params":{{"inputUrl":"https://example.com/whep/live"{output_video_track_id_part}{output_audio_track_id_part}{bearer_token_part}{processor_id_part}}}}}"#
         )
+    }
+
+    fn create_test_png_file(
+        width: u32,
+        height: u32,
+        color_type: png::ColorType,
+        data: &[u8],
+    ) -> crate::Result<tempfile::NamedTempFile> {
+        let file = tempfile::NamedTempFile::new()?;
+        let writer = BufWriter::new(File::create(file.path())?);
+        let mut encoder = png::Encoder::new(writer, width, height);
+        encoder.set_color(color_type);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| crate::Error::new(e.to_string()))?;
+        writer
+            .write_image_data(data)
+            .map_err(|e| crate::Error::new(e.to_string()))?;
+        Ok(file)
     }
 }

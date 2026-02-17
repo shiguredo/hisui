@@ -8,6 +8,20 @@ use crate::{
     types::{CodecName, EvenUsize},
 };
 
+pub type I420Planes<'a> = (&'a [u8], &'a [u8], &'a [u8]);
+pub type I420APlanes<'a> = (&'a [u8], &'a [u8], &'a [u8], &'a [u8]);
+
+pub(crate) fn rgb_to_yuv_bt601_int(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    let r = i32::from(r);
+    let g = i32::from(g);
+    let b = i32::from(b);
+
+    let y = ((77 * r + 150 * g + 29 * b + 128) >> 8).clamp(0, 255) as u8;
+    let u = (((-43 * r - 85 * g + 128 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+    let v = (((128 * r - 107 * g - 21 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+    (y, u, v)
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
     pub source_id: Option<SourceId>,
@@ -35,6 +49,12 @@ impl VideoFrame {
     fn i420_total_size(width: usize, height: usize) -> usize {
         let (y_size, u_size, v_size) = Self::i420_plane_sizes(width, height);
         y_size + u_size + v_size
+    }
+
+    /// I420A 形式の総データサイズを計算
+    fn i420a_total_size(width: usize, height: usize) -> usize {
+        let (_, u_size, _) = Self::i420_plane_sizes(width, height);
+        Self::i420_total_size(width, height) + u_size
     }
 
     /// UV プレーンの幅・高さを計算
@@ -71,14 +91,10 @@ impl VideoFrame {
         for y in 0..height_val {
             for x in 0..width_val {
                 let bgr_idx = (y * width_val + x) * 3;
-                let b = bgr_data[bgr_idx] as f32;
-                let g = bgr_data[bgr_idx + 1] as f32;
-                let r = bgr_data[bgr_idx + 2] as f32;
-
-                // ITU-R BT.601 standard RGB to YUV conversion
-                let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
-                let u_val = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
-                let v_val = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
+                let b = bgr_data[bgr_idx];
+                let g = bgr_data[bgr_idx + 1];
+                let r = bgr_data[bgr_idx + 2];
+                let (y_val, u_val, v_val) = rgb_to_yuv_bt601_int(r, g, b);
 
                 y_plane[y * width_val + x] = y_val;
 
@@ -330,15 +346,8 @@ impl VideoFrame {
             return Self::black(width, height);
         }
 
-        // RGB から YUV に変換
-        let r = rgb[0] as f32;
-        let g = rgb[1] as f32;
-        let b = rgb[2] as f32;
-
-        // ITU-R BT.601 標準を使用した RGB から YUV への変換
-        let y = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
-        let u = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
-        let v = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
+        // ITU-R BT.601 相当の整数近似で RGB から YUV に変換
+        let (y, u, v) = rgb_to_yuv_bt601_int(rgb[0], rgb[1], rgb[2]);
 
         let actual_width = width.get();
         let actual_height = height.get();
@@ -401,18 +410,39 @@ impl VideoFrame {
         EvenUsize::ceiling_new(self.height)
     }
 
-    pub fn as_yuv_planes(&self) -> Option<(&[u8], &[u8], &[u8])> {
+    pub fn as_yuv_planes(&self) -> Option<I420Planes<'_>> {
         if self.format != VideoFormat::I420 {
             return None;
         }
 
         let (y_size, uv_size, _) = Self::i420_plane_sizes(self.width, self.height);
+        if self.data.len() < Self::i420_total_size(self.width, self.height) {
+            return None;
+        }
 
         let y_plane = &self.data[..y_size];
         let u_plane = &self.data[y_size..][..uv_size];
         let v_plane = &self.data[y_size + uv_size..][..uv_size];
 
         Some((y_plane, u_plane, v_plane))
+    }
+
+    pub fn as_i420a_planes(&self) -> Option<I420APlanes<'_>> {
+        if self.format != VideoFormat::I420A {
+            return None;
+        }
+
+        let (y_size, uv_size, _) = Self::i420_plane_sizes(self.width, self.height);
+        if self.data.len() < Self::i420a_total_size(self.width, self.height) {
+            return None;
+        }
+
+        let y_plane = &self.data[..y_size];
+        let u_plane = &self.data[y_size..][..uv_size];
+        let v_plane = &self.data[y_size + uv_size..][..uv_size];
+        let a_plane = &self.data[y_size + uv_size * 2..][..uv_size];
+
+        Some((y_plane, u_plane, v_plane, a_plane))
     }
 
     pub fn end_timestamp(&self) -> Duration {
@@ -426,7 +456,7 @@ impl VideoFrame {
         new_height: EvenUsize,
         filter_mode: shiguredo_libyuv::FilterMode,
     ) -> orfail::Result<Option<Self>> {
-        (self.format == VideoFormat::I420).or_fail()?;
+        matches!(self.format, VideoFormat::I420 | VideoFormat::I420A).or_fail()?;
 
         let width = self.width;
         let height = self.height;
@@ -435,13 +465,23 @@ impl VideoFrame {
             return Ok(None);
         }
 
+        // 元の YUV プレーンを取得
+        let (src_y, src_u, src_v, src_a) = match self.format {
+            VideoFormat::I420 => {
+                let (src_y, src_u, src_v) = self.as_yuv_planes().or_fail()?;
+                (src_y, src_u, src_v, None)
+            }
+            VideoFormat::I420A => {
+                let (src_y, src_u, src_v, src_a) = self.as_i420a_planes().or_fail()?;
+                (src_y, src_u, src_v, Some(src_a))
+            }
+            _ => unreachable!("infallible"),
+        };
+
         // 新しい YUV バッファを作成
         let (new_y_size, new_uv_size, _) =
             Self::i420_plane_sizes(new_width.get(), new_height.get());
-        let mut new_data = vec![0; Self::i420_total_size(new_width.get(), new_height.get())];
-
-        // 元のYUVプレーンを取得
-        let (src_y, src_u, src_v) = self.as_yuv_planes().or_fail()?;
+        let mut resized_yuv = vec![0; Self::i420_total_size(new_width.get(), new_height.get())];
 
         // ストライド計算（元画像） - 実際の幅を使用
         let src_width = self.width;
@@ -452,7 +492,7 @@ impl VideoFrame {
         let dst_uv_width = dst_width / 2;
 
         // 出力バッファを分割
-        let (dst_y, rest) = new_data.split_at_mut(new_y_size);
+        let (dst_y, rest) = resized_yuv.split_at_mut(new_y_size);
         let (dst_u, dst_v) = rest.split_at_mut(new_uv_size);
 
         // libyuv でリサイズ実行
@@ -483,9 +523,31 @@ impl VideoFrame {
         )
         .or_fail()?;
 
+        let data = if let Some(src_a) = src_a {
+            let (src_uv_width, src_uv_height) = Self::i420_uv_dimensions(width, height);
+            let (dst_uv_width, dst_uv_height) =
+                Self::i420_uv_dimensions(new_width.get(), new_height.get());
+            let mut dst_a = vec![0; dst_uv_width * dst_uv_height];
+            Self::resize_plane_nearest(
+                src_a,
+                src_uv_width,
+                src_uv_height,
+                &mut dst_a,
+                dst_uv_width,
+                dst_uv_height,
+            )?;
+
+            let mut data = Vec::with_capacity(resized_yuv.len() + dst_a.len());
+            data.extend_from_slice(&resized_yuv);
+            data.extend_from_slice(&dst_a);
+            data
+        } else {
+            resized_yuv
+        };
+
         let resized = Self {
             source_id: self.source_id.clone(),
-            data: new_data,
+            data,
             format: self.format,
             keyframe: self.keyframe,
             width: new_width.get(),
@@ -495,6 +557,44 @@ impl VideoFrame {
             sample_entry: self.sample_entry.clone(),
         };
         Ok(Some(resized))
+    }
+
+    fn resize_plane_nearest(
+        src: &[u8],
+        src_width: usize,
+        src_height: usize,
+        dst: &mut [u8],
+        dst_width: usize,
+        dst_height: usize,
+    ) -> orfail::Result<()> {
+        (src.len() >= src_width.saturating_mul(src_height)).or_fail_with(|()| {
+            format!(
+                "source plane too small: expected at least {}, got {}",
+                src_width.saturating_mul(src_height),
+                src.len()
+            )
+        })?;
+        (dst.len() >= dst_width.saturating_mul(dst_height)).or_fail_with(|()| {
+            format!(
+                "destination plane too small: expected at least {}, got {}",
+                dst_width.saturating_mul(dst_height),
+                dst.len()
+            )
+        })?;
+
+        if dst_width == 0 || dst_height == 0 {
+            return Ok(());
+        }
+
+        for dst_y in 0..dst_height {
+            let src_y = dst_y * src_height / dst_height;
+            for dst_x in 0..dst_width {
+                let src_x = dst_x * src_width / dst_width;
+                dst[dst_y * dst_width + dst_x] = src[src_y * src_width + src_x];
+            }
+        }
+
+        Ok(())
     }
 
     pub fn to_bgr_data(&self) -> orfail::Result<Vec<u8>> {
@@ -551,6 +651,7 @@ impl VideoFrame {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoFormat {
     I420,
+    I420A,
     H264,
     H264AnnexB,
     H265,
@@ -563,6 +664,7 @@ impl VideoFormat {
     pub fn codec_name(self) -> Option<CodecName> {
         match self {
             VideoFormat::I420 => None,
+            VideoFormat::I420A => None,
             VideoFormat::H264 => Some(CodecName::H264),
             VideoFormat::H264AnnexB => Some(CodecName::H264),
             VideoFormat::H265 => Some(CodecName::H265),
@@ -577,6 +679,7 @@ impl std::fmt::Display for VideoFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VideoFormat::I420 => write!(f, "I420"),
+            VideoFormat::I420A => write!(f, "I420A"),
             _ => {
                 let name = self.codec_name().expect("infallible");
                 write!(f, "{}", name.as_str())
@@ -726,5 +829,66 @@ mod tests {
         let result = crate::json::parse_str::<FrameRate>(&too_high);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn video_format_display_i420a() {
+        assert_eq!(VideoFormat::I420A.to_string(), "I420A");
+    }
+
+    #[test]
+    fn rgb_to_yuv_bt601_int_known_values() {
+        assert_eq!(rgb_to_yuv_bt601_int(0, 0, 0), (0, 128, 128));
+        assert_eq!(rgb_to_yuv_bt601_int(255, 255, 255), (255, 128, 128));
+        assert_eq!(rgb_to_yuv_bt601_int(255, 0, 0), (77, 85, 255));
+        assert_eq!(rgb_to_yuv_bt601_int(0, 255, 0), (149, 43, 21));
+        assert_eq!(rgb_to_yuv_bt601_int(0, 0, 255), (29, 255, 107));
+    }
+
+    #[test]
+    fn rgb_to_yuv_bt601_int_stays_in_u8_range() {
+        for r in [0u8, 1, 127, 254, 255] {
+            for g in [0u8, 1, 127, 254, 255] {
+                for b in [0u8, 1, 127, 254, 255] {
+                    let (_y, _u, _v) = rgb_to_yuv_bt601_int(r, g, b);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resize_i420a_preserves_format_and_alpha_plane() -> orfail::Result<()> {
+        let frame = VideoFrame {
+            source_id: None,
+            sample_entry: None,
+            keyframe: true,
+            format: VideoFormat::I420A,
+            width: 4,
+            height: 4,
+            timestamp: Duration::ZERO,
+            duration: Duration::from_millis(40),
+            data: vec![
+                // Y (4x4)
+                16, 16, 16, 16, 32, 32, 32, 32, 64, 64, 64, 64, 128, 128, 128, 128,
+                // U (2x2)
+                80, 80, 80, 80, // V (2x2)
+                160, 160, 160, 160, // A (2x2)
+                0, 64, 128, 255,
+            ],
+        };
+
+        let resized = frame
+            .resize(
+                EvenUsize::new(2).expect("infallible"),
+                EvenUsize::new(2).expect("infallible"),
+                shiguredo_libyuv::FilterMode::Bilinear,
+            )?
+            .expect("resized frame");
+
+        assert_eq!(resized.format, VideoFormat::I420A);
+        assert_eq!(resized.width, 2);
+        assert_eq!(resized.height, 2);
+        assert_eq!(resized.data.len(), 7);
+        Ok(())
     }
 }

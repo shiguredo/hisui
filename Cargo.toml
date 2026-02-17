@@ -46,6 +46,7 @@ shiguredo_http11 = "=2026.1.0-canary.5"
 shiguredo_rtmp = "=2026.1.0-canary.5"
 shiguredo_webrtc = "=0.145.1"
 shiguredo_video_device = "=2026.1.0-canary.0"
+png = "=0.17.16"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }

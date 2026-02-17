@@ -8,7 +8,6 @@ use crate::{
     Error, MediaSample, Message, ProcessorHandle, TrackId,
     types::EvenUsize,
     video::{FrameRate, VideoFormat, VideoFrame},
-    video_canvas::I420Canvas,
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -308,9 +307,9 @@ impl InputTrackState {
     }
 
     fn handle_video(&mut self, frame: Arc<VideoFrame>, received_at: Duration) -> crate::Result<()> {
-        if frame.format != VideoFormat::I420 {
+        if !matches!(frame.format, VideoFormat::I420 | VideoFormat::I420A) {
             return Err(Error::new(format!(
-                "unsupported video format: expected I420, got {}",
+                "unsupported video format: expected I420 or I420A, got {}",
                 frame.format
             )));
         }
@@ -456,7 +455,7 @@ fn compose_frame(
     draw_order: &[DrawOrder],
     states: &HashMap<TrackId, InputTrackState>,
 ) -> crate::Result<VideoFrame> {
-    let mut canvas = I420Canvas::new(canvas_width, canvas_height);
+    let mut canvas = RealtimeI420Canvas::new(canvas_width, canvas_height);
 
     for draw in draw_order {
         let Some(state) = states.get(&draw.track_id) else {
@@ -515,6 +514,143 @@ fn compose_frame(
         height: canvas_height,
         data: canvas.into_data(),
     })
+}
+
+#[derive(Debug)]
+struct RealtimeI420Canvas {
+    width: usize,
+    height: usize,
+    y_plane: Vec<u8>,
+    u_plane: Vec<u8>,
+    v_plane: Vec<u8>,
+}
+
+impl RealtimeI420Canvas {
+    fn new(width: usize, height: usize) -> Self {
+        let y_size = width.saturating_mul(height);
+        let uv_size = width.div_ceil(2).saturating_mul(height.div_ceil(2));
+        Self {
+            width,
+            height,
+            y_plane: vec![0; y_size],
+            u_plane: vec![128; uv_size],
+            v_plane: vec![128; uv_size],
+        }
+    }
+
+    fn draw_frame_clipped(&mut self, x: isize, y: isize, frame: &VideoFrame) -> crate::Result<()> {
+        let (src_y, src_u, src_v, src_a) = match frame.format {
+            VideoFormat::I420 => {
+                let (src_y, src_u, src_v) = frame
+                    .as_yuv_planes()
+                    .ok_or_else(|| Error::new("invalid I420 frame size"))?;
+                (src_y, src_u, src_v, None)
+            }
+            VideoFormat::I420A => {
+                let (src_y, src_u, src_v, src_a) = frame
+                    .as_i420a_planes()
+                    .ok_or_else(|| Error::new("invalid I420A frame size"))?;
+                (src_y, src_u, src_v, Some(src_a))
+            }
+            _ => {
+                return Err(Error::new(format!(
+                    "unsupported video format: expected I420 or I420A, got {}",
+                    frame.format
+                )));
+            }
+        };
+
+        let (src_x0, dst_x0, copy_width) = clipped_span(frame.width, self.width, x);
+        let (src_y0, dst_y0, copy_height) = clipped_span(frame.height, self.height, y);
+        if copy_width == 0 || copy_height == 0 {
+            return Ok(());
+        }
+
+        for row in 0..copy_height {
+            for col in 0..copy_width {
+                let src_x = src_x0 + col;
+                let src_y_pos = src_y0 + row;
+                let dst_x = dst_x0 + col;
+                let dst_y_pos = dst_y0 + row;
+                let src_index = src_y_pos * frame.width + src_x;
+                let dst_index = dst_y_pos * self.width + dst_x;
+                let alpha = alpha_for_luma(src_a, frame.width, src_x, src_y_pos);
+                self.y_plane[dst_index] =
+                    blend_component(src_y[src_index], self.y_plane[dst_index], alpha);
+            }
+        }
+
+        let src_uv_width = frame.width.div_ceil(2);
+        let dst_uv_width = self.width.div_ceil(2);
+        let src_uv_x0 = src_x0 / 2;
+        let src_uv_y0 = src_y0 / 2;
+        let dst_uv_x0 = dst_x0 / 2;
+        let dst_uv_y0 = dst_y0 / 2;
+        let copy_uv_width = copy_width.div_ceil(2);
+        let copy_uv_height = copy_height.div_ceil(2);
+
+        for row in 0..copy_uv_height {
+            for col in 0..copy_uv_width {
+                let src_index = (src_uv_y0 + row) * src_uv_width + (src_uv_x0 + col);
+                let dst_index = (dst_uv_y0 + row) * dst_uv_width + (dst_uv_x0 + col);
+                let alpha = src_a.map(|a| a[src_index]).unwrap_or(u8::MAX);
+
+                self.u_plane[dst_index] =
+                    blend_component(src_u[src_index], self.u_plane[dst_index], alpha);
+                self.v_plane[dst_index] =
+                    blend_component(src_v[src_index], self.v_plane[dst_index], alpha);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn into_data(self) -> Vec<u8> {
+        let mut data =
+            Vec::with_capacity(self.y_plane.len() + self.u_plane.len() + self.v_plane.len());
+        data.extend_from_slice(&self.y_plane);
+        data.extend_from_slice(&self.u_plane);
+        data.extend_from_slice(&self.v_plane);
+        data
+    }
+}
+
+fn alpha_for_luma(src_a: Option<&[u8]>, src_width: usize, src_x: usize, src_y: usize) -> u8 {
+    let Some(src_a) = src_a else {
+        return u8::MAX;
+    };
+    let src_uv_width = src_width.div_ceil(2);
+    let index = (src_y / 2) * src_uv_width + (src_x / 2);
+    src_a[index]
+}
+
+fn blend_component(src: u8, dst: u8, alpha: u8) -> u8 {
+    if alpha == u8::MAX {
+        return src;
+    }
+    if alpha == 0 {
+        return dst;
+    }
+    let src = u16::from(src);
+    let dst = u16::from(dst);
+    let alpha = u16::from(alpha);
+    let blended = (src * alpha + dst * (u16::from(u8::MAX) - alpha) + 127) / u16::from(u8::MAX);
+    blended as u8
+}
+
+fn clipped_span(src_len: usize, dst_len: usize, dst_pos: isize) -> (usize, usize, usize) {
+    let dst_start = dst_pos.max(0) as usize;
+    let src_start = if dst_pos < 0 {
+        dst_pos.unsigned_abs()
+    } else {
+        0
+    };
+
+    let src_remaining = src_len.saturating_sub(src_start);
+    let dst_remaining = dst_len.saturating_sub(dst_start);
+    let copy_len = src_remaining.min(dst_remaining);
+
+    (src_start, dst_start, copy_len)
 }
 
 fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
@@ -1045,12 +1181,90 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn input_track_state_accepts_i420a_frame() -> crate::Result<()> {
+        let input_track = InputTrack {
+            track_id: TrackId::new("input-alpha"),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: None,
+            height: None,
+        };
+        let mut state = InputTrackState::new(input_track)?;
+
+        let frame = Arc::new(dummy_i420a_frame(Duration::from_millis(10), 200, 128));
+        state.handle_video(frame, Duration::from_millis(1))?;
+        state.advance(Duration::from_millis(1));
+
+        assert!(state.current_frame.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn compose_frame_blends_i420a_and_outputs_i420() -> crate::Result<()> {
+        let track_id = TrackId::new("alpha-track");
+        let input_track = InputTrack {
+            track_id: track_id.clone(),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: None,
+            height: None,
+        };
+        let mut state = InputTrackState::new(input_track)?;
+        state.current_frame = Some(PendingVideoFrame {
+            timestamp: Duration::ZERO,
+            frame: Arc::new(dummy_i420a_frame(Duration::ZERO, 200, 128)),
+        });
+
+        let draw_order = vec![DrawOrder {
+            track_id: track_id.clone(),
+            z: 0,
+            index: 0,
+        }];
+        let mut states = HashMap::new();
+        states.insert(track_id, state);
+
+        let frame = compose_frame(
+            2,
+            2,
+            Duration::ZERO,
+            Duration::from_millis(40),
+            &draw_order,
+            &states,
+        )?;
+
+        assert_eq!(frame.format, VideoFormat::I420);
+        assert_eq!(frame.data[0], 100);
+        assert_eq!(frame.data[1], 100);
+        assert_eq!(frame.data[2], 100);
+        assert_eq!(frame.data[3], 100);
+        assert_eq!(frame.data[4], 164);
+        assert_eq!(frame.data[5], 164);
+        Ok(())
+    }
+
     fn dummy_frame(timestamp: Duration) -> VideoFrame {
         let mut frame =
             VideoFrame::black(EvenUsize::truncating_new(64), EvenUsize::truncating_new(64));
         frame.timestamp = timestamp;
         frame.duration = Duration::from_millis(40);
         frame
+    }
+
+    fn dummy_i420a_frame(timestamp: Duration, y: u8, alpha: u8) -> VideoFrame {
+        VideoFrame {
+            source_id: None,
+            sample_entry: None,
+            keyframe: true,
+            format: VideoFormat::I420A,
+            width: 2,
+            height: 2,
+            timestamp,
+            duration: Duration::from_millis(40),
+            data: vec![y, y, y, y, 200, 200, alpha],
+        }
     }
 
     #[test]
