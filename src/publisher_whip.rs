@@ -108,55 +108,59 @@ impl WhipPublisher {
             }
         }
 
-        loop {
-            let mut close_video = false;
-            let mut close_audio = false;
-            match (video_rx.as_mut(), audio_rx.as_mut()) {
-                (Some(video_rx), Some(audio_rx)) => {
-                    tokio::select! {
-                        message = video_rx.recv() => {
-                            if handle_video_message(&mut session, &self.input_video_track_id, message)? {
-                                close_video = true;
+        let run_result = async {
+            loop {
+                let mut close_video = false;
+                let mut close_audio = false;
+                match (video_rx.as_mut(), audio_rx.as_mut()) {
+                    (Some(video_rx), Some(audio_rx)) => {
+                        tokio::select! {
+                            message = video_rx.recv() => {
+                                if handle_video_message(&mut session, &self.input_video_track_id, message)? {
+                                    close_video = true;
+                                }
+                            }
+                            message = audio_rx.recv() => {
+                                if handle_audio_message(&mut session, &self.input_audio_track_id, message)? {
+                                    close_audio = true;
+                                }
                             }
                         }
-                        message = audio_rx.recv() => {
-                            if handle_audio_message(&mut session, &self.input_audio_track_id, message)? {
-                                close_audio = true;
-                            }
+                    }
+                    (Some(video_rx), None) => {
+                        if handle_video_message(
+                            &mut session,
+                            &self.input_video_track_id,
+                            video_rx.recv().await,
+                        )? {
+                            close_video = true;
                         }
                     }
-                }
-                (Some(video_rx), None) => {
-                    if handle_video_message(
-                        &mut session,
-                        &self.input_video_track_id,
-                        video_rx.recv().await,
-                    )? {
-                        close_video = true;
+                    (None, Some(audio_rx)) => {
+                        if handle_audio_message(
+                            &mut session,
+                            &self.input_audio_track_id,
+                            audio_rx.recv().await,
+                        )? {
+                            close_audio = true;
+                        }
                     }
+                    (None, None) => break,
                 }
-                (None, Some(audio_rx)) => {
-                    if handle_audio_message(
-                        &mut session,
-                        &self.input_audio_track_id,
-                        audio_rx.recv().await,
-                    )? {
-                        close_audio = true;
-                    }
-                }
-                (None, None) => break,
-            }
 
-            if close_video {
-                video_rx = None;
+                if close_video {
+                    video_rx = None;
+                }
+                if close_audio {
+                    audio_rx = None;
+                }
             }
-            if close_audio {
-                audio_rx = None;
-            }
+            Ok(())
         }
+        .await;
 
-        session.disconnect();
-        Ok(())
+        session.disconnect().await;
+        run_result
     }
 }
 
@@ -243,6 +247,8 @@ struct WhipSession {
     audio_sink: crate::webrtc_audio::WebRtcAudioTransportSink,
     /// `VideoTrack` の生存期間を維持するために参照を持つ
     _video_track: Option<shiguredo_webrtc::VideoTrack>,
+    resource_url: Option<String>,
+    bearer_token: Option<String>,
 }
 
 impl WhipSession {
@@ -322,7 +328,7 @@ impl WhipSession {
             (None, None)
         };
 
-        exchange_offer_answer(&pc, output_url, bearer_token).await?;
+        let resource_url = exchange_offer_answer(&pc, output_url, bearer_token).await?;
 
         Ok(Self {
             _factory_bundle: factory_bundle,
@@ -331,6 +337,8 @@ impl WhipSession {
             audio_sink,
             video_source,
             _video_track: video_track,
+            resource_url,
+            bearer_token: bearer_token.map(str::to_owned),
         })
     }
 
@@ -350,8 +358,20 @@ impl WhipSession {
         }
     }
 
-    fn disconnect(&mut self) {
+    async fn disconnect(&mut self) {
         self.pc = None;
+        if let Some(resource_url) = self.resource_url.take() {
+            match delete_resource(
+                &resource_url,
+                self.bearer_token.as_deref(),
+                "Hisui-WhipPublisher",
+            )
+            .await
+            {
+                Ok(()) => tracing::info!("WHIP resource deleted: {resource_url}"),
+                Err(e) => tracing::warn!("failed to delete WHIP resource: {e}"),
+            }
+        }
     }
 }
 
@@ -491,7 +511,7 @@ async fn exchange_offer_answer(
     pc: &PeerConnection,
     output_url: &str,
     bearer_token: Option<&str>,
-) -> crate::Result<()> {
+) -> crate::Result<Option<String>> {
     let offer_sdp = crate::webrtc_sdp::create_offer_sdp(pc)?;
     log_sdp_candidates("WHIP offer", &offer_sdp);
 
@@ -508,6 +528,7 @@ async fn exchange_offer_answer(
     apply_ice_servers_from_link_header(pc, &response)?;
     crate::webrtc_sdp::set_local_offer(pc, &offer_sdp)?;
 
+    let location = response.get_header("Location").map(str::to_owned);
     let answer_sdp = String::from_utf8(response.body)
         .map_err(|e| Error::new(format!("failed to decode answer SDP as UTF-8: {e}")))?;
     if answer_sdp.trim().is_empty() {
@@ -516,7 +537,21 @@ async fn exchange_offer_answer(
     log_sdp_candidates("WHIP answer", &answer_sdp);
     crate::webrtc_sdp::set_remote_answer(pc, &answer_sdp)?;
 
-    Ok(())
+    let resource_url = match location.as_deref() {
+        Some(location) => match resolve_resource_url(output_url, location) {
+            Ok(url) => Some(url),
+            Err(e) => {
+                tracing::warn!("failed to resolve WHIP resource URL from Location header: {e}");
+                None
+            }
+        },
+        None => {
+            tracing::debug!("WHIP response does not contain Location header");
+            None
+        }
+    };
+
+    Ok(resource_url)
 }
 
 fn apply_ice_servers_from_link_header(
@@ -671,6 +706,44 @@ async fn send_offer(
     read_http_response(&mut stream).await
 }
 
+async fn delete_resource(
+    resource_url: &str,
+    bearer_token: Option<&str>,
+    user_agent: &str,
+) -> crate::Result<()> {
+    let target = build_request_target(resource_url)?;
+    let mut request = Request::new("DELETE", &target.path_and_query)
+        .header("Host", &target.host_header)
+        .header("Connection", "close")
+        .header("User-Agent", user_agent);
+    let authorization = bearer_token.map(|token| format!("Bearer {token}"));
+    if let Some(value) = authorization.as_deref() {
+        request = request.header("Authorization", value);
+    }
+    let request = request.body(Vec::new());
+
+    let mut stream = crate::tcp::TcpOrTlsStream::connect(&target.host, target.port, target.tls)
+        .await
+        .map_err(|e| Error::new(format!("failed to connect resource endpoint: {e}")))?;
+    stream
+        .write_all(&request.encode())
+        .await
+        .map_err(|e| Error::new(format!("failed to send resource DELETE request: {e}")))?;
+    stream
+        .flush()
+        .await
+        .map_err(|e| Error::new(format!("failed to flush resource DELETE request: {e}")))?;
+
+    let response = read_http_response(&mut stream).await?;
+    if !(200..300).contains(&response.status_code) {
+        return Err(Error::new(format!(
+            "resource endpoint returned unexpected status code for DELETE: {}",
+            response.status_code
+        )));
+    }
+    Ok(())
+}
+
 async fn read_http_response<T>(stream: &mut T) -> crate::Result<Response>
 where
     T: AsyncRead + Unpin,
@@ -743,6 +816,43 @@ fn extract_quoted_param(text: &str, key: &str) -> Option<String> {
     let rest = &text[start..];
     let end = rest.find('"')?;
     Some(rest[..end].to_owned())
+}
+
+fn resolve_resource_url(base_url: &str, location: &str) -> crate::Result<String> {
+    if location.starts_with("http://") || location.starts_with("https://") {
+        Uri::parse(location).map_err(|e| Error::new(format!("invalid resource URL: {e}")))?;
+        return Ok(location.to_owned());
+    }
+
+    let base = Uri::parse(base_url).map_err(|e| Error::new(format!("invalid base URL: {e}")))?;
+    let scheme = base
+        .scheme()
+        .ok_or_else(|| Error::new("base URL must contain URL scheme"))?;
+    let host = base
+        .host()
+        .ok_or_else(|| Error::new("base URL must contain host"))?;
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    let port = base.port().unwrap_or(default_port);
+    let authority = if (scheme == "http" && port != 80) || (scheme == "https" && port != 443) {
+        format!("{host}:{port}")
+    } else {
+        host.to_owned()
+    };
+
+    let path_and_query = if location.starts_with('/') {
+        location.to_owned()
+    } else {
+        let mut base_path = base.path().to_owned();
+        if base_path.is_empty() {
+            base_path = "/".to_owned();
+        }
+        let parent_end = base_path.rfind('/').unwrap_or(0);
+        let parent = &base_path[..=parent_end];
+        format!("{parent}{location}")
+    };
+    Uri::parse(&format!("{scheme}://{authority}{path_and_query}"))
+        .map_err(|e| Error::new(format!("invalid resolved resource URL: {e}")))?;
+    Ok(format!("{scheme}://{authority}{path_and_query}"))
 }
 
 #[cfg(test)]
@@ -861,5 +971,25 @@ mod tests {
         assert_eq!(target.path_and_query, "/whip/live?foo=bar");
         assert_eq!(target.host_header, "example.com:8443");
         assert!(target.tls);
+    }
+
+    #[test]
+    fn resolve_resource_url_supports_relative_location() {
+        let resolved = resolve_resource_url(
+            "https://example.com/whip/live/channel",
+            "/resource/abc?token=xyz",
+        )
+        .expect("resolve");
+        assert_eq!(resolved, "https://example.com/resource/abc?token=xyz");
+    }
+
+    #[test]
+    fn resolve_resource_url_supports_absolute_location() {
+        let resolved = resolve_resource_url(
+            "https://example.com/whip/live/channel",
+            "https://resource.example.com/session/123",
+        )
+        .expect("resolve");
+        assert_eq!(resolved, "https://resource.example.com/session/123");
     }
 }
