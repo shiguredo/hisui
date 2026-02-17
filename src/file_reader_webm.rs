@@ -94,17 +94,17 @@ impl WebmFileReader {
     async fn handle_sample(&mut self, sample: PendingSample) -> Result<bool> {
         match sample {
             PendingSample::Audio(data) => {
-                if let Some(sender) = self.audio_sender.as_mut() {
-                    if !sender.send_audio(data).await {
-                        return Ok(true);
-                    }
+                if let Some(sender) = self.audio_sender.as_mut()
+                    && !sender.send_audio(data).await
+                {
+                    return Ok(true);
                 }
             }
             PendingSample::Video(frame) => {
-                if let Some(sender) = self.video_sender.as_mut() {
-                    if !sender.send_video(frame).await {
-                        return Ok(true);
-                    }
+                if let Some(sender) = self.video_sender.as_mut()
+                    && !sender.send_video(frame).await
+                {
+                    return Ok(true);
                 }
             }
         }
