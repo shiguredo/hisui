@@ -338,4 +338,70 @@ mod tests {
         let result: orfail::Result<VideoDeviceSource> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn convert_captured_frame_to_i420_accepts_i420_input() {
+        let width = 4usize;
+        let height = 2usize;
+        let y_size = width * height;
+        let uv_width = width.div_ceil(2);
+        let uv_height = height.div_ceil(2);
+        let uv_size = uv_width * uv_height;
+        let expected_size = y_size + uv_size * 2;
+        let data = (0u8..(expected_size as u8)).collect::<Vec<_>>();
+
+        let captured = shiguredo_video_device::VideoFrameOwned {
+            data: data.clone(),
+            uv_data: None,
+            width: width as i32,
+            height: height as i32,
+            stride: width as i32,
+            stride_uv: uv_width as i32,
+            pixel_format: shiguredo_video_device::PixelFormat::I420,
+            timestamp_us: 1_000_000,
+        };
+
+        let default_duration = Duration::from_millis(33);
+        let mut last_timestamp = None;
+        let frame =
+            convert_captured_frame_to_i420(&captured, default_duration, &mut last_timestamp)
+                .expect("convert");
+
+        assert_eq!(frame.format, crate::video::VideoFormat::I420);
+        assert_eq!(frame.width, width);
+        assert_eq!(frame.height, height);
+        assert_eq!(frame.data, data);
+        assert_eq!(frame.timestamp, Duration::from_secs(1));
+        assert_eq!(frame.duration, default_duration);
+    }
+
+    #[test]
+    fn convert_captured_frame_to_i420_rejects_short_i420_input() {
+        let width = 4usize;
+        let height = 2usize;
+        let y_size = width * height;
+        let uv_width = width.div_ceil(2);
+        let uv_height = height.div_ceil(2);
+        let uv_size = uv_width * uv_height;
+        let expected_size = y_size + uv_size * 2;
+
+        let captured = shiguredo_video_device::VideoFrameOwned {
+            data: vec![0; expected_size - 1],
+            uv_data: None,
+            width: width as i32,
+            height: height as i32,
+            stride: width as i32,
+            stride_uv: uv_width as i32,
+            pixel_format: shiguredo_video_device::PixelFormat::I420,
+            timestamp_us: 1_000_000,
+        };
+
+        let default_duration = Duration::from_millis(33);
+        let mut last_timestamp = None;
+        let error =
+            convert_captured_frame_to_i420(&captured, default_duration, &mut last_timestamp)
+                .expect_err("must fail");
+
+        assert!(error.reason.contains("insufficient I420 data"));
+    }
 }
