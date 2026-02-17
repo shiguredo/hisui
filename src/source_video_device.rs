@@ -109,15 +109,13 @@ impl VideoDeviceSource {
                 ))
             })?;
 
-        let mut config = shiguredo_video_device::VideoCaptureConfig::default();
-        config.device_id = self.device_id.clone();
-        if let (Some(width), Some(height)) = (self.width, self.height) {
-            config.width = width;
-            config.height = height;
-        }
-        if let Some(fps) = self.fps {
-            config.fps = fps;
-        }
+        let default_config = shiguredo_video_device::VideoCaptureConfig::default();
+        let config = shiguredo_video_device::VideoCaptureConfig {
+            device_id: self.device_id.clone(),
+            width: self.width.unwrap_or(default_config.width),
+            height: self.height.unwrap_or(default_config.height),
+            fps: self.fps.unwrap_or(default_config.fps),
+        };
 
         let default_duration = frame_duration_from_fps(config.fps);
         let (frame_tx, mut frame_rx) =
