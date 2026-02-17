@@ -118,8 +118,12 @@ fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
 }
 
 fn decode_png_to_i420a(path: &Path) -> Result<DecodedPngI420A> {
-    let file = File::open(path)
-        .map_err(|e| Error::new(format!("failed to open input PNG file {}: {e}", path.display())))?;
+    let file = File::open(path).map_err(|e| {
+        Error::new(format!(
+            "failed to open input PNG file {}: {e}",
+            path.display()
+        ))
+    })?;
     let mut decoder = png::Decoder::new(BufReader::new(file));
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().map_err(|e| {
@@ -436,7 +440,9 @@ mod tests {
         let mut encoder = png::Encoder::new(writer, width, height);
         encoder.set_color(color_type);
         encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().map_err(|e| Error::new(e.to_string()))?;
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| Error::new(e.to_string()))?;
         writer
             .write_image_data(data)
             .map_err(|e| Error::new(e.to_string()))?;

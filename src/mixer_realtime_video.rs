@@ -606,7 +606,8 @@ impl RealtimeI420Canvas {
     }
 
     fn into_data(self) -> Vec<u8> {
-        let mut data = Vec::with_capacity(self.y_plane.len() + self.u_plane.len() + self.v_plane.len());
+        let mut data =
+            Vec::with_capacity(self.y_plane.len() + self.u_plane.len() + self.v_plane.len());
         data.extend_from_slice(&self.y_plane);
         data.extend_from_slice(&self.u_plane);
         data.extend_from_slice(&self.v_plane);
@@ -614,12 +615,7 @@ impl RealtimeI420Canvas {
     }
 }
 
-fn alpha_for_luma(
-    src_a: Option<&[u8]>,
-    src_width: usize,
-    src_x: usize,
-    src_y: usize,
-) -> u8 {
+fn alpha_for_luma(src_a: Option<&[u8]>, src_width: usize, src_x: usize, src_y: usize) -> u8 {
     let Some(src_a) = src_a else {
         return u8::MAX;
     };

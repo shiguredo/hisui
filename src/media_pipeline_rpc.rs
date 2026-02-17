@@ -1563,7 +1563,9 @@ mod tests {
         let mut encoder = png::Encoder::new(writer, width, height);
         encoder.set_color(color_type);
         encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().map_err(|e| crate::Error::new(e.to_string()))?;
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| crate::Error::new(e.to_string()))?;
         writer
             .write_image_data(data)
             .map_err(|e| crate::Error::new(e.to_string()))?;
