@@ -152,6 +152,15 @@ fn decode_png_to_i420a(path: &Path) -> Result<DecodedPngI420A> {
     let src_height = info.height as usize;
     let width = src_width - (src_width % 2);
     let height = src_height - (src_height % 2);
+    if src_width != width || src_height != height {
+        tracing::warn!(
+            "odd PNG dimensions were truncated: {}x{} -> {}x{}",
+            src_width,
+            src_height,
+            width,
+            height
+        );
+    }
     if width == 0 || height == 0 {
         return Err(Error::new(format!(
             "PNG dimensions are too small after truncation: width={src_width} height={src_height}"
