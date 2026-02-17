@@ -74,8 +74,7 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
         let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode, ready_tx);
         if let Err(e) = pipeline_handle
             .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
-                let output_printer = output_printer;
-                async move { output_printer.run(handle).await }
+                output_printer.run(handle)
             })
             .await
         {
