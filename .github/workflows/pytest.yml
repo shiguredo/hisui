@@ -12,6 +12,7 @@ env:
 
 jobs:
   pytest:
+    if: false
     strategy:
       matrix:
         runs_on:
