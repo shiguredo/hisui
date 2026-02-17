@@ -11,6 +11,17 @@ use crate::{
 pub type I420Planes<'a> = (&'a [u8], &'a [u8], &'a [u8]);
 pub type I420APlanes<'a> = (&'a [u8], &'a [u8], &'a [u8], &'a [u8]);
 
+pub(crate) fn rgb_to_yuv_bt601_int(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    let r = i32::from(r);
+    let g = i32::from(g);
+    let b = i32::from(b);
+
+    let y = ((77 * r + 150 * g + 29 * b + 128) >> 8).clamp(0, 255) as u8;
+    let u = (((-43 * r - 85 * g + 128 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+    let v = (((128 * r - 107 * g - 21 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+    (y, u, v)
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
     pub source_id: Option<SourceId>,
@@ -80,14 +91,10 @@ impl VideoFrame {
         for y in 0..height_val {
             for x in 0..width_val {
                 let bgr_idx = (y * width_val + x) * 3;
-                let b = bgr_data[bgr_idx] as f32;
-                let g = bgr_data[bgr_idx + 1] as f32;
-                let r = bgr_data[bgr_idx + 2] as f32;
-
-                // ITU-R BT.601 standard RGB to YUV conversion
-                let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
-                let u_val = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
-                let v_val = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
+                let b = bgr_data[bgr_idx];
+                let g = bgr_data[bgr_idx + 1];
+                let r = bgr_data[bgr_idx + 2];
+                let (y_val, u_val, v_val) = rgb_to_yuv_bt601_int(r, g, b);
 
                 y_plane[y * width_val + x] = y_val;
 
@@ -339,15 +346,8 @@ impl VideoFrame {
             return Self::black(width, height);
         }
 
-        // RGB から YUV に変換
-        let r = rgb[0] as f32;
-        let g = rgb[1] as f32;
-        let b = rgb[2] as f32;
-
-        // ITU-R BT.601 標準を使用した RGB から YUV への変換
-        let y = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
-        let u = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
-        let v = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
+        // ITU-R BT.601 相当の整数近似で RGB から YUV に変換
+        let (y, u, v) = rgb_to_yuv_bt601_int(rgb[0], rgb[1], rgb[2]);
 
         let actual_width = width.get();
         let actual_height = height.get();
@@ -834,6 +834,26 @@ mod tests {
     #[test]
     fn video_format_display_i420a() {
         assert_eq!(VideoFormat::I420A.to_string(), "I420A");
+    }
+
+    #[test]
+    fn rgb_to_yuv_bt601_int_known_values() {
+        assert_eq!(rgb_to_yuv_bt601_int(0, 0, 0), (0, 128, 128));
+        assert_eq!(rgb_to_yuv_bt601_int(255, 255, 255), (255, 128, 128));
+        assert_eq!(rgb_to_yuv_bt601_int(255, 0, 0), (77, 85, 255));
+        assert_eq!(rgb_to_yuv_bt601_int(0, 255, 0), (149, 43, 21));
+        assert_eq!(rgb_to_yuv_bt601_int(0, 0, 255), (29, 255, 107));
+    }
+
+    #[test]
+    fn rgb_to_yuv_bt601_int_stays_in_u8_range() {
+        for r in [0u8, 1, 127, 254, 255] {
+            for g in [0u8, 1, 127, 254, 255] {
+                for b in [0u8, 1, 127, 254, 255] {
+                    let (_y, _u, _v) = rgb_to_yuv_bt601_int(r, g, b);
+                }
+            }
+        }
     }
 
     #[test]

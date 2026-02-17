@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     Error, ProcessorHandle, Result, TrackId,
-    video::{FrameRate, VideoFormat, VideoFrame},
+    video::{FrameRate, VideoFormat, VideoFrame, rgb_to_yuv_bt601_int},
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -230,7 +230,7 @@ fn rgba_like_to_i420a(
                         u8::MAX
                     };
 
-                    let (y_val, u_val, v_val) = rgb_to_yuv(r, g, b);
+                    let (y_val, u_val, v_val) = rgb_to_yuv_bt601_int(r, g, b);
                     y_plane[y * width + x] = y_val;
                     u_sum += u32::from(u_val);
                     v_sum += u32::from(v_val);
@@ -311,17 +311,6 @@ fn grayscale_like_to_i420a(
     data.extend_from_slice(&v_plane);
     data.extend_from_slice(&a_plane);
     Ok((data, width, height))
-}
-
-fn rgb_to_yuv(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-    let r = i32::from(r);
-    let g = i32::from(g);
-    let b = i32::from(b);
-
-    let y = ((77 * r + 150 * g + 29 * b + 128) >> 8).clamp(0, 255) as u8;
-    let u = (((-43 * r - 85 * g + 128 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-    let v = (((128 * r - 107 * g - 21 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-    (y, u, v)
 }
 
 #[cfg(test)]
