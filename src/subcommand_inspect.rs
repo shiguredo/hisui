@@ -178,8 +178,6 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
                 let reader = WebmFileReader::new(
                     input_file_path,
                     WebmFileReaderOptions {
-                        realtime: false,
-                        loop_playback: false,
                         audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
                         video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
                     },

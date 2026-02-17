@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
 
 use crate::{
     Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
@@ -14,8 +11,6 @@ const MAX_NOACKED_COUNT: u64 = 100;
 
 #[derive(Debug, Clone, Default)]
 pub struct WebmFileReaderOptions {
-    pub realtime: bool,
-    pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
     pub video_track_id: Option<TrackId>,
 }
@@ -26,10 +21,6 @@ pub struct WebmFileReader {
     options: WebmFileReaderOptions,
     audio_sender: Option<TrackSender>,
     video_sender: Option<TrackSender>,
-    base_offset: Duration,
-    last_emitted_end: Duration,
-    start_instant: tokio::time::Instant,
-    emitted_in_loop: bool,
 }
 
 impl WebmFileReader {
@@ -39,39 +30,23 @@ impl WebmFileReader {
             options,
             audio_sender: None,
             video_sender: None,
-            base_offset: Duration::ZERO,
-            last_emitted_end: Duration::ZERO,
-            start_instant: tokio::time::Instant::now(),
-            emitted_in_loop: false,
         }
     }
 
     pub async fn run(mut self, handle: ProcessorHandle) -> Result<()> {
-        let loop_enabled = self.resolve_loop_enabled();
         (self.audio_sender, self.video_sender) = self.build_track_senders(handle).await?;
 
         if self.audio_sender.is_none() && self.video_sender.is_none() {
             return Ok(());
         }
 
-        self.start_instant = tokio::time::Instant::now();
-
-        let should_stop = self.run_loop(loop_enabled).await?;
+        let should_stop = self.run_once().await?;
         if should_stop {
             return Ok(());
         }
 
         Self::send_eos(&mut self.audio_sender, &mut self.video_sender);
         Ok(())
-    }
-
-    fn resolve_loop_enabled(&self) -> bool {
-        let mut loop_enabled = self.options.loop_playback;
-        if loop_enabled && !self.options.realtime {
-            tracing::warn!("Loop playback is ignored because realtime is disabled");
-            loop_enabled = false;
-        }
-        loop_enabled
     }
 
     async fn build_track_senders(
@@ -97,36 +72,22 @@ impl WebmFileReader {
         Ok((audio_sender, video_sender))
     }
 
-    async fn run_loop(&mut self, loop_enabled: bool) -> Result<bool> {
-        loop {
-            let mut state = ReaderState::open(
-                &self.path,
-                self.audio_sender.is_some(),
-                self.video_sender.is_some(),
-            )?;
+    async fn run_once(&mut self) -> Result<bool> {
+        let mut state = ReaderState::open(
+            &self.path,
+            self.audio_sender.is_some(),
+            self.video_sender.is_some(),
+        )?;
 
-            if !state.has_enabled_readers() {
-                break;
+        if !state.has_enabled_readers() {
+            return Ok(false);
+        }
+
+        while let Some(sample) = state.next_sample()? {
+            let should_stop = self.handle_sample(sample).await?;
+            if should_stop {
+                return Ok(true);
             }
-
-            self.emitted_in_loop = false;
-            while let Some(sample) = state.next_sample()? {
-                let should_stop = self.handle_sample(sample).await?;
-                if should_stop {
-                    return Ok(true);
-                }
-            }
-
-            if loop_enabled {
-                if !self.emitted_in_loop {
-                    tracing::warn!("Loop playback stopped because no samples were read");
-                    break;
-                }
-                self.base_offset = self.last_emitted_end;
-                continue;
-            }
-
-            break;
         }
 
         Ok(false)
@@ -134,43 +95,17 @@ impl WebmFileReader {
 
     async fn handle_sample(&mut self, sample: PendingSample) -> Result<bool> {
         match sample {
-            PendingSample::Audio(mut data) => {
-                let effective_timestamp = self.base_offset + data.timestamp;
-                if self.options.realtime {
-                    let target = self.start_instant + effective_timestamp;
-                    tokio::time::sleep_until(target).await;
-                }
-
-                data.timestamp = effective_timestamp;
-                let duration = data.duration;
+            PendingSample::Audio(data) => {
                 if let Some(sender) = self.audio_sender.as_mut() {
                     if !sender.send_audio(data).await {
                         return Ok(true);
                     }
-                    self.emitted_in_loop = true;
-                    let end = effective_timestamp + duration;
-                    if end > self.last_emitted_end {
-                        self.last_emitted_end = end;
-                    }
                 }
             }
-            PendingSample::Video(mut frame) => {
-                let effective_timestamp = self.base_offset + frame.timestamp;
-                if self.options.realtime {
-                    let target = self.start_instant + effective_timestamp;
-                    tokio::time::sleep_until(target).await;
-                }
-
-                frame.timestamp = effective_timestamp;
-                let duration = frame.duration;
+            PendingSample::Video(frame) => {
                 if let Some(sender) = self.video_sender.as_mut() {
                     if !sender.send_video(frame).await {
                         return Ok(true);
-                    }
-                    self.emitted_in_loop = true;
-                    let end = effective_timestamp + duration;
-                    if end > self.last_emitted_end {
-                        self.last_emitted_end = end;
                     }
                 }
             }
