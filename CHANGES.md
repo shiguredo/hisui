@@ -27,6 +27,16 @@
   - `processorId` 未指定時は `inputUrl` を既定値として利用する
   - 現時点では音声受信 (`outputAudioTrackId`) は未対応
   - @sile
+- [ADD] server サブコマンドの JSON-RPC で PNG file source を作成できるようにする
+  - JSON-RPC に `createPngFileSource` メソッドを追加する
+  - `path` で指定した PNG を `outputVideoTrackId` に固定 FPS で繰り返し配信できる
+  - `frameRate` の既定値は `1`
+  - @sile
+- [ADD] `VideoFormat` に `I420A` を追加する
+  - `PngFileSource` の出力にアルファ付き I420 を使えるようにする
+  - `VideoRealtimeMixer` は `I420A` を受け取った場合にアルファ合成して `I420` で出力する
+  - 既存の `VideoMixer` は従来通り `I420` のみを対象とする
+  - @sile
 - [ADD] 環境変数 `HISUI_WEBRTC_LOG` で WebRTC ネイティブログを有効化できるようにする
   - `verbose` / `info` / `warning` / `error` / `none` を指定できる
   - @sile
