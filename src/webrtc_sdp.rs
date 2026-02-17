@@ -14,6 +14,13 @@ pub(crate) fn create_offer_sdp(pc: &PeerConnection) -> crate::Result<String> {
     create_sdp(pc, &mut options, true)
 }
 
+pub(crate) fn create_offer_sdp_recvonly(pc: &PeerConnection) -> crate::Result<String> {
+    let mut options = PeerConnectionOfferAnswerOptions::new();
+    options.set_offer_to_receive_audio(1);
+    options.set_offer_to_receive_video(1);
+    create_sdp(pc, &mut options, true)
+}
+
 pub(crate) fn create_answer_sdp(pc: &PeerConnection) -> crate::Result<String> {
     let mut options = PeerConnectionOfferAnswerOptions::new();
     create_sdp(pc, &mut options, false)

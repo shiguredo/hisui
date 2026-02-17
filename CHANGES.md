@@ -15,11 +15,17 @@
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
   - 未指定の場合は従来通り 404 を返す
   - @voluntas
-- [ADD] MediaPipeline 用の WHIP publisher を追加する
+- [ADD] server サブコマンドの JSON-RPC で WHIP publisher を作成できるようにする
   - JSON-RPC に `createWhipPublisher` メソッドを追加する
-  - `outputUrl` を指定して `inputVideoTrackId` / `inputAudioTrackId` のトラックを WHIP で publish できる
+  - `outputUrl` を指定して `inputVideoTrackId` / `inputAudioTrackId` のトラックを WHIP で配信できる
   - `bearerToken` で Authorization ヘッダーの Bearer トークンを指定できる
   - `videoCodecPreferences` で映像コーデック優先順を指定できる
+  - @sile
+- [ADD] server サブコマンドの JSON-RPC で WHEP subscriber を作成できるようにする
+  - JSON-RPC に `createWhepSubscriber` メソッドを追加する
+  - `inputUrl` を指定して WHEP の受信映像を `outputVideoTrackId` に配信できる
+  - `processorId` 未指定時は `inputUrl` を既定値として利用する
+  - 現時点では音声受信 (`outputAudioTrackId`) は未対応
   - @sile
 - [ADD] 環境変数 `HISUI_WEBRTC_LOG` で WebRTC ネイティブログを有効化できるようにする
   - `verbose` / `info` / `warning` / `error` / `none` を指定できる

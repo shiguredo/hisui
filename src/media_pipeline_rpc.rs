@@ -59,6 +59,7 @@ impl MediaPipelineHandle {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
             "createWhipPublisher" => self.handle_create_whip_publisher_rpc(maybe_params).await,
+            "createWhepSubscriber" => self.handle_create_whep_subscriber_rpc(maybe_params).await,
             "listTracks" => self.handle_list_tracks_rpc().await,
             "listProcessors" => self.handle_list_processors_rpc().await,
             _ => Err(method_not_found()),
@@ -160,6 +161,35 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::CreateWhipPublisher { processor_id })
     }
 
+    async fn handle_create_whep_subscriber_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (subscriber, processor_id): (
+            crate::subscriber_whep::WhepSubscriber,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let subscriber = params.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((subscriber, processor_id))
+        })?;
+        let processor_id =
+            processor_id.unwrap_or_else(|| ProcessorId::new(subscriber.input_url.clone()));
+
+        self.spawn_local_processor(processor_id.clone(), move |handle| subscriber.run(handle))
+            .await
+            .map_err(|e| match e {
+                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                    "Invalid params: processorId already exists: {processor_id}"
+                )),
+                RegisterProcessorError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
+            })?;
+
+        Ok(RpcSuccessResult::CreateWhepSubscriber { processor_id })
+    }
+
     async fn handle_list_tracks_rpc(&self) -> Result<RpcSuccessResult, RpcError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.send(MediaPipelineCommand::ListTracks { reply_tx });
@@ -187,6 +217,7 @@ enum RpcSuccessResult {
     CreateMp4FileSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
     CreateWhipPublisher { processor_id: ProcessorId },
+    CreateWhepSubscriber { processor_id: ProcessorId },
     ListTracks { track_ids: Vec<TrackId> },
     ListProcessors { processor_ids: Vec<ProcessorId> },
 }
@@ -201,6 +232,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateWhipPublisher { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateWhepSubscriber { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::ListTracks { track_ids } => f.array(|f| {
@@ -709,6 +743,215 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_whep_subscriber_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber","params":{"inputUrl":"ws://example.com/whep/live","outputVideoTrackId":"video-main"}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_requires_output_video_track_id_for_now() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whep_subscriber_request(None, None, None, None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_rejects_output_audio_track_id_for_now() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request =
+            create_whep_subscriber_request(None, None, Some("video-main"), Some("audio-main"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whep_subscriber_request(None, None, Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "https://example.com/whep/live"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whep_subscriber_request(
+            Some("custom-whep-subscriber"),
+            None,
+            Some("video-main"),
+            None,
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-whep-subscriber"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_accepts_bearer_token() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request =
+            create_whep_subscriber_request(None, Some("test-token"), Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "https://example.com/whep/live"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_rejects_empty_bearer_token() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let request = create_whep_subscriber_request(None, Some("   "), Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_whep_subscriber_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline();
+        let blocker = handle
+            .register_processor(ProcessorId::new("duplicate-whep-subscriber"))
+            .await
+            .expect("register duplicate-whep-subscriber");
+        let request = create_whep_subscriber_request(
+            Some("duplicate-whep-subscriber"),
+            None,
+            Some("video-main"),
+            None,
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
     async fn list_processors_returns_empty_array_when_no_processors() {
         let (handle, pipeline_task) = spawn_test_pipeline();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;
@@ -930,6 +1173,30 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{{"outputUrl":"https://example.com/whip/live"{input_video_track_id_part}{input_audio_track_id_part}{bearer_token_part}{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_whep_subscriber_request(
+        processor_id: Option<&str>,
+        bearer_token: Option<&str>,
+        output_video_track_id: Option<&str>,
+        output_audio_track_id: Option<&str>,
+    ) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+        let bearer_token_part = bearer_token
+            .map(|token| format!(r#","bearerToken":"{token}""#))
+            .unwrap_or_default();
+        let output_video_track_id_part = output_video_track_id
+            .map(|id| format!(r#","outputVideoTrackId":"{id}""#))
+            .unwrap_or_default();
+        let output_audio_track_id_part = output_audio_track_id
+            .map(|id| format!(r#","outputAudioTrackId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber","params":{{"inputUrl":"https://example.com/whep/live"{output_video_track_id_part}{output_audio_track_id_part}{bearer_token_part}{processor_id_part}}}}}"#
         )
     }
 }
