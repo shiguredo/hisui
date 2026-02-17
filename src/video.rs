@@ -8,6 +8,9 @@ use crate::{
     types::{CodecName, EvenUsize},
 };
 
+pub type I420Planes<'a> = (&'a [u8], &'a [u8], &'a [u8]);
+pub type I420APlanes<'a> = (&'a [u8], &'a [u8], &'a [u8], &'a [u8]);
+
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
     pub source_id: Option<SourceId>,
@@ -407,7 +410,7 @@ impl VideoFrame {
         EvenUsize::ceiling_new(self.height)
     }
 
-    pub fn as_yuv_planes(&self) -> Option<(&[u8], &[u8], &[u8])> {
+    pub fn as_yuv_planes(&self) -> Option<I420Planes<'_>> {
         if self.format != VideoFormat::I420 {
             return None;
         }
@@ -424,7 +427,7 @@ impl VideoFrame {
         Some((y_plane, u_plane, v_plane))
     }
 
-    pub fn as_i420a_planes(&self) -> Option<(&[u8], &[u8], &[u8], &[u8])> {
+    pub fn as_i420a_planes(&self) -> Option<I420APlanes<'_>> {
         if self.format != VideoFormat::I420A {
             return None;
         }
