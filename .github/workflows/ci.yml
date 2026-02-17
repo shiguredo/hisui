@@ -174,12 +174,14 @@ jobs:
         platform:
           - name: ubuntu-24.04_x86_64
             runs-on: ubuntu-24.04
-          - name: ubuntu-24.04_arm64
-            runs-on: ubuntu-24.04-arm
+          # TODO: webrtc-rs が ubuntu-24.04 arm64 をサポートしたら ubuntu-24.04_arm64 を復帰する
+          # - name: ubuntu-24.04_arm64
+          #   runs-on: ubuntu-24.04-arm
           - name: ubuntu-22.04_x86_64
             runs-on: ubuntu-22.04
-          - name: ubuntu-22.04_arm64
-            runs-on: ubuntu-22.04-arm
+          # TODO: webrtc-rs が ubuntu-22.04 arm64 をサポートしたら ubuntu-22.04_arm64 を復帰する
+          # - name: ubuntu-22.04_arm64
+          #   runs-on: ubuntu-22.04-arm
     runs-on: ${{ matrix.platform.runs-on }}
     timeout-minutes: 20
     steps:
