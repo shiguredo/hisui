@@ -363,6 +363,7 @@ impl Mp4Writer {
     ) -> crate::Result<()> {
         let mut audio_rx = input_audio_track_id.map(|id| handle.subscribe_track(id));
         let mut video_rx = input_video_track_id.map(|id| handle.subscribe_track(id));
+        handle.notify_ready();
 
         let mut in_progress = audio_rx.is_some() || video_rx.is_some();
         while in_progress {
