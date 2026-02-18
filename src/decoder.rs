@@ -65,6 +65,8 @@ impl AudioDecoder {
     ) -> Result<()> {
         let mut input_rx = handle.subscribe_track(input_track_id);
         let mut output_tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
 
         loop {
             let message = input_rx.recv().await;
@@ -85,7 +87,7 @@ impl AudioDecoder {
             let finished = drain_decoder_output(&mut self, &mut output_tx).await?;
 
             if finished {
-                output_tx.send_eos().await;
+                output_tx.send_eos();
                 break;
             }
 
@@ -283,6 +285,8 @@ impl VideoDecoder {
     ) -> Result<()> {
         let mut input_rx = handle.subscribe_track(input_track_id);
         let mut output_tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
 
         loop {
             let message = input_rx.recv().await;
@@ -303,7 +307,7 @@ impl VideoDecoder {
             let finished = drain_decoder_output(&mut self, &mut output_tx).await?;
 
             if finished {
-                output_tx.send_eos().await;
+                output_tx.send_eos();
                 break;
             }
 
@@ -374,7 +378,7 @@ async fn drain_decoder_output<P: MediaProcessor>(
             .map_err(|e| Error::new(e.to_string()))?
         {
             MediaProcessorOutput::Processed { sample, .. } => {
-                if !output_tx.send_media(sample).await {
+                if !output_tx.send_media(sample) {
                     return Ok(true);
                 }
             }

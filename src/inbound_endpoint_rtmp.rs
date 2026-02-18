@@ -76,6 +76,8 @@ impl RtmpInboundEndpoint {
 
         let timeout = self.options.lifetime;
         let start_time = tokio::time::Instant::now();
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
 
         loop {
             let elapsed = start_time.elapsed();
@@ -260,8 +262,8 @@ impl RtmpPublisherHandler {
             }
         }
 
-        self.video_track_tx.send_eos().await;
-        self.audio_track_tx.send_eos().await;
+        self.video_track_tx.send_eos();
+        self.audio_track_tx.send_eos();
 
         Ok(())
     }
@@ -325,8 +327,7 @@ impl RtmpPublisherHandler {
     ) -> orfail::Result<()> {
         let audio_data = self.frame_handler.process_audio_frame(frame)?;
         self.audio_track_tx
-            .send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)))
-            .await;
+            .send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
         Ok(())
     }
 
@@ -337,8 +338,7 @@ impl RtmpPublisherHandler {
     ) -> orfail::Result<()> {
         if let Some(video_frame) = self.frame_handler.process_video_frame(frame).or_fail()? {
             self.video_track_tx
-                .send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)))
-                .await;
+                .send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
         }
         Ok(())
     }

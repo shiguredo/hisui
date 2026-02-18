@@ -70,19 +70,21 @@ impl PngFileSource {
         let mut tx = outer_processor
             .publish_track(self.output_video_track_id.clone())
             .await?;
+        outer_processor.notify_ready();
+        outer_processor.wait_subscribers_ready().await?;
         drop(outer_processor);
 
         let mut frame_index = 0u64;
         let mut noacked_sent = 0u64;
         let start = tokio::time::Instant::now();
-        let mut ack = tx.send_syn().await;
+        let mut ack = tx.send_syn();
         loop {
             let timestamp = frames_to_timestamp(self.frame_rate, frame_index);
             tokio::time::sleep_until(start + timestamp).await;
 
             if noacked_sent > MAX_NOACKED_COUNT {
                 ack.await;
-                ack = tx.send_syn().await;
+                ack = tx.send_syn();
                 noacked_sent = 0;
             }
 
@@ -101,7 +103,7 @@ impl PngFileSource {
                 sample_entry: None,
             };
 
-            if !tx.send_video(frame).await {
+            if !tx.send_video(frame) {
                 break;
             }
             noacked_sent = noacked_sent.saturating_add(1);
@@ -391,6 +393,8 @@ mod tests {
             .register_processor(ProcessorId::new("subscriber"))
             .await?;
         let mut rx = subscriber.subscribe_track(output_track_id.clone());
+        subscriber.notify_ready();
+        pipeline_handle.complete_initial_processor_registration();
 
         let source = PngFileSource {
             path: png_file.path().to_path_buf(),

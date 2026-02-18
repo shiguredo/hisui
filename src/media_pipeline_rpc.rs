@@ -333,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn notification_error_returns_no_response() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","method":"createMp4FileSource"}"#;
 
         let response = handle.rpc(request.as_bytes()).await;
@@ -348,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_mp4_file_source_requires_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource"}"#;
 
         let response = handle
@@ -370,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_mp4_file_source_validates_mp4_source_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}"}}}}"#
         );
@@ -394,7 +394,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_mp4_file_source_uses_path_as_default_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}","realtime":false,"loopPlayback":false,"videoTrackId":"video-default-id"}}}}"#
         );
@@ -418,7 +418,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_mp4_file_source_uses_explicit_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}","processorId":"custom-source","realtime":false,"loopPlayback":false,"videoTrackId":"video-custom-id"}}}}"#
         );
@@ -442,7 +442,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_mp4_file_source_rejects_duplicate_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4FileSource","params":{{"path":"{TEST_MP4_PATH}","processorId":"duplicate-source","realtime":true,"loopPlayback":false,"videoTrackId":"video-duplicate-id"}}}}"#
         );
@@ -474,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_png_file_source_requires_params() -> crate::Result<()> {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createPngFileSource"}"#;
 
         let response = handle
@@ -497,7 +497,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_png_file_source_validates_source_params() -> crate::Result<()> {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let png_file = create_test_png_file(2, 2, png::ColorType::Rgba, &[255; 16])?;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}"}}}}"#,
@@ -524,7 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_png_file_source_uses_path_as_default_processor_id() -> crate::Result<()> {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let png_file = create_test_png_file(2, 2, png::ColorType::Rgb, &[0; 12])?;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}","frameRate":1,"outputVideoTrackId":"png-video-default"}}}}"#,
@@ -549,7 +549,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_png_file_source_uses_explicit_processor_id() -> crate::Result<()> {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let png_file = create_test_png_file(2, 2, png::ColorType::Rgb, &[0; 12])?;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}","processorId":"custom-png-source","frameRate":1,"outputVideoTrackId":"png-video-custom"}}}}"#,
@@ -574,7 +574,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_png_file_source_rejects_duplicate_processor_id() -> crate::Result<()> {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let png_file = create_test_png_file(2, 2, png::ColorType::Rgba, &[255; 16])?;
         let request = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createPngFileSource","params":{{"path":"{}","processorId":"duplicate-png-source","frameRate":1,"outputVideoTrackId":"png-video-duplicate"}}}}"#,
@@ -606,7 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_device_source_requires_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoDeviceSource"}"#;
 
         let response = handle
@@ -628,7 +628,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_device_source_validates_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoDeviceSource","params":{"deviceId":"camera0"}}"#;
 
         let response = handle
@@ -650,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_device_source_uses_default_processor_id_for_default_device() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_video_device_source_request(None, None);
 
         let response = handle
@@ -670,7 +670,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_device_source_uses_default_processor_id_for_device_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_video_device_source_request(None, Some("camera0"));
 
         let response = handle
@@ -690,7 +690,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_device_source_uses_explicit_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_video_device_source_request(Some("custom-video-device"), None);
 
         let response = handle
@@ -710,7 +710,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_device_source_rejects_duplicate_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_video_device_source_request(Some("duplicate-video-device"), None);
 
         let first_response = handle
@@ -738,7 +738,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_mixer_requires_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoMixer"}"#;
 
         let response = handle
@@ -760,7 +760,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_mixer_validates_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request =
             r#"{"jsonrpc":"2.0","id":1,"method":"createVideoMixer","params":{"canvasWidth":640}}"#;
 
@@ -783,7 +783,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_mixer_uses_default_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
             .register_processor(ProcessorId::new("video-mixer-blocker"))
             .await
@@ -815,7 +815,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_mixer_uses_explicit_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
             .register_processor(ProcessorId::new("video-mixer-blocker"))
             .await
@@ -847,7 +847,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_video_mixer_rejects_duplicate_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request =
             create_video_mixer_request("video-mixer-output-dup", Some("duplicate-video-mixer"));
 
@@ -876,7 +876,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_requires_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher"}"#;
 
         let response = handle
@@ -898,7 +898,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_validates_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhipPublisher","params":{"outputUrl":"ws://example.com/whip/live","inputVideoTrackId":"video-main"}}"#;
 
         let response = handle
@@ -920,7 +920,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_uses_default_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whip_publisher_request(None, None, Some("video-main"), None);
 
         let response = handle
@@ -940,7 +940,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_uses_explicit_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whip_publisher_request(
             Some("custom-whip-publisher"),
             None,
@@ -965,7 +965,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_accepts_bearer_token() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request =
             create_whip_publisher_request(None, Some("test-token"), Some("video-main"), None);
 
@@ -986,7 +986,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_rejects_empty_bearer_token() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whip_publisher_request(None, Some("   "), Some("video-main"), None);
 
         let response = handle
@@ -1008,7 +1008,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_rejects_duplicate_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
             .register_processor(ProcessorId::new("duplicate-whip-publisher"))
             .await
@@ -1040,7 +1040,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_accepts_input_audio_track_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whip_publisher_request(None, None, None, Some("audio-main"));
 
         let response = handle
@@ -1060,7 +1060,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whip_publisher_accepts_without_input_track_ids() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whip_publisher_request(None, None, None, None);
 
         let response = handle
@@ -1080,7 +1080,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_requires_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber"}"#;
 
         let response = handle
@@ -1102,7 +1102,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_validates_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber","params":{"inputUrl":"ws://example.com/whep/live","outputVideoTrackId":"video-main"}}"#;
 
         let response = handle
@@ -1124,7 +1124,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_requires_output_video_track_id_for_now() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whep_subscriber_request(None, None, None, None);
 
         let response = handle
@@ -1146,7 +1146,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_rejects_output_audio_track_id_for_now() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request =
             create_whep_subscriber_request(None, None, Some("video-main"), Some("audio-main"));
 
@@ -1169,7 +1169,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_uses_default_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whep_subscriber_request(None, None, Some("video-main"), None);
 
         let response = handle
@@ -1189,7 +1189,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_uses_explicit_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whep_subscriber_request(
             Some("custom-whep-subscriber"),
             None,
@@ -1214,7 +1214,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_accepts_bearer_token() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request =
             create_whep_subscriber_request(None, Some("test-token"), Some("video-main"), None);
 
@@ -1235,7 +1235,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_rejects_empty_bearer_token() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = create_whep_subscriber_request(None, Some("   "), Some("video-main"), None);
 
         let response = handle
@@ -1257,7 +1257,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_whep_subscriber_rejects_duplicate_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
             .register_processor(ProcessorId::new("duplicate-whep-subscriber"))
             .await
@@ -1289,7 +1289,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_processors_returns_empty_array_when_no_processors() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;
 
         let response = handle
@@ -1312,7 +1312,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_processors_returns_registered_processors() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let processor_a = handle
             .register_processor(ProcessorId::new("list-processor-a"))
             .await
@@ -1343,7 +1343,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_tracks_returns_empty_array_when_no_tracks() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"listTracks"}"#;
 
         let response = handle
@@ -1366,7 +1366,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_tracks_returns_created_tracks() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let publisher = handle
             .register_processor(ProcessorId::new("list-tracks-publisher"))
             .await
@@ -1400,7 +1400,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_rpcs_ignore_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline();
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
         let list_tracks_request =
             r#"{"jsonrpc":"2.0","id":1,"method":"listTracks","params":{"dummy":1}}"#;
         let list_processors_request =
@@ -1425,10 +1425,11 @@ mod tests {
             .expect("pipeline task failed");
     }
 
-    fn spawn_test_pipeline() -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
+    async fn spawn_test_pipeline() -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
+        handle.complete_initial_processor_registration();
         (handle, pipeline_task)
     }
 

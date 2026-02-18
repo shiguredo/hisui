@@ -108,6 +108,8 @@ impl VideoDeviceSource {
                     self.output_video_track_id
                 ))
             })?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
 
         let default_config = shiguredo_video_device::VideoCaptureConfig::default();
         let config = shiguredo_video_device::VideoCaptureConfig {
@@ -136,13 +138,13 @@ impl VideoDeviceSource {
                 &mut last_timestamp,
             )?;
             // TODO: send_syn() でペース調整に対応する
-            if !output_video_sender.send_video(frame).await {
+            if !output_video_sender.send_video(frame) {
                 break;
             }
         }
 
         capture.stop();
-        output_video_sender.send_eos().await;
+        output_video_sender.send_eos();
 
         Ok(())
     }

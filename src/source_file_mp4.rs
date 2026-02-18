@@ -78,6 +78,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
 
 impl Mp4FileSource {
     pub async fn run(self, outer_processor: ProcessorHandle) -> Result<()> {
+        outer_processor.notify_ready();
+        outer_processor.wait_subscribers_ready().await?;
+
         let inner_pipeline = MediaPipeline::new()?;
         let inner_handle = inner_pipeline.handle();
         let task = tokio::spawn(inner_pipeline.run());
@@ -141,6 +144,8 @@ impl Mp4FileSource {
             .spawn_processor(ProcessorId::new("reader"), |handle| reader.run(handle))
             .await?;
 
+        inner_handle.complete_initial_processor_registration();
+
         Ok(())
     }
 }
@@ -151,29 +156,28 @@ async fn start_bridge(
     outer_processor: &ProcessorHandle,
 ) -> Result<()> {
     let mut tx = outer_processor.publish_track(track_id.clone()).await?;
+    let bridge_processor_id = ProcessorId::new(format!("mp4_source_bridge_{track_id}"));
 
     inner_handle
-        .spawn_processor(
-            ProcessorId::new("mp4_source_bridge"),
-            async move |inner_processor| {
-                let mut rx = inner_processor.subscribe_track(track_id);
-                loop {
-                    match rx.recv().await {
-                        Message::Media(sample) => {
-                            if !tx.send_media(sample).await {
-                                break;
-                            }
-                        }
-                        Message::Eos => {
-                            tx.send_eos().await;
+        .spawn_processor(bridge_processor_id, async move |inner_processor| {
+            inner_processor.notify_ready();
+            let mut rx = inner_processor.subscribe_track(track_id);
+            loop {
+                match rx.recv().await {
+                    Message::Media(sample) => {
+                        if !tx.send_media(sample) {
                             break;
                         }
-                        Message::Syn(_) => {}
                     }
+                    Message::Eos => {
+                        tx.send_eos();
+                        break;
+                    }
+                    Message::Syn(_) => {}
                 }
-                Ok(())
-            },
-        )
+            }
+            Ok(())
+        })
         .await?;
 
     Ok(())
@@ -197,6 +201,8 @@ mod tests {
                 .register_processor(ProcessorId::new("test_subscriber"))
                 .await?;
             let mut rx = subscriber.subscribe_track(video_track_id.clone());
+            subscriber.notify_ready();
+            handle.complete_initial_processor_registration();
 
             let source = Mp4FileSource {
                 path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),

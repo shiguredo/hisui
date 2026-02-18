@@ -163,6 +163,7 @@ async fn run_server(
             .map_err(|e| crate::Error::new(e.to_string()))?;
         tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
     }
+    pipeline_handle.complete_initial_processor_registration();
 
     let bootstrap_endpoint = Rc::new(
         BootstrapEndpoint::new(pipeline_handle.clone())

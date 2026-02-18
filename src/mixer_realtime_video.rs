@@ -99,9 +99,11 @@ impl VideoRealtimeMixer {
             );
         }
         drop(event_tx);
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
 
         let mut output_tx = output_tx;
-        let ack = Some(output_tx.send_syn().await);
+        let ack = Some(output_tx.send_syn());
         VideoRealtimeMixerRunner {
             canvas_width: canvas_width.get(),
             canvas_height: canvas_height.get(),
@@ -231,7 +233,7 @@ impl VideoRealtimeMixerRunner {
             if let Some(waiting_ack) = self.ack.take() {
                 waiting_ack.await;
             }
-            self.ack = Some(self.output_tx.send_syn().await);
+            self.ack = Some(self.output_tx.send_syn());
             self.noacked_sent = 0;
         }
 
@@ -250,7 +252,7 @@ impl VideoRealtimeMixerRunner {
             &self.states,
         )?;
 
-        if !self.output_tx.send_video(frame).await {
+        if !self.output_tx.send_video(frame) {
             return Ok(false);
         }
         self.noacked_sent = self.noacked_sent.saturating_add(1);
@@ -1013,28 +1015,31 @@ mod tests {
         let sender2_processor = pipeline_handle
             .register_processor(crate::ProcessorId::new("sender2"))
             .await?;
+        mixer_processor.notify_ready();
+        sink_processor.notify_ready();
+        sender1_processor.notify_ready();
+        sender2_processor.notify_ready();
+        pipeline_handle.complete_initial_processor_registration();
 
         let mixer_task = tokio::spawn(async move { mixer.run(mixer_processor).await });
 
         let sender1_task = tokio::spawn(async move {
             let mut tx = sender1_processor.publish_track(input_track_id_1).await?;
             for i in 0..5 {
-                tx.send_video(dummy_frame(Duration::from_millis(i * 40)))
-                    .await;
+                tx.send_video(dummy_frame(Duration::from_millis(i * 40)));
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            tx.send_eos().await;
+            tx.send_eos();
             Ok::<(), crate::Error>(())
         });
 
         let sender2_task = tokio::spawn(async move {
             let mut tx = sender2_processor.publish_track(input_track_id_2).await?;
             for i in 0..5 {
-                tx.send_video(dummy_frame(Duration::from_millis(100 + i * 40)))
-                    .await;
+                tx.send_video(dummy_frame(Duration::from_millis(100 + i * 40)));
                 tokio::time::sleep(Duration::from_millis(12)).await;
             }
-            tx.send_eos().await;
+            tx.send_eos();
             Ok::<(), crate::Error>(())
         });
 
@@ -1086,6 +1091,9 @@ mod tests {
         let receiver_processor = pipeline_handle
             .register_processor(crate::ProcessorId::new("syn_receiver"))
             .await?;
+        sender_processor.notify_ready();
+        receiver_processor.notify_ready();
+        pipeline_handle.complete_initial_processor_registration();
 
         let track_id = TrackId::new("syn-track");
         let mut tx = sender_processor.publish_track(track_id.clone()).await?;
@@ -1097,7 +1105,7 @@ mod tests {
 
         let mut first_event = None;
         for _ in 0..40 {
-            tx.send_video(dummy_frame(Duration::from_millis(0))).await;
+            tx.send_video(dummy_frame(Duration::from_millis(0)));
             if let Ok(Some(event)) =
                 tokio::time::timeout(Duration::from_millis(50), event_rx.recv()).await
             {
@@ -1115,7 +1123,7 @@ mod tests {
             } if event_track_id == track_id
         ));
 
-        let ack = tx.send_syn().await;
+        let ack = tx.send_syn();
         tokio::pin!(ack);
 
         let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv())
@@ -1135,7 +1143,7 @@ mod tests {
             .await
             .map_err(|e| Error::new(e.to_string()))?;
 
-        tx.send_eos().await;
+        tx.send_eos();
 
         drop(receiver_processor);
         drop(sender_processor);

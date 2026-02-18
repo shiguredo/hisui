@@ -36,15 +36,20 @@ impl AudioReader {
     pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
+        handle.notify_ready();
+        handle
+            .wait_subscribers_ready()
+            .await
+            .map_err(|e| orfail::Failure::new(e.to_string()))?;
 
-        let mut ack = track_handle.send_syn().await;
+        let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
         loop {
             // 100 はとりあえずの暫定値。
             // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
             if noacked_sent > 100 {
                 ack.await;
-                ack = track_handle.send_syn().await;
+                ack = track_handle.send_syn();
                 noacked_sent = 0;
             }
 
@@ -62,7 +67,7 @@ impl AudioReader {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
 
-                    if !track_handle.send_media(MediaSample::new_audio(data)).await {
+                    if !track_handle.send_media(MediaSample::new_audio(data)) {
                         // パイプライン処理が中断された
                         break;
                     }
@@ -71,7 +76,7 @@ impl AudioReader {
             }
         }
 
-        track_handle.send_eos().await;
+        track_handle.send_eos();
 
         Ok(())
     }
@@ -246,15 +251,20 @@ impl VideoReader {
     pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
+        handle.notify_ready();
+        handle
+            .wait_subscribers_ready()
+            .await
+            .map_err(|e| orfail::Failure::new(e.to_string()))?;
 
-        let mut ack = track_handle.send_syn().await;
+        let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
         loop {
             // 100 はとりあえずの暫定値。
             // おそらくこの値は適当に大きい値ならなんでも構わないが、実際に使ってみて問題があれば都度調整する。
             if noacked_sent > 100 {
                 ack.await;
-                ack = track_handle.send_syn().await;
+                ack = track_handle.send_syn();
                 noacked_sent = 0;
             }
 
@@ -272,7 +282,7 @@ impl VideoReader {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
 
-                    if !track_handle.send_media(MediaSample::new_video(frame)).await {
+                    if !track_handle.send_media(MediaSample::new_video(frame)) {
                         // パイプライン処理が中断された
                         break;
                     }
@@ -280,7 +290,7 @@ impl VideoReader {
                 }
             }
         }
-        track_handle.send_eos().await;
+        track_handle.send_eos();
 
         Ok(())
     }

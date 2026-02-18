@@ -173,6 +173,8 @@ async fn setup_pipeline(
         }
     }
 
+    pipeline_handle.complete_initial_processor_registration();
+
     Ok(())
 }
 
@@ -382,6 +384,8 @@ impl OutputPrinter {
 
         let video_decoded_track_id = self.video_decoded_track_id.clone();
         let mut video_decoded_track = handle.subscribe_track(video_decoded_track_id.clone());
+
+        handle.notify_ready();
 
         while !self.active_streams.is_empty() {
             tokio::select! {

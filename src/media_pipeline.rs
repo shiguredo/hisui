@@ -6,7 +6,11 @@ pub struct MediaPipeline {
     command_rx: tokio::sync::mpsc::UnboundedReceiver<MediaPipelineCommand>,
     local_processor_task_tx: Option<tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>>,
     local_processor_thread: std::thread::JoinHandle<()>,
-    processors: std::collections::HashSet<ProcessorId>,
+    registration_closed: bool,
+    initial_ready_open: bool,
+    processors: std::collections::HashMap<ProcessorId, ProcessorState>,
+    pending_initial_processors: std::collections::HashSet<ProcessorId>,
+    initial_ready_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
 }
 
@@ -28,7 +32,11 @@ impl MediaPipeline {
             command_rx,
             local_processor_task_tx: Some(local_processor_task_tx),
             local_processor_thread,
-            processors: std::collections::HashSet::new(),
+            registration_closed: false,
+            initial_ready_open: false,
+            processors: std::collections::HashMap::new(),
+            pending_initial_processors: std::collections::HashSet::new(),
+            initial_ready_waiters: Vec::new(),
             tracks: std::collections::HashMap::new(),
         })
     }
@@ -96,6 +104,90 @@ impl MediaPipeline {
             MediaPipelineCommand::ListProcessors { reply_tx } => {
                 let _ = reply_tx.send(self.handle_list_processors());
             }
+            MediaPipelineCommand::CompleteInitialProcessorRegistration => {
+                self.handle_complete_initial_processor_registration();
+            }
+            MediaPipelineCommand::NotifyReady { processor_id } => {
+                self.handle_notify_ready(processor_id);
+            }
+            MediaPipelineCommand::WaitSubscribersReady {
+                processor_id,
+                reply_tx,
+            } => {
+                self.handle_wait_subscribers_ready(processor_id, reply_tx);
+            }
+        }
+    }
+
+    fn handle_complete_initial_processor_registration(&mut self) {
+        if self.registration_closed {
+            return;
+        }
+        self.registration_closed = true;
+
+        for (processor_id, state) in &mut self.processors {
+            state.is_initial_member = true;
+            if !state.notified_ready {
+                self.pending_initial_processors.insert(processor_id.clone());
+            }
+        }
+        self.try_open_initial_ready();
+    }
+
+    fn handle_notify_ready(&mut self, processor_id: ProcessorId) {
+        let Some(state) = self.processors.get_mut(&processor_id) else {
+            tracing::warn!("attempt to notify ready from unregistered processor: {processor_id}");
+            return;
+        };
+        state.notified_ready = true;
+        if state.is_initial_member {
+            self.pending_initial_processors.remove(&processor_id);
+        }
+        self.try_open_initial_ready();
+    }
+
+    fn handle_wait_subscribers_ready(
+        &mut self,
+        processor_id: ProcessorId,
+        reply_tx: tokio::sync::oneshot::Sender<()>,
+    ) {
+        if !self.processors.contains_key(&processor_id) {
+            tracing::warn!("attempt to wait from unregistered processor: {processor_id}");
+            let _ = reply_tx.send(());
+            return;
+        }
+
+        if self.initial_ready_open {
+            let _ = reply_tx.send(());
+            return;
+        }
+
+        self.initial_ready_waiters.push(reply_tx);
+        self.try_open_initial_ready();
+    }
+
+    fn try_open_initial_ready(&mut self) {
+        if self.initial_ready_open
+            || !self.registration_closed
+            || !self.pending_initial_processors.is_empty()
+        {
+            return;
+        }
+        self.initial_ready_open = true;
+        self.flush_pending_subscribers();
+        for waiter in self.initial_ready_waiters.drain(..) {
+            let _ = waiter.send(());
+        }
+    }
+
+    fn flush_pending_subscribers(&mut self) {
+        for track in self.tracks.values_mut() {
+            let Some(publisher_tx) = track.publisher_command_tx.as_ref() else {
+                continue;
+            };
+            for subscriber_tx in track.pending_subscribers.drain(..) {
+                let _ = publisher_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
+            }
         }
     }
 
@@ -107,7 +199,7 @@ impl MediaPipeline {
     ) {
         tracing::debug!("subscribe track: processor={processor_id}, track={track_id}");
 
-        if !self.processors.contains(&processor_id) {
+        if !self.processors.contains_key(&processor_id) {
             tracing::warn!(
                 "attempt to subscribe to track from unregistered processor: {processor_id}"
             );
@@ -120,21 +212,21 @@ impl MediaPipeline {
             TrackState::default()
         });
 
-        if let Some(publisher_tx) = &track.publisher_command_tx {
-            let _ = publisher_tx.send(TrackCommand::AddSubscriber(tx));
+        if self.initial_ready_open {
+            if let Some(publisher_tx) = &track.publisher_command_tx {
+                let _ = publisher_tx.send(TrackCommand::AddSubscriber(tx));
+            } else {
+                // publisher がまだ登録されていない場合は、subscriber を待機キューに追加
+                tracing::debug!("publisher not yet registered for track: {track_id}");
+                track.pending_subscribers.push(tx);
+
+                // TODO: publisher の再登録に対応する
+            }
         } else {
-            // publisher がまだ登録されていない場合は、subscriber を待機キューに追加
-            tracing::debug!("publisher not yet registered for track: {track_id}");
+            // 初期化が完了するまでは接続せず、subscriber を待機キューに追加
+            tracing::debug!("initial barrier not open yet for track: {track_id}");
             track.pending_subscribers.push(tx);
         }
-
-        // TODO: 将来的には不要となったトラックの削除の仕組みを追加する
-        //
-        // 例えば、
-        // - 参照していた全ての publisher がいなくなったら削除する
-        // - Message{Sender,Receiver} のドロップ時に解除コマンドを送る
-        //
-        // ただし、現状ではこの対応を入れなくても別に困らないため、実際に削除が必要になるまでは残り続けて構わない
     }
 
     fn handle_publish_track(
@@ -144,7 +236,7 @@ impl MediaPipeline {
     ) -> Result<MessageSender, PublishTrackError> {
         tracing::debug!("publish track: processor={processor_id}, track={track_id}");
 
-        if !self.processors.contains(&processor_id) {
+        if !self.processors.contains_key(&processor_id) {
             tracing::warn!("attempt to publish track from unregistered processor: {processor_id}");
             return Err(PublishTrackError::UnregisteredProcessor);
         }
@@ -165,34 +257,42 @@ impl MediaPipeline {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         track.publisher_command_tx = Some(command_tx.clone());
 
-        // 既に待機中の subscriber に通知
-        for subscriber_tx in track.pending_subscribers.drain(..) {
-            let _ = command_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
+        // 初期バリア開放後のみ、待機中の subscriber に通知
+        if self.initial_ready_open {
+            for subscriber_tx in track.pending_subscribers.drain(..) {
+                let _ = command_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
+            }
         }
 
         Ok(MessageSender {
             rx: command_rx,
             txs: Vec::new(),
-            has_first_subscriber: false,
         })
     }
 
     fn handle_register_processor(&mut self, processor_id: ProcessorId) -> bool {
         tracing::debug!("register processor: {processor_id}");
 
-        if self.processors.contains(&processor_id) {
+        if self.processors.contains_key(&processor_id) {
             tracing::warn!("processor already registered: {processor_id}");
             return false;
         }
 
-        self.processors.insert(processor_id.clone());
+        self.processors
+            .insert(processor_id.clone(), ProcessorState::default());
         true
     }
 
     fn handle_deregister_processor(&mut self, processor_id: ProcessorId) {
         // TODO: トラックが残っている間は deregister 扱いにしない
         tracing::debug!("deregister processor: {processor_id}");
-        self.processors.remove(&processor_id);
+        if let Some(state) = self.processors.remove(&processor_id)
+            && state.is_initial_member
+            && !state.notified_ready
+        {
+            self.pending_initial_processors.remove(&processor_id);
+        }
+        self.try_open_initial_ready();
     }
 
     fn handle_list_tracks(&self) -> Vec<TrackId> {
@@ -200,7 +300,7 @@ impl MediaPipeline {
     }
 
     fn handle_list_processors(&self) -> Vec<ProcessorId> {
-        self.processors.iter().cloned().collect()
+        self.processors.keys().cloned().collect()
     }
 }
 
@@ -275,6 +375,11 @@ impl MediaPipelineHandle {
         }
     }
 
+    /// 初期 processor の登録が完了したことを通知する
+    pub fn complete_initial_processor_registration(&self) {
+        self.send(MediaPipelineCommand::CompleteInitialProcessorRegistration);
+    }
+
     // すでに MediaPipeline が終了している場合には false が返される。
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
@@ -329,6 +434,14 @@ pub(crate) enum MediaPipelineCommand {
     },
     ListProcessors {
         reply_tx: tokio::sync::oneshot::Sender<Vec<ProcessorId>>,
+    },
+    CompleteInitialProcessorRegistration,
+    NotifyReady {
+        processor_id: ProcessorId,
+    },
+    WaitSubscribersReady {
+        processor_id: ProcessorId,
+        reply_tx: tokio::sync::oneshot::Sender<()>,
     },
 }
 
@@ -404,6 +517,12 @@ struct TrackState {
     pending_subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ProcessorState {
+    notified_ready: bool,
+    is_initial_member: bool,
+}
+
 #[derive(Debug)]
 pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
@@ -444,6 +563,25 @@ impl ProcessorHandle {
         // トラックが存在しなかったりした場合は、すぐに受信側が閉じるだけなので、
         // 上のコマンドの結果はまたない
         MessageReceiver { rx }
+    }
+
+    /// 自分自身の準備完了を通知する
+    pub fn notify_ready(&self) {
+        self.pipeline_handle
+            .send(MediaPipelineCommand::NotifyReady {
+                processor_id: self.processor_id.clone(),
+            });
+    }
+
+    /// 初期 processor 群の準備が完了するまで待機する
+    pub async fn wait_subscribers_ready(&self) -> Result<(), PipelineTerminated> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.pipeline_handle
+            .send(MediaPipelineCommand::WaitSubscribersReady {
+                processor_id: self.processor_id.clone(),
+                reply_tx,
+            });
+        reply_rx.await.map_err(|_| PipelineTerminated)
     }
 
     // TODO: これは実際に必要になったタイミングで実装する
@@ -504,15 +642,11 @@ enum TrackCommand {
 pub struct MessageSender {
     rx: tokio::sync::mpsc::UnboundedReceiver<TrackCommand>,
     txs: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
-    has_first_subscriber: bool,
 }
 
 impl MessageSender {
     // MediaPipeline が途中終了した場合は false が返される
-    pub async fn send(&mut self, message: Message) -> bool {
-        if !self.has_first_subscriber && !self.wait_for_first_subscriber().await {
-            return false;
-        }
+    pub fn send(&mut self, message: Message) -> bool {
         if !self.drain_track_commands() {
             return false;
         }
@@ -521,39 +655,26 @@ impl MessageSender {
         true
     }
 
-    pub async fn send_media(&mut self, sample: crate::MediaSample) -> bool {
-        self.send(Message::Media(sample)).await
+    pub fn send_media(&mut self, sample: crate::MediaSample) -> bool {
+        self.send(Message::Media(sample))
     }
 
-    pub async fn send_audio(&mut self, data: crate::AudioData) -> bool {
+    pub fn send_audio(&mut self, data: crate::AudioData) -> bool {
         self.send(Message::Media(crate::MediaSample::new_audio(data)))
-            .await
     }
 
-    pub async fn send_video(&mut self, frame: crate::VideoFrame) -> bool {
+    pub fn send_video(&mut self, frame: crate::VideoFrame) -> bool {
         self.send(Message::Media(crate::MediaSample::new_video(frame)))
-            .await
     }
 
-    pub async fn send_eos(&mut self) -> bool {
-        self.send(Message::Eos).await
+    pub fn send_eos(&mut self) -> bool {
+        self.send(Message::Eos)
     }
 
-    pub async fn send_syn(&mut self) -> Ack {
+    pub fn send_syn(&mut self) -> Ack {
         let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
-        let _ = self.send(Message::Syn(Syn(tx))).await; // NOTE: ここでは false を特別扱いする必要はないので無視する
+        let _ = self.send(Message::Syn(Syn(tx))); // NOTE: ここでは false を特別扱いする必要はないので無視する
         Ack(rx)
-    }
-
-    async fn wait_for_first_subscriber(&mut self) -> bool {
-        if let Some(TrackCommand::AddSubscriber(tx)) = self.rx.recv().await {
-            self.txs.push(tx);
-            self.has_first_subscriber = true;
-            return self.drain_track_commands();
-        }
-
-        self.txs.clear();
-        false
     }
 
     fn drain_track_commands(&mut self) -> bool {
@@ -610,6 +731,17 @@ impl std::fmt::Display for RegisterProcessorError {
 impl std::error::Error for RegisterProcessorError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PipelineTerminated;
+
+impl std::fmt::Display for PipelineTerminated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Pipeline has terminated")
+    }
+}
+
+impl std::error::Error for PipelineTerminated {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublishTrackError {
     /// パイプラインが終了している
     PipelineTerminated,
@@ -643,6 +775,7 @@ mod tests {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
+        handle.complete_initial_processor_registration();
 
         let (done_tx, done_rx) = tokio::sync::oneshot::channel::<usize>();
         handle
@@ -675,6 +808,7 @@ mod tests {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
+        handle.complete_initial_processor_registration();
 
         let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
         handle
@@ -706,42 +840,83 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_waits_until_first_subscriber_arrives() {
+    async fn wait_subscribers_ready_waits_for_initial_processors() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        {
+            let first = handle
+                .register_processor(ProcessorId::new("wait_first"))
+                .await
+                .expect("failed to register first processor");
+            let second = handle
+                .register_processor(ProcessorId::new("wait_second"))
+                .await
+                .expect("failed to register second processor");
+
+            first.notify_ready();
+            let wait = first.wait_subscribers_ready();
+            tokio::pin!(wait);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), &mut wait)
+                    .await
+                    .is_err(),
+                "wait_subscribers_ready must wait before registration close"
+            );
+
+            handle.complete_initial_processor_registration();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), &mut wait)
+                    .await
+                    .is_err(),
+                "wait_subscribers_ready must wait until all initial processors notify ready"
+            );
+
+            second.notify_ready();
+            tokio::time::timeout(Duration::from_secs(2), &mut wait)
+                .await
+                .expect("wait_subscribers_ready did not finish after all ready")
+                .expect("wait_subscribers_ready returned error");
+        }
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn send_after_initial_ready_delivers_to_subscriber() {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
         let sender = handle
-            .register_processor(ProcessorId::new("wait_sender"))
+            .register_processor(ProcessorId::new("sender"))
             .await
             .expect("failed to register sender");
-        let track_id = TrackId::new("wait-track");
+        let receiver = handle
+            .register_processor(ProcessorId::new("receiver"))
+            .await
+            .expect("failed to register receiver");
+        let track_id = TrackId::new("ready-track");
         let mut tx = sender
             .publish_track(track_id.clone())
             .await
             .expect("failed to publish track");
-
-        let send = tx.send_eos();
-        tokio::pin!(send);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut send)
-                .await
-                .is_err(),
-            "send_eos must wait until first subscriber arrives"
-        );
-
-        let receiver = handle
-            .register_processor(ProcessorId::new("wait_receiver"))
-            .await
-            .expect("failed to register receiver");
         let mut rx = receiver.subscribe_track(track_id);
 
-        assert!(
-            tokio::time::timeout(Duration::from_secs(2), &mut send)
-                .await
-                .expect("send_eos did not finish after subscriber arrived"),
-            "send_eos must succeed after first subscriber arrives"
-        );
+        sender.notify_ready();
+        receiver.notify_ready();
+        handle.complete_initial_processor_registration();
+        sender
+            .wait_subscribers_ready()
+            .await
+            .expect("wait_subscribers_ready must succeed");
+
+        assert!(tx.send_eos(), "send_eos must succeed");
 
         let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
@@ -759,7 +934,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_syn_waits_until_first_subscriber_and_ack_waits_for_drop() {
+    async fn send_syn_ack_waits_for_drop_after_initial_ready() {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
@@ -768,32 +943,27 @@ mod tests {
             .register_processor(ProcessorId::new("syn_sender"))
             .await
             .expect("failed to register sender");
+        let receiver = handle
+            .register_processor(ProcessorId::new("syn_receiver"))
+            .await
+            .expect("failed to register receiver");
         let track_id = TrackId::new("syn-track");
         let mut tx = sender
             .publish_track(track_id.clone())
             .await
             .expect("failed to publish track");
-
-        let send_syn = tx.send_syn();
-        tokio::pin!(send_syn);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut send_syn)
-                .await
-                .is_err(),
-            "send_syn must wait until first subscriber arrives"
-        );
-
-        let receiver = handle
-            .register_processor(ProcessorId::new("syn_receiver"))
-            .await
-            .expect("failed to register receiver");
         let mut rx = receiver.subscribe_track(track_id);
 
-        let ack = tokio::time::timeout(Duration::from_secs(2), &mut send_syn)
+        sender.notify_ready();
+        receiver.notify_ready();
+        handle.complete_initial_processor_registration();
+        sender
+            .wait_subscribers_ready()
             .await
-            .expect("send_syn did not finish after subscriber arrived");
-        tokio::pin!(ack);
+            .expect("wait_subscribers_ready must succeed");
 
+        let ack = tx.send_syn();
+        tokio::pin!(ack);
         let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .expect("receiver did not get syn");
@@ -819,5 +989,48 @@ mod tests {
             .await
             .expect("pipeline task timed out")
             .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn complete_initial_processor_registration_is_idempotent() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+        let processor = handle
+            .register_processor(ProcessorId::new("idempotent_processor"))
+            .await
+            .expect("failed to register processor");
+
+        processor.notify_ready();
+        handle.complete_initial_processor_registration();
+        handle.complete_initial_processor_registration();
+        processor
+            .wait_subscribers_ready()
+            .await
+            .expect("wait_subscribers_ready must succeed");
+
+        drop(processor);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn wait_subscribers_ready_returns_error_after_pipeline_terminated() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+        let processor = handle
+            .register_processor(ProcessorId::new("terminated_waiter"))
+            .await
+            .expect("failed to register processor");
+
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+
+        let result = processor.wait_subscribers_ready().await;
+        assert_eq!(result, Err(PipelineTerminated));
     }
 }

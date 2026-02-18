@@ -34,11 +34,13 @@ impl WebmFileReader {
     }
 
     pub async fn run(mut self, handle: ProcessorHandle) -> Result<()> {
-        (self.audio_sender, self.video_sender) = self.build_track_senders(handle).await?;
+        (self.audio_sender, self.video_sender) = self.build_track_senders(&handle).await?;
+        handle.notify_ready();
 
         if self.audio_sender.is_none() && self.video_sender.is_none() {
             return Ok(());
         }
+        handle.wait_subscribers_ready().await?;
 
         let should_stop = self.run_once().await?;
         if should_stop {
@@ -51,18 +53,18 @@ impl WebmFileReader {
 
     async fn build_track_senders(
         &mut self,
-        handle: ProcessorHandle,
+        handle: &ProcessorHandle,
     ) -> Result<(Option<TrackSender>, Option<TrackSender>)> {
         let audio_sender = if let Some(track_id) = self.options.audio_track_id.take() {
             let sender = handle.publish_track(track_id).await?;
-            Some(TrackSender::new(sender).await)
+            Some(TrackSender::new(sender))
         } else {
             None
         };
 
         let video_sender = if let Some(track_id) = self.options.video_track_id.take() {
             let sender = handle.publish_track(track_id).await?;
-            Some(TrackSender::new(sender).await)
+            Some(TrackSender::new(sender))
         } else {
             None
         };
@@ -117,10 +119,10 @@ impl WebmFileReader {
         video_sender: &mut Option<TrackSender>,
     ) {
         if let Some(sender) = audio_sender.as_mut() {
-            sender.send_eos().await;
+            sender.send_eos();
         }
         if let Some(sender) = video_sender.as_mut() {
-            sender.send_eos().await;
+            sender.send_eos();
         }
     }
 }
@@ -260,8 +262,8 @@ struct TrackSender {
 }
 
 impl TrackSender {
-    async fn new(mut sender: MessageSender) -> Self {
-        let ack = Some(sender.send_syn().await);
+    fn new(mut sender: MessageSender) -> Self {
+        let ack = Some(sender.send_syn());
         Self {
             sender,
             ack,
@@ -274,14 +276,14 @@ impl TrackSender {
             if let Some(ack) = self.ack.take() {
                 ack.await;
             }
-            self.ack = Some(self.sender.send_syn().await);
+            self.ack = Some(self.sender.send_syn());
             self.noacked_sent = 0;
         }
     }
 
     async fn send_audio(&mut self, data: AudioData) -> bool {
         self.prepare_send().await;
-        let ok = self.sender.send_audio(data).await;
+        let ok = self.sender.send_audio(data);
         if ok {
             self.noacked_sent += 1;
         }
@@ -290,14 +292,14 @@ impl TrackSender {
 
     async fn send_video(&mut self, frame: VideoFrame) -> bool {
         self.prepare_send().await;
-        let ok = self.sender.send_video(frame).await;
+        let ok = self.sender.send_video(frame);
         if ok {
             self.noacked_sent += 1;
         }
         ok
     }
 
-    async fn send_eos(&mut self) {
-        let _ = self.sender.send_eos().await;
+    fn send_eos(&mut self) {
+        let _ = self.sender.send_eos();
     }
 }

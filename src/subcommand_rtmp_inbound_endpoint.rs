@@ -86,6 +86,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
             )
             .await?;
 
+        pipeline_handle.complete_initial_processor_registration();
+
         Ok::<(), crate::Error>(())
     });
 

@@ -101,11 +101,13 @@ impl WhepSubscriber {
                     "failed to publish output video track {output_video_track_id}: {e}"
                 ))
             })?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
 
         let mut session =
             WhepSession::connect(&self.input_url, self.bearer_token.as_deref()).await?;
         let run_result = session.forward_video(&mut output_video_sender).await;
-        output_video_sender.send_eos().await;
+        output_video_sender.send_eos();
         session.disconnect().await;
         run_result
     }
@@ -270,7 +272,7 @@ impl WhepSession {
                     let Some(frame) = maybe_frame else {
                         break;
                     };
-                    if !output_video_sender.send_video(frame).await {
+                    if !output_video_sender.send_video(frame) {
                         break;
                     }
                 }
