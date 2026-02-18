@@ -111,9 +111,10 @@
   - 入力ファイル（.mp4 or .webm）を RTMP サーバーとして配信するためのコマンド
   - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
   - @sile
-- [ADD] 実験的コマンドとして rtmp-publish を追加する
-  - 入力ファイル（.mp4 or .webm）を RTMP サーバーに配信するためのコマンド
-  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+- [ADD] server サブコマンドの JSON-RPC で RTMP publisher を作成できるようにする
+  - JSON-RPC に `createRtmpPublisher` メソッドを追加する
+  - `outputUrl` と `inputVideoTrackId` / `inputAudioTrackId` を指定して RTMP 配信できる
+  - `processorId` 未指定時は `rtmpPublisher` を既定値として利用する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_rtmp を追加する
   - @sile

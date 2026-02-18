@@ -21,8 +21,6 @@ const TUNE_COMMAND: noargs::CmdSpec =
 const SERVER_COMMAND: noargs::CmdSpec = noargs::cmd("server").doc("HTTP サーバーを起動します");
 
 // 以降は実験的なサブコマンドの定義
-const RTMP_PUBLISH_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-publish")
-    .doc("指定された入力ファイルを RTMP クライアントとして配信します（実験的機能）");
 const RTMP_OUTBOUND_ENDPOINT_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-outbound-endpoint")
     .doc("指定された入力ファイルを RTMP サーバーとして配信します（実験的機能）");
 const RTMP_INBOUND_ENDPOINT_COMMAND: noargs::CmdSpec = noargs::cmd("rtmp-inbound-endpoint")
@@ -67,8 +65,6 @@ fn main() -> noargs::Result<()> {
         hisui::subcommand_tune::run(args)?;
     } else if experimental && SERVER_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_server::run(args)?;
-    } else if experimental && RTMP_PUBLISH_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_rtmp_publish::run(args)?;
     } else if experimental && RTMP_OUTBOUND_ENDPOINT_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_rtmp_outbound_endpoint::run(args)?;
     } else if experimental && RTMP_INBOUND_ENDPOINT_COMMAND.take(&mut args).is_present() {

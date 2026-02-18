@@ -81,7 +81,6 @@ pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
 pub mod subcommand_rtmp_inbound_endpoint;
 pub mod subcommand_rtmp_outbound_endpoint;
-pub mod subcommand_rtmp_publish;
 pub mod subcommand_server;
 pub mod subcommand_tune;
 pub mod subcommand_vmaf;

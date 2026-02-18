@@ -63,6 +63,7 @@ impl MediaPipelineHandle {
                     .await
             }
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
+            "createRtmpPublisher" => self.handle_create_rtmp_publisher_rpc(maybe_params).await,
             "createWhipPublisher" => self.handle_create_whip_publisher_rpc(maybe_params).await,
             "createWhepSubscriber" => self.handle_create_whep_subscriber_rpc(maybe_params).await,
             "listTracks" => self.handle_list_tracks_rpc().await,
@@ -225,6 +226,32 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::CreateWhipPublisher { processor_id })
     }
 
+    async fn handle_create_rtmp_publisher_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (publisher, processor_id): (crate::publisher_rtmp::RtmpPublisher, Option<ProcessorId>) =
+            parse_params(maybe_params, |params| {
+                let publisher = params.try_into()?;
+                let processor_id = params.to_member("processorId")?.try_into()?;
+                Ok((publisher, processor_id))
+            })?;
+        let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("rtmpPublisher"));
+
+        self.spawn_processor(processor_id.clone(), move |handle| publisher.run(handle))
+            .await
+            .map_err(|e| match e {
+                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                    "Invalid params: processorId already exists: {processor_id}"
+                )),
+                RegisterProcessorError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
+            })?;
+
+        Ok(RpcSuccessResult::CreateRtmpPublisher { processor_id })
+    }
+
     async fn handle_create_whep_subscriber_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
@@ -282,6 +309,7 @@ enum RpcSuccessResult {
     CreatePngFileSource { processor_id: ProcessorId },
     CreateVideoDeviceSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
+    CreateRtmpPublisher { processor_id: ProcessorId },
     CreateWhipPublisher { processor_id: ProcessorId },
     CreateWhepSubscriber { processor_id: ProcessorId },
     ListTracks { track_ids: Vec<TrackId> },
@@ -301,6 +329,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateVideoMixer { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateRtmpPublisher { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateWhipPublisher { processor_id } => {
@@ -1079,6 +1110,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_rtmp_publisher_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtmpPublisher"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_publisher_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtmpPublisher","params":{"outputUrl":"ws://example.com/live","inputVideoTrackId":"video-main"}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_publisher_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtmp_publisher_request(None, Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "rtmpPublisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_publisher_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request =
+            create_rtmp_publisher_request(Some("custom-rtmp-publisher"), Some("video-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-rtmp-publisher"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_publisher_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtmp_publisher_request(
+            Some("duplicate-rtmp-publisher"),
+            Some("video-main"),
+            None,
+        );
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-rtmp-publisher"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
     async fn create_whep_subscriber_requires_params() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber"}"#;
@@ -1502,6 +1650,26 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createVideoDeviceSource","params":{{"outputVideoTrackId":"video-device-output"{device_id_part}{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_rtmp_publisher_request(
+        processor_id: Option<&str>,
+        input_video_track_id: Option<&str>,
+        input_audio_track_id: Option<&str>,
+    ) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+        let input_video_track_id_part = input_video_track_id
+            .map(|id| format!(r#","inputVideoTrackId":"{id}""#))
+            .unwrap_or_default();
+        let input_audio_track_id_part = input_audio_track_id
+            .map(|id| format!(r#","inputAudioTrackId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createRtmpPublisher","params":{{"outputUrl":"rtmp://127.0.0.1:1935/live","streamName":"stream-main"{input_video_track_id_part}{input_audio_track_id_part}{processor_id_part}}}}}"#
         )
     }
 
