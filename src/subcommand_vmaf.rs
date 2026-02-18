@@ -1,28 +1,24 @@
 use std::{
-    collections::VecDeque,
+    collections::HashSet,
+    future::Future,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
+    Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, Result, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{VideoEncoder, VideoEncoderOptions},
     json::JsonObject,
     layout::Layout,
     media::{MediaSample, MediaStreamId},
     mixer_video::{VideoMixer, VideoMixerSpec},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
     reader::VideoReader,
-    scheduler::Scheduler,
-    stats::ProcessorStats,
     types::EngineName,
     video::FrameRate,
     writer_yuv::YuvWriter,
@@ -149,105 +145,39 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         None
     };
 
-    // プロセッサを準備
-    let mut scheduler = Scheduler::new();
-    let mut next_stream_id = MediaStreamId::new(0);
-
-    // リーダーとデコーダーを登録
-    let mut mixer_input_stream_ids = Vec::new();
-    let decoder_options = VideoDecoderOptions {
-        openh264_lib: openh264_lib.clone(),
-        decode_params: layout.decode_params.clone(),
-        engines: None,
-    };
-    for (source_id, source_info) in &layout.sources {
-        if layout.video_source_ids().all(|id| id != source_id) {
-            continue;
-        }
-
-        let reader_output_stream_id = next_stream_id.fetch_add(1);
-        let reader =
-            VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
-        scheduler.register(reader).or_fail()?;
-
-        let decoder_output_stream_id = next_stream_id.fetch_add(1);
-        let decoder = VideoDecoder::new(
-            reader_output_stream_id,
-            decoder_output_stream_id,
-            decoder_options.clone(),
-        );
-        scheduler.register(decoder).or_fail()?;
-
-        mixer_input_stream_ids.push(decoder_output_stream_id);
-    }
-
-    // ミキサーを登録
-    let mixer_output_stream_id = next_stream_id.fetch_add(1);
-    let mixer = VideoMixer::new(
-        VideoMixerSpec::from_layout(&layout),
-        mixer_input_stream_ids,
-        mixer_output_stream_id,
-    );
-    scheduler.register(mixer).or_fail()?;
-
-    // フレーム数を制限する
-    let limiter_output_stream_id = next_stream_id.fetch_add(1);
-    let limiter = FrameCountLimiter::new(
-        mixer_output_stream_id,
-        limiter_output_stream_id,
-        args.frame_count,
-    );
-    scheduler.register(limiter).or_fail()?;
-
-    // エンコード前の画像の YUV 書き込みを登録
     let distorted_yuv_file_path = args
         .distorted_yuv_file_path
+        .clone()
         .unwrap_or_else(|| args.root_dir.join("distorted.yuv"));
-    let writer = YuvWriter::new(limiter_output_stream_id, &distorted_yuv_file_path).or_fail()?;
-    scheduler.register(writer).or_fail()?;
-
-    // エンコーダーを登録
-    let encoder_output_stream_id = next_stream_id.fetch_add(1);
-    let encoder = VideoEncoder::new(
-        &VideoEncoderOptions::from_layout(&layout),
-        limiter_output_stream_id,
-        encoder_output_stream_id,
-        openh264_lib.clone(),
-    )
-    .or_fail()?;
-    let encoder_stats = encoder.encoder_stats().clone();
-    scheduler.register(encoder).or_fail()?;
-
-    // エンコード後の画像（のデコード結果）の YUV 書き込みを登録
-    let decoder_output_stream_id = next_stream_id.fetch_add(1);
-    let decoder = VideoDecoder::new(
-        encoder_output_stream_id,
-        decoder_output_stream_id,
-        decoder_options.clone(),
-    );
-    scheduler.register(decoder).or_fail()?;
-
     let reference_yuv_file_path = args
         .reference_yuv_file_path
+        .clone()
         .unwrap_or_else(|| args.root_dir.join("reference.yuv"));
-    let writer = YuvWriter::new(decoder_output_stream_id, &reference_yuv_file_path).or_fail()?;
-    scheduler.register(writer).or_fail()?;
-
-    // プログレスバーを準備
-    let progress = ProgressBar::new(decoder_output_stream_id, args.frame_count as u64);
-    scheduler.register(progress).or_fail()?;
 
     // 合成処理を実行
     eprintln!("# Compose for VMAF");
-    let (timeout_expired, stats) = if let Some(timeout) = args.timeout {
-        scheduler.run_timeout(timeout).or_fail()?
-    } else {
-        (false, scheduler.run().or_fail()?)
-    };
-    if stats.error.get() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .or_fail()?;
+    let compose_result = runtime
+        .block_on(compose_for_vmaf(
+            layout.clone(),
+            openh264_lib.clone(),
+            args.frame_count,
+            args.timeout,
+            distorted_yuv_file_path.clone(),
+            reference_yuv_file_path.clone(),
+        ))
+        .map_err(|e| orfail::Failure::new(e.to_string()))?;
+    if !compose_result.success {
         return Err(orfail::Failure::new(format!(
             "video composition process failed{}",
-            if timeout_expired { " (timeout)" } else { "" }
+            if compose_result.timeout_expired {
+                " (timeout)"
+            } else {
+                ""
+            }
         ))
         .into());
     }
@@ -278,12 +208,15 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         reference_yuv_file_path,
         distorted_yuv_file_path,
         vmaf_output_file_path,
-        encode_engine: encoder_stats.engine.get().or_fail()?,
+        encode_engine: compose_result.encoder_stats.engine.get().or_fail()?,
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
-        encoded_frame_count: encoder_stats.total_output_video_frame_count.get() as usize,
-        elapsed_duration: stats.elapsed_duration,
+        encoded_frame_count: compose_result
+            .encoder_stats
+            .total_output_video_frame_count
+            .get() as usize,
+        elapsed_duration: compose_result.elapsed_duration,
         vmaf,
     };
     println!(
@@ -296,6 +229,385 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     );
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct ComposeForVmafResult {
+    success: bool,
+    timeout_expired: bool,
+    elapsed_duration: Duration,
+    encoder_stats: crate::stats::VideoEncoderStats,
+}
+
+#[derive(Debug)]
+struct VmafPipelineSetup {
+    processor_tasks: Vec<SpawnedProcessorTask>,
+    encoder_stats: crate::stats::VideoEncoderStats,
+}
+
+#[derive(Debug)]
+struct SpawnedProcessorTask {
+    processor_id: ProcessorId,
+    task: tokio::task::JoinHandle<Result<()>>,
+}
+
+async fn compose_for_vmaf(
+    layout: Layout,
+    openh264_lib: Option<Openh264Library>,
+    frame_count: usize,
+    timeout: Option<Duration>,
+    distorted_yuv_file_path: PathBuf,
+    reference_yuv_file_path: PathBuf,
+) -> Result<ComposeForVmafResult> {
+    let pipeline = MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    let pipeline_task = tokio::spawn(pipeline.run());
+
+    let mut setup = match setup_vmaf_pipeline(
+        &pipeline_handle,
+        layout.clone(),
+        openh264_lib,
+        frame_count,
+        distorted_yuv_file_path,
+        reference_yuv_file_path,
+    )
+    .await
+    {
+        Ok(setup) => setup,
+        Err(e) => {
+            let _ = shutdown_pipeline(pipeline_handle, pipeline_task).await;
+            return Err(e);
+        }
+    };
+
+    pipeline_handle.complete_initial_processor_registration();
+
+    let start = Instant::now();
+    let (success, timeout_expired) =
+        wait_processor_tasks(&mut setup.processor_tasks, timeout).await;
+    let elapsed_duration = start.elapsed();
+
+    shutdown_pipeline(pipeline_handle, pipeline_task).await?;
+
+    Ok(ComposeForVmafResult {
+        success,
+        timeout_expired,
+        elapsed_duration,
+        encoder_stats: setup.encoder_stats,
+    })
+}
+
+async fn setup_vmaf_pipeline(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    layout: Layout,
+    openh264_lib: Option<Openh264Library>,
+    frame_count: usize,
+    distorted_yuv_file_path: PathBuf,
+    reference_yuv_file_path: PathBuf,
+) -> Result<VmafPipelineSetup> {
+    let mut next_stream_id = MediaStreamId::new(0);
+    let mut next_processor_number = 0usize;
+    let mut next_track_number = 0usize;
+    let mut processor_tasks = Vec::new();
+
+    let decoder_options = VideoDecoderOptions {
+        openh264_lib: openh264_lib.clone(),
+        decode_params: layout.decode_params.clone(),
+        engines: None,
+    };
+    let video_source_ids = layout.video_source_ids().cloned().collect::<HashSet<_>>();
+
+    let mut mixer_input_stream_ids = Vec::new();
+    let mut mixer_input_track_ids = Vec::new();
+    for source_info in layout
+        .sources
+        .iter()
+        .filter_map(|(source_id, source_info)| {
+            video_source_ids.contains(source_id).then_some(source_info)
+        })
+    {
+        let reader_output_stream_id = next_stream_id.fetch_add(1);
+        let reader_output_track_id = next_track_id(&mut next_track_number, "reader_output");
+        let reader = VideoReader::from_source_info(reader_output_stream_id, source_info)
+            .map_err(error_from)?;
+        spawn_processor_task(
+            pipeline_handle,
+            next_processor_id(&mut next_processor_number, "video_reader"),
+            move |handle| async move {
+                reader
+                    .run(handle)
+                    .await
+                    .map_err(|e| Error::new(e.to_string()))
+            },
+            &mut processor_tasks,
+        )
+        .await?;
+
+        let decoder_output_stream_id = next_stream_id.fetch_add(1);
+        let decoder_output_track_id = next_track_id(&mut next_track_number, "decoder_output");
+        let decoder = VideoDecoder::new(
+            reader_output_stream_id,
+            decoder_output_stream_id,
+            decoder_options.clone(),
+        );
+        let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
+        spawn_processor_task(
+            pipeline_handle,
+            next_processor_id(&mut next_processor_number, "video_decoder"),
+            move |handle| {
+                decoder.run(
+                    handle,
+                    reader_output_track_id.clone(),
+                    decoder_output_track_id_for_decoder.clone(),
+                )
+            },
+            &mut processor_tasks,
+        )
+        .await?;
+
+        mixer_input_stream_ids.push(decoder_output_stream_id);
+        mixer_input_track_ids.push(decoder_output_track_id);
+    }
+
+    let mixer_output_stream_id = next_stream_id.fetch_add(1);
+    let mixer_output_track_id = next_track_id(&mut next_track_number, "mixer_output");
+    let mixer = VideoMixer::new(
+        VideoMixerSpec::from_layout(&layout),
+        mixer_input_stream_ids,
+        mixer_output_stream_id,
+    );
+    let mixer_output_track_id_for_mixer = mixer_output_track_id.clone();
+    spawn_processor_task(
+        pipeline_handle,
+        next_processor_id(&mut next_processor_number, "video_mixer"),
+        move |handle| {
+            mixer.run(
+                handle,
+                mixer_input_track_ids,
+                mixer_output_track_id_for_mixer,
+            )
+        },
+        &mut processor_tasks,
+    )
+    .await?;
+
+    let limiter_output_track_id = next_track_id(&mut next_track_number, "limiter_output");
+    let limiter = FrameCountLimiter::new(frame_count);
+    let mixer_output_track_id_for_limiter = mixer_output_track_id.clone();
+    let limiter_output_track_id_for_limiter = limiter_output_track_id.clone();
+    spawn_processor_task(
+        pipeline_handle,
+        next_processor_id(&mut next_processor_number, "frame_count_limiter"),
+        move |handle| {
+            limiter.run(
+                handle,
+                mixer_output_track_id_for_limiter.clone(),
+                limiter_output_track_id_for_limiter.clone(),
+            )
+        },
+        &mut processor_tasks,
+    )
+    .await?;
+
+    let distorted_writer = YuvWriter::new(&distorted_yuv_file_path)?;
+    let limiter_output_track_id_for_distorted_writer = limiter_output_track_id.clone();
+    spawn_processor_task(
+        pipeline_handle,
+        next_processor_id(&mut next_processor_number, "distorted_yuv_writer"),
+        move |handle| {
+            distorted_writer.run(handle, limiter_output_track_id_for_distorted_writer.clone())
+        },
+        &mut processor_tasks,
+    )
+    .await?;
+
+    let limiter_output_stream_id = next_stream_id.fetch_add(1);
+    let encoder_output_stream_id = next_stream_id.fetch_add(1);
+    let encoder_output_track_id = next_track_id(&mut next_track_number, "encoder_output");
+    let encoder = VideoEncoder::new(
+        &VideoEncoderOptions::from_layout(&layout),
+        limiter_output_stream_id,
+        encoder_output_stream_id,
+        openh264_lib,
+    )
+    .map_err(error_from)?;
+    let encoder_stats = encoder.encoder_stats().clone();
+    let limiter_output_track_id_for_encoder = limiter_output_track_id.clone();
+    let encoder_output_track_id_for_encoder = encoder_output_track_id.clone();
+    spawn_processor_task(
+        pipeline_handle,
+        next_processor_id(&mut next_processor_number, "video_encoder"),
+        move |handle| {
+            encoder.run(
+                handle,
+                limiter_output_track_id_for_encoder.clone(),
+                encoder_output_track_id_for_encoder.clone(),
+            )
+        },
+        &mut processor_tasks,
+    )
+    .await?;
+
+    let decoder_output_stream_id = next_stream_id.fetch_add(1);
+    let decoder_output_track_id = next_track_id(&mut next_track_number, "decoded_output");
+    let decoder = VideoDecoder::new(
+        encoder_output_stream_id,
+        decoder_output_stream_id,
+        decoder_options,
+    );
+    let encoder_output_track_id_for_decoder = encoder_output_track_id.clone();
+    let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
+    spawn_processor_task(
+        pipeline_handle,
+        next_processor_id(&mut next_processor_number, "decoded_video_decoder"),
+        move |handle| {
+            decoder.run(
+                handle,
+                encoder_output_track_id_for_decoder.clone(),
+                decoder_output_track_id_for_decoder.clone(),
+            )
+        },
+        &mut processor_tasks,
+    )
+    .await?;
+
+    let reference_writer = YuvWriter::new(&reference_yuv_file_path)?;
+    let decoder_output_track_id_for_reference_writer = decoder_output_track_id.clone();
+    spawn_processor_task(
+        pipeline_handle,
+        next_processor_id(&mut next_processor_number, "reference_yuv_writer"),
+        move |handle| {
+            reference_writer.run(handle, decoder_output_track_id_for_reference_writer.clone())
+        },
+        &mut processor_tasks,
+    )
+    .await?;
+
+    let progress = ProgressBar::new(frame_count as u64);
+    let decoder_output_track_id_for_progress = decoder_output_track_id.clone();
+    spawn_processor_task(
+        pipeline_handle,
+        next_processor_id(&mut next_processor_number, "progress_bar"),
+        move |handle| progress.run(handle, decoder_output_track_id_for_progress.clone()),
+        &mut processor_tasks,
+    )
+    .await?;
+
+    Ok(VmafPipelineSetup {
+        processor_tasks,
+        encoder_stats,
+    })
+}
+
+async fn spawn_processor_task<F, T>(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    processor_id: ProcessorId,
+    f: F,
+    processor_tasks: &mut Vec<SpawnedProcessorTask>,
+) -> Result<()>
+where
+    F: FnOnce(ProcessorHandle) -> T + Send + 'static,
+    T: Future<Output = Result<()>> + Send + 'static,
+{
+    let processor_handle = pipeline_handle
+        .register_processor(processor_id.clone())
+        .await
+        .map_err(|e| match e {
+            crate::RegisterProcessorError::PipelineTerminated => {
+                Error::new("failed to register processor: pipeline has terminated")
+            }
+            crate::RegisterProcessorError::DuplicateProcessorId => Error::new(format!(
+                "processor ID already exists: {}",
+                processor_id.get()
+            )),
+        })?;
+    let task = tokio::spawn(async move { f(processor_handle).await });
+    processor_tasks.push(SpawnedProcessorTask { processor_id, task });
+    Ok(())
+}
+
+async fn wait_processor_tasks(
+    processor_tasks: &mut Vec<SpawnedProcessorTask>,
+    timeout: Option<Duration>,
+) -> (bool, bool) {
+    let mut success = true;
+    let mut timeout_expired = false;
+    let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
+
+    while let Some(mut processor_task) = processor_tasks.pop() {
+        let join_result = if let Some(deadline) = deadline {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                timeout_expired = true;
+                processor_task.task.abort();
+                for task in processor_tasks.drain(..) {
+                    task.task.abort();
+                }
+                break;
+            }
+
+            let timeout = deadline.saturating_duration_since(now);
+            match tokio::time::timeout(timeout, &mut processor_task.task).await {
+                Ok(result) => result,
+                Err(_) => {
+                    timeout_expired = true;
+                    processor_task.task.abort();
+                    for task in processor_tasks.drain(..) {
+                        task.task.abort();
+                    }
+                    break;
+                }
+            }
+        } else {
+            processor_task.task.await
+        };
+
+        match join_result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                success = false;
+                tracing::error!("processor {} failed: {e}", processor_task.processor_id);
+            }
+            Err(e) => {
+                success = false;
+                tracing::error!("processor task {} failed: {e}", processor_task.processor_id);
+            }
+        }
+    }
+
+    (success && !timeout_expired, timeout_expired)
+}
+
+async fn shutdown_pipeline(
+    pipeline_handle: crate::MediaPipelineHandle,
+    mut pipeline_task: tokio::task::JoinHandle<()>,
+) -> Result<()> {
+    drop(pipeline_handle);
+    match tokio::time::timeout(Duration::from_secs(5), &mut pipeline_task).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(Error::new(format!("media pipeline task failed: {e}"))),
+        Err(_) => {
+            pipeline_task.abort();
+            let _ = pipeline_task.await;
+            Ok(())
+        }
+    }
+}
+
+fn next_processor_id(next_number: &mut usize, prefix: &str) -> ProcessorId {
+    let number = *next_number;
+    *next_number += 1;
+    ProcessorId::new(format!("vmaf_{prefix}_{number}"))
+}
+
+fn next_track_id(next_number: &mut usize, prefix: &str) -> TrackId {
+    let number = *next_number;
+    *next_number += 1;
+    TrackId::new(format!("vmaf_{prefix}_{number}"))
+}
+
+fn error_from<E: std::fmt::Display>(error: E) -> Error {
+    Error::new(error.to_string())
 }
 
 pub fn check_vmaf_availability() -> orfail::Result<()> {
@@ -424,109 +736,96 @@ struct VmafScoreStats {
 // 処理対象のフレーム数を制限するためのプロセッサ
 #[derive(Debug)]
 struct FrameCountLimiter {
-    input_stream_id: MediaStreamId,
-    output_stream_id: MediaStreamId,
     remaining_frame_count: usize,
-    queue: VecDeque<MediaSample>,
 }
 
 impl FrameCountLimiter {
-    fn new(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
-        total_frame_count: usize,
-    ) -> Self {
+    fn new(total_frame_count: usize) -> Self {
         Self {
-            input_stream_id,
-            output_stream_id,
             remaining_frame_count: total_frame_count,
-            queue: VecDeque::new(),
-        }
-    }
-}
-
-impl MediaProcessor for FrameCountLimiter {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::other("frame-count-limiter"),
-            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        if let Some(sample) = input.sample
-            && let Some(n) = self.remaining_frame_count.checked_sub(1)
-        {
-            self.queue.push_back(sample);
-            self.remaining_frame_count = n;
-        } else {
-            // 指定数フレームを処理した or 入力がEOSに達した
-            self.remaining_frame_count = 0;
-        };
+    async fn run(
+        mut self,
+        handle: ProcessorHandle,
+        input_track_id: TrackId,
+        output_track_id: TrackId,
+    ) -> Result<()> {
+        let mut input_rx = handle.subscribe_track(input_track_id.clone());
+        let mut output_tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
+
+        loop {
+            if self.remaining_frame_count == 0 {
+                output_tx.send_eos();
+                break;
+            }
+
+            match input_rx.recv().await {
+                Message::Media(MediaSample::Video(frame)) => {
+                    self.remaining_frame_count -= 1;
+                    if !output_tx.send_media(MediaSample::Video(frame)) {
+                        break;
+                    }
+                }
+                Message::Media(MediaSample::Audio(_)) => {
+                    return Err(Error::new(format!(
+                        "expected a video sample on track {}, but got an audio sample",
+                        input_track_id.get()
+                    )));
+                }
+                Message::Eos => {
+                    output_tx.send_eos();
+                    break;
+                }
+                Message::Syn(_) => {}
+            }
+        }
+
         Ok(())
-    }
-
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        if let Some(sample) = self.queue.pop_front() {
-            Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample,
-            })
-        } else if self.remaining_frame_count == 0 {
-            Ok(MediaProcessorOutput::Finished)
-        } else {
-            Ok(MediaProcessorOutput::pending(self.input_stream_id))
-        }
     }
 }
 
 #[derive(Debug)]
 struct ProgressBar {
-    input_stream_id: MediaStreamId,
-    eos: bool,
     bar: crate::progress::ProgressBar,
 }
 
 impl ProgressBar {
-    fn new(input_stream_id: MediaStreamId, total_frame_count: u64) -> Self {
+    fn new(total_frame_count: u64) -> Self {
         Self {
-            input_stream_id,
-            eos: false,
             bar: crate::progress::ProgressBar::new(
                 total_frame_count,
                 crate::progress::ProgressKind::Frame,
             ),
         }
     }
-}
 
-impl MediaProcessor for ProgressBar {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress_bar"),
-            workload_hint: MediaProcessorWorkloadHint::WRITER,
+    async fn run(mut self, handle: ProcessorHandle, input_track_id: TrackId) -> Result<()> {
+        let mut input_rx = handle.subscribe_track(input_track_id.clone());
+        handle.notify_ready();
+
+        loop {
+            match input_rx.recv().await {
+                Message::Media(MediaSample::Video(_)) => {
+                    self.bar.inc(1);
+                }
+                Message::Media(MediaSample::Audio(_)) => {
+                    return Err(Error::new(format!(
+                        "expected a video sample on track {}, but got an audio sample",
+                        input_track_id.get()
+                    )));
+                }
+                Message::Eos => {
+                    self.bar.finish();
+                    break;
+                }
+                Message::Syn(_) => {}
+            }
         }
-    }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        if input.sample.is_some() {
-            self.bar.inc(1);
-        } else {
-            self.eos = true;
-            self.bar.finish();
-        };
         Ok(())
-    }
-
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        if self.eos {
-            Ok(MediaProcessorOutput::Finished)
-        } else {
-            Ok(MediaProcessorOutput::pending(self.input_stream_id))
-        }
     }
 }

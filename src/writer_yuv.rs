@@ -1,66 +1,50 @@
 use std::{fs::File, io::Write, path::Path};
 
-use orfail::OrFail;
-
-use crate::{
-    media::MediaStreamId,
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
-    stats::ProcessorStats,
-    video::VideoFormat,
-};
+use crate::{Error, MediaSample, Message, ProcessorHandle, Result, TrackId, video::VideoFormat};
 
 #[derive(Debug)]
 pub struct YuvWriter {
-    input_stream_id: MediaStreamId,
-    eos: bool,
     file: File,
 }
 
 impl YuvWriter {
-    pub fn new<P: AsRef<Path>>(input_stream_id: MediaStreamId, path: P) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
             .open(&path)
-            .or_fail_with(|e| format!("{e}: {}", path.as_ref().display()))?;
-        Ok(Self {
-            input_stream_id,
-            eos: false,
-            file,
-        })
-    }
-}
-
-impl MediaProcessor for YuvWriter {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("yuv_writer"),
-            workload_hint: MediaProcessorWorkloadHint::WRITER,
-        }
+            .map_err(|e| Error::new(format!("{e}: {}", path.as_ref().display())))?;
+        Ok(Self { file })
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        if let Some(sample) = input.sample {
-            let frame = sample.expect_video_frame().or_fail()?;
-            matches!(frame.format, VideoFormat::I420).or_fail()?;
-            self.file.write_all(&frame.data).or_fail()?;
-        } else {
-            self.eos = true;
+    pub async fn run(mut self, handle: ProcessorHandle, input_track_id: TrackId) -> Result<()> {
+        let mut input_rx = handle.subscribe_track(input_track_id.clone());
+        handle.notify_ready();
+
+        loop {
+            match input_rx.recv().await {
+                Message::Media(MediaSample::Video(frame)) => {
+                    if frame.format != VideoFormat::I420 {
+                        return Err(Error::new(format!(
+                            "expected I420 video sample on track {}, but got {}",
+                            input_track_id.get(),
+                            frame.format
+                        )));
+                    }
+                    self.file.write_all(&frame.data)?;
+                }
+                Message::Media(MediaSample::Audio(_)) => {
+                    return Err(Error::new(format!(
+                        "expected a video sample on track {}, but got an audio sample",
+                        input_track_id.get()
+                    )));
+                }
+                Message::Eos => break,
+                Message::Syn(_) => {}
+            }
         }
+
         Ok(())
-    }
-
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
-        if self.eos {
-            Ok(MediaProcessorOutput::Finished)
-        } else {
-            Ok(MediaProcessorOutput::pending(self.input_stream_id))
-        }
     }
 }

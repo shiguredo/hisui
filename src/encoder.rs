@@ -16,6 +16,7 @@ use crate::encoder_nvcodec::NvcodecEncoder;
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
+    Error, Message, ProcessorHandle, Result, TrackId,
     audio::AudioData,
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
@@ -457,6 +458,71 @@ impl VideoEncoder {
 
     pub fn encoder_stats(&self) -> &VideoEncoderStats {
         &self.stats
+    }
+
+    pub async fn run(
+        mut self,
+        handle: ProcessorHandle,
+        input_track_id: TrackId,
+        output_track_id: TrackId,
+    ) -> Result<()> {
+        let mut input_rx = handle.subscribe_track(input_track_id);
+        let mut output_tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
+
+        loop {
+            let message = input_rx.recv().await;
+            let is_eos = matches!(message, Message::Eos);
+
+            match message {
+                Message::Media(sample) => {
+                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
+                        .map_err(|e| Error::new(e.to_string()))?;
+                }
+                Message::Eos => {
+                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))
+                        .map_err(|e| Error::new(e.to_string()))?;
+                }
+                Message::Syn(_) => {}
+            }
+
+            let finished = drain_video_encoder_output(&mut self, &mut output_tx)?;
+            if finished {
+                output_tx.send_eos();
+                break;
+            }
+
+            if is_eos {
+                return Err(Error::new("video encoder still pending after EOS"));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn drain_video_encoder_output(
+    encoder: &mut VideoEncoder,
+    output_tx: &mut crate::MessageSender,
+) -> Result<bool> {
+    loop {
+        match encoder
+            .process_output()
+            .map_err(|e| Error::new(e.to_string()))?
+        {
+            MediaProcessorOutput::Processed { sample, .. } => {
+                if !output_tx.send_media(sample) {
+                    return Ok(true);
+                }
+            }
+            MediaProcessorOutput::Pending { .. } => {
+                return Ok(false);
+            }
+            MediaProcessorOutput::Finished => {
+                return Ok(true);
+            }
+        }
     }
 }
 
