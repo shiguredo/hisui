@@ -76,6 +76,7 @@ pub mod source_file_mp4;
 pub mod source_png_file;
 pub mod source_video_device;
 pub mod stats;
+pub mod stats2;
 pub mod subcommand_compose;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
