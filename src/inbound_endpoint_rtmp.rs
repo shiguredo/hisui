@@ -419,10 +419,9 @@ impl RtmpPublisherHandler {
             .frame_handler
             .process_video_frame(frame)
             .map_err(|e| orfail::Failure::new(e.to_string()))?
+            && let Some(tx) = &mut self.video_track_tx
         {
-            if let Some(tx) = &mut self.video_track_tx {
-                tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
-            }
+            tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
         }
         Ok(())
     }
