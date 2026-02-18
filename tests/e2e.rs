@@ -438,6 +438,235 @@ fn check_engine_in_stats(
     Ok(())
 }
 
+fn required_string_member(
+    value: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+) -> noargs::Result<String> {
+    value
+        .to_member(key)?
+        .required()?
+        .try_into()
+        .map_err(|e| format!("member {key} must be string: {e}").into())
+}
+
+fn required_usize_member(value: nojson::RawJsonValue<'_, '_>, key: &str) -> noargs::Result<usize> {
+    value
+        .to_member(key)?
+        .required()?
+        .try_into()
+        .map_err(|e| format!("member {key} must be integer: {e}").into())
+}
+
+fn required_f64_member(value: nojson::RawJsonValue<'_, '_>, key: &str) -> noargs::Result<f64> {
+    value
+        .to_member(key)?
+        .required()?
+        .try_into()
+        .map_err(|e| format!("member {key} must be number: {e}").into())
+}
+
+fn required_bool_member(value: nojson::RawJsonValue<'_, '_>, key: &str) -> noargs::Result<bool> {
+    value
+        .to_member(key)?
+        .required()?
+        .try_into()
+        .map_err(|e| format!("member {key} must be boolean: {e}").into())
+}
+
+fn optional_string_member(
+    value: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+) -> noargs::Result<Option<String>> {
+    value
+        .to_member(key)?
+        .try_into()
+        .map_err(|e| format!("member {key} must be optional string: {e}").into())
+}
+
+fn optional_u64_member(
+    value: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+) -> noargs::Result<Option<u64>> {
+    value
+        .to_member(key)?
+        .try_into()
+        .map_err(|e| format!("member {key} must be optional integer: {e}").into())
+}
+
+fn optional_f64_member(
+    value: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+) -> noargs::Result<Option<f64>> {
+    value
+        .to_member(key)?
+        .try_into()
+        .map_err(|e| format!("member {key} must be optional number: {e}").into())
+}
+
+#[test]
+#[cfg(feature = "libvpx")]
+fn compose_stdout_summary_has_required_fields() -> noargs::Result<()> {
+    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let stats_file = tempfile::NamedTempFile::new().or_fail()?;
+
+    let output = run_hisui_command(&[
+        "compose",
+        "--no-progress-bar",
+        "--layout-file",
+        "testdata/e2e/simple_single_source_vp9/layout.jsonc",
+        "--output-file",
+        &out_file.path().display().to_string(),
+        "--stats-file",
+        &stats_file.path().display().to_string(),
+        "testdata/e2e/simple_single_source_vp9/",
+    ])?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse compose output JSON: {e}"))?;
+    let root = json.value();
+
+    let _ = required_string_member(root, "input_root_dir")?;
+    let _ = required_string_member(root, "output_file_path")?;
+    let _ = required_string_member(root, "output_audio_codec")?;
+    let _ = required_string_member(root, "output_video_codec")?;
+    let width = required_usize_member(root, "output_video_width")?;
+    let height = required_usize_member(root, "output_video_height")?;
+    let elapsed = required_f64_member(root, "elapsed_seconds")?;
+
+    assert!(width > 0, "output_video_width must be greater than 0");
+    assert!(height > 0, "output_video_height must be greater than 0");
+    assert!(elapsed >= 0.0, "elapsed_seconds must be non-negative");
+
+    let _ = optional_string_member(root, "layout_file_path")?;
+    let _ = optional_string_member(root, "stats_file_path")?;
+    let _ = optional_string_member(root, "output_audio_encode_engine")?;
+    let _ = optional_string_member(root, "output_video_encode_engine")?;
+    let _ = optional_f64_member(root, "output_audio_duration_seconds")?;
+    let _ = optional_f64_member(root, "output_video_duration_seconds")?;
+    let _ = optional_u64_member(root, "output_audio_bitrate")?;
+    let _ = optional_u64_member(root, "output_video_bitrate")?;
+    let _ = optional_f64_member(root, "total_audio_decoder_processing_seconds")?;
+    let _ = optional_f64_member(root, "total_video_decoder_processing_seconds")?;
+    let _ = optional_f64_member(root, "total_audio_encoder_processing_seconds")?;
+    let _ = optional_f64_member(root, "total_video_encoder_processing_seconds")?;
+    let _ = optional_f64_member(root, "total_audio_mixer_processing_seconds")?;
+    let _ = optional_f64_member(root, "total_video_mixer_processing_seconds")?;
+
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "libvpx")]
+fn compose_stats_file_has_required_top_level_and_processor_entries() -> noargs::Result<()> {
+    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let stats_file = tempfile::NamedTempFile::new().or_fail()?;
+
+    let _ = run_hisui_command(&[
+        "compose",
+        "--no-progress-bar",
+        "--layout-file",
+        "testdata/e2e/simple_single_source_vp9/layout.jsonc",
+        "--output-file",
+        &out_file.path().display().to_string(),
+        "--stats-file",
+        &stats_file.path().display().to_string(),
+        "testdata/e2e/simple_single_source_vp9/",
+    ])?;
+
+    let stats_json = std::fs::read_to_string(stats_file.path())
+        .map_err(|e| format!("Failed to read stats file: {e}"))?;
+    let stats = nojson::RawJson::parse(&stats_json)
+        .map_err(|e| format!("Failed to parse stats JSON: {e}"))?;
+    let root = stats.value();
+
+    let elapsed = required_f64_member(root, "elapsed_seconds")?;
+    assert!(elapsed >= 0.0, "elapsed_seconds must be non-negative");
+    let _ = required_bool_member(root, "error")?;
+    let _ = root.to_member("worker_threads")?.required()?.to_array()?;
+    let processors = root.to_member("processors")?.required()?.to_array()?;
+
+    let mut found_mp4_writer = false;
+    let mut found_video_encoder = false;
+    let mut found_audio_encoder = false;
+
+    for processor in processors {
+        let processor_type = processor
+            .to_member("type")?
+            .required()?
+            .to_unquoted_string_str()?;
+        match processor_type.as_ref() {
+            "mp4_writer" => found_mp4_writer = true,
+            "video_encoder" => found_video_encoder = true,
+            "audio_encoder" => found_audio_encoder = true,
+            _ => {}
+        }
+    }
+
+    assert!(found_mp4_writer, "mp4_writer processor not found in stats");
+    assert!(
+        found_video_encoder,
+        "video_encoder processor not found in stats",
+    );
+    assert!(
+        found_audio_encoder,
+        "audio_encoder processor not found in stats",
+    );
+
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "libvpx")]
+fn compose_empty_source_summary_omits_media_specific_fields() -> noargs::Result<()> {
+    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+
+    let output = run_hisui_command(&[
+        "compose",
+        "--no-progress-bar",
+        "--output-file",
+        &out_file.path().display().to_string(),
+        "testdata/e2e/empty_source/",
+    ])?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse compose output JSON: {e}"))?;
+    let root = json.value();
+
+    let _ = required_string_member(root, "input_root_dir")?;
+    let _ = required_string_member(root, "output_file_path")?;
+    let width = required_usize_member(root, "output_video_width")?;
+    let height = required_usize_member(root, "output_video_height")?;
+    let elapsed = required_f64_member(root, "elapsed_seconds")?;
+    assert!(width > 0, "output_video_width must be greater than 0");
+    assert!(height > 0, "output_video_height must be greater than 0");
+    assert!(elapsed >= 0.0, "elapsed_seconds must be non-negative");
+
+    assert!(
+        root.to_member("output_audio_codec")?.get().is_none(),
+        "output_audio_codec must not exist for empty source",
+    );
+    assert!(
+        root.to_member("output_video_codec")?.get().is_none(),
+        "output_video_codec must not exist for empty source",
+    );
+    assert!(
+        root.to_member("output_audio_duration_seconds")?
+            .get()
+            .is_none(),
+        "output_audio_duration_seconds must not exist for empty source",
+    );
+    assert!(
+        root.to_member("output_video_duration_seconds")?
+            .get()
+            .is_none(),
+        "output_video_duration_seconds must not exist for empty source",
+    );
+
+    Ok(())
+}
+
 /// 単一のソースをそのまま変換する場合
 /// - 入力:
 ///   - 映像:
