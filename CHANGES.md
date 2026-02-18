@@ -98,14 +98,10 @@
 - [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
   - バージョンが `-canary.X` は `.devX` 形式に変換される
   - @voluntas
-- [ADD] 実験的コマンドとして inspect2 を追加する
-  - inspect コマンドとほぼ同様だが、内部的に tokio ベースの仕組みを使っている点が異なる
-  - 将来的にはこちらの実装で inspect コマンドを置き換える想定
-  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
-  - @sile
-- [ADD] 実験的コマンドとして rtmp-inbound-endpoint を追加する
-  - RTMP サーバーとして受信したストリームを出力ファイル（.mp4）に保存するためのコマンド
-  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+- [ADD] server サブコマンドの JSON-RPC で RTMP inbound endpoint を作成できるようにする
+  - JSON-RPC に `createRtmpInboundEndpoint` メソッドを追加する
+  - `inputUrl` と `outputAudioTrackId` / `outputVideoTrackId` を指定して RTMP を受信し、指定トラックへ配信できる
+  - `processorId` 未指定時は `rtmpInboundEndpoint` を既定値として利用する
   - @sile
 - [ADD] 実験的コマンドとして rtmp-outbound-endpoint を追加する
   - 入力ファイル（.mp4 or .webm）を RTMP サーバーとして配信するためのコマンド

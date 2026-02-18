@@ -64,6 +64,10 @@ impl MediaPipelineHandle {
             }
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
             "createRtmpPublisher" => self.handle_create_rtmp_publisher_rpc(maybe_params).await,
+            "createRtmpInboundEndpoint" => {
+                self.handle_create_rtmp_inbound_endpoint_rpc(maybe_params)
+                    .await
+            }
             "createWhipPublisher" => self.handle_create_whip_publisher_rpc(maybe_params).await,
             "createWhepSubscriber" => self.handle_create_whep_subscriber_rpc(maybe_params).await,
             "listTracks" => self.handle_list_tracks_rpc().await,
@@ -281,6 +285,34 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::CreateWhepSubscriber { processor_id })
     }
 
+    async fn handle_create_rtmp_inbound_endpoint_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (endpoint, processor_id): (
+            crate::inbound_endpoint_rtmp::RtmpInboundEndpoint,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let endpoint = params.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((endpoint, processor_id))
+        })?;
+        let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("rtmpInboundEndpoint"));
+
+        self.spawn_processor(processor_id.clone(), move |handle| endpoint.run(handle))
+            .await
+            .map_err(|e| match e {
+                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                    "Invalid params: processorId already exists: {processor_id}"
+                )),
+                RegisterProcessorError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
+            })?;
+
+        Ok(RpcSuccessResult::CreateRtmpInboundEndpoint { processor_id })
+    }
+
     async fn handle_list_tracks_rpc(&self) -> Result<RpcSuccessResult, RpcError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.send(MediaPipelineCommand::ListTracks { reply_tx });
@@ -310,6 +342,7 @@ enum RpcSuccessResult {
     CreateVideoDeviceSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
     CreateRtmpPublisher { processor_id: ProcessorId },
+    CreateRtmpInboundEndpoint { processor_id: ProcessorId },
     CreateWhipPublisher { processor_id: ProcessorId },
     CreateWhepSubscriber { processor_id: ProcessorId },
     ListTracks { track_ids: Vec<TrackId> },
@@ -332,6 +365,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateRtmpPublisher { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateRtmpInboundEndpoint { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateWhipPublisher { processor_id } => {
@@ -1227,6 +1263,173 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_rtmp_inbound_endpoint_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtmpInboundEndpoint"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_inbound_endpoint_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let invalid_url_request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtmpInboundEndpoint","params":{"inputUrl":"ws://example.com/live","outputVideoTrackId":"video-main"}}"#;
+        let missing_output_track_request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtmpInboundEndpoint","params":{"inputUrl":"rtmp://127.0.0.1:1935/live","streamName":"stream-main"}}"#;
+
+        let invalid_url_response = handle
+            .rpc(invalid_url_request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&invalid_url_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        let missing_output_track_response = handle
+            .rpc(missing_output_track_request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&missing_output_track_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_inbound_endpoint_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtmp_inbound_endpoint_request(None, Some("audio-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "rtmpInboundEndpoint"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_inbound_endpoint_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtmp_inbound_endpoint_request(
+            Some("custom-rtmp-inbound-endpoint"),
+            Some("audio-main"),
+            Some("video-main"),
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-rtmp-inbound-endpoint"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_inbound_endpoint_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let blocker = handle
+            .register_processor(ProcessorId::new("duplicate-rtmp-inbound-endpoint"))
+            .await
+            .expect("register duplicate-rtmp-inbound-endpoint");
+        let request = create_rtmp_inbound_endpoint_request(
+            Some("duplicate-rtmp-inbound-endpoint"),
+            Some("audio-main"),
+            Some("video-main"),
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_inbound_endpoint_accepts_audio_only() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtmp_inbound_endpoint_request(None, Some("audio-main"), None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "rtmpInboundEndpoint"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_rtmp_inbound_endpoint_accepts_video_only() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtmp_inbound_endpoint_request(None, None, Some("video-main"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "rtmpInboundEndpoint"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
     async fn create_whep_subscriber_requires_params() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber"}"#;
@@ -1670,6 +1873,26 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createRtmpPublisher","params":{{"outputUrl":"rtmp://127.0.0.1:1935/live","streamName":"stream-main"{input_video_track_id_part}{input_audio_track_id_part}{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_rtmp_inbound_endpoint_request(
+        processor_id: Option<&str>,
+        output_audio_track_id: Option<&str>,
+        output_video_track_id: Option<&str>,
+    ) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+        let output_audio_track_id_part = output_audio_track_id
+            .map(|id| format!(r#","outputAudioTrackId":"{id}""#))
+            .unwrap_or_default();
+        let output_video_track_id_part = output_video_track_id
+            .map(|id| format!(r#","outputVideoTrackId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createRtmpInboundEndpoint","params":{{"inputUrl":"rtmp://127.0.0.1:1935/live","streamName":"stream-main"{output_audio_track_id_part}{output_video_track_id_part}{processor_id_part}}}}}"#
         )
     }
 
