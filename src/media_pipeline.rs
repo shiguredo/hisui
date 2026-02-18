@@ -814,8 +814,9 @@ mod tests {
         handle
             .spawn_local_processor(
                 ProcessorId::new("duplicate-local"),
-                move |_handle| async move {
+                move |handle| async move {
                     let _ = release_rx.await;
+                    drop(handle);
                     Ok(())
                 },
             )
