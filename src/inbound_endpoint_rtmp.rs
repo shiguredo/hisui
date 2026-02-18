@@ -400,7 +400,10 @@ impl RtmpPublisherHandler {
         &mut self,
         frame: shiguredo_rtmp::AudioFrame,
     ) -> orfail::Result<()> {
-        let audio_data = self.frame_handler.process_audio_frame(frame)?;
+        let audio_data = self
+            .frame_handler
+            .process_audio_frame(frame)
+            .map_err(|e| orfail::Failure::new(e.to_string()))?;
         if let Some(tx) = &mut self.audio_track_tx {
             tx.send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
         }
@@ -412,7 +415,11 @@ impl RtmpPublisherHandler {
         &mut self,
         frame: shiguredo_rtmp::VideoFrame,
     ) -> orfail::Result<()> {
-        if let Some(video_frame) = self.frame_handler.process_video_frame(frame).or_fail()? {
+        if let Some(video_frame) = self
+            .frame_handler
+            .process_video_frame(frame)
+            .map_err(|e| orfail::Failure::new(e.to_string()))?
+        {
             if let Some(tx) = &mut self.video_track_tx {
                 tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
             }

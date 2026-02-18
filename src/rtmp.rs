@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::{audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
+use crate::{Error, audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
 
 #[derive(Debug)]
 pub struct RtmpOutgoingFrameHandlerStats {
@@ -48,7 +47,7 @@ impl RtmpOutgoingFrameHandler {
     pub fn prepare_audio_frame(
         &mut self,
         audio: Arc<AudioData>,
-    ) -> orfail::Result<(
+    ) -> crate::Result<(
         Option<shiguredo_rtmp::AudioFrame>,
         shiguredo_rtmp::AudioFrame,
     )> {
@@ -97,7 +96,7 @@ impl RtmpOutgoingFrameHandler {
     pub fn prepare_video_frame(
         &mut self,
         video: Arc<VideoFrame>,
-    ) -> orfail::Result<
+    ) -> crate::Result<
         Option<(
             Option<shiguredo_rtmp::VideoFrame>,
             shiguredo_rtmp::VideoFrame,
@@ -148,9 +147,10 @@ impl RtmpOutgoingFrameHandler {
             }
             crate::video::VideoFormat::H264AnnexB => {
                 // Annex B 形式（開始コード付き）から AVC 形式に変換が必要
-                crate::video_h264::convert_annexb_to_nalu(&video.data, self.video_nalu_length_size)?
+                crate::video_h264::convert_annexb_to_nalu(&video.data, self.video_nalu_length_size)
+                    .map_err(|e| Error::new(format!("failed to convert Annex B to NALU: {e}")))?
             }
-            _ => return Err(orfail::Failure::new("unsupported video format")),
+            _ => return Err(Error::new("unsupported video format")),
         };
 
         let frame = shiguredo_rtmp::VideoFrame {
@@ -218,7 +218,7 @@ impl RtmpIncomingFrameHandler {
             self.rtmp_base_timestamp = Some(rtmp_ts);
         }
 
-        let base = self.rtmp_base_timestamp.unwrap();
+        let base = self.rtmp_base_timestamp.unwrap_or(0);
         // RTMP timestamp - RTMP base timestamp + offset timestamp
         (rtmp_ts as i64 - base as i64) as u64 + self.timestamp_offset.as_millis() as u64
     }
@@ -227,7 +227,7 @@ impl RtmpIncomingFrameHandler {
     pub fn process_audio_frame(
         &mut self,
         frame: shiguredo_rtmp::AudioFrame,
-    ) -> orfail::Result<AudioData> {
+    ) -> crate::Result<AudioData> {
         // シーケンスヘッダーの処理
         if frame.is_aac_sequence_header {
             self.stats.total_audio_sequence_header_count.increment();
@@ -258,7 +258,10 @@ impl RtmpIncomingFrameHandler {
         // タイムスタンプを調整
         let adjusted_timestamp_ms = self.adjust_timestamp(frame.timestamp.as_millis() as u64);
 
-        let codec_info = self.audio_codec_info.as_ref().or_fail()?;
+        let codec_info = self
+            .audio_codec_info
+            .as_ref()
+            .ok_or_else(|| Error::new("audio codec info is not initialized"))?;
 
         Ok(AudioData {
             timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
@@ -276,14 +279,13 @@ impl RtmpIncomingFrameHandler {
     pub fn process_video_frame(
         &mut self,
         frame: shiguredo_rtmp::VideoFrame,
-    ) -> orfail::Result<Option<VideoFrame>> {
+    ) -> crate::Result<Option<VideoFrame>> {
         // シーケンスヘッダーの処理
         if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::SequenceHeader) {
             self.stats.total_video_sequence_header_count.increment();
 
-            // Use shiguredo_rtmp::AvcSequenceHeader directly
-            let seq_header =
-                shiguredo_rtmp::AvcSequenceHeader::from_bytes(&frame.data).or_fail()?;
+            let seq_header = shiguredo_rtmp::AvcSequenceHeader::from_bytes(&frame.data)
+                .map_err(|e| Error::new(format!("failed to parse AVC sequence header: {e}")))?;
 
             // いったん解像度は 0 扱いにしておく
             // TODO: SPS から実際の width, height を抽出
@@ -317,11 +319,14 @@ impl RtmpIncomingFrameHandler {
         let current_timestamp = std::time::Duration::from_millis(adjusted_timestamp_ms);
 
         // サンプルエントリーを処理
-        let sample_entry = self.video_sample_entry.as_ref().or_fail()?;
+        let sample_entry = self
+            .video_sample_entry
+            .as_ref()
+            .ok_or_else(|| Error::new("video sample entry is not initialized"))?;
 
         // サンプルエントリーから解像度を取得
-        let (width, height) =
-            crate::video_h264::extract_video_dimensions(sample_entry).or_fail()?;
+        let (width, height) = crate::video_h264::extract_video_dimensions(sample_entry)
+            .map_err(|e| Error::new(format!("failed to extract video dimensions: {e}")))?;
 
         // durationを計算
         //
@@ -356,14 +361,14 @@ impl RtmpIncomingFrameHandler {
 }
 
 /// AVC1エントリーから nalu_length_size を抽出
-fn extract_nalu_length_size(entry: &SampleEntry) -> orfail::Result<u8> {
+fn extract_nalu_length_size(entry: &SampleEntry) -> crate::Result<u8> {
     match entry {
         SampleEntry::Avc1(avc1) => Ok(avc1.avcc_box.length_size_minus_one.get() + 1),
-        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
+        _ => Err(Error::new("Not an H.264 video sample entry")),
     }
 }
 
-pub fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
+pub fn create_audio_sequence_header(entry: &SampleEntry) -> crate::Result<Vec<u8>> {
     match entry {
         SampleEntry::Mp4a(mp4a) => mp4a
             .esds_box
@@ -372,15 +377,14 @@ pub fn create_audio_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
             .dec_specific_info
             .as_ref()
             .map(|info| info.payload.clone())
-            .ok_or_else(|| orfail::Failure::new("No decoder specific info available")),
-        _ => Err(orfail::Failure::new("Not an audio sample entry")),
+            .ok_or_else(|| Error::new("No decoder specific info available")),
+        _ => Err(Error::new("Not an audio sample entry")),
     }
 }
 
-pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
+pub fn create_video_sequence_header(entry: &SampleEntry) -> crate::Result<Vec<u8>> {
     match entry {
         SampleEntry::Avc1(avc1) => {
-            // shiguredo_rtmp::AvcSequenceHeader を使用して生成
             let avc_header = shiguredo_rtmp::AvcSequenceHeader {
                 avc_profile_indication: avc1.avcc_box.avc_profile_indication,
                 profile_compatibility: avc1.avcc_box.profile_compatibility,
@@ -391,15 +395,17 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> orfail::Result<Vec<u
             };
             avc_header
                 .to_bytes()
-                .or_fail_with(|e| format!("Failed to create AVC sequence header: {e}"))
+                .map_err(|e| Error::new(format!("Failed to create AVC sequence header: {e}")))
         }
-        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
+        _ => Err(Error::new("Not an H.264 video sample entry")),
     }
 }
 
 /// AAC Audio Specific Config をパースしてサンプルレートとチャンネル数を取得
-fn parse_aac_audio_specific_config(data: &[u8]) -> orfail::Result<(u32, u8)> {
-    (data.len() >= 2).or_fail()?;
+fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(u32, u8)> {
+    if data.len() < 2 {
+        return Err(Error::new("AAC audio specific config is too short"));
+    }
 
     let byte0 = data[0];
     let byte1 = data[1];
@@ -425,15 +431,11 @@ fn parse_aac_audio_specific_config(data: &[u8]) -> orfail::Result<(u32, u8)> {
         10 => 11025,
         11 => 8000,
         12 => 7350,
-        _ => return Err(orfail::Failure::new("Invalid AAC sample rate index")),
+        _ => return Err(Error::new("Invalid AAC sample rate index")),
     };
 
     let num_channels = match channels {
-        0 => {
-            return Err(orfail::Failure::new(
-                "AAC channel configuration 0 is invalid",
-            ));
-        }
+        0 => return Err(Error::new("AAC channel configuration 0 is invalid")),
         1 => 1,
         2 => 2,
         3 => 3,
@@ -441,7 +443,7 @@ fn parse_aac_audio_specific_config(data: &[u8]) -> orfail::Result<(u32, u8)> {
         5 => 5,
         6 => 6,
         7 => 8,
-        _ => return Err(orfail::Failure::new("Invalid AAC channel configuration")),
+        _ => return Err(Error::new("Invalid AAC channel configuration")),
     };
 
     Ok((sample_rate, num_channels as u8))
@@ -452,7 +454,7 @@ fn create_audio_sample_entry(
     audio_specific_config: &[u8],
     sample_rate: u32,
     channels: u8,
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     use shiguredo_mp4::{
         FixedPointNumber, Uint,
         boxes::{AudioSampleEntryFields, EsdsBox, Mp4aBox, SampleEntry},
@@ -497,7 +499,7 @@ fn avc_sequence_header_to_sample_entry(
     seq_header: &shiguredo_rtmp::AvcSequenceHeader,
     width: usize,
     height: usize,
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     use shiguredo_mp4::{Uint, boxes::Avc1Box, boxes::AvccBox};
 
     Ok(SampleEntry::Avc1(Avc1Box {

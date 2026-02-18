@@ -103,9 +103,10 @@
   - `inputUrl` と `outputAudioTrackId` / `outputVideoTrackId` を指定して RTMP を受信し、指定トラックへ配信できる
   - `processorId` 未指定時は `rtmpInboundEndpoint` を既定値として利用する
   - @sile
-- [ADD] 実験的コマンドとして rtmp-outbound-endpoint を追加する
-  - 入力ファイル（.mp4 or .webm）を RTMP サーバーとして配信するためのコマンド
-  - `--experimental(-x)` フラグが指定されている場合にのみ利用可能となる
+- [ADD] server サブコマンドの JSON-RPC で RTMP outbound endpoint を作成できるようにする
+  - JSON-RPC に `createRtmpOutboundEndpoint` メソッドを追加する
+  - `outputUrl` と `inputAudioTrackId` / `inputVideoTrackId` を指定して RTMP サーバーとして配信できる
+  - `processorId` 未指定時は `rtmpOutboundEndpoint` を既定値として利用する
   - @sile
 - [ADD] server サブコマンドの JSON-RPC で RTMP publisher を作成できるようにする
   - JSON-RPC に `createRtmpPublisher` メソッドを追加する
