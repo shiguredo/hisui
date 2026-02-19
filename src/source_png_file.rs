@@ -329,7 +329,7 @@ mod tests {
     use std::{io::BufWriter, time::Duration};
 
     use super::*;
-    use crate::{MediaPipeline, Message, ProcessorId};
+    use crate::{MediaPipeline, Message, ProcessorId, ProcessorMetadata};
 
     #[test]
     fn png_file_source_json_parse_defaults_frame_rate() -> crate::Result<()> {
@@ -390,7 +390,10 @@ mod tests {
 
         let output_track_id = TrackId::new("png-video");
         let subscriber = pipeline_handle
-            .register_processor(ProcessorId::new("subscriber"))
+            .register_processor(
+                ProcessorId::new("subscriber"),
+                ProcessorMetadata::new("test_subscriber"),
+            )
             .await?;
         let mut rx = subscriber.subscribe_track(output_track_id.clone());
         subscriber.notify_ready();
@@ -402,7 +405,11 @@ mod tests {
             output_video_track_id: output_track_id,
         };
         pipeline_handle
-            .spawn_processor(ProcessorId::new("png_source"), |handle| source.run(handle))
+            .spawn_processor(
+                ProcessorId::new("png_source"),
+                ProcessorMetadata::new("png_file_source"),
+                |handle| source.run(handle),
+            )
             .await?;
 
         let mut video_count = 0usize;

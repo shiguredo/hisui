@@ -174,7 +174,10 @@ impl WebRtcP2pSessionManager {
 
         let processor_handle = self
             .pipeline_handle
-            .register_processor(crate::ProcessorId::new("webrtc_p2p_session"))
+            .register_processor(
+                crate::ProcessorId::new("webrtc_p2p_session"),
+                crate::ProcessorMetadata::new("webrtc_p2p_session"),
+            )
             .await
             .map_err(|e| match e {
                 crate::RegisterProcessorError::DuplicateProcessorId => {
