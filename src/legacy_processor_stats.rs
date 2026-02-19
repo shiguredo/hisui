@@ -24,9 +24,6 @@ pub struct Stats {
 
     /// 各プロセッサの統計情報
     pub processors: Vec<ProcessorStats>,
-
-    /// プロセッサを実行するワーカースレッドの統計情報
-    pub worker_threads: Vec<WorkerThreadStats>,
 }
 
 impl Stats {
@@ -53,7 +50,6 @@ impl nojson::DisplayJson for Stats {
             f.member("elapsed_seconds", self.elapsed_duration.as_secs_f32())?;
             f.member("error", self.error.get())?;
             f.member("processors", &self.processors)?;
-            f.member("worker_threads", &self.worker_threads)?;
             Ok(())
         })
     }
@@ -1011,45 +1007,6 @@ impl nojson::DisplayJson for Mp4WriterStats {
                 self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// `Mp4Writer` 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct WorkerThreadStats {
-    /// 担当しているプロセッサの番号（インデックス）リスト
-    pub processors: Vec<usize>,
-
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// 入出力の待機時間
-    pub total_waiting_duration: SharedAtomicDuration,
-}
-
-impl nojson::DisplayJson for WorkerThreadStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member(
-                "processors",
-                nojson::json(|f| {
-                    let indent = f.get_indent_size();
-                    f.set_indent_size(0);
-                    f.value(&self.processors)?;
-                    f.set_indent_size(indent);
-                    Ok(())
-                }),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member(
-                "total_waiting_seconds",
-                self.total_waiting_duration.get().as_secs_f32(),
-            )?;
             Ok(())
         })
     }

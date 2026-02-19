@@ -165,7 +165,6 @@ impl Composer {
             match crate::stats_legacy_json::to_legacy_stats_json(
                 &stats,
                 legacy_stats.elapsed_duration.as_secs_f64(),
-                Vec::new(),
             ) {
                 Ok(json) => {
                     if let Err(e) = std::fs::write(path, json.to_string()) {
@@ -608,7 +607,6 @@ mod tests {
                 ProcessorStats::VideoMixer(video_mixer),
                 ProcessorStats::Mp4Writer(writer),
             ],
-            worker_threads: Vec::new(),
         };
 
         let stats = convert_legacy_stats_to_stats(&legacy_stats);
@@ -764,7 +762,6 @@ mod tests {
                     ..Default::default()
                 }),
             ],
-            worker_threads: Vec::new(),
         };
 
         let stats = convert_legacy_stats_to_stats(&legacy_stats);

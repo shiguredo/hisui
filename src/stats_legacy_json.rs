@@ -1,11 +1,5 @@
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct LegacyWorkerThreadStats {
-    pub total_processing_seconds: f64,
-    pub total_waiting_seconds: f64,
-}
-
 #[derive(Debug, Clone)]
 struct LegacyProcessorStats {
     processor_type: String,
@@ -36,16 +30,6 @@ impl nojson::DisplayJson for LegacyProcessorStats {
     }
 }
 
-impl nojson::DisplayJson for LegacyWorkerThreadStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("total_processing_seconds", self.total_processing_seconds)?;
-            f.member("total_waiting_seconds", self.total_waiting_seconds)?;
-            Ok(())
-        })
-    }
-}
-
 struct LegacyStatsJson {
     elapsed_seconds: f64,
     error: bool,
@@ -66,7 +50,6 @@ impl nojson::DisplayJson for LegacyStatsJson {
 pub fn to_legacy_stats_json(
     stats: &crate::stats::Stats,
     elapsed_seconds: f64,
-    _worker_threads: Vec<LegacyWorkerThreadStats>,
 ) -> crate::Result<nojson::RawJsonOwned> {
     let mut processors = BTreeMap::<String, LegacyProcessorStats>::new();
     for entry in stats.entries()? {
@@ -127,15 +110,7 @@ mod tests {
         stats.counter("total_output_video_frame_count").add(4);
         stats.flag("error").set(true);
 
-        let json = to_legacy_stats_json(
-            &stats,
-            3.0,
-            vec![LegacyWorkerThreadStats {
-                total_processing_seconds: 2.0,
-                total_waiting_seconds: 1.0,
-            }],
-        )
-        .expect("to_legacy_stats_json must succeed");
+        let json = to_legacy_stats_json(&stats, 3.0).expect("to_legacy_stats_json must succeed");
 
         let text = json.to_string();
         assert!(text.contains("\"elapsed_seconds\":3"));
@@ -157,8 +132,7 @@ mod tests {
         stats.counter("frames_total").add(10);
         stats.flag("error").set(false);
 
-        let json = to_legacy_stats_json(&stats, 0.0, Vec::new())
-            .expect("to_legacy_stats_json must succeed");
+        let json = to_legacy_stats_json(&stats, 0.0).expect("to_legacy_stats_json must succeed");
         let text = json.to_string();
         assert!(!text.contains("\"frames_total\":10"));
         assert!(text.contains("\"type\":\"video_mixer\""));
