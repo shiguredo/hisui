@@ -15,6 +15,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum ProcessorStats {
     Mp4AudioReader(Mp4AudioReaderStats),
     Mp4VideoReader(Mp4VideoReaderStats),

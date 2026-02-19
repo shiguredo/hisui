@@ -23,7 +23,7 @@ use crate::{
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
     layout_encode_params::LayoutEncodeParams,
-    legacy_processor_stats::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
+    legacy_processor_stats::{AudioEncoderStats, VideoEncoderStats},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -38,36 +38,54 @@ pub struct AudioEncoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
     stats: AudioEncoderStats,
+    compose_stats: crate::stats::Stats,
     encoded: VecDeque<AudioData>,
     eos: bool,
     inner: AudioEncoderInner,
 }
 
 impl AudioEncoder {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        ProcessorStats::AudioEncoder(self.stats.clone())
-    }
-
     pub fn new(
         codec: CodecName,
         bitrate: NonZeroUsize,
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
     ) -> orfail::Result<Self> {
+        Self::new_with_stats(
+            codec,
+            bitrate,
+            input_stream_id,
+            output_stream_id,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats(
+        codec: CodecName,
+        bitrate: NonZeroUsize,
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        compose_stats: crate::stats::Stats,
+    ) -> orfail::Result<Self> {
         match codec {
             #[cfg(feature = "fdk-aac")]
             CodecName::Aac => {
-                AudioEncoder::new_fdk_aac(input_stream_id, output_stream_id, bitrate).or_fail()
-            }
-            #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
-            CodecName::Aac => {
-                AudioEncoder::new_audio_toolbox_aac(input_stream_id, output_stream_id, bitrate)
+                AudioEncoder::new_fdk_aac(input_stream_id, output_stream_id, bitrate, compose_stats)
                     .or_fail()
             }
+            #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
+            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
+                input_stream_id,
+                output_stream_id,
+                bitrate,
+                compose_stats,
+            )
+            .or_fail(),
             #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
             CodecName::Aac => Err(orfail::Failure::new("AAC output is not supported")),
             CodecName::Opus => {
-                AudioEncoder::new_opus(input_stream_id, output_stream_id, bitrate).or_fail()
+                AudioEncoder::new_opus(input_stream_id, output_stream_id, bitrate, compose_stats)
+                    .or_fail()
             }
             _ => unreachable!(),
         }
@@ -77,12 +95,19 @@ impl AudioEncoder {
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::Opus, CodecName::Opus);
+        compose_stats
+            .string("engine")
+            .set(EngineName::Opus.as_str());
+        compose_stats.string("codec").set(CodecName::Opus.as_str());
+        compose_stats.flag("error").set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
             stats,
+            compose_stats,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_opus(bitrate).or_fail()?,
@@ -94,12 +119,19 @@ impl AudioEncoder {
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::FdkAac, CodecName::Aac);
+        compose_stats
+            .string("engine")
+            .set(EngineName::FdkAac.as_str());
+        compose_stats.string("codec").set(CodecName::Aac.as_str());
+        compose_stats.flag("error").set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
             stats,
+            compose_stats,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_fdk_aac(bitrate).or_fail()?,
@@ -111,12 +143,19 @@ impl AudioEncoder {
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let stats = AudioEncoderStats::new(EngineName::AudioToolbox, CodecName::Aac);
+        compose_stats
+            .string("engine")
+            .set(EngineName::AudioToolbox.as_str());
+        compose_stats.string("codec").set(CodecName::Aac.as_str());
+        compose_stats.flag("error").set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
             stats,
+            compose_stats,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate).or_fail()?,
@@ -248,6 +287,7 @@ impl MediaProcessor for AudioEncoder {
 
         if let Some(encoded) = encoded {
             self.stats.total_audio_data_count.add(1);
+            self.compose_stats.counter("total_audio_data_count").inc();
             self.encoded.push_back(encoded);
         }
         Ok(())
@@ -270,6 +310,8 @@ impl MediaProcessor for AudioEncoder {
 
     fn set_error(&self) {
         self.stats.error.set(true);
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 
@@ -355,6 +397,7 @@ pub struct VideoEncoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
     stats: VideoEncoderStats,
+    compose_stats: crate::stats::Stats,
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
@@ -364,21 +407,35 @@ pub struct VideoEncoder {
 }
 
 impl VideoEncoder {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        ProcessorStats::VideoEncoder(self.stats.clone())
-    }
-
     pub fn new(
         options: &VideoEncoderOptions,
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
     ) -> orfail::Result<Self> {
+        Self::new_with_stats(
+            options,
+            input_stream_id,
+            output_stream_id,
+            openh264_lib,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats(
+        options: &VideoEncoderOptions,
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        openh264_lib: Option<Openh264Library>,
+        mut compose_stats: crate::stats::Stats,
+    ) -> orfail::Result<Self> {
         let stats = VideoEncoderStats::new();
+        compose_stats.flag("error").set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
             stats,
+            compose_stats,
             encoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -408,6 +465,12 @@ impl VideoEncoder {
         // エンジン名とコーデックを設定
         self.stats.engine.set(inner.name());
         self.stats.codec.set(inner.codec());
+        self.compose_stats
+            .string("engine")
+            .set(inner.name().as_str());
+        self.compose_stats
+            .string("codec")
+            .set(inner.codec().as_str());
 
         self.inner = Some(inner);
         Ok(())
@@ -621,6 +684,9 @@ impl MediaProcessor for VideoEncoder {
             }
 
             self.stats.total_input_video_frame_count.add(1);
+            self.compose_stats
+                .counter("total_input_video_frame_count")
+                .inc();
             self.inner
                 .as_mut()
                 .expect("infallible")
@@ -637,6 +703,9 @@ impl MediaProcessor for VideoEncoder {
         if let Some(inner) = &mut self.inner {
             while let Some(encoded) = inner.next_encoded_frame() {
                 self.stats.total_output_video_frame_count.add(1);
+                self.compose_stats
+                    .counter("total_output_video_frame_count")
+                    .inc();
                 self.encoded.push_back(encoded);
             }
         }
@@ -660,6 +729,8 @@ impl MediaProcessor for VideoEncoder {
 
     fn set_error(&self) {
         self.stats.error.set(true);
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 

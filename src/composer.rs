@@ -7,7 +7,6 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
     layout::Layout,
-    legacy_processor_stats::ProcessorStats,
     media::MediaStreamId,
     mixer_audio::AudioMixer,
     mixer_video::{VideoMixer, VideoMixerSpec},
@@ -51,22 +50,45 @@ impl Composer {
         // プロセッサを準備
         let mut scheduler = Scheduler::with_thread_count(self.worker_threads);
         let mut next_stream_id = MediaStreamId::new(0);
-        let mut legacy_processors = Vec::new();
+        let stats = crate::stats::Stats::new();
+        let mut next_processor_index = 0;
+        let mut scoped_stats = |processor_type: &'static str| {
+            let mut scoped = stats.clone();
+            scoped.set_default_label(
+                "processor_id",
+                &format!("{processor_type}:{next_processor_index}"),
+            );
+            scoped.set_default_label("processor_type", processor_type);
+            next_processor_index += 1;
+            scoped
+        };
 
         // リーダーとデコーダーを登録
         let mut audio_mixer_input_stream_ids = Vec::new();
         for source_id in self.layout.audio_source_ids() {
             let source_info = self.layout.sources.get(source_id).or_fail()?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
-            let reader =
-                AudioReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
-            legacy_processors.push(reader.processor_stats());
+            let reader = AudioReader::new_with_stats(
+                reader_output_stream_id,
+                source_info.id.clone(),
+                source_info.format,
+                source_info.start_timestamp,
+                source_info.timestamp_sorted_media_paths(),
+                scoped_stats(match source_info.format {
+                    crate::metadata::ContainerFormat::Mp4 => "mp4_audio_reader",
+                    crate::metadata::ContainerFormat::Webm => "webm_audio_reader",
+                }),
+            )
+            .or_fail()?;
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
-            let decoder =
-                AudioDecoder::new(reader_output_stream_id, decoder_output_stream_id).or_fail()?;
-            legacy_processors.push(decoder.processor_stats());
+            let decoder = AudioDecoder::new_with_stats(
+                reader_output_stream_id,
+                decoder_output_stream_id,
+                scoped_stats("audio_decoder"),
+            )
+            .or_fail()?;
             scheduler.register(decoder).or_fail()?;
 
             audio_mixer_input_stream_ids.push(decoder_output_stream_id);
@@ -81,18 +103,27 @@ impl Composer {
         for source_id in self.layout.video_source_ids() {
             let source_info = self.layout.sources.get(source_id).or_fail()?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
-            let reader =
-                VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
-            legacy_processors.push(reader.processor_stats());
+            let reader = VideoReader::new_with_stats(
+                reader_output_stream_id,
+                source_info.id.clone(),
+                source_info.format,
+                source_info.start_timestamp,
+                source_info.timestamp_sorted_media_paths(),
+                scoped_stats(match source_info.format {
+                    crate::metadata::ContainerFormat::Mp4 => "mp4_video_reader",
+                    crate::metadata::ContainerFormat::Webm => "webm_video_reader",
+                }),
+            )
+            .or_fail()?;
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
-            let decoder = VideoDecoder::new(
+            let decoder = VideoDecoder::new_with_stats(
                 reader_output_stream_id,
                 decoder_output_stream_id,
                 video_decoder_options.clone(),
+                scoped_stats("video_decoder"),
             );
-            legacy_processors.push(decoder.processor_stats());
             scheduler.register(decoder).or_fail()?;
 
             video_mixer_input_stream_ids.push(decoder_output_stream_id);
@@ -100,48 +131,48 @@ impl Composer {
 
         // ミキサーを登録
         let audio_mixer_output_stream_id = next_stream_id.fetch_add(1);
-        let audio_mixer = AudioMixer::new(
+        let audio_mixer = AudioMixer::new_with_stats(
             self.layout.trim_spans.clone(),
             audio_mixer_input_stream_ids,
             audio_mixer_output_stream_id,
+            scoped_stats("audio_mixer"),
         );
-        legacy_processors.push(audio_mixer.processor_stats());
         scheduler.register(audio_mixer).or_fail()?;
 
         let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
-        let video_mixer = VideoMixer::new(
+        let video_mixer = VideoMixer::new_with_stats(
             VideoMixerSpec::from_layout(&self.layout),
             video_mixer_input_stream_ids,
             video_mixer_output_stream_id,
+            scoped_stats("video_mixer"),
         );
-        legacy_processors.push(video_mixer.processor_stats());
         scheduler.register(video_mixer).or_fail()?;
 
         // エンコーダーを登録
         let audio_encoder_output_stream_id = next_stream_id.fetch_add(1);
-        let audio_encoder = AudioEncoder::new(
+        let audio_encoder = AudioEncoder::new_with_stats(
             self.layout.audio_codec,
             self.layout.audio_bitrate_bps(),
             audio_mixer_output_stream_id,
             audio_encoder_output_stream_id,
+            scoped_stats("audio_encoder"),
         )
         .or_fail()?;
-        legacy_processors.push(audio_encoder.processor_stats());
         scheduler.register(audio_encoder).or_fail()?;
 
         let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
-        let video_encoder = VideoEncoder::new(
+        let video_encoder = VideoEncoder::new_with_stats(
             &VideoEncoderOptions::from_layout(&self.layout),
             video_mixer_output_stream_id,
             video_encoder_output_stream_id,
             self.openh264_lib.clone(),
+            scoped_stats("video_encoder"),
         )
         .or_fail()?;
-        legacy_processors.push(video_encoder.processor_stats());
         scheduler.register(video_encoder).or_fail()?;
 
         // ライターを登録
-        let writer = Mp4Writer::new(
+        let writer = Mp4Writer::new_with_stats(
             out_file_path,
             Some(Mp4WriterOptions::from_layout(&self.layout)),
             self.layout
@@ -150,9 +181,9 @@ impl Composer {
             self.layout
                 .has_video()
                 .then_some(video_encoder_output_stream_id),
+            scoped_stats("mp4_writer"),
         )
         .or_fail()?;
-        legacy_processors.push(writer.processor_stats());
         scheduler.register(writer).or_fail()?;
 
         // プログレスバーを登録
@@ -169,7 +200,6 @@ impl Composer {
 
         // 合成を実行
         let scheduler_result = scheduler.run().or_fail()?;
-        let stats = convert_legacy_stats_to_stats(&legacy_processors);
 
         if let Some(path) = &self.stats_file_path {
             match crate::stats_legacy_json::to_legacy_stats_json(
@@ -202,21 +232,46 @@ impl Composer {
     }
 }
 
-fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate::stats::Stats {
-    let stats = crate::stats::Stats::new();
+#[cfg(test)]
+fn append_legacy_stats_to_stats(
+    stats: &mut crate::stats::Stats,
+    legacy_processors: &[crate::legacy_processor_stats::ProcessorStats],
+) {
     for (index, processor) in legacy_processors.iter().enumerate() {
         let (processor_type, error) = match processor {
-            ProcessorStats::Mp4AudioReader(reader) => ("mp4_audio_reader", reader.error.get()),
-            ProcessorStats::Mp4VideoReader(reader) => ("mp4_video_reader", reader.error.get()),
-            ProcessorStats::WebmAudioReader(reader) => ("webm_audio_reader", reader.error.get()),
-            ProcessorStats::WebmVideoReader(reader) => ("webm_video_reader", reader.error.get()),
-            ProcessorStats::AudioDecoder(decoder) => ("audio_decoder", decoder.error.get()),
-            ProcessorStats::VideoDecoder(decoder) => ("video_decoder", decoder.error.get()),
-            ProcessorStats::AudioMixer(mixer) => ("audio_mixer", mixer.error.get()),
-            ProcessorStats::VideoMixer(mixer) => ("video_mixer", mixer.error.get()),
-            ProcessorStats::AudioEncoder(encoder) => ("audio_encoder", encoder.error.get()),
-            ProcessorStats::VideoEncoder(encoder) => ("video_encoder", encoder.error.get()),
-            ProcessorStats::Mp4Writer(writer) => ("mp4_writer", writer.error.get()),
+            crate::legacy_processor_stats::ProcessorStats::Mp4AudioReader(reader) => {
+                ("mp4_audio_reader", reader.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::Mp4VideoReader(reader) => {
+                ("mp4_video_reader", reader.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::WebmAudioReader(reader) => {
+                ("webm_audio_reader", reader.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::WebmVideoReader(reader) => {
+                ("webm_video_reader", reader.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::AudioDecoder(decoder) => {
+                ("audio_decoder", decoder.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::VideoDecoder(decoder) => {
+                ("video_decoder", decoder.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::AudioMixer(mixer) => {
+                ("audio_mixer", mixer.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::VideoMixer(mixer) => {
+                ("video_mixer", mixer.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::AudioEncoder(encoder) => {
+                ("audio_encoder", encoder.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::VideoEncoder(encoder) => {
+                ("video_encoder", encoder.error.get())
+            }
+            crate::legacy_processor_stats::ProcessorStats::Mp4Writer(writer) => {
+                ("mp4_writer", writer.error.get())
+            }
         };
 
         let mut processor_stats = stats.clone();
@@ -225,7 +280,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
         processor_stats.flag("error").set(error);
 
         match processor {
-            ProcessorStats::Mp4AudioReader(reader) => {
+            crate::legacy_processor_stats::ProcessorStats::Mp4AudioReader(reader) => {
                 if let Some(codec) = reader.codec {
                     processor_stats.string("codec").set(codec.as_str());
                 }
@@ -245,7 +300,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .gauge_f64("start_time_seconds")
                     .set(reader.start_time.as_secs_f64());
             }
-            ProcessorStats::Mp4VideoReader(reader) => {
+            crate::legacy_processor_stats::ProcessorStats::Mp4VideoReader(reader) => {
                 if let Some(codec) = reader.codec.get() {
                     processor_stats.string("codec").set(codec.as_str());
                 }
@@ -265,7 +320,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .gauge_f64("start_time_seconds")
                     .set(reader.start_time.as_secs_f64());
             }
-            ProcessorStats::WebmAudioReader(reader) => {
+            crate::legacy_processor_stats::ProcessorStats::WebmAudioReader(reader) => {
                 if let Some(codec) = reader.codec {
                     processor_stats.string("codec").set(codec.as_str());
                 }
@@ -288,7 +343,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .gauge_f64("start_time_seconds")
                     .set(reader.start_time.as_secs_f64());
             }
-            ProcessorStats::WebmVideoReader(reader) => {
+            crate::legacy_processor_stats::ProcessorStats::WebmVideoReader(reader) => {
                 if let Some(codec) = reader.codec.get() {
                     processor_stats.string("codec").set(codec.as_str());
                 }
@@ -311,7 +366,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .gauge_f64("start_time_seconds")
                     .set(reader.start_time.as_secs_f64());
             }
-            ProcessorStats::AudioEncoder(encoder) => {
+            crate::legacy_processor_stats::ProcessorStats::AudioEncoder(encoder) => {
                 processor_stats
                     .string("engine")
                     .set(encoder.engine.as_str());
@@ -320,7 +375,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .counter("total_audio_data_count")
                     .add(encoder.total_audio_data_count.get());
             }
-            ProcessorStats::AudioDecoder(decoder) => {
+            crate::legacy_processor_stats::ProcessorStats::AudioDecoder(decoder) => {
                 if let Some(engine) = decoder.engine {
                     processor_stats.string("engine").set(engine.as_str());
                 }
@@ -331,7 +386,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .counter("total_audio_data_count")
                     .add(decoder.total_audio_data_count.get());
             }
-            ProcessorStats::VideoDecoder(decoder) => {
+            crate::legacy_processor_stats::ProcessorStats::VideoDecoder(decoder) => {
                 if let Some(engine) = decoder.engine.get() {
                     processor_stats.string("engine").set(engine.as_str());
                 }
@@ -345,7 +400,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .counter("total_output_video_frame_count")
                     .add(decoder.total_output_video_frame_count.get());
             }
-            ProcessorStats::VideoEncoder(encoder) => {
+            crate::legacy_processor_stats::ProcessorStats::VideoEncoder(encoder) => {
                 if let Some(engine) = encoder.engine.get() {
                     processor_stats.string("engine").set(engine.as_str());
                 }
@@ -359,7 +414,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .counter("total_output_video_frame_count")
                     .add(encoder.total_output_video_frame_count.get());
             }
-            ProcessorStats::AudioMixer(mixer) => {
+            crate::legacy_processor_stats::ProcessorStats::AudioMixer(mixer) => {
                 processor_stats
                     .counter("total_input_audio_data_count")
                     .add(mixer.total_input_audio_data_count.get());
@@ -379,7 +434,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .counter("total_trimmed_sample_count")
                     .add(mixer.total_trimmed_sample_count.get());
             }
-            ProcessorStats::VideoMixer(mixer) => {
+            crate::legacy_processor_stats::ProcessorStats::VideoMixer(mixer) => {
                 processor_stats
                     .gauge("output_video_width")
                     .set(mixer.output_video_resolution.width as i64);
@@ -402,7 +457,7 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .counter("total_extended_video_frame_count")
                     .add(mixer.total_extended_video_frame_count.get());
             }
-            ProcessorStats::Mp4Writer(writer) => {
+            crate::legacy_processor_stats::ProcessorStats::Mp4Writer(writer) => {
                 if let Some(audio_codec) = writer.audio_codec.get() {
                     processor_stats
                         .string("audio_codec")
@@ -446,7 +501,6 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
             }
         }
     }
-    stats
 }
 
 #[derive(Debug)]
@@ -503,7 +557,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::legacy_processor_stats as legacy;
+    use crate::legacy_processor_stats::{self as legacy, ProcessorStats};
 
     fn counter(value: u64) -> legacy::SharedAtomicCounter {
         let counter = legacy::SharedAtomicCounter::default();
@@ -557,7 +611,8 @@ mod tests {
             ProcessorStats::Mp4Writer(writer),
         ];
 
-        let stats = convert_legacy_stats_to_stats(&legacy_processors);
+        let mut stats = crate::stats::Stats::new();
+        append_legacy_stats_to_stats(&mut stats, &legacy_processors);
         let entries = stats.entries().expect("entries must succeed");
 
         assert!(entries.iter().any(|entry| {
@@ -700,7 +755,8 @@ mod tests {
             }),
         ];
 
-        let stats = convert_legacy_stats_to_stats(&legacy_processors);
+        let mut stats = crate::stats::Stats::new();
+        append_legacy_stats_to_stats(&mut stats, &legacy_processors);
         let entries = stats.entries().expect("entries must succeed");
         let has_counter = |processor_type: &str, metric_name: &str, value: u64| {
             entries.iter().any(|entry| {
@@ -750,7 +806,8 @@ mod tests {
             legacy::AudioDecoderStats::default(),
         )];
 
-        let stats = convert_legacy_stats_to_stats(&legacy_processors);
+        let mut stats = crate::stats::Stats::new();
+        append_legacy_stats_to_stats(&mut stats, &legacy_processors);
         let entries = stats.entries().expect("entries must succeed");
         assert!(
             !entries

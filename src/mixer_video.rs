@@ -10,7 +10,7 @@ use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
     layout::{Layout, Resolution, TrimSpans},
     layout_region::Region,
-    legacy_processor_stats::{ProcessorStats, VideoMixerStats, VideoResolution},
+    legacy_processor_stats::{VideoMixerStats, VideoResolution},
     media::MediaStreamId,
     metadata::SourceId,
     processor::{
@@ -196,17 +196,28 @@ pub struct VideoMixer {
     output_stream_id: MediaStreamId,
     last_mixed_frame: Option<VideoFrame>,
     stats: VideoMixerStats,
+    compose_stats: crate::stats::Stats,
 }
 
 impl VideoMixer {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        ProcessorStats::VideoMixer(self.stats.clone())
-    }
-
     pub fn new(
         spec: VideoMixerSpec,
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_id: MediaStreamId,
+    ) -> Self {
+        Self::new_with_stats(
+            spec,
+            input_stream_ids,
+            output_stream_id,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats(
+        spec: VideoMixerSpec,
+        input_stream_ids: Vec<MediaStreamId>,
+        output_stream_id: MediaStreamId,
+        mut compose_stats: crate::stats::Stats,
     ) -> Self {
         let resolution = spec.resolution;
         let input_streams = input_stream_ids
@@ -214,6 +225,13 @@ impl VideoMixer {
             .copied()
             .map(|id| (id, InputStream::default()))
             .collect();
+        compose_stats
+            .gauge("output_video_width")
+            .set(resolution.width().get() as i64);
+        compose_stats
+            .gauge("output_video_height")
+            .set(resolution.height().get() as i64);
+        compose_stats.flag("error").set(false);
         Self {
             spec,
             input_stream_ids,
@@ -227,6 +245,7 @@ impl VideoMixer {
                 },
                 ..Default::default()
             },
+            compose_stats,
         }
     }
 
@@ -341,7 +360,18 @@ impl VideoMixer {
         }
 
         self.stats.total_output_video_frame_count.add(1);
+        self.compose_stats
+            .counter("total_output_video_frame_count")
+            .inc();
         self.stats.total_output_video_frame_duration.add(duration);
+        self.compose_stats
+            .gauge_f64("total_output_video_frame_seconds")
+            .set(
+                self.stats
+                    .total_output_video_frame_duration
+                    .get()
+                    .as_secs_f64(),
+            );
 
         Ok(VideoFrame {
             // 固定値
@@ -480,6 +510,9 @@ impl MediaProcessor for VideoMixer {
                     self.spec.resize_filter_mode,
                 ));
             self.stats.total_input_video_frame_count.add(1);
+            self.compose_stats
+                .counter("total_input_video_frame_count")
+                .inc();
         } else {
             input_stream.eos = true;
         }
@@ -493,6 +526,9 @@ impl MediaProcessor for VideoMixer {
             // トリム対象期間ならその分はスキップする
             while self.spec.trim_spans.contains(now) {
                 self.stats.total_trimmed_video_frame_count.add(1);
+                self.compose_stats
+                    .counter("total_trimmed_video_frame_count")
+                    .inc();
                 now = self.next_input_timestamp();
             }
 
@@ -532,7 +568,18 @@ impl MediaProcessor for VideoMixer {
 
                 last_frame.duration += duration;
                 self.stats.total_extended_video_frame_count.add(1);
+                self.compose_stats
+                    .counter("total_extended_video_frame_count")
+                    .inc();
                 self.stats.total_output_video_frame_duration.add(duration); // 出力フレーム数は増えないけど尺は伸びる
+                self.compose_stats
+                    .gauge_f64("total_output_video_frame_seconds")
+                    .set(
+                        self.stats
+                            .total_output_video_frame_duration
+                            .get()
+                            .as_secs_f64(),
+                    );
 
                 continue;
             }
@@ -551,6 +598,8 @@ impl MediaProcessor for VideoMixer {
 
     fn set_error(&self) {
         self.stats.error.set(true);
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 

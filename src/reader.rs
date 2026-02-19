@@ -30,13 +30,10 @@ pub struct AudioReader {
     next_timestamp_offset: Duration,
     remaining_input_files: Vec<PathBuf>,
     inner: AudioReaderInner,
+    compose_stats: crate::stats::Stats,
 }
 
 impl AudioReader {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        self.inner.stats()
-    }
-
     pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
@@ -89,12 +86,13 @@ impl AudioReader {
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
     ) -> orfail::Result<Self> {
-        Self::new(
+        Self::new_with_stats(
             output_stream_id,
             source_info.id.clone(),
             source_info.format,
             source_info.start_timestamp,
             source_info.timestamp_sorted_media_paths(),
+            crate::stats::Stats::new(),
         )
     }
 
@@ -104,6 +102,24 @@ impl AudioReader {
         format: ContainerFormat,
         timestamp_offset: Duration,
         input_files: Vec<PathBuf>,
+    ) -> orfail::Result<Self> {
+        Self::new_with_stats(
+            output_stream_id,
+            source_id,
+            format,
+            timestamp_offset,
+            input_files,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats(
+        output_stream_id: MediaStreamId,
+        source_id: SourceId,
+        format: ContainerFormat,
+        timestamp_offset: Duration,
+        input_files: Vec<PathBuf>,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let mut remaining_input_files = input_files.clone();
         remaining_input_files.reverse();
@@ -134,6 +150,10 @@ impl AudioReader {
                 ))
             }
         };
+        compose_stats
+            .gauge_f64("start_time_seconds")
+            .set(timestamp_offset.as_secs_f64());
+        compose_stats.flag("error").set(false);
         Ok(Self {
             output_stream_id,
             source_id,
@@ -141,6 +161,7 @@ impl AudioReader {
             next_timestamp_offset: timestamp_offset,
             remaining_input_files,
             inner,
+            compose_stats,
         })
     }
 
@@ -164,6 +185,50 @@ impl AudioReader {
             )
             .map(|reader| reader.map(|reader| **inner = reader).is_some())
             .or_fail(),
+        }
+    }
+
+    fn update_compose_stats_from_inner(&mut self) {
+        let mut stats = self.compose_stats.clone();
+        match self.inner.stats() {
+            ProcessorStats::Mp4AudioReader(reader) => {
+                stats
+                    .gauge("total_sample_count")
+                    .set(reader.total_sample_count.get() as i64);
+                stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec {
+                    stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+            }
+            ProcessorStats::WebmAudioReader(reader) => {
+                stats
+                    .gauge("total_cluster_count")
+                    .set(reader.total_cluster_count.get() as i64);
+                stats
+                    .gauge("total_simple_block_count")
+                    .set(reader.total_simple_block_count.get() as i64);
+                stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec {
+                    stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -197,6 +262,7 @@ impl MediaProcessor for AudioReader {
                 Some(Ok(mut data)) => {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
+                    self.update_compose_stats_from_inner();
                     return Ok(MediaProcessorOutput::audio_data(
                         self.output_stream_id,
                         data,
@@ -208,6 +274,8 @@ impl MediaProcessor for AudioReader {
 
     fn set_error(&self) {
         self.inner.stats().set_error();
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 
@@ -252,13 +320,10 @@ pub struct VideoReader {
     next_timestamp_offset: Duration,
     remaining_input_files: Vec<PathBuf>,
     inner: VideoReaderInner,
+    compose_stats: crate::stats::Stats,
 }
 
 impl VideoReader {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        self.inner.stats()
-    }
-
     pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
@@ -310,12 +375,13 @@ impl VideoReader {
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
     ) -> orfail::Result<Self> {
-        Self::new(
+        Self::new_with_stats(
             output_stream_id,
             source_info.id.clone(),
             source_info.format,
             source_info.start_timestamp,
             source_info.timestamp_sorted_media_paths(),
+            crate::stats::Stats::new(),
         )
     }
 
@@ -325,6 +391,24 @@ impl VideoReader {
         format: ContainerFormat,
         timestamp_offset: Duration,
         input_files: Vec<PathBuf>,
+    ) -> orfail::Result<Self> {
+        Self::new_with_stats(
+            output_stream_id,
+            source_id,
+            format,
+            timestamp_offset,
+            input_files,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats(
+        output_stream_id: MediaStreamId,
+        source_id: SourceId,
+        format: ContainerFormat,
+        timestamp_offset: Duration,
+        input_files: Vec<PathBuf>,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let mut remaining_input_files = input_files.clone();
         remaining_input_files.reverse();
@@ -353,6 +437,10 @@ impl VideoReader {
                 ))
             }
         };
+        compose_stats
+            .gauge_f64("start_time_seconds")
+            .set(timestamp_offset.as_secs_f64());
+        compose_stats.flag("error").set(false);
         Ok(Self {
             output_stream_id,
             source_id,
@@ -360,6 +448,7 @@ impl VideoReader {
             next_timestamp_offset: timestamp_offset,
             remaining_input_files,
             inner,
+            compose_stats,
         })
     }
 
@@ -383,6 +472,50 @@ impl VideoReader {
             )
             .map(|reader| reader.map(|reader| **inner = reader).is_some())
             .or_fail(),
+        }
+    }
+
+    fn update_compose_stats_from_inner(&mut self) {
+        let mut stats = self.compose_stats.clone();
+        match self.inner.stats() {
+            ProcessorStats::Mp4VideoReader(reader) => {
+                stats
+                    .gauge("total_sample_count")
+                    .set(reader.total_sample_count.get() as i64);
+                stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec.get() {
+                    stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+            }
+            ProcessorStats::WebmVideoReader(reader) => {
+                stats
+                    .gauge("total_cluster_count")
+                    .set(reader.total_cluster_count.get() as i64);
+                stats
+                    .gauge("total_simple_block_count")
+                    .set(reader.total_simple_block_count.get() as i64);
+                stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec.get() {
+                    stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -416,6 +549,7 @@ impl MediaProcessor for VideoReader {
                 Some(Ok(mut frame)) => {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
+                    self.update_compose_stats_from_inner();
                     return Ok(MediaProcessorOutput::video_frame(
                         self.output_stream_id,
                         frame,
@@ -427,6 +561,8 @@ impl MediaProcessor for VideoReader {
 
     fn set_error(&self) {
         self.inner.stats().set_error();
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 

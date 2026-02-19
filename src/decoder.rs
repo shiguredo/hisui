@@ -17,9 +17,7 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     layout_decode_params::LayoutDecodeParams,
-    legacy_processor_stats::{
-        AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution,
-    },
+    legacy_processor_stats::{AudioDecoderStats, VideoDecoderStats, VideoResolution},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -34,29 +32,44 @@ pub struct AudioDecoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
     stats: AudioDecoderStats,
+    compose_stats: crate::stats::Stats,
     decoded: VecDeque<AudioData>,
     eos: bool,
     inner: Option<AudioDecoderInner>,
 }
 
 impl AudioDecoder {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        ProcessorStats::AudioDecoder(self.stats.clone())
-    }
-
     pub fn new(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
+    ) -> orfail::Result<Self> {
+        Self::new_with_stats(
+            input_stream_id,
+            output_stream_id,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let stats = AudioDecoderStats {
             engine: Some(EngineName::Opus),
             codec: Some(CodecName::Opus),
             ..Default::default()
         };
+        compose_stats
+            .string("engine")
+            .set(EngineName::Opus.as_str());
+        compose_stats.string("codec").set(CodecName::Opus.as_str());
+        compose_stats.flag("error").set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
             stats,
+            compose_stats,
             decoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -153,8 +166,10 @@ impl MediaProcessor for AudioDecoder {
         let inner = self.inner.as_mut().or_fail()?;
         let decoded = inner.decode(&data).or_fail()?;
         self.stats.total_audio_data_count.add(1);
+        self.compose_stats.counter("total_audio_data_count").inc();
         if let Some(id) = &data.source_id {
             self.stats.source_id.set_once(|| id.clone());
+            self.compose_stats.string("source_id").set(id.get());
         }
 
         self.decoded.push_back(decoded);
@@ -188,6 +203,8 @@ impl MediaProcessor for AudioDecoder {
 
     fn set_error(&self) {
         self.stats.error.set(true);
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 
@@ -264,26 +281,39 @@ pub struct VideoDecoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
     stats: VideoDecoderStats,
+    compose_stats: crate::stats::Stats,
     decoded: VecDeque<VideoFrame>,
     eos: bool,
     inner: VideoDecoderInner,
 }
 
 impl VideoDecoder {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        ProcessorStats::VideoDecoder(self.stats.clone())
-    }
-
     pub fn new(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         options: VideoDecoderOptions,
     ) -> Self {
+        Self::new_with_stats(
+            input_stream_id,
+            output_stream_id,
+            options,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats(
+        input_stream_id: MediaStreamId,
+        output_stream_id: MediaStreamId,
+        options: VideoDecoderOptions,
+        mut compose_stats: crate::stats::Stats,
+    ) -> Self {
         let stats = VideoDecoderStats::default();
+        compose_stats.flag("error").set(false);
         Self {
             input_stream_id,
             output_stream_id,
             stats,
+            compose_stats,
             decoded: VecDeque::new(),
             eos: false,
             inner: VideoDecoderInner::new(options),
@@ -419,11 +449,21 @@ impl MediaProcessor for VideoDecoder {
             let frame = sample.expect_video_frame().or_fail()?;
 
             self.stats.total_input_video_frame_count.add(1);
+            self.compose_stats
+                .counter("total_input_video_frame_count")
+                .inc();
             if let Some(id) = &frame.source_id {
                 self.stats.source_id.set_once(|| id.clone());
+                self.compose_stats.string("source_id").set(id.get());
             }
 
             self.inner.decode(&frame, &mut self.stats).or_fail()?;
+            if let Some(codec) = self.stats.codec.get() {
+                self.compose_stats.string("codec").set(codec.as_str());
+            }
+            if let Some(engine) = self.stats.engine.get() {
+                self.compose_stats.string("engine").set(engine.as_str());
+            }
         } else {
             self.eos = true;
             self.inner.finish().or_fail()?;
@@ -431,6 +471,9 @@ impl MediaProcessor for VideoDecoder {
 
         while let Some(frame) = self.inner.next_decoded_frame() {
             self.stats.total_output_video_frame_count.add(1);
+            self.compose_stats
+                .counter("total_output_video_frame_count")
+                .inc();
             self.stats.resolutions.insert(VideoResolution::new(&frame));
             self.decoded.push_back(frame);
         }
@@ -455,6 +498,8 @@ impl MediaProcessor for VideoDecoder {
 
     fn set_error(&self) {
         self.stats.error.set(true);
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 

@@ -16,7 +16,7 @@ use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
 use crate::{
     audio::AudioData,
     layout::Layout,
-    legacy_processor_stats::{Mp4WriterStats, ProcessorStats},
+    legacy_processor_stats::Mp4WriterStats,
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -66,19 +66,32 @@ pub struct Mp4Writer {
     input_video_queue: VecDeque<Arc<VideoFrame>>,
     appending_video_chunk: bool,
     stats: Mp4WriterStats,
+    compose_stats: crate::stats::Stats,
 }
 
 impl Mp4Writer {
-    pub fn processor_stats(&self) -> ProcessorStats {
-        ProcessorStats::Mp4Writer(self.stats.clone())
-    }
-
     /// [`Mp4Writer`] インスタンスを生成する
     pub fn new<P: AsRef<Path>>(
         path: P,
         options: Option<Mp4WriterOptions>, // ライブの場合は None になる
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
+    ) -> orfail::Result<Self> {
+        Self::new_with_stats(
+            path,
+            options,
+            input_audio_stream_id,
+            input_video_stream_id,
+            crate::stats::Stats::new(),
+        )
+    }
+
+    pub fn new_with_stats<P: AsRef<Path>>(
+        path: P,
+        options: Option<Mp4WriterOptions>, // ライブの場合は None になる
+        input_audio_stream_id: Option<MediaStreamId>,
+        input_video_stream_id: Option<MediaStreamId>,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let reserved_moov_box_size = if let Some(options) = options {
             // 事前に尺などが分かっている場合には fast start 用の領域を計算する
@@ -117,6 +130,10 @@ impl Mp4Writer {
         stats
             .reserved_moov_box_size
             .set(reserved_moov_box_size as u64);
+        compose_stats
+            .gauge("reserved_moov_box_size")
+            .set(reserved_moov_box_size as i64);
+        compose_stats.flag("error").set(false);
 
         Ok(Self {
             file: BufWriter::new(file),
@@ -128,6 +145,7 @@ impl Mp4Writer {
             input_video_queue: VecDeque::new(),
             appending_video_chunk: true,
             stats,
+            compose_stats,
         })
     }
 
@@ -155,6 +173,9 @@ impl Mp4Writer {
 
                 let actual_moov_size = finalized.moov_box_size() as u64;
                 self.stats.actual_moov_box_size.set(actual_moov_size);
+                self.compose_stats
+                    .gauge("actual_moov_box_size")
+                    .set(actual_moov_size as i64);
 
                 for (offset, bytes) in finalized.offset_and_bytes_pairs() {
                     self.file.seek(SeekFrom::Start(offset)).or_fail()?;
@@ -208,9 +229,15 @@ impl Mp4Writer {
             match trak.mdia_box.hdlr_box.handler_type {
                 HdlrBox::HANDLER_TYPE_SOUN => {
                     self.stats.total_audio_chunk_count.set(chunk_count);
+                    self.compose_stats
+                        .gauge("total_audio_chunk_count")
+                        .set(chunk_count as i64);
                 }
                 HdlrBox::HANDLER_TYPE_VIDE => {
                     self.stats.total_video_chunk_count.set(chunk_count);
+                    self.compose_stats
+                        .gauge("total_video_chunk_count")
+                        .set(chunk_count as i64);
                 }
                 _ => {}
             }
@@ -226,6 +253,7 @@ impl Mp4Writer {
             && let Some(name) = frame.format.codec_name()
         {
             self.stats.video_codec.set(name);
+            self.compose_stats.string("video_codec").set(name.as_str());
         }
 
         // ファイルへのデータ追記
@@ -248,10 +276,17 @@ impl Mp4Writer {
         self.next_position += frame.data.len() as u64;
 
         self.stats.total_video_sample_count.add(1);
+        self.compose_stats.counter("total_video_sample_count").inc();
         self.stats
             .total_video_sample_data_byte_size
             .add(frame.data.len() as u64);
+        self.compose_stats
+            .counter("total_video_sample_data_byte_size")
+            .add(frame.data.len() as u64);
         self.stats.total_video_track_duration.add(frame.duration);
+        self.compose_stats
+            .gauge_f64("total_video_track_seconds")
+            .set(self.stats.total_video_track_duration.get().as_secs_f64());
         self.appending_video_chunk = true;
         Ok(())
     }
@@ -264,6 +299,7 @@ impl Mp4Writer {
             && let Some(name) = data.format.codec_name()
         {
             self.stats.audio_codec.set(name);
+            self.compose_stats.string("audio_codec").set(name.as_str());
         }
 
         // ファイルへのデータ追記
@@ -286,10 +322,17 @@ impl Mp4Writer {
         self.next_position += data.data.len() as u64;
 
         self.stats.total_audio_sample_count.add(1);
+        self.compose_stats.counter("total_audio_sample_count").inc();
         self.stats
             .total_audio_sample_data_byte_size
             .add(data.data.len() as u64);
+        self.compose_stats
+            .counter("total_audio_sample_data_byte_size")
+            .add(data.data.len() as u64);
         self.stats.total_audio_track_duration.add(data.duration);
+        self.compose_stats
+            .gauge_f64("total_audio_track_seconds")
+            .set(self.stats.total_audio_track_duration.get().as_secs_f64());
         self.appending_video_chunk = false;
         Ok(())
     }
@@ -358,6 +401,8 @@ impl MediaProcessor for Mp4Writer {
 
     fn set_error(&self) {
         self.stats.error.set(true);
+        let mut stats = self.compose_stats.clone();
+        stats.flag("error").set(true);
     }
 }
 
