@@ -1124,7 +1124,10 @@ mod tests {
         let mut stats = processor.stats();
         stats.counter("processed_frames_total").inc();
 
-        let text = handle.stats().to_prometheus_text("hisui_");
+        let text = handle
+            .stats()
+            .to_prometheus_text()
+            .expect("to_prometheus_text must succeed");
         assert!(text.contains("hisui_processed_frames_total"));
         assert!(text.contains("processor_id=\"stats_processor\""));
 
@@ -1196,7 +1199,10 @@ mod tests {
 
     async fn wait_until_metric_contains(handle: &MediaPipelineHandle, needle: &str) {
         for _ in 0..200 {
-            let text = handle.stats().to_prometheus_text("hisui_");
+            let text = handle
+                .stats()
+                .to_prometheus_text()
+                .expect("to_prometheus_text must succeed");
             if text.contains(needle) {
                 return;
             }

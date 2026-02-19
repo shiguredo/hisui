@@ -4,6 +4,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
 };
 
+const PROMETHEUS_METRIC_PREFIX: &str = "hisui_";
+
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
     shared_entries: Arc<Mutex<BTreeMap<StatsKey, StatsEntry>>>,
@@ -88,7 +90,7 @@ impl Stats {
         }
     }
 
-    pub fn to_prometheus_text(&self, prefix: &str) -> String {
+    pub fn to_prometheus_text(&self) -> crate::Result<String> {
         let entries = {
             let shared_entries = self
                 .shared_entries
@@ -103,7 +105,8 @@ impl Stats {
         let mut text = String::new();
         let mut previous_metric_name: Option<String> = None;
         for (key, entry) in entries {
-            let metric_name = format!("{prefix}{}", sanitize_metric_name(key.metric_name));
+            validate_prometheus_metric_name(key.metric_name)?;
+            let metric_name = format!("{PROMETHEUS_METRIC_PREFIX}{}", key.metric_name);
             if previous_metric_name.as_deref() != Some(metric_name.as_str()) {
                 text.push_str("# TYPE ");
                 text.push_str(&metric_name);
@@ -118,13 +121,13 @@ impl Stats {
             if let StatsEntry::StringValue(string_value) = entry.clone() {
                 labels.insert("value", string_value.get());
             }
-            append_prometheus_labels(&mut text, labels);
+            append_prometheus_labels(&mut text, labels)?;
             text.push(' ');
             text.push_str(&entry.prometheus_value_string());
             text.push('\n');
         }
 
-        text
+        Ok(text)
     }
 
     pub fn snapshot_entries(&self) -> Vec<StatsSnapshotEntry> {
@@ -389,44 +392,6 @@ pub enum StatsSnapshotValue {
     String(String),
 }
 
-fn sanitize_metric_name(name: &str) -> String {
-    let mut out = String::new();
-    for (i, c) in name.chars().enumerate() {
-        let c = if i == 0 {
-            if c.is_ascii_alphabetic() || c == '_' || c == ':' {
-                c
-            } else {
-                '_'
-            }
-        } else if c.is_ascii_alphanumeric() || c == '_' || c == ':' {
-            c
-        } else {
-            '_'
-        };
-        out.push(c);
-    }
-    if out.is_empty() { "_".to_owned() } else { out }
-}
-
-fn sanitize_label_name(name: &str) -> String {
-    let mut out = String::new();
-    for (i, c) in name.chars().enumerate() {
-        let c = if i == 0 {
-            if c.is_ascii_alphabetic() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        } else if c.is_ascii_alphanumeric() || c == '_' {
-            c
-        } else {
-            '_'
-        };
-        out.push(c);
-    }
-    if out.is_empty() { "_".to_owned() } else { out }
-}
-
 fn escape_label_value(value: &str) -> String {
     let mut out = String::new();
     for c in value.chars() {
@@ -440,29 +405,65 @@ fn escape_label_value(value: &str) -> String {
     out
 }
 
-fn append_prometheus_labels(text: &mut String, labels: BTreeMap<&'static str, String>) {
+fn append_prometheus_labels(
+    text: &mut String,
+    labels: BTreeMap<&'static str, String>,
+) -> crate::Result<()> {
     if labels.is_empty() {
-        return;
-    }
-
-    let mut normalized = BTreeMap::<String, String>::new();
-    for (name, value) in labels {
-        normalized.insert(sanitize_label_name(name), value);
+        return Ok(());
     }
 
     text.push('{');
     let mut first = true;
-    for (name, value) in normalized {
+    for (name, value) in labels {
+        validate_prometheus_label_name(name)?;
         if !first {
             text.push(',');
         }
         first = false;
-        text.push_str(&name);
+        text.push_str(name);
         text.push_str("=\"");
         text.push_str(&escape_label_value(&value));
         text.push('"');
     }
     text.push('}');
+    Ok(())
+}
+
+fn validate_prometheus_metric_name(name: &str) -> crate::Result<()> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(crate::Error::new("invalid Prometheus metric name: empty"));
+    };
+    if !(first.is_ascii_alphabetic() || first == '_' || first == ':') {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus metric name: {name}"
+        )));
+    }
+    if chars.any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == ':')) {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus metric name: {name}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_prometheus_label_name(name: &str) -> crate::Result<()> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(crate::Error::new("invalid Prometheus label name: empty"));
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus label name: {name}"
+        )));
+    }
+    if chars.any(|c| !(c.is_ascii_alphanumeric() || c == '_')) {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus label name: {name}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -606,7 +607,9 @@ mod tests {
         gauge_f64.set(0.5);
         flag.set(true);
 
-        let text = stats.to_prometheus_text("hisui_");
+        let text = stats
+            .to_prometheus_text()
+            .expect("to_prometheus_text must succeed");
         assert!(text.contains("# TYPE hisui_processed_frames_total counter"));
         assert!(text.contains("# TYPE hisui_queue_depth gauge"));
         assert!(text.contains("# TYPE hisui_latency_seconds gauge"));
@@ -623,7 +626,9 @@ mod tests {
         stats.set_default_label("processor_id", "p0");
         let state = stats.string("state");
         state.set("running");
-        let text = stats.to_prometheus_text("hisui_");
+        let text = stats
+            .to_prometheus_text()
+            .expect("to_prometheus_text must succeed");
         assert!(text.contains("# TYPE hisui_state gauge"));
         assert!(text.contains("hisui_state{processor_id=\"p0\",value=\"running\"} 1"));
     }
@@ -633,8 +638,31 @@ mod tests {
         let mut stats = Stats::new();
         let state = stats.string("state");
         state.set("a\"b\\c\nd");
-        let text = stats.to_prometheus_text("hisui_");
+        let text = stats
+            .to_prometheus_text()
+            .expect("to_prometheus_text must succeed");
         assert!(text.contains("value=\"a\\\"b\\\\c\\nd\""));
+    }
+
+    #[test]
+    fn prometheus_text_rejects_invalid_metric_name() {
+        let mut stats = Stats::new();
+        stats.counter("foo-bar").inc();
+        let err = stats
+            .to_prometheus_text()
+            .expect_err("to_prometheus_text must fail");
+        assert!(err.to_string().contains("invalid Prometheus metric name"));
+    }
+
+    #[test]
+    fn prometheus_text_rejects_invalid_label_name() {
+        let mut stats = Stats::new();
+        stats.set_default_label("bad-label", "x");
+        stats.counter("requests_total").inc();
+        let err = stats
+            .to_prometheus_text()
+            .expect_err("to_prometheus_text must fail");
+        assert!(err.to_string().contains("invalid Prometheus label name"));
     }
 
     fn panic_message(panic: std::result::Result<(), Box<dyn std::any::Any + Send>>) -> String {
