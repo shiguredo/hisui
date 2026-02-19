@@ -163,13 +163,13 @@ mod tests {
         let mut stats = crate::stats2::Stats::new();
         stats.set_default_label("processor_id", "reader0");
         stats.set_default_label("processor_type", "mp4_reader");
-        stats.counter("total_input_video_sample_count").set(5);
+        stats.counter("total_input_video_sample_count").add(5);
         stats.flag("error").set(false);
         stats.gauge_f64("total_processing_seconds").set(1.5);
 
         stats.set_default_label("processor_id", "decoder0");
         stats.set_default_label("processor_type", "video_decoder");
-        stats.counter("total_output_video_frame_count").set(4);
+        stats.counter("total_output_video_frame_count").add(4);
         stats.flag("error").set(true);
 
         let json = to_legacy_stats_json(
@@ -200,7 +200,7 @@ mod tests {
         stats.set_default_label("processor_id", "mixer0");
         stats.set_default_label("processor_type", "video_mixer");
         stats.set_default_label("track_id", "video-main");
-        stats.counter("frames_total").set(10);
+        stats.counter("frames_total").add(10);
         stats.flag("error").set(false);
 
         let json = to_legacy_stats_json(&stats, 0.0, Vec::new())

@@ -260,10 +260,6 @@ impl StatsCounter {
         self.value.fetch_add(value, Ordering::Relaxed);
     }
 
-    pub fn set(&self, value: u64) {
-        self.value.store(value, Ordering::Relaxed);
-    }
-
     pub fn get(&self) -> u64 {
         self.value.load(Ordering::Relaxed)
     }
@@ -495,7 +491,7 @@ mod tests {
         counter.inc();
         counter.add(4);
         assert_eq!(counter.get(), 5);
-        counter.set(10);
+        counter.add(5);
         assert_eq!(counter.get(), 10);
     }
 
@@ -712,7 +708,7 @@ mod tests {
     fn snapshot_entries_include_all_metric_types() {
         let mut stats = Stats::new();
         stats.set_default_label("processor_id", "p0");
-        stats.counter("processed_total").set(10);
+        stats.counter("processed_total").add(10);
         stats.gauge("queue_depth").set(-3);
         stats.gauge_f64("latency_seconds").set(0.25);
         stats.flag("error").set(true);
