@@ -10,7 +10,7 @@ pub struct LegacyWorkerThreadStats {
 struct LegacyProcessorStats {
     processor_type: String,
     error: bool,
-    values: BTreeMap<String, crate::stats::StatsEntry>,
+    values: BTreeMap<String, crate::stats::StatsValue>,
 }
 
 impl LegacyProcessorStats {
@@ -93,12 +93,12 @@ pub fn to_legacy_stats_json(
         }
 
         if entry.metric_name == "error" {
-            processor.error = entry.entry.as_bool_for_legacy();
+            processor.error = entry.value.as_bool_for_legacy();
             continue;
         }
         processor
             .values
-            .insert(entry.metric_name.to_owned(), entry.entry);
+            .insert(entry.metric_name.to_owned(), entry.value);
     }
 
     let processors = processors.into_values().collect::<Vec<_>>();

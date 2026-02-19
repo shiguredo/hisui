@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::{DEFAULT_LAYOUT_JSON, Layout},
-    stats::StatsRawEntry,
+    stats::StatsEntry,
 };
 
 #[derive(Debug)]
@@ -155,7 +155,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
 fn print_input_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
 ) -> std::fmt::Result {
     // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
     //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
@@ -174,7 +174,7 @@ fn print_input_stats_summary(
 
 fn print_output_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
 ) -> std::fmt::Result {
     let Some(writer_id) = find_first_processor_id_by_type(entries, "mp4_writer") else {
         return Ok(());
@@ -239,7 +239,7 @@ fn print_output_stats_summary(
 
 fn print_time_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
     elapsed_seconds: f64,
 ) -> std::fmt::Result {
     let total_audio_decoder_processing_seconds =
@@ -301,7 +301,7 @@ fn print_time_stats_summary(
     Ok(())
 }
 
-fn count_processors_by_types(entries: &[StatsRawEntry], processor_types: &[&str]) -> usize {
+fn count_processors_by_types(entries: &[StatsEntry], processor_types: &[&str]) -> usize {
     let mut processor_ids = BTreeSet::new();
     for entry in entries {
         if entry.metric_name != "error" {
@@ -320,14 +320,11 @@ fn count_processors_by_types(entries: &[StatsRawEntry], processor_types: &[&str]
     processor_ids.len()
 }
 
-fn label_value<'a>(entry: &'a StatsRawEntry, name: &str) -> Option<&'a str> {
+fn label_value<'a>(entry: &'a StatsEntry, name: &str) -> Option<&'a str> {
     entry.labels.get(name).map(String::as_str)
 }
 
-fn find_first_processor_id_by_type(
-    entries: &[StatsRawEntry],
-    processor_type: &str,
-) -> Option<String> {
+fn find_first_processor_id_by_type(entries: &[StatsEntry], processor_type: &str) -> Option<String> {
     entries.iter().find_map(|entry| {
         if label_value(entry, "processor_type") != Some(processor_type) {
             return None;
@@ -337,7 +334,7 @@ fn find_first_processor_id_by_type(
 }
 
 fn find_string_metric_by_processor(
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
     processor_id: &str,
     metric_name: &str,
 ) -> Option<String> {
@@ -348,12 +345,12 @@ fn find_string_metric_by_processor(
         if label_value(entry, "processor_id") != Some(processor_id) {
             return None;
         }
-        entry.entry.as_string()
+        entry.value.as_string()
     })
 }
 
 fn find_numeric_metric_by_processor(
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
     processor_id: &str,
     metric_name: &str,
 ) -> Option<f64> {
@@ -364,12 +361,12 @@ fn find_numeric_metric_by_processor(
         if label_value(entry, "processor_id") != Some(processor_id) {
             return None;
         }
-        entry.entry.as_numeric_f64()
+        entry.value.as_numeric_f64()
     })
 }
 
 fn find_first_string_metric_by_type(
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
     processor_type: &str,
     metric_name: &str,
 ) -> Option<String> {
@@ -380,12 +377,12 @@ fn find_first_string_metric_by_type(
         if label_value(entry, "processor_type") != Some(processor_type) {
             return None;
         }
-        entry.entry.as_string()
+        entry.value.as_string()
     })
 }
 
 fn find_first_numeric_metric_by_type(
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
     processor_type: &str,
     metric_name: &str,
 ) -> Option<f64> {
@@ -396,12 +393,12 @@ fn find_first_numeric_metric_by_type(
         if label_value(entry, "processor_type") != Some(processor_type) {
             return None;
         }
-        entry.entry.as_numeric_f64()
+        entry.value.as_numeric_f64()
     })
 }
 
 fn sum_numeric_metric_by_type(
-    entries: &[StatsRawEntry],
+    entries: &[StatsEntry],
     processor_type: &str,
     metric_name: &str,
 ) -> f64 {
@@ -411,6 +408,6 @@ fn sum_numeric_metric_by_type(
             entry.metric_name == metric_name
                 && label_value(entry, "processor_type") == Some(processor_type)
         })
-        .filter_map(|entry| entry.entry.as_numeric_f64())
+        .filter_map(|entry| entry.value.as_numeric_f64())
         .sum()
 }

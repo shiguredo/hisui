@@ -648,32 +648,32 @@ mod tests {
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "audio_codec"
                 && entry.labels.get("processor_type") == Some(&"mp4_writer".to_owned())
-                && entry.entry.as_string() == Some("OPUS".to_owned())
+                && entry.value.as_string() == Some("OPUS".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "video_codec"
                 && entry.labels.get("processor_type") == Some(&"mp4_writer".to_owned())
-                && entry.entry.as_string() == Some("VP9".to_owned())
+                && entry.value.as_string() == Some("VP9".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "engine"
                 && entry.labels.get("processor_type") == Some(&"audio_encoder".to_owned())
-                && entry.entry.as_string() == Some("opus".to_owned())
+                && entry.value.as_string() == Some("opus".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "engine"
                 && entry.labels.get("processor_type") == Some(&"video_encoder".to_owned())
-                && entry.entry.as_string() == Some("libvpx".to_owned())
+                && entry.value.as_string() == Some("libvpx".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "output_video_width"
                 && entry.labels.get("processor_type") == Some(&"video_mixer".to_owned())
-                && entry.entry.as_gauge() == Some(320)
+                && entry.value.as_gauge() == Some(320)
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "output_video_height"
                 && entry.labels.get("processor_type") == Some(&"video_mixer".to_owned())
-                && entry.entry.as_gauge() == Some(240)
+                && entry.value.as_gauge() == Some(240)
         }));
     }
 
@@ -804,14 +804,14 @@ mod tests {
             entries.iter().any(|entry| {
                 entry.labels.get("processor_type") == Some(&processor_type.to_owned())
                     && entry.metric_name == metric_name
-                    && entry.entry.as_counter() == Some(value)
+                    && entry.value.as_counter() == Some(value)
             })
         };
         let has_gauge_f64 = |processor_type: &str, metric_name: &str, value: f64| {
             entries.iter().any(|entry| {
                 entry.labels.get("processor_type") == Some(&processor_type.to_owned())
                     && entry.metric_name == metric_name
-                    && entry.entry.as_gauge_f64() == Some(value)
+                    && entry.value.as_gauge_f64() == Some(value)
             })
         };
 

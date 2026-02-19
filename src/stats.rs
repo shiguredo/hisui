@@ -8,12 +8,12 @@ const PROMETHEUS_METRIC_PREFIX: &str = "hisui_";
 
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
-    shared_entries: Arc<Mutex<BTreeMap<StatsKey, StatsEntry>>>,
+    shared_entries: Arc<Mutex<BTreeMap<StatsKey, StatsValue>>>,
     // `Stats` を clone した後にどちらかで `set_default_label()` を呼ぶと、
     // `Arc` を差し替えるため、もう片方には影響しない。
     default_labels: Arc<StatsLabels>,
     // 同一 `Stats` インスタンス内での再取得時にロックを減らすためのキャッシュ。
-    entry_cache: BTreeMap<StatsKey, StatsEntry>,
+    entry_cache: BTreeMap<StatsKey, StatsValue>,
 }
 
 impl Stats {
@@ -32,9 +32,9 @@ impl Stats {
 
     pub fn counter(&mut self, name: &'static str) -> StatsCounter {
         let key = self.make_key(name);
-        let entry = self.get_or_insert_entry(key, || StatsEntry::Counter(StatsCounter::new()));
+        let entry = self.get_or_insert_entry(key, || StatsValue::Counter(StatsCounter::new()));
         match entry {
-            StatsEntry::Counter(counter) => counter,
+            StatsValue::Counter(counter) => counter,
             other => panic!(
                 "metric type mismatch: expected=counter actual={}",
                 other.kind_name()
@@ -44,9 +44,9 @@ impl Stats {
 
     pub fn gauge(&mut self, name: &'static str) -> StatsGauge {
         let key = self.make_key(name);
-        let entry = self.get_or_insert_entry(key, || StatsEntry::Gauge(StatsGauge::new()));
+        let entry = self.get_or_insert_entry(key, || StatsValue::Gauge(StatsGauge::new()));
         match entry {
-            StatsEntry::Gauge(gauge) => gauge,
+            StatsValue::Gauge(gauge) => gauge,
             other => panic!(
                 "metric type mismatch: expected=gauge actual={}",
                 other.kind_name()
@@ -56,9 +56,9 @@ impl Stats {
 
     pub fn gauge_f64(&mut self, name: &'static str) -> StatsGaugeF64 {
         let key = self.make_key(name);
-        let entry = self.get_or_insert_entry(key, || StatsEntry::GaugeF64(StatsGaugeF64::new()));
+        let entry = self.get_or_insert_entry(key, || StatsValue::GaugeF64(StatsGaugeF64::new()));
         match entry {
-            StatsEntry::GaugeF64(gauge) => gauge,
+            StatsValue::GaugeF64(gauge) => gauge,
             other => panic!(
                 "metric type mismatch: expected=gauge_f64 actual={}",
                 other.kind_name()
@@ -68,9 +68,9 @@ impl Stats {
 
     pub fn string(&mut self, name: &'static str) -> StatsString {
         let key = self.make_key(name);
-        let entry = self.get_or_insert_entry(key, || StatsEntry::StringValue(StatsString::new()));
+        let entry = self.get_or_insert_entry(key, || StatsValue::StringValue(StatsString::new()));
         match entry {
-            StatsEntry::StringValue(string_value) => string_value,
+            StatsValue::StringValue(string_value) => string_value,
             other => panic!(
                 "metric type mismatch: expected=string actual={}",
                 other.kind_name()
@@ -80,9 +80,9 @@ impl Stats {
 
     pub fn flag(&mut self, name: &'static str) -> StatsFlag {
         let key = self.make_key(name);
-        let entry = self.get_or_insert_entry(key, || StatsEntry::Flag(StatsFlag::new()));
+        let entry = self.get_or_insert_entry(key, || StatsValue::Flag(StatsFlag::new()));
         match entry {
-            StatsEntry::Flag(flag) => flag,
+            StatsValue::Flag(flag) => flag,
             other => panic!(
                 "metric type mismatch: expected=flag actual={}",
                 other.kind_name()
@@ -121,7 +121,7 @@ impl Stats {
 
             text.push_str(&metric_name);
             let mut labels = (*key.default_labels).clone();
-            if let StatsEntry::StringValue(string_value) = &entry {
+            if let StatsValue::StringValue(string_value) = &entry {
                 labels.insert("value", string_value.get());
             }
             append_prometheus_labels(&mut text, &labels)?;
@@ -133,7 +133,7 @@ impl Stats {
         Ok(text)
     }
 
-    pub fn entries(&self) -> crate::Result<Vec<StatsRawEntry>> {
+    pub fn entries(&self) -> crate::Result<Vec<StatsEntry>> {
         let entries = {
             let shared_entries = self
                 .shared_entries
@@ -147,10 +147,10 @@ impl Stats {
 
         Ok(entries
             .into_iter()
-            .map(|(key, entry)| StatsRawEntry {
+            .map(|(key, entry)| StatsEntry {
                 metric_name: key.metric_name,
                 labels: (*key.default_labels).clone(),
-                entry,
+                value: entry,
             })
             .collect())
     }
@@ -165,8 +165,8 @@ impl Stats {
     fn get_or_insert_entry(
         &mut self,
         key: StatsKey,
-        create: impl FnOnce() -> StatsEntry,
-    ) -> StatsEntry {
+        create: impl FnOnce() -> StatsValue,
+    ) -> StatsValue {
         if let Some(entry) = self.entry_cache.get(&key) {
             return entry.clone();
         }
@@ -190,7 +190,7 @@ struct StatsKey {
 }
 
 #[derive(Debug, Clone)]
-pub enum StatsEntry {
+pub enum StatsValue {
     Counter(StatsCounter),
     Gauge(StatsGauge),
     GaugeF64(StatsGaugeF64),
@@ -198,7 +198,7 @@ pub enum StatsEntry {
     StringValue(StatsString),
 }
 
-impl StatsEntry {
+impl StatsValue {
     pub fn as_counter(&self) -> Option<u64> {
         match self {
             Self::Counter(counter) => Some(counter.get()),
@@ -291,7 +291,7 @@ impl StatsEntry {
     }
 }
 
-impl nojson::DisplayJson for StatsEntry {
+impl nojson::DisplayJson for StatsValue {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
             Self::Counter(counter) => f.value(counter.get()),
@@ -458,10 +458,10 @@ impl StatsLabels {
 }
 
 #[derive(Debug, Clone)]
-pub struct StatsRawEntry {
+pub struct StatsEntry {
     pub metric_name: &'static str,
     pub labels: StatsLabels,
-    pub entry: StatsEntry,
+    pub value: StatsValue,
 }
 
 fn escape_label_value(value: &str) -> String {
@@ -774,32 +774,32 @@ mod tests {
             entries.iter().any(|e| {
                 e.metric_name == "processed_total"
                     && e.labels.get("processor_id") == Some(&"p0".to_owned())
-                    && e.entry.as_counter() == Some(10)
+                    && e.value.as_counter() == Some(10)
             }),
             "counter entry is missing: {entries:?}"
         );
         assert!(
             entries
                 .iter()
-                .any(|e| e.metric_name == "queue_depth" && e.entry.as_gauge() == Some(-3)),
+                .any(|e| e.metric_name == "queue_depth" && e.value.as_gauge() == Some(-3)),
             "gauge entry is missing: {entries:?}"
         );
         assert!(
             entries.iter().any(|e| {
-                e.metric_name == "latency_seconds" && e.entry.as_gauge_f64() == Some(0.25)
+                e.metric_name == "latency_seconds" && e.value.as_gauge_f64() == Some(0.25)
             }),
             "gauge_f64 entry is missing: {entries:?}"
         );
         assert!(
             entries
                 .iter()
-                .any(|e| e.metric_name == "error" && e.entry.as_flag() == Some(true)),
+                .any(|e| e.metric_name == "error" && e.value.as_flag() == Some(true)),
             "flag entry is missing: {entries:?}"
         );
         assert!(
             entries
                 .iter()
-                .any(|e| e.metric_name == "state" && e.entry.as_string() == Some("running".into())),
+                .any(|e| e.metric_name == "state" && e.value.as_string() == Some("running".into())),
             "string entry is missing: {entries:?}"
         );
     }
