@@ -107,6 +107,9 @@ impl Stats {
         for (key, entry) in entries {
             validate_prometheus_metric_name(key.metric_name)?;
             let metric_name = format!("{PROMETHEUS_METRIC_PREFIX}{}", key.metric_name);
+            // [NOTE]
+            // 同じ metric_name に対して label が違うエントリの型不一致は、ここでは検出しない。
+            // 先に出力した型で `# TYPE` を 1 回だけ出す挙動。
             if previous_metric_name.as_deref() != Some(metric_name.as_str()) {
                 text.push_str("# TYPE ");
                 text.push_str(&metric_name);
