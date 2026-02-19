@@ -281,6 +281,9 @@ async fn handle_connection(
                 "/rpc" => {
                     Some(crate::endpoint_http_rpc::handle_request(&request, &pipeline_handle).await)
                 }
+                "/metrics" => Some(
+                    crate::endpoint_http_metrics::handle_request(&request, &pipeline_handle).await,
+                ),
                 _ => None,
             };
 

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicI64, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
 };
 
 #[derive(Debug, Default, Clone)]
@@ -49,25 +49,67 @@ impl Stats {
         }
     }
 
-    pub fn string(&mut self, name: &'static str, label_key: &'static str) -> StatsString {
+    pub fn string(&mut self, name: &'static str) -> StatsString {
         let key = self.make_key(name);
-        let entry =
-            self.get_or_insert_entry(key, || StatsEntry::StringValue(StatsString::new(label_key)));
+        let entry = self.get_or_insert_entry(key, || StatsEntry::StringValue(StatsString::new()));
         match entry {
-            StatsEntry::StringValue(string_value) => {
-                if string_value.label_key() != label_key {
-                    panic!(
-                        "metric label_key mismatch: expected={label_key} actual={}",
-                        string_value.label_key()
-                    );
-                }
-                string_value
-            }
+            StatsEntry::StringValue(string_value) => string_value,
             other => panic!(
                 "metric type mismatch: expected=string actual={}",
                 other.kind_name()
             ),
         }
+    }
+
+    pub fn flag(&mut self, name: &'static str) -> StatsFlag {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsEntry::Flag(StatsFlag::new()));
+        match entry {
+            StatsEntry::Flag(flag) => flag,
+            other => panic!(
+                "metric type mismatch: expected=flag actual={}",
+                other.kind_name()
+            ),
+        }
+    }
+
+    pub fn to_prometheus_text(&self, prefix: &str) -> String {
+        let entries = {
+            let shared_entries = self
+                .shared_entries
+                .lock()
+                .expect("lock() failed unexpectedly");
+            shared_entries
+                .iter()
+                .map(|(key, entry)| (key.clone(), entry.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        let mut text = String::new();
+        let mut previous_metric_name: Option<String> = None;
+        for (key, entry) in entries {
+            let metric_name = format!("{prefix}{}", sanitize_metric_name(key.metric_name));
+            if previous_metric_name.as_deref() != Some(metric_name.as_str()) {
+                text.push_str("# TYPE ");
+                text.push_str(&metric_name);
+                text.push(' ');
+                text.push_str(entry.prometheus_type_name());
+                text.push('\n');
+                previous_metric_name = Some(metric_name.clone());
+            }
+
+            text.push_str(&metric_name);
+            let mut labels = key.default_labels.0.clone();
+            if let StatsEntry::StringValue(string_value) = entry.clone() {
+                labels.insert("value", string_value.get());
+            }
+            append_prometheus_labels(&mut text, labels);
+            text.push(' ');
+            text.push_str(&entry.prometheus_value_string());
+            text.push('\n');
+        }
+
+        text
     }
 
     fn make_key(&self, metric_name: &'static str) -> StatsKey {
@@ -108,6 +150,7 @@ struct StatsKey {
 pub enum StatsEntry {
     Counter(StatsCounter),
     Gauge(StatsGauge),
+    Flag(StatsFlag),
     StringValue(StatsString),
 }
 
@@ -116,7 +159,32 @@ impl StatsEntry {
         match self {
             Self::Counter(_) => "counter",
             Self::Gauge(_) => "gauge",
+            Self::Flag(_) => "flag",
             Self::StringValue(_) => "string",
+        }
+    }
+
+    fn prometheus_type_name(&self) -> &'static str {
+        match self {
+            Self::Counter(_) => "counter",
+            Self::Gauge(_) => "gauge",
+            Self::Flag(_) => "gauge",
+            Self::StringValue(_) => "gauge",
+        }
+    }
+
+    fn prometheus_value_string(&self) -> String {
+        match self {
+            Self::Counter(counter) => counter.get().to_string(),
+            Self::Gauge(gauge) => gauge.get().to_string(),
+            Self::Flag(flag) => {
+                if flag.get() {
+                    "1".to_owned()
+                } else {
+                    "0".to_owned()
+                }
+            }
+            Self::StringValue(_) => "1".to_owned(),
         }
     }
 }
@@ -186,14 +254,12 @@ impl StatsGauge {
 #[derive(Debug, Clone)]
 pub struct StatsString {
     string_value: Arc<Mutex<String>>,
-    value_label_key: &'static str,
 }
 
 impl StatsString {
-    pub fn new(label_key: &'static str) -> Self {
+    pub fn new() -> Self {
         Self {
             string_value: Arc::new(Mutex::new(String::new())),
-            value_label_key: label_key,
         }
     }
 
@@ -219,14 +285,105 @@ impl StatsString {
             .expect("lock() failed unexpectedly");
         v.clear();
     }
+}
 
-    pub fn label_key(&self) -> &'static str {
-        self.value_label_key
+#[derive(Debug, Default, Clone)]
+pub struct StatsFlag {
+    value: Arc<AtomicBool>,
+}
+
+impl StatsFlag {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(&self, value: bool) {
+        self.value.store(value, Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> bool {
+        self.value.load(Ordering::Relaxed)
     }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct Labels(BTreeMap<&'static str, String>);
+
+fn sanitize_metric_name(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        let c = if i == 0 {
+            if c.is_ascii_alphabetic() || c == '_' || c == ':' {
+                c
+            } else {
+                '_'
+            }
+        } else if c.is_ascii_alphanumeric() || c == '_' || c == ':' {
+            c
+        } else {
+            '_'
+        };
+        out.push(c);
+    }
+    if out.is_empty() { "_".to_owned() } else { out }
+}
+
+fn sanitize_label_name(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        let c = if i == 0 {
+            if c.is_ascii_alphabetic() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        } else if c.is_ascii_alphanumeric() || c == '_' {
+            c
+        } else {
+            '_'
+        };
+        out.push(c);
+    }
+    if out.is_empty() { "_".to_owned() } else { out }
+}
+
+fn escape_label_value(value: &str) -> String {
+    let mut out = String::new();
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn append_prometheus_labels(text: &mut String, labels: BTreeMap<&'static str, String>) {
+    if labels.is_empty() {
+        return;
+    }
+
+    let mut normalized = BTreeMap::<String, String>::new();
+    for (name, value) in labels {
+        normalized.insert(sanitize_label_name(name), value);
+    }
+
+    text.push('{');
+    let mut first = true;
+    for (name, value) in normalized {
+        if !first {
+            text.push(',');
+        }
+        first = false;
+        text.push_str(&name);
+        text.push_str("=\"");
+        text.push_str(&escape_label_value(&value));
+        text.push('"');
+    }
+    text.push('}');
+}
 
 #[cfg(test)]
 mod tests {
@@ -258,8 +415,7 @@ mod tests {
 
     #[test]
     fn string_basic_ops() {
-        let string_value = StatsString::new("state");
-        assert_eq!(string_value.label_key(), "state");
+        let string_value = StatsString::new();
         assert_eq!(string_value.get(), "");
         string_value.set("running");
         assert_eq!(string_value.get(), "running");
@@ -339,6 +495,56 @@ mod tests {
             message.contains("metric type mismatch: expected=gauge actual=counter"),
             "unexpected panic message: {message}"
         );
+    }
+
+    #[test]
+    fn flag_basic_ops() {
+        let flag = StatsFlag::new();
+        assert!(!flag.get());
+        flag.set(true);
+        assert!(flag.get());
+        flag.set(false);
+        assert!(!flag.get());
+    }
+
+    #[test]
+    fn prometheus_text_outputs_counter_gauge_and_flag() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        let counter = stats.counter("processed_frames_total");
+        let gauge = stats.gauge("queue_depth");
+        let flag = stats.flag("error");
+        counter.add(3);
+        gauge.set(-1);
+        flag.set(true);
+
+        let text = stats.to_prometheus_text("hisui_");
+        assert!(text.contains("# TYPE hisui_processed_frames_total counter"));
+        assert!(text.contains("# TYPE hisui_queue_depth gauge"));
+        assert!(text.contains("# TYPE hisui_error gauge"));
+        assert!(text.contains("hisui_processed_frames_total{processor_id=\"p0\"} 3"));
+        assert!(text.contains("hisui_queue_depth{processor_id=\"p0\"} -1"));
+        assert!(text.contains("hisui_error{processor_id=\"p0\"} 1"));
+    }
+
+    #[test]
+    fn prometheus_text_outputs_string_as_gauge_with_value_label() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        let state = stats.string("state");
+        state.set("running");
+        let text = stats.to_prometheus_text("hisui_");
+        assert!(text.contains("# TYPE hisui_state gauge"));
+        assert!(text.contains("hisui_state{processor_id=\"p0\",value=\"running\"} 1"));
+    }
+
+    #[test]
+    fn prometheus_text_escapes_label_value() {
+        let mut stats = Stats::new();
+        let state = stats.string("state");
+        state.set("a\"b\\c\nd");
+        let text = stats.to_prometheus_text("hisui_");
+        assert!(text.contains("value=\"a\\\"b\\\\c\\nd\""));
     }
 
     fn panic_message(panic: std::result::Result<(), Box<dyn std::any::Any + Send>>) -> String {

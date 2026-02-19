@@ -12,6 +12,7 @@ pub struct MediaPipeline {
     pending_initial_processors: std::collections::HashSet<ProcessorId>,
     initial_ready_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
+    stats: crate::stats2::Stats,
 }
 
 impl MediaPipeline {
@@ -38,6 +39,7 @@ impl MediaPipeline {
             pending_initial_processors: std::collections::HashSet::new(),
             initial_ready_waiters: Vec::new(),
             tracks: std::collections::HashMap::new(),
+            stats: crate::stats2::Stats::new(),
         })
     }
 
@@ -48,6 +50,7 @@ impl MediaPipeline {
         MediaPipelineHandle {
             command_tx: self.command_tx.clone().expect("infallible"),
             local_processor_task_tx: self.local_processor_task_tx.clone().expect("infallible"),
+            stats: self.stats.clone(),
         }
     }
 
@@ -308,6 +311,7 @@ impl MediaPipeline {
 pub struct MediaPipelineHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>,
     local_processor_task_tx: tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>,
+    stats: crate::stats2::Stats,
 }
 
 impl MediaPipelineHandle {
@@ -322,7 +326,11 @@ impl MediaPipelineHandle {
     {
         let handle = self.register_processor(processor_id.clone()).await?;
         tokio::spawn(async move {
+            let mut stats = handle.stats();
+            let error_flag = stats.flag("error");
+            error_flag.set(false);
             if let Err(e) = f(handle).await {
+                error_flag.set(true);
                 tracing::error!("failed to run processor {processor_id}: {e}");
             }
         });
@@ -341,7 +349,11 @@ impl MediaPipelineHandle {
         let handle = self.register_processor(processor_id.clone()).await?;
         let task: LocalProcessorTask = Box::new(move || {
             tokio::task::spawn_local(async move {
+                let mut stats = handle.stats();
+                let error_flag = stats.flag("error");
+                error_flag.set(false);
                 if let Err(e) = f(handle).await {
+                    error_flag.set(true);
                     tracing::error!("failed to run processor {processor_id}: {e}");
                 }
             });
@@ -366,10 +378,15 @@ impl MediaPipelineHandle {
         self.send(command);
 
         match reply_rx.await {
-            Ok(true) => Ok(ProcessorHandle {
-                pipeline_handle: self.clone(),
-                processor_id,
-            }),
+            Ok(true) => {
+                let mut stats = self.stats();
+                stats.set_default_label("processor_id", processor_id.get());
+                Ok(ProcessorHandle {
+                    pipeline_handle: self.clone(),
+                    processor_id,
+                    stats,
+                })
+            }
             Ok(false) => Err(RegisterProcessorError::DuplicateProcessorId),
             Err(_) => Err(RegisterProcessorError::PipelineTerminated),
         }
@@ -378,6 +395,10 @@ impl MediaPipelineHandle {
     /// 初期 processor の登録が完了したことを通知する
     pub fn complete_initial_processor_registration(&self) {
         self.send(MediaPipelineCommand::CompleteInitialProcessorRegistration);
+    }
+
+    pub fn stats(&self) -> crate::stats2::Stats {
+        self.stats.clone()
     }
 
     // すでに MediaPipeline が終了している場合には false が返される。
@@ -527,11 +548,16 @@ struct ProcessorState {
 pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
     processor_id: ProcessorId,
+    stats: crate::stats2::Stats,
 }
 
 impl ProcessorHandle {
     pub fn processor_id(&self) -> &ProcessorId {
         &self.processor_id
+    }
+
+    pub fn stats(&self) -> crate::stats2::Stats {
+        self.stats.clone()
     }
 
     pub async fn publish_track(
@@ -1033,5 +1059,94 @@ mod tests {
 
         let result = processor.wait_subscribers_ready().await;
         assert_eq!(result, Err(PipelineTerminated));
+    }
+
+    #[tokio::test]
+    async fn processor_handle_stats_has_processor_id_label() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let processor = handle
+            .register_processor(ProcessorId::new("stats_processor"))
+            .await
+            .expect("failed to register processor");
+        let mut stats = processor.stats();
+        stats.counter("processed_frames_total").inc();
+
+        let text = handle.stats().to_prometheus_text("hisui_");
+        assert!(text.contains("hisui_processed_frames_total"));
+        assert!(text.contains("processor_id=\"stats_processor\""));
+
+        drop(processor);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn spawn_processor_sets_error_flag_on_failure() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+        handle.complete_initial_processor_registration();
+
+        handle
+            .spawn_processor(
+                ProcessorId::new("failing_processor"),
+                move |_handle| async move { Err(crate::Error::new("processor failed")) },
+            )
+            .await
+            .expect("spawn_processor must succeed");
+
+        wait_until_metric_contains(&handle, "hisui_error{processor_id=\"failing_processor\"} 1")
+            .await;
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn spawn_local_processor_sets_error_flag_on_failure() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+        handle.complete_initial_processor_registration();
+
+        handle
+            .spawn_local_processor(
+                ProcessorId::new("failing_local_processor"),
+                move |_handle| async move { Err(crate::Error::new("local processor failed")) },
+            )
+            .await
+            .expect("spawn_local_processor must succeed");
+
+        wait_until_metric_contains(
+            &handle,
+            "hisui_error{processor_id=\"failing_local_processor\"} 1",
+        )
+        .await;
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    async fn wait_until_metric_contains(handle: &MediaPipelineHandle, needle: &str) {
+        for _ in 0..200 {
+            let text = handle.stats().to_prometheus_text("hisui_");
+            if text.contains(needle) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("metric not found within timeout: {needle}");
     }
 }

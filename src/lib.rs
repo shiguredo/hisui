@@ -40,6 +40,7 @@ pub mod encoder_video_toolbox;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox_params;
 pub mod endpoint_http_bootstrap;
+pub mod endpoint_http_metrics;
 pub mod endpoint_http_rpc;
 pub mod error;
 pub mod file_reader_mp4;
