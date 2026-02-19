@@ -53,7 +53,6 @@ pub mod layout;
 pub mod layout_decode_params;
 pub mod layout_encode_params;
 pub mod layout_region;
-mod legacy_processor_stats;
 pub mod logger;
 pub mod media;
 pub mod media_pipeline;

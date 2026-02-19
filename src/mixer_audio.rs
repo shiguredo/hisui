@@ -9,7 +9,6 @@ use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::TrimSpans,
-    legacy_processor_stats::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -22,13 +21,13 @@ const MIXED_AUDIO_DATA_SAMPLES: usize = 960;
 
 #[derive(Debug, Default)]
 pub struct AudioMixerStats {
-    pub total_input_audio_data_count: SharedAtomicCounter,
-    pub total_output_audio_data_count: SharedAtomicCounter,
-    pub total_output_audio_data_duration: SharedAtomicDuration,
-    pub total_output_sample_count: SharedAtomicCounter,
-    pub total_output_filled_sample_count: SharedAtomicCounter,
-    pub total_trimmed_sample_count: SharedAtomicCounter,
-    pub error: SharedAtomicFlag,
+    pub total_input_audio_data_count: u64,
+    pub total_output_audio_data_count: u64,
+    pub total_output_audio_data_duration: Duration,
+    pub total_output_sample_count: u64,
+    pub total_output_filled_sample_count: u64,
+    pub total_trimmed_sample_count: u64,
+    pub error: bool,
 }
 
 #[derive(Debug, Default)]
@@ -156,13 +155,12 @@ impl AudioMixer {
 
     fn next_input_timestamp(&self) -> Duration {
         Duration::from_secs(
-            self.stats.total_output_sample_count.get()
-                + self.stats.total_trimmed_sample_count.get(),
+            self.stats.total_output_sample_count + self.stats.total_trimmed_sample_count,
         ) / SAMPLE_RATE as u32
     }
 
     fn next_output_timestamp(&self) -> Duration {
-        Duration::from_secs(self.stats.total_output_sample_count.get()) / SAMPLE_RATE as u32
+        Duration::from_secs(self.stats.total_output_sample_count) / SAMPLE_RATE as u32
     }
 
     fn mix_next_audio_data(&mut self, now: Duration) -> orfail::Result<AudioData> {
@@ -195,31 +193,20 @@ impl AudioMixer {
             mixed_samples.extend_from_slice(&right.to_be_bytes());
         }
 
-        self.stats.total_output_audio_data_count.add(1);
+        self.stats.total_output_audio_data_count += 1;
         self.compose_stats
             .counter("total_output_audio_data_count")
             .inc();
-        self.stats
-            .total_output_audio_data_duration
-            .add(MIXED_AUDIO_DATA_DURATION);
+        self.stats.total_output_audio_data_duration += MIXED_AUDIO_DATA_DURATION;
         self.compose_stats
             .gauge_f64("total_output_audio_data_seconds")
-            .set(
-                self.stats
-                    .total_output_audio_data_duration
-                    .get()
-                    .as_secs_f64(),
-            );
-        self.stats
-            .total_output_sample_count
-            .add(MIXED_AUDIO_DATA_SAMPLES as u64);
+            .set(self.stats.total_output_audio_data_duration.as_secs_f64());
+        self.stats.total_output_sample_count += MIXED_AUDIO_DATA_SAMPLES as u64;
         self.compose_stats
             .counter("total_output_sample_count")
             .add(MIXED_AUDIO_DATA_SAMPLES as u64);
         if filled {
-            self.stats
-                .total_output_filled_sample_count
-                .add(MIXED_AUDIO_DATA_SAMPLES as u64);
+            self.stats.total_output_filled_sample_count += MIXED_AUDIO_DATA_SAMPLES as u64;
             self.compose_stats
                 .counter("total_output_filled_sample_count")
                 .add(MIXED_AUDIO_DATA_SAMPLES as u64);
@@ -302,7 +289,7 @@ impl MediaProcessor for AudioMixer {
                 .sample_queue
                 .extend(data.stereo_samples().or_fail()?);
 
-            self.stats.total_input_audio_data_count.add(1);
+            self.stats.total_input_audio_data_count += 1;
             self.compose_stats
                 .counter("total_input_audio_data_count")
                 .inc();
@@ -315,9 +302,7 @@ impl MediaProcessor for AudioMixer {
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
         let mut now = self.next_input_timestamp();
         while self.trim_spans.contains(now) {
-            self.stats
-                .total_trimmed_sample_count
-                .add(MIXED_AUDIO_DATA_SAMPLES as u64);
+            self.stats.total_trimmed_sample_count += MIXED_AUDIO_DATA_SAMPLES as u64;
             self.compose_stats
                 .counter("total_trimmed_sample_count")
                 .add(MIXED_AUDIO_DATA_SAMPLES as u64);
@@ -357,7 +342,7 @@ impl MediaProcessor for AudioMixer {
     }
 
     fn set_error(&self) {
-        self.stats.error.set(true);
+        // runner からは &self しか渡されないため、ローカル統計は更新しない
         let mut stats = self.compose_stats.clone();
         stats.flag("error").set(true);
     }

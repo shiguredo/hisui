@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -10,38 +11,40 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
     audio::{AudioData, AudioFormat},
-    legacy_processor_stats::{
-        SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag, SharedOption, SharedSet,
-        VideoResolution,
-    },
     metadata::SourceId,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VideoResolution {
+    pub width: usize,
+    pub height: usize,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Mp4AudioReaderStats {
     pub input_files: Vec<PathBuf>,
-    pub current_input_file: SharedOption<PathBuf>,
+    pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
-    pub total_sample_count: SharedAtomicCounter,
-    pub total_track_duration: SharedAtomicDuration,
-    pub track_duration_offset: SharedAtomicDuration,
+    pub total_sample_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
     pub start_time: Duration,
-    pub error: SharedAtomicFlag,
+    pub error: bool,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct Mp4VideoReaderStats {
     pub input_files: Vec<PathBuf>,
-    pub current_input_file: SharedOption<PathBuf>,
-    pub codec: SharedOption<CodecName>,
-    pub resolutions: SharedSet<VideoResolution>,
-    pub total_sample_count: SharedAtomicCounter,
-    pub total_track_duration: SharedAtomicDuration,
-    pub track_duration_offset: SharedAtomicDuration,
+    pub current_input_file: Option<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub resolutions: BTreeSet<VideoResolution>,
+    pub total_sample_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
     pub start_time: Duration,
-    pub error: SharedAtomicFlag,
+    pub error: bool,
 }
 
 #[derive(Debug)]
@@ -81,6 +84,10 @@ impl Mp4VideoReader {
 
     pub fn stats(&self) -> &Mp4VideoReaderStats {
         &self.stats
+    }
+
+    pub fn stats_mut(&mut self) -> &mut Mp4VideoReaderStats {
+        &mut self.stats
     }
 
     fn next_sample(&mut self) -> orfail::Result<Option<VideoFrame>> {
@@ -133,12 +140,12 @@ impl Mp4VideoReader {
         let duration = Duration::from_secs(sample.duration as u64) / timescale;
 
         // 統計値を更新する
-        self.stats.total_sample_count.add(1);
-        self.stats.total_track_duration.set(timestamp + duration);
-        if self.stats.codec.get().is_none()
+        self.stats.total_sample_count += 1;
+        self.stats.total_track_duration = timestamp + duration;
+        if self.stats.codec.is_none()
             && let Some(name) = self.format.codec_name()
         {
-            self.stats.codec.set(name);
+            self.stats.codec = Some(name);
         }
         self.stats.resolutions.insert(VideoResolution {
             width: self.width,
@@ -213,6 +220,10 @@ impl Mp4AudioReader {
         &self.stats
     }
 
+    pub fn stats_mut(&mut self) -> &mut Mp4AudioReaderStats {
+        &mut self.stats
+    }
+
     fn next_sample(&mut self) -> orfail::Result<Option<AudioData>> {
         let sample = 'next_sample: loop {
             match self
@@ -259,8 +270,8 @@ impl Mp4AudioReader {
         let duration = Duration::from_secs(sample.duration as u64) / timescale;
 
         // 統計値を更新する
-        self.stats.total_sample_count.add(1);
-        self.stats.total_track_duration.set(timestamp + duration);
+        self.stats.total_sample_count += 1;
+        self.stats.total_track_duration = timestamp + duration;
 
         Ok(Some(AudioData {
             source_id: Some(self.source_id.clone()),

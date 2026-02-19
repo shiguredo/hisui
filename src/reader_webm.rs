@@ -8,9 +8,6 @@ use orfail::OrFail;
 
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
-    legacy_processor_stats::{
-        SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag, SharedOption,
-    },
     metadata::SourceId,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
@@ -19,27 +16,27 @@ use crate::{
 #[derive(Debug, Default, Clone)]
 pub struct WebmAudioReaderStats {
     pub input_files: Vec<PathBuf>,
-    pub current_input_file: SharedOption<PathBuf>,
+    pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
-    pub total_cluster_count: SharedAtomicCounter,
-    pub total_simple_block_count: SharedAtomicCounter,
-    pub total_track_duration: SharedAtomicDuration,
-    pub track_duration_offset: SharedAtomicDuration,
+    pub total_cluster_count: u64,
+    pub total_simple_block_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
     pub start_time: Duration,
-    pub error: SharedAtomicFlag,
+    pub error: bool,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct WebmVideoReaderStats {
     pub input_files: Vec<PathBuf>,
-    pub current_input_file: SharedOption<PathBuf>,
-    pub codec: SharedOption<CodecName>,
-    pub total_cluster_count: SharedAtomicCounter,
-    pub total_simple_block_count: SharedAtomicCounter,
-    pub total_track_duration: SharedAtomicDuration,
-    pub track_duration_offset: SharedAtomicDuration,
+    pub current_input_file: Option<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub total_cluster_count: u64,
+    pub total_simple_block_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
     pub start_time: Duration,
-    pub error: SharedAtomicFlag,
+    pub error: bool,
 }
 
 // Hisui で参照する要素 ID
@@ -391,6 +388,10 @@ impl WebmAudioReader {
         &self.stats
     }
 
+    pub fn stats_mut(&mut self) -> &mut WebmAudioReaderStats {
+        &mut self.stats
+    }
+
     fn read_simple_block(&mut self) -> orfail::Result<Option<AudioData>> {
         let mut reader = self.reader.read_master(ID_SIMPLE_BLOCK).or_fail()?;
 
@@ -412,10 +413,8 @@ impl WebmAudioReader {
         let _flags = reader.read_raw_u8().or_fail()?;
         let data = reader.read_raw_data().or_fail()?;
 
-        self.stats.total_simple_block_count.add(1);
-        self.stats
-            .total_track_duration
-            .set(timestamp + self.last_duration);
+        self.stats.total_simple_block_count += 1;
+        self.stats.total_track_duration = timestamp + self.last_duration;
 
         Ok(Some(AudioData {
             source_id: Some(self.source_id.clone()),
@@ -445,7 +444,7 @@ impl WebmAudioReader {
 
                     let value = self.reader.read_u64(ID_TIMESTAMP).or_fail()?;
                     self.cluster_timestamp = Duration::from_millis(value);
-                    self.stats.total_cluster_count.add(1);
+                    self.stats.total_cluster_count += 1;
                 }
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block().or_fail()? {
@@ -524,6 +523,10 @@ impl WebmVideoReader {
         &self.stats
     }
 
+    pub fn stats_mut(&mut self) -> &mut WebmVideoReaderStats {
+        &mut self.stats
+    }
+
     fn read_video_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
         loop {
             match self.reader.peek_id().or_fail()? {
@@ -535,7 +538,7 @@ impl WebmVideoReader {
 
                     let value = self.reader.read_u64(ID_TIMESTAMP).or_fail()?;
                     self.cluster_timestamp = Duration::from_millis(value);
-                    self.stats.total_cluster_count.add(1);
+                    self.stats.total_cluster_count += 1;
                 }
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block().or_fail()? {
@@ -584,14 +587,12 @@ impl WebmVideoReader {
         let keyframe = (flags >> 7) == 1;
         let data = reader.read_raw_data().or_fail()?;
 
-        self.stats.total_simple_block_count.add(1);
-        self.stats
-            .total_track_duration
-            .set(timestamp + self.last_duration);
-        if self.stats.codec.get().is_none()
+        self.stats.total_simple_block_count += 1;
+        self.stats.total_track_duration = timestamp + self.last_duration;
+        if self.stats.codec.is_none()
             && let Some(name) = self.header.codec.codec_name()
         {
-            self.stats.codec.set(name);
+            self.stats.codec = Some(name);
         }
 
         Ok(Some(VideoFrame {

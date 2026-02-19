@@ -292,30 +292,26 @@ fn test_simple_single_source_common(
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(expected_video_codec));
+    assert_eq!(video_stats.codec, Some(expected_video_codec));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(320, 240)]
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -847,19 +843,18 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         // 合成後は偶数解像度になる
@@ -868,11 +863,8 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -985,14 +977,14 @@ fn simple_multi_sources() -> noargs::Result<()> {
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
 
     // レイアウトファイル未指定の場合には、一つのセルの解像度は 320x240 で、
     // 今回はソースが三つなのでグリッドは 3x1 となり、
@@ -1000,8 +992,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         // NOTE: +4 は枠線用
@@ -1009,11 +1000,8 @@ fn simple_multi_sources() -> noargs::Result<()> {
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     Ok(())
 }
@@ -1071,30 +1059,26 @@ fn simple_split_archive() -> noargs::Result<()> {
     );
 
     // 分割ファイルが3つ（各1秒）なので合計3秒分 + 3サンプル (25 ms * 3)
-    assert_eq!(audio_stats.total_sample_count.get(), 153); // 51 * 3
+    assert_eq!(audio_stats.total_sample_count, 153); // 51 * 3
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(3060) // 1020 * 3
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(16, 16)] // 単一ソース（分割された部分）なので16x16
     );
 
     // 3秒分 (25 fps = 40 ms * 75フレーム)
-    assert_eq!(video_stats.total_sample_count.get(), 75); // 25 * 3
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(3)
-    );
+    assert_eq!(video_stats.total_sample_count, 75); // 25 * 3
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(3));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -1217,30 +1201,26 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(16, 52)]
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -1344,23 +1324,19 @@ fn two_regions() -> noargs::Result<()> {
 
     // 統計値を確認
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(16, 34)]
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 映像をデコードをして中身を確認する
     let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
