@@ -11,7 +11,7 @@ pub struct Stats {
     shared_entries: Arc<Mutex<BTreeMap<StatsKey, StatsEntry>>>,
     // `Stats` を clone した後にどちらかで `set_default_label()` を呼ぶと、
     // `Arc` を差し替えるため、もう片方には影響しない。
-    default_labels: Arc<Labels>,
+    default_labels: Arc<StatsLabels>,
     // 同一 `Stats` インスタンス内での再取得時にロックを減らすためのキャッシュ。
     entry_cache: BTreeMap<StatsKey, StatsEntry>,
 }
@@ -26,7 +26,7 @@ impl Stats {
     // すでに取得済みのメトリクス（counter()/gauge() 等の戻り値）は、以前のラベル集合のまま。
     pub fn set_default_label(&mut self, name: &'static str, value: &str) {
         let mut labels = (*self.default_labels).clone();
-        labels.0.insert(name, value.to_owned());
+        labels.insert(name, value.to_owned());
         self.default_labels = Arc::new(labels);
     }
 
@@ -117,11 +117,11 @@ impl Stats {
             }
 
             text.push_str(&metric_name);
-            let mut labels = key.default_labels.0.clone();
+            let mut labels = (*key.default_labels).clone();
             if let StatsEntry::StringValue(string_value) = entry.clone() {
                 labels.insert("value", string_value.get());
             }
-            append_prometheus_labels(&mut text, labels)?;
+            append_prometheus_labels(&mut text, &labels)?;
             text.push(' ');
             text.push_str(&entry.prometheus_value_string());
             text.push('\n');
@@ -146,7 +146,7 @@ impl Stats {
             .into_iter()
             .map(|(key, entry)| StatsSnapshotEntry {
                 metric_name: key.metric_name,
-                labels: key.default_labels.0.clone(),
+                labels: (*key.default_labels).clone(),
                 value: match entry {
                     StatsEntry::Counter(v) => StatsSnapshotValue::Counter(v.get()),
                     StatsEntry::Gauge(v) => StatsSnapshotValue::Gauge(v.get()),
@@ -189,7 +189,7 @@ impl Stats {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct StatsKey {
     metric_name: &'static str,
-    default_labels: Arc<Labels>,
+    default_labels: Arc<StatsLabels>,
 }
 
 #[derive(Debug, Clone)]
@@ -374,12 +374,30 @@ impl StatsFlag {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct Labels(BTreeMap<&'static str, String>);
+pub struct StatsLabels(BTreeMap<&'static str, String>);
+
+impl StatsLabels {
+    pub fn insert(&mut self, name: &'static str, value: impl Into<String>) {
+        self.0.insert(name, value.into());
+    }
+
+    pub fn get(&self, name: &str) -> Option<&String> {
+        self.0.get(name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, &String)> {
+        self.0.iter().map(|(k, v)| (*k, v))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatsSnapshotEntry {
     pub metric_name: &'static str,
-    pub labels: BTreeMap<&'static str, String>,
+    pub labels: StatsLabels,
     pub value: StatsSnapshotValue,
 }
 
@@ -405,17 +423,14 @@ fn escape_label_value(value: &str) -> String {
     out
 }
 
-fn append_prometheus_labels(
-    text: &mut String,
-    labels: BTreeMap<&'static str, String>,
-) -> crate::Result<()> {
+fn append_prometheus_labels(text: &mut String, labels: &StatsLabels) -> crate::Result<()> {
     if labels.is_empty() {
         return Ok(());
     }
 
     text.push('{');
     let mut first = true;
-    for (name, value) in labels {
+    for (name, value) in labels.iter() {
         validate_prometheus_label_name(name)?;
         if !first {
             text.push(',');
@@ -423,7 +438,7 @@ fn append_prometheus_labels(
         first = false;
         text.push_str(name);
         text.push_str("=\"");
-        text.push_str(&escape_label_value(&value));
+        text.push_str(&escape_label_value(value));
         text.push('"');
     }
     text.push('}');
@@ -508,6 +523,20 @@ mod tests {
         assert_eq!(string_value.get(), "running");
         string_value.clear();
         assert_eq!(string_value.get(), "");
+    }
+
+    #[test]
+    fn stats_labels_basic_ops() {
+        let mut labels = StatsLabels::default();
+        assert!(labels.is_empty());
+        labels.insert("processor_id", "p0");
+        assert_eq!(labels.get("processor_id"), Some(&"p0".to_owned()));
+        let collected = labels
+            .iter()
+            .map(|(name, value)| (name, value.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(collected, vec![("processor_id", "p0".to_owned())]);
+        assert!(!labels.is_empty());
     }
 
     #[test]

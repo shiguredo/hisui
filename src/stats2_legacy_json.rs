@@ -107,8 +107,8 @@ pub fn to_legacy_stats_json(
         // processor_id / processor_type 以外のラベルを持つ指標は一旦除外する。
         if entry
             .labels
-            .keys()
-            .any(|key| !matches!(*key, "processor_id" | "processor_type"))
+            .iter()
+            .any(|(key, _)| !matches!(key, "processor_id" | "processor_type"))
         {
             continue;
         }
