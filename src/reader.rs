@@ -169,7 +169,7 @@ impl MediaProcessor for AudioReader {
         MediaProcessorSpec {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
-            stats: self.inner.stats(),
+            stats: Some(self.inner.stats()),
             workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }
@@ -381,7 +381,7 @@ impl MediaProcessor for VideoReader {
         MediaProcessorSpec {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
-            stats: self.inner.stats(),
+            stats: Some(self.inner.stats()),
             workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }

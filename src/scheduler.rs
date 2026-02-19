@@ -44,7 +44,7 @@ pub struct Task {
     output_stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     awaiting_input_stream_ids: Vec<MediaStreamId>,
     output_sample: Option<(MediaStreamId, usize, MediaSample)>,
-    stats: ProcessorStats,
+    stats: Option<ProcessorStats>,
     workload_hint: MediaProcessorWorkloadHint,
     finished: bool,
 }
@@ -203,7 +203,9 @@ impl Scheduler {
         P: 'static + Send + MediaProcessor,
     {
         let (task, input_stream_txs) = Task::new(processor);
-        self.processors.push(task.stats.clone());
+        if let Some(stats) = &task.stats {
+            self.processors.push(stats.clone());
+        }
         self.tasks.push(task);
 
         for (id, tx) in input_stream_txs {
@@ -392,13 +394,17 @@ impl TaskRunner {
             let start = Instant::now();
             let result = self.tasks[i].run_until_block().or_fail();
             let elapsed = start.elapsed();
-            self.tasks[i].stats.total_processing_duration().add(elapsed);
+            if let Some(stats) = &self.tasks[i].stats {
+                stats.total_processing_duration().add(elapsed);
+            }
 
             match result {
                 Err(e) => {
                     tracing::error!("{e}");
                     self.error_flag.store(true, Ordering::Relaxed);
-                    self.tasks[i].stats.set_error();
+                    if let Some(stats) = &self.tasks[i].stats {
+                        stats.set_error();
+                    }
                     self.tasks.swap_remove(i);
                 }
                 Ok(task_did_something) if self.tasks[i].finished => {

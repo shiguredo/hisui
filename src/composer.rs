@@ -251,15 +251,6 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                 writer.total_processing_duration.get().as_secs_f64(),
                 writer.error.get(),
             ),
-            ProcessorStats::Other {
-                processor_type,
-                total_processing_duration,
-                error,
-            } => (
-                processor_type.as_str(),
-                total_processing_duration.get().as_secs_f64(),
-                error.get(),
-            ),
         };
 
         let mut processor_stats = stats.clone();
@@ -490,7 +481,6 @@ fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate:
                     .gauge_f64("total_video_track_seconds")
                     .set(writer.total_video_track_duration.get().as_secs_f64());
             }
-            _ => {}
         }
     }
     stats
@@ -521,7 +511,7 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress_bar"),
+            stats: None,
             workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }

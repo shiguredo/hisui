@@ -229,7 +229,7 @@ impl MediaProcessor for AudioEncoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::AudioEncoder(self.stats.clone()),
+            stats: Some(ProcessorStats::AudioEncoder(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::AUDIO_ENCODER,
         }
     }
@@ -596,7 +596,7 @@ impl MediaProcessor for VideoEncoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::VideoEncoder(self.stats.clone()),
+            stats: Some(ProcessorStats::VideoEncoder(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::VIDEO_ENCODER,
         }
     }

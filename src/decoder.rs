@@ -130,7 +130,7 @@ impl MediaProcessor for AudioDecoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::AudioDecoder(self.stats.clone()),
+            stats: Some(ProcessorStats::AudioDecoder(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::AUDIO_DECODER,
         }
     }
@@ -399,7 +399,7 @@ impl MediaProcessor for VideoDecoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::VideoDecoder(self.stats.clone()),
+            stats: Some(ProcessorStats::VideoDecoder(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::VIDEO_DECODER,
         }
     }

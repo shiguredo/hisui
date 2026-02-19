@@ -458,7 +458,7 @@ impl MediaProcessor for VideoMixer {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::VideoMixer(self.stats.clone()),
+            stats: Some(ProcessorStats::VideoMixer(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::VIDEO_MIXER,
         }
     }

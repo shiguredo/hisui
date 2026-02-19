@@ -300,7 +300,7 @@ impl MediaProcessor for Mp4Writer {
                 .chain(self.input_video_stream_id)
                 .collect(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::Mp4Writer(self.stats.clone()),
+            stats: Some(ProcessorStats::Mp4Writer(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }

@@ -15,7 +15,9 @@ pub trait MediaProcessor {
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
 
     fn set_error(&self) {
-        self.spec().stats.set_error();
+        if let Some(stats) = self.spec().stats {
+            stats.set_error();
+        }
     }
 }
 
@@ -95,7 +97,7 @@ pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
     pub workload_hint: MediaProcessorWorkloadHint,
-    pub stats: ProcessorStats,
+    pub stats: Option<ProcessorStats>,
 }
 
 #[derive(Debug)]
@@ -273,7 +275,7 @@ impl MediaProcessor for RealtimePacer {
         MediaProcessorSpec {
             input_stream_ids: self.stream_ids.keys().copied().collect(),
             output_stream_ids: self.stream_ids.values().copied().collect(),
-            stats: ProcessorStats::other("realtime_pacer"),
+            stats: None,
             workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }

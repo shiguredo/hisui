@@ -225,7 +225,7 @@ impl MediaProcessor for AudioMixer {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::AudioMixer(self.stats.clone()),
+            stats: Some(ProcessorStats::AudioMixer(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::AUDIO_MIXER,
         }
     }
