@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::{Error, audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
+use crate::{Error, audio::AudioData, stats_legacy::SharedAtomicCounter, video::VideoFrame};
 
 #[derive(Debug)]
 pub struct RtmpOutgoingFrameHandlerStats {

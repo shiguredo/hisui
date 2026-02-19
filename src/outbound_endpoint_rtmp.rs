@@ -8,7 +8,7 @@ use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, TrackId,
     audio::{AudioData, AudioFormat},
-    stats::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
+    stats_legacy::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
     video::{VideoFormat, VideoFrame},
 };
 

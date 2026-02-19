@@ -5,7 +5,7 @@ use orfail::OrFail;
 
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
-use crate::stats::ProcessorStats;
+use crate::stats_legacy::ProcessorStats;
 use crate::video::VideoFrame;
 
 pub trait MediaProcessor {

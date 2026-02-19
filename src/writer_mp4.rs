@@ -21,7 +21,7 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::{Mp4WriterStats, ProcessorStats},
+    stats_legacy::{Mp4WriterStats, ProcessorStats},
     video::{FrameRate, VideoFrame},
 };
 

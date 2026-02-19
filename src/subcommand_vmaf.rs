@@ -236,13 +236,13 @@ struct ComposeForVmafResult {
     success: bool,
     timeout_expired: bool,
     elapsed_duration: Duration,
-    encoder_stats: crate::stats::VideoEncoderStats,
+    encoder_stats: crate::stats_legacy::VideoEncoderStats,
 }
 
 #[derive(Debug)]
 struct VmafPipelineSetup {
     processor_tasks: Vec<SpawnedProcessorTask>,
-    encoder_stats: crate::stats::VideoEncoderStats,
+    encoder_stats: crate::stats_legacy::VideoEncoderStats,
 }
 
 #[derive(Debug)]

@@ -12,7 +12,7 @@ pub struct MediaPipeline {
     pending_initial_processors: std::collections::HashSet<ProcessorId>,
     initial_ready_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
-    stats: crate::stats2::Stats,
+    stats: crate::stats::Stats,
 }
 
 impl MediaPipeline {
@@ -39,7 +39,7 @@ impl MediaPipeline {
             pending_initial_processors: std::collections::HashSet::new(),
             initial_ready_waiters: Vec::new(),
             tracks: std::collections::HashMap::new(),
-            stats: crate::stats2::Stats::new(),
+            stats: crate::stats::Stats::new(),
         })
     }
 
@@ -311,7 +311,7 @@ impl MediaPipeline {
 pub struct MediaPipelineHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>,
     local_processor_task_tx: tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>,
-    stats: crate::stats2::Stats,
+    stats: crate::stats::Stats,
 }
 
 impl MediaPipelineHandle {
@@ -386,7 +386,7 @@ impl MediaPipelineHandle {
             Ok(true) => {
                 let mut stats = self.stats();
                 // [NOTE]
-                // stats2 の label は取得時点で固定されるため、
+                // stats の label は取得時点で固定されるため、
                 // ここで default label を先に確定してから最初のメトリクスを取得する。
                 stats.set_default_label("processor_id", processor_id.get());
                 stats.set_default_label("processor_type", metadata.processor_type());
@@ -408,7 +408,7 @@ impl MediaPipelineHandle {
         self.send(MediaPipelineCommand::CompleteInitialProcessorRegistration);
     }
 
-    pub fn stats(&self) -> crate::stats2::Stats {
+    pub fn stats(&self) -> crate::stats::Stats {
         self.stats.clone()
     }
 
@@ -582,7 +582,7 @@ struct ProcessorState {
 pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
     processor_id: ProcessorId,
-    stats: crate::stats2::Stats,
+    stats: crate::stats::Stats,
 }
 
 impl ProcessorHandle {
@@ -590,7 +590,7 @@ impl ProcessorHandle {
         &self.processor_id
     }
 
-    pub fn stats(&self) -> crate::stats2::Stats {
+    pub fn stats(&self) -> crate::stats::Stats {
         self.stats.clone()
     }
 

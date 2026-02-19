@@ -16,7 +16,7 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::{ProcessorStats, VideoMixerStats, VideoResolution},
+    stats_legacy::{ProcessorStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };

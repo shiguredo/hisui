@@ -5,7 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, TrackId,
     audio::{AudioData, AudioFormat},
-    stats::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
+    stats_legacy::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
     video::{VideoFormat, VideoFrame},
 };
 

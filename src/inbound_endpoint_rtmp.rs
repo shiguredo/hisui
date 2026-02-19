@@ -5,7 +5,7 @@ use orfail::OrFail;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::stats::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag};
+use crate::stats_legacy::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag};
 use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 
 #[derive(Debug, Clone)]

@@ -14,7 +14,7 @@ use crate::{
     },
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::{
+    stats_legacy::{
         Mp4AudioReaderStats, Mp4VideoReaderStats, ProcessorStats, SharedOption,
         WebmAudioReaderStats, WebmVideoReaderStats,
     },

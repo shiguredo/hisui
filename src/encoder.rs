@@ -28,7 +28,7 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
+    stats_legacy::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
 };

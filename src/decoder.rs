@@ -22,7 +22,7 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
+    stats_legacy::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };

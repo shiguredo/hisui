@@ -87,7 +87,7 @@ impl nojson::DisplayJson for LegacyStatsJson {
 }
 
 pub fn to_legacy_stats_json(
-    stats: &crate::stats2::Stats,
+    stats: &crate::stats::Stats,
     elapsed_seconds: f64,
     worker_threads: Vec<LegacyWorkerThreadStats>,
 ) -> crate::Result<nojson::RawJsonOwned> {
@@ -134,23 +134,23 @@ pub fn to_legacy_stats_json(
     Ok(nojson::RawJsonOwned::parse(json.to_string()).expect("infallible"))
 }
 
-fn snapshot_value_to_legacy_value(value: crate::stats2::StatsSnapshotValue) -> LegacyJsonValue {
+fn snapshot_value_to_legacy_value(value: crate::stats::StatsSnapshotValue) -> LegacyJsonValue {
     match value {
-        crate::stats2::StatsSnapshotValue::Counter(v) => LegacyJsonValue::Unsigned(v),
-        crate::stats2::StatsSnapshotValue::Gauge(v) => LegacyJsonValue::Signed(v),
-        crate::stats2::StatsSnapshotValue::GaugeF64(v) => LegacyJsonValue::Float(v),
-        crate::stats2::StatsSnapshotValue::Flag(v) => LegacyJsonValue::Bool(v),
-        crate::stats2::StatsSnapshotValue::String(v) => LegacyJsonValue::String(v),
+        crate::stats::StatsSnapshotValue::Counter(v) => LegacyJsonValue::Unsigned(v),
+        crate::stats::StatsSnapshotValue::Gauge(v) => LegacyJsonValue::Signed(v),
+        crate::stats::StatsSnapshotValue::GaugeF64(v) => LegacyJsonValue::Float(v),
+        crate::stats::StatsSnapshotValue::Flag(v) => LegacyJsonValue::Bool(v),
+        crate::stats::StatsSnapshotValue::String(v) => LegacyJsonValue::String(v),
     }
 }
 
-fn snapshot_value_as_bool(value: &crate::stats2::StatsSnapshotValue) -> bool {
+fn snapshot_value_as_bool(value: &crate::stats::StatsSnapshotValue) -> bool {
     match value {
-        crate::stats2::StatsSnapshotValue::Flag(v) => *v,
-        crate::stats2::StatsSnapshotValue::Counter(v) => *v != 0,
-        crate::stats2::StatsSnapshotValue::Gauge(v) => *v != 0,
-        crate::stats2::StatsSnapshotValue::GaugeF64(v) => *v != 0.0,
-        crate::stats2::StatsSnapshotValue::String(v) => !v.is_empty(),
+        crate::stats::StatsSnapshotValue::Flag(v) => *v,
+        crate::stats::StatsSnapshotValue::Counter(v) => *v != 0,
+        crate::stats::StatsSnapshotValue::Gauge(v) => *v != 0,
+        crate::stats::StatsSnapshotValue::GaugeF64(v) => *v != 0.0,
+        crate::stats::StatsSnapshotValue::String(v) => !v.is_empty(),
     }
 }
 
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn to_legacy_stats_json_excludes_worker_thread_processors_and_groups_by_processor() {
-        let mut stats = crate::stats2::Stats::new();
+        let mut stats = crate::stats::Stats::new();
         stats.set_default_label("processor_id", "reader0");
         stats.set_default_label("processor_type", "mp4_reader");
         stats.counter("total_input_video_sample_count").add(5);
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn to_legacy_stats_json_skips_metrics_with_extra_labels() {
-        let mut stats = crate::stats2::Stats::new();
+        let mut stats = crate::stats::Stats::new();
         stats.set_default_label("processor_id", "mixer0");
         stats.set_default_label("processor_type", "video_mixer");
         stats.set_default_label("track_id", "video-main");

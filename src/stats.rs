@@ -1,1089 +1,753 @@
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
-    time::Duration,
+use std::collections::BTreeMap;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
 };
 
-use crate::{
-    metadata::SourceId,
-    types::{CodecName, EngineName},
-    video::VideoFrame,
-};
+const PROMETHEUS_METRIC_PREFIX: &str = "hisui_";
 
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
-    /// 全体の合成に要した実時間
-    pub elapsed_duration: Duration,
-
-    /// 全体でひとつでもエラーが発生したら true になる
-    pub error: SharedAtomicFlag,
-
-    /// 各プロセッサの統計情報
-    pub processors: Vec<ProcessorStats>,
-
-    /// プロセッサを実行するワーカースレッドの統計情報
-    pub worker_threads: Vec<WorkerThreadStats>,
+    shared_entries: Arc<Mutex<BTreeMap<StatsKey, StatsEntry>>>,
+    // `Stats` を clone した後にどちらかで `set_default_label()` を呼ぶと、
+    // `Arc` を差し替えるため、もう片方には影響しない。
+    default_labels: Arc<StatsLabels>,
+    // 同一 `Stats` インスタンス内での再取得時にロックを減らすためのキャッシュ。
+    entry_cache: BTreeMap<StatsKey, StatsEntry>,
 }
 
 impl Stats {
-    pub fn save(&self, output_file_path: &Path) {
-        let json = nojson::json(|f| {
-            f.set_indent_size(2);
-            f.set_spacing(true);
-            f.value(self)
-        })
-        .to_string();
-        if let Err(e) = std::fs::write(output_file_path, json) {
-            // 統計が出力できなくても全体を失敗扱いにはしない
-            tracing::warn!(
-                "failed to write stats JSON: path={}, reason={e}",
-                output_file_path.display()
-            );
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    // [NOTE]
+    // default label は「これ以降に取得するメトリクスのキー」にだけ反映される。
+    // すでに取得済みのメトリクス（counter()/gauge() 等の戻り値）は、以前のラベル集合のまま。
+    pub fn set_default_label(&mut self, name: &'static str, value: &str) {
+        let mut labels = (*self.default_labels).clone();
+        labels.insert(name, value.to_owned());
+        self.default_labels = Arc::new(labels);
+    }
+
+    pub fn counter(&mut self, name: &'static str) -> StatsCounter {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsEntry::Counter(StatsCounter::new()));
+        match entry {
+            StatsEntry::Counter(counter) => counter,
+            other => panic!(
+                "metric type mismatch: expected=counter actual={}",
+                other.kind_name()
+            ),
         }
+    }
+
+    pub fn gauge(&mut self, name: &'static str) -> StatsGauge {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsEntry::Gauge(StatsGauge::new()));
+        match entry {
+            StatsEntry::Gauge(gauge) => gauge,
+            other => panic!(
+                "metric type mismatch: expected=gauge actual={}",
+                other.kind_name()
+            ),
+        }
+    }
+
+    pub fn gauge_f64(&mut self, name: &'static str) -> StatsGaugeF64 {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsEntry::GaugeF64(StatsGaugeF64::new()));
+        match entry {
+            StatsEntry::GaugeF64(gauge) => gauge,
+            other => panic!(
+                "metric type mismatch: expected=gauge_f64 actual={}",
+                other.kind_name()
+            ),
+        }
+    }
+
+    pub fn string(&mut self, name: &'static str) -> StatsString {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsEntry::StringValue(StatsString::new()));
+        match entry {
+            StatsEntry::StringValue(string_value) => string_value,
+            other => panic!(
+                "metric type mismatch: expected=string actual={}",
+                other.kind_name()
+            ),
+        }
+    }
+
+    pub fn flag(&mut self, name: &'static str) -> StatsFlag {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsEntry::Flag(StatsFlag::new()));
+        match entry {
+            StatsEntry::Flag(flag) => flag,
+            other => panic!(
+                "metric type mismatch: expected=flag actual={}",
+                other.kind_name()
+            ),
+        }
+    }
+
+    pub fn to_prometheus_text(&self) -> crate::Result<String> {
+        let entries = {
+            let shared_entries = self
+                .shared_entries
+                .lock()
+                .map_err(|_| crate::Error::new("stats lock poisoned: shared_entries"))?;
+            shared_entries
+                .iter()
+                .map(|(key, entry)| (key.clone(), entry.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        let mut text = String::new();
+        let mut previous_metric_name: Option<String> = None;
+        for (key, entry) in entries {
+            validate_prometheus_metric_name(key.metric_name)?;
+            let metric_name = format!("{PROMETHEUS_METRIC_PREFIX}{}", key.metric_name);
+            // [NOTE]
+            // 同じ metric_name に対して label が違うエントリの型不一致は、ここでは検出しない。
+            // 先に出力した型で `# TYPE` を 1 回だけ出す挙動。
+            if previous_metric_name.as_deref() != Some(metric_name.as_str()) {
+                text.push_str("# TYPE ");
+                text.push_str(&metric_name);
+                text.push(' ');
+                text.push_str(entry.prometheus_type_name());
+                text.push('\n');
+                previous_metric_name = Some(metric_name.clone());
+            }
+
+            text.push_str(&metric_name);
+            let mut labels = (*key.default_labels).clone();
+            if let StatsEntry::StringValue(string_value) = &entry {
+                labels.insert("value", string_value.get());
+            }
+            append_prometheus_labels(&mut text, &labels)?;
+            text.push(' ');
+            text.push_str(&entry.prometheus_value_string());
+            text.push('\n');
+        }
+
+        Ok(text)
+    }
+
+    pub fn snapshot_entries(&self) -> crate::Result<Vec<StatsSnapshotEntry>> {
+        let entries = {
+            let shared_entries = self
+                .shared_entries
+                .lock()
+                .map_err(|_| crate::Error::new("stats lock poisoned: shared_entries"))?;
+            shared_entries
+                .iter()
+                .map(|(key, entry)| (key.clone(), entry.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        Ok(entries
+            .into_iter()
+            .map(|(key, entry)| StatsSnapshotEntry {
+                metric_name: key.metric_name,
+                labels: (*key.default_labels).clone(),
+                value: match entry {
+                    StatsEntry::Counter(v) => StatsSnapshotValue::Counter(v.get()),
+                    StatsEntry::Gauge(v) => StatsSnapshotValue::Gauge(v.get()),
+                    StatsEntry::GaugeF64(v) => StatsSnapshotValue::GaugeF64(v.get()),
+                    StatsEntry::Flag(v) => StatsSnapshotValue::Flag(v.get()),
+                    StatsEntry::StringValue(v) => StatsSnapshotValue::String(v.get()),
+                },
+            })
+            .collect())
+    }
+
+    fn make_key(&self, metric_name: &'static str) -> StatsKey {
+        StatsKey {
+            metric_name,
+            default_labels: self.default_labels.clone(),
+        }
+    }
+
+    fn get_or_insert_entry(
+        &mut self,
+        key: StatsKey,
+        create: impl FnOnce() -> StatsEntry,
+    ) -> StatsEntry {
+        if let Some(entry) = self.entry_cache.get(&key) {
+            return entry.clone();
+        }
+        let mut shared_entries = self
+            .shared_entries
+            .lock()
+            .expect("lock() failed unexpectedly");
+        let entry = shared_entries
+            .entry(key.clone())
+            .or_insert_with(create)
+            .clone();
+        self.entry_cache.insert(key, entry.clone());
+        entry
     }
 }
 
-impl nojson::DisplayJson for Stats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("elapsed_seconds", self.elapsed_duration.as_secs_f32())?;
-            f.member("error", self.error.get())?;
-            f.member("processors", &self.processors)?;
-            f.member("worker_threads", &self.worker_threads)?;
-            Ok(())
-        })
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct StatsKey {
+    metric_name: &'static str,
+    default_labels: Arc<StatsLabels>,
 }
 
 #[derive(Debug, Clone)]
-pub enum ProcessorStats {
-    Mp4AudioReader(Mp4AudioReaderStats),
-    Mp4VideoReader(Mp4VideoReaderStats),
-    WebmAudioReader(WebmAudioReaderStats),
-    WebmVideoReader(WebmVideoReaderStats),
-    AudioDecoder(AudioDecoderStats),
-    VideoDecoder(VideoDecoderStats),
-    AudioMixer(AudioMixerStats),
-    VideoMixer(VideoMixerStats),
-    AudioEncoder(AudioEncoderStats),
-    VideoEncoder(VideoEncoderStats),
-    Mp4Writer(Mp4WriterStats),
-    RtmpPublisher(crate::publisher_rtmp::RtmpPublisherStats),
-    RtmpOutboundEndpoint(crate::outbound_endpoint_rtmp::RtmpOutboundEndpointStats),
-    RtmpInboundEndpoint(crate::inbound_endpoint_rtmp::RtmpInboundEndpointStats),
-    Other {
-        processor_type: String,
-        total_processing_duration: SharedAtomicDuration,
-        error: SharedAtomicFlag,
-    },
+pub enum StatsEntry {
+    Counter(StatsCounter),
+    Gauge(StatsGauge),
+    GaugeF64(StatsGaugeF64),
+    Flag(StatsFlag),
+    StringValue(StatsString),
 }
 
-impl ProcessorStats {
-    pub fn other(processor_type: &str) -> Self {
-        Self::Other {
-            processor_type: processor_type.to_owned(),
-            total_processing_duration: Default::default(),
-            error: Default::default(),
+impl StatsEntry {
+    fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Counter(_) => "counter",
+            Self::Gauge(_) => "gauge",
+            Self::GaugeF64(_) => "gauge_f64",
+            Self::Flag(_) => "flag",
+            Self::StringValue(_) => "string",
         }
     }
 
-    pub fn total_processing_duration(&self) -> SharedAtomicDuration {
+    fn prometheus_type_name(&self) -> &'static str {
         match self {
-            ProcessorStats::Mp4AudioReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::Mp4VideoReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::WebmAudioReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::WebmVideoReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::AudioDecoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::VideoDecoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::AudioMixer(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::VideoMixer(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::AudioEncoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::VideoEncoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::Mp4Writer(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::RtmpPublisher(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::RtmpOutboundEndpoint(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::RtmpInboundEndpoint(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::Other {
-                total_processing_duration,
-                ..
-            } => total_processing_duration.clone(),
+            Self::Counter(_) => "counter",
+            Self::Gauge(_) => "gauge",
+            Self::GaugeF64(_) => "gauge",
+            Self::Flag(_) => "gauge",
+            Self::StringValue(_) => "gauge",
         }
     }
 
-    pub fn set_error(&self) {
+    fn prometheus_value_string(&self) -> String {
         match self {
-            ProcessorStats::Mp4AudioReader(stats) => stats.error.set(true),
-            ProcessorStats::Mp4VideoReader(stats) => stats.error.set(true),
-            ProcessorStats::WebmAudioReader(stats) => stats.error.set(true),
-            ProcessorStats::WebmVideoReader(stats) => stats.error.set(true),
-            ProcessorStats::AudioDecoder(stats) => stats.error.set(true),
-            ProcessorStats::VideoDecoder(stats) => stats.error.set(true),
-            ProcessorStats::AudioMixer(stats) => stats.error.set(true),
-            ProcessorStats::VideoMixer(stats) => stats.error.set(true),
-            ProcessorStats::AudioEncoder(stats) => stats.error.set(true),
-            ProcessorStats::VideoEncoder(stats) => stats.error.set(true),
-            ProcessorStats::Mp4Writer(stats) => stats.error.set(true),
-            ProcessorStats::RtmpPublisher(stats) => stats.error.set(true),
-            ProcessorStats::RtmpOutboundEndpoint(stats) => stats.error.set(true),
-            ProcessorStats::RtmpInboundEndpoint(stats) => stats.error.set(true),
-            ProcessorStats::Other { error, .. } => error.set(true),
+            Self::Counter(counter) => counter.get().to_string(),
+            Self::Gauge(gauge) => gauge.get().to_string(),
+            Self::GaugeF64(gauge) => gauge.get().to_string(),
+            Self::Flag(flag) => {
+                if flag.get() {
+                    "1".to_owned()
+                } else {
+                    "0".to_owned()
+                }
+            }
+            Self::StringValue(_) => "1".to_owned(),
         }
     }
 }
 
-impl nojson::DisplayJson for ProcessorStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            ProcessorStats::Mp4AudioReader(stats) => stats.fmt(f),
-            ProcessorStats::Mp4VideoReader(stats) => stats.fmt(f),
-            ProcessorStats::WebmAudioReader(stats) => stats.fmt(f),
-            ProcessorStats::WebmVideoReader(stats) => stats.fmt(f),
-            ProcessorStats::AudioDecoder(stats) => stats.fmt(f),
-            ProcessorStats::VideoDecoder(stats) => stats.fmt(f),
-            ProcessorStats::AudioMixer(stats) => stats.fmt(f),
-            ProcessorStats::VideoMixer(stats) => stats.fmt(f),
-            ProcessorStats::AudioEncoder(stats) => stats.fmt(f),
-            ProcessorStats::VideoEncoder(stats) => stats.fmt(f),
-            ProcessorStats::Mp4Writer(stats) => stats.fmt(f),
-            ProcessorStats::RtmpPublisher(stats) => stats.fmt(f),
-            ProcessorStats::RtmpOutboundEndpoint(stats) => stats.fmt(f),
-            ProcessorStats::RtmpInboundEndpoint(stats) => stats.fmt(f),
-            ProcessorStats::Other {
-                processor_type,
-                total_processing_duration,
-                error,
-            } => f.object(|f| {
-                f.member("type", processor_type)?;
-                f.member(
-                    "total_processing_seconds",
-                    total_processing_duration.get().as_secs_f32(),
-                )?;
-                f.member("error", error.get())
-            }),
-        }
-    }
-}
-
-/// `AudioMixer` 用の統計情報
 #[derive(Debug, Default, Clone)]
-pub struct AudioMixerStats {
-    /// ミキサーの入力 `AudioData` の数
-    pub total_input_audio_data_count: SharedAtomicCounter,
-
-    /// ミキサーが生成した `AudioData` の数
-    pub total_output_audio_data_count: SharedAtomicCounter,
-
-    /// ミキサーが生成した `AudioData` の合計尺
-    pub total_output_audio_data_duration: SharedAtomicDuration,
-
-    /// ミキサーが生成したサンプルの合計数
-    pub total_output_sample_count: SharedAtomicCounter,
-
-    /// ミキサーによって無音補完されたサンプルの合計数
-    pub total_output_filled_sample_count: SharedAtomicCounter,
-
-    /// 出力から除去されたサンプルの合計数
-    pub total_trimmed_sample_count: SharedAtomicCounter,
-
-    // TODO: 以下のふたつの項目は、個々のプロセッサではなくワーカースレッドが
-    // 共通的に処理するものなので個別の統計構造体の外にだした方がいいかもしれない
-    /// 合成処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
+pub struct StatsCounter {
+    value: Arc<AtomicU64>,
 }
 
-impl nojson::DisplayJson for AudioMixerStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "audio_mixer")?;
-            f.member(
-                "total_input_audio_data_count",
-                self.total_input_audio_data_count.get(),
-            )?;
-            f.member(
-                "total_output_audio_data_count",
-                self.total_output_audio_data_count.get(),
-            )?;
-            f.member(
-                "total_output_audio_data_seconds",
-                self.total_output_audio_data_duration.get().as_secs_f32(),
-            )?;
-            f.member(
-                "total_output_sample_count",
-                self.total_output_sample_count.get(),
-            )?;
-            f.member(
-                "total_output_filled_sample_count",
-                self.total_output_filled_sample_count.get(),
-            )?;
-            f.member(
-                "total_trimmed_sample_count",
-                self.total_trimmed_sample_count.get(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
+impl StatsCounter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn inc(&self) {
+        self.add(1);
+    }
+
+    pub fn add(&self, value: u64) {
+        self.value.fetch_add(value, Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> u64 {
+        self.value.load(Ordering::Relaxed)
     }
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct VideoMixerStats {
-    /// 合成後の映像の解像度
-    pub output_video_resolution: VideoResolution,
-
-    /// ミキサーの入力 `VideoFrame` の数
-    pub total_input_video_frame_count: SharedAtomicCounter,
-
-    /// ミキサーが生成した `VideoFrame` の数
-    pub total_output_video_frame_count: SharedAtomicCounter,
-
-    /// ミキサーが生成した `VideoFrame` の合計尺
-    pub total_output_video_frame_duration: SharedAtomicDuration,
-
-    /// 出力から除去された映像フレームの合計数
-    pub total_trimmed_video_frame_count: SharedAtomicCounter,
-
-    /// 合成を省略して前フレームの尺を延長したフレームの数
-    pub total_extended_video_frame_count: SharedAtomicCounter,
-
-    /// 合成処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
+pub struct StatsGauge {
+    value: Arc<AtomicI64>,
 }
 
-impl nojson::DisplayJson for VideoMixerStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "video_mixer")?;
-            f.member("output_video_resolution", self.output_video_resolution)?;
-            f.member(
-                "total_input_video_frame_count",
-                self.total_input_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_output_video_frame_count",
-                self.total_output_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_output_video_frame_seconds",
-                self.total_output_video_frame_duration.get().as_secs_f32(),
-            )?;
-            f.member(
-                "total_trimmed_video_frame_count",
-                self.total_trimmed_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_extended_video_frame_count",
-                self.total_extended_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
+impl StatsGauge {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn inc(&self) {
+        self.value.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn dec(&self) {
+        self.value.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub fn set(&self, value: i64) {
+        self.value.store(value, Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> i64 {
+        self.value.load(Ordering::Relaxed)
     }
 }
 
-/// 音声エンコーダー用の統計情報
+#[derive(Debug, Default, Clone)]
+pub struct StatsGaugeF64 {
+    value: Arc<AtomicU64>,
+}
+
+impl StatsGaugeF64 {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(&self, value: f64) {
+        self.value.store(value.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> f64 {
+        f64::from_bits(self.value.load(Ordering::Relaxed))
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct AudioEncoderStats {
-    /// エンコーダーの種類
-    pub engine: EngineName,
-
-    /// コーデック
-    pub codec: CodecName,
-
-    /// エンコーダーで処理された `AudioData` の数
-    pub total_audio_data_count: SharedAtomicCounter,
-
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
+pub struct StatsString {
+    string_value: Arc<Mutex<String>>,
 }
 
-impl AudioEncoderStats {
-    pub fn new(engine: EngineName, codec: CodecName) -> Self {
-        Self {
-            engine,
-            codec,
-            total_audio_data_count: Default::default(),
-            total_processing_duration: Default::default(),
-            error: Default::default(),
-        }
-    }
-}
-
-impl nojson::DisplayJson for AudioEncoderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "audio_encoder")?;
-            f.member("engine", self.engine)?;
-            f.member("codec", self.codec)?;
-            f.member("total_audio_data_count", self.total_audio_data_count.get())?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// 映像エンコーダー用の統計情報
-#[derive(Debug, Clone)]
-pub struct VideoEncoderStats {
-    /// エンコーダーの種類
-    pub engine: SharedOption<EngineName>,
-
-    /// コーデック
-    pub codec: SharedOption<CodecName>,
-
-    /// エンコード対象の `VideoFrame` の数
-    pub total_input_video_frame_count: SharedAtomicCounter,
-
-    /// 実際にエンコードされた `VideoFrame` の数
-    pub total_output_video_frame_count: SharedAtomicCounter,
-
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl Default for VideoEncoderStats {
+impl Default for StatsString {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VideoEncoderStats {
+impl StatsString {
     pub fn new() -> Self {
         Self {
-            engine: SharedOption::new(None),
-            codec: SharedOption::new(None),
-            total_input_video_frame_count: Default::default(),
-            total_output_video_frame_count: Default::default(),
-            total_processing_duration: Default::default(),
-            error: Default::default(),
-        }
-    }
-}
-
-impl nojson::DisplayJson for VideoEncoderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "video_encoder")?;
-            f.member("engine", &self.engine)?;
-            f.member("codec", &self.codec)?;
-            f.member(
-                "total_input_video_frame_count",
-                self.total_input_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_output_video_frame_count",
-                self.total_output_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// 音声デコーダー用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct AudioDecoderStats {
-    /// 入力ソースの ID
-    pub source_id: SharedOption<SourceId>,
-
-    /// デコーダーの種類
-    pub engine: Option<EngineName>,
-
-    /// コーデック
-    pub codec: Option<CodecName>,
-
-    /// デコーダーで処理された `AudioData` の数
-    pub total_audio_data_count: SharedAtomicCounter,
-
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for AudioDecoderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "audio_decoder")?;
-            f.member("source_id", self.source_id.get())?;
-            f.member("engine", self.engine)?;
-            f.member("codec", self.codec)?;
-            f.member("total_audio_data_count", self.total_audio_data_count.get())?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// 映像デコーダー用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct VideoDecoderStats {
-    /// 入力ソースの ID
-    pub source_id: SharedOption<SourceId>,
-
-    /// デコーダーの種類
-    pub engine: SharedOption<EngineName>,
-
-    /// コーデック
-    pub codec: SharedOption<CodecName>,
-
-    /// デコード対象の `VideoFrame` の数
-    pub total_input_video_frame_count: SharedAtomicCounter,
-
-    /// デコードされた `VideoFrame` の数
-    pub total_output_video_frame_count: SharedAtomicCounter,
-
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// 解像度リスト
-    pub resolutions: SharedSet<VideoResolution>,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for VideoDecoderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "video_decoder")?;
-            f.member("source_id", self.source_id.get())?;
-            f.member("engine", self.engine.get())?;
-            f.member("codec", self.codec.get())?;
-            f.member(
-                "total_input_video_frame_count",
-                self.total_input_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_output_video_frame_count",
-                self.total_output_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("resolutions", self.resolutions.get())?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct SharedAtomicFlag(Arc<AtomicBool>);
-
-impl SharedAtomicFlag {
-    pub fn set(&self, v: bool) {
-        // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
-        self.0.store(v, Ordering::Relaxed)
-    }
-
-    pub fn get(&self) -> bool {
-        // 取得結果が一時的に古くても問題はないので Relaxed で十分
-        self.0.load(Ordering::Relaxed)
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct SharedAtomicCounter(Arc<AtomicU64>);
-
-impl SharedAtomicCounter {
-    pub fn add(&self, n: u64) {
-        // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
-        self.0.fetch_add(n, Ordering::Relaxed);
-    }
-
-    pub fn increment(&self) {
-        self.add(1);
-    }
-
-    pub fn set(&self, n: u64) {
-        // 統計情報の更新が複数スレッドから行われることはないので Relaxed で十分
-        self.0.store(n, Ordering::Relaxed);
-    }
-
-    pub fn get(&self) -> u64 {
-        // 取得結果が一時的に古くても問題はないので Relaxed で十分
-        self.0.load(Ordering::Relaxed)
-    }
-}
-
-impl nojson::DisplayJson for SharedAtomicCounter {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(self.get())
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct SharedAtomicDuration(SharedAtomicCounter);
-
-impl SharedAtomicDuration {
-    pub fn new(n: Duration) -> Self {
-        let v = Self::default();
-        v.set(n);
-        v
-    }
-
-    pub fn add(&self, n: Duration) {
-        self.0.add(n.as_nanos() as u64);
-    }
-
-    pub fn set(&self, n: Duration) {
-        self.0.set(n.as_nanos() as u64);
-    }
-
-    pub fn get(&self) -> Duration {
-        Duration::from_nanos(self.0.get())
-    }
-}
-
-impl nojson::DisplayJson for SharedAtomicDuration {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(self.get().as_secs_f32())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SharedOption<T>(Arc<Mutex<Option<T>>>);
-
-impl<T> SharedOption<T> {
-    pub fn new(value: Option<T>) -> Self {
-        Self(Arc::new(Mutex::new(value)))
-    }
-
-    pub fn set(&self, value: T) {
-        // [NOTE]
-        // ロック獲得に失敗することはまずないはずだし、
-        // 失敗しても統計が不正確になるだけで、全体の実行に影響はないので、単に無視している
-        // （なおここで警告ログなどを出すと量が多くなりすぎる可能性があるのでやらない）
-        if let Ok(mut v) = self.0.lock() {
-            *v = Some(value);
+            string_value: Arc::new(Mutex::new(String::new())),
         }
     }
 
-    pub fn set_once<F>(&self, f: F)
-    where
-        F: FnOnce() -> T,
-    {
-        // [NOTE] 同上
-        if let Ok(mut v) = self.0.lock()
-            && v.is_none()
-        {
-            *v = Some(f());
-        }
+    pub fn set(&self, value: impl Into<String>) {
+        let mut v = self
+            .string_value
+            .lock()
+            .expect("lock() failed unexpectedly");
+        *v = value.into();
+    }
+
+    pub fn get(&self) -> String {
+        self.string_value
+            .lock()
+            .expect("lock() failed unexpectedly")
+            .clone()
     }
 
     pub fn clear(&self) {
-        // [NOTE] 同上
-        if let Ok(mut v) = self.0.lock() {
-            *v = None;
+        let mut v = self
+            .string_value
+            .lock()
+            .expect("lock() failed unexpectedly");
+        v.clear();
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct StatsFlag {
+    value: Arc<AtomicBool>,
+}
+
+impl StatsFlag {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(&self, value: bool) {
+        self.value.store(value, Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> bool {
+        self.value.load(Ordering::Relaxed)
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StatsLabels(BTreeMap<&'static str, String>);
+
+impl StatsLabels {
+    pub fn insert(&mut self, name: &'static str, value: impl Into<String>) {
+        self.0.insert(name, value.into());
+    }
+
+    pub fn get(&self, name: &str) -> Option<&String> {
+        self.0.get(name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, &String)> {
+        self.0.iter().map(|(k, v)| (*k, v))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatsSnapshotEntry {
+    pub metric_name: &'static str,
+    pub labels: StatsLabels,
+    pub value: StatsSnapshotValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatsSnapshotValue {
+    Counter(u64),
+    Gauge(i64),
+    GaugeF64(f64),
+    Flag(bool),
+    String(String),
+}
+
+fn escape_label_value(value: &str) -> String {
+    let mut out = String::new();
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(c),
         }
     }
+    out
 }
 
-impl<T: Clone> SharedOption<T> {
-    pub fn get(&self) -> Option<T> {
-        if let Ok(v) = self.0.lock() {
-            v.clone()
-        } else {
-            // [NOTE]
-            // ロック獲得に失敗することはまずないはずだし、
-            // 失敗しても統計が不正確になるだけで、全体の実行に影響はないので、単に None 扱いにしている
-            // （なおここで警告ログなどを出すと量が多くなりすぎる可能性があるのでやらない）
-            None
+fn append_prometheus_labels(text: &mut String, labels: &StatsLabels) -> crate::Result<()> {
+    if labels.is_empty() {
+        return Ok(());
+    }
+
+    text.push('{');
+    let mut first = true;
+    for (name, value) in labels.iter() {
+        validate_prometheus_label_name(name)?;
+        if !first {
+            text.push(',');
         }
+        first = false;
+        text.push_str(name);
+        text.push_str("=\"");
+        text.push_str(&escape_label_value(value));
+        text.push('"');
     }
+    text.push('}');
+    Ok(())
 }
 
-impl<T> Default for SharedOption<T> {
-    fn default() -> Self {
-        Self::new(None)
+fn validate_prometheus_metric_name(name: &str) -> crate::Result<()> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(crate::Error::new("invalid Prometheus metric name: empty"));
+    };
+    if !(first.is_ascii_alphabetic() || first == '_' || first == ':') {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus metric name: {name}"
+        )));
     }
+    if chars.any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == ':')) {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus metric name: {name}"
+        )));
+    }
+    Ok(())
 }
 
-impl<T: Clone + nojson::DisplayJson> nojson::DisplayJson for SharedOption<T> {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(self.get())
+fn validate_prometheus_label_name(name: &str) -> crate::Result<()> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(crate::Error::new("invalid Prometheus label name: empty"));
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus label name: {name}"
+        )));
     }
+    if chars.any(|c| !(c.is_ascii_alphanumeric() || c == '_')) {
+        return Err(crate::Error::new(format!(
+            "invalid Prometheus label name: {name}"
+        )));
+    }
+    Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub struct SharedSet<T>(Arc<Mutex<BTreeSet<T>>>);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl<T: Ord + Eq> SharedSet<T> {
-    pub fn insert(&self, value: T) {
-        if let Ok(mut v) = self.0.lock() {
-            v.insert(value);
+    #[test]
+    fn counter_basic_ops() {
+        let counter = StatsCounter::new();
+        assert_eq!(counter.get(), 0);
+        counter.inc();
+        counter.add(4);
+        assert_eq!(counter.get(), 5);
+        counter.add(5);
+        assert_eq!(counter.get(), 10);
+    }
+
+    #[test]
+    fn gauge_basic_ops() {
+        let gauge = StatsGauge::new();
+        assert_eq!(gauge.get(), 0);
+        gauge.inc();
+        gauge.dec();
+        assert_eq!(gauge.get(), 0);
+        gauge.set(-4);
+        assert_eq!(gauge.get(), -4);
+    }
+
+    #[test]
+    fn gauge_f64_basic_ops() {
+        let gauge = StatsGaugeF64::new();
+        assert_eq!(gauge.get(), 0.0);
+        gauge.set(3.25);
+        assert_eq!(gauge.get(), 3.25);
+    }
+
+    #[test]
+    fn string_basic_ops() {
+        let string_value = StatsString::new();
+        assert_eq!(string_value.get(), "");
+        string_value.set("running");
+        assert_eq!(string_value.get(), "running");
+        string_value.clear();
+        assert_eq!(string_value.get(), "");
+    }
+
+    #[test]
+    fn stats_labels_basic_ops() {
+        let mut labels = StatsLabels::default();
+        assert!(labels.is_empty());
+        labels.insert("processor_id", "p0");
+        assert_eq!(labels.get("processor_id"), Some(&"p0".to_owned()));
+        let collected = labels
+            .iter()
+            .map(|(name, value)| (name, value.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(collected, vec![("processor_id", "p0".to_owned())]);
+        assert!(!labels.is_empty());
+    }
+
+    #[test]
+    fn same_key_returns_shared_state() {
+        let mut stats = Stats::new();
+        let counter1 = stats.counter("processed_frames");
+        let counter2 = stats.counter("processed_frames");
+        counter1.add(7);
+        assert_eq!(counter2.get(), 7);
+    }
+
+    #[test]
+    fn different_default_labels_are_isolated() {
+        let mut stats = Stats::new();
+        stats.set_default_label("node", "a");
+        let counter_a = stats.counter("requests");
+        counter_a.inc();
+
+        stats.set_default_label("node", "b");
+        let counter_b = stats.counter("requests");
+        counter_b.add(2);
+
+        assert_eq!(counter_a.get(), 1);
+        assert_eq!(counter_b.get(), 2);
+    }
+
+    #[test]
+    fn set_default_label_overwrites_value() {
+        let mut stats = Stats::new();
+        stats.set_default_label("node", "a");
+        let counter_a = stats.counter("requests");
+        counter_a.inc();
+
+        stats.set_default_label("node", "b");
+        stats.set_default_label("node", "c");
+        let counter_c = stats.counter("requests");
+        counter_c.add(3);
+
+        assert_eq!(counter_a.get(), 1);
+        assert_eq!(counter_c.get(), 3);
+    }
+
+    #[test]
+    fn clone_keeps_label_snapshot_semantics() {
+        let mut stats1 = Stats::new();
+        stats1.set_default_label("node", "a");
+        let counter_a = stats1.counter("requests");
+
+        let mut cloned = stats1.clone();
+        cloned.set_default_label("node", "b");
+        let counter_b = cloned.counter("requests");
+
+        counter_a.inc();
+        counter_b.add(2);
+
+        let counter_a_again = stats1.counter("requests");
+        assert_eq!(counter_a_again.get(), 1);
+        assert_eq!(counter_b.get(), 2);
+    }
+
+    #[test]
+    fn type_mismatch_panics_with_clear_message() {
+        let mut stats = Stats::new();
+        let _ = stats.counter("requests");
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = stats.gauge("requests");
+        }));
+        assert!(panic.is_err());
+        let message = panic_message(panic);
+        assert!(
+            message.contains("metric type mismatch: expected=gauge actual=counter"),
+            "unexpected panic message: {message}"
+        );
+    }
+
+    #[test]
+    fn flag_basic_ops() {
+        let flag = StatsFlag::new();
+        assert!(!flag.get());
+        flag.set(true);
+        assert!(flag.get());
+        flag.set(false);
+        assert!(!flag.get());
+    }
+
+    #[test]
+    fn prometheus_text_outputs_counter_gauge_and_flag() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        let counter = stats.counter("processed_frames_total");
+        let gauge = stats.gauge("queue_depth");
+        let gauge_f64 = stats.gauge_f64("latency_seconds");
+        let flag = stats.flag("error");
+        counter.add(3);
+        gauge.set(-1);
+        gauge_f64.set(0.5);
+        flag.set(true);
+
+        let text = stats
+            .to_prometheus_text()
+            .expect("to_prometheus_text must succeed");
+        assert!(text.contains("# TYPE hisui_processed_frames_total counter"));
+        assert!(text.contains("# TYPE hisui_queue_depth gauge"));
+        assert!(text.contains("# TYPE hisui_latency_seconds gauge"));
+        assert!(text.contains("# TYPE hisui_error gauge"));
+        assert!(text.contains("hisui_processed_frames_total{processor_id=\"p0\"} 3"));
+        assert!(text.contains("hisui_queue_depth{processor_id=\"p0\"} -1"));
+        assert!(text.contains("hisui_latency_seconds{processor_id=\"p0\"} 0.5"));
+        assert!(text.contains("hisui_error{processor_id=\"p0\"} 1"));
+    }
+
+    #[test]
+    fn prometheus_text_outputs_string_as_gauge_with_value_label() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        let state = stats.string("state");
+        state.set("running");
+        let text = stats
+            .to_prometheus_text()
+            .expect("to_prometheus_text must succeed");
+        assert!(text.contains("# TYPE hisui_state gauge"));
+        assert!(text.contains("hisui_state{processor_id=\"p0\",value=\"running\"} 1"));
+    }
+
+    #[test]
+    fn prometheus_text_escapes_label_value() {
+        let mut stats = Stats::new();
+        let state = stats.string("state");
+        state.set("a\"b\\c\nd");
+        let text = stats
+            .to_prometheus_text()
+            .expect("to_prometheus_text must succeed");
+        assert!(text.contains("value=\"a\\\"b\\\\c\\nd\""));
+    }
+
+    #[test]
+    fn prometheus_text_rejects_invalid_metric_name() {
+        let mut stats = Stats::new();
+        stats.counter("foo-bar").inc();
+        let err = stats
+            .to_prometheus_text()
+            .expect_err("to_prometheus_text must fail");
+        assert!(err.to_string().contains("invalid Prometheus metric name"));
+    }
+
+    #[test]
+    fn prometheus_text_rejects_invalid_label_name() {
+        let mut stats = Stats::new();
+        stats.set_default_label("bad-label", "x");
+        stats.counter("requests_total").inc();
+        let err = stats
+            .to_prometheus_text()
+            .expect_err("to_prometheus_text must fail");
+        assert!(err.to_string().contains("invalid Prometheus label name"));
+    }
+
+    fn panic_message(panic: std::result::Result<(), Box<dyn std::any::Any + Send>>) -> String {
+        let panic = panic.expect_err("panic is expected");
+        if let Some(message) = panic.downcast_ref::<String>() {
+            return message.clone();
         }
-    }
-}
-
-impl<T: Clone> SharedSet<T> {
-    pub fn get(&self) -> BTreeSet<T> {
-        if let Ok(v) = self.0.lock() {
-            v.clone()
-        } else {
-            BTreeSet::default()
+        if let Some(message) = panic.downcast_ref::<&str>() {
+            return message.to_string();
         }
+        "<non-string panic>".to_string()
     }
-}
 
-impl<T> Default for SharedSet<T> {
-    fn default() -> Self {
-        Self(Arc::new(Mutex::new(BTreeSet::new())))
-    }
-}
-
-/// `Mp4AudioReader` 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct Mp4AudioReaderStats {
-    /// 入力ファイルのパスのリスト
-    ///
-    /// 分割録画の場合には要素の数が複数になる
-    pub input_files: Vec<PathBuf>,
-
-    /// 現在処理中の入力ファイル
-    pub current_input_file: SharedOption<PathBuf>,
-
-    /// 音声コーデック
-    pub codec: Option<CodecName>,
-
-    /// Mp4 のサンプルの数
-    pub total_sample_count: SharedAtomicCounter,
-
-    /// 入力ファイルに含まれる音声トラックの尺
-    pub total_track_duration: SharedAtomicDuration,
-
-    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
-    pub track_duration_offset: SharedAtomicDuration,
-
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// ソースの表示開始時刻（オフセッット）
-    pub start_time: Duration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for Mp4AudioReaderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "mp4_audio_reader")?;
-            f.member("input_files", &self.input_files)?;
-            if let Some(path) = self.current_input_file.get() {
-                f.member("current_input_file", path)?;
-            }
-            f.member("codec", self.codec)?;
-            f.member("total_sample_count", self.total_sample_count.get())?;
-            f.member(
-                "total_track_seconds",
-                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// `Mp4VideoReader` 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct Mp4VideoReaderStats {
-    /// 入力ファイルのパスのリスト
-    ///
-    /// 分割録画の場合には要素の数が複数になる
-    pub input_files: Vec<PathBuf>,
-
-    /// 現在処理中の入力ファイル
-    pub current_input_file: SharedOption<PathBuf>,
-
-    /// 映像コーデック
-    pub codec: SharedOption<CodecName>,
-
-    /// 映像の解像度（途中で変わった場合は複数になる）
-    pub resolutions: SharedSet<VideoResolution>,
-
-    /// Mp4 のサンプルの数
-    pub total_sample_count: SharedAtomicCounter,
-
-    /// 入力ファイルに含まれる映像トラックの尺
-    pub total_track_duration: SharedAtomicDuration,
-
-    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
-    pub track_duration_offset: SharedAtomicDuration,
-
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// ソースの表示開始時刻（オフセッット）
-    pub start_time: Duration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for Mp4VideoReaderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "mp4_video_reader")?;
-            f.member("input_files", &self.input_files)?;
-            if let Some(path) = self.current_input_file.get() {
-                f.member("current_input_file", path)?;
-            }
-            f.member("codec", self.codec.get())?;
-            f.member(
-                "resolutions",
-                nojson::json(|f| {
-                    f.array(|f| {
-                        f.elements(
-                            self.resolutions
-                                .get()
-                                .iter()
-                                .map(|res| format!("{}x{}", res.width, res.height)),
-                        )
-                    })
-                }),
-            )?;
-            f.member("total_sample_count", self.total_sample_count.get())?;
-            f.member(
-                "total_track_seconds",
-                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// `WebmAudioReader` 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct WebmAudioReaderStats {
-    /// 入力ファイルのパスのリスト
-    ///
-    /// 分割録画の場合には要素の数が複数になる
-    pub input_files: Vec<PathBuf>,
-
-    /// 現在処理中の入力ファイル
-    pub current_input_file: SharedOption<PathBuf>,
-
-    /// 音声コーデック
-    pub codec: Option<CodecName>,
-
-    /// WebM のクラスターの数
-    pub total_cluster_count: SharedAtomicCounter,
-
-    /// WebM のシンプルブロックの数
-    pub total_simple_block_count: SharedAtomicCounter,
-
-    /// 入力ファイルに含まれる音声トラックの尺
-    pub total_track_duration: SharedAtomicDuration,
-
-    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
-    pub track_duration_offset: SharedAtomicDuration,
-
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// ソースの表示開始時刻（オフセッット）
-    pub start_time: Duration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for WebmAudioReaderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "webm_audio_reader")?;
-            f.member("input_files", &self.input_files)?;
-            if let Some(path) = self.current_input_file.get() {
-                f.member("current_input_file", path)?;
-            }
-            f.member("codec", self.codec)?;
-            f.member("total_cluster_count", self.total_cluster_count.get())?;
-            f.member(
-                "total_simple_block_count",
-                self.total_simple_block_count.get(),
-            )?;
-            f.member(
-                "total_track_seconds",
-                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// `WebmVideoReader` 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct WebmVideoReaderStats {
-    /// 入力ファイルのパスのリスト
-    ///
-    /// 分割録画の場合には要素の数が複数になる
-    pub input_files: Vec<PathBuf>,
-
-    /// 現在処理中の入力ファイル
-    pub current_input_file: SharedOption<PathBuf>,
-
-    /// 映像コーデック
-    pub codec: SharedOption<CodecName>,
-
-    /// WebM のクラスターの数
-    pub total_cluster_count: SharedAtomicCounter,
-
-    /// WebM のシンプルブロックの数
-    pub total_simple_block_count: SharedAtomicCounter,
-
-    /// 入力ファイルに含まれる映像トラックの尺
-    pub total_track_duration: SharedAtomicDuration,
-
-    /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
-    pub track_duration_offset: SharedAtomicDuration,
-
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// ソースの表示開始時刻（オフセッット）
-    pub start_time: Duration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for WebmVideoReaderStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "webm_video_reader")?;
-            f.member("input_files", &self.input_files)?;
-            if let Some(path) = self.current_input_file.get() {
-                f.member("current_input_file", path)?;
-            }
-            f.member("codec", self.codec.get())?;
-            f.member("total_cluster_count", self.total_cluster_count.get())?;
-            f.member(
-                "total_simple_block_count",
-                self.total_simple_block_count.get(),
-            )?;
-            f.member(
-                "total_track_seconds",
-                (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("start_time_seconds", self.start_time.as_secs_f32())?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// `Mp4Writer` 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct Mp4WriterStats {
-    /// 音声コーデック
-    pub audio_codec: SharedOption<CodecName>,
-
-    /// 映像コーデック
-    pub video_codec: SharedOption<CodecName>,
-
-    /// 出力ファイルの初期化時に moov ボックス用に事前に予約した領域のサイズ
-    pub reserved_moov_box_size: SharedAtomicCounter,
-
-    /// 出力ファイルの最終処理時に判明した moov ボックスの実際のサイズ
-    pub actual_moov_box_size: SharedAtomicCounter,
-
-    /// 出力ファイルに含まれる音声チャンクの数
-    pub total_audio_chunk_count: SharedAtomicCounter,
-
-    /// 出力ファイルに含まれる映像チャンクの数
-    pub total_video_chunk_count: SharedAtomicCounter,
-
-    /// 出力ファイルに含まれる音声サンプルの数
-    pub total_audio_sample_count: SharedAtomicCounter,
-
-    /// 出力ファイルに含まれる映像サンプルの数
-    pub total_video_sample_count: SharedAtomicCounter,
-
-    /// 出力ファイルに含まれる音声データのバイト数
-    pub total_audio_sample_data_byte_size: SharedAtomicCounter,
-
-    /// 出力ファイルに含まれる映像データのバイト数
-    pub total_video_sample_data_byte_size: SharedAtomicCounter,
-
-    /// 出力ファイルに含まれる音声トラックの尺
-    pub total_audio_track_duration: SharedAtomicDuration,
-
-    /// 出力ファイルに含まれる映像トラックの尺
-    pub total_video_track_duration: SharedAtomicDuration,
-
-    /// MP4 出力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for Mp4WriterStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "mp4_writer")?;
-            f.member("audio_codec", self.audio_codec.get())?;
-            f.member("video_codec", self.video_codec.get())?;
-            f.member("reserved_moov_box_size", self.reserved_moov_box_size.get())?;
-            f.member("actual_moov_box_size", self.actual_moov_box_size.get())?;
-            f.member(
-                "total_audio_chunk_count",
-                self.total_audio_chunk_count.get(),
-            )?;
-            f.member(
-                "total_video_chunk_count",
-                self.total_video_chunk_count.get(),
-            )?;
-            f.member(
-                "total_audio_sample_count",
-                self.total_audio_sample_count.get(),
-            )?;
-            f.member(
-                "total_video_sample_count",
-                self.total_video_sample_count.get(),
-            )?;
-            f.member(
-                "total_audio_sample_data_byte_size",
-                self.total_audio_sample_data_byte_size.get(),
-            )?;
-            f.member(
-                "total_video_sample_data_byte_size",
-                self.total_video_sample_data_byte_size.get(),
-            )?;
-            f.member(
-                "total_audio_track_seconds",
-                self.total_audio_track_duration.get().as_secs_f32(),
-            )?;
-            f.member(
-                "total_video_track_seconds",
-                self.total_video_track_duration.get().as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
-    }
-}
-
-/// `Mp4Writer` 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct WorkerThreadStats {
-    /// 担当しているプロセッサの番号（インデックス）リスト
-    pub processors: Vec<usize>,
-
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// 入出力の待機時間
-    pub total_waiting_duration: SharedAtomicDuration,
-}
-
-impl nojson::DisplayJson for WorkerThreadStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member(
-                "processors",
-                nojson::json(|f| {
-                    let indent = f.get_indent_size();
-                    f.set_indent_size(0);
-                    f.value(&self.processors)?;
-                    f.set_indent_size(indent);
-                    Ok(())
-                }),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
-            f.member(
-                "total_waiting_seconds",
-                self.total_waiting_duration.get().as_secs_f32(),
-            )?;
-            Ok(())
-        })
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VideoResolution {
-    pub width: usize,
-    pub height: usize,
-}
-
-impl VideoResolution {
-    pub fn new(frame: &VideoFrame) -> Self {
-        Self {
-            width: frame.width,
-            height: frame.height,
-        }
-    }
-}
-
-impl nojson::DisplayJson for VideoResolution {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.value(format!("{}x{}", self.width, self.height))
+    #[test]
+    fn snapshot_entries_include_all_metric_types() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        stats.counter("processed_total").add(10);
+        stats.gauge("queue_depth").set(-3);
+        stats.gauge_f64("latency_seconds").set(0.25);
+        stats.flag("error").set(true);
+        stats.string("state").set("running");
+
+        let entries = stats
+            .snapshot_entries()
+            .expect("snapshot_entries must succeed");
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "processed_total"
+                    && e.labels.get("processor_id") == Some(&"p0".to_owned())
+                    && e.value == StatsSnapshotValue::Counter(10)
+            }),
+            "counter entry is missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "queue_depth" && e.value == StatsSnapshotValue::Gauge(-3)
+            }),
+            "gauge entry is missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "latency_seconds" && e.value == StatsSnapshotValue::GaugeF64(0.25)
+            }),
+            "gauge_f64 entry is missing: {entries:?}"
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.metric_name == "error" && e.value == StatsSnapshotValue::Flag(true)),
+            "flag entry is missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "state" && e.value == StatsSnapshotValue::String("running".into())
+            }),
+            "string entry is missing: {entries:?}"
+        );
     }
 }

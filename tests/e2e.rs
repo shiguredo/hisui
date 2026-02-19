@@ -9,7 +9,7 @@ use hisui::{
     metadata::SourceId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
+    stats_legacy::{Mp4AudioReaderStats, Mp4VideoReaderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };

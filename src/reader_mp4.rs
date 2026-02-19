@@ -11,7 +11,7 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
+    stats_legacy::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
     video::{VideoFormat, VideoFrame},
 };
 

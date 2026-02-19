@@ -14,7 +14,7 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::{AudioMixerStats, ProcessorStats},
+    stats_legacy::{AudioMixerStats, ProcessorStats},
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);

@@ -4,7 +4,7 @@ use crate::{
     Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
     metadata::SourceId,
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::{WebmAudioReaderStats, WebmVideoReaderStats},
+    stats_legacy::{WebmAudioReaderStats, WebmVideoReaderStats},
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
