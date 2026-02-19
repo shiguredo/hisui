@@ -291,6 +291,21 @@ impl StatsEntry {
     }
 }
 
+impl nojson::DisplayJson for StatsEntry {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::Counter(counter) => f.value(counter.get()),
+            Self::Gauge(gauge) => f.value(gauge.get()),
+            Self::GaugeF64(gauge) => f.value(gauge.get()),
+            Self::Flag(flag) => f.value(flag.get()),
+            Self::StringValue(string_value) => {
+                let value = string_value.get();
+                f.value(&value)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct StatsCounter {
     value: Arc<AtomicU64>,

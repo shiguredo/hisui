@@ -6,32 +6,11 @@ pub struct LegacyWorkerThreadStats {
     pub total_waiting_seconds: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum LegacyJsonValue {
-    Bool(bool),
-    Unsigned(u64),
-    Signed(i64),
-    Float(f64),
-    String(String),
-}
-
-impl nojson::DisplayJson for LegacyJsonValue {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            Self::Bool(v) => f.value(*v),
-            Self::Unsigned(v) => f.value(*v),
-            Self::Signed(v) => f.value(*v),
-            Self::Float(v) => f.value(*v),
-            Self::String(v) => f.value(v),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct LegacyProcessorStats {
     processor_type: String,
     error: bool,
-    values: BTreeMap<String, LegacyJsonValue>,
+    values: BTreeMap<String, crate::stats::StatsEntry>,
 }
 
 impl LegacyProcessorStats {
@@ -117,10 +96,9 @@ pub fn to_legacy_stats_json(
             processor.error = entry.entry.as_bool_for_legacy();
             continue;
         }
-        processor.values.insert(
-            entry.metric_name.to_owned(),
-            stats_entry_to_legacy_value(&entry.entry),
-        );
+        processor
+            .values
+            .insert(entry.metric_name.to_owned(), entry.entry);
     }
 
     let processors = processors.into_values().collect::<Vec<_>>();
@@ -132,16 +110,6 @@ pub fn to_legacy_stats_json(
     };
     let json = nojson::json(|f| f.value(&stats));
     Ok(nojson::RawJsonOwned::parse(json.to_string()).expect("infallible"))
-}
-
-fn stats_entry_to_legacy_value(entry: &crate::stats::StatsEntry) -> LegacyJsonValue {
-    match entry {
-        crate::stats::StatsEntry::Counter(v) => LegacyJsonValue::Unsigned(v.get()),
-        crate::stats::StatsEntry::Gauge(v) => LegacyJsonValue::Signed(v.get()),
-        crate::stats::StatsEntry::GaugeF64(v) => LegacyJsonValue::Float(v.get()),
-        crate::stats::StatsEntry::Flag(v) => LegacyJsonValue::Bool(v.get()),
-        crate::stats::StatsEntry::StringValue(v) => LegacyJsonValue::String(v.get()),
-    }
 }
 
 #[cfg(test)]
