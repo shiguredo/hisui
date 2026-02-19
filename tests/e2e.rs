@@ -210,13 +210,13 @@ fn empty_source() -> noargs::Result<()> {
     // 結果ファイルを確認（映像・音声トラックが存在しない）
     assert!(out_file.path().exists());
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0
     );
     assert_eq!(
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0
@@ -272,11 +272,9 @@ fn test_simple_single_source_common(
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -823,11 +821,9 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -954,11 +950,9 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // [NOTE]
     // レイアウトファイル未指定だと映像の解像度が大きめになって
@@ -1040,11 +1034,9 @@ fn simple_split_archive() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -1181,11 +1173,9 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -1308,12 +1298,11 @@ fn two_regions() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
-            .or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 音声はなし
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), Default::default())
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::{
     Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
     metadata::SourceId,
-    reader_webm::{WebmAudioReader, WebmAudioReaderStats, WebmVideoReader, WebmVideoReaderStats},
+    reader_webm::{WebmAudioReader, WebmVideoReader},
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -140,12 +140,8 @@ impl ReaderState {
 
         let audio_reader = if enable_audio {
             Some(
-                WebmAudioReader::new(
-                    source_id.clone(),
-                    path.as_ref(),
-                    WebmAudioReaderStats::default(),
-                )
-                .map_err(|e| Error::new(e.to_string()))?,
+                WebmAudioReader::new(source_id.clone(), path.as_ref())
+                    .map_err(|e| Error::new(e.to_string()))?,
             )
         } else {
             None
@@ -153,7 +149,7 @@ impl ReaderState {
 
         let video_reader = if enable_video {
             Some(
-                WebmVideoReader::new(source_id, path.as_ref(), WebmVideoReaderStats::default())
+                WebmVideoReader::new(source_id, path.as_ref())
                     .map_err(|e| Error::new(e.to_string()))?,
             )
         } else {

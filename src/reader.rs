@@ -12,8 +12,8 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    reader_mp4::{Mp4AudioReader, Mp4AudioReaderStats, Mp4VideoReader, Mp4VideoReaderStats},
-    reader_webm::{WebmAudioReader, WebmAudioReaderStats, WebmVideoReader, WebmVideoReaderStats},
+    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
+    reader_webm::{WebmAudioReader, WebmVideoReader},
     types::CodecName,
     video::VideoFrame,
 };
@@ -122,28 +122,22 @@ impl AudioReader {
         let first_input_file = remaining_input_files.pop().or_fail()?;
         let inner = match format {
             ContainerFormat::Mp4 => {
-                let stats = Mp4AudioReaderStats {
-                    input_files,
-                    codec: Some(CodecName::Opus),
-                    start_time: timestamp_offset,
-                    current_input_file: Some(first_input_file.clone()),
-                    ..Default::default()
-                };
-                AudioReaderInner::Mp4(Box::new(
-                    Mp4AudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    Mp4AudioReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.input_files = input_files.clone();
+                reader.codec = Some(CodecName::Opus);
+                reader.start_time = timestamp_offset;
+                reader.current_input_file = Some(first_input_file.clone());
+                AudioReaderInner::Mp4(Box::new(reader))
             }
             ContainerFormat::Webm => {
-                let stats = WebmAudioReaderStats {
-                    input_files,
-                    codec: Some(CodecName::Opus),
-                    start_time: timestamp_offset,
-                    current_input_file: Some(first_input_file.clone()),
-                    ..Default::default()
-                };
-                AudioReaderInner::Webm(Box::new(
-                    WebmAudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    WebmAudioReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.input_files = input_files.clone();
+                reader.codec = Some(CodecName::Opus);
+                reader.start_time = timestamp_offset;
+                reader.current_input_file = Some(first_input_file.clone());
+                AudioReaderInner::Webm(Box::new(reader))
             }
         };
         compose_stats
@@ -163,38 +157,34 @@ impl AudioReader {
 
     fn start_next_input_file(&mut self) -> orfail::Result<bool> {
         match &mut self.inner {
-            AudioReaderInner::Mp4(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().clone(),
-                Mp4AudioReader::new,
-            )
-            .map(|reader| {
-                if let Some(reader) = reader {
+            AudioReaderInner::Mp4(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        Mp4AudioReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
                     **inner = reader;
-                    true
+                    Ok(true)
                 } else {
                     inner.stats_mut().current_input_file = None;
-                    false
+                    Ok(false)
                 }
-            })
-            .or_fail(),
-            AudioReaderInner::Webm(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().clone(),
-                WebmAudioReader::new,
-            )
-            .map(|reader| {
-                if let Some(reader) = reader {
+            }
+            AudioReaderInner::Webm(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        WebmAudioReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
                     **inner = reader;
-                    true
+                    Ok(true)
                 } else {
                     inner.stats_mut().current_input_file = None;
-                    false
+                    Ok(false)
                 }
-            })
-            .or_fail(),
+            }
         }
     }
 
@@ -420,26 +410,20 @@ impl VideoReader {
         let first_input_file = remaining_input_files.pop().or_fail()?;
         let inner = match format {
             ContainerFormat::Mp4 => {
-                let stats = Mp4VideoReaderStats {
-                    input_files,
-                    current_input_file: Some(first_input_file.clone()),
-                    start_time: timestamp_offset,
-                    ..Default::default()
-                };
-                VideoReaderInner::Mp4(Box::new(
-                    Mp4VideoReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    Mp4VideoReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.input_files = input_files.clone();
+                reader.start_time = timestamp_offset;
+                reader.current_input_file = Some(first_input_file.clone());
+                VideoReaderInner::Mp4(Box::new(reader))
             }
             ContainerFormat::Webm => {
-                let stats = WebmVideoReaderStats {
-                    input_files,
-                    current_input_file: Some(first_input_file.clone()),
-                    start_time: timestamp_offset,
-                    ..Default::default()
-                };
-                VideoReaderInner::Webm(Box::new(
-                    WebmVideoReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    WebmVideoReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.input_files = input_files.clone();
+                reader.start_time = timestamp_offset;
+                reader.current_input_file = Some(first_input_file.clone());
+                VideoReaderInner::Webm(Box::new(reader))
             }
         };
         compose_stats
@@ -459,38 +443,34 @@ impl VideoReader {
 
     fn start_next_input_file(&mut self) -> orfail::Result<bool> {
         match &mut self.inner {
-            VideoReaderInner::Mp4(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().clone(),
-                Mp4VideoReader::new,
-            )
-            .map(|reader| {
-                if let Some(reader) = reader {
+            VideoReaderInner::Mp4(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        Mp4VideoReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
                     **inner = reader;
-                    true
+                    Ok(true)
                 } else {
                     inner.stats_mut().current_input_file = None;
-                    false
+                    Ok(false)
                 }
-            })
-            .or_fail(),
-            VideoReaderInner::Webm(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().clone(),
-                WebmVideoReader::new,
-            )
-            .map(|reader| {
-                if let Some(reader) = reader {
+            }
+            VideoReaderInner::Webm(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        WebmVideoReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
                     **inner = reader;
-                    true
+                    Ok(true)
                 } else {
                     inner.stats_mut().current_input_file = None;
-                    false
+                    Ok(false)
                 }
-            })
-            .or_fail(),
+            }
         }
     }
 
@@ -610,52 +590,5 @@ impl Iterator for VideoReaderInner {
             Self::Mp4(r) => r.next(),
             Self::Webm(r) => r.next(),
         }
-    }
-}
-
-fn start_next_input_file<F, S, R>(
-    remaining_input_files: &mut Vec<PathBuf>,
-    source_id: SourceId,
-    mut stats: S,
-    f: F,
-) -> orfail::Result<Option<R>>
-where
-    S: HasCurrentInputFile,
-    F: FnOnce(SourceId, PathBuf, S) -> orfail::Result<R>,
-{
-    if let Some(next_input_file) = remaining_input_files.pop() {
-        stats.set_current_input_file(Some(next_input_file.clone()));
-        let reader = f(source_id, next_input_file, stats).or_fail()?;
-        Ok(Some(reader))
-    } else {
-        Ok(None)
-    }
-}
-
-trait HasCurrentInputFile {
-    fn set_current_input_file(&mut self, path: Option<PathBuf>);
-}
-
-impl HasCurrentInputFile for Mp4AudioReaderStats {
-    fn set_current_input_file(&mut self, path: Option<PathBuf>) {
-        self.current_input_file = path;
-    }
-}
-
-impl HasCurrentInputFile for Mp4VideoReaderStats {
-    fn set_current_input_file(&mut self, path: Option<PathBuf>) {
-        self.current_input_file = path;
-    }
-}
-
-impl HasCurrentInputFile for WebmAudioReaderStats {
-    fn set_current_input_file(&mut self, path: Option<PathBuf>) {
-        self.current_input_file = path;
-    }
-}
-
-impl HasCurrentInputFile for WebmVideoReaderStats {
-    fn set_current_input_file(&mut self, path: Option<PathBuf>) {
-        self.current_input_file = path;
     }
 }

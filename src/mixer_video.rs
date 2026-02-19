@@ -38,17 +38,6 @@ pub struct VideoResolution {
     pub height: usize,
 }
 
-#[derive(Debug, Default)]
-pub struct VideoMixerStats {
-    pub output_video_resolution: VideoResolution,
-    pub total_input_video_frame_count: u64,
-    pub total_output_video_frame_count: u64,
-    pub total_output_video_frame_duration: Duration,
-    pub total_trimmed_video_frame_count: u64,
-    pub total_extended_video_frame_count: u64,
-    pub error: bool,
-}
-
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
     original: Arc<VideoFrame>,
@@ -211,8 +200,14 @@ pub struct VideoMixer {
     input_streams: HashMap<MediaStreamId, InputStream>,
     output_stream_id: MediaStreamId,
     last_mixed_frame: Option<VideoFrame>,
-    stats: VideoMixerStats,
     compose_stats: crate::stats::Stats,
+    pub output_video_resolution: VideoResolution,
+    pub total_input_video_frame_count: u64,
+    pub total_output_video_frame_count: u64,
+    pub total_output_video_frame_duration: Duration,
+    pub total_trimmed_video_frame_count: u64,
+    pub total_extended_video_frame_count: u64,
+    pub error: bool,
 }
 
 impl VideoMixer {
@@ -254,19 +249,22 @@ impl VideoMixer {
             input_streams,
             output_stream_id,
             last_mixed_frame: None,
-            stats: VideoMixerStats {
-                output_video_resolution: VideoResolution {
-                    width: resolution.width().get(),
-                    height: resolution.height().get(),
-                },
-                ..Default::default()
-            },
             compose_stats,
+            output_video_resolution: VideoResolution {
+                width: resolution.width().get(),
+                height: resolution.height().get(),
+            },
+            total_input_video_frame_count: 0,
+            total_output_video_frame_count: 0,
+            total_output_video_frame_duration: Duration::ZERO,
+            total_trimmed_video_frame_count: 0,
+            total_extended_video_frame_count: 0,
+            error: false,
         }
     }
 
-    pub fn stats(&self) -> &VideoMixerStats {
-        &self.stats
+    pub fn stats(&self) -> &Self {
+        self
     }
 
     pub async fn run(
@@ -337,9 +335,9 @@ impl VideoMixer {
 
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count
-                + self.stats.total_extended_video_frame_count
-                + self.stats.total_trimmed_video_frame_count,
+            self.total_output_video_frame_count
+                + self.total_extended_video_frame_count
+                + self.total_trimmed_video_frame_count,
         )
     }
 
@@ -351,16 +349,14 @@ impl VideoMixer {
 
     fn next_output_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count + self.stats.total_extended_video_frame_count,
+            self.total_output_video_frame_count + self.total_extended_video_frame_count,
         )
     }
 
     fn next_output_duration(&self) -> Duration {
         // 丸め誤差が蓄積しないように次のフレームのタイスタンプとの差をとる
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count
-                + self.stats.total_extended_video_frame_count
-                + 1,
+            self.total_output_video_frame_count + self.total_extended_video_frame_count + 1,
         ) - self.next_output_timestamp()
     }
 
@@ -374,14 +370,14 @@ impl VideoMixer {
             Self::mix_region(&mut canvas, region, &mut self.input_streams, now).or_fail()?;
         }
 
-        self.stats.total_output_video_frame_count += 1;
+        self.total_output_video_frame_count += 1;
         self.compose_stats
             .counter("total_output_video_frame_count")
             .inc();
-        self.stats.total_output_video_frame_duration += duration;
+        self.total_output_video_frame_duration += duration;
         self.compose_stats
             .gauge_f64("total_output_video_frame_seconds")
-            .set(self.stats.total_output_video_frame_duration.as_secs_f64());
+            .set(self.total_output_video_frame_duration.as_secs_f64());
 
         Ok(VideoFrame {
             // 固定値
@@ -519,7 +515,7 @@ impl MediaProcessor for VideoMixer {
                     frame,
                     self.spec.resize_filter_mode,
                 ));
-            self.stats.total_input_video_frame_count += 1;
+            self.total_input_video_frame_count += 1;
             self.compose_stats
                 .counter("total_input_video_frame_count")
                 .inc();
@@ -535,7 +531,7 @@ impl MediaProcessor for VideoMixer {
 
             // トリム対象期間ならその分はスキップする
             while self.spec.trim_spans.contains(now) {
-                self.stats.total_trimmed_video_frame_count += 1;
+                self.total_trimmed_video_frame_count += 1;
                 self.compose_stats
                     .counter("total_trimmed_video_frame_count")
                     .inc();
@@ -577,14 +573,14 @@ impl MediaProcessor for VideoMixer {
                 let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
 
                 last_frame.duration += duration;
-                self.stats.total_extended_video_frame_count += 1;
+                self.total_extended_video_frame_count += 1;
                 self.compose_stats
                     .counter("total_extended_video_frame_count")
                     .inc();
-                self.stats.total_output_video_frame_duration += duration; // 出力フレーム数は増えないけど尺は伸びる
+                self.total_output_video_frame_duration += duration; // 出力フレーム数は増えないけど尺は伸びる
                 self.compose_stats
                     .gauge_f64("total_output_video_frame_seconds")
-                    .set(self.stats.total_output_video_frame_duration.as_secs_f64());
+                    .set(self.total_output_video_frame_duration.as_secs_f64());
 
                 continue;
             }
