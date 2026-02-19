@@ -51,6 +51,7 @@ impl Composer {
         // プロセッサを準備
         let mut scheduler = Scheduler::with_thread_count(self.worker_threads);
         let mut next_stream_id = MediaStreamId::new(0);
+        let mut legacy_processors = Vec::new();
 
         // リーダーとデコーダーを登録
         let mut audio_mixer_input_stream_ids = Vec::new();
@@ -59,11 +60,13 @@ impl Composer {
             let reader_output_stream_id = next_stream_id.fetch_add(1);
             let reader =
                 AudioReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+            legacy_processors.push(reader.processor_stats());
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
             let decoder =
                 AudioDecoder::new(reader_output_stream_id, decoder_output_stream_id).or_fail()?;
+            legacy_processors.push(decoder.processor_stats());
             scheduler.register(decoder).or_fail()?;
 
             audio_mixer_input_stream_ids.push(decoder_output_stream_id);
@@ -80,6 +83,7 @@ impl Composer {
             let reader_output_stream_id = next_stream_id.fetch_add(1);
             let reader =
                 VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+            legacy_processors.push(reader.processor_stats());
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
@@ -88,6 +92,7 @@ impl Composer {
                 decoder_output_stream_id,
                 video_decoder_options.clone(),
             );
+            legacy_processors.push(decoder.processor_stats());
             scheduler.register(decoder).or_fail()?;
 
             video_mixer_input_stream_ids.push(decoder_output_stream_id);
@@ -100,6 +105,7 @@ impl Composer {
             audio_mixer_input_stream_ids,
             audio_mixer_output_stream_id,
         );
+        legacy_processors.push(audio_mixer.processor_stats());
         scheduler.register(audio_mixer).or_fail()?;
 
         let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
@@ -108,6 +114,7 @@ impl Composer {
             video_mixer_input_stream_ids,
             video_mixer_output_stream_id,
         );
+        legacy_processors.push(video_mixer.processor_stats());
         scheduler.register(video_mixer).or_fail()?;
 
         // エンコーダーを登録
@@ -119,6 +126,7 @@ impl Composer {
             audio_encoder_output_stream_id,
         )
         .or_fail()?;
+        legacy_processors.push(audio_encoder.processor_stats());
         scheduler.register(audio_encoder).or_fail()?;
 
         let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
@@ -129,6 +137,7 @@ impl Composer {
             self.openh264_lib.clone(),
         )
         .or_fail()?;
+        legacy_processors.push(video_encoder.processor_stats());
         scheduler.register(video_encoder).or_fail()?;
 
         // ライターを登録
@@ -143,6 +152,7 @@ impl Composer {
                 .then_some(video_encoder_output_stream_id),
         )
         .or_fail()?;
+        legacy_processors.push(writer.processor_stats());
         scheduler.register(writer).or_fail()?;
 
         // プログレスバーを登録
@@ -159,7 +169,7 @@ impl Composer {
 
         // 合成を実行
         let scheduler_result = scheduler.run().or_fail()?;
-        let stats = convert_legacy_stats_to_stats(&scheduler_result.processors);
+        let stats = convert_legacy_stats_to_stats(&legacy_processors);
 
         if let Some(path) = &self.stats_file_path {
             match crate::stats_legacy_json::to_legacy_stats_json(

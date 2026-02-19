@@ -37,6 +37,10 @@ pub struct AudioMixer {
 }
 
 impl AudioMixer {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        ProcessorStats::AudioMixer(self.stats.clone())
+    }
+
     pub fn new(
         trim_spans: TrimSpans,
         input_stream_ids: Vec<MediaStreamId>,
@@ -229,10 +233,6 @@ impl MediaProcessor for AudioMixer {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(ProcessorStats::AudioMixer(self.stats.clone()))
-    }
-
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
         if let Some(sample) = input.sample {
@@ -307,6 +307,10 @@ impl MediaProcessor for AudioMixer {
             stream_id: self.output_stream_id,
             sample: MediaSample::audio_data(mixed_data),
         })
+    }
+
+    fn set_error(&self) {
+        self.stats.error.set(true);
     }
 }
 

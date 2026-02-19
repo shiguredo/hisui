@@ -199,6 +199,10 @@ pub struct VideoMixer {
 }
 
 impl VideoMixer {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        ProcessorStats::VideoMixer(self.stats.clone())
+    }
+
     pub fn new(
         spec: VideoMixerSpec,
         input_stream_ids: Vec<MediaStreamId>,
@@ -462,10 +466,6 @@ impl MediaProcessor for VideoMixer {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(ProcessorStats::VideoMixer(self.stats.clone()))
-    }
-
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
         if let Some(sample) = input.sample {
@@ -547,6 +547,10 @@ impl MediaProcessor for VideoMixer {
                 ));
             }
         }
+    }
+
+    fn set_error(&self) {
+        self.stats.error.set(true);
     }
 }
 

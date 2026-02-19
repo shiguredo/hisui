@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use orfail::OrFail;
 
-use crate::legacy_processor_stats::ProcessorStats;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
@@ -44,7 +43,6 @@ pub struct Task {
     output_stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     awaiting_input_stream_ids: Vec<MediaStreamId>,
     output_sample: Option<(MediaStreamId, usize, MediaSample)>,
-    stats: Option<ProcessorStats>,
     workload_hint: MediaProcessorWorkloadHint,
     finished: bool,
 }
@@ -58,7 +56,6 @@ impl Task {
         let mut input_stream_txs = Vec::new();
 
         let spec = processor.spec();
-        let stats = processor.stats();
         let channel_size = sync_channel_size();
         for input_stream_id in spec.input_stream_ids {
             let (tx, rx) = mpsc::sync_channel(channel_size);
@@ -73,7 +70,6 @@ impl Task {
             output_stream_txs: HashMap::new(),
             awaiting_input_stream_ids: Vec::new(),
             output_sample: None,
-            stats,
             workload_hint: spec.workload_hint,
             finished: false,
         };
@@ -174,7 +170,6 @@ pub struct Scheduler {
     tasks: Vec<Task>,
     thread_count: NonZeroUsize,
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
-    processors: Vec<ProcessorStats>,
     error: Arc<AtomicBool>,
 }
 
@@ -182,7 +177,6 @@ pub struct Scheduler {
 pub struct SchedulerResult {
     pub elapsed_duration: Duration,
     pub error: bool,
-    pub processors: Vec<ProcessorStats>,
 }
 
 impl Scheduler {
@@ -195,7 +189,6 @@ impl Scheduler {
             tasks: Vec::new(),
             thread_count,
             stream_txs: HashMap::new(),
-            processors: Vec::new(),
             error: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -204,9 +197,6 @@ impl Scheduler {
         P: 'static + Send + MediaProcessor,
     {
         let (task, input_stream_txs) = Task::new(processor);
-        if let Some(stats) = &task.stats {
-            self.processors.push(stats.clone());
-        }
         self.tasks.push(task);
 
         for (id, tx) in input_stream_txs {
@@ -270,7 +260,6 @@ impl Scheduler {
 
         Ok(SchedulerHandle {
             handles,
-            processors: self.processors,
             error: self.error,
         })
     }
@@ -286,7 +275,6 @@ impl Scheduler {
         Ok(SchedulerResult {
             elapsed_duration: start.elapsed(),
             error: handle.error.load(Ordering::Relaxed),
-            processors: handle.processors,
         })
     }
 
@@ -334,7 +322,6 @@ impl Scheduler {
             SchedulerResult {
                 elapsed_duration: start.elapsed(),
                 error: handle.error.load(Ordering::Relaxed),
-                processors: handle.processors,
             },
         ))
     }
@@ -362,7 +349,6 @@ impl Default for Scheduler {
 #[derive(Debug)]
 struct SchedulerHandle {
     handles: Vec<std::thread::JoinHandle<()>>,
-    processors: Vec<ProcessorStats>,
     error: Arc<AtomicBool>,
 }
 
@@ -398,9 +384,7 @@ impl TaskRunner {
                 Err(e) => {
                     tracing::error!("{e}");
                     self.error_flag.store(true, Ordering::Relaxed);
-                    if let Some(stats) = &self.tasks[i].stats {
-                        stats.set_error();
-                    }
+                    self.tasks[i].processor.set_error();
                     self.tasks.swap_remove(i);
                 }
                 Ok(task_did_something) if self.tasks[i].finished => {

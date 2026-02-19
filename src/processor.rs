@@ -4,24 +4,16 @@ use std::time::{Duration, Instant};
 use orfail::OrFail;
 
 use crate::audio::AudioData;
-use crate::legacy_processor_stats::ProcessorStats;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::video::VideoFrame;
 
 pub trait MediaProcessor {
     fn spec(&self) -> MediaProcessorSpec;
-    fn stats(&self) -> Option<ProcessorStats> {
-        None
-    }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()>;
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
 
-    fn set_error(&self) {
-        if let Some(stats) = self.stats() {
-            stats.set_error();
-        }
-    }
+    fn set_error(&self) {}
 }
 
 pub struct BoxedMediaProcessor(Box<dyn 'static + Send + MediaProcessor>);
@@ -42,10 +34,6 @@ impl std::fmt::Debug for BoxedMediaProcessor {
 impl MediaProcessor for BoxedMediaProcessor {
     fn spec(&self) -> MediaProcessorSpec {
         self.0.spec()
-    }
-
-    fn stats(&self) -> Option<ProcessorStats> {
-        self.0.stats()
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {

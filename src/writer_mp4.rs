@@ -69,6 +69,10 @@ pub struct Mp4Writer {
 }
 
 impl Mp4Writer {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        ProcessorStats::Mp4Writer(self.stats.clone())
+    }
+
     /// [`Mp4Writer`] インスタンスを生成する
     pub fn new<P: AsRef<Path>>(
         path: P,
@@ -304,10 +308,6 @@ impl MediaProcessor for Mp4Writer {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(ProcessorStats::Mp4Writer(self.stats.clone()))
-    }
-
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         match input.sample {
             Some(MediaSample::Audio(sample))
@@ -354,6 +354,10 @@ impl MediaProcessor for Mp4Writer {
                 return Ok(MediaProcessorOutput::Finished);
             }
         }
+    }
+
+    fn set_error(&self) {
+        self.stats.error.set(true);
     }
 }
 

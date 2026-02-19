@@ -40,6 +40,10 @@ pub struct AudioDecoder {
 }
 
 impl AudioDecoder {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        ProcessorStats::AudioDecoder(self.stats.clone())
+    }
+
     pub fn new(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
@@ -134,10 +138,6 @@ impl MediaProcessor for AudioDecoder {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(ProcessorStats::AudioDecoder(self.stats.clone()))
-    }
-
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         let Some(sample) = input.sample else {
             self.eos = true;
@@ -184,6 +184,10 @@ impl MediaProcessor for AudioDecoder {
                 awaiting_stream_id: Some(self.input_stream_id),
             })
         }
+    }
+
+    fn set_error(&self) {
+        self.stats.error.set(true);
     }
 }
 
@@ -266,6 +270,10 @@ pub struct VideoDecoder {
 }
 
 impl VideoDecoder {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        ProcessorStats::VideoDecoder(self.stats.clone())
+    }
+
     pub fn new(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
@@ -406,10 +414,6 @@ impl MediaProcessor for VideoDecoder {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(ProcessorStats::VideoDecoder(self.stats.clone()))
-    }
-
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
@@ -447,6 +451,10 @@ impl MediaProcessor for VideoDecoder {
                 awaiting_stream_id: Some(self.input_stream_id),
             })
         }
+    }
+
+    fn set_error(&self) {
+        self.stats.error.set(true);
     }
 }
 

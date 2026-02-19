@@ -44,6 +44,10 @@ pub struct AudioEncoder {
 }
 
 impl AudioEncoder {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        ProcessorStats::AudioEncoder(self.stats.clone())
+    }
+
     pub fn new(
         codec: CodecName,
         bitrate: NonZeroUsize,
@@ -233,10 +237,6 @@ impl MediaProcessor for AudioEncoder {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(ProcessorStats::AudioEncoder(self.stats.clone()))
-    }
-
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         let encoded = if let Some(sample) = input.sample {
             let data = sample.expect_audio_data().or_fail()?;
@@ -266,6 +266,10 @@ impl MediaProcessor for AudioEncoder {
                 awaiting_stream_id: Some(self.input_stream_id),
             })
         }
+    }
+
+    fn set_error(&self) {
+        self.stats.error.set(true);
     }
 }
 
@@ -360,6 +364,10 @@ pub struct VideoEncoder {
 }
 
 impl VideoEncoder {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        ProcessorStats::VideoEncoder(self.stats.clone())
+    }
+
     pub fn new(
         options: &VideoEncoderOptions,
         input_stream_id: MediaStreamId,
@@ -603,10 +611,6 @@ impl MediaProcessor for VideoEncoder {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(ProcessorStats::VideoEncoder(self.stats.clone()))
-    }
-
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
@@ -652,6 +656,10 @@ impl MediaProcessor for VideoEncoder {
                 awaiting_stream_id: Some(self.input_stream_id),
             })
         }
+    }
+
+    fn set_error(&self) {
+        self.stats.error.set(true);
     }
 }
 

@@ -33,6 +33,10 @@ pub struct AudioReader {
 }
 
 impl AudioReader {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        self.inner.stats()
+    }
+
     pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
@@ -173,10 +177,6 @@ impl MediaProcessor for AudioReader {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(self.inner.stats())
-    }
-
     fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
         Err(orfail::Failure::new(
             "BUG: reader does not require any input streams",
@@ -204,6 +204,10 @@ impl MediaProcessor for AudioReader {
                 }
             }
         }
+    }
+
+    fn set_error(&self) {
+        self.inner.stats().set_error();
     }
 }
 
@@ -251,6 +255,10 @@ pub struct VideoReader {
 }
 
 impl VideoReader {
+    pub fn processor_stats(&self) -> ProcessorStats {
+        self.inner.stats()
+    }
+
     pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
@@ -388,10 +396,6 @@ impl MediaProcessor for VideoReader {
         }
     }
 
-    fn stats(&self) -> Option<ProcessorStats> {
-        Some(self.inner.stats())
-    }
-
     fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
         Err(orfail::Failure::new(
             "BUG: reader does not require any input streams",
@@ -419,6 +423,10 @@ impl MediaProcessor for VideoReader {
                 }
             }
         }
+    }
+
+    fn set_error(&self) {
+        self.inner.stats().set_error();
     }
 }
 
