@@ -8,7 +8,6 @@ use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, TrackId,
     audio::{AudioData, AudioFormat},
-    stats_legacy::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
     video::{VideoFormat, VideoFrame},
 };
 
@@ -140,7 +139,6 @@ impl RtmpOutboundEndpoint {
 
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
             .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?;
-        let stats = RtmpOutboundEndpointStats::default();
         let (tx, rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
 
         let server_options = self.options.clone();
@@ -149,13 +147,11 @@ impl RtmpOutboundEndpoint {
                 url,
                 rx,
                 clients: Vec::new(),
-                stats: stats.clone(),
                 options: server_options,
             };
 
             if let Err(e) = server.run().await {
                 tracing::error!("RTMP play server error: {e}");
-                server.stats.error.set(true);
                 return Err(e);
             }
             Ok(())
@@ -290,7 +286,6 @@ struct RtmpPlayServer {
     url: shiguredo_rtmp::RtmpUrl,
     rx: tokio::sync::mpsc::Receiver<MediaSample>,
     clients: Vec<tokio::sync::mpsc::Sender<ClientMediaFrame>>,
-    stats: RtmpOutboundEndpointStats,
     options: RtmpOutboundEndpointOptions,
 }
 
@@ -358,21 +353,10 @@ impl RtmpPlayServer {
         let (client_tx, client_rx) = tokio::sync::mpsc::channel(CLIENT_FRAME_CHANNEL_SIZE);
         self.clients.push(client_tx);
 
-        let stats = self.stats.clone();
         let expected_app = self.url.app.clone();
         let expected_stream_name = self.url.stream_name.clone();
 
         tokio::spawn(async move {
-            let frame_handler_stats = crate::rtmp::RtmpOutgoingFrameHandlerStats {
-                total_audio_frame_count: stats.total_audio_frame_count.clone(),
-                total_video_frame_count: stats.total_video_frame_count.clone(),
-                total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
-                total_audio_sequence_header_count: stats.total_audio_sequence_header_count.clone(),
-                total_video_sequence_header_count: stats.total_video_sequence_header_count.clone(),
-            };
-
-            stats.total_connected_clients.increment();
-
             match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await {
                 Ok(tls_stream) => {
                     if tls_acceptor.is_some() {
@@ -381,23 +365,17 @@ impl RtmpPlayServer {
                     let mut handler = RtmpClientHandler::new(
                         tls_stream,
                         client_rx,
-                        stats.clone(),
                         expected_app,
                         expected_stream_name,
-                        frame_handler_stats,
                     );
 
                     if let Err(e) = handler.run().await {
                         tracing::error!("RTMP client handler error: {e}");
-                        handler.stats.total_error_disconnected_clients.increment();
                     }
-                    handler.stats.total_disconnected_clients.increment();
                     tracing::debug!("RTMP client disconnected: {peer_addr}");
                 }
                 Err(e) => {
                     tracing::error!("Connection setup failed with {peer_addr}: {e}");
-                    stats.total_error_disconnected_clients.increment();
-                    stats.total_disconnected_clients.increment();
                 }
             }
         });
@@ -424,7 +402,6 @@ struct RtmpClientHandler {
     connection: shiguredo_rtmp::RtmpServerConnection,
     rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
     recv_buf: Vec<u8>,
-    stats: RtmpOutboundEndpointStats,
     expected_app: String,
     expected_stream_name: String,
     frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
@@ -434,20 +411,17 @@ impl RtmpClientHandler {
     fn new(
         stream: ServerTcpOrTlsStream,
         rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
-        stats: RtmpOutboundEndpointStats,
         expected_app: String,
         expected_stream_name: String,
-        frame_handler_stats: crate::rtmp::RtmpOutgoingFrameHandlerStats,
     ) -> Self {
         Self {
             stream,
             connection: shiguredo_rtmp::RtmpServerConnection::new(),
             rx,
             recv_buf: vec![0u8; 4096],
-            stats,
             expected_app,
             expected_stream_name,
-            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(frame_handler_stats),
+            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(),
         }
     }
 
@@ -455,7 +429,6 @@ impl RtmpClientHandler {
         loop {
             while let Some(event) = self.connection.next_event() {
                 tracing::debug!("RTMP event: {:?}", event);
-                self.stats.total_event_count.increment();
                 self.handle_event(event)?;
             }
 
@@ -579,7 +552,6 @@ impl RtmpClientHandler {
                 Ok(false)
             }
             Ok(n) => {
-                self.stats.total_received_bytes.add(n as u64);
                 self.connection
                     .feed_recv_buf(&self.recv_buf[..n])
                     .map_err(|e| {
@@ -602,64 +574,8 @@ impl RtmpClientHandler {
         while !self.connection.send_buf().is_empty() {
             let send_data = self.connection.send_buf();
             self.stream.write_all(send_data).await?;
-            self.stats.total_sent_bytes.add(send_data.len() as u64);
             self.connection.advance_send_buf(send_data.len());
         }
         Ok(())
-    }
-}
-
-/// [`RtmpOutboundEndpoint`] 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct RtmpOutboundEndpointStats {
-    pub total_audio_frame_count: SharedAtomicCounter,
-    pub total_video_frame_count: SharedAtomicCounter,
-    pub total_event_count: SharedAtomicCounter,
-    pub total_sent_bytes: SharedAtomicCounter,
-    pub total_received_bytes: SharedAtomicCounter,
-    pub total_video_keyframe_count: SharedAtomicCounter,
-    pub total_audio_sequence_header_count: SharedAtomicCounter,
-    pub total_video_sequence_header_count: SharedAtomicCounter,
-    pub total_processing_duration: SharedAtomicDuration,
-    pub total_connected_clients: SharedAtomicCounter,
-    pub total_disconnected_clients: SharedAtomicCounter,
-    pub total_error_disconnected_clients: SharedAtomicCounter,
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for RtmpOutboundEndpointStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "rtmp_outbound_endpoint")?;
-            f.member("total_audio_frame_count", &self.total_audio_frame_count)?;
-            f.member("total_video_frame_count", &self.total_video_frame_count)?;
-            f.member("total_event_count", &self.total_event_count)?;
-            f.member("total_sent_bytes", &self.total_sent_bytes)?;
-            f.member("total_received_bytes", &self.total_received_bytes)?;
-            f.member(
-                "total_video_keyframe_count",
-                &self.total_video_keyframe_count,
-            )?;
-            f.member(
-                "total_audio_sequence_header_count",
-                &self.total_audio_sequence_header_count,
-            )?;
-            f.member(
-                "total_video_sequence_header_count",
-                &self.total_video_sequence_header_count,
-            )?;
-            f.member("total_processing_seconds", &self.total_processing_duration)?;
-            f.member("total_connected_clients", &self.total_connected_clients)?;
-            f.member(
-                "total_disconnected_clients",
-                &self.total_disconnected_clients,
-            )?;
-            f.member(
-                "total_error_disconnected_clients",
-                &self.total_error_disconnected_clients,
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
     }
 }

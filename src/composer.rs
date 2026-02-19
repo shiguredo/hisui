@@ -7,6 +7,7 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
     layout::Layout,
+    legacy_processor_stats::{ProcessorStats, Stats as LegacyStats},
     media::MediaStreamId,
     mixer_audio::AudioMixer,
     mixer_video::{VideoMixer, VideoMixerSpec},
@@ -16,8 +17,6 @@ use crate::{
     },
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
-    stats_legacy::{ProcessorStats, Stats as LegacyStats, WorkerThreadStats},
-    stats_legacy_json::LegacyWorkerThreadStats,
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
 
@@ -34,7 +33,6 @@ pub struct Composer {
 pub struct ComposeResult {
     pub stats: crate::stats::Stats,
     pub elapsed_duration: Duration,
-    pub worker_threads: Vec<LegacyWorkerThreadStats>,
     pub success: bool,
 }
 
@@ -162,13 +160,12 @@ impl Composer {
         // 合成を実行
         let legacy_stats = scheduler.run().or_fail()?;
         let stats = convert_legacy_stats_to_stats(&legacy_stats);
-        let worker_threads = convert_worker_thread_stats(&legacy_stats.worker_threads);
 
         if let Some(path) = &self.stats_file_path {
             match crate::stats_legacy_json::to_legacy_stats_json(
                 &stats,
                 legacy_stats.elapsed_duration.as_secs_f64(),
-                worker_threads.clone(),
+                Vec::new(),
             ) {
                 Ok(json) => {
                     if let Err(e) = std::fs::write(path, json.to_string()) {
@@ -191,22 +188,9 @@ impl Composer {
         Ok(ComposeResult {
             stats,
             elapsed_duration: legacy_stats.elapsed_duration,
-            worker_threads,
             success: !legacy_stats.error.get(),
         })
     }
-}
-
-fn convert_worker_thread_stats(
-    worker_threads: &[WorkerThreadStats],
-) -> Vec<LegacyWorkerThreadStats> {
-    worker_threads
-        .iter()
-        .map(|worker| LegacyWorkerThreadStats {
-            total_processing_seconds: worker.total_processing_duration.get().as_secs_f64(),
-            total_waiting_seconds: worker.total_waiting_duration.get().as_secs_f64(),
-        })
-        .collect()
 }
 
 fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::Stats {
@@ -267,21 +251,6 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
                 "mp4_writer",
                 writer.total_processing_duration.get().as_secs_f64(),
                 writer.error.get(),
-            ),
-            ProcessorStats::RtmpPublisher(publisher) => (
-                "rtmp_publisher",
-                publisher.total_processing_duration.get().as_secs_f64(),
-                publisher.error.get(),
-            ),
-            ProcessorStats::RtmpOutboundEndpoint(endpoint) => (
-                "rtmp_outbound_endpoint",
-                endpoint.total_processing_duration.get().as_secs_f64(),
-                endpoint.error.get(),
-            ),
-            ProcessorStats::RtmpInboundEndpoint(endpoint) => (
-                "rtmp_inbound_endpoint",
-                endpoint.total_processing_duration.get().as_secs_f64(),
-                endpoint.error.get(),
             ),
             ProcessorStats::Other {
                 processor_type,
@@ -583,7 +552,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::stats_legacy as legacy;
+    use crate::legacy_processor_stats as legacy;
 
     fn counter(value: u64) -> legacy::SharedAtomicCounter {
         let counter = legacy::SharedAtomicCounter::default();
@@ -840,22 +809,5 @@ mod tests {
             24,
         ));
         assert!(has_counter("mp4_writer", "reserved_moov_box_size", 26,));
-    }
-
-    #[test]
-    fn convert_worker_thread_stats_preserves_seconds() {
-        let worker = WorkerThreadStats {
-            processors: Vec::new(),
-            total_processing_duration: crate::stats_legacy::SharedAtomicDuration::new(
-                Duration::from_millis(1500),
-            ),
-            total_waiting_duration: crate::stats_legacy::SharedAtomicDuration::new(
-                Duration::from_millis(250),
-            ),
-        };
-        let converted = convert_worker_thread_stats(&[worker]);
-        assert_eq!(converted.len(), 1);
-        assert_eq!(converted[0].total_processing_seconds, 1.5);
-        assert_eq!(converted[0].total_waiting_seconds, 0.25);
     }
 }

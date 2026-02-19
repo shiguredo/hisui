@@ -10,13 +10,13 @@ use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
     layout::{Layout, Resolution, TrimSpans},
     layout_region::Region,
+    legacy_processor_stats::{ProcessorStats, VideoMixerStats, VideoResolution},
     media::MediaStreamId,
     metadata::SourceId,
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats_legacy::{ProcessorStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };

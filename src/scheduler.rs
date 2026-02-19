@@ -5,12 +5,12 @@ use std::time::{Duration, Instant};
 
 use orfail::OrFail;
 
+use crate::legacy_processor_stats::{ProcessorStats, SharedAtomicFlag, Stats, WorkerThreadStats};
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
     MediaProcessorWorkloadHint,
 };
-use crate::stats_legacy::{ProcessorStats, SharedAtomicFlag, Stats, WorkerThreadStats};
 
 type MediaSampleReceiver = mpsc::Receiver<MediaSample>;
 type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;

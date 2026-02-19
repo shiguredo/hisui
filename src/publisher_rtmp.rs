@@ -5,7 +5,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, TrackId,
     audio::{AudioData, AudioFormat},
-    stats_legacy::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
     video::{VideoFormat, VideoFrame},
 };
 
@@ -138,16 +137,7 @@ impl RtmpPublisher {
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
             .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?;
 
-        let stats = RtmpPublisherStats::default();
         let (tx, rx) = tokio::sync::mpsc::channel(self.options.max_buffered_frame_count);
-
-        let frame_handler_stats = crate::rtmp::RtmpOutgoingFrameHandlerStats {
-            total_audio_frame_count: stats.total_audio_frame_count.clone(),
-            total_video_frame_count: stats.total_video_frame_count.clone(),
-            total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
-            total_audio_sequence_header_count: stats.total_audio_sequence_header_count.clone(),
-            total_video_sequence_header_count: stats.total_video_sequence_header_count.clone(),
-        };
 
         let mut runner = RtmpPublishRunner {
             url,
@@ -158,14 +148,12 @@ impl RtmpPublisher {
                     .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?,
             ),
             ready: false,
-            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(frame_handler_stats),
-            stats: stats.clone(),
+            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(),
         };
 
         let runner_task = tokio::spawn(async move {
             if let Err(e) = runner.run().await {
                 tracing::error!("RTMP publish error: {e}");
-                runner.stats.error.set(true);
                 return Err(e);
             }
             Ok(())
@@ -293,7 +281,6 @@ struct RtmpPublishRunner {
     connection: shiguredo_rtmp::RtmpPublishClientConnection,
     ready: bool,
     frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
-    stats: RtmpPublisherStats,
 }
 
 impl RtmpPublishRunner {
@@ -307,7 +294,6 @@ impl RtmpPublishRunner {
         loop {
             while let Some(event) = self.connection.next_event() {
                 tracing::debug!("RTMP event: {:?}", event);
-                self.stats.total_event_count.increment();
                 if matches!(
                     event,
                     shiguredo_rtmp::RtmpConnectionEvent::StateChanged(
@@ -322,7 +308,6 @@ impl RtmpPublishRunner {
             while !self.connection.send_buf().is_empty() {
                 let send_data = self.connection.send_buf();
                 stream.write_all(send_data).await?;
-                self.stats.total_sent_bytes.add(send_data.len() as u64);
                 self.connection.advance_send_buf(send_data.len());
             }
 
@@ -354,7 +339,6 @@ impl RtmpPublishRunner {
             return Err(Error::new("connection reset by server"));
         }
 
-        self.stats.total_received_bytes.add(n as u64);
         self.connection
             .feed_recv_buf(&self.recv_buf[..n])
             .map_err(|e| {
@@ -404,67 +388,5 @@ impl RtmpPublishRunner {
                 .map_err(|e| Error::new(format!("failed to send video frame: {e}")))?;
         }
         Ok(())
-    }
-}
-
-/// [`RtmpPublisher`] 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct RtmpPublisherStats {
-    /// 配信した音声フレームの数
-    pub total_audio_frame_count: SharedAtomicCounter,
-
-    /// 配信した映像フレームの数
-    pub total_video_frame_count: SharedAtomicCounter,
-
-    /// RTMP イベント処理の回数
-    pub total_event_count: SharedAtomicCounter,
-
-    /// RTMP で送信したバイト数
-    pub total_sent_bytes: SharedAtomicCounter,
-
-    /// RTMP で受信したバイト数
-    pub total_received_bytes: SharedAtomicCounter,
-
-    /// 配信したキーフレーム（映像）の数
-    pub total_video_keyframe_count: SharedAtomicCounter,
-
-    /// 送信した音声シーケンスヘッダの数
-    pub total_audio_sequence_header_count: SharedAtomicCounter,
-
-    /// 送信した映像シーケンスヘッダの数
-    pub total_video_sequence_header_count: SharedAtomicCounter,
-
-    /// 処理に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
-    /// エラーで中断したかどうか
-    pub error: SharedAtomicFlag,
-}
-
-impl nojson::DisplayJson for RtmpPublisherStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "rtmp_publisher")?;
-            f.member("total_audio_frame_count", &self.total_audio_frame_count)?;
-            f.member("total_video_frame_count", &self.total_video_frame_count)?;
-            f.member("total_event_count", &self.total_event_count)?;
-            f.member("total_sent_bytes", &self.total_sent_bytes)?;
-            f.member("total_received_bytes", &self.total_received_bytes)?;
-            f.member(
-                "total_video_keyframe_count",
-                &self.total_video_keyframe_count,
-            )?;
-            f.member(
-                "total_audio_sequence_header_count",
-                &self.total_audio_sequence_header_count,
-            )?;
-            f.member(
-                "total_video_sequence_header_count",
-                &self.total_video_sequence_header_count,
-            )?;
-            f.member("total_processing_seconds", &self.total_processing_duration)?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
     }
 }

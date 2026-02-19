@@ -23,12 +23,12 @@ use crate::{
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
     layout_encode_params::LayoutEncodeParams,
+    legacy_processor_stats::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats_legacy::{AudioEncoderStats, ProcessorStats, VideoEncoderStats},
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
 };

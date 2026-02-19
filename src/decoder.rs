@@ -17,12 +17,14 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     layout_decode_params::LayoutDecodeParams,
+    legacy_processor_stats::{
+        AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution,
+    },
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats_legacy::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };

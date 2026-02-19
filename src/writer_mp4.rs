@@ -16,12 +16,12 @@ use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
 use crate::{
     audio::AudioData,
     layout::Layout,
+    legacy_processor_stats::{Mp4WriterStats, ProcessorStats},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats_legacy::{Mp4WriterStats, ProcessorStats},
     video::{FrameRate, VideoFrame},
 };
 

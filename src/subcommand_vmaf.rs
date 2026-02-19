@@ -19,7 +19,6 @@ use crate::{
     media::{MediaSample, MediaStreamId},
     mixer_video::{VideoMixer, VideoMixerSpec},
     reader::VideoReader,
-    types::EngineName,
     video::FrameRate,
     writer_yuv::YuvWriter,
 };
@@ -208,14 +207,11 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         reference_yuv_file_path,
         distorted_yuv_file_path,
         vmaf_output_file_path,
-        encode_engine: compose_result.encoder_stats.engine.get().or_fail()?,
+        encode_engine: compose_result.encode_engine,
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
         frame_rate: layout.frame_rate,
-        encoded_frame_count: compose_result
-            .encoder_stats
-            .total_output_video_frame_count
-            .get() as usize,
+        encoded_frame_count: compose_result.encoded_frame_count,
         elapsed_duration: compose_result.elapsed_duration,
         vmaf,
     };
@@ -236,13 +232,14 @@ struct ComposeForVmafResult {
     success: bool,
     timeout_expired: bool,
     elapsed_duration: Duration,
-    encoder_stats: crate::stats_legacy::VideoEncoderStats,
+    encode_engine: String,
+    encoded_frame_count: usize,
 }
 
 #[derive(Debug)]
 struct VmafPipelineSetup {
     processor_tasks: Vec<SpawnedProcessorTask>,
-    encoder_stats: crate::stats_legacy::VideoEncoderStats,
+    encoder_processor_id: ProcessorId,
 }
 
 #[derive(Debug)]
@@ -287,13 +284,26 @@ async fn compose_for_vmaf(
         wait_processor_tasks(&mut setup.processor_tasks, timeout).await;
     let elapsed_duration = start.elapsed();
 
+    let stats_entries = pipeline_handle.stats().entries()?;
     shutdown_pipeline(pipeline_handle, pipeline_task).await?;
 
     Ok(ComposeForVmafResult {
         success,
         timeout_expired,
         elapsed_duration,
-        encoder_stats: setup.encoder_stats,
+        encode_engine: find_string_metric_by_processor(
+            &stats_entries,
+            &setup.encoder_processor_id,
+            "engine",
+        )
+        .ok_or_else(|| Error::new("video encoder engine metric not found"))?,
+        encoded_frame_count: find_counter_metric_by_processor(
+            &stats_entries,
+            &setup.encoder_processor_id,
+            "total_output_video_frame_count",
+        )
+        .ok_or_else(|| Error::new("video encoder output frame count metric not found"))?
+            as usize,
     })
 }
 
@@ -436,12 +446,12 @@ async fn setup_vmaf_pipeline(
         openh264_lib,
     )
     .map_err(error_from)?;
-    let encoder_stats = encoder.encoder_stats().clone();
+    let encoder_processor_id = next_processor_id(&mut next_processor_number, "video_encoder");
     let limiter_output_track_id_for_encoder = limiter_output_track_id.clone();
     let encoder_output_track_id_for_encoder = encoder_output_track_id.clone();
     spawn_processor_task(
         pipeline_handle,
-        next_processor_id(&mut next_processor_number, "video_encoder"),
+        encoder_processor_id.clone(),
         crate::ProcessorMetadata::new("video_encoder"),
         move |handle| {
             encoder.run(
@@ -504,7 +514,39 @@ async fn setup_vmaf_pipeline(
 
     Ok(VmafPipelineSetup {
         processor_tasks,
-        encoder_stats,
+        encoder_processor_id,
+    })
+}
+
+fn find_string_metric_by_processor(
+    entries: &[crate::stats::StatsEntry],
+    processor_id: &ProcessorId,
+    metric_name: &str,
+) -> Option<String> {
+    entries.iter().find_map(|entry| {
+        if entry.metric_name != metric_name {
+            return None;
+        }
+        if entry.labels.get("processor_id").map(String::as_str) != Some(processor_id.get()) {
+            return None;
+        }
+        entry.value.as_string()
+    })
+}
+
+fn find_counter_metric_by_processor(
+    entries: &[crate::stats::StatsEntry],
+    processor_id: &ProcessorId,
+    metric_name: &str,
+) -> Option<u64> {
+    entries.iter().find_map(|entry| {
+        if entry.metric_name != metric_name {
+            return None;
+        }
+        if entry.labels.get("processor_id").map(String::as_str) != Some(processor_id.get()) {
+            return None;
+        }
+        entry.value.as_counter()
     })
 }
 
@@ -701,7 +743,7 @@ struct Output {
     reference_yuv_file_path: PathBuf,
     distorted_yuv_file_path: PathBuf,
     vmaf_output_file_path: PathBuf,
-    encode_engine: EngineName,
+    encode_engine: String,
     width: usize,
     height: usize,
     frame_rate: FrameRate,
@@ -719,7 +761,7 @@ impl nojson::DisplayJson for Output {
             f.member("reference_yuv_file_path", &self.reference_yuv_file_path)?;
             f.member("distorted_yuv_file_path", &self.distorted_yuv_file_path)?;
             f.member("vmaf_output_file_path", &self.vmaf_output_file_path)?;
-            f.member("encode_engine", self.encode_engine)?;
+            f.member("encode_engine", &self.encode_engine)?;
             f.member("width", self.width)?;
             f.member("height", self.height)?;
             f.member("frame_rate", self.frame_rate)?;

@@ -50,7 +50,6 @@ struct LegacyStatsJson {
     elapsed_seconds: f64,
     error: bool,
     processors: Vec<LegacyProcessorStats>,
-    worker_threads: Vec<LegacyWorkerThreadStats>,
 }
 
 impl nojson::DisplayJson for LegacyStatsJson {
@@ -59,7 +58,6 @@ impl nojson::DisplayJson for LegacyStatsJson {
             f.member("elapsed_seconds", self.elapsed_seconds)?;
             f.member("error", self.error)?;
             f.member("processors", &self.processors)?;
-            f.member("worker_threads", &self.worker_threads)?;
             Ok(())
         })
     }
@@ -68,7 +66,7 @@ impl nojson::DisplayJson for LegacyStatsJson {
 pub fn to_legacy_stats_json(
     stats: &crate::stats::Stats,
     elapsed_seconds: f64,
-    worker_threads: Vec<LegacyWorkerThreadStats>,
+    _worker_threads: Vec<LegacyWorkerThreadStats>,
 ) -> crate::Result<nojson::RawJsonOwned> {
     let mut processors = BTreeMap::<String, LegacyProcessorStats>::new();
     for entry in stats.entries()? {
@@ -106,7 +104,6 @@ pub fn to_legacy_stats_json(
         elapsed_seconds,
         error: processors.iter().any(|p| p.error),
         processors,
-        worker_threads,
     };
     let json = nojson::json(|f| f.value(&stats));
     Ok(nojson::RawJsonOwned::parse(json.to_string()).expect("infallible"))
@@ -148,7 +145,6 @@ mod tests {
         assert!(text.contains("\"total_input_video_sample_count\":5"));
         assert!(text.contains("\"total_output_video_frame_count\":4"));
         assert!(text.contains("\"total_processing_seconds\":1.5"));
-        assert!(text.contains("\"worker_threads\":[{\"total_processing_seconds\":2"));
         assert!(!text.contains("\"processors\":[0"));
     }
 

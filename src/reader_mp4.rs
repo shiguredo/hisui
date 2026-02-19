@@ -10,8 +10,8 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
     audio::{AudioData, AudioFormat},
+    legacy_processor_stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
     metadata::SourceId,
-    stats_legacy::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
     video::{VideoFormat, VideoFrame},
 };
 

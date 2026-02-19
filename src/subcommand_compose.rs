@@ -124,7 +124,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let entries = result
         .stats
         .entries()
-        .map_err(|e| orfail::Failure::new(e.to_string()))?;
+        .map_err(|e: crate::Error| orfail::Failure::new(e.to_string()))?;
 
     if !result.success {
         // エラー発生時は終了コードを変える

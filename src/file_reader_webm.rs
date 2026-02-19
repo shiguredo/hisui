@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
+    legacy_processor_stats::{WebmAudioReaderStats, WebmVideoReaderStats},
     metadata::SourceId,
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats_legacy::{WebmAudioReaderStats, WebmVideoReaderStats},
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;

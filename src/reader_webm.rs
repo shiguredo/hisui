@@ -8,8 +8,8 @@ use orfail::OrFail;
 
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
+    legacy_processor_stats::{WebmAudioReaderStats, WebmVideoReaderStats},
     metadata::SourceId,
-    stats_legacy::{WebmAudioReaderStats, WebmVideoReaderStats},
     video::{VideoFormat, VideoFrame},
 };
 

@@ -3,6 +3,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
 };
+use std::time::Duration;
 
 const PROMETHEUS_METRIC_PREFIX: &str = "hisui_";
 
@@ -61,6 +62,18 @@ impl Stats {
             StatsValue::GaugeF64(gauge) => gauge,
             other => panic!(
                 "metric type mismatch: expected=gauge_f64 actual={}",
+                other.kind_name()
+            ),
+        }
+    }
+
+    pub fn duration(&mut self, name: &'static str) -> StatsDuration {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsValue::Duration(StatsDuration::new()));
+        match entry {
+            StatsValue::Duration(duration) => duration,
+            other => panic!(
+                "metric type mismatch: expected=duration actual={}",
                 other.kind_name()
             ),
         }
@@ -194,6 +207,7 @@ pub enum StatsValue {
     Counter(StatsCounter),
     Gauge(StatsGauge),
     GaugeF64(StatsGaugeF64),
+    Duration(StatsDuration),
     Flag(StatsFlag),
     StringValue(StatsString),
 }
@@ -220,6 +234,13 @@ impl StatsValue {
         }
     }
 
+    pub fn as_duration(&self) -> Option<Duration> {
+        match self {
+            Self::Duration(duration) => Some(duration.get()),
+            _ => None,
+        }
+    }
+
     pub fn as_flag(&self) -> Option<bool> {
         match self {
             Self::Flag(flag) => Some(flag.get()),
@@ -239,6 +260,7 @@ impl StatsValue {
             Self::Counter(counter) => Some(counter.get() as f64),
             Self::Gauge(gauge) => Some(gauge.get() as f64),
             Self::GaugeF64(gauge) => Some(gauge.get()),
+            Self::Duration(duration) => Some(duration.get().as_secs_f64()),
             Self::Flag(flag) => Some(if flag.get() { 1.0 } else { 0.0 }),
             Self::StringValue(_) => None,
         }
@@ -250,6 +272,7 @@ impl StatsValue {
             Self::Counter(counter) => counter.get() != 0,
             Self::Gauge(gauge) => gauge.get() != 0,
             Self::GaugeF64(gauge) => gauge.get() != 0.0,
+            Self::Duration(duration) => duration.get() != Duration::ZERO,
             Self::StringValue(string_value) => !string_value.get().is_empty(),
         }
     }
@@ -259,6 +282,7 @@ impl StatsValue {
             Self::Counter(_) => "counter",
             Self::Gauge(_) => "gauge",
             Self::GaugeF64(_) => "gauge_f64",
+            Self::Duration(_) => "duration",
             Self::Flag(_) => "flag",
             Self::StringValue(_) => "string",
         }
@@ -269,6 +293,7 @@ impl StatsValue {
             Self::Counter(_) => "counter",
             Self::Gauge(_) => "gauge",
             Self::GaugeF64(_) => "gauge",
+            Self::Duration(_) => "gauge",
             Self::Flag(_) => "gauge",
             Self::StringValue(_) => "gauge",
         }
@@ -279,6 +304,7 @@ impl StatsValue {
             Self::Counter(counter) => counter.get().to_string(),
             Self::Gauge(gauge) => gauge.get().to_string(),
             Self::GaugeF64(gauge) => gauge.get().to_string(),
+            Self::Duration(duration) => duration.get().as_secs_f64().to_string(),
             Self::Flag(flag) => {
                 if flag.get() {
                     "1".to_owned()
@@ -297,6 +323,7 @@ impl nojson::DisplayJson for StatsValue {
             Self::Counter(counter) => f.value(counter.get()),
             Self::Gauge(gauge) => f.value(gauge.get()),
             Self::GaugeF64(gauge) => f.value(gauge.get()),
+            Self::Duration(duration) => f.value(duration.get().as_secs_f64()),
             Self::Flag(flag) => f.value(flag.get()),
             Self::StringValue(string_value) => {
                 let value = string_value.get();
@@ -375,6 +402,31 @@ impl StatsGaugeF64 {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct StatsDuration {
+    value: Arc<AtomicU64>,
+}
+
+impl StatsDuration {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&self, value: Duration) {
+        self.value
+            .fetch_add(value.as_micros() as u64, Ordering::Relaxed);
+    }
+
+    pub fn set(&self, value: Duration) {
+        self.value
+            .store(value.as_micros() as u64, Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> Duration {
+        Duration::from_micros(self.value.load(Ordering::Relaxed))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StatsString {
     string_value: Arc<Mutex<String>>,
@@ -434,6 +486,105 @@ impl StatsFlag {
     pub fn get(&self) -> bool {
         self.value.load(Ordering::Relaxed)
     }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SharedAtomicFlag(Arc<AtomicBool>);
+
+impl SharedAtomicFlag {
+    pub fn set(&self, value: bool) {
+        self.0.store(value, Ordering::SeqCst);
+    }
+
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SharedAtomicCounter(Arc<AtomicU64>);
+
+impl SharedAtomicCounter {
+    pub fn increment(&self) {
+        self.add(1);
+    }
+
+    pub fn add(&self, value: u64) {
+        self.0.fetch_add(value, Ordering::SeqCst);
+    }
+
+    pub fn set(&self, value: u64) {
+        self.0.store(value, Ordering::SeqCst);
+    }
+
+    pub fn get(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+impl nojson::DisplayJson for SharedAtomicCounter {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get())
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SharedAtomicDuration(SharedAtomicCounter);
+
+impl SharedAtomicDuration {
+    pub fn new(value: Duration) -> Self {
+        let s = Self::default();
+        s.set(value);
+        s
+    }
+
+    pub fn add(&self, duration: Duration) {
+        self.0.add(duration.as_micros() as u64)
+    }
+
+    pub fn set(&self, duration: Duration) {
+        self.0.set(duration.as_micros() as u64);
+    }
+
+    pub fn get(&self) -> Duration {
+        Duration::from_micros(self.0.get())
+    }
+}
+
+impl nojson::DisplayJson for SharedAtomicDuration {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.get().as_secs_f64())
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SharedOption<T>(Arc<Mutex<Option<T>>>);
+
+impl<T> SharedOption<T> {
+    pub fn new(v: Option<T>) -> Self {
+        Self(Arc::new(Mutex::new(v)))
+    }
+
+    pub fn get(&self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.0.lock().expect("lock() failed unexpectedly").clone()
+    }
+
+    pub fn set(&self, v: T) {
+        *self.0.lock().expect("lock() failed unexpectedly") = Some(v);
+    }
+
+    pub fn clear(&self) {
+        *self.0.lock().expect("lock() failed unexpectedly") = None;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VideoResolution {
+    pub width: usize,
+    pub height: usize,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -567,6 +718,16 @@ mod tests {
         assert_eq!(gauge.get(), 0.0);
         gauge.set(3.25);
         assert_eq!(gauge.get(), 3.25);
+    }
+
+    #[test]
+    fn duration_basic_ops() {
+        let duration = StatsDuration::new();
+        assert_eq!(duration.get(), Duration::ZERO);
+        duration.set(Duration::from_millis(750));
+        assert_eq!(duration.get(), Duration::from_millis(750));
+        duration.add(Duration::from_millis(250));
+        assert_eq!(duration.get(), Duration::from_secs(1));
     }
 
     #[test]
@@ -766,6 +927,7 @@ mod tests {
         stats.counter("processed_total").add(10);
         stats.gauge("queue_depth").set(-3);
         stats.gauge_f64("latency_seconds").set(0.25);
+        stats.duration("uptime").set(Duration::from_millis(1250));
         stats.flag("error").set(true);
         stats.string("state").set("running");
 
@@ -789,6 +951,13 @@ mod tests {
                 e.metric_name == "latency_seconds" && e.value.as_gauge_f64() == Some(0.25)
             }),
             "gauge_f64 entry is missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "uptime"
+                    && e.value.as_duration() == Some(Duration::from_millis(1250))
+            }),
+            "duration entry is missing: {entries:?}"
         );
         assert!(
             entries

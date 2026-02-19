@@ -9,12 +9,12 @@ use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::TrimSpans,
+    legacy_processor_stats::{AudioMixerStats, ProcessorStats},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats_legacy::{AudioMixerStats, ProcessorStats},
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);

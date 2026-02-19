@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use orfail::OrFail;
 
 use crate::audio::AudioData;
+use crate::legacy_processor_stats::ProcessorStats;
 use crate::media::{MediaSample, MediaStreamId};
-use crate::stats_legacy::ProcessorStats;
 use crate::video::VideoFrame;
 
 pub trait MediaProcessor {
