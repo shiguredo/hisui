@@ -19,6 +19,9 @@ impl Stats {
         Self::default()
     }
 
+    // [NOTE]
+    // default label は「これ以降に取得するメトリクスのキー」にだけ反映される。
+    // すでに取得済みのメトリクス（counter()/gauge() 等の戻り値）は、以前のラベル集合のまま。
     pub fn set_default_label(&mut self, name: &'static str, value: &str) {
         let mut labels = (*self.default_labels).clone();
         labels.0.insert(name, value.to_owned());

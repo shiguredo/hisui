@@ -385,8 +385,12 @@ impl MediaPipelineHandle {
         match reply_rx.await {
             Ok(true) => {
                 let mut stats = self.stats();
+                // [NOTE]
+                // stats2 の label は取得時点で固定されるため、
+                // ここで default label を先に確定してから最初のメトリクスを取得する。
                 stats.set_default_label("processor_id", processor_id.get());
                 stats.set_default_label("processor_type", metadata.processor_type());
+                // `error` は初期化時に必ず 0 で作っておく（後続タスク側は true への遷移のみ担当）。
                 stats.flag("error").set(false);
                 Ok(ProcessorHandle {
                     pipeline_handle: self.clone(),
