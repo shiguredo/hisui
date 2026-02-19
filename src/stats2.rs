@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, atomic::AtomicU64};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicI64, AtomicU64},
+};
 
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
@@ -13,22 +16,32 @@ impl Stats {
         Self::default()
     }
 
-    pub fn set_local_common_label(&mut self, name: &str, value: &str) {
+    pub fn set_local_common_label(&mut self, name: &'static str, value: &str) {
         let mut labels = (*self.local_common_labels).clone();
-        labels.0.insert(name.to_owned(), value.to_owned());
+        labels.0.insert(name, value.to_owned());
         self.local_common_labels = Arc::new(labels);
     }
 
-    pub fn counter(&mut self, name: &'static str) -> &StatsEntry {
-        let key = StatsKey {
-            name,
-            labels: self.local_common_labels.clone(),
-        };
-        if let Some(entry) = self.local_entries.get_mut(&key) {
-            entry
-        } else {
-            let entries = self.entries.lock().expect("lock() failed unexpectedly");
-            todo!()
+    pub fn counter(&mut self, name: &'static str) -> StatsCounter {
+        loop {
+            let key = StatsKey {
+                name,
+                labels: self.local_common_labels.clone(),
+            };
+
+            if let Some(StatsEntry::Counter(counter)) = self.local_entries.get(&key) {
+                // ローカルにキャッシュが存在する
+                return counter.clone();
+            }
+
+            // NOTE: キーが同じでも、種類が違うとエントリが上書きされてしまうけど、それは利用側の自己責任
+
+            // キャッシュが存在しない場合には、必要に応じてグローバルで追加した上で、キャッシュにも登録する
+            let mut entries = self.entries.lock().expect("lock() failed unexpectedly");
+            let entry = entries
+                .entry(key.clone())
+                .or_insert_with(|| StatsEntry::Counter(StatsCounter::default()));
+            self.local_entries.insert(key, entry.clone());
         }
     }
 }
@@ -42,12 +55,18 @@ pub struct StatsKey {
 #[derive(Debug, Clone)]
 pub enum StatsEntry {
     Counter(StatsCounter),
+    Guage(StatsGuage),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct StatsCounter {
     pub value: Arc<AtomicU64>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct StatsGuage {
+    pub value: Arc<AtomicI64>,
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Labels(BTreeMap<String, String>);
+pub struct Labels(BTreeMap<&'static str, String>);
