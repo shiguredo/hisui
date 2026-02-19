@@ -121,7 +121,7 @@ impl Stats {
 
             text.push_str(&metric_name);
             let mut labels = (*key.default_labels).clone();
-            if let StatsEntry::StringValue(string_value) = entry.clone() {
+            if let StatsEntry::StringValue(string_value) = &entry {
                 labels.insert("value", string_value.get());
             }
             append_prometheus_labels(&mut text, &labels)?;
