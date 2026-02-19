@@ -309,6 +309,22 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
                     .set(encoder.engine.as_str());
                 processor_stats.string("codec").set(encoder.codec.as_str());
             }
+            ProcessorStats::AudioDecoder(decoder) => {
+                if let Some(engine) = decoder.engine {
+                    processor_stats.string("engine").set(engine.as_str());
+                }
+                if let Some(codec) = decoder.codec {
+                    processor_stats.string("codec").set(codec.as_str());
+                }
+            }
+            ProcessorStats::VideoDecoder(decoder) => {
+                if let Some(engine) = decoder.engine.get() {
+                    processor_stats.string("engine").set(engine.as_str());
+                }
+                if let Some(codec) = decoder.codec.get() {
+                    processor_stats.string("codec").set(codec.as_str());
+                }
+            }
             ProcessorStats::VideoEncoder(encoder) => {
                 if let Some(engine) = encoder.engine.get() {
                     processor_stats.string("engine").set(engine.as_str());
