@@ -1,7 +1,8 @@
 // NOTE: 長いので MediaPipelineHandle の RPC 関連の処理はこっちで実装している
 
 use crate::media_pipeline::{
-    MediaPipelineCommand, MediaPipelineHandle, ProcessorId, RegisterProcessorError, TrackId,
+    MediaPipelineCommand, MediaPipelineHandle, ProcessorId, ProcessorMetadata,
+    RegisterProcessorError, TrackId,
 };
 
 type RpcError = (i32, String);
@@ -107,16 +108,20 @@ impl MediaPipelineHandle {
         let processor_id =
             processor_id.unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
 
-        self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("mp4_file_source"),
+            move |handle| source.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateMp4FileSource { processor_id })
     }
@@ -134,16 +139,20 @@ impl MediaPipelineHandle {
         let processor_id =
             processor_id.unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
 
-        self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("png_file_source"),
+            move |handle| source.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreatePngFileSource { processor_id })
     }
@@ -166,16 +175,20 @@ impl MediaPipelineHandle {
             }
         });
 
-        self.spawn_processor(processor_id.clone(), move |handle| source.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("video_device_source"),
+            move |handle| source.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateVideoDeviceSource { processor_id })
     }
@@ -194,16 +207,20 @@ impl MediaPipelineHandle {
         })?;
         let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("videoMixer"));
 
-        self.spawn_processor(processor_id.clone(), move |handle| mixer.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("video_mixer"),
+            move |handle| mixer.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateVideoMixer { processor_id })
     }
@@ -220,16 +237,20 @@ impl MediaPipelineHandle {
             })?;
         let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("whipPublisher"));
 
-        self.spawn_local_processor(processor_id.clone(), move |handle| publisher.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_local_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("whip_publisher"),
+            move |handle| publisher.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateWhipPublisher { processor_id })
     }
@@ -246,16 +267,20 @@ impl MediaPipelineHandle {
             })?;
         let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("rtmpPublisher"));
 
-        self.spawn_processor(processor_id.clone(), move |handle| publisher.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("rtmp_publisher"),
+            move |handle| publisher.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateRtmpPublisher { processor_id })
     }
@@ -275,16 +300,20 @@ impl MediaPipelineHandle {
         let processor_id =
             processor_id.unwrap_or_else(|| ProcessorId::new(subscriber.input_url.clone()));
 
-        self.spawn_local_processor(processor_id.clone(), move |handle| subscriber.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_local_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("whep_subscriber"),
+            move |handle| subscriber.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateWhepSubscriber { processor_id })
     }
@@ -303,16 +332,20 @@ impl MediaPipelineHandle {
         })?;
         let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("rtmpInboundEndpoint"));
 
-        self.spawn_processor(processor_id.clone(), move |handle| endpoint.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("rtmp_inbound_endpoint"),
+            move |handle| endpoint.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateRtmpInboundEndpoint { processor_id })
     }
@@ -331,16 +364,20 @@ impl MediaPipelineHandle {
         })?;
         let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("rtmpOutboundEndpoint"));
 
-        self.spawn_processor(processor_id.clone(), move |handle| endpoint.run(handle))
-            .await
-            .map_err(|e| match e {
-                RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
-                    "Invalid params: processorId already exists: {processor_id}"
-                )),
-                RegisterProcessorError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-            })?;
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("rtmp_outbound_endpoint"),
+            move |handle| endpoint.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
 
         Ok(RpcSuccessResult::CreateRtmpOutboundEndpoint { processor_id })
     }
@@ -430,7 +467,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
 mod tests {
     use std::{fs::File, io::BufWriter, time::Duration};
 
-    use crate::media_pipeline::{MediaPipeline, MediaPipelineHandle, ProcessorId, TrackId};
+    use crate::media_pipeline::{
+        MediaPipeline, MediaPipelineHandle, ProcessorId, ProcessorMetadata, TrackId,
+    };
 
     const TEST_MP4_PATH: &str = "testdata/archive-red-320x320-av1.mp4";
 
@@ -888,7 +927,10 @@ mod tests {
     async fn create_video_mixer_uses_default_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
-            .register_processor(ProcessorId::new("video-mixer-blocker"))
+            .register_processor(
+                ProcessorId::new("video-mixer-blocker"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register video-mixer-blocker");
         let occupied_sender = blocker
@@ -920,7 +962,10 @@ mod tests {
     async fn create_video_mixer_uses_explicit_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
-            .register_processor(ProcessorId::new("video-mixer-blocker"))
+            .register_processor(
+                ProcessorId::new("video-mixer-blocker"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register video-mixer-blocker");
         let occupied_sender = blocker
@@ -1113,7 +1158,10 @@ mod tests {
     async fn create_whip_publisher_rejects_duplicate_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
-            .register_processor(ProcessorId::new("duplicate-whip-publisher"))
+            .register_processor(
+                ProcessorId::new("duplicate-whip-publisher"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register duplicate-whip-publisher");
         let request = create_whip_publisher_request(
@@ -1399,7 +1447,10 @@ mod tests {
     async fn create_rtmp_inbound_endpoint_rejects_duplicate_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
-            .register_processor(ProcessorId::new("duplicate-rtmp-inbound-endpoint"))
+            .register_processor(
+                ProcessorId::new("duplicate-rtmp-inbound-endpoint"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register duplicate-rtmp-inbound-endpoint");
         let request = create_rtmp_inbound_endpoint_request(
@@ -1579,7 +1630,10 @@ mod tests {
     async fn create_rtmp_outbound_endpoint_rejects_duplicate_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
-            .register_processor(ProcessorId::new("duplicate-rtmp-outbound-endpoint"))
+            .register_processor(
+                ProcessorId::new("duplicate-rtmp-outbound-endpoint"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register duplicate-rtmp-outbound-endpoint");
         let request = create_rtmp_outbound_endpoint_request(
@@ -1830,7 +1884,10 @@ mod tests {
     async fn create_whep_subscriber_rejects_duplicate_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
-            .register_processor(ProcessorId::new("duplicate-whep-subscriber"))
+            .register_processor(
+                ProcessorId::new("duplicate-whep-subscriber"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register duplicate-whep-subscriber");
         let request = create_whep_subscriber_request(
@@ -1885,11 +1942,17 @@ mod tests {
     async fn list_processors_returns_registered_processors() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let processor_a = handle
-            .register_processor(ProcessorId::new("list-processor-a"))
+            .register_processor(
+                ProcessorId::new("list-processor-a"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register list-processor-a");
         let processor_b = handle
-            .register_processor(ProcessorId::new("list-processor-b"))
+            .register_processor(
+                ProcessorId::new("list-processor-b"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register list-processor-b");
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;
@@ -1939,7 +2002,10 @@ mod tests {
     async fn list_tracks_returns_created_tracks() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let publisher = handle
-            .register_processor(ProcessorId::new("list-tracks-publisher"))
+            .register_processor(
+                ProcessorId::new("list-tracks-publisher"),
+                ProcessorMetadata::new("test_processor"),
+            )
             .await
             .expect("register list-tracks-publisher");
         publisher

@@ -4,8 +4,8 @@ use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
 use crate::file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions};
 use crate::media::MediaStreamId;
 use crate::{
-    Error, MediaPipeline, MediaPipelineHandle, Message, ProcessorHandle, ProcessorId, Result,
-    TrackId,
+    Error, MediaPipeline, MediaPipelineHandle, Message, ProcessorHandle, ProcessorId,
+    ProcessorMetadata, Result, TrackId,
 };
 
 #[derive(Debug, Clone)]
@@ -113,9 +113,11 @@ impl Mp4FileSource {
             options.audio_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;
             inner_handle
-                .spawn_processor(ProcessorId::new("audio_decoder"), |handle| {
-                    decoder.run(handle, inner_id, id)
-                })
+                .spawn_processor(
+                    ProcessorId::new("audio_decoder"),
+                    ProcessorMetadata::new("audio_decoder"),
+                    |handle| decoder.run(handle, inner_id, id),
+                )
                 .await?;
         }
 
@@ -131,9 +133,11 @@ impl Mp4FileSource {
             options.video_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;
             inner_handle
-                .spawn_processor(ProcessorId::new("video_decoder"), |handle| {
-                    decoder.run(handle, inner_id, id)
-                })
+                .spawn_processor(
+                    ProcessorId::new("video_decoder"),
+                    ProcessorMetadata::new("video_decoder"),
+                    |handle| decoder.run(handle, inner_id, id),
+                )
                 .await?;
         }
 
@@ -141,7 +145,11 @@ impl Mp4FileSource {
         // （最初に起動すると、デコーダーが冒頭を取りこぼす恐れがあるので、最後に起動する）
         let reader = Mp4FileReader::new(&self.path, options)?;
         inner_handle
-            .spawn_processor(ProcessorId::new("reader"), |handle| reader.run(handle))
+            .spawn_processor(
+                ProcessorId::new("reader"),
+                ProcessorMetadata::new("mp4_reader"),
+                |handle| reader.run(handle),
+            )
             .await?;
 
         inner_handle.complete_initial_processor_registration();
@@ -159,25 +167,29 @@ async fn start_bridge(
     let bridge_processor_id = ProcessorId::new(format!("mp4_source_bridge_{track_id}"));
 
     inner_handle
-        .spawn_processor(bridge_processor_id, async move |inner_processor| {
-            inner_processor.notify_ready();
-            let mut rx = inner_processor.subscribe_track(track_id);
-            loop {
-                match rx.recv().await {
-                    Message::Media(sample) => {
-                        if !tx.send_media(sample) {
+        .spawn_processor(
+            bridge_processor_id,
+            ProcessorMetadata::new("mp4_source_bridge"),
+            async move |inner_processor| {
+                inner_processor.notify_ready();
+                let mut rx = inner_processor.subscribe_track(track_id);
+                loop {
+                    match rx.recv().await {
+                        Message::Media(sample) => {
+                            if !tx.send_media(sample) {
+                                break;
+                            }
+                        }
+                        Message::Eos => {
+                            tx.send_eos();
                             break;
                         }
+                        Message::Syn(_) => {}
                     }
-                    Message::Eos => {
-                        tx.send_eos();
-                        break;
-                    }
-                    Message::Syn(_) => {}
                 }
-            }
-            Ok(())
-        })
+                Ok(())
+            },
+        )
         .await?;
 
     Ok(())
@@ -198,7 +210,10 @@ mod tests {
             let handle = handle; // スコープを抜けたらドロップさせる
             let video_track_id = TrackId::new("mp4_file_source_test_video");
             let subscriber = handle
-                .register_processor(ProcessorId::new("test_subscriber"))
+                .register_processor(
+                    ProcessorId::new("test_subscriber"),
+                    ProcessorMetadata::new("test_subscriber"),
+                )
                 .await?;
             let mut rx = subscriber.subscribe_track(video_track_id.clone());
             subscriber.notify_ready();
@@ -212,7 +227,11 @@ mod tests {
                 video_track_id: Some(video_track_id.clone()),
             };
             handle
-                .spawn_processor(ProcessorId::new("source"), |handle| source.run(handle))
+                .spawn_processor(
+                    ProcessorId::new("source"),
+                    ProcessorMetadata::new("mp4_file_source"),
+                    |handle| source.run(handle),
+                )
                 .await?;
 
             let mut decoded_count = 0;

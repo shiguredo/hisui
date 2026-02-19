@@ -318,17 +318,19 @@ impl MediaPipelineHandle {
     pub async fn spawn_processor<F, T>(
         &self,
         processor_id: ProcessorId,
+        metadata: ProcessorMetadata,
         f: F,
     ) -> Result<(), RegisterProcessorError>
     where
         F: FnOnce(ProcessorHandle) -> T + Send + 'static,
         T: Future<Output = crate::Result<()>> + Send,
     {
-        let handle = self.register_processor(processor_id.clone()).await?;
+        let handle = self
+            .register_processor(processor_id.clone(), metadata)
+            .await?;
         tokio::spawn(async move {
             let mut stats = handle.stats();
             let error_flag = stats.flag("error");
-            error_flag.set(false);
             if let Err(e) = f(handle).await {
                 error_flag.set(true);
                 tracing::error!("failed to run processor {processor_id}: {e}");
@@ -340,18 +342,20 @@ impl MediaPipelineHandle {
     pub async fn spawn_local_processor<F, T>(
         &self,
         processor_id: ProcessorId,
+        metadata: ProcessorMetadata,
         f: F,
     ) -> Result<(), RegisterProcessorError>
     where
         F: FnOnce(ProcessorHandle) -> T + Send + 'static,
         T: Future<Output = crate::Result<()>> + 'static,
     {
-        let handle = self.register_processor(processor_id.clone()).await?;
+        let handle = self
+            .register_processor(processor_id.clone(), metadata)
+            .await?;
         let task: LocalProcessorTask = Box::new(move || {
             tokio::task::spawn_local(async move {
                 let mut stats = handle.stats();
                 let error_flag = stats.flag("error");
-                error_flag.set(false);
                 if let Err(e) = f(handle).await {
                     error_flag.set(true);
                     tracing::error!("failed to run processor {processor_id}: {e}");
@@ -367,6 +371,7 @@ impl MediaPipelineHandle {
     pub async fn register_processor(
         &self,
         processor_id: ProcessorId,
+        metadata: ProcessorMetadata,
     ) -> Result<ProcessorHandle, RegisterProcessorError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = MediaPipelineCommand::RegisterProcessor {
@@ -381,6 +386,8 @@ impl MediaPipelineHandle {
             Ok(true) => {
                 let mut stats = self.stats();
                 stats.set_default_label("processor_id", processor_id.get());
+                stats.set_default_label("processor_type", metadata.processor_type());
+                stats.flag("error").set(false);
                 Ok(ProcessorHandle {
                     pipeline_handle: self.clone(),
                     processor_id,
@@ -496,6 +503,29 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ProcessorId {
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         value.try_into().map(Self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessorMetadata {
+    processor_type: String,
+}
+
+impl ProcessorMetadata {
+    pub fn new(processor_type: impl Into<String>) -> Self {
+        Self {
+            processor_type: processor_type.into(),
+        }
+    }
+
+    pub fn processor_type(&self) -> &str {
+        &self.processor_type
+    }
+}
+
+impl Default for ProcessorMetadata {
+    fn default() -> Self {
+        Self::new("unknown")
     }
 }
 
@@ -796,6 +826,10 @@ mod tests {
 
     use super::*;
 
+    fn metadata(name: &str) -> ProcessorMetadata {
+        ProcessorMetadata::new(name)
+    }
+
     #[tokio::test]
     async fn spawn_local_processor_accepts_non_send_future() {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
@@ -807,6 +841,7 @@ mod tests {
         handle
             .spawn_local_processor(
                 ProcessorId::new("local-non-send"),
+                metadata("test_local_processor"),
                 move |_handle| async move {
                     let value = Rc::new(41usize);
                     let _ = done_tx.send(*value + 1);
@@ -840,6 +875,7 @@ mod tests {
         handle
             .spawn_local_processor(
                 ProcessorId::new("duplicate-local"),
+                metadata("test_local_processor"),
                 move |handle| async move {
                     let _ = release_rx.await;
                     drop(handle);
@@ -852,6 +888,7 @@ mod tests {
         let result = handle
             .spawn_local_processor(
                 ProcessorId::new("duplicate-local"),
+                metadata("test_local_processor"),
                 move |_handle| async move { Ok(()) },
             )
             .await;
@@ -874,11 +911,11 @@ mod tests {
 
         {
             let first = handle
-                .register_processor(ProcessorId::new("wait_first"))
+                .register_processor(ProcessorId::new("wait_first"), metadata("test_processor"))
                 .await
                 .expect("failed to register first processor");
             let second = handle
-                .register_processor(ProcessorId::new("wait_second"))
+                .register_processor(ProcessorId::new("wait_second"), metadata("test_processor"))
                 .await
                 .expect("failed to register second processor");
 
@@ -921,11 +958,11 @@ mod tests {
         let pipeline_task = tokio::spawn(pipeline.run());
 
         let sender = handle
-            .register_processor(ProcessorId::new("sender"))
+            .register_processor(ProcessorId::new("sender"), metadata("test_sender"))
             .await
             .expect("failed to register sender");
         let receiver = handle
-            .register_processor(ProcessorId::new("receiver"))
+            .register_processor(ProcessorId::new("receiver"), metadata("test_receiver"))
             .await
             .expect("failed to register receiver");
         let track_id = TrackId::new("ready-track");
@@ -967,11 +1004,11 @@ mod tests {
         let pipeline_task = tokio::spawn(pipeline.run());
 
         let sender = handle
-            .register_processor(ProcessorId::new("syn_sender"))
+            .register_processor(ProcessorId::new("syn_sender"), metadata("test_sender"))
             .await
             .expect("failed to register sender");
         let receiver = handle
-            .register_processor(ProcessorId::new("syn_receiver"))
+            .register_processor(ProcessorId::new("syn_receiver"), metadata("test_receiver"))
             .await
             .expect("failed to register receiver");
         let track_id = TrackId::new("syn-track");
@@ -1024,7 +1061,10 @@ mod tests {
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         let processor = handle
-            .register_processor(ProcessorId::new("idempotent_processor"))
+            .register_processor(
+                ProcessorId::new("idempotent_processor"),
+                metadata("test_processor"),
+            )
             .await
             .expect("failed to register processor");
 
@@ -1050,7 +1090,10 @@ mod tests {
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         let processor = handle
-            .register_processor(ProcessorId::new("terminated_waiter"))
+            .register_processor(
+                ProcessorId::new("terminated_waiter"),
+                metadata("test_processor"),
+            )
             .await
             .expect("failed to register processor");
 
@@ -1068,7 +1111,10 @@ mod tests {
         let pipeline_task = tokio::spawn(pipeline.run());
 
         let processor = handle
-            .register_processor(ProcessorId::new("stats_processor"))
+            .register_processor(
+                ProcessorId::new("stats_processor"),
+                metadata("test_processor"),
+            )
             .await
             .expect("failed to register processor");
         let mut stats = processor.stats();
@@ -1096,13 +1142,17 @@ mod tests {
         handle
             .spawn_processor(
                 ProcessorId::new("failing_processor"),
+                metadata("test_processor"),
                 move |_handle| async move { Err(crate::Error::new("processor failed")) },
             )
             .await
             .expect("spawn_processor must succeed");
 
-        wait_until_metric_contains(&handle, "hisui_error{processor_id=\"failing_processor\"} 1")
-            .await;
+        wait_until_metric_contains(
+            &handle,
+            "hisui_error{processor_id=\"failing_processor\",processor_type=\"test_processor\"} 1",
+        )
+        .await;
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -1121,6 +1171,7 @@ mod tests {
         handle
             .spawn_local_processor(
                 ProcessorId::new("failing_local_processor"),
+                metadata("test_processor"),
                 move |_handle| async move { Err(crate::Error::new("local processor failed")) },
             )
             .await
@@ -1128,7 +1179,7 @@ mod tests {
 
         wait_until_metric_contains(
             &handle,
-            "hisui_error{processor_id=\"failing_local_processor\"} 1",
+            "hisui_error{processor_id=\"failing_local_processor\",processor_type=\"test_processor\"} 1",
         )
         .await;
 

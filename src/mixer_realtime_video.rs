@@ -1004,16 +1004,28 @@ mod tests {
         };
 
         let mixer_processor = pipeline_handle
-            .register_processor(crate::ProcessorId::new("mixer"))
+            .register_processor(
+                crate::ProcessorId::new("mixer"),
+                crate::ProcessorMetadata::new("video_mixer"),
+            )
             .await?;
         let sink_processor = pipeline_handle
-            .register_processor(crate::ProcessorId::new("sink"))
+            .register_processor(
+                crate::ProcessorId::new("sink"),
+                crate::ProcessorMetadata::new("test_sink"),
+            )
             .await?;
         let sender1_processor = pipeline_handle
-            .register_processor(crate::ProcessorId::new("sender1"))
+            .register_processor(
+                crate::ProcessorId::new("sender1"),
+                crate::ProcessorMetadata::new("test_sender"),
+            )
             .await?;
         let sender2_processor = pipeline_handle
-            .register_processor(crate::ProcessorId::new("sender2"))
+            .register_processor(
+                crate::ProcessorId::new("sender2"),
+                crate::ProcessorMetadata::new("test_sender"),
+            )
             .await?;
         mixer_processor.notify_ready();
         sink_processor.notify_ready();
@@ -1086,10 +1098,16 @@ mod tests {
         let pipeline_task = tokio::spawn(pipeline.run());
 
         let sender_processor = pipeline_handle
-            .register_processor(crate::ProcessorId::new("syn_sender"))
+            .register_processor(
+                crate::ProcessorId::new("syn_sender"),
+                crate::ProcessorMetadata::new("test_sender"),
+            )
             .await?;
         let receiver_processor = pipeline_handle
-            .register_processor(crate::ProcessorId::new("syn_receiver"))
+            .register_processor(
+                crate::ProcessorId::new("syn_receiver"),
+                crate::ProcessorMetadata::new("test_receiver"),
+            )
             .await?;
         sender_processor.notify_ready();
         receiver_processor.notify_ready();

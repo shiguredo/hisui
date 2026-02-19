@@ -333,6 +333,7 @@ async fn setup_vmaf_pipeline(
         spawn_processor_task(
             pipeline_handle,
             next_processor_id(&mut next_processor_number, "video_reader"),
+            crate::ProcessorMetadata::new("video_reader"),
             move |handle| async move {
                 reader
                     .run(handle)
@@ -354,6 +355,7 @@ async fn setup_vmaf_pipeline(
         spawn_processor_task(
             pipeline_handle,
             next_processor_id(&mut next_processor_number, "video_decoder"),
+            crate::ProcessorMetadata::new("video_decoder"),
             move |handle| {
                 decoder.run(
                     handle,
@@ -380,6 +382,7 @@ async fn setup_vmaf_pipeline(
     spawn_processor_task(
         pipeline_handle,
         next_processor_id(&mut next_processor_number, "video_mixer"),
+        crate::ProcessorMetadata::new("video_mixer"),
         move |handle| {
             mixer.run(
                 handle,
@@ -398,6 +401,7 @@ async fn setup_vmaf_pipeline(
     spawn_processor_task(
         pipeline_handle,
         next_processor_id(&mut next_processor_number, "frame_count_limiter"),
+        crate::ProcessorMetadata::new("frame_count_limiter"),
         move |handle| {
             limiter.run(
                 handle,
@@ -414,6 +418,7 @@ async fn setup_vmaf_pipeline(
     spawn_processor_task(
         pipeline_handle,
         next_processor_id(&mut next_processor_number, "distorted_yuv_writer"),
+        crate::ProcessorMetadata::new("distorted_yuv_writer"),
         move |handle| {
             distorted_writer.run(handle, limiter_output_track_id_for_distorted_writer.clone())
         },
@@ -437,6 +442,7 @@ async fn setup_vmaf_pipeline(
     spawn_processor_task(
         pipeline_handle,
         next_processor_id(&mut next_processor_number, "video_encoder"),
+        crate::ProcessorMetadata::new("video_encoder"),
         move |handle| {
             encoder.run(
                 handle,
@@ -460,6 +466,7 @@ async fn setup_vmaf_pipeline(
     spawn_processor_task(
         pipeline_handle,
         next_processor_id(&mut next_processor_number, "decoded_video_decoder"),
+        crate::ProcessorMetadata::new("decoded_video_decoder"),
         move |handle| {
             decoder.run(
                 handle,
@@ -476,6 +483,7 @@ async fn setup_vmaf_pipeline(
     spawn_processor_task(
         pipeline_handle,
         next_processor_id(&mut next_processor_number, "reference_yuv_writer"),
+        crate::ProcessorMetadata::new("reference_yuv_writer"),
         move |handle| {
             reference_writer.run(handle, decoder_output_track_id_for_reference_writer.clone())
         },
@@ -488,6 +496,7 @@ async fn setup_vmaf_pipeline(
     spawn_processor_task(
         pipeline_handle,
         next_processor_id(&mut next_processor_number, "progress_bar"),
+        crate::ProcessorMetadata::new("progress_bar"),
         move |handle| progress.run(handle, decoder_output_track_id_for_progress.clone()),
         &mut processor_tasks,
     )
@@ -502,6 +511,7 @@ async fn setup_vmaf_pipeline(
 async fn spawn_processor_task<F, T>(
     pipeline_handle: &crate::MediaPipelineHandle,
     processor_id: ProcessorId,
+    processor_metadata: crate::ProcessorMetadata,
     f: F,
     processor_tasks: &mut Vec<SpawnedProcessorTask>,
 ) -> Result<()>
@@ -510,7 +520,7 @@ where
     T: Future<Output = Result<()>> + Send + 'static,
 {
     let processor_handle = pipeline_handle
-        .register_processor(processor_id.clone())
+        .register_processor(processor_id.clone(), processor_metadata)
         .await
         .map_err(|e| match e {
             crate::RegisterProcessorError::PipelineTerminated => {

@@ -103,9 +103,11 @@ async fn setup_pipeline(
             .map_err(|e| Error::new(e.to_string()))?;
 
             pipeline_handle
-                .spawn_processor(crate::ProcessorId::new("mp4_file_reader"), |handle| {
-                    reader.run(handle)
-                })
+                .spawn_processor(
+                    crate::ProcessorId::new("mp4_file_reader"),
+                    crate::ProcessorMetadata::new("mp4_file_reader"),
+                    |handle| reader.run(handle),
+                )
                 .await?;
         }
         ContainerFormat::Webm => {
@@ -118,9 +120,11 @@ async fn setup_pipeline(
             );
 
             pipeline_handle
-                .spawn_processor(crate::ProcessorId::new("webm_file_reader"), |handle| {
-                    reader.run(handle)
-                })
+                .spawn_processor(
+                    crate::ProcessorId::new("webm_file_reader"),
+                    crate::ProcessorMetadata::new("webm_file_reader"),
+                    |handle| reader.run(handle),
+                )
                 .await?;
         }
     }
@@ -139,13 +143,17 @@ async fn setup_pipeline(
         .map_err(|e| Error::new(e.to_string()))?;
 
         pipeline_handle
-            .spawn_processor(crate::ProcessorId::new("audio_decoder"), |handle| {
-                audio_decoder.run(
-                    handle,
-                    crate::TrackId::new(AUDIO_ENCODED_TRACK_ID),
-                    crate::TrackId::new(AUDIO_DECODED_TRACK_ID),
-                )
-            })
+            .spawn_processor(
+                crate::ProcessorId::new("audio_decoder"),
+                crate::ProcessorMetadata::new("audio_decoder"),
+                |handle| {
+                    audio_decoder.run(
+                        handle,
+                        crate::TrackId::new(AUDIO_ENCODED_TRACK_ID),
+                        crate::TrackId::new(AUDIO_DECODED_TRACK_ID),
+                    )
+                },
+            )
             .await?;
 
         let video_decoder = VideoDecoder::new(
@@ -158,20 +166,26 @@ async fn setup_pipeline(
             },
         );
         pipeline_handle
-            .spawn_processor(crate::ProcessorId::new("video_decoder"), |handle| {
-                video_decoder.run(
-                    handle,
-                    crate::TrackId::new(VIDEO_ENCODED_TRACK_ID),
-                    crate::TrackId::new(VIDEO_DECODED_TRACK_ID),
-                )
-            })
+            .spawn_processor(
+                crate::ProcessorId::new("video_decoder"),
+                crate::ProcessorMetadata::new("video_decoder"),
+                |handle| {
+                    video_decoder.run(
+                        handle,
+                        crate::TrackId::new(VIDEO_ENCODED_TRACK_ID),
+                        crate::TrackId::new(VIDEO_DECODED_TRACK_ID),
+                    )
+                },
+            )
             .await?;
     }
 
     pipeline_handle
-        .spawn_processor(crate::ProcessorId::new("output_printer"), |handle| {
-            output_printer.run(handle)
-        })
+        .spawn_processor(
+            crate::ProcessorId::new("output_printer"),
+            crate::ProcessorMetadata::new("inspect_output_printer"),
+            |handle| output_printer.run(handle),
+        )
         .await?;
 
     pipeline_handle.complete_initial_processor_registration();

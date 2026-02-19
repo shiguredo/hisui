@@ -49,6 +49,18 @@ impl Stats {
         }
     }
 
+    pub fn gauge_f64(&mut self, name: &'static str) -> StatsGaugeF64 {
+        let key = self.make_key(name);
+        let entry = self.get_or_insert_entry(key, || StatsEntry::GaugeF64(StatsGaugeF64::new()));
+        match entry {
+            StatsEntry::GaugeF64(gauge) => gauge,
+            other => panic!(
+                "metric type mismatch: expected=gauge_f64 actual={}",
+                other.kind_name()
+            ),
+        }
+    }
+
     pub fn string(&mut self, name: &'static str) -> StatsString {
         let key = self.make_key(name);
         let entry = self.get_or_insert_entry(key, || StatsEntry::StringValue(StatsString::new()));
@@ -112,6 +124,34 @@ impl Stats {
         text
     }
 
+    pub fn snapshot_entries(&self) -> Vec<StatsSnapshotEntry> {
+        let entries = {
+            let shared_entries = self
+                .shared_entries
+                .lock()
+                .expect("lock() failed unexpectedly");
+            shared_entries
+                .iter()
+                .map(|(key, entry)| (key.clone(), entry.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        entries
+            .into_iter()
+            .map(|(key, entry)| StatsSnapshotEntry {
+                metric_name: key.metric_name,
+                labels: key.default_labels.0.clone(),
+                value: match entry {
+                    StatsEntry::Counter(v) => StatsSnapshotValue::Counter(v.get()),
+                    StatsEntry::Gauge(v) => StatsSnapshotValue::Gauge(v.get()),
+                    StatsEntry::GaugeF64(v) => StatsSnapshotValue::GaugeF64(v.get()),
+                    StatsEntry::Flag(v) => StatsSnapshotValue::Flag(v.get()),
+                    StatsEntry::StringValue(v) => StatsSnapshotValue::String(v.get()),
+                },
+            })
+            .collect()
+    }
+
     fn make_key(&self, metric_name: &'static str) -> StatsKey {
         StatsKey {
             metric_name,
@@ -150,6 +190,7 @@ struct StatsKey {
 pub enum StatsEntry {
     Counter(StatsCounter),
     Gauge(StatsGauge),
+    GaugeF64(StatsGaugeF64),
     Flag(StatsFlag),
     StringValue(StatsString),
 }
@@ -159,6 +200,7 @@ impl StatsEntry {
         match self {
             Self::Counter(_) => "counter",
             Self::Gauge(_) => "gauge",
+            Self::GaugeF64(_) => "gauge_f64",
             Self::Flag(_) => "flag",
             Self::StringValue(_) => "string",
         }
@@ -168,6 +210,7 @@ impl StatsEntry {
         match self {
             Self::Counter(_) => "counter",
             Self::Gauge(_) => "gauge",
+            Self::GaugeF64(_) => "gauge",
             Self::Flag(_) => "gauge",
             Self::StringValue(_) => "gauge",
         }
@@ -177,6 +220,7 @@ impl StatsEntry {
         match self {
             Self::Counter(counter) => counter.get().to_string(),
             Self::Gauge(gauge) => gauge.get().to_string(),
+            Self::GaugeF64(gauge) => gauge.get().to_string(),
             Self::Flag(flag) => {
                 if flag.get() {
                     "1".to_owned()
@@ -227,19 +271,11 @@ impl StatsGauge {
     }
 
     pub fn inc(&self) {
-        self.add(1);
+        self.value.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn dec(&self) {
-        self.sub(1);
-    }
-
-    pub fn add(&self, value: i64) {
-        self.value.fetch_add(value, Ordering::Relaxed);
-    }
-
-    pub fn sub(&self, value: i64) {
-        self.value.fetch_sub(value, Ordering::Relaxed);
+        self.value.fetch_sub(1, Ordering::Relaxed);
     }
 
     pub fn set(&self, value: i64) {
@@ -251,9 +287,34 @@ impl StatsGauge {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct StatsGaugeF64 {
+    value: Arc<AtomicU64>,
+}
+
+impl StatsGaugeF64 {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(&self, value: f64) {
+        self.value.store(value.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> f64 {
+        f64::from_bits(self.value.load(Ordering::Relaxed))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StatsString {
     string_value: Arc<Mutex<String>>,
+}
+
+impl Default for StatsString {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StatsString {
@@ -308,6 +369,22 @@ impl StatsFlag {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct Labels(BTreeMap<&'static str, String>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatsSnapshotEntry {
+    pub metric_name: &'static str,
+    pub labels: BTreeMap<&'static str, String>,
+    pub value: StatsSnapshotValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatsSnapshotValue {
+    Counter(u64),
+    Gauge(i64),
+    GaugeF64(f64),
+    Flag(bool),
+    String(String),
+}
 
 fn sanitize_metric_name(name: &str) -> String {
     let mut out = String::new();
@@ -405,12 +482,18 @@ mod tests {
         let gauge = StatsGauge::new();
         assert_eq!(gauge.get(), 0);
         gauge.inc();
-        gauge.add(5);
         gauge.dec();
-        gauge.sub(2);
-        assert_eq!(gauge.get(), 3);
+        assert_eq!(gauge.get(), 0);
         gauge.set(-4);
         assert_eq!(gauge.get(), -4);
+    }
+
+    #[test]
+    fn gauge_f64_basic_ops() {
+        let gauge = StatsGaugeF64::new();
+        assert_eq!(gauge.get(), 0.0);
+        gauge.set(3.25);
+        assert_eq!(gauge.get(), 3.25);
     }
 
     #[test]
@@ -513,17 +596,21 @@ mod tests {
         stats.set_default_label("processor_id", "p0");
         let counter = stats.counter("processed_frames_total");
         let gauge = stats.gauge("queue_depth");
+        let gauge_f64 = stats.gauge_f64("latency_seconds");
         let flag = stats.flag("error");
         counter.add(3);
         gauge.set(-1);
+        gauge_f64.set(0.5);
         flag.set(true);
 
         let text = stats.to_prometheus_text("hisui_");
         assert!(text.contains("# TYPE hisui_processed_frames_total counter"));
         assert!(text.contains("# TYPE hisui_queue_depth gauge"));
+        assert!(text.contains("# TYPE hisui_latency_seconds gauge"));
         assert!(text.contains("# TYPE hisui_error gauge"));
         assert!(text.contains("hisui_processed_frames_total{processor_id=\"p0\"} 3"));
         assert!(text.contains("hisui_queue_depth{processor_id=\"p0\"} -1"));
+        assert!(text.contains("hisui_latency_seconds{processor_id=\"p0\"} 0.5"));
         assert!(text.contains("hisui_error{processor_id=\"p0\"} 1"));
     }
 
@@ -556,5 +643,50 @@ mod tests {
             return message.to_string();
         }
         "<non-string panic>".to_string()
+    }
+
+    #[test]
+    fn snapshot_entries_include_all_metric_types() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        stats.counter("processed_total").set(10);
+        stats.gauge("queue_depth").set(-3);
+        stats.gauge_f64("latency_seconds").set(0.25);
+        stats.flag("error").set(true);
+        stats.string("state").set("running");
+
+        let entries = stats.snapshot_entries();
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "processed_total"
+                    && e.labels.get("processor_id") == Some(&"p0".to_owned())
+                    && e.value == StatsSnapshotValue::Counter(10)
+            }),
+            "counter entry is missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "queue_depth" && e.value == StatsSnapshotValue::Gauge(-3)
+            }),
+            "gauge entry is missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "latency_seconds" && e.value == StatsSnapshotValue::GaugeF64(0.25)
+            }),
+            "gauge_f64 entry is missing: {entries:?}"
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.metric_name == "error" && e.value == StatsSnapshotValue::Flag(true)),
+            "flag entry is missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| {
+                e.metric_name == "state" && e.value == StatsSnapshotValue::String("running".into())
+            }),
+            "string entry is missing: {entries:?}"
+        );
     }
 }

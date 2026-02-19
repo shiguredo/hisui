@@ -78,6 +78,7 @@ pub mod source_png_file;
 pub mod source_video_device;
 pub mod stats;
 pub mod stats2;
+pub mod stats2_legacy_json;
 pub mod subcommand_compose;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
@@ -106,8 +107,8 @@ pub use error::Error;
 pub use media::MediaSample;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineHandle, Message, MessageReceiver, MessageSender,
-    PipelineTerminated, ProcessorHandle, ProcessorId, PublishTrackError, RegisterProcessorError,
-    Syn, TrackId,
+    PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata, PublishTrackError,
+    RegisterProcessorError, Syn, TrackId,
 };
 pub use source_file_mp4::Mp4FileSource;
 pub use source_png_file::PngFileSource;
