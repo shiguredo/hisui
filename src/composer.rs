@@ -303,11 +303,100 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
             .set(total_processing_seconds);
 
         match processor {
+            ProcessorStats::Mp4AudioReader(reader) => {
+                if let Some(codec) = reader.codec {
+                    processor_stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    processor_stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+                processor_stats
+                    .counter("total_sample_count")
+                    .add(reader.total_sample_count.get());
+                processor_stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                processor_stats
+                    .gauge_f64("start_time_seconds")
+                    .set(reader.start_time.as_secs_f64());
+            }
+            ProcessorStats::Mp4VideoReader(reader) => {
+                if let Some(codec) = reader.codec.get() {
+                    processor_stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    processor_stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+                processor_stats
+                    .counter("total_sample_count")
+                    .add(reader.total_sample_count.get());
+                processor_stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                processor_stats
+                    .gauge_f64("start_time_seconds")
+                    .set(reader.start_time.as_secs_f64());
+            }
+            ProcessorStats::WebmAudioReader(reader) => {
+                if let Some(codec) = reader.codec {
+                    processor_stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    processor_stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+                processor_stats
+                    .counter("total_cluster_count")
+                    .add(reader.total_cluster_count.get());
+                processor_stats
+                    .counter("total_simple_block_count")
+                    .add(reader.total_simple_block_count.get());
+                processor_stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                processor_stats
+                    .gauge_f64("start_time_seconds")
+                    .set(reader.start_time.as_secs_f64());
+            }
+            ProcessorStats::WebmVideoReader(reader) => {
+                if let Some(codec) = reader.codec.get() {
+                    processor_stats.string("codec").set(codec.as_str());
+                }
+                if let Some(path) = reader.current_input_file.get() {
+                    processor_stats
+                        .string("current_input_file")
+                        .set(path.display().to_string());
+                }
+                processor_stats
+                    .counter("total_cluster_count")
+                    .add(reader.total_cluster_count.get());
+                processor_stats
+                    .counter("total_simple_block_count")
+                    .add(reader.total_simple_block_count.get());
+                processor_stats.gauge_f64("total_track_seconds").set(
+                    (reader.track_duration_offset.get() + reader.total_track_duration.get())
+                        .as_secs_f64(),
+                );
+                processor_stats
+                    .gauge_f64("start_time_seconds")
+                    .set(reader.start_time.as_secs_f64());
+            }
             ProcessorStats::AudioEncoder(encoder) => {
                 processor_stats
                     .string("engine")
                     .set(encoder.engine.as_str());
                 processor_stats.string("codec").set(encoder.codec.as_str());
+                processor_stats
+                    .counter("total_audio_data_count")
+                    .add(encoder.total_audio_data_count.get());
             }
             ProcessorStats::AudioDecoder(decoder) => {
                 if let Some(engine) = decoder.engine {
@@ -316,6 +405,9 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
                 if let Some(codec) = decoder.codec {
                     processor_stats.string("codec").set(codec.as_str());
                 }
+                processor_stats
+                    .counter("total_audio_data_count")
+                    .add(decoder.total_audio_data_count.get());
             }
             ProcessorStats::VideoDecoder(decoder) => {
                 if let Some(engine) = decoder.engine.get() {
@@ -324,6 +416,12 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
                 if let Some(codec) = decoder.codec.get() {
                     processor_stats.string("codec").set(codec.as_str());
                 }
+                processor_stats
+                    .counter("total_input_video_frame_count")
+                    .add(decoder.total_input_video_frame_count.get());
+                processor_stats
+                    .counter("total_output_video_frame_count")
+                    .add(decoder.total_output_video_frame_count.get());
             }
             ProcessorStats::VideoEncoder(encoder) => {
                 if let Some(engine) = encoder.engine.get() {
@@ -332,6 +430,32 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
                 if let Some(codec) = encoder.codec.get() {
                     processor_stats.string("codec").set(codec.as_str());
                 }
+                processor_stats
+                    .counter("total_input_video_frame_count")
+                    .add(encoder.total_input_video_frame_count.get());
+                processor_stats
+                    .counter("total_output_video_frame_count")
+                    .add(encoder.total_output_video_frame_count.get());
+            }
+            ProcessorStats::AudioMixer(mixer) => {
+                processor_stats
+                    .counter("total_input_audio_data_count")
+                    .add(mixer.total_input_audio_data_count.get());
+                processor_stats
+                    .counter("total_output_audio_data_count")
+                    .add(mixer.total_output_audio_data_count.get());
+                processor_stats
+                    .gauge_f64("total_output_audio_data_seconds")
+                    .set(mixer.total_output_audio_data_duration.get().as_secs_f64());
+                processor_stats
+                    .counter("total_output_sample_count")
+                    .add(mixer.total_output_sample_count.get());
+                processor_stats
+                    .counter("total_output_filled_sample_count")
+                    .add(mixer.total_output_filled_sample_count.get());
+                processor_stats
+                    .counter("total_trimmed_sample_count")
+                    .add(mixer.total_trimmed_sample_count.get());
             }
             ProcessorStats::VideoMixer(mixer) => {
                 processor_stats
@@ -340,6 +464,21 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
                 processor_stats
                     .gauge("output_video_height")
                     .set(mixer.output_video_resolution.height as i64);
+                processor_stats
+                    .counter("total_input_video_frame_count")
+                    .add(mixer.total_input_video_frame_count.get());
+                processor_stats
+                    .counter("total_output_video_frame_count")
+                    .add(mixer.total_output_video_frame_count.get());
+                processor_stats
+                    .gauge_f64("total_output_video_frame_seconds")
+                    .set(mixer.total_output_video_frame_duration.get().as_secs_f64());
+                processor_stats
+                    .counter("total_trimmed_video_frame_count")
+                    .add(mixer.total_trimmed_video_frame_count.get());
+                processor_stats
+                    .counter("total_extended_video_frame_count")
+                    .add(mixer.total_extended_video_frame_count.get());
             }
             ProcessorStats::Mp4Writer(writer) => {
                 if let Some(audio_codec) = writer.audio_codec.get() {
@@ -358,6 +497,24 @@ fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::St
                 processor_stats
                     .counter("total_video_sample_data_byte_size")
                     .add(writer.total_video_sample_data_byte_size.get());
+                processor_stats
+                    .counter("reserved_moov_box_size")
+                    .add(writer.reserved_moov_box_size.get());
+                processor_stats
+                    .counter("actual_moov_box_size")
+                    .add(writer.actual_moov_box_size.get());
+                processor_stats
+                    .counter("total_audio_chunk_count")
+                    .add(writer.total_audio_chunk_count.get());
+                processor_stats
+                    .counter("total_video_chunk_count")
+                    .add(writer.total_video_chunk_count.get());
+                processor_stats
+                    .counter("total_audio_sample_count")
+                    .add(writer.total_audio_sample_count.get());
+                processor_stats
+                    .counter("total_video_sample_count")
+                    .add(writer.total_video_sample_count.get());
                 processor_stats
                     .gauge_f64("total_audio_track_seconds")
                     .set(writer.total_audio_track_duration.get().as_secs_f64());
@@ -423,36 +580,43 @@ impl MediaProcessor for ProgressBar {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
+    use crate::stats_legacy as legacy;
+
+    fn counter(value: u64) -> legacy::SharedAtomicCounter {
+        let counter = legacy::SharedAtomicCounter::default();
+        counter.set(value);
+        counter
+    }
+
+    fn duration_secs(value: u64) -> legacy::SharedAtomicDuration {
+        legacy::SharedAtomicDuration::new(Duration::from_secs(value))
+    }
 
     #[test]
     fn convert_legacy_stats_to_stats_preserves_compose_summary_metrics() {
-        let writer = crate::stats_legacy::Mp4WriterStats {
-            audio_codec: crate::stats_legacy::SharedOption::new(Some(
-                crate::types::CodecName::Opus,
-            )),
-            video_codec: crate::stats_legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+        let writer = legacy::Mp4WriterStats {
+            audio_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Opus)),
+            video_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
             total_audio_sample_data_byte_size: {
-                let v = crate::stats_legacy::SharedAtomicCounter::default();
+                let v = legacy::SharedAtomicCounter::default();
                 v.set(1000);
                 v
             },
             total_video_sample_data_byte_size: {
-                let v = crate::stats_legacy::SharedAtomicCounter::default();
+                let v = legacy::SharedAtomicCounter::default();
                 v.set(2000);
                 v
             },
-            total_audio_track_duration: crate::stats_legacy::SharedAtomicDuration::new(
-                Duration::from_secs(2),
-            ),
-            total_video_track_duration: crate::stats_legacy::SharedAtomicDuration::new(
-                Duration::from_secs(4),
-            ),
+            total_audio_track_duration: legacy::SharedAtomicDuration::new(Duration::from_secs(2)),
+            total_video_track_duration: legacy::SharedAtomicDuration::new(Duration::from_secs(4)),
             ..Default::default()
         };
 
-        let video_mixer = crate::stats_legacy::VideoMixerStats {
-            output_video_resolution: crate::stats_legacy::VideoResolution {
+        let video_mixer = legacy::VideoMixerStats {
+            output_video_resolution: legacy::VideoResolution {
                 width: 320,
                 height: 240,
             },
@@ -463,17 +627,13 @@ mod tests {
             elapsed_duration: Duration::from_secs(5),
             error: Default::default(),
             processors: vec![
-                ProcessorStats::AudioEncoder(crate::stats_legacy::AudioEncoderStats::new(
+                ProcessorStats::AudioEncoder(legacy::AudioEncoderStats::new(
                     crate::types::EngineName::Opus,
                     crate::types::CodecName::Opus,
                 )),
-                ProcessorStats::VideoEncoder(crate::stats_legacy::VideoEncoderStats {
-                    engine: crate::stats_legacy::SharedOption::new(Some(
-                        crate::types::EngineName::Libvpx,
-                    )),
-                    codec: crate::stats_legacy::SharedOption::new(Some(
-                        crate::types::CodecName::Vp9,
-                    )),
+                ProcessorStats::VideoEncoder(legacy::VideoEncoderStats {
+                    engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
+                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
                     ..Default::default()
                 }),
                 ProcessorStats::VideoMixer(video_mixer),
@@ -517,6 +677,187 @@ mod tests {
                 && entry.labels.get("processor_type") == Some(&"video_mixer".to_owned())
                 && entry.value == crate::stats::StatsSnapshotValue::Gauge(240)
         }));
+    }
+
+    #[test]
+    fn convert_legacy_stats_to_stats_restores_simple_legacy_fields() {
+        let legacy_stats = LegacyStats {
+            elapsed_duration: Duration::from_secs(1),
+            error: Default::default(),
+            processors: vec![
+                ProcessorStats::Mp4AudioReader(legacy::Mp4AudioReaderStats {
+                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
+                        "/tmp/a.mp4",
+                    ))),
+                    codec: Some(crate::types::CodecName::Opus),
+                    total_sample_count: counter(11),
+                    total_track_duration: duration_secs(4),
+                    track_duration_offset: duration_secs(1),
+                    start_time: Duration::from_secs(2),
+                    ..Default::default()
+                }),
+                ProcessorStats::Mp4VideoReader(legacy::Mp4VideoReaderStats {
+                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
+                        "/tmp/v.mp4",
+                    ))),
+                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                    total_sample_count: counter(22),
+                    total_track_duration: duration_secs(5),
+                    track_duration_offset: duration_secs(2),
+                    start_time: Duration::from_secs(3),
+                    ..Default::default()
+                }),
+                ProcessorStats::WebmAudioReader(legacy::WebmAudioReaderStats {
+                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
+                        "/tmp/a.webm",
+                    ))),
+                    codec: Some(crate::types::CodecName::Opus),
+                    total_cluster_count: counter(3),
+                    total_simple_block_count: counter(4),
+                    total_track_duration: duration_secs(6),
+                    track_duration_offset: duration_secs(1),
+                    start_time: Duration::from_secs(4),
+                    ..Default::default()
+                }),
+                ProcessorStats::WebmVideoReader(legacy::WebmVideoReaderStats {
+                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
+                        "/tmp/v.webm",
+                    ))),
+                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                    total_cluster_count: counter(5),
+                    total_simple_block_count: counter(6),
+                    total_track_duration: duration_secs(7),
+                    track_duration_offset: duration_secs(2),
+                    start_time: Duration::from_secs(5),
+                    ..Default::default()
+                }),
+                ProcessorStats::AudioDecoder(legacy::AudioDecoderStats {
+                    engine: Some(crate::types::EngineName::Opus),
+                    codec: Some(crate::types::CodecName::Opus),
+                    total_audio_data_count: counter(8),
+                    ..Default::default()
+                }),
+                ProcessorStats::VideoDecoder(legacy::VideoDecoderStats {
+                    engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
+                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                    total_input_video_frame_count: counter(9),
+                    total_output_video_frame_count: counter(10),
+                    ..Default::default()
+                }),
+                ProcessorStats::AudioMixer(legacy::AudioMixerStats {
+                    total_input_audio_data_count: counter(12),
+                    total_output_audio_data_count: counter(13),
+                    total_output_audio_data_duration: duration_secs(14),
+                    total_output_sample_count: counter(15),
+                    total_output_filled_sample_count: counter(16),
+                    total_trimmed_sample_count: counter(17),
+                    ..Default::default()
+                }),
+                ProcessorStats::VideoMixer(legacy::VideoMixerStats {
+                    output_video_resolution: legacy::VideoResolution {
+                        width: 640,
+                        height: 360,
+                    },
+                    total_input_video_frame_count: counter(18),
+                    total_output_video_frame_count: counter(19),
+                    total_output_video_frame_duration: duration_secs(20),
+                    total_trimmed_video_frame_count: counter(21),
+                    total_extended_video_frame_count: counter(22),
+                    ..Default::default()
+                }),
+                ProcessorStats::AudioEncoder(legacy::AudioEncoderStats {
+                    engine: crate::types::EngineName::Opus,
+                    codec: crate::types::CodecName::Opus,
+                    total_audio_data_count: counter(23),
+                    ..legacy::AudioEncoderStats::new(
+                        crate::types::EngineName::Opus,
+                        crate::types::CodecName::Opus,
+                    )
+                }),
+                ProcessorStats::VideoEncoder(legacy::VideoEncoderStats {
+                    engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
+                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                    total_input_video_frame_count: counter(24),
+                    total_output_video_frame_count: counter(25),
+                    ..Default::default()
+                }),
+                ProcessorStats::Mp4Writer(legacy::Mp4WriterStats {
+                    audio_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Opus)),
+                    video_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                    reserved_moov_box_size: counter(26),
+                    actual_moov_box_size: counter(27),
+                    total_audio_chunk_count: counter(28),
+                    total_video_chunk_count: counter(29),
+                    total_audio_sample_count: counter(30),
+                    total_video_sample_count: counter(31),
+                    total_audio_sample_data_byte_size: counter(32),
+                    total_video_sample_data_byte_size: counter(33),
+                    total_audio_track_duration: duration_secs(34),
+                    total_video_track_duration: duration_secs(35),
+                    ..Default::default()
+                }),
+            ],
+            worker_threads: Vec::new(),
+        };
+
+        let stats = convert_legacy_stats_to_stats(&legacy_stats);
+        let entries = stats
+            .snapshot_entries()
+            .expect("snapshot_entries must succeed");
+        let has =
+            |processor_type: &str, metric_name: &str, value: crate::stats::StatsSnapshotValue| {
+                entries.iter().any(|entry| {
+                    entry.labels.get("processor_type") == Some(&processor_type.to_owned())
+                        && entry.metric_name == metric_name
+                        && entry.value == value
+                })
+            };
+
+        assert!(has(
+            "mp4_audio_reader",
+            "total_sample_count",
+            crate::stats::StatsSnapshotValue::Counter(11),
+        ));
+        assert!(has(
+            "webm_audio_reader",
+            "total_cluster_count",
+            crate::stats::StatsSnapshotValue::Counter(3),
+        ));
+        assert!(has(
+            "audio_decoder",
+            "total_audio_data_count",
+            crate::stats::StatsSnapshotValue::Counter(8),
+        ));
+        assert!(has(
+            "video_decoder",
+            "total_output_video_frame_count",
+            crate::stats::StatsSnapshotValue::Counter(10),
+        ));
+        assert!(has(
+            "audio_mixer",
+            "total_output_audio_data_seconds",
+            crate::stats::StatsSnapshotValue::GaugeF64(14.0),
+        ));
+        assert!(has(
+            "video_mixer",
+            "total_output_video_frame_seconds",
+            crate::stats::StatsSnapshotValue::GaugeF64(20.0),
+        ));
+        assert!(has(
+            "audio_encoder",
+            "total_audio_data_count",
+            crate::stats::StatsSnapshotValue::Counter(23),
+        ));
+        assert!(has(
+            "video_encoder",
+            "total_input_video_frame_count",
+            crate::stats::StatsSnapshotValue::Counter(24),
+        ));
+        assert!(has(
+            "mp4_writer",
+            "reserved_moov_box_size",
+            crate::stats::StatsSnapshotValue::Counter(26),
+        ));
     }
 
     #[test]

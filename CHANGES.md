@@ -14,18 +14,11 @@
 - [CHANGE] `compose` コマンドの統計 JSON の内容を調整する
   - `--stats-file` のトップレベルキー（`elapsed_seconds` / `error` / `processors` / `worker_threads`）は従来通り維持する
   - `worker_threads` の各要素は `total_processing_seconds` / `total_waiting_seconds` のみを出力し、`processors` は出力しない
-  - `processors` の各要素で削除される項目は、種別ごとに次の通り
-  - `mp4_audio_reader`: `input_files` / `current_input_file` / `codec` / `total_sample_count` / `total_track_seconds` / `start_time_seconds`
-  - `webm_audio_reader`: `input_files` / `current_input_file` / `codec` / `total_cluster_count` / `total_simple_block_count` / `total_track_seconds` / `start_time_seconds`
-  - `mp4_video_reader`: `input_files` / `current_input_file` / `codec` / `resolutions` / `total_sample_count` / `total_track_seconds` / `start_time_seconds`
-  - `webm_video_reader`: `input_files` / `current_input_file` / `codec` / `total_cluster_count` / `total_simple_block_count` / `total_track_seconds` / `start_time_seconds`
-  - `audio_decoder`: `source_id` / `total_audio_data_count`
-  - `video_decoder`: `source_id` / `total_input_video_frame_count` / `total_output_video_frame_count` / `resolutions`
-  - `audio_encoder`: `total_audio_data_count`
-  - `video_encoder`: `total_input_video_frame_count` / `total_output_video_frame_count`
-  - `audio_mixer`: `total_input_audio_data_count` / `total_output_audio_data_count` / `total_output_audio_data_seconds` / `total_output_sample_count` / `total_output_filled_sample_count` / `total_trimmed_sample_count`
-  - `video_mixer`: `output_video_resolution` / `total_input_video_frame_count` / `total_output_video_frame_count` / `total_output_video_frame_seconds` / `total_trimmed_video_frame_count` / `total_extended_video_frame_count`
-  - `mp4_writer`: `reserved_moov_box_size` / `actual_moov_box_size` / `total_audio_chunk_count` / `total_video_chunk_count` / `total_audio_sample_count` / `total_video_sample_count`
+  - `processors` の各要素で従来との差分が残る項目は次の通り
+  - `mp4_audio_reader` / `webm_audio_reader` / `mp4_video_reader` / `webm_video_reader`: `input_files` は出力しない
+  - `mp4_video_reader` / `video_decoder`: `resolutions` は出力しない
+  - `audio_decoder` / `video_decoder`: `source_id` は出力しない
+  - `video_mixer`: `output_video_resolution` の代わりに `output_video_width` / `output_video_height` を出力する
   - @sile
 - [ADD] server サブコマンドの JSON-RPC で Video Device source を作成できるようにする
   - JSON-RPC に `createVideoDeviceSource` メソッドを追加する
