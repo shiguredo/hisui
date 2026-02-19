@@ -90,9 +90,9 @@ pub fn to_legacy_stats_json(
     stats: &crate::stats2::Stats,
     elapsed_seconds: f64,
     worker_threads: Vec<LegacyWorkerThreadStats>,
-) -> nojson::RawJsonOwned {
+) -> crate::Result<nojson::RawJsonOwned> {
     let mut processors = BTreeMap::<String, LegacyProcessorStats>::new();
-    for entry in stats.snapshot_entries() {
+    for entry in stats.snapshot_entries()? {
         let Some(processor_id) = entry.labels.get("processor_id") else {
             continue;
         };
@@ -131,7 +131,7 @@ pub fn to_legacy_stats_json(
         worker_threads,
     };
     let json = nojson::json(|f| f.value(&stats));
-    nojson::RawJsonOwned::parse(json.to_string()).expect("infallible")
+    Ok(nojson::RawJsonOwned::parse(json.to_string()).expect("infallible"))
 }
 
 fn snapshot_value_to_legacy_value(value: crate::stats2::StatsSnapshotValue) -> LegacyJsonValue {
@@ -179,7 +179,8 @@ mod tests {
                 total_processing_seconds: 2.0,
                 total_waiting_seconds: 1.0,
             }],
-        );
+        )
+        .expect("to_legacy_stats_json must succeed");
 
         let text = json.to_string();
         assert!(text.contains("\"elapsed_seconds\":3"));
@@ -202,7 +203,8 @@ mod tests {
         stats.counter("frames_total").set(10);
         stats.flag("error").set(false);
 
-        let json = to_legacy_stats_json(&stats, 0.0, Vec::new());
+        let json = to_legacy_stats_json(&stats, 0.0, Vec::new())
+            .expect("to_legacy_stats_json must succeed");
         let text = json.to_string();
         assert!(!text.contains("\"frames_total\":10"));
         assert!(text.contains("\"type\":\"video_mixer\""));

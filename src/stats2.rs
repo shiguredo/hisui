@@ -95,7 +95,7 @@ impl Stats {
             let shared_entries = self
                 .shared_entries
                 .lock()
-                .expect("lock() failed unexpectedly");
+                .map_err(|_| crate::Error::new("stats lock poisoned: shared_entries"))?;
             shared_entries
                 .iter()
                 .map(|(key, entry)| (key.clone(), entry.clone()))
@@ -130,19 +130,19 @@ impl Stats {
         Ok(text)
     }
 
-    pub fn snapshot_entries(&self) -> Vec<StatsSnapshotEntry> {
+    pub fn snapshot_entries(&self) -> crate::Result<Vec<StatsSnapshotEntry>> {
         let entries = {
             let shared_entries = self
                 .shared_entries
                 .lock()
-                .expect("lock() failed unexpectedly");
+                .map_err(|_| crate::Error::new("stats lock poisoned: shared_entries"))?;
             shared_entries
                 .iter()
                 .map(|(key, entry)| (key.clone(), entry.clone()))
                 .collect::<Vec<_>>()
         };
 
-        entries
+        Ok(entries
             .into_iter()
             .map(|(key, entry)| StatsSnapshotEntry {
                 metric_name: key.metric_name,
@@ -155,7 +155,7 @@ impl Stats {
                     StatsEntry::StringValue(v) => StatsSnapshotValue::String(v.get()),
                 },
             })
-            .collect()
+            .collect())
     }
 
     fn make_key(&self, metric_name: &'static str) -> StatsKey {
@@ -715,7 +715,9 @@ mod tests {
         stats.flag("error").set(true);
         stats.string("state").set("running");
 
-        let entries = stats.snapshot_entries();
+        let entries = stats
+            .snapshot_entries()
+            .expect("snapshot_entries must succeed");
         assert!(
             entries.iter().any(|e| {
                 e.metric_name == "processed_total"
