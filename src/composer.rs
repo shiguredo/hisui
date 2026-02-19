@@ -643,39 +643,37 @@ mod tests {
         };
 
         let stats = convert_legacy_stats_to_stats(&legacy_stats);
-        let entries = stats
-            .snapshot_entries()
-            .expect("snapshot_entries must succeed");
+        let entries = stats.entries().expect("entries must succeed");
 
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "audio_codec"
                 && entry.labels.get("processor_type") == Some(&"mp4_writer".to_owned())
-                && entry.value == crate::stats::StatsSnapshotValue::String("OPUS".to_owned())
+                && entry.entry.as_string() == Some("OPUS".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "video_codec"
                 && entry.labels.get("processor_type") == Some(&"mp4_writer".to_owned())
-                && entry.value == crate::stats::StatsSnapshotValue::String("VP9".to_owned())
+                && entry.entry.as_string() == Some("VP9".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "engine"
                 && entry.labels.get("processor_type") == Some(&"audio_encoder".to_owned())
-                && entry.value == crate::stats::StatsSnapshotValue::String("opus".to_owned())
+                && entry.entry.as_string() == Some("opus".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "engine"
                 && entry.labels.get("processor_type") == Some(&"video_encoder".to_owned())
-                && entry.value == crate::stats::StatsSnapshotValue::String("libvpx".to_owned())
+                && entry.entry.as_string() == Some("libvpx".to_owned())
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "output_video_width"
                 && entry.labels.get("processor_type") == Some(&"video_mixer".to_owned())
-                && entry.value == crate::stats::StatsSnapshotValue::Gauge(320)
+                && entry.entry.as_gauge() == Some(320)
         }));
         assert!(entries.iter().any(|entry| {
             entry.metric_name == "output_video_height"
                 && entry.labels.get("processor_type") == Some(&"video_mixer".to_owned())
-                && entry.value == crate::stats::StatsSnapshotValue::Gauge(240)
+                && entry.entry.as_gauge() == Some(240)
         }));
     }
 
@@ -801,63 +799,47 @@ mod tests {
         };
 
         let stats = convert_legacy_stats_to_stats(&legacy_stats);
-        let entries = stats
-            .snapshot_entries()
-            .expect("snapshot_entries must succeed");
-        let has =
-            |processor_type: &str, metric_name: &str, value: crate::stats::StatsSnapshotValue| {
-                entries.iter().any(|entry| {
-                    entry.labels.get("processor_type") == Some(&processor_type.to_owned())
-                        && entry.metric_name == metric_name
-                        && entry.value == value
-                })
-            };
+        let entries = stats.entries().expect("entries must succeed");
+        let has_counter = |processor_type: &str, metric_name: &str, value: u64| {
+            entries.iter().any(|entry| {
+                entry.labels.get("processor_type") == Some(&processor_type.to_owned())
+                    && entry.metric_name == metric_name
+                    && entry.entry.as_counter() == Some(value)
+            })
+        };
+        let has_gauge_f64 = |processor_type: &str, metric_name: &str, value: f64| {
+            entries.iter().any(|entry| {
+                entry.labels.get("processor_type") == Some(&processor_type.to_owned())
+                    && entry.metric_name == metric_name
+                    && entry.entry.as_gauge_f64() == Some(value)
+            })
+        };
 
-        assert!(has(
-            "mp4_audio_reader",
-            "total_sample_count",
-            crate::stats::StatsSnapshotValue::Counter(11),
-        ));
-        assert!(has(
-            "webm_audio_reader",
-            "total_cluster_count",
-            crate::stats::StatsSnapshotValue::Counter(3),
-        ));
-        assert!(has(
-            "audio_decoder",
-            "total_audio_data_count",
-            crate::stats::StatsSnapshotValue::Counter(8),
-        ));
-        assert!(has(
+        assert!(has_counter("mp4_audio_reader", "total_sample_count", 11,));
+        assert!(has_counter("webm_audio_reader", "total_cluster_count", 3,));
+        assert!(has_counter("audio_decoder", "total_audio_data_count", 8,));
+        assert!(has_counter(
             "video_decoder",
             "total_output_video_frame_count",
-            crate::stats::StatsSnapshotValue::Counter(10),
+            10,
         ));
-        assert!(has(
+        assert!(has_gauge_f64(
             "audio_mixer",
             "total_output_audio_data_seconds",
-            crate::stats::StatsSnapshotValue::GaugeF64(14.0),
+            14.0,
         ));
-        assert!(has(
+        assert!(has_gauge_f64(
             "video_mixer",
             "total_output_video_frame_seconds",
-            crate::stats::StatsSnapshotValue::GaugeF64(20.0),
+            20.0,
         ));
-        assert!(has(
-            "audio_encoder",
-            "total_audio_data_count",
-            crate::stats::StatsSnapshotValue::Counter(23),
-        ));
-        assert!(has(
+        assert!(has_counter("audio_encoder", "total_audio_data_count", 23,));
+        assert!(has_counter(
             "video_encoder",
             "total_input_video_frame_count",
-            crate::stats::StatsSnapshotValue::Counter(24),
+            24,
         ));
-        assert!(has(
-            "mp4_writer",
-            "reserved_moov_box_size",
-            crate::stats::StatsSnapshotValue::Counter(26),
-        ));
+        assert!(has_counter("mp4_writer", "reserved_moov_box_size", 26,));
     }
 
     #[test]

@@ -133,7 +133,7 @@ impl Stats {
         Ok(text)
     }
 
-    pub fn snapshot_entries(&self) -> crate::Result<Vec<StatsSnapshotEntry>> {
+    pub fn entries(&self) -> crate::Result<Vec<StatsRawEntry>> {
         let entries = {
             let shared_entries = self
                 .shared_entries
@@ -147,16 +147,10 @@ impl Stats {
 
         Ok(entries
             .into_iter()
-            .map(|(key, entry)| StatsSnapshotEntry {
+            .map(|(key, entry)| StatsRawEntry {
                 metric_name: key.metric_name,
                 labels: (*key.default_labels).clone(),
-                value: match entry {
-                    StatsEntry::Counter(v) => StatsSnapshotValue::Counter(v.get()),
-                    StatsEntry::Gauge(v) => StatsSnapshotValue::Gauge(v.get()),
-                    StatsEntry::GaugeF64(v) => StatsSnapshotValue::GaugeF64(v.get()),
-                    StatsEntry::Flag(v) => StatsSnapshotValue::Flag(v.get()),
-                    StatsEntry::StringValue(v) => StatsSnapshotValue::String(v.get()),
-                },
+                entry,
             })
             .collect())
     }
@@ -205,6 +199,61 @@ pub enum StatsEntry {
 }
 
 impl StatsEntry {
+    pub fn as_counter(&self) -> Option<u64> {
+        match self {
+            Self::Counter(counter) => Some(counter.get()),
+            _ => None,
+        }
+    }
+
+    pub fn as_gauge(&self) -> Option<i64> {
+        match self {
+            Self::Gauge(gauge) => Some(gauge.get()),
+            _ => None,
+        }
+    }
+
+    pub fn as_gauge_f64(&self) -> Option<f64> {
+        match self {
+            Self::GaugeF64(gauge) => Some(gauge.get()),
+            _ => None,
+        }
+    }
+
+    pub fn as_flag(&self) -> Option<bool> {
+        match self {
+            Self::Flag(flag) => Some(flag.get()),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<String> {
+        match self {
+            Self::StringValue(string_value) => Some(string_value.get()),
+            _ => None,
+        }
+    }
+
+    pub fn as_numeric_f64(&self) -> Option<f64> {
+        match self {
+            Self::Counter(counter) => Some(counter.get() as f64),
+            Self::Gauge(gauge) => Some(gauge.get() as f64),
+            Self::GaugeF64(gauge) => Some(gauge.get()),
+            Self::Flag(flag) => Some(if flag.get() { 1.0 } else { 0.0 }),
+            Self::StringValue(_) => None,
+        }
+    }
+
+    pub fn as_bool_for_legacy(&self) -> bool {
+        match self {
+            Self::Flag(flag) => flag.get(),
+            Self::Counter(counter) => counter.get() != 0,
+            Self::Gauge(gauge) => gauge.get() != 0,
+            Self::GaugeF64(gauge) => gauge.get() != 0.0,
+            Self::StringValue(string_value) => !string_value.get().is_empty(),
+        }
+    }
+
     fn kind_name(&self) -> &'static str {
         match self {
             Self::Counter(_) => "counter",
@@ -393,20 +442,11 @@ impl StatsLabels {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct StatsSnapshotEntry {
+#[derive(Debug, Clone)]
+pub struct StatsRawEntry {
     pub metric_name: &'static str,
     pub labels: StatsLabels,
-    pub value: StatsSnapshotValue,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StatsSnapshotValue {
-    Counter(u64),
-    Gauge(i64),
-    GaugeF64(f64),
-    Flag(bool),
-    String(String),
+    pub entry: StatsEntry,
 }
 
 fn escape_label_value(value: &str) -> String {
@@ -705,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_entries_include_all_metric_types() {
+    fn entries_include_all_metric_types() {
         let mut stats = Stats::new();
         stats.set_default_label("processor_id", "p0");
         stats.counter("processed_total").add(10);
@@ -714,39 +754,37 @@ mod tests {
         stats.flag("error").set(true);
         stats.string("state").set("running");
 
-        let entries = stats
-            .snapshot_entries()
-            .expect("snapshot_entries must succeed");
+        let entries = stats.entries().expect("entries must succeed");
         assert!(
             entries.iter().any(|e| {
                 e.metric_name == "processed_total"
                     && e.labels.get("processor_id") == Some(&"p0".to_owned())
-                    && e.value == StatsSnapshotValue::Counter(10)
+                    && e.entry.as_counter() == Some(10)
             }),
             "counter entry is missing: {entries:?}"
         );
         assert!(
-            entries.iter().any(|e| {
-                e.metric_name == "queue_depth" && e.value == StatsSnapshotValue::Gauge(-3)
-            }),
+            entries
+                .iter()
+                .any(|e| e.metric_name == "queue_depth" && e.entry.as_gauge() == Some(-3)),
             "gauge entry is missing: {entries:?}"
         );
         assert!(
             entries.iter().any(|e| {
-                e.metric_name == "latency_seconds" && e.value == StatsSnapshotValue::GaugeF64(0.25)
+                e.metric_name == "latency_seconds" && e.entry.as_gauge_f64() == Some(0.25)
             }),
             "gauge_f64 entry is missing: {entries:?}"
         );
         assert!(
             entries
                 .iter()
-                .any(|e| e.metric_name == "error" && e.value == StatsSnapshotValue::Flag(true)),
+                .any(|e| e.metric_name == "error" && e.entry.as_flag() == Some(true)),
             "flag entry is missing: {entries:?}"
         );
         assert!(
-            entries.iter().any(|e| {
-                e.metric_name == "state" && e.value == StatsSnapshotValue::String("running".into())
-            }),
+            entries
+                .iter()
+                .any(|e| e.metric_name == "state" && e.entry.as_string() == Some("running".into())),
             "string entry is missing: {entries:?}"
         );
     }

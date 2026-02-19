@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::{DEFAULT_LAYOUT_JSON, Layout},
-    stats::{StatsSnapshotEntry, StatsSnapshotValue},
+    stats::StatsRawEntry,
 };
 
 #[derive(Debug)]
@@ -123,7 +123,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let result = composer.compose(&output_file_path).or_fail()?;
     let entries = result
         .stats
-        .snapshot_entries()
+        .entries()
         .map_err(|e| orfail::Failure::new(e.to_string()))?;
 
     if !result.success {
@@ -155,7 +155,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
 fn print_input_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    entries: &[StatsSnapshotEntry],
+    entries: &[StatsRawEntry],
 ) -> std::fmt::Result {
     // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
     //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
@@ -174,7 +174,7 @@ fn print_input_stats_summary(
 
 fn print_output_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    entries: &[StatsSnapshotEntry],
+    entries: &[StatsRawEntry],
 ) -> std::fmt::Result {
     let Some(writer_id) = find_first_processor_id_by_type(entries, "mp4_writer") else {
         return Ok(());
@@ -239,7 +239,7 @@ fn print_output_stats_summary(
 
 fn print_time_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    entries: &[StatsSnapshotEntry],
+    entries: &[StatsRawEntry],
     elapsed_seconds: f64,
 ) -> std::fmt::Result {
     let total_audio_decoder_processing_seconds =
@@ -301,7 +301,7 @@ fn print_time_stats_summary(
     Ok(())
 }
 
-fn count_processors_by_types(entries: &[StatsSnapshotEntry], processor_types: &[&str]) -> usize {
+fn count_processors_by_types(entries: &[StatsRawEntry], processor_types: &[&str]) -> usize {
     let mut processor_ids = BTreeSet::new();
     for entry in entries {
         if entry.metric_name != "error" {
@@ -320,12 +320,12 @@ fn count_processors_by_types(entries: &[StatsSnapshotEntry], processor_types: &[
     processor_ids.len()
 }
 
-fn label_value<'a>(entry: &'a StatsSnapshotEntry, name: &str) -> Option<&'a str> {
+fn label_value<'a>(entry: &'a StatsRawEntry, name: &str) -> Option<&'a str> {
     entry.labels.get(name).map(String::as_str)
 }
 
 fn find_first_processor_id_by_type(
-    entries: &[StatsSnapshotEntry],
+    entries: &[StatsRawEntry],
     processor_type: &str,
 ) -> Option<String> {
     entries.iter().find_map(|entry| {
@@ -336,11 +336,11 @@ fn find_first_processor_id_by_type(
     })
 }
 
-fn find_string_metric_by_processor<'a>(
-    entries: &'a [StatsSnapshotEntry],
+fn find_string_metric_by_processor(
+    entries: &[StatsRawEntry],
     processor_id: &str,
     metric_name: &str,
-) -> Option<&'a str> {
+) -> Option<String> {
     entries.iter().find_map(|entry| {
         if entry.metric_name != metric_name {
             return None;
@@ -348,15 +348,12 @@ fn find_string_metric_by_processor<'a>(
         if label_value(entry, "processor_id") != Some(processor_id) {
             return None;
         }
-        match &entry.value {
-            StatsSnapshotValue::String(value) => Some(value.as_str()),
-            _ => None,
-        }
+        entry.entry.as_string()
     })
 }
 
 fn find_numeric_metric_by_processor(
-    entries: &[StatsSnapshotEntry],
+    entries: &[StatsRawEntry],
     processor_id: &str,
     metric_name: &str,
 ) -> Option<f64> {
@@ -367,15 +364,15 @@ fn find_numeric_metric_by_processor(
         if label_value(entry, "processor_id") != Some(processor_id) {
             return None;
         }
-        snapshot_value_as_f64(&entry.value)
+        entry.entry.as_numeric_f64()
     })
 }
 
-fn find_first_string_metric_by_type<'a>(
-    entries: &'a [StatsSnapshotEntry],
+fn find_first_string_metric_by_type(
+    entries: &[StatsRawEntry],
     processor_type: &str,
     metric_name: &str,
-) -> Option<&'a str> {
+) -> Option<String> {
     entries.iter().find_map(|entry| {
         if entry.metric_name != metric_name {
             return None;
@@ -383,15 +380,12 @@ fn find_first_string_metric_by_type<'a>(
         if label_value(entry, "processor_type") != Some(processor_type) {
             return None;
         }
-        match &entry.value {
-            StatsSnapshotValue::String(value) => Some(value.as_str()),
-            _ => None,
-        }
+        entry.entry.as_string()
     })
 }
 
 fn find_first_numeric_metric_by_type(
-    entries: &[StatsSnapshotEntry],
+    entries: &[StatsRawEntry],
     processor_type: &str,
     metric_name: &str,
 ) -> Option<f64> {
@@ -402,12 +396,12 @@ fn find_first_numeric_metric_by_type(
         if label_value(entry, "processor_type") != Some(processor_type) {
             return None;
         }
-        snapshot_value_as_f64(&entry.value)
+        entry.entry.as_numeric_f64()
     })
 }
 
 fn sum_numeric_metric_by_type(
-    entries: &[StatsSnapshotEntry],
+    entries: &[StatsRawEntry],
     processor_type: &str,
     metric_name: &str,
 ) -> f64 {
@@ -417,16 +411,6 @@ fn sum_numeric_metric_by_type(
             entry.metric_name == metric_name
                 && label_value(entry, "processor_type") == Some(processor_type)
         })
-        .filter_map(|entry| snapshot_value_as_f64(&entry.value))
+        .filter_map(|entry| entry.entry.as_numeric_f64())
         .sum()
-}
-
-fn snapshot_value_as_f64(value: &StatsSnapshotValue) -> Option<f64> {
-    match value {
-        StatsSnapshotValue::Counter(v) => Some(*v as f64),
-        StatsSnapshotValue::Gauge(v) => Some(*v as f64),
-        StatsSnapshotValue::GaugeF64(v) => Some(*v),
-        StatsSnapshotValue::Flag(v) => Some(if *v { 1.0 } else { 0.0 }),
-        StatsSnapshotValue::String(_) => None,
-    }
 }

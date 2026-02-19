@@ -92,7 +92,7 @@ pub fn to_legacy_stats_json(
     worker_threads: Vec<LegacyWorkerThreadStats>,
 ) -> crate::Result<nojson::RawJsonOwned> {
     let mut processors = BTreeMap::<String, LegacyProcessorStats>::new();
-    for entry in stats.snapshot_entries()? {
+    for entry in stats.entries()? {
         let Some(processor_id) = entry.labels.get("processor_id") else {
             continue;
         };
@@ -114,12 +114,12 @@ pub fn to_legacy_stats_json(
         }
 
         if entry.metric_name == "error" {
-            processor.error = snapshot_value_as_bool(&entry.value);
+            processor.error = entry.entry.as_bool_for_legacy();
             continue;
         }
         processor.values.insert(
             entry.metric_name.to_owned(),
-            snapshot_value_to_legacy_value(entry.value),
+            stats_entry_to_legacy_value(&entry.entry),
         );
     }
 
@@ -134,23 +134,13 @@ pub fn to_legacy_stats_json(
     Ok(nojson::RawJsonOwned::parse(json.to_string()).expect("infallible"))
 }
 
-fn snapshot_value_to_legacy_value(value: crate::stats::StatsSnapshotValue) -> LegacyJsonValue {
-    match value {
-        crate::stats::StatsSnapshotValue::Counter(v) => LegacyJsonValue::Unsigned(v),
-        crate::stats::StatsSnapshotValue::Gauge(v) => LegacyJsonValue::Signed(v),
-        crate::stats::StatsSnapshotValue::GaugeF64(v) => LegacyJsonValue::Float(v),
-        crate::stats::StatsSnapshotValue::Flag(v) => LegacyJsonValue::Bool(v),
-        crate::stats::StatsSnapshotValue::String(v) => LegacyJsonValue::String(v),
-    }
-}
-
-fn snapshot_value_as_bool(value: &crate::stats::StatsSnapshotValue) -> bool {
-    match value {
-        crate::stats::StatsSnapshotValue::Flag(v) => *v,
-        crate::stats::StatsSnapshotValue::Counter(v) => *v != 0,
-        crate::stats::StatsSnapshotValue::Gauge(v) => *v != 0,
-        crate::stats::StatsSnapshotValue::GaugeF64(v) => *v != 0.0,
-        crate::stats::StatsSnapshotValue::String(v) => !v.is_empty(),
+fn stats_entry_to_legacy_value(entry: &crate::stats::StatsEntry) -> LegacyJsonValue {
+    match entry {
+        crate::stats::StatsEntry::Counter(v) => LegacyJsonValue::Unsigned(v.get()),
+        crate::stats::StatsEntry::Gauge(v) => LegacyJsonValue::Signed(v.get()),
+        crate::stats::StatsEntry::GaugeF64(v) => LegacyJsonValue::Float(v.get()),
+        crate::stats::StatsEntry::Flag(v) => LegacyJsonValue::Bool(v.get()),
+        crate::stats::StatsEntry::StringValue(v) => LegacyJsonValue::String(v.get()),
     }
 }
 
