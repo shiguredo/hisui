@@ -145,6 +145,12 @@ impl RtmpOutgoingFrameHandler {
     }
 }
 
+impl Default for RtmpOutgoingFrameHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// RTMP フレーム処理の共通ロジック（受信側）
 #[derive(Debug)]
 pub struct RtmpIncomingFrameHandler {

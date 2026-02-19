@@ -7,7 +7,7 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
     layout::Layout,
-    legacy_processor_stats::{ProcessorStats, Stats as LegacyStats},
+    legacy_processor_stats::ProcessorStats,
     media::MediaStreamId,
     mixer_audio::AudioMixer,
     mixer_video::{VideoMixer, VideoMixerSpec},
@@ -158,13 +158,13 @@ impl Composer {
         }
 
         // 合成を実行
-        let legacy_stats = scheduler.run().or_fail()?;
-        let stats = convert_legacy_stats_to_stats(&legacy_stats);
+        let scheduler_result = scheduler.run().or_fail()?;
+        let stats = convert_legacy_stats_to_stats(&scheduler_result.processors);
 
         if let Some(path) = &self.stats_file_path {
             match crate::stats_legacy_json::to_legacy_stats_json(
                 &stats,
-                legacy_stats.elapsed_duration.as_secs_f64(),
+                scheduler_result.elapsed_duration.as_secs_f64(),
             ) {
                 Ok(json) => {
                     if let Err(e) = std::fs::write(path, json.to_string()) {
@@ -186,15 +186,15 @@ impl Composer {
 
         Ok(ComposeResult {
             stats,
-            elapsed_duration: legacy_stats.elapsed_duration,
-            success: !legacy_stats.error.get(),
+            elapsed_duration: scheduler_result.elapsed_duration,
+            success: !scheduler_result.error,
         })
     }
 }
 
-fn convert_legacy_stats_to_stats(legacy_stats: &LegacyStats) -> crate::stats::Stats {
+fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate::stats::Stats {
     let stats = crate::stats::Stats::new();
-    for (index, processor) in legacy_stats.processors.iter().enumerate() {
+    for (index, processor) in legacy_processors.iter().enumerate() {
         let (processor_type, total_processing_seconds, error) = match processor {
             ProcessorStats::Mp4AudioReader(reader) => (
                 "mp4_audio_reader",
@@ -591,25 +591,21 @@ mod tests {
             ..Default::default()
         };
 
-        let legacy_stats = LegacyStats {
-            elapsed_duration: Duration::from_secs(5),
-            error: Default::default(),
-            processors: vec![
-                ProcessorStats::AudioEncoder(legacy::AudioEncoderStats::new(
-                    crate::types::EngineName::Opus,
-                    crate::types::CodecName::Opus,
-                )),
-                ProcessorStats::VideoEncoder(legacy::VideoEncoderStats {
-                    engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
-                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
-                    ..Default::default()
-                }),
-                ProcessorStats::VideoMixer(video_mixer),
-                ProcessorStats::Mp4Writer(writer),
-            ],
-        };
+        let legacy_processors = vec![
+            ProcessorStats::AudioEncoder(legacy::AudioEncoderStats::new(
+                crate::types::EngineName::Opus,
+                crate::types::CodecName::Opus,
+            )),
+            ProcessorStats::VideoEncoder(legacy::VideoEncoderStats {
+                engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
+                codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                ..Default::default()
+            }),
+            ProcessorStats::VideoMixer(video_mixer),
+            ProcessorStats::Mp4Writer(writer),
+        ];
 
-        let stats = convert_legacy_stats_to_stats(&legacy_stats);
+        let stats = convert_legacy_stats_to_stats(&legacy_processors);
         let entries = stats.entries().expect("entries must succeed");
 
         assert!(entries.iter().any(|entry| {
@@ -646,125 +642,113 @@ mod tests {
 
     #[test]
     fn convert_legacy_stats_to_stats_restores_simple_legacy_fields() {
-        let legacy_stats = LegacyStats {
-            elapsed_duration: Duration::from_secs(1),
-            error: Default::default(),
-            processors: vec![
-                ProcessorStats::Mp4AudioReader(legacy::Mp4AudioReaderStats {
-                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
-                        "/tmp/a.mp4",
-                    ))),
-                    codec: Some(crate::types::CodecName::Opus),
-                    total_sample_count: counter(11),
-                    total_track_duration: duration_secs(4),
-                    track_duration_offset: duration_secs(1),
-                    start_time: Duration::from_secs(2),
-                    ..Default::default()
-                }),
-                ProcessorStats::Mp4VideoReader(legacy::Mp4VideoReaderStats {
-                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
-                        "/tmp/v.mp4",
-                    ))),
-                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
-                    total_sample_count: counter(22),
-                    total_track_duration: duration_secs(5),
-                    track_duration_offset: duration_secs(2),
-                    start_time: Duration::from_secs(3),
-                    ..Default::default()
-                }),
-                ProcessorStats::WebmAudioReader(legacy::WebmAudioReaderStats {
-                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
-                        "/tmp/a.webm",
-                    ))),
-                    codec: Some(crate::types::CodecName::Opus),
-                    total_cluster_count: counter(3),
-                    total_simple_block_count: counter(4),
-                    total_track_duration: duration_secs(6),
-                    track_duration_offset: duration_secs(1),
-                    start_time: Duration::from_secs(4),
-                    ..Default::default()
-                }),
-                ProcessorStats::WebmVideoReader(legacy::WebmVideoReaderStats {
-                    current_input_file: legacy::SharedOption::new(Some(PathBuf::from(
-                        "/tmp/v.webm",
-                    ))),
-                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
-                    total_cluster_count: counter(5),
-                    total_simple_block_count: counter(6),
-                    total_track_duration: duration_secs(7),
-                    track_duration_offset: duration_secs(2),
-                    start_time: Duration::from_secs(5),
-                    ..Default::default()
-                }),
-                ProcessorStats::AudioDecoder(legacy::AudioDecoderStats {
-                    engine: Some(crate::types::EngineName::Opus),
-                    codec: Some(crate::types::CodecName::Opus),
-                    total_audio_data_count: counter(8),
-                    ..Default::default()
-                }),
-                ProcessorStats::VideoDecoder(legacy::VideoDecoderStats {
-                    engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
-                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
-                    total_input_video_frame_count: counter(9),
-                    total_output_video_frame_count: counter(10),
-                    ..Default::default()
-                }),
-                ProcessorStats::AudioMixer(legacy::AudioMixerStats {
-                    total_input_audio_data_count: counter(12),
-                    total_output_audio_data_count: counter(13),
-                    total_output_audio_data_duration: duration_secs(14),
-                    total_output_sample_count: counter(15),
-                    total_output_filled_sample_count: counter(16),
-                    total_trimmed_sample_count: counter(17),
-                    ..Default::default()
-                }),
-                ProcessorStats::VideoMixer(legacy::VideoMixerStats {
-                    output_video_resolution: legacy::VideoResolution {
-                        width: 640,
-                        height: 360,
-                    },
-                    total_input_video_frame_count: counter(18),
-                    total_output_video_frame_count: counter(19),
-                    total_output_video_frame_duration: duration_secs(20),
-                    total_trimmed_video_frame_count: counter(21),
-                    total_extended_video_frame_count: counter(22),
-                    ..Default::default()
-                }),
-                ProcessorStats::AudioEncoder(legacy::AudioEncoderStats {
-                    engine: crate::types::EngineName::Opus,
-                    codec: crate::types::CodecName::Opus,
-                    total_audio_data_count: counter(23),
-                    ..legacy::AudioEncoderStats::new(
-                        crate::types::EngineName::Opus,
-                        crate::types::CodecName::Opus,
-                    )
-                }),
-                ProcessorStats::VideoEncoder(legacy::VideoEncoderStats {
-                    engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
-                    codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
-                    total_input_video_frame_count: counter(24),
-                    total_output_video_frame_count: counter(25),
-                    ..Default::default()
-                }),
-                ProcessorStats::Mp4Writer(legacy::Mp4WriterStats {
-                    audio_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Opus)),
-                    video_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
-                    reserved_moov_box_size: counter(26),
-                    actual_moov_box_size: counter(27),
-                    total_audio_chunk_count: counter(28),
-                    total_video_chunk_count: counter(29),
-                    total_audio_sample_count: counter(30),
-                    total_video_sample_count: counter(31),
-                    total_audio_sample_data_byte_size: counter(32),
-                    total_video_sample_data_byte_size: counter(33),
-                    total_audio_track_duration: duration_secs(34),
-                    total_video_track_duration: duration_secs(35),
-                    ..Default::default()
-                }),
-            ],
-        };
+        let legacy_processors = vec![
+            ProcessorStats::Mp4AudioReader(legacy::Mp4AudioReaderStats {
+                current_input_file: legacy::SharedOption::new(Some(PathBuf::from("/tmp/a.mp4"))),
+                codec: Some(crate::types::CodecName::Opus),
+                total_sample_count: counter(11),
+                total_track_duration: duration_secs(4),
+                track_duration_offset: duration_secs(1),
+                start_time: Duration::from_secs(2),
+                ..Default::default()
+            }),
+            ProcessorStats::Mp4VideoReader(legacy::Mp4VideoReaderStats {
+                current_input_file: legacy::SharedOption::new(Some(PathBuf::from("/tmp/v.mp4"))),
+                codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                total_sample_count: counter(22),
+                total_track_duration: duration_secs(5),
+                track_duration_offset: duration_secs(2),
+                start_time: Duration::from_secs(3),
+                ..Default::default()
+            }),
+            ProcessorStats::WebmAudioReader(legacy::WebmAudioReaderStats {
+                current_input_file: legacy::SharedOption::new(Some(PathBuf::from("/tmp/a.webm"))),
+                codec: Some(crate::types::CodecName::Opus),
+                total_cluster_count: counter(3),
+                total_simple_block_count: counter(4),
+                total_track_duration: duration_secs(6),
+                track_duration_offset: duration_secs(1),
+                start_time: Duration::from_secs(4),
+                ..Default::default()
+            }),
+            ProcessorStats::WebmVideoReader(legacy::WebmVideoReaderStats {
+                current_input_file: legacy::SharedOption::new(Some(PathBuf::from("/tmp/v.webm"))),
+                codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                total_cluster_count: counter(5),
+                total_simple_block_count: counter(6),
+                total_track_duration: duration_secs(7),
+                track_duration_offset: duration_secs(2),
+                start_time: Duration::from_secs(5),
+                ..Default::default()
+            }),
+            ProcessorStats::AudioDecoder(legacy::AudioDecoderStats {
+                engine: Some(crate::types::EngineName::Opus),
+                codec: Some(crate::types::CodecName::Opus),
+                total_audio_data_count: counter(8),
+                ..Default::default()
+            }),
+            ProcessorStats::VideoDecoder(legacy::VideoDecoderStats {
+                engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
+                codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                total_input_video_frame_count: counter(9),
+                total_output_video_frame_count: counter(10),
+                ..Default::default()
+            }),
+            ProcessorStats::AudioMixer(legacy::AudioMixerStats {
+                total_input_audio_data_count: counter(12),
+                total_output_audio_data_count: counter(13),
+                total_output_audio_data_duration: duration_secs(14),
+                total_output_sample_count: counter(15),
+                total_output_filled_sample_count: counter(16),
+                total_trimmed_sample_count: counter(17),
+                ..Default::default()
+            }),
+            ProcessorStats::VideoMixer(legacy::VideoMixerStats {
+                output_video_resolution: legacy::VideoResolution {
+                    width: 640,
+                    height: 360,
+                },
+                total_input_video_frame_count: counter(18),
+                total_output_video_frame_count: counter(19),
+                total_output_video_frame_duration: duration_secs(20),
+                total_trimmed_video_frame_count: counter(21),
+                total_extended_video_frame_count: counter(22),
+                ..Default::default()
+            }),
+            ProcessorStats::AudioEncoder(legacy::AudioEncoderStats {
+                engine: crate::types::EngineName::Opus,
+                codec: crate::types::CodecName::Opus,
+                total_audio_data_count: counter(23),
+                ..legacy::AudioEncoderStats::new(
+                    crate::types::EngineName::Opus,
+                    crate::types::CodecName::Opus,
+                )
+            }),
+            ProcessorStats::VideoEncoder(legacy::VideoEncoderStats {
+                engine: legacy::SharedOption::new(Some(crate::types::EngineName::Libvpx)),
+                codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                total_input_video_frame_count: counter(24),
+                total_output_video_frame_count: counter(25),
+                ..Default::default()
+            }),
+            ProcessorStats::Mp4Writer(legacy::Mp4WriterStats {
+                audio_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Opus)),
+                video_codec: legacy::SharedOption::new(Some(crate::types::CodecName::Vp9)),
+                reserved_moov_box_size: counter(26),
+                actual_moov_box_size: counter(27),
+                total_audio_chunk_count: counter(28),
+                total_video_chunk_count: counter(29),
+                total_audio_sample_count: counter(30),
+                total_video_sample_count: counter(31),
+                total_audio_sample_data_byte_size: counter(32),
+                total_video_sample_data_byte_size: counter(33),
+                total_audio_track_duration: duration_secs(34),
+                total_video_track_duration: duration_secs(35),
+                ..Default::default()
+            }),
+        ];
 
-        let stats = convert_legacy_stats_to_stats(&legacy_stats);
+        let stats = convert_legacy_stats_to_stats(&legacy_processors);
         let entries = stats.entries().expect("entries must succeed");
         let has_counter = |processor_type: &str, metric_name: &str, value: u64| {
             entries.iter().any(|entry| {

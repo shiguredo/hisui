@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeSet,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -13,47 +13,6 @@ use crate::{
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
-
-#[derive(Debug, Default, Clone)]
-pub struct Stats {
-    /// 全体の合成に要した実時間
-    pub elapsed_duration: Duration,
-
-    /// 全体でひとつでもエラーが発生したら true になる
-    pub error: SharedAtomicFlag,
-
-    /// 各プロセッサの統計情報
-    pub processors: Vec<ProcessorStats>,
-}
-
-impl Stats {
-    pub fn save(&self, output_file_path: &Path) {
-        let json = nojson::json(|f| {
-            f.set_indent_size(2);
-            f.set_spacing(true);
-            f.value(self)
-        })
-        .to_string();
-        if let Err(e) = std::fs::write(output_file_path, json) {
-            // 統計が出力できなくても全体を失敗扱いにはしない
-            tracing::warn!(
-                "failed to write stats JSON: path={}, reason={e}",
-                output_file_path.display()
-            );
-        }
-    }
-}
-
-impl nojson::DisplayJson for Stats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("elapsed_seconds", self.elapsed_duration.as_secs_f32())?;
-            f.member("error", self.error.get())?;
-            f.member("processors", &self.processors)?;
-            Ok(())
-        })
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum ProcessorStats {

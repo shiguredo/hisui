@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use orfail::OrFail;
 
-use crate::legacy_processor_stats::{ProcessorStats, SharedAtomicFlag, Stats};
+use crate::legacy_processor_stats::ProcessorStats;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
@@ -169,7 +173,15 @@ pub struct Scheduler {
     tasks: Vec<Task>,
     thread_count: NonZeroUsize,
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
-    stats: Stats,
+    processors: Vec<ProcessorStats>,
+    error: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchedulerResult {
+    pub elapsed_duration: Duration,
+    pub error: bool,
+    pub processors: Vec<ProcessorStats>,
 }
 
 impl Scheduler {
@@ -182,7 +194,8 @@ impl Scheduler {
             tasks: Vec::new(),
             thread_count,
             stream_txs: HashMap::new(),
-            stats: Stats::default(),
+            processors: Vec::new(),
+            error: Arc::new(AtomicBool::new(false)),
         }
     }
     pub fn register<P>(&mut self, processor: P) -> orfail::Result<()>
@@ -190,7 +203,7 @@ impl Scheduler {
         P: 'static + Send + MediaProcessor,
     {
         let (task, input_stream_txs) = Task::new(processor);
-        self.stats.processors.push(task.stats.clone());
+        self.processors.push(task.stats.clone());
         self.tasks.push(task);
 
         for (id, tx) in input_stream_txs {
@@ -247,30 +260,34 @@ impl Scheduler {
             if thread_tasks.is_empty() {
                 continue;
             };
-            let runner = TaskRunner::new(thread_tasks, self.stats.error.clone());
+            let runner = TaskRunner::new(thread_tasks, self.error.clone());
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
         }
 
         Ok(SchedulerHandle {
             handles,
-            stats: self.stats,
+            processors: self.processors,
+            error: self.error,
         })
     }
 
-    pub fn run(self) -> orfail::Result<Stats> {
+    pub fn run(self) -> orfail::Result<SchedulerResult> {
         let start = Instant::now();
-        let mut handle = self.spawn().or_fail()?;
+        let handle = self.spawn().or_fail()?;
         for handle in handle.handles {
             if let Err(e) = handle.join() {
                 std::panic::resume_unwind(e);
             }
         }
-        handle.stats.elapsed_duration = start.elapsed();
-        Ok(handle.stats)
+        Ok(SchedulerResult {
+            elapsed_duration: start.elapsed(),
+            error: handle.error.load(Ordering::Relaxed),
+            processors: handle.processors,
+        })
     }
 
-    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, Stats)> {
+    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, SchedulerResult)> {
         // 完了待ちのビジーループを避けるためのスリープの時間
         // 適当に長めの時間ならなんでもいい
         const SLEEP_DURATION: Duration = Duration::from_millis(100);
@@ -281,7 +298,7 @@ impl Scheduler {
         while !handle.handles.is_empty() {
             if !timeout_expired && timeout < start.elapsed() {
                 // エラーフラグを立てて、ワーカースレッドを終了処理に移行させる
-                handle.stats.error.set(true);
+                handle.error.store(true, Ordering::Relaxed);
                 timeout_expired = true;
                 tracing::debug!(
                     "Timeout expired after {} seconds, signaling worker threads to terminate",
@@ -309,8 +326,14 @@ impl Scheduler {
             }
         }
 
-        handle.stats.elapsed_duration = start.elapsed();
-        Ok((timeout_expired, handle.stats))
+        Ok((
+            timeout_expired,
+            SchedulerResult {
+                elapsed_duration: start.elapsed(),
+                error: handle.error.load(Ordering::Relaxed),
+                processors: handle.processors,
+            },
+        ))
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
@@ -336,18 +359,19 @@ impl Default for Scheduler {
 #[derive(Debug)]
 struct SchedulerHandle {
     handles: Vec<std::thread::JoinHandle<()>>,
-    stats: Stats,
+    processors: Vec<ProcessorStats>,
+    error: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
 struct TaskRunner {
     tasks: Vec<Task>,
-    error_flag: SharedAtomicFlag,
+    error_flag: Arc<AtomicBool>,
     next_sleep_duration: Option<Duration>,
 }
 
 impl TaskRunner {
-    fn new(tasks: Vec<Task>, error_flag: SharedAtomicFlag) -> Self {
+    fn new(tasks: Vec<Task>, error_flag: Arc<AtomicBool>) -> Self {
         Self {
             tasks,
             error_flag,
@@ -356,7 +380,7 @@ impl TaskRunner {
     }
 
     fn run(mut self) {
-        while !self.tasks.is_empty() && !self.error_flag.get() {
+        while !self.tasks.is_empty() && !self.error_flag.load(Ordering::Relaxed) {
             self.run_one();
         }
     }
@@ -373,7 +397,7 @@ impl TaskRunner {
             match result {
                 Err(e) => {
                     tracing::error!("{e}");
-                    self.error_flag.set(true);
+                    self.error_flag.store(true, Ordering::Relaxed);
                     self.tasks[i].stats.set_error();
                     self.tasks.swap_remove(i);
                 }
