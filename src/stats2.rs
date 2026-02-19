@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex, atomic::AtomicU64};
 
 #[derive(Debug, Default, Clone)]
 pub struct Stats {
-    pub entries: Arc<Mutex<BTreeMap<String, StatsEntry>>>,
-    pub local_common_labels: Labels,
-    pub local_entries: BTreeMap<String, StatsEntry>, // cache?
+    pub entries: Arc<Mutex<BTreeMap<StatsKey, StatsEntry>>>,
+    pub local_common_labels: Arc<Labels>,
+    pub local_entries: BTreeMap<StatsKey, StatsEntry>, // cache?
 }
 
 impl Stats {
@@ -14,8 +14,29 @@ impl Stats {
     }
 
     pub fn set_local_common_label(&mut self, name: &str, value: &str) {
-        self.local_common_labels.insert(name, value);
+        let mut labels = (*self.local_common_labels).clone();
+        labels.0.insert(name.to_owned(), value.to_owned());
+        self.local_common_labels = Arc::new(labels);
     }
+
+    pub fn counter(&mut self, name: &'static str) -> &StatsEntry {
+        let key = StatsKey {
+            name,
+            labels: self.local_common_labels.clone(),
+        };
+        if let Some(entry) = self.local_entries.get_mut(&key) {
+            entry
+        } else {
+            let entries = self.entries.lock().expect("lock() failed unexpectedly");
+            todo!()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StatsKey {
+    pub name: &'static str,
+    pub labels: Arc<Labels>,
 }
 
 #[derive(Debug, Clone)]
@@ -25,15 +46,8 @@ pub enum StatsEntry {
 
 #[derive(Debug, Clone)]
 pub struct StatsCounter {
-    pub labels: Labels,
     pub value: Arc<AtomicU64>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Labels(BTreeMap<String, String>);
-
-impl Labels {
-    fn insert(&mut self, name: &str, value: &str) {
-        self.0.insert(name.to_owned(), value.to_owned());
-    }
-}
