@@ -10,7 +10,9 @@ use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
     layout::{Layout, Resolution, TrimSpans},
     layout_region::Region,
-    legacy_processor_stats::{VideoMixerStats, VideoResolution},
+    legacy_processor_stats::{
+        SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag, VideoResolution,
+    },
     media::MediaStreamId,
     metadata::SourceId,
     processor::{
@@ -32,6 +34,17 @@ const TIMESTAMP_GAP_THRESHOLD: Duration = Duration::from_secs(60);
 //
 // 値は適当なので必要に応じて調整すること
 const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60);
+
+#[derive(Debug, Default)]
+pub struct VideoMixerStats {
+    pub output_video_resolution: VideoResolution,
+    pub total_input_video_frame_count: SharedAtomicCounter,
+    pub total_output_video_frame_count: SharedAtomicCounter,
+    pub total_output_video_frame_duration: SharedAtomicDuration,
+    pub total_trimmed_video_frame_count: SharedAtomicCounter,
+    pub total_extended_video_frame_count: SharedAtomicCounter,
+    pub error: SharedAtomicFlag,
+}
 
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {

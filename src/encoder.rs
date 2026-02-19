@@ -23,7 +23,6 @@ use crate::{
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
     layout_encode_params::LayoutEncodeParams,
-    legacy_processor_stats::{AudioEncoderStats, VideoEncoderStats},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -37,7 +36,6 @@ use crate::{
 pub struct AudioEncoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
-    stats: AudioEncoderStats,
     compose_stats: crate::stats::Stats,
     encoded: VecDeque<AudioData>,
     eos: bool,
@@ -97,7 +95,6 @@ impl AudioEncoder {
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        let stats = AudioEncoderStats::new(EngineName::Opus, CodecName::Opus);
         compose_stats
             .string("engine")
             .set(EngineName::Opus.as_str());
@@ -106,7 +103,6 @@ impl AudioEncoder {
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            stats,
             compose_stats,
             encoded: VecDeque::new(),
             eos: false,
@@ -121,7 +117,6 @@ impl AudioEncoder {
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        let stats = AudioEncoderStats::new(EngineName::FdkAac, CodecName::Aac);
         compose_stats
             .string("engine")
             .set(EngineName::FdkAac.as_str());
@@ -130,7 +125,6 @@ impl AudioEncoder {
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            stats,
             compose_stats,
             encoded: VecDeque::new(),
             eos: false,
@@ -145,7 +139,6 @@ impl AudioEncoder {
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        let stats = AudioEncoderStats::new(EngineName::AudioToolbox, CodecName::Aac);
         compose_stats
             .string("engine")
             .set(EngineName::AudioToolbox.as_str());
@@ -154,7 +147,6 @@ impl AudioEncoder {
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            stats,
             compose_stats,
             encoded: VecDeque::new(),
             eos: false,
@@ -286,7 +278,6 @@ impl MediaProcessor for AudioEncoder {
         };
 
         if let Some(encoded) = encoded {
-            self.stats.total_audio_data_count.add(1);
             self.compose_stats.counter("total_audio_data_count").inc();
             self.encoded.push_back(encoded);
         }
@@ -309,7 +300,6 @@ impl MediaProcessor for AudioEncoder {
     }
 
     fn set_error(&self) {
-        self.stats.error.set(true);
         let mut stats = self.compose_stats.clone();
         stats.flag("error").set(true);
     }
@@ -396,7 +386,6 @@ impl VideoEncoderOptions {
 pub struct VideoEncoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
-    stats: VideoEncoderStats,
     compose_stats: crate::stats::Stats,
     encoded: VecDeque<VideoFrame>,
     eos: bool,
@@ -429,12 +418,10 @@ impl VideoEncoder {
         openh264_lib: Option<Openh264Library>,
         mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        let stats = VideoEncoderStats::new();
         compose_stats.flag("error").set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            stats,
             compose_stats,
             encoded: VecDeque::new(),
             eos: false,
@@ -463,8 +450,6 @@ impl VideoEncoder {
         let inner = self.create_inner()?;
 
         // エンジン名とコーデックを設定
-        self.stats.engine.set(inner.name());
-        self.stats.codec.set(inner.codec());
         self.compose_stats
             .string("engine")
             .set(inner.name().as_str());
@@ -595,10 +580,6 @@ impl VideoEncoder {
         engines
     }
 
-    pub fn encoder_stats(&self) -> &VideoEncoderStats {
-        &self.stats
-    }
-
     pub async fn run(
         mut self,
         handle: ProcessorHandle,
@@ -683,7 +664,6 @@ impl MediaProcessor for VideoEncoder {
                 self.initialize_inner(frame.width, frame.height).or_fail()?;
             }
 
-            self.stats.total_input_video_frame_count.add(1);
             self.compose_stats
                 .counter("total_input_video_frame_count")
                 .inc();
@@ -702,7 +682,6 @@ impl MediaProcessor for VideoEncoder {
         // エンコード済みフレームを取得
         if let Some(inner) = &mut self.inner {
             while let Some(encoded) = inner.next_encoded_frame() {
-                self.stats.total_output_video_frame_count.add(1);
                 self.compose_stats
                     .counter("total_output_video_frame_count")
                     .inc();
@@ -728,7 +707,6 @@ impl MediaProcessor for VideoEncoder {
     }
 
     fn set_error(&self) {
-        self.stats.error.set(true);
         let mut stats = self.compose_stats.clone();
         stats.flag("error").set(true);
     }

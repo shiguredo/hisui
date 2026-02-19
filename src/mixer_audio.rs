@@ -9,7 +9,7 @@ use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::TrimSpans,
-    legacy_processor_stats::AudioMixerStats,
+    legacy_processor_stats::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag},
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
@@ -19,6 +19,17 @@ use crate::{
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);
 const MIXED_AUDIO_DATA_SAMPLES: usize = 960;
+
+#[derive(Debug, Default)]
+pub struct AudioMixerStats {
+    pub total_input_audio_data_count: SharedAtomicCounter,
+    pub total_output_audio_data_count: SharedAtomicCounter,
+    pub total_output_audio_data_duration: SharedAtomicDuration,
+    pub total_output_sample_count: SharedAtomicCounter,
+    pub total_output_filled_sample_count: SharedAtomicCounter,
+    pub total_trimmed_sample_count: SharedAtomicCounter,
+    pub error: SharedAtomicFlag,
+}
 
 #[derive(Debug, Default)]
 struct InputStream {

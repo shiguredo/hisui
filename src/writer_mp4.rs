@@ -16,12 +16,15 @@ use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
 use crate::{
     audio::AudioData,
     layout::Layout,
-    legacy_processor_stats::Mp4WriterStats,
+    legacy_processor_stats::{
+        SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag, SharedOption,
+    },
     media::{MediaSample, MediaStreamId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
+    types::CodecName,
     video::{FrameRate, VideoFrame},
 };
 
@@ -43,6 +46,23 @@ const MAX_INPUT_QUEUE_GAP: usize = 200;
 pub struct Mp4WriterOptions {
     pub duration: Duration,
     pub frame_rate: FrameRate,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Mp4WriterStats {
+    pub audio_codec: SharedOption<CodecName>,
+    pub video_codec: SharedOption<CodecName>,
+    pub reserved_moov_box_size: SharedAtomicCounter,
+    pub actual_moov_box_size: SharedAtomicCounter,
+    pub total_audio_chunk_count: SharedAtomicCounter,
+    pub total_video_chunk_count: SharedAtomicCounter,
+    pub total_audio_sample_count: SharedAtomicCounter,
+    pub total_video_sample_count: SharedAtomicCounter,
+    pub total_audio_sample_data_byte_size: SharedAtomicCounter,
+    pub total_video_sample_data_byte_size: SharedAtomicCounter,
+    pub total_audio_track_duration: SharedAtomicDuration,
+    pub total_video_track_duration: SharedAtomicDuration,
+    pub error: SharedAtomicFlag,
 }
 
 impl Mp4WriterOptions {
