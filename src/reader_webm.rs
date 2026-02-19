@@ -1,6 +1,6 @@
 use std::{
     io::{BufReader, Read},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -8,10 +8,39 @@ use orfail::OrFail;
 
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
-    legacy_processor_stats::{WebmAudioReaderStats, WebmVideoReaderStats},
+    legacy_processor_stats::{
+        SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag, SharedOption,
+    },
     metadata::SourceId,
+    types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
+
+#[derive(Debug, Default, Clone)]
+pub struct WebmAudioReaderStats {
+    pub input_files: Vec<PathBuf>,
+    pub current_input_file: SharedOption<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub total_cluster_count: SharedAtomicCounter,
+    pub total_simple_block_count: SharedAtomicCounter,
+    pub total_track_duration: SharedAtomicDuration,
+    pub track_duration_offset: SharedAtomicDuration,
+    pub start_time: Duration,
+    pub error: SharedAtomicFlag,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct WebmVideoReaderStats {
+    pub input_files: Vec<PathBuf>,
+    pub current_input_file: SharedOption<PathBuf>,
+    pub codec: SharedOption<CodecName>,
+    pub total_cluster_count: SharedAtomicCounter,
+    pub total_simple_block_count: SharedAtomicCounter,
+    pub total_track_duration: SharedAtomicDuration,
+    pub track_duration_offset: SharedAtomicDuration,
+    pub start_time: Duration,
+    pub error: SharedAtomicFlag,
+}
 
 // Hisui で参照する要素 ID
 const ID_EBML: u32 = 0x1A45_DFA3;

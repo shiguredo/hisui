@@ -6,18 +6,15 @@ use orfail::OrFail;
 use crate::{
     audio::AudioData,
     layout::AggregatedSourceInfo,
-    legacy_processor_stats::{
-        Mp4AudioReaderStats, Mp4VideoReaderStats, SharedOption, WebmAudioReaderStats,
-        WebmVideoReaderStats,
-    },
+    legacy_processor_stats::SharedOption,
     media::{MediaSample, MediaStreamId},
     metadata::{ContainerFormat, SourceId},
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    reader_webm::{WebmAudioReader, WebmVideoReader},
+    reader_mp4::{Mp4AudioReader, Mp4AudioReaderStats, Mp4VideoReader, Mp4VideoReaderStats},
+    reader_webm::{WebmAudioReader, WebmAudioReaderStats, WebmVideoReader, WebmVideoReaderStats},
     types::CodecName,
     video::VideoFrame,
 };

@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -10,10 +10,39 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
     audio::{AudioData, AudioFormat},
-    legacy_processor_stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
+    legacy_processor_stats::{
+        SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag, SharedOption, SharedSet,
+        VideoResolution,
+    },
     metadata::SourceId,
+    types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
+
+#[derive(Debug, Default, Clone)]
+pub struct Mp4AudioReaderStats {
+    pub input_files: Vec<PathBuf>,
+    pub current_input_file: SharedOption<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub total_sample_count: SharedAtomicCounter,
+    pub total_track_duration: SharedAtomicDuration,
+    pub track_duration_offset: SharedAtomicDuration,
+    pub start_time: Duration,
+    pub error: SharedAtomicFlag,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Mp4VideoReaderStats {
+    pub input_files: Vec<PathBuf>,
+    pub current_input_file: SharedOption<PathBuf>,
+    pub codec: SharedOption<CodecName>,
+    pub resolutions: SharedSet<VideoResolution>,
+    pub total_sample_count: SharedAtomicCounter,
+    pub total_track_duration: SharedAtomicDuration,
+    pub track_duration_offset: SharedAtomicDuration,
+    pub start_time: Duration,
+    pub error: SharedAtomicFlag,
+}
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
