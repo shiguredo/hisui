@@ -130,9 +130,12 @@ impl MediaProcessor for AudioDecoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: Some(ProcessorStats::AudioDecoder(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::AUDIO_DECODER,
         }
+    }
+
+    fn stats(&self) -> Option<ProcessorStats> {
+        Some(ProcessorStats::AudioDecoder(self.stats.clone()))
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
@@ -399,9 +402,12 @@ impl MediaProcessor for VideoDecoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: Some(ProcessorStats::VideoDecoder(self.stats.clone())),
             workload_hint: MediaProcessorWorkloadHint::VIDEO_DECODER,
         }
+    }
+
+    fn stats(&self) -> Option<ProcessorStats> {
+        Some(ProcessorStats::VideoDecoder(self.stats.clone()))
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {

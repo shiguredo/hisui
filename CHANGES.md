@@ -13,8 +13,7 @@
 
 - [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
   - 内部実装の更新に伴い、いくつかの項目が出力されなくなる
-  - トップレベルキー（`elapsed_seconds` / `error` / `processors` / `worker_threads`）は従来通り維持する
-  - `worker_threads` の各要素は `total_processing_seconds` / `total_waiting_seconds` のみを出力し、`processors` は出力しない
+  - トップレベルキー（`elapsed_seconds` / `error` / `processors`）は従来通り維持する
   - `processors` の各要素で従来との差分が残る項目は次の通り:
     - `mp4_audio_reader` / `webm_audio_reader` / `mp4_video_reader` / `webm_video_reader`:
       - `input_files` が削除される

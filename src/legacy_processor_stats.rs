@@ -30,22 +30,6 @@ pub enum ProcessorStats {
 }
 
 impl ProcessorStats {
-    pub fn total_processing_duration(&self) -> SharedAtomicDuration {
-        match self {
-            ProcessorStats::Mp4AudioReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::Mp4VideoReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::WebmAudioReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::WebmVideoReader(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::AudioDecoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::VideoDecoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::AudioMixer(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::VideoMixer(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::AudioEncoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::VideoEncoder(stats) => stats.total_processing_duration.clone(),
-            ProcessorStats::Mp4Writer(stats) => stats.total_processing_duration.clone(),
-        }
-    }
-
     pub fn set_error(&self) {
         match self {
             ProcessorStats::Mp4AudioReader(stats) => stats.error.set(true),
@@ -102,11 +86,6 @@ pub struct AudioMixerStats {
     /// 出力から除去されたサンプルの合計数
     pub total_trimmed_sample_count: SharedAtomicCounter,
 
-    // TODO: 以下のふたつの項目は、個々のプロセッサではなくワーカースレッドが
-    // 共通的に処理するものなので個別の統計構造体の外にだした方がいいかもしれない
-    /// 合成処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -139,10 +118,6 @@ impl nojson::DisplayJson for AudioMixerStats {
                 "total_trimmed_sample_count",
                 self.total_trimmed_sample_count.get(),
             )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -168,9 +143,6 @@ pub struct VideoMixerStats {
 
     /// 合成を省略して前フレームの尺を延長したフレームの数
     pub total_extended_video_frame_count: SharedAtomicCounter,
-
-    /// 合成処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
 
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
@@ -201,10 +173,6 @@ impl nojson::DisplayJson for VideoMixerStats {
                 "total_extended_video_frame_count",
                 self.total_extended_video_frame_count.get(),
             )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -223,9 +191,6 @@ pub struct AudioEncoderStats {
     /// エンコーダーで処理された `AudioData` の数
     pub total_audio_data_count: SharedAtomicCounter,
 
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -236,7 +201,6 @@ impl AudioEncoderStats {
             engine,
             codec,
             total_audio_data_count: Default::default(),
-            total_processing_duration: Default::default(),
             error: Default::default(),
         }
     }
@@ -249,10 +213,6 @@ impl nojson::DisplayJson for AudioEncoderStats {
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -274,9 +234,6 @@ pub struct VideoEncoderStats {
     /// 実際にエンコードされた `VideoFrame` の数
     pub total_output_video_frame_count: SharedAtomicCounter,
 
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -294,7 +251,6 @@ impl VideoEncoderStats {
             codec: SharedOption::new(None),
             total_input_video_frame_count: Default::default(),
             total_output_video_frame_count: Default::default(),
-            total_processing_duration: Default::default(),
             error: Default::default(),
         }
     }
@@ -313,10 +269,6 @@ impl nojson::DisplayJson for VideoEncoderStats {
             f.member(
                 "total_output_video_frame_count",
                 self.total_output_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -339,9 +291,6 @@ pub struct AudioDecoderStats {
     /// デコーダーで処理された `AudioData` の数
     pub total_audio_data_count: SharedAtomicCounter,
 
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -354,10 +303,6 @@ impl nojson::DisplayJson for AudioDecoderStats {
             f.member("engine", self.engine)?;
             f.member("codec", self.codec)?;
             f.member("total_audio_data_count", self.total_audio_data_count.get())?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
             f.member("error", self.error.get())?;
             Ok(())
         })
@@ -382,9 +327,6 @@ pub struct VideoDecoderStats {
     /// デコードされた `VideoFrame` の数
     pub total_output_video_frame_count: SharedAtomicCounter,
 
-    /// 処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// 解像度リスト
     pub resolutions: SharedSet<VideoResolution>,
 
@@ -406,10 +348,6 @@ impl nojson::DisplayJson for VideoDecoderStats {
             f.member(
                 "total_output_video_frame_count",
                 self.total_output_video_frame_count.get(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("resolutions", self.resolutions.get())?;
             f.member("error", self.error.get())?;
@@ -606,9 +544,6 @@ pub struct Mp4AudioReaderStats {
     /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
     pub track_duration_offset: SharedAtomicDuration,
 
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
 
@@ -629,10 +564,6 @@ impl nojson::DisplayJson for Mp4AudioReaderStats {
             f.member(
                 "total_track_seconds",
                 (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
@@ -666,9 +597,6 @@ pub struct Mp4VideoReaderStats {
 
     /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
     pub track_duration_offset: SharedAtomicDuration,
-
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
 
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
@@ -704,10 +632,6 @@ impl nojson::DisplayJson for Mp4VideoReaderStats {
                 "total_track_seconds",
                 (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
             )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
-            )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
             Ok(())
@@ -741,9 +665,6 @@ pub struct WebmAudioReaderStats {
     /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
     pub track_duration_offset: SharedAtomicDuration,
 
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
 
@@ -768,10 +689,6 @@ impl nojson::DisplayJson for WebmAudioReaderStats {
             f.member(
                 "total_track_seconds",
                 (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
@@ -806,9 +723,6 @@ pub struct WebmVideoReaderStats {
     /// 分割録画の際にタイムスタンプを調整するためのオフセット時間
     pub track_duration_offset: SharedAtomicDuration,
 
-    /// 入力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// ソースの表示開始時刻（オフセッット）
     pub start_time: Duration,
 
@@ -833,10 +747,6 @@ impl nojson::DisplayJson for WebmVideoReaderStats {
             f.member(
                 "total_track_seconds",
                 (self.track_duration_offset.get() + self.total_track_duration.get()).as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("start_time_seconds", self.start_time.as_secs_f32())?;
             f.member("error", self.error.get())?;
@@ -884,9 +794,6 @@ pub struct Mp4WriterStats {
     /// 出力ファイルに含まれる映像トラックの尺
     pub total_video_track_duration: SharedAtomicDuration,
 
-    /// MP4 出力処理部分に掛かった時間
-    pub total_processing_duration: SharedAtomicDuration,
-
     /// エラーで中断したかどうか
     pub error: SharedAtomicFlag,
 }
@@ -930,10 +837,6 @@ impl nojson::DisplayJson for Mp4WriterStats {
             f.member(
                 "total_video_track_seconds",
                 self.total_video_track_duration.get().as_secs_f32(),
-            )?;
-            f.member(
-                "total_processing_seconds",
-                self.total_processing_duration.get().as_secs_f32(),
             )?;
             f.member("error", self.error.get())?;
             Ok(())

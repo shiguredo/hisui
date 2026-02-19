@@ -10,12 +10,15 @@ use crate::video::VideoFrame;
 
 pub trait MediaProcessor {
     fn spec(&self) -> MediaProcessorSpec;
+    fn stats(&self) -> Option<ProcessorStats> {
+        None
+    }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()>;
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
 
     fn set_error(&self) {
-        if let Some(stats) = self.spec().stats {
+        if let Some(stats) = self.stats() {
             stats.set_error();
         }
     }
@@ -39,6 +42,10 @@ impl std::fmt::Debug for BoxedMediaProcessor {
 impl MediaProcessor for BoxedMediaProcessor {
     fn spec(&self) -> MediaProcessorSpec {
         self.0.spec()
+    }
+
+    fn stats(&self) -> Option<ProcessorStats> {
+        self.0.stats()
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
@@ -97,7 +104,6 @@ pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
     pub workload_hint: MediaProcessorWorkloadHint,
-    pub stats: Option<ProcessorStats>,
 }
 
 #[derive(Debug)]
@@ -275,7 +281,6 @@ impl MediaProcessor for RealtimePacer {
         MediaProcessorSpec {
             input_stream_ids: self.stream_ids.keys().copied().collect(),
             output_stream_ids: self.stream_ids.values().copied().collect(),
-            stats: None,
             workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }

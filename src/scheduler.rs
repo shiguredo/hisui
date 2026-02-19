@@ -58,6 +58,7 @@ impl Task {
         let mut input_stream_txs = Vec::new();
 
         let spec = processor.spec();
+        let stats = processor.stats();
         let channel_size = sync_channel_size();
         for input_stream_id in spec.input_stream_ids {
             let (tx, rx) = mpsc::sync_channel(channel_size);
@@ -72,7 +73,7 @@ impl Task {
             output_stream_txs: HashMap::new(),
             awaiting_input_stream_ids: Vec::new(),
             output_sample: None,
-            stats: spec.stats,
+            stats,
             workload_hint: spec.workload_hint,
             finished: false,
         };
@@ -391,12 +392,7 @@ impl TaskRunner {
         let mut i = 0;
         let mut did_something = false;
         while i < self.tasks.len() {
-            let start = Instant::now();
             let result = self.tasks[i].run_until_block().or_fail();
-            let elapsed = start.elapsed();
-            if let Some(stats) = &self.tasks[i].stats {
-                stats.total_processing_duration().add(elapsed);
-            }
 
             match result {
                 Err(e) => {

@@ -103,7 +103,6 @@ mod tests {
         stats.set_default_label("processor_type", "mp4_reader");
         stats.counter("total_input_video_sample_count").add(5);
         stats.flag("error").set(false);
-        stats.gauge_f64("total_processing_seconds").set(1.5);
 
         stats.set_default_label("processor_id", "decoder0");
         stats.set_default_label("processor_type", "video_decoder");
@@ -119,7 +118,6 @@ mod tests {
         assert!(text.contains("\"type\":\"video_decoder\""));
         assert!(text.contains("\"total_input_video_sample_count\":5"));
         assert!(text.contains("\"total_output_video_frame_count\":4"));
-        assert!(text.contains("\"total_processing_seconds\":1.5"));
         assert!(!text.contains("\"processors\":[0"));
     }
 

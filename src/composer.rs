@@ -195,71 +195,24 @@ impl Composer {
 fn convert_legacy_stats_to_stats(legacy_processors: &[ProcessorStats]) -> crate::stats::Stats {
     let stats = crate::stats::Stats::new();
     for (index, processor) in legacy_processors.iter().enumerate() {
-        let (processor_type, total_processing_seconds, error) = match processor {
-            ProcessorStats::Mp4AudioReader(reader) => (
-                "mp4_audio_reader",
-                reader.total_processing_duration.get().as_secs_f64(),
-                reader.error.get(),
-            ),
-            ProcessorStats::Mp4VideoReader(reader) => (
-                "mp4_video_reader",
-                reader.total_processing_duration.get().as_secs_f64(),
-                reader.error.get(),
-            ),
-            ProcessorStats::WebmAudioReader(reader) => (
-                "webm_audio_reader",
-                reader.total_processing_duration.get().as_secs_f64(),
-                reader.error.get(),
-            ),
-            ProcessorStats::WebmVideoReader(reader) => (
-                "webm_video_reader",
-                reader.total_processing_duration.get().as_secs_f64(),
-                reader.error.get(),
-            ),
-            ProcessorStats::AudioDecoder(decoder) => (
-                "audio_decoder",
-                decoder.total_processing_duration.get().as_secs_f64(),
-                decoder.error.get(),
-            ),
-            ProcessorStats::VideoDecoder(decoder) => (
-                "video_decoder",
-                decoder.total_processing_duration.get().as_secs_f64(),
-                decoder.error.get(),
-            ),
-            ProcessorStats::AudioMixer(mixer) => (
-                "audio_mixer",
-                mixer.total_processing_duration.get().as_secs_f64(),
-                mixer.error.get(),
-            ),
-            ProcessorStats::VideoMixer(mixer) => (
-                "video_mixer",
-                mixer.total_processing_duration.get().as_secs_f64(),
-                mixer.error.get(),
-            ),
-            ProcessorStats::AudioEncoder(encoder) => (
-                "audio_encoder",
-                encoder.total_processing_duration.get().as_secs_f64(),
-                encoder.error.get(),
-            ),
-            ProcessorStats::VideoEncoder(encoder) => (
-                "video_encoder",
-                encoder.total_processing_duration.get().as_secs_f64(),
-                encoder.error.get(),
-            ),
-            ProcessorStats::Mp4Writer(writer) => (
-                "mp4_writer",
-                writer.total_processing_duration.get().as_secs_f64(),
-                writer.error.get(),
-            ),
+        let (processor_type, error) = match processor {
+            ProcessorStats::Mp4AudioReader(reader) => ("mp4_audio_reader", reader.error.get()),
+            ProcessorStats::Mp4VideoReader(reader) => ("mp4_video_reader", reader.error.get()),
+            ProcessorStats::WebmAudioReader(reader) => ("webm_audio_reader", reader.error.get()),
+            ProcessorStats::WebmVideoReader(reader) => ("webm_video_reader", reader.error.get()),
+            ProcessorStats::AudioDecoder(decoder) => ("audio_decoder", decoder.error.get()),
+            ProcessorStats::VideoDecoder(decoder) => ("video_decoder", decoder.error.get()),
+            ProcessorStats::AudioMixer(mixer) => ("audio_mixer", mixer.error.get()),
+            ProcessorStats::VideoMixer(mixer) => ("video_mixer", mixer.error.get()),
+            ProcessorStats::AudioEncoder(encoder) => ("audio_encoder", encoder.error.get()),
+            ProcessorStats::VideoEncoder(encoder) => ("video_encoder", encoder.error.get()),
+            ProcessorStats::Mp4Writer(writer) => ("mp4_writer", writer.error.get()),
         };
 
         let mut processor_stats = stats.clone();
         processor_stats.set_default_label("processor_id", &format!("legacy_processor_{index}"));
         processor_stats.set_default_label("processor_type", processor_type);
         processor_stats.flag("error").set(error);
-        processor_stats
-            .gauge_f64("total_processing_seconds")
-            .set(total_processing_seconds);
 
         match processor {
             ProcessorStats::Mp4AudioReader(reader) => {
@@ -511,7 +464,6 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
-            stats: None,
             workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }
@@ -780,5 +732,20 @@ mod tests {
             24,
         ));
         assert!(has_counter("mp4_writer", "reserved_moov_box_size", 26,));
+    }
+
+    #[test]
+    fn convert_legacy_stats_to_stats_omits_total_processing_seconds() {
+        let legacy_processors = vec![ProcessorStats::AudioDecoder(
+            legacy::AudioDecoderStats::default(),
+        )];
+
+        let stats = convert_legacy_stats_to_stats(&legacy_processors);
+        let entries = stats.entries().expect("entries must succeed");
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.metric_name == "total_processing_seconds")
+        );
     }
 }

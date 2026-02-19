@@ -143,7 +143,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             print_input_stats_summary(f, &entries)?;
             f.member("output_file_path", &output_file_path)?;
             print_output_stats_summary(f, &entries)?;
-            print_time_stats_summary(f, &entries, result.elapsed_duration.as_secs_f64())?;
+            print_time_stats_summary(f, result.elapsed_duration.as_secs_f64())?;
 
             Ok(())
         })
@@ -239,63 +239,8 @@ fn print_output_stats_summary(
 
 fn print_time_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    entries: &[StatsEntry],
     elapsed_seconds: f64,
 ) -> std::fmt::Result {
-    let total_audio_decoder_processing_seconds =
-        sum_numeric_metric_by_type(entries, "audio_decoder", "total_processing_seconds");
-    if total_audio_decoder_processing_seconds > 0.0 {
-        f.member(
-            "total_audio_decoder_processing_seconds",
-            total_audio_decoder_processing_seconds,
-        )?;
-    }
-
-    let total_video_decoder_processing_seconds =
-        sum_numeric_metric_by_type(entries, "video_decoder", "total_processing_seconds");
-    if total_video_decoder_processing_seconds > 0.0 {
-        f.member(
-            "total_video_decoder_processing_seconds",
-            total_video_decoder_processing_seconds,
-        )?;
-    }
-
-    let total_audio_encoder_processing_seconds =
-        sum_numeric_metric_by_type(entries, "audio_encoder", "total_processing_seconds");
-    if total_audio_encoder_processing_seconds > 0.0 {
-        f.member(
-            "total_audio_encoder_processing_seconds",
-            total_audio_encoder_processing_seconds,
-        )?;
-    }
-
-    let total_video_encoder_processing_seconds =
-        sum_numeric_metric_by_type(entries, "video_encoder", "total_processing_seconds");
-    if total_video_encoder_processing_seconds > 0.0 {
-        f.member(
-            "total_video_encoder_processing_seconds",
-            total_video_encoder_processing_seconds,
-        )?;
-    }
-
-    let total_audio_mixer_processing_seconds =
-        sum_numeric_metric_by_type(entries, "audio_mixer", "total_processing_seconds");
-    if total_audio_mixer_processing_seconds > 0.0 {
-        f.member(
-            "total_audio_mixer_processing_seconds",
-            total_audio_mixer_processing_seconds,
-        )?;
-    }
-
-    let total_video_mixer_processing_seconds =
-        sum_numeric_metric_by_type(entries, "video_mixer", "total_processing_seconds");
-    if total_video_mixer_processing_seconds > 0.0 {
-        f.member(
-            "total_video_mixer_processing_seconds",
-            total_video_mixer_processing_seconds,
-        )?;
-    }
-
     f.member("elapsed_seconds", elapsed_seconds)?;
 
     Ok(())
@@ -395,19 +340,4 @@ fn find_first_numeric_metric_by_type(
         }
         entry.value.as_numeric_f64()
     })
-}
-
-fn sum_numeric_metric_by_type(
-    entries: &[StatsEntry],
-    processor_type: &str,
-    metric_name: &str,
-) -> f64 {
-    entries
-        .iter()
-        .filter(|entry| {
-            entry.metric_name == metric_name
-                && label_value(entry, "processor_type") == Some(processor_type)
-        })
-        .filter_map(|entry| entry.value.as_numeric_f64())
-        .sum()
 }
