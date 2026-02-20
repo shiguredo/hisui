@@ -502,6 +502,20 @@ impl Mp4Writer {
 
         let mut in_progress = audio_rx.is_some() || video_rx.is_some();
         while in_progress {
+            if audio_rx.is_none() && video_rx.is_none() {
+                // これ以上入力は増えないので、キューを空にするまで出力処理を続ける。
+                loop {
+                    let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
+                    let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
+                    in_progress =
+                        self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
+                    if !in_progress {
+                        break;
+                    }
+                }
+                break;
+            }
+
             let audio_len = self.input_audio_queue.len();
             let video_len = self.input_video_queue.len();
             let mut suppress_audio = false;
@@ -525,8 +539,15 @@ impl Mp4Writer {
 
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
             let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
-
-            in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
+            if audio_timestamp.is_none() && video_timestamp.is_none() {
+                if audio_rx.is_some() || video_rx.is_some() {
+                    // 入力待ち中は finalize せず、次のメッセージ到着を待つ。
+                    continue;
+                }
+                in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
+            } else {
+                in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
+            }
         }
 
         Ok(())
