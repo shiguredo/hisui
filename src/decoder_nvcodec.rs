@@ -73,7 +73,7 @@ impl NvcodecDecoder {
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
-        matches!(
+        if !matches!(
             frame.format,
             VideoFormat::H264
                 | VideoFormat::H264AnnexB
@@ -81,7 +81,9 @@ impl NvcodecDecoder {
                 | VideoFormat::Vp8
                 | VideoFormat::Vp9
                 | VideoFormat::Av1
-        )?;
+        ) {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         // サンプルエントリからパラメータセットを抽出してキャッシュ
         if self.parameter_sets.is_none()
@@ -113,11 +115,15 @@ impl NvcodecDecoder {
             }
 
             while !data.is_empty() {
-                (data.len() >= NALU_HEADER_LENGTH)?;
+                if data.len() < NALU_HEADER_LENGTH {
+                    return Err(crate::Error::new("condition is false"));
+                }
                 let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                 data = &data[NALU_HEADER_LENGTH..];
 
-                (data.len() >= n)?;
+                if data.len() < n {
+                    return Err(crate::Error::new("condition is false"));
+                }
                 data_annexb.extend_from_slice(&[0, 0, 0, 1]);
                 data_annexb.extend_from_slice(&data[..n]);
 
@@ -141,7 +147,10 @@ impl NvcodecDecoder {
 
     fn handle_decoded_frames(&mut self) -> crate::Result<()> {
         while let Some(nv12_frame) = self.inner.next_frame()? {
-            let input_frame = self.input_queue.pop_front()?;
+            let input_frame = self
+                .input_queue
+                .pop_front()
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
 
             // NV12 から I420 への変換
             let width = nv12_frame.width();
