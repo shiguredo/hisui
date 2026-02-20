@@ -256,7 +256,7 @@ impl StatsValue {
         }
     }
 
-    pub fn as_bool_for_legacy(&self) -> bool {
+    pub fn as_bool_for_sora_compose(&self) -> bool {
         match self {
             Self::Flag(flag) => flag.get(),
             Self::Counter(counter) => counter.get() != 0,

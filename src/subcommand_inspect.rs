@@ -9,7 +9,7 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions},
     file_reader_webm::{WebmFileReader, WebmFileReaderOptions},
-    metadata::ContainerFormat,
+    sora_metadata::ContainerFormat,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_h264::H264AnnexBNalUnits,

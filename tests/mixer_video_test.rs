@@ -8,10 +8,10 @@ use std::{
 
 use hisui::{
     TrackId,
-    layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
-    layout_region::{Grid, Region},
-    metadata::{SourceId, SourceInfo},
-    mixer_video::{VideoMixer, VideoMixerInput, VideoMixerOutput, VideoMixerSpec},
+    sora_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
+    sora_layout_region::{Grid, Region},
+    sora_metadata::{SourceId, SourceInfo},
+    sora_video_mixer::{VideoMixer, VideoMixerInput, VideoMixerOutput, VideoMixerSpec},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -1219,7 +1219,7 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
 }
 
 fn video_frame(
-    source: &SourceInfo,
+    _source: &SourceInfo,
     size: Size,
     timestamp: Duration,
     duration: Duration,
@@ -1228,7 +1228,6 @@ fn video_frame(
     let y_size = size.width * size.height;
     let uv_size = (size.width * size.height) / 4 * 2;
     VideoFrame {
-        source_id: Some(source.id.clone()),
         data: std::iter::repeat_n(grayscale, y_size)
             .chain(std::iter::repeat_n(128, uv_size))
             .collect(),

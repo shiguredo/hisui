@@ -225,7 +225,6 @@ impl NvcodecEncoder {
 
             // VideoFrame を作成
             self.output_queue.push_back(VideoFrame {
-                source_id: input_frame.source_id.clone(),
                 data: frame_data,
                 format: self.encoded_format,
                 keyframe,

@@ -5,7 +5,7 @@ use shiguredo_mp4::{
     boxes::{AudioSampleEntryFields, SampleEntry},
 };
 
-use crate::{metadata::SourceId, types::CodecName};
+use crate::types::CodecName;
 
 // 現時点では 48000 固定
 pub const SAMPLE_RATE: u16 = 48000;
@@ -18,7 +18,6 @@ pub const DEFAULT_BITRATE: usize = 65536;
 
 #[derive(Debug, Clone)]
 pub struct AudioData {
-    pub source_id: Option<SourceId>,
     pub data: Vec<u8>,
     pub format: AudioFormat,
     pub stereo: bool,

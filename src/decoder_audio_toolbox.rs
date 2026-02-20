@@ -4,13 +4,11 @@ use std::time::Duration;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
-use crate::metadata::SourceId;
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
     inner: Option<shiguredo_audio_toolbox::Decoder>,
     sample_rate: u32,
-    source_id: Option<SourceId>,
     original_samples: u64,
     resampled_samples: u64,
     prev_decoded_original_samples: Vec<i16>,
@@ -22,7 +20,6 @@ impl AudioToolboxDecoder {
         Ok(Self {
             inner: None,
             sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
-            source_id: None,
             original_samples: 0,
             resampled_samples: 0,
             prev_decoded_original_samples: Vec::new(),
@@ -51,7 +48,6 @@ impl AudioToolboxDecoder {
                 channels,
             )?);
             self.sample_rate = sample_rate;
-            self.source_id = data.source_id.clone();
         }
 
         let inner = self
@@ -112,7 +108,6 @@ impl AudioToolboxDecoder {
             Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
 
         Ok(AudioData {
-            source_id: self.source_id.clone(),
             data: decoded_samples
                 .iter()
                 .flat_map(|v| v.to_be_bytes())

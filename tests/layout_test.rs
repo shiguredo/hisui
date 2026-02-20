@@ -5,9 +5,11 @@ use std::{
 };
 
 use hisui::{
-    layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
-    layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
-    metadata::{SourceId, SourceInfo},
+    sora_layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
+    sora_layout_region::{
+        ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells,
+    },
+    sora_metadata::{SourceId, SourceInfo},
 };
 
 #[test]
@@ -719,7 +721,7 @@ fn source_wildcard() -> hisui::Result<()> {
     let to_absolute = |path| std::path::absolute(base_path.join(path));
 
     // ソースパスを明示的に指定
-    let resolved = layout::resolve_source_paths(
+    let resolved = sora_layout::resolve_source_paths(
         &base_path,
         &[PathBuf::from("bar-0.json"), PathBuf::from("foo-1.json")],
         &[],
@@ -730,7 +732,7 @@ fn source_wildcard() -> hisui::Result<()> {
     );
 
     // ソースパスと除外パスを明示的に指定
-    let resolved = layout::resolve_source_paths(
+    let resolved = sora_layout::resolve_source_paths(
         &base_path,
         &[PathBuf::from("bar-0.json"), PathBuf::from("foo-1.json")],
         &[
@@ -741,7 +743,8 @@ fn source_wildcard() -> hisui::Result<()> {
     assert_eq!(resolved, &[to_absolute("bar-0.json")?]);
 
     // ソースパスをワイルドカードで指定
-    let resolved = layout::resolve_source_paths(&base_path, &[PathBuf::from("foo-*.json")], &[])?;
+    let resolved =
+        sora_layout::resolve_source_paths(&base_path, &[PathBuf::from("foo-*.json")], &[])?;
     assert_eq!(
         resolved,
         &[
@@ -752,7 +755,7 @@ fn source_wildcard() -> hisui::Result<()> {
     );
 
     // ソースパスと除外パスをワイルドカードで指定
-    let resolved = layout::resolve_source_paths(
+    let resolved = sora_layout::resolve_source_paths(
         &base_path,
         &[PathBuf::from("*.json")],
         &[PathBuf::from("*-1.json")],
@@ -770,7 +773,7 @@ fn source_wildcard() -> hisui::Result<()> {
     );
 
     // ワイルドカードと通常パスの混合
-    let resolved = layout::resolve_source_paths(
+    let resolved = sora_layout::resolve_source_paths(
         &base_path,
         &[
             PathBuf::from("foo-2.json"),
@@ -796,8 +799,11 @@ fn source_path_outside_base_dir_error() -> hisui::Result<()> {
     // ベースディレクトリの外をレイアウトの中で参照した場合にはエラーになる
     let base_path = PathBuf::from("testdata/files/").canonicalize()?;
 
-    let result =
-        layout::resolve_source_paths(&base_path, &[PathBuf::from("../files2/foo-0.json")], &[]);
+    let result = sora_layout::resolve_source_paths(
+        &base_path,
+        &[PathBuf::from("../files2/foo-0.json")],
+        &[],
+    );
     assert!(result.is_err());
     assert!(
         result
@@ -818,7 +824,7 @@ fn wildcard_excludes_sources_without_media_files() -> hisui::Result<()> {
     let to_absolute = |path| std::path::absolute(base_path.join(path));
 
     // ワイルドカードで全 JSON ファイルを指定
-    let resolved = layout::resolve_source_paths(&base_path, &[PathBuf::from("*.json")], &[])?;
+    let resolved = sora_layout::resolve_source_paths(&base_path, &[PathBuf::from("*.json")], &[])?;
 
     // メディアファイルが存在するソースのみが含まれることを確認
     // source-without-media.json は対応するメディアファイル（.webm または .mp4）が
@@ -827,7 +833,7 @@ fn wildcard_excludes_sources_without_media_files() -> hisui::Result<()> {
 
     // [おまけ]
     // source-without-media.json をワイルドカードではなく直接指定した場合にはエラーになる
-    let result = layout::resolve_source_paths(
+    let result = sora_layout::resolve_source_paths(
         &base_path,
         &[PathBuf::from("source-without-media.json")],
         &[],

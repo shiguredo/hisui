@@ -6,8 +6,8 @@ use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     decoder_opus::OpusDecoder,
-    metadata::SourceId,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
+    sora_metadata::SourceId,
     types::{CodecName, EngineName},
     video::VideoFrame,
 };

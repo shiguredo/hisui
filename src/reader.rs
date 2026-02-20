@@ -3,11 +3,11 @@ use std::time::Duration;
 
 use crate::{
     audio::AudioData,
-    layout::AggregatedSourceInfo,
     media::MediaSample,
-    metadata::{ContainerFormat, SourceId},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    sora_layout::AggregatedSourceInfo,
+    sora_metadata::{ContainerFormat, SourceId},
     types::CodecName,
     video::VideoFrame,
 };

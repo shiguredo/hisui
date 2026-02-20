@@ -1,8 +1,9 @@
 #![cfg_attr(not(feature = "nvcodec"), expect(unused_variables, unused_mut))]
 
+// Sora の録画ファイル合成処理固有
 #[cfg(feature = "nvcodec")]
 use crate::decoder_nvcodec_params;
-use crate::layout::DEFAULT_LAYOUT_JSON;
+use crate::sora_layout::DEFAULT_LAYOUT_JSON;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDecodeParams {

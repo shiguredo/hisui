@@ -1,3 +1,4 @@
+// Sora の録画ファイル合成処理固有
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     num::NonZeroUsize,
@@ -8,10 +9,10 @@ use std::{
 use crate::{
     audio,
     json::JsonObject,
-    layout_decode_params::LayoutDecodeParams,
-    layout_encode_params::LayoutEncodeParams,
-    layout_region::{self, RawRegion, Region},
-    metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
+    sora_layout_decode_params::LayoutDecodeParams,
+    sora_layout_encode_params::LayoutEncodeParams,
+    sora_layout_region::{self, RawRegion, Region},
+    sora_metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, EngineName, EvenUsize},
     video::FrameRate,
 };
@@ -108,7 +109,7 @@ impl Layout {
         let (rows, columns) = if audio_only {
             (1, 1)
         } else {
-            layout_region::decide_grid_dimensions(0, max_columns, report.archives.len())
+            sora_layout_region::decide_grid_dimensions(0, max_columns, report.archives.len())
         };
 
         // 全体の解像度を求める（キリを良くするために内枠のことはここでは考慮しない）
@@ -773,7 +774,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
+    use crate::sora_metadata::{ContainerFormat, SourceId, SourceInfo};
 
     #[test]
     fn load_layout_jsons() -> crate::Result<()> {

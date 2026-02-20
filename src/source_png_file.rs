@@ -92,7 +92,6 @@ impl PngFileSource {
                 frames_to_timestamp(self.frame_rate, frame_index.saturating_add(1));
             let duration = next_timestamp.saturating_sub(timestamp);
             let frame = VideoFrame {
-                source_id: None,
                 data: decoded.data.clone(),
                 format: VideoFormat::I420A,
                 keyframe: true,

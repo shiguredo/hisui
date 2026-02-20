@@ -120,7 +120,6 @@ impl LibvpxEncoder {
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
             self.output_queue.push_back(VideoFrame {
-                source_id: None,
                 sample_entry: self.sample_entry.take(),
                 data: frame.data().to_vec(),
                 format: self.format,

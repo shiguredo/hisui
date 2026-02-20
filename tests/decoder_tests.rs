@@ -1,8 +1,8 @@
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    metadata::SourceId,
     reader_mp4::Mp4VideoReader,
+    sora_metadata::SourceId,
     video::VideoFrame,
 };
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]

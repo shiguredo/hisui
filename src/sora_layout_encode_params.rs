@@ -1,10 +1,11 @@
+// Sora の録画ファイル合成処理固有
 #[cfg(feature = "libvpx")]
 use crate::encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 use crate::encoder_nvcodec_params;
 #[cfg(target_os = "macos")]
 use crate::encoder_video_toolbox_params;
-use crate::layout::DEFAULT_LAYOUT_JSON;
+use crate::sora_layout::DEFAULT_LAYOUT_JSON;
 use crate::{encoder_openh264_params, encoder_svt_av1_params};
 
 #[derive(Debug, Clone)]

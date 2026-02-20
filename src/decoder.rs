@@ -15,8 +15,8 @@ use crate::{
     decoder_dav1d::Dav1dDecoder,
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
-    layout_decode_params::LayoutDecodeParams,
     media::MediaSample,
+    sora_layout_decode_params::LayoutDecodeParams,
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -24,7 +24,6 @@ use crate::{
 #[derive(Debug)]
 pub struct AudioDecoder {
     total_audio_data_count_metric: crate::stats::StatsCounter,
-    source_id_metric: crate::stats::StatsString,
     decoded: VecDeque<AudioData>,
     eos: bool,
     inner: Option<AudioDecoderInner>,
@@ -43,11 +42,9 @@ impl AudioDecoder {
             .set(EngineName::Opus.as_str());
         compose_stats.string("codec").set(CodecName::Opus.as_str());
         let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
-        let source_id_metric = compose_stats.string("source_id");
         compose_stats.flag("error").set(false);
         Ok(Self {
             total_audio_data_count_metric,
-            source_id_metric,
             decoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -109,9 +106,6 @@ impl AudioDecoder {
         let inner = self.inner.as_mut().expect("infallible");
         let decoded = inner.decode(&data)?;
         self.total_audio_data_count_metric.inc();
-        if let Some(id) = &data.source_id {
-            self.source_id_metric.set(id.get());
-        }
 
         self.decoded.push_back(decoded);
         Ok(())
@@ -231,7 +225,6 @@ pub struct VideoDecoder {
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_output_video_frame_count_metric: crate::stats::StatsCounter,
-    source_id_metric: crate::stats::StatsString,
     decoded: VecDeque<VideoFrame>,
     eos: bool,
     inner: VideoDecoderInner,
@@ -245,14 +238,12 @@ impl VideoDecoder {
             compose_stats.counter("total_input_video_frame_count");
         let total_output_video_frame_count_metric =
             compose_stats.counter("total_output_video_frame_count");
-        let source_id_metric = compose_stats.string("source_id");
         compose_stats.flag("error").set(false);
         Self {
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
             total_output_video_frame_count_metric,
-            source_id_metric,
             decoded: VecDeque::new(),
             eos: false,
             inner: VideoDecoderInner::new(options),
@@ -304,9 +295,6 @@ impl VideoDecoder {
             let frame = sample.expect_video_frame()?;
 
             self.total_input_video_frame_count_metric.inc();
-            if let Some(id) = &frame.source_id {
-                self.source_id_metric.set(id.get());
-            }
 
             self.inner
                 .decode(&frame, &self.codec_metric, &self.engine_metric)?;

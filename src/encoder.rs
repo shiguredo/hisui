@@ -20,9 +20,9 @@ use crate::{
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
-    layout::Layout,
-    layout_encode_params::LayoutEncodeParams,
     media::MediaSample,
+    sora_layout::Layout,
+    sora_layout_encode_params::LayoutEncodeParams,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
 };

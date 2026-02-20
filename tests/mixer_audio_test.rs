@@ -3,10 +3,10 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 use hisui::{
     TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
-    layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     media::MediaSample,
-    metadata::{SourceId, SourceInfo},
     mixer_audio::{AudioMixer, AudioMixerOutput},
+    sora_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
+    sora_metadata::{SourceId, SourceInfo},
     types::CodecName,
     video::FrameRate,
 };
@@ -433,7 +433,6 @@ fn audio_data(
     let sample_count =
         (SAMPLE_RATE as f64 * duration.as_secs_f64()) as usize * CHANNELS as usize * sample_bytes;
     let data = AudioData {
-        source_id: Some(source.id.clone()),
         data: vec![sample; sample_count],
         format: AudioFormat::I16Be,
         stereo: true,

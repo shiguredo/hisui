@@ -15,8 +15,8 @@ use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
 use crate::{
     TrackId,
     audio::AudioData,
-    layout::Layout,
     media::MediaSample,
+    sora_layout::Layout,
     types::CodecName,
     video::{FrameRate, VideoFrame},
 };

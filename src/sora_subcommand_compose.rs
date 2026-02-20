@@ -1,5 +1,6 @@
+// Sora の録画ファイル合成処理固有
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     future::Future,
     num::NonZeroUsize,
     path::PathBuf,
@@ -13,10 +14,10 @@ use crate::{
     TrackId,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
-    layout::{DEFAULT_LAYOUT_JSON, Layout},
     mixer_audio::AudioMixer,
-    mixer_video::{VideoMixer, VideoMixerSpec},
     reader::{AudioReader, VideoReader},
+    sora_layout::{DEFAULT_LAYOUT_JSON, Layout},
+    sora_video_mixer::{VideoMixer, VideoMixerSpec},
     stats::{StatsEntry, StatsValue},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
@@ -199,7 +200,7 @@ fn run_compose(
     ))?;
 
     if let Some(path) = stats_file_path {
-        match crate::stats_legacy_json::to_legacy_stats_json(
+        match crate::sora_compose_stats_json::to_sora_compose_stats_json(
             &result.stats,
             result.elapsed_duration.as_secs_f64(),
         ) {
@@ -306,8 +307,8 @@ async fn setup_pipeline(
 
         let source_info = source_info.clone();
         let reader_processor_type = match source_info.format {
-            crate::metadata::ContainerFormat::Mp4 => "mp4_audio_reader",
-            crate::metadata::ContainerFormat::Webm => "webm_audio_reader",
+            crate::sora_metadata::ContainerFormat::Mp4 => "mp4_audio_reader",
+            crate::sora_metadata::ContainerFormat::Webm => "webm_audio_reader",
         };
         let (reader_processor_id, reader_metadata) = next_processor(reader_processor_type);
         let reader_output_track_id = TrackId::new(reader_processor_id.get());
@@ -348,6 +349,7 @@ async fn setup_pipeline(
     }
 
     let mut video_mixer_input_track_ids = Vec::new();
+    let mut video_mixer_input_track_source_ids = HashMap::new();
     let decoder_options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
         decode_params: layout.decode_params.clone(),
@@ -363,8 +365,8 @@ async fn setup_pipeline(
 
         let source_info = source_info.clone();
         let reader_processor_type = match source_info.format {
-            crate::metadata::ContainerFormat::Mp4 => "mp4_video_reader",
-            crate::metadata::ContainerFormat::Webm => "webm_video_reader",
+            crate::sora_metadata::ContainerFormat::Mp4 => "mp4_video_reader",
+            crate::sora_metadata::ContainerFormat::Webm => "webm_video_reader",
         };
         let (reader_processor_id, reader_metadata) = next_processor(reader_processor_type);
         let reader_output_track_id = TrackId::new(reader_processor_id.get());
@@ -400,6 +402,8 @@ async fn setup_pipeline(
             &mut processor_tasks,
         )
         .await?;
+        video_mixer_input_track_source_ids
+            .insert(decoder_output_track_id.clone(), source_id.clone());
         video_mixer_input_track_ids.push(decoder_output_track_id);
     }
 
@@ -433,7 +437,8 @@ async fn setup_pipeline(
 
     let (video_mixer_processor_id, video_mixer_metadata) = next_processor("video_mixer");
     let video_mixer_output_track_id = TrackId::new(video_mixer_processor_id.get());
-    let video_mixer_spec = VideoMixerSpec::from_layout(layout);
+    let video_mixer_spec = VideoMixerSpec::from_layout(layout)
+        .with_input_track_source_ids(video_mixer_input_track_source_ids);
     let video_mixer_output_track_id_for_mixer = video_mixer_output_track_id.clone();
     let video_mixer_input_track_ids_for_new = video_mixer_input_track_ids.clone();
     let video_mixer_input_track_ids_for_run = video_mixer_input_track_ids;

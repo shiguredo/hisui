@@ -3,9 +3,9 @@ use std::{path::Path, path::PathBuf, time::Duration};
 use hisui::{
     Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
-    layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
-    layout_region::{Grid, Region},
-    metadata::{SourceId, SourceInfo},
+    sora_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
+    sora_layout_region::{Grid, Region},
+    sora_metadata::{SourceId, SourceInfo},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
@@ -488,7 +488,6 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
 
 fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioData {
     AudioData {
-        source_id: Some(source.id.clone()),
         data: vec![0], // 中身はなんでもいい
         format: AudioFormat::I16Be,
         stereo: true,
@@ -510,7 +509,6 @@ fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioData {
 
 fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame {
     VideoFrame {
-        source_id: Some(source.id.clone()),
         data: vec![0], // 中身はなんでもいい
         format: VideoFormat::I420,
         keyframe: i.is_multiple_of(2),

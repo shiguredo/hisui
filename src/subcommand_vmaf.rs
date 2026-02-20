@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -14,10 +14,10 @@ use crate::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::{VideoEncoder, VideoEncoderOptions},
     json::JsonObject,
-    layout::Layout,
     media::MediaSample,
-    mixer_video::{VideoMixer, VideoMixerSpec},
     reader::VideoReader,
+    sora_layout::Layout,
+    sora_video_mixer::{VideoMixer, VideoMixerSpec},
     video::FrameRate,
     writer_yuv::YuvWriter,
 };
@@ -327,13 +327,17 @@ async fn setup_vmaf_pipeline(
     let video_source_ids = layout.video_source_ids().cloned().collect::<HashSet<_>>();
 
     let mut mixer_input_track_ids = Vec::new();
+    let mut mixer_input_track_source_ids = HashMap::new();
     for source_info in layout
         .sources
         .iter()
         .filter_map(|(source_id, source_info)| {
-            video_source_ids.contains(source_id).then_some(source_info)
+            video_source_ids
+                .contains(source_id)
+                .then_some((source_id, source_info))
         })
     {
+        let (source_id, source_info) = source_info;
         let reader_output_track_id = next_track_id(&mut next_track_number, "reader_output");
         let source_info = source_info.clone();
         let reader_processor_id = next_processor_id(&mut next_processor_number, "video_reader");
@@ -371,11 +375,13 @@ async fn setup_vmaf_pipeline(
         )
         .await?;
 
+        mixer_input_track_source_ids.insert(decoder_output_track_id.clone(), source_id.clone());
         mixer_input_track_ids.push(decoder_output_track_id);
     }
 
     let mixer_output_track_id = next_track_id(&mut next_track_number, "mixer_output");
-    let mixer_spec = VideoMixerSpec::from_layout(&layout);
+    let mixer_spec = VideoMixerSpec::from_layout(&layout)
+        .with_input_track_source_ids(mixer_input_track_source_ids);
     let mixer_input_track_ids_for_new = mixer_input_track_ids.clone();
     let mixer_input_track_ids_for_run = mixer_input_track_ids;
     let mixer_processor_id = next_processor_id(&mut next_processor_number, "video_mixer");

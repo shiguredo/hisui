@@ -242,7 +242,6 @@ impl RtmpIncomingFrameHandler {
             stereo: codec_info.channels == 2,
             sample_entry: self.audio_sample_entry.clone(),
             data: frame.data,
-            source_id: None,
         })
     }
 
@@ -320,7 +319,6 @@ impl RtmpIncomingFrameHandler {
             format: crate::video::VideoFormat::H264,
             width: width as usize,
             height: height as usize,
-            source_id: None,
             data: frame.data,
         }))
     }

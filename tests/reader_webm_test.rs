@@ -1,6 +1,6 @@
 use hisui::{
-    metadata::SourceId,
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    sora_metadata::SourceId,
 };
 
 #[test]

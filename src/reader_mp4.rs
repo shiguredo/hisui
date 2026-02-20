@@ -10,7 +10,7 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
     audio::{AudioData, AudioFormat},
-    metadata::SourceId,
+    sora_metadata::SourceId,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -25,7 +25,6 @@ pub struct VideoResolution {
 pub struct Mp4VideoReader {
     file: File,
     demuxer: Mp4FileDemuxer,
-    source_id: SourceId,
     format: VideoFormat,
     width: usize,
     height: usize,
@@ -39,7 +38,7 @@ pub struct Mp4VideoReader {
 }
 
 impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
+    pub fn new<P: AsRef<Path>>(_source_id: SourceId, path: P) -> crate::Result<Self> {
         let mut file = File::open(&path).map_err(|e| {
             crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
         })?;
@@ -49,7 +48,6 @@ impl Mp4VideoReader {
         Ok(Self {
             file,
             demuxer,
-            source_id,
 
             // 後で更新されるので適当な初期値を設定しておく
             format: VideoFormat::Vp8,
@@ -143,7 +141,6 @@ impl Mp4VideoReader {
         });
 
         Ok(Some(VideoFrame {
-            source_id: Some(self.source_id.clone()),
             sample_entry,
             data,
             format: self.format,
@@ -168,7 +165,6 @@ impl Iterator for Mp4VideoReader {
 pub struct Mp4AudioReader {
     file: File,
     demuxer: Mp4FileDemuxer,
-    source_id: SourceId,
     audio_track_id: Option<u32>,
     format: AudioFormat,
     stereo: bool,
@@ -182,7 +178,7 @@ pub struct Mp4AudioReader {
 }
 
 impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
+    pub fn new<P: AsRef<Path>>(_source_id: SourceId, path: P) -> crate::Result<Self> {
         let mut file = File::open(&path).map_err(|e| {
             crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
         })?;
@@ -198,7 +194,6 @@ impl Mp4AudioReader {
         Ok(Self {
             file,
             demuxer,
-            source_id,
             audio_track_id,
             // 後で更新されるので適当な初期値を設定しておく
             format: AudioFormat::Opus,
@@ -277,7 +272,6 @@ impl Mp4AudioReader {
         self.total_track_duration = timestamp + duration;
 
         Ok(Some(AudioData {
-            source_id: Some(self.source_id.clone()),
             data,
             format: self.format,
             sample_entry,

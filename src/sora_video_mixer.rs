@@ -1,3 +1,4 @@
+// Sora の録画ファイル合成処理固有
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
@@ -6,9 +7,9 @@ use std::{
 
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
-    layout::{Layout, Resolution, TrimSpans},
-    layout_region::Region,
-    metadata::SourceId,
+    sora_layout::{Layout, Resolution, TrimSpans},
+    sora_layout_region::Region,
+    sora_metadata::SourceId,
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -47,10 +48,6 @@ impl ResizeCachedVideoFrame {
 
     fn end_timestamp(&self) -> Duration {
         self.original.end_timestamp()
-    }
-
-    fn source_id(&self) -> Option<&SourceId> {
-        self.original.source_id.as_ref()
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> crate::Result<&VideoFrame> {
@@ -192,6 +189,7 @@ pub struct VideoMixerSpec {
     pub resolution: Resolution,
     pub trim_spans: TrimSpans,
     pub resize_filter_mode: shiguredo_libyuv::FilterMode,
+    pub input_track_source_ids: HashMap<TrackId, SourceId>,
 }
 
 impl VideoMixerSpec {
@@ -202,7 +200,16 @@ impl VideoMixerSpec {
             resolution: layout.resolution,
             trim_spans: layout.trim_spans.clone(),
             resize_filter_mode: shiguredo_libyuv::FilterMode::Box,
+            input_track_source_ids: HashMap::new(),
         }
+    }
+
+    pub fn with_input_track_source_ids(
+        mut self,
+        input_track_source_ids: HashMap<TrackId, SourceId>,
+    ) -> Self {
+        self.input_track_source_ids = input_track_source_ids;
+        self
     }
 }
 
@@ -345,7 +352,14 @@ impl VideoMixer {
         let input_streams = input_track_ids
             .iter()
             .cloned()
-            .map(|id| (id, InputStream::default()))
+            .map(|id| {
+                let source_id = spec
+                    .input_track_source_ids
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| SourceId::new(id.get()));
+                (id, InputStream::new(source_id))
+            })
             .collect();
         stats
             .gauge("output_video_width")
@@ -472,7 +486,6 @@ impl VideoMixer {
 
         Ok(VideoFrame {
             // 固定値
-            source_id: None,    // 合成後は常に None となる
             sample_entry: None, // 生データにはエンプルエントリーは存在しない
             keyframe: true,     // 生データはすべてキーフレーム扱い
             format: VideoFormat::I420,
@@ -506,10 +519,7 @@ impl VideoMixer {
             if now < frame.start_timestamp() {
                 continue;
             }
-            let Some(source_id) = frame.source_id() else {
-                continue;
-            };
-            let Some(source) = region.grid.assigned_sources.get(source_id) else {
+            let Some(source) = region.grid.assigned_sources.get(&input_stream.source_id) else {
                 // このグリッドには含まれないソースなので飛ばす
                 continue;
             };
@@ -699,13 +709,22 @@ struct InputTrack {
     rx: crate::MessageReceiver,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct InputStream {
+    source_id: SourceId,
     eos: bool,
     frame_queue: VecDeque<ResizeCachedVideoFrame>,
 }
 
 impl InputStream {
+    fn new(source_id: SourceId) -> Self {
+        Self {
+            source_id,
+            eos: false,
+            frame_queue: VecDeque::new(),
+        }
+    }
+
     fn pop_outdated_frame(&mut self, now: Duration) -> bool {
         loop {
             let Some(current_frame) = self.frame_queue.front() else {

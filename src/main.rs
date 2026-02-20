@@ -54,7 +54,7 @@ fn main() -> noargs::Result<()> {
     } else if LIST_CODECS_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_list_codecs::run(args)?;
     } else if COMPOSE_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_compose::run(args)?;
+        hisui::sora_subcommand_compose::run(args)?;
     } else if VMAF_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {

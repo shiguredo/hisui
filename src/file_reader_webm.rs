@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
-    metadata::SourceId,
     reader_webm::{WebmAudioReader, WebmVideoReader},
+    sora_metadata::SourceId,
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;

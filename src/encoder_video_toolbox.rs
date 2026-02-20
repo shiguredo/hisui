@@ -148,7 +148,6 @@ impl VideoToolboxEncoder {
             };
 
             self.output_queue.push_back(VideoFrame {
-                source_id: None,
                 data: frame.data,
                 format: self.format,
                 keyframe: frame.keyframe,
