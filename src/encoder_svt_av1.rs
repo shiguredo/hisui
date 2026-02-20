@@ -47,12 +47,15 @@ impl SvtAv1Encoder {
 
     pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
         if frame.format != VideoFormat::I420 {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.format
+            )));
         }
 
         let (y_plane, u_plane, v_plane) = frame
             .as_yuv_planes()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
         self.inner.encode(y_plane, u_plane, v_plane)?;
         self.input_queue.push_back(frame);
         self.handle_encoded_frames()?;
@@ -76,7 +79,7 @@ impl SvtAv1Encoder {
             let input_frame = self
                 .input_queue
                 .pop_front()
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+                .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
 
             self.output_queue.push_back(VideoFrame {
                 source_id: None,

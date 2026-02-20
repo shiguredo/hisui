@@ -142,17 +142,19 @@ pub fn h265_sample_entry_from_annexb(
     }
 
     if vps_list.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.265 VPS"));
     }
     if sps_list.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.265 SPS"));
     }
     if pps_list.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.265 PPS"));
     }
 
-    let width = EvenUsize::new(width).ok_or_else(|| crate::Error::new("value is missing"))?;
-    let height = EvenUsize::new(height).ok_or_else(|| crate::Error::new("value is missing"))?;
+    let width = EvenUsize::new(width)
+        .ok_or_else(|| crate::Error::new(format!("H.265 width must be even, got {width}")))?;
+    let height = EvenUsize::new(height)
+        .ok_or_else(|| crate::Error::new(format!("H.265 height must be even, got {height}")))?;
 
     h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
 }

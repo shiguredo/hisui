@@ -109,7 +109,7 @@ impl AudioReader {
         remaining_input_files.reverse();
         let first_input_file = remaining_input_files
             .pop()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("no input file for audio reader"))?;
         let inner = match format {
             ContainerFormat::Mp4 => {
                 let mut reader = Mp4AudioReader::new(source_id.clone(), first_input_file.clone())?;
@@ -383,7 +383,7 @@ impl VideoReader {
         remaining_input_files.reverse();
         let first_input_file = remaining_input_files
             .pop()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("no input file for video reader"))?;
         let inner = match format {
             ContainerFormat::Mp4 => {
                 let mut reader = Mp4VideoReader::new(source_id.clone(), first_input_file.clone())?;

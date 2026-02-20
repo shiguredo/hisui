@@ -65,11 +65,12 @@ impl Composer {
         // リーダーとデコーダーを登録
         let mut audio_mixer_input_stream_ids = Vec::new();
         for source_id in self.layout.audio_source_ids() {
-            let source_info = self
-                .layout
-                .sources
-                .get(source_id)
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+            let source_info = self.layout.sources.get(source_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing source info for source id: {}",
+                    source_id.get()
+                ))
+            })?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
             let reader = AudioReader::new(
                 reader_output_stream_id,
@@ -102,11 +103,12 @@ impl Composer {
             engines: self.layout.video_decode_engines.clone(),
         };
         for source_id in self.layout.video_source_ids() {
-            let source_info = self
-                .layout
-                .sources
-                .get(source_id)
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+            let source_info = self.layout.sources.get(source_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing source info for source id: {}",
+                    source_id.get()
+                ))
+            })?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
             let reader = VideoReader::new(
                 reader_output_stream_id,

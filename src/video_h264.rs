@@ -43,12 +43,14 @@ impl<'a> H264AnnexBNalUnits<'a> {
             return Err(crate::Error::new("no H.264 start code prefix"));
         };
         if self.data.is_empty() {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new("empty H.264 NAL unit"));
         }
 
         let header = self.data[0];
         if (header >> 7) != 0 {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(
+                "invalid H.264 NAL header: forbidden_zero_bit is set",
+            ));
         }
 
         let _nal_ref_idc = header >> 5;
@@ -99,10 +101,10 @@ pub fn h264_sample_entry_from_annexb(
         }
     }
     if sps_list.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.264 SPS"));
     }
     if pps_list.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.264 PPS"));
     }
 
     Ok(SampleEntry::Avc1(Avc1Box {
@@ -187,7 +189,9 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec
             3 => {
                 let size = u32::try_from(nalu.data.len())?;
                 if size > 0x00FF_FFFF {
-                    return Err(crate::Error::new("condition is false"));
+                    return Err(crate::Error::new(format!(
+                        "NALU size does not fit in 3-byte length field: {size}"
+                    )));
                 }
                 &[(size >> 16) as u8, (size >> 8) as u8, size as u8]
             }

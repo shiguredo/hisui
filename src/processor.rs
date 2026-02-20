@@ -235,7 +235,11 @@ impl RealtimePacer {
         output_stream_ids: Vec<MediaStreamId>,
     ) -> crate::Result<Self> {
         if input_stream_ids.len() != output_stream_ids.len() {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "input/output stream count mismatch: inputs={}, outputs={}",
+                input_stream_ids.len(),
+                output_stream_ids.len()
+            )));
         }
         Ok(Self {
             stream_ids: input_stream_ids
@@ -278,7 +282,12 @@ impl MediaProcessor for RealtimePacer {
             .stream_ids
             .get(&input.stream_id)
             .copied()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| {
+                crate::Error::new(format!(
+                    "unknown input stream id for realtime pacer: {}",
+                    input.stream_id.get()
+                ))
+            })?;
         if let Some(sample) = input.sample {
             self.stream_timestamps
                 .insert(input.stream_id, sample.timestamp());

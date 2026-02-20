@@ -77,10 +77,12 @@ impl Task {
     fn process_input(&mut self) -> crate::Result<bool> {
         let mut input = None;
         for &stream_id in &self.awaiting_input_stream_ids {
-            let rx = self
-                .input_stream_rxs
-                .get(&stream_id)
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+            let rx = self.input_stream_rxs.get(&stream_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing input receiver for stream id: {}",
+                    stream_id.get()
+                ))
+            })?;
             match rx.try_recv() {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     input = Some(MediaProcessorInput::eos(stream_id));
@@ -109,10 +111,12 @@ impl Task {
         }
 
         if let Some((stream_id, mut i, sample)) = self.output_sample.take() {
-            let txs = self
-                .output_stream_txs
-                .get_mut(&stream_id)
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+            let txs = self.output_stream_txs.get_mut(&stream_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing output sender list for stream id: {}",
+                    stream_id.get()
+                ))
+            })?;
             while i < txs.len() {
                 match txs[i].try_send(sample.clone()) {
                     Ok(()) => {
@@ -235,7 +239,7 @@ impl Scheduler {
                 .iter()
                 .enumerate()
                 .min_by_key(|(_, cost)| *cost)
-                .ok_or_else(|| crate::Error::new("value is missing"))? // 累積コストが一番低いスレッドを選ぶ
+                .ok_or_else(|| crate::Error::new("no thread cost entries found"))? // 累積コストが一番低いスレッドを選ぶ
                 .0;
             thread_costs[i] += cost.get();
             task.thread_number = i;

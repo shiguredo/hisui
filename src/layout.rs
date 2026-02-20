@@ -97,7 +97,7 @@ impl Layout {
     ) -> crate::Result<Self> {
         let base_path = std::path::absolute(report_file_path)?
             .parent()
-            .ok_or_else(|| crate::Error::new("value is missing"))?
+            .ok_or_else(|| crate::Error::new("recording report path has no parent directory"))?
             .to_path_buf();
 
         // layout 未指定の場合にはセルの解像度は固定
@@ -121,7 +121,7 @@ impl Layout {
             .map(|path| {
                 path.file_name()
                     .map(PathBuf::from)
-                    .ok_or_else(|| crate::Error::new("value is missing"))
+                    .ok_or_else(|| crate::Error::new("source path does not have a file name"))
             })
             .collect::<crate::Result<Vec<_>>>()?;
         let video_layout = nojson::json(|f| {
@@ -801,7 +801,7 @@ mod tests {
         let e = json
             .parse::<nojson::Json<RawLayout>>()
             .err()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("expected duplicate region name error"))?;
         let error_message = e.to_string();
         assert!(error_message.contains("duplicate region name"));
         Ok(())

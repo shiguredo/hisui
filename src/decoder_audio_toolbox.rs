@@ -31,14 +31,17 @@ impl AudioToolboxDecoder {
 
     pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         if data.format != AudioFormat::Aac {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected AAC format, got {}",
+                data.format
+            )));
         }
 
         if self.inner.is_none() {
             let sample_entry = data
                 .sample_entry
                 .as_ref()
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+                .ok_or_else(|| crate::Error::new("missing sample entry for AAC decoder"))?;
             let (sample_rate, channels) = extract_audio_config(sample_entry)?;
             tracing::debug!(
                 "Audio Toolbox AAC decoder configuration: sample_rate={sample_rate}Hz, channels={channels}"
@@ -54,7 +57,7 @@ impl AudioToolboxDecoder {
         let inner = self
             .inner
             .as_mut()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("audio toolbox decoder is not initialized"))?;
         inner.decode(&data.data)?;
 
         self.build_audio_data()
@@ -81,7 +84,7 @@ impl AudioToolboxDecoder {
         let inner = self
             .inner
             .as_mut()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("audio toolbox decoder is not initialized"))?;
         while let Some(samples) = inner.next_decoded_data()? {
             decoded_samples.extend(samples);
         }
@@ -129,7 +132,7 @@ fn extract_audio_config(sample_entry: &SampleEntry) -> crate::Result<(u32, NonZe
         SampleEntry::Mp4a(mp4a) => {
             let sample_rate = mp4a.audio.samplerate.integer as u32;
             let channels = NonZeroU8::new(mp4a.audio.channelcount as u8)
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+                .ok_or_else(|| crate::Error::new("invalid AAC channel count: 0"))?;
             Ok((sample_rate, channels))
         }
         _ => Err(crate::Error::new(

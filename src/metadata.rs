@@ -36,10 +36,9 @@ impl RecordingMetadata {
             // 命名規則に従って生成する
             let mut paths = Vec::new();
             for archive in &self.archives {
-                let last_index_str = archive
-                    .split_last_index
-                    .as_ref()
-                    .ok_or_else(|| crate::Error::new("value is missing"))?;
+                let last_index_str = archive.split_last_index.as_ref().ok_or_else(|| {
+                    crate::Error::new("splitOnly archive entry is missing splitLastIndex")
+                })?;
                 let last_index = last_index_str.parse::<usize>()?;
                 for i in 1..=last_index {
                     let path = format!("split-archive-{}_{:04}.json", archive.connection_id, i);

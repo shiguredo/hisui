@@ -20,7 +20,10 @@ impl OpusDecoder {
 
     pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         if data.format != AudioFormat::Opus {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected Opus format, got {}",
+                data.format
+            )));
         }
 
         let decoded_samples = self.inner.decode(&data.data)?;

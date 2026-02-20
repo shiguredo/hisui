@@ -27,10 +27,13 @@ impl OpusEncoder {
 
     pub fn encode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         if data.format != AudioFormat::I16Be {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected I16Be format, got {}",
+                data.format
+            )));
         }
         if !data.stereo {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new("expected stereo audio data"));
         }
 
         let input = data.interleaved_stereo_samples()?.collect::<Vec<_>>();

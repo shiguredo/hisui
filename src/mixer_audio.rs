@@ -305,7 +305,12 @@ impl MediaProcessor for AudioMixer {
         let input_stream = self
             .input_streams
             .get_mut(&input.stream_id)
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| {
+                crate::Error::new(format!(
+                    "unknown input stream id for audio mixer: {}",
+                    input.stream_id.get()
+                ))
+            })?;
         if let Some(sample) = input.sample {
             let data = sample.expect_audio_data()?;
 
@@ -328,7 +333,10 @@ impl MediaProcessor for AudioMixer {
             // 想定外の入力が来ていないかを念のためにチェックする
             // (format と stereo については stereo_samples() の中でチェックしている)
             if data.sample_rate != SAMPLE_RATE {
-                return Err(crate::Error::new("condition is false"));
+                return Err(crate::Error::new(format!(
+                    "expected sample rate {}Hz, got {}Hz",
+                    SAMPLE_RATE, data.sample_rate
+                )));
             }
             input_stream.sample_queue.extend(data.stereo_samples()?);
 

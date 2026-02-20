@@ -228,9 +228,9 @@ impl Trial {
     /// Optuna が提案したパラメータセットを使ってレイアウトを更新する
     pub fn apply_params_to_layout(&self, layout: &mut JsonValue) -> crate::Result<()> {
         for (path, value) in &self.params {
-            *path
-                .get_mut(layout)
-                .ok_or_else(|| crate::Error::new("value is missing"))? = value.clone();
+            *path.get_mut(layout).ok_or_else(|| {
+                crate::Error::new(format!("target JSON path not found in layout: {}", path))
+            })? = value.clone();
         }
         Ok(())
     }

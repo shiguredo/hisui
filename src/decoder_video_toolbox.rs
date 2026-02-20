@@ -65,7 +65,9 @@ impl VideoToolboxDecoder {
 
                 // 変わっているので再初期化
                 if self.decoded.is_some() {
-                    return Err(crate::Error::new("condition is false"));
+                    return Err(crate::Error::new(
+                        "cannot reinitialize decoder while decoded frame is pending",
+                    ));
                 }
                 *self = Self::new_h265(frame)?;
             }
@@ -79,7 +81,9 @@ impl VideoToolboxDecoder {
 
                 // 変わっているので再初期化
                 if self.decoded.is_some() {
-                    return Err(crate::Error::new("condition is false"));
+                    return Err(crate::Error::new(
+                        "cannot reinitialize decoder while decoded frame is pending",
+                    ));
                 }
                 *self = Self::new_h264(frame)?;
             }
@@ -93,7 +97,10 @@ impl VideoToolboxDecoder {
             frame.format,
             VideoFormat::H264 | VideoFormat::H264AnnexB | VideoFormat::H265
         ) {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "unsupported input format for VideoToolbox decoder: {:?}",
+                frame.format
+            )));
         }
 
         self.reinitialize_if_need(frame)?;
@@ -135,7 +142,10 @@ impl VideoToolboxDecoder {
 
 fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
     if !matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB) {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new(format!(
+            "expected H264 or H264AnnexB format, got {:?}",
+            frame.format
+        )));
     }
 
     let mut sps = Vec::new();
@@ -165,20 +175,20 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
             };
             sps = sps_list
                 .first()
-                .ok_or_else(|| crate::Error::new("value is missing"))?
+                .ok_or_else(|| crate::Error::new("missing H.264 SPS in sample entry"))?
                 .to_vec();
             pps = pps_list
                 .first()
-                .ok_or_else(|| crate::Error::new("value is missing"))?
+                .ok_or_else(|| crate::Error::new("missing H.264 PPS in sample entry"))?
                 .to_vec();
         }
         _ => unreachable!(),
     }
     if sps.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.264 SPS"));
     }
     if pps.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.264 PPS"));
     }
 
     Ok((sps, pps))
@@ -186,7 +196,10 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
 
 fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8])> {
     if !matches!(frame.format, VideoFormat::H265) {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new(format!(
+            "expected H265 format, got {:?}",
+            frame.format
+        )));
     }
 
     let hvcc = match &frame.sample_entry {
@@ -211,13 +224,13 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
         }
     }
     if vps.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.265 VPS"));
     }
     if sps.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.265 SPS"));
     }
     if pps.is_empty() {
-        return Err(crate::Error::new("condition is false"));
+        return Err(crate::Error::new("missing H.265 PPS"));
     }
 
     Ok((vps, sps, pps))

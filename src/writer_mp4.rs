@@ -325,7 +325,7 @@ impl Mp4Writer {
         let finalized = self
             .muxer
             .finalized_boxes()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("muxer finalized boxes are not available"))?;
         let moov_box = finalized.moov_box();
 
         for trak in &moov_box.trak_boxes {
@@ -354,7 +354,7 @@ impl Mp4Writer {
         let frame = self
             .input_video_queue
             .pop_front()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("video input queue is unexpectedly empty"))?;
 
         if self.stats.video_codec().is_none()
             && let Some(name) = frame.format.codec_name()
@@ -392,7 +392,7 @@ impl Mp4Writer {
         let data = self
             .input_audio_queue
             .pop_front()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("audio input queue is unexpectedly empty"))?;
 
         if self.stats.audio_codec().is_none()
             && let Some(name) = data.format.codec_name()

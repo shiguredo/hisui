@@ -30,7 +30,10 @@ impl LibvpxDecoder {
 
     pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !matches!(frame.format, VideoFormat::Vp8 | VideoFormat::Vp9) {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected VP8 or VP9 format, got {:?}",
+                frame.format
+            )));
         }
 
         self.inner.decode(&frame.data)?;
@@ -49,10 +52,9 @@ impl LibvpxDecoder {
         while let Some(image) = self.inner.next_frame() {
             if image.is_high_depth() {
                 // 高ビット深度データの処理
-                let input_frame = self
-                    .input_queue
-                    .pop_front()
-                    .ok_or_else(|| crate::Error::new("value is missing"))?;
+                let input_frame = self.input_queue.pop_front().ok_or_else(|| {
+                    crate::Error::new("decoded frame produced without input frame")
+                })?;
                 self.output_queue
                     .push_back(VideoFrame::new_i420_from_high_depth(
                         input_frame,
@@ -67,10 +69,9 @@ impl LibvpxDecoder {
                     )?);
             } else {
                 // 通常の 8 ビット I420 データの処理
-                let input_frame = self
-                    .input_queue
-                    .pop_front()
-                    .ok_or_else(|| crate::Error::new("value is missing"))?;
+                let input_frame = self.input_queue.pop_front().ok_or_else(|| {
+                    crate::Error::new("decoded frame produced without input frame")
+                })?;
                 self.output_queue.push_back(VideoFrame::new_i420(
                     input_frame,
                     image.width(),

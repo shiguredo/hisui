@@ -104,22 +104,39 @@ impl Canvas {
 
     fn draw_frame(&mut self, position: PixelPosition, frame: &VideoFrame) -> crate::Result<()> {
         if frame.format != VideoFormat::I420 {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.format
+            )));
         }
         if frame.width > self.width.get() {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "frame width {} exceeds canvas width {}",
+                frame.width,
+                self.width.get()
+            )));
         }
         if frame.height > self.height.get() {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "frame height {} exceeds canvas height {}",
+                frame.height,
+                self.height.get()
+            )));
         }
 
         // セルの解像度は偶数前提なので、奇数になることはない
         // (入力が奇数の場合でもリサイズによって常に偶数解像度になる）
         if !frame.width.is_multiple_of(2) {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "frame width must be even, got {}",
+                frame.width
+            )));
         }
         if !frame.height.is_multiple_of(2) {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "frame height must be even, got {}",
+                frame.height
+            )));
         }
 
         // Y成分の描画
@@ -538,12 +555,20 @@ impl MediaProcessor for VideoMixer {
         let input_stream = self
             .input_streams
             .get_mut(&input.stream_id)
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| {
+                crate::Error::new(format!(
+                    "unknown input stream id for video mixer: {}",
+                    input.stream_id.get()
+                ))
+            })?;
         if let Some(sample) = input.sample {
             // キューに要素を追加する
             let frame = sample.expect_video_frame()?;
             if frame.format != VideoFormat::I420 {
-                return Err(crate::Error::new("condition is false"));
+                return Err(crate::Error::new(format!(
+                    "expected I420 format, got {:?}",
+                    frame.format
+                )));
             }
 
             input_stream
