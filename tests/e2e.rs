@@ -414,7 +414,13 @@ fn decode_video_frames_with_pipeline(
             }
             Err(_) => {
                 pipeline_task.abort();
-                let _ = pipeline_task.await;
+                let join_error = pipeline_task
+                    .await
+                    .expect_err("media pipeline task should be cancelled after timeout abort");
+                assert!(
+                    join_error.is_cancelled(),
+                    "media pipeline task join failed after timeout abort: {join_error}"
+                );
             }
         }
 
