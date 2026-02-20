@@ -553,14 +553,13 @@ async fn setup_pipeline(
             pipeline_handle,
             progress_processor_id,
             progress_metadata,
-            move |handle| async move {
+            move |handle| {
                 run_progress_bar(
                     handle,
                     progress_audio_track_id,
                     progress_video_track_id,
                     output_duration,
                 )
-                .await
             },
             &mut processor_tasks,
         )
