@@ -4,9 +4,9 @@ use hisui::{
     TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     media::MediaSample,
-    sora_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
-    sora_metadata::{SourceId, SourceInfo},
-    sora_mixer_audio::{AudioMixer, AudioMixerOutput},
+    sora_recording_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
+    sora_recording_metadata::{SourceId, SourceInfo},
+    sora_recording_mixer_audio::{AudioMixer, AudioMixerOutput},
     types::CodecName,
     video::FrameRate,
 };

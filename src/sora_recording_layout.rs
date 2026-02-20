@@ -10,10 +10,10 @@ use crate::{
     audio,
     encoder::VideoEncoderOptions,
     json::JsonObject,
-    sora_layout_decode_params::LayoutDecodeParams,
-    sora_layout_encode_params::LayoutEncodeParams,
-    sora_layout_region::{self, RawRegion, Region},
-    sora_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
+    sora_recording_layout_decode_params::LayoutDecodeParams,
+    sora_recording_layout_encode_params::LayoutEncodeParams,
+    sora_recording_layout_region::{self, RawRegion, Region},
+    sora_recording_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, ContainerFormat, EngineName, EvenUsize},
     video::FrameRate,
     writer_mp4::Mp4WriterOptions,
@@ -111,7 +111,11 @@ impl Layout {
         let (rows, columns) = if audio_only {
             (1, 1)
         } else {
-            sora_layout_region::decide_grid_dimensions(0, max_columns, report.archives.len())
+            sora_recording_layout_region::decide_grid_dimensions(
+                0,
+                max_columns,
+                report.archives.len(),
+            )
         };
 
         // 全体の解像度を求める（キリを良くするために内枠のことはここでは考慮しない）
@@ -796,7 +800,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        sora_metadata::{SourceId, SourceInfo},
+        sora_recording_metadata::{SourceId, SourceInfo},
         types::ContainerFormat,
     };
 

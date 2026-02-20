@@ -8,7 +8,7 @@ use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     media::MediaSample,
-    sora_layout::TrimSpans,
+    sora_recording_layout::TrimSpans,
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);

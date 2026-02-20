@@ -16,9 +16,9 @@ use crate::{
     encoder::VideoEncoder,
     json::JsonObject,
     media::MediaSample,
-    sora_layout::Layout,
-    sora_reader::VideoReader,
-    sora_video_mixer::{VideoMixer, VideoMixerSpec},
+    sora_recording_layout::Layout,
+    sora_recording_reader::VideoReader,
+    sora_recording_video_mixer::{VideoMixer, VideoMixerSpec},
     video::FrameRate,
     writer_yuv::YuvWriter,
 };

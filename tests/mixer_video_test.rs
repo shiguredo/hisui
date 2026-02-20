@@ -8,10 +8,10 @@ use std::{
 
 use hisui::{
     TrackId,
-    sora_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
-    sora_layout_region::{Grid, Region},
-    sora_metadata::{SourceId, SourceInfo},
-    sora_video_mixer::{VideoMixer, VideoMixerInput, VideoMixerOutput, VideoMixerSpec},
+    sora_recording_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
+    sora_recording_layout_region::{Grid, Region},
+    sora_recording_metadata::{SourceId, SourceInfo},
+    sora_recording_video_mixer::{VideoMixer, VideoMixerInput, VideoMixerOutput, VideoMixerSpec},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };

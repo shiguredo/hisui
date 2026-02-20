@@ -7,8 +7,8 @@ use std::{
 
 use crate::{
     json::JsonObject,
-    sora_layout::{AggregatedSourceInfo, AssignedSource, Resolution},
-    sora_metadata::{SourceId, SourceInfo},
+    sora_recording_layout::{AggregatedSourceInfo, AssignedSource, Resolution},
+    sora_recording_metadata::{SourceId, SourceInfo},
     types::{EvenUsize, PixelPosition},
     video::VideoFrame,
 };

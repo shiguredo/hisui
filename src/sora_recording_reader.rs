@@ -7,7 +7,7 @@ use crate::{
     media::MediaSample,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    sora_layout::AggregatedSourceInfo,
+    sora_recording_layout::AggregatedSourceInfo,
     types::{CodecName, ContainerFormat},
     video::VideoFrame,
 };

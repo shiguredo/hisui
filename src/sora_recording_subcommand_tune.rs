@@ -9,7 +9,7 @@ use std::{
 use crate::{
     json::{JsonObject, JsonValue},
     optuna::{OptunaStudy, SearchSpace, TrialValues},
-    sora_subcommand_vmaf,
+    sora_recording_subcommand_vmaf,
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp9.jsonc");
@@ -138,7 +138,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 fn run_internal(args: Args) -> crate::Result<()> {
     // 最初に optuna と vmaf コマンドが利用可能かどうかをチェックする
     OptunaStudy::check_optuna_availability()?;
-    sora_subcommand_vmaf::check_vmaf_availability()?;
+    sora_recording_subcommand_vmaf::check_vmaf_availability()?;
 
     // 必要なら tune_working_dir を作る
     if !args.tune_working_dir().exists() {

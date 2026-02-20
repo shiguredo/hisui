@@ -7,9 +7,9 @@ use std::{
 
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
-    sora_layout::{Layout, Resolution, TrimSpans},
-    sora_layout_region::Region,
-    sora_metadata::SourceId,
+    sora_recording_layout::{Layout, Resolution, TrimSpans},
+    sora_recording_layout_region::Region,
+    sora_recording_metadata::SourceId,
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };

@@ -14,10 +14,10 @@ use crate::{
     TrackId,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder},
-    sora_layout::{DEFAULT_LAYOUT_JSON, Layout},
-    sora_mixer_audio::AudioMixer,
-    sora_reader::{AudioReader, VideoReader},
-    sora_video_mixer::{VideoMixer, VideoMixerSpec},
+    sora_recording_layout::{DEFAULT_LAYOUT_JSON, Layout},
+    sora_recording_mixer_audio::AudioMixer,
+    sora_recording_reader::{AudioReader, VideoReader},
+    sora_recording_video_mixer::{VideoMixer, VideoMixerSpec},
     stats::{StatsEntry, StatsValue},
     types::ContainerFormat,
     writer_mp4::Mp4Writer,
@@ -201,7 +201,7 @@ fn run_compose(
     ))?;
 
     if let Some(path) = stats_file_path {
-        match crate::sora_compose_stats_json::to_sora_compose_stats_json(
+        match crate::sora_recording_compose_stats_json::to_sora_recording_compose_stats_json(
             &result.stats,
             result.elapsed_duration.as_secs_f64(),
         ) {

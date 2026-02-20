@@ -52,28 +52,28 @@ pub mod reader_mp4;
 pub mod reader_webm;
 mod rpc_request_file;
 pub mod rtmp;
-mod sora_compose_stats_json;
+mod sora_recording_compose_stats_json;
 #[cfg(feature = "nvcodec")]
-pub mod sora_decoder_nvcodec_params;
+pub mod sora_recording_decoder_nvcodec_params;
 #[cfg(feature = "libvpx")]
-pub mod sora_encoder_libvpx_params;
+pub mod sora_recording_encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
-pub mod sora_encoder_nvcodec_params;
-pub mod sora_encoder_openh264_params;
-pub mod sora_encoder_svt_av1_params;
+pub mod sora_recording_encoder_nvcodec_params;
+pub mod sora_recording_encoder_openh264_params;
+pub mod sora_recording_encoder_svt_av1_params;
 #[cfg(target_os = "macos")]
-pub mod sora_encoder_video_toolbox_params;
-pub mod sora_layout;
-pub mod sora_layout_decode_params;
-pub mod sora_layout_encode_params;
-pub mod sora_layout_region;
-pub mod sora_metadata;
-pub mod sora_mixer_audio;
-pub mod sora_reader;
-pub mod sora_subcommand_compose;
-pub mod sora_subcommand_tune;
-pub mod sora_subcommand_vmaf;
-pub mod sora_video_mixer;
+pub mod sora_recording_encoder_video_toolbox_params;
+pub mod sora_recording_layout;
+pub mod sora_recording_layout_decode_params;
+pub mod sora_recording_layout_encode_params;
+pub mod sora_recording_layout_region;
+pub mod sora_recording_metadata;
+pub mod sora_recording_mixer_audio;
+pub mod sora_recording_reader;
+pub mod sora_recording_subcommand_compose;
+pub mod sora_recording_subcommand_tune;
+pub mod sora_recording_subcommand_vmaf;
+pub mod sora_recording_video_mixer;
 pub mod source_file_mp4;
 pub mod source_png_file;
 pub mod source_video_device;

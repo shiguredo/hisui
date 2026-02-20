@@ -3,9 +3,9 @@ use std::{path::Path, path::PathBuf, time::Duration};
 use hisui::{
     Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
-    sora_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
-    sora_layout_region::{Grid, Region},
-    sora_metadata::{SourceId, SourceInfo},
+    sora_recording_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
+    sora_recording_layout_region::{Grid, Region},
+    sora_recording_metadata::{SourceId, SourceInfo},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},

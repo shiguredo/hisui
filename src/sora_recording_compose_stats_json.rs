@@ -48,7 +48,7 @@ impl nojson::DisplayJson for SoraComposeStatsJson {
     }
 }
 
-pub fn to_sora_compose_stats_json(
+pub fn to_sora_recording_compose_stats_json(
     stats: &crate::stats::Stats,
     elapsed_seconds: f64,
 ) -> crate::Result<nojson::RawJsonOwned> {
@@ -75,7 +75,7 @@ pub fn to_sora_compose_stats_json(
         }
 
         if entry.metric_name == "error" {
-            processor.error = entry.value.as_bool_for_sora_compose();
+            processor.error = entry.value.as_bool_for_sora_recording_compose();
             continue;
         }
         processor
@@ -98,7 +98,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn to_sora_compose_stats_json_excludes_worker_thread_processors_and_groups_by_processor() {
+    fn to_sora_recording_compose_stats_json_excludes_worker_thread_processors_and_groups_by_processor()
+     {
         let mut stats = crate::stats::Stats::new();
         stats.set_default_label("processor_id", "reader0");
         stats.set_default_label("processor_type", "mp4_reader");
@@ -110,8 +111,8 @@ mod tests {
         stats.counter("total_output_video_frame_count").add(4);
         stats.flag("error").set(true);
 
-        let json = to_sora_compose_stats_json(&stats, 3.0)
-            .expect("to_sora_compose_stats_json must succeed");
+        let json = to_sora_recording_compose_stats_json(&stats, 3.0)
+            .expect("to_sora_recording_compose_stats_json must succeed");
 
         let text = json.to_string();
         assert!(text.contains("\"elapsed_seconds\":3"));
@@ -124,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn to_sora_compose_stats_json_skips_metrics_with_extra_labels() {
+    fn to_sora_recording_compose_stats_json_skips_metrics_with_extra_labels() {
         let mut stats = crate::stats::Stats::new();
         stats.set_default_label("processor_id", "mixer0");
         stats.set_default_label("processor_type", "video_mixer");
@@ -132,8 +133,8 @@ mod tests {
         stats.counter("frames_total").add(10);
         stats.flag("error").set(false);
 
-        let json = to_sora_compose_stats_json(&stats, 0.0)
-            .expect("to_sora_compose_stats_json must succeed");
+        let json = to_sora_recording_compose_stats_json(&stats, 0.0)
+            .expect("to_sora_recording_compose_stats_json must succeed");
         let text = json.to_string();
         assert!(!text.contains("\"frames_total\":10"));
         assert!(text.contains("\"type\":\"video_mixer\""));

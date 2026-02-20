@@ -1,6 +1,6 @@
 // Sora の録画ファイル合成処理固有
 use crate::json::JsonObject;
-use crate::sora_layout::DEFAULT_LAYOUT_JSON;
+use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 
 pub fn parse_h264_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
