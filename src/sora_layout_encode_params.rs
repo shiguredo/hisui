@@ -1,12 +1,12 @@
 // Sora の録画ファイル合成処理固有
 #[cfg(feature = "libvpx")]
-use crate::encoder_libvpx_params;
+use crate::sora_encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
-use crate::encoder_nvcodec_params;
+use crate::sora_encoder_nvcodec_params;
 #[cfg(target_os = "macos")]
-use crate::encoder_video_toolbox_params;
+use crate::sora_encoder_video_toolbox_params;
 use crate::sora_layout::DEFAULT_LAYOUT_JSON;
-use crate::{encoder_openh264_params, encoder_svt_av1_params};
+use crate::{sora_encoder_openh264_params, sora_encoder_svt_av1_params};
 
 #[derive(Debug, Clone)]
 pub struct LayoutEncodeParams {
@@ -37,39 +37,42 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodePar
             match &*key.to_unquoted_string_str()? {
                 #[cfg(feature = "libvpx")]
                 "libvpx_vp8_encode_params" => {
-                    params.libvpx_vp8 = encoder_libvpx_params::parse_vp8_encode_params(value)?;
+                    params.libvpx_vp8 = sora_encoder_libvpx_params::parse_vp8_encode_params(value)?;
                 }
                 #[cfg(feature = "libvpx")]
                 "libvpx_vp9_encode_params" => {
-                    params.libvpx_vp9 = encoder_libvpx_params::parse_vp9_encode_params(value)?;
+                    params.libvpx_vp9 = sora_encoder_libvpx_params::parse_vp9_encode_params(value)?;
                 }
                 "openh264_encode_params" => {
-                    params.openh264 = encoder_openh264_params::parse_encode_params(value)?;
+                    params.openh264 = sora_encoder_openh264_params::parse_encode_params(value)?;
                 }
                 "svt_av1_encode_params" => {
-                    params.svt_av1 = encoder_svt_av1_params::parse_encode_params(value)?;
+                    params.svt_av1 = sora_encoder_svt_av1_params::parse_encode_params(value)?;
                 }
                 #[cfg(target_os = "macos")]
                 "video_toolbox_h264_encode_params" => {
                     params.video_toolbox_h264 =
-                        encoder_video_toolbox_params::parse_h264_encode_params(value)?;
+                        sora_encoder_video_toolbox_params::parse_h264_encode_params(value)?;
                 }
                 #[cfg(target_os = "macos")]
                 "video_toolbox_h265_encode_params" => {
                     params.video_toolbox_h265 =
-                        encoder_video_toolbox_params::parse_h265_encode_params(value)?;
+                        sora_encoder_video_toolbox_params::parse_h265_encode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_h264_encode_params" => {
-                    params.nvcodec_h264 = encoder_nvcodec_params::parse_h264_encode_params(value)?;
+                    params.nvcodec_h264 =
+                        sora_encoder_nvcodec_params::parse_h264_encode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_h265_encode_params" => {
-                    params.nvcodec_h265 = encoder_nvcodec_params::parse_h265_encode_params(value)?;
+                    params.nvcodec_h265 =
+                        sora_encoder_nvcodec_params::parse_h265_encode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_av1_encode_params" => {
-                    params.nvcodec_av1 = encoder_nvcodec_params::parse_av1_encode_params(value)?;
+                    params.nvcodec_av1 =
+                        sora_encoder_nvcodec_params::parse_av1_encode_params(value)?;
                 }
                 _ => {}
             }
@@ -84,49 +87,49 @@ impl LayoutEncodeParams {
         let value = default_layout.value();
 
         #[cfg(feature = "libvpx")]
-        let libvpx_vp8 = encoder_libvpx_params::parse_vp8_encode_params(
+        let libvpx_vp8 = sora_encoder_libvpx_params::parse_vp8_encode_params(
             value.to_member("libvpx_vp8_encode_params")?.required()?,
         )?;
 
         #[cfg(feature = "libvpx")]
-        let libvpx_vp9 = encoder_libvpx_params::parse_vp9_encode_params(
+        let libvpx_vp9 = sora_encoder_libvpx_params::parse_vp9_encode_params(
             value.to_member("libvpx_vp9_encode_params")?.required()?,
         )?;
 
-        let openh264 = encoder_openh264_params::parse_encode_params(
+        let openh264 = sora_encoder_openh264_params::parse_encode_params(
             value.to_member("openh264_encode_params")?.required()?,
         )?;
 
-        let svt_av1 = encoder_svt_av1_params::parse_encode_params(
+        let svt_av1 = sora_encoder_svt_av1_params::parse_encode_params(
             value.to_member("svt_av1_encode_params")?.required()?,
         )?;
 
         #[cfg(target_os = "macos")]
-        let video_toolbox_h264 = encoder_video_toolbox_params::parse_h264_encode_params(
+        let video_toolbox_h264 = sora_encoder_video_toolbox_params::parse_h264_encode_params(
             value
                 .to_member("video_toolbox_h264_encode_params")?
                 .required()?,
         )?;
 
         #[cfg(target_os = "macos")]
-        let video_toolbox_h265 = encoder_video_toolbox_params::parse_h265_encode_params(
+        let video_toolbox_h265 = sora_encoder_video_toolbox_params::parse_h265_encode_params(
             value
                 .to_member("video_toolbox_h265_encode_params")?
                 .required()?,
         )?;
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_h264 = encoder_nvcodec_params::parse_h264_encode_params(
+        let nvcodec_h264 = sora_encoder_nvcodec_params::parse_h264_encode_params(
             value.to_member("nvcodec_h264_encode_params")?.required()?,
         )?;
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_h265 = encoder_nvcodec_params::parse_h265_encode_params(
+        let nvcodec_h265 = sora_encoder_nvcodec_params::parse_h265_encode_params(
             value.to_member("nvcodec_h265_encode_params")?.required()?,
         )?;
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_av1 = encoder_nvcodec_params::parse_av1_encode_params(
+        let nvcodec_av1 = sora_encoder_nvcodec_params::parse_av1_encode_params(
             value.to_member("nvcodec_av1_encode_params")?.required()?,
         )?;
 

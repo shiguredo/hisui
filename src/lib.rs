@@ -23,21 +23,13 @@ pub mod encoder_audio_toolbox;
 pub mod encoder_fdk_aac;
 #[cfg(feature = "libvpx")]
 pub mod encoder_libvpx;
-#[cfg(feature = "libvpx")]
-pub mod encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 pub mod encoder_nvcodec;
-#[cfg(feature = "nvcodec")]
-pub mod encoder_nvcodec_params;
 pub mod encoder_openh264;
-pub mod encoder_openh264_params;
 pub mod encoder_opus;
 pub mod encoder_svt_av1;
-pub mod encoder_svt_av1_params;
 #[cfg(target_os = "macos")]
 pub mod encoder_video_toolbox;
-#[cfg(target_os = "macos")]
-pub mod encoder_video_toolbox_params;
 pub mod endpoint_http_bootstrap;
 pub mod endpoint_http_metrics;
 pub mod endpoint_http_rpc;
@@ -63,6 +55,14 @@ pub mod reader_webm;
 mod rpc_request_file;
 pub mod rtmp;
 mod sora_compose_stats_json;
+#[cfg(feature = "libvpx")]
+pub mod sora_encoder_libvpx_params;
+#[cfg(feature = "nvcodec")]
+pub mod sora_encoder_nvcodec_params;
+pub mod sora_encoder_openh264_params;
+pub mod sora_encoder_svt_av1_params;
+#[cfg(target_os = "macos")]
+pub mod sora_encoder_video_toolbox_params;
 pub mod sora_layout;
 pub mod sora_layout_decode_params;
 pub mod sora_layout_encode_params;
