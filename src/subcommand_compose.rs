@@ -199,9 +199,6 @@ fn run_compose(
     ))?;
 
     if let Some(path) = stats_file_path {
-        // TODO: compose 実行基盤を tokio ランタイムへ移行した後に、
-        // `tokio::runtime::Handle::current().metrics()` を収集して
-        // stats JSON の `tokio_metrics` へ反映する。
         match crate::stats_legacy_json::to_legacy_stats_json(
             &result.stats,
             result.elapsed_duration.as_secs_f64(),
