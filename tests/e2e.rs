@@ -6,7 +6,6 @@ use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     decoder_opus::OpusDecoder,
-    media::MediaStreamId,
     metadata::SourceId,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     types::{CodecName, EngineName},
@@ -339,8 +338,6 @@ fn test_simple_single_source_common(
 fn decode_video_frames_with_pipeline(
     video_samples: Vec<VideoFrame>,
 ) -> hisui::Result<Vec<VideoFrame>> {
-    const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
-    const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
     const INPUT_TRACK_ID: &str = "e2e_decoder_input";
     const OUTPUT_TRACK_ID: &str = "e2e_decoder_output";
 
@@ -369,12 +366,7 @@ fn decode_video_frames_with_pipeline(
         )
         .await?;
         let decoder_task = tokio::spawn(async move {
-            let decoder = VideoDecoder::new(
-                DECODER_INPUT_STREAM_ID,
-                DECODER_OUTPUT_STREAM_ID,
-                VideoDecoderOptions::default(),
-                decoder_handle.stats(),
-            );
+            let decoder = VideoDecoder::new(VideoDecoderOptions::default(), decoder_handle.stats());
             decoder
                 .run(
                     decoder_handle,

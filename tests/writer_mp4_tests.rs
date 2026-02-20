@@ -5,7 +5,6 @@ use hisui::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{Grid, Region},
-    media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
@@ -16,8 +15,6 @@ use shiguredo_mp4::{
     boxes::{SampleEntry, UnknownBox},
 };
 
-const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
-const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 const AUDIO_TRACK_ID: &str = "writer_test_audio";
 const VIDEO_TRACK_ID: &str = "writer_test_video";
 
@@ -245,19 +242,17 @@ fn run_writer_with_pipeline(
         .await?;
         let output_path = output_path.to_path_buf();
         let writer_task = tokio::spawn(async move {
+            let input_audio_track_id = has_audio.then_some(TrackId::new(AUDIO_TRACK_ID));
+            let input_video_track_id = has_video.then_some(TrackId::new(VIDEO_TRACK_ID));
             let writer = Mp4Writer::new(
                 &output_path,
                 options,
-                has_audio.then_some(AUDIO_STREAM_ID),
-                has_video.then_some(VIDEO_STREAM_ID),
+                input_audio_track_id.clone(),
+                input_video_track_id.clone(),
                 writer_handle.stats(),
             )?;
             writer
-                .run(
-                    writer_handle,
-                    has_audio.then_some(TrackId::new(AUDIO_TRACK_ID)),
-                    has_video.then_some(TrackId::new(VIDEO_TRACK_ID)),
-                )
+                .run(writer_handle, input_audio_track_id, input_video_track_id)
                 .await
         });
         processor_tasks.push(writer_task);

@@ -8,7 +8,6 @@ use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
     layout::{Layout, Resolution, TrimSpans},
     layout_region::Region,
-    media::MediaStreamId,
     metadata::SourceId,
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
@@ -210,30 +209,30 @@ impl VideoMixerSpec {
 #[derive(Debug)]
 pub struct VideoMixer {
     spec: VideoMixerSpec,
-    input_stream_ids: Vec<MediaStreamId>,
-    input_streams: HashMap<MediaStreamId, InputStream>,
-    output_stream_id: MediaStreamId,
+    input_track_ids: Vec<TrackId>,
+    input_streams: HashMap<TrackId, InputStream>,
+    output_track_id: TrackId,
     last_mixed_frame: Option<VideoFrame>,
     stats: VideoMixerStats,
 }
 
 #[derive(Debug)]
 pub struct VideoMixerInput {
-    pub stream_id: MediaStreamId,
+    pub track_id: TrackId,
     pub sample: Option<MediaSample>,
 }
 
 impl VideoMixerInput {
-    pub fn video_frame(stream_id: MediaStreamId, frame: VideoFrame) -> Self {
+    pub fn video_frame(track_id: TrackId, frame: VideoFrame) -> Self {
         Self {
-            stream_id,
+            track_id,
             sample: Some(MediaSample::video_frame(frame)),
         }
     }
 
-    pub fn eos(stream_id: MediaStreamId) -> Self {
+    pub fn eos(track_id: TrackId) -> Self {
         Self {
-            stream_id,
+            track_id,
             sample: None,
         }
     }
@@ -242,19 +241,19 @@ impl VideoMixerInput {
 #[derive(Debug)]
 pub enum VideoMixerOutput {
     Processed {
-        stream_id: MediaStreamId,
+        track_id: TrackId,
         sample: MediaSample,
     },
     Pending {
-        awaiting_stream_id: Option<MediaStreamId>,
+        awaiting_track_id: Option<TrackId>,
     },
     Finished,
 }
 
 impl VideoMixerOutput {
-    pub fn expect_processed(self) -> Option<(MediaStreamId, MediaSample)> {
-        if let Self::Processed { stream_id, sample } = self {
-            Some((stream_id, sample))
+    pub fn expect_processed(self) -> Option<(TrackId, MediaSample)> {
+        if let Self::Processed { track_id, sample } = self {
+            Some((track_id, sample))
         } else {
             None
         }
@@ -264,7 +263,7 @@ impl VideoMixerOutput {
 #[derive(Debug)]
 enum VideoMixerRunOutput {
     Processed(MediaSample),
-    Pending(MediaStreamId),
+    Pending(TrackId),
     Finished,
 }
 
@@ -338,14 +337,14 @@ impl VideoMixerStats {
 impl VideoMixer {
     pub fn new(
         spec: VideoMixerSpec,
-        input_stream_ids: Vec<MediaStreamId>,
-        output_stream_id: MediaStreamId,
+        input_track_ids: Vec<TrackId>,
+        output_track_id: TrackId,
         mut stats: crate::stats::Stats,
     ) -> Self {
         let resolution = spec.resolution;
-        let input_streams = input_stream_ids
+        let input_streams = input_track_ids
             .iter()
-            .copied()
+            .cloned()
             .map(|id| (id, InputStream::default()))
             .collect();
         stats
@@ -357,9 +356,9 @@ impl VideoMixer {
         let stats = VideoMixerStats::new(&mut stats);
         Self {
             spec,
-            input_stream_ids,
+            input_track_ids,
             input_streams,
-            output_stream_id,
+            output_track_id,
             last_mixed_frame: None,
             stats,
         }
@@ -375,25 +374,28 @@ impl VideoMixer {
         input_track_ids: Vec<TrackId>,
         output_track_id: TrackId,
     ) -> Result<()> {
-        if input_track_ids.len() != self.input_stream_ids.len() {
+        if input_track_ids.len() != self.input_track_ids.len() {
             return Err(Error::new(format!(
                 "input track count mismatch: expected {}, got {}",
-                self.input_stream_ids.len(),
+                self.input_track_ids.len(),
                 input_track_ids.len()
             )));
         }
 
         let mut input_tracks = self
-            .input_stream_ids
+            .input_track_ids
             .iter()
-            .copied()
+            .cloned()
             .zip(input_track_ids.into_iter())
-            .map(|(stream_id, track_id)| InputTrack {
-                stream_id,
-                track_id: track_id.clone(),
-                rx: handle.subscribe_track(track_id),
+            .map(|(expected_track_id, subscribed_track_id)| {
+                (
+                    expected_track_id,
+                    InputTrack {
+                        rx: handle.subscribe_track(subscribed_track_id),
+                    },
+                )
             })
-            .collect::<Vec<_>>();
+            .collect::<HashMap<_, _>>();
         let mut output_tx = handle.publish_track(output_track_id).await?;
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
@@ -405,19 +407,15 @@ impl VideoMixer {
                         break;
                     }
                 }
-                VideoMixerRunOutput::Pending(stream_id) => {
-                    let input_track = input_tracks
-                        .iter_mut()
-                        .find(|track| track.stream_id == stream_id)
-                        .ok_or_else(|| {
-                            Error::new(format!(
-                                "video mixer is waiting for unknown stream id: {}",
-                                stream_id.get()
-                            ))
-                        })?;
-                    let track_id = input_track.track_id.clone();
+                VideoMixerRunOutput::Pending(track_id) => {
+                    let input_track = input_tracks.get_mut(&track_id).ok_or_else(|| {
+                        Error::new(format!(
+                            "video mixer is waiting for unknown track id: {}",
+                            track_id
+                        ))
+                    })?;
                     let message = input_track.rx.recv().await;
-                    self.handle_input_message(stream_id, &track_id, message)?;
+                    self.handle_input_message(&track_id, message)?;
                 }
                 VideoMixerRunOutput::Finished => {
                     output_tx.send_eos();
@@ -491,7 +489,7 @@ impl VideoMixer {
     fn mix_region(
         canvas: &mut Canvas,
         region: &Region,
-        input_streams: &mut HashMap<MediaStreamId, InputStream>,
+        input_streams: &mut HashMap<TrackId, InputStream>,
         now: Duration,
     ) -> crate::Result<()> {
         // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
@@ -559,34 +557,29 @@ impl VideoMixer {
         }
     }
 
-    fn handle_input_message(
-        &mut self,
-        stream_id: MediaStreamId,
-        track_id: &TrackId,
-        message: Message,
-    ) -> Result<()> {
+    fn handle_input_message(&mut self, track_id: &TrackId, message: Message) -> Result<()> {
         match message {
             Message::Media(MediaSample::Video(sample)) => {
-                self.handle_input_sample(stream_id, Some(MediaSample::Video(sample)))
+                self.handle_input_sample(track_id, Some(MediaSample::Video(sample)))
             }
             Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
                 "expected a video sample on track {}, but got an audio sample",
                 track_id.get()
             ))),
-            Message::Eos => self.handle_input_sample(stream_id, None),
+            Message::Eos => self.handle_input_sample(track_id, None),
             Message::Syn(_) => Ok(()),
         }
     }
 
     fn handle_input_sample(
         &mut self,
-        stream_id: MediaStreamId,
+        track_id: &TrackId,
         sample: Option<MediaSample>,
     ) -> Result<()> {
-        let input_stream = self.input_streams.get_mut(&stream_id).ok_or_else(|| {
+        let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
             crate::Error::new(format!(
-                "unknown input stream id for video mixer: {}",
-                stream_id.get()
+                "unknown input track id for video mixer: {}",
+                track_id
             ))
         })?;
         if let Some(sample) = sample {
@@ -623,10 +616,10 @@ impl VideoMixer {
             }
 
             // 表示対象のフレームを更新する
-            for (input_stream_id, input_stream) in &mut self.input_streams {
+            for (input_track_id, input_stream) in &mut self.input_streams {
                 if !input_stream.pop_outdated_frame(now) {
                     // 十分な数のフレームが溜まっていないので入力を待つ
-                    return Ok(VideoMixerRunOutput::Pending(*input_stream_id));
+                    return Ok(VideoMixerRunOutput::Pending(input_track_id.clone()));
                 }
             }
 
@@ -675,26 +668,22 @@ impl VideoMixer {
         }
     }
 
-    pub fn push_input(
-        &mut self,
-        stream_id: MediaStreamId,
-        sample: Option<MediaSample>,
-    ) -> Result<()> {
-        self.handle_input_sample(stream_id, sample)
+    pub fn push_input(&mut self, track_id: TrackId, sample: Option<MediaSample>) -> Result<()> {
+        self.handle_input_sample(&track_id, sample)
     }
 
     pub fn process_input(&mut self, input: VideoMixerInput) -> Result<()> {
-        self.push_input(input.stream_id, input.sample)
+        self.push_input(input.track_id, input.sample)
     }
 
     pub fn next_output(&mut self) -> Result<VideoMixerOutput> {
         match self.poll_output()? {
             VideoMixerRunOutput::Processed(sample) => Ok(VideoMixerOutput::Processed {
-                stream_id: self.output_stream_id,
+                track_id: self.output_track_id.clone(),
                 sample,
             }),
-            VideoMixerRunOutput::Pending(stream_id) => Ok(VideoMixerOutput::Pending {
-                awaiting_stream_id: Some(stream_id),
+            VideoMixerRunOutput::Pending(track_id) => Ok(VideoMixerOutput::Pending {
+                awaiting_track_id: Some(track_id),
             }),
             VideoMixerRunOutput::Finished => Ok(VideoMixerOutput::Finished),
         }
@@ -707,8 +696,6 @@ impl VideoMixer {
 
 #[derive(Debug)]
 struct InputTrack {
-    stream_id: MediaStreamId,
-    track_id: TrackId,
     rx: crate::MessageReceiver,
 }
 

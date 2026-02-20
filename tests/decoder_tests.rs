@@ -1,7 +1,6 @@
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    media::MediaStreamId,
     metadata::SourceId,
     reader_mp4::Mp4VideoReader,
     video::VideoFrame,
@@ -11,8 +10,6 @@ use hisui::{audio::AudioData, decoder::AudioDecoder, reader_mp4::Mp4AudioReader}
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
 
-const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
-const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 const VIDEO_INPUT_TRACK_ID: &str = "decoder_test_video_input";
 const VIDEO_OUTPUT_TRACK_ID: &str = "decoder_test_video_output";
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
@@ -202,12 +199,7 @@ fn decode_video_frames_with_pipeline(
         )
         .await?;
         let decoder_task = tokio::spawn(async move {
-            let decoder = VideoDecoder::new(
-                DECODER_INPUT_STREAM_ID,
-                DECODER_OUTPUT_STREAM_ID,
-                options,
-                decoder_handle.stats(),
-            );
+            let decoder = VideoDecoder::new(options, decoder_handle.stats());
             decoder
                 .run(
                     decoder_handle,
@@ -273,11 +265,7 @@ fn decode_audio_count_with_pipeline(input_samples: Vec<AudioData>) -> hisui::Res
         )
         .await?;
         let decoder_task = tokio::spawn(async move {
-            let decoder = AudioDecoder::new(
-                DECODER_INPUT_STREAM_ID,
-                DECODER_OUTPUT_STREAM_ID,
-                decoder_handle.stats(),
-            )?;
+            let decoder = AudioDecoder::new(decoder_handle.stats())?;
             decoder
                 .run(
                     decoder_handle,

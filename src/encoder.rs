@@ -22,15 +22,13 @@ use crate::{
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
     layout_encode_params::LayoutEncodeParams,
-    media::{MediaSample, MediaStreamId},
+    media::MediaSample,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
 };
 
 #[derive(Debug)]
 pub struct AudioEncoder {
-    _input_stream_id: MediaStreamId,
-    _output_stream_id: MediaStreamId,
     total_audio_data_count_metric: crate::stats::StatsCounter,
     _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<AudioData>,
@@ -48,34 +46,21 @@ impl AudioEncoder {
     pub fn new(
         codec: CodecName,
         bitrate: NonZeroUsize,
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         match codec {
             #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => {
-                AudioEncoder::new_fdk_aac(input_stream_id, output_stream_id, bitrate, compose_stats)
-            }
+            CodecName::Aac => AudioEncoder::new_fdk_aac(bitrate, compose_stats),
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
-            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
-                input_stream_id,
-                output_stream_id,
-                bitrate,
-                compose_stats,
-            ),
+            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(bitrate, compose_stats),
             #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
             CodecName::Aac => Err(crate::Error::new("AAC output is not supported")),
-            CodecName::Opus => {
-                AudioEncoder::new_opus(input_stream_id, output_stream_id, bitrate, compose_stats)
-            }
+            CodecName::Opus => AudioEncoder::new_opus(bitrate, compose_stats),
             _ => unreachable!(),
         }
     }
 
     fn new_opus(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -87,8 +72,6 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            _input_stream_id: input_stream_id,
-            _output_stream_id: output_stream_id,
             total_audio_data_count_metric,
             _error_flag: error_flag,
             encoded: VecDeque::new(),
@@ -99,8 +82,6 @@ impl AudioEncoder {
 
     #[cfg(feature = "fdk-aac")]
     fn new_fdk_aac(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -112,8 +93,6 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            _input_stream_id: input_stream_id,
-            _output_stream_id: output_stream_id,
             total_audio_data_count_metric,
             _error_flag: error_flag,
             encoded: VecDeque::new(),
@@ -124,8 +103,6 @@ impl AudioEncoder {
 
     #[cfg(target_os = "macos")]
     fn new_audio_toolbox_aac(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -137,8 +114,6 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            _input_stream_id: input_stream_id,
-            _output_stream_id: output_stream_id,
             total_audio_data_count_metric,
             _error_flag: error_flag,
             encoded: VecDeque::new(),
@@ -350,8 +325,6 @@ impl VideoEncoderOptions {
 
 #[derive(Debug)]
 pub struct VideoEncoder {
-    _input_stream_id: MediaStreamId,
-    _output_stream_id: MediaStreamId,
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
@@ -368,8 +341,6 @@ pub struct VideoEncoder {
 impl VideoEncoder {
     pub fn new(
         options: &VideoEncoderOptions,
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -382,8 +353,6 @@ impl VideoEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            _input_stream_id: input_stream_id,
-            _output_stream_id: output_stream_id,
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,

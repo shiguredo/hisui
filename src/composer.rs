@@ -13,7 +13,6 @@ use crate::{
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
     layout::Layout,
-    media::MediaStreamId,
     mixer_audio::AudioMixer,
     mixer_video::{VideoMixer, VideoMixerSpec},
     reader::{AudioReader, VideoReader},
@@ -154,7 +153,6 @@ async fn setup_pipeline(
     show_progress_bar: bool,
     out_file_path: PathBuf,
 ) -> Result<ComposePipelineSetup> {
-    let mut next_stream_id = MediaStreamId::new(0);
     let mut next_processor_index = 0usize;
     let mut next_processor = |processor_type: &'static str| {
         let processor_id = ProcessorId::new(format!("{processor_type}:{next_processor_index}"));
@@ -165,7 +163,6 @@ async fn setup_pipeline(
     let mut processor_tasks = Vec::new();
 
     // リーダーとデコーダーを登録する。
-    let mut audio_mixer_input_stream_ids = Vec::new();
     let mut audio_mixer_input_track_ids = Vec::new();
     for source_id in layout.audio_source_ids() {
         let source_info = layout.sources.get(source_id).ok_or_else(|| {
@@ -175,7 +172,6 @@ async fn setup_pipeline(
             ))
         })?;
 
-        let reader_output_stream_id = next_stream_id.fetch_add(1);
         let source_info = source_info.clone();
         let reader_processor_type = match source_info.format {
             crate::metadata::ContainerFormat::Mp4 => "mp4_audio_reader",
@@ -188,18 +184,13 @@ async fn setup_pipeline(
             reader_processor_id,
             reader_metadata,
             move |handle| async move {
-                let reader = AudioReader::from_source_info(
-                    reader_output_stream_id,
-                    &source_info,
-                    handle.stats(),
-                )?;
+                let reader = AudioReader::from_source_info(&source_info, handle.stats())?;
                 reader.run(handle).await
             },
             &mut processor_tasks,
         )
         .await?;
 
-        let decoder_output_stream_id = next_stream_id.fetch_add(1);
         let (decoder_processor_id, decoder_metadata) = next_processor("audio_decoder");
         let decoder_output_track_id = TrackId::new(decoder_processor_id.get());
         let reader_output_track_id_for_decoder = reader_output_track_id.clone();
@@ -209,11 +200,7 @@ async fn setup_pipeline(
             decoder_processor_id,
             decoder_metadata,
             move |handle| async move {
-                let decoder = AudioDecoder::new(
-                    reader_output_stream_id,
-                    decoder_output_stream_id,
-                    handle.stats(),
-                )?;
+                let decoder = AudioDecoder::new(handle.stats())?;
                 decoder
                     .run(
                         handle,
@@ -225,11 +212,9 @@ async fn setup_pipeline(
             &mut processor_tasks,
         )
         .await?;
-        audio_mixer_input_stream_ids.push(decoder_output_stream_id);
         audio_mixer_input_track_ids.push(decoder_output_track_id);
     }
 
-    let mut video_mixer_input_stream_ids = Vec::new();
     let mut video_mixer_input_track_ids = Vec::new();
     let decoder_options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
@@ -244,7 +229,6 @@ async fn setup_pipeline(
             ))
         })?;
 
-        let reader_output_stream_id = next_stream_id.fetch_add(1);
         let source_info = source_info.clone();
         let reader_processor_type = match source_info.format {
             crate::metadata::ContainerFormat::Mp4 => "mp4_video_reader",
@@ -257,18 +241,13 @@ async fn setup_pipeline(
             reader_processor_id,
             reader_metadata,
             move |handle| async move {
-                let reader = VideoReader::from_source_info(
-                    reader_output_stream_id,
-                    &source_info,
-                    handle.stats(),
-                )?;
+                let reader = VideoReader::from_source_info(&source_info, handle.stats())?;
                 reader.run(handle).await
             },
             &mut processor_tasks,
         )
         .await?;
 
-        let decoder_output_stream_id = next_stream_id.fetch_add(1);
         let (decoder_processor_id, decoder_metadata) = next_processor("video_decoder");
         let decoder_output_track_id = TrackId::new(decoder_processor_id.get());
         let reader_output_track_id_for_decoder = reader_output_track_id.clone();
@@ -279,12 +258,7 @@ async fn setup_pipeline(
             decoder_processor_id,
             decoder_metadata,
             move |handle| {
-                let decoder = VideoDecoder::new(
-                    reader_output_stream_id,
-                    decoder_output_stream_id,
-                    decoder_options_for_decoder,
-                    handle.stats(),
-                );
+                let decoder = VideoDecoder::new(decoder_options_for_decoder, handle.stats());
                 decoder.run(
                     handle,
                     reader_output_track_id_for_decoder.clone(),
@@ -294,16 +268,16 @@ async fn setup_pipeline(
             &mut processor_tasks,
         )
         .await?;
-        video_mixer_input_stream_ids.push(decoder_output_stream_id);
         video_mixer_input_track_ids.push(decoder_output_track_id);
     }
 
     // ミキサーを登録する。
-    let audio_mixer_output_stream_id = next_stream_id.fetch_add(1);
     let (audio_mixer_processor_id, audio_mixer_metadata) = next_processor("audio_mixer");
     let audio_mixer_output_track_id = TrackId::new(audio_mixer_processor_id.get());
     let trim_spans_for_audio_mixer = layout.trim_spans.clone();
     let audio_mixer_output_track_id_for_mixer = audio_mixer_output_track_id.clone();
+    let audio_mixer_input_track_ids_for_new = audio_mixer_input_track_ids.clone();
+    let audio_mixer_input_track_ids_for_run = audio_mixer_input_track_ids;
     spawn_processor_task(
         pipeline_handle,
         audio_mixer_processor_id,
@@ -311,13 +285,13 @@ async fn setup_pipeline(
         move |handle| {
             let mixer = AudioMixer::new(
                 trim_spans_for_audio_mixer,
-                audio_mixer_input_stream_ids,
-                audio_mixer_output_stream_id,
+                audio_mixer_input_track_ids_for_new,
+                audio_mixer_output_track_id_for_mixer.clone(),
                 handle.stats(),
             );
             mixer.run(
                 handle,
-                audio_mixer_input_track_ids,
+                audio_mixer_input_track_ids_for_run,
                 audio_mixer_output_track_id_for_mixer.clone(),
             )
         },
@@ -325,11 +299,12 @@ async fn setup_pipeline(
     )
     .await?;
 
-    let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
     let (video_mixer_processor_id, video_mixer_metadata) = next_processor("video_mixer");
     let video_mixer_output_track_id = TrackId::new(video_mixer_processor_id.get());
     let video_mixer_spec = VideoMixerSpec::from_layout(layout);
     let video_mixer_output_track_id_for_mixer = video_mixer_output_track_id.clone();
+    let video_mixer_input_track_ids_for_new = video_mixer_input_track_ids.clone();
+    let video_mixer_input_track_ids_for_run = video_mixer_input_track_ids;
     spawn_processor_task(
         pipeline_handle,
         video_mixer_processor_id,
@@ -337,13 +312,13 @@ async fn setup_pipeline(
         move |handle| {
             let mixer = VideoMixer::new(
                 video_mixer_spec,
-                video_mixer_input_stream_ids,
-                video_mixer_output_stream_id,
+                video_mixer_input_track_ids_for_new,
+                video_mixer_output_track_id_for_mixer.clone(),
                 handle.stats(),
             );
             mixer.run(
                 handle,
-                video_mixer_input_track_ids,
+                video_mixer_input_track_ids_for_run,
                 video_mixer_output_track_id_for_mixer.clone(),
             )
         },
@@ -352,7 +327,6 @@ async fn setup_pipeline(
     .await?;
 
     // エンコーダーを登録する。
-    let audio_encoder_output_stream_id = next_stream_id.fetch_add(1);
     let (audio_encoder_processor_id, audio_encoder_metadata) = next_processor("audio_encoder");
     let audio_encoder_output_track_id = TrackId::new(audio_encoder_processor_id.get());
     let audio_codec = layout.audio_codec;
@@ -364,13 +338,7 @@ async fn setup_pipeline(
         audio_encoder_processor_id,
         audio_encoder_metadata,
         move |handle| async move {
-            let encoder = AudioEncoder::new(
-                audio_codec,
-                audio_bitrate,
-                audio_mixer_output_stream_id,
-                audio_encoder_output_stream_id,
-                handle.stats(),
-            )?;
+            let encoder = AudioEncoder::new(audio_codec, audio_bitrate, handle.stats())?;
             encoder
                 .run(
                     handle,
@@ -383,7 +351,6 @@ async fn setup_pipeline(
     )
     .await?;
 
-    let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
     let (video_encoder_processor_id, video_encoder_metadata) = next_processor("video_encoder");
     let video_encoder_output_track_id = TrackId::new(video_encoder_processor_id.get());
     let video_encoder_options = VideoEncoderOptions::from_layout(layout);
@@ -397,8 +364,6 @@ async fn setup_pipeline(
         move |handle| async move {
             let encoder = VideoEncoder::new(
                 &video_encoder_options,
-                video_mixer_output_stream_id,
-                video_encoder_output_stream_id,
                 openh264_lib_for_encoder,
                 handle.stats(),
             )?;
@@ -417,8 +382,6 @@ async fn setup_pipeline(
     // ライターを登録する。
     let (writer_processor_id, writer_metadata) = next_processor("mp4_writer");
     let writer_options = Mp4WriterOptions::from_layout(layout);
-    let writer_input_audio_stream_id = layout.has_audio().then_some(audio_encoder_output_stream_id);
-    let writer_input_video_stream_id = layout.has_video().then_some(video_encoder_output_stream_id);
     let writer_input_audio_track_id = layout
         .has_audio()
         .then_some(audio_encoder_output_track_id.clone());
@@ -433,15 +396,15 @@ async fn setup_pipeline(
             let writer = Mp4Writer::new(
                 &out_file_path,
                 Some(writer_options),
-                writer_input_audio_stream_id,
-                writer_input_video_stream_id,
+                writer_input_audio_track_id.clone(),
+                writer_input_video_track_id.clone(),
                 handle.stats(),
             )?;
             writer
                 .run(
                     handle,
-                    writer_input_audio_track_id,
-                    writer_input_video_track_id,
+                    writer_input_audio_track_id.clone(),
+                    writer_input_video_track_id.clone(),
                 )
                 .await
         },

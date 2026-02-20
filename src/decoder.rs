@@ -16,7 +16,7 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     layout_decode_params::LayoutDecodeParams,
-    media::{MediaSample, MediaStreamId},
+    media::MediaSample,
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -37,11 +37,7 @@ enum DecoderRunOutput {
 }
 
 impl AudioDecoder {
-    pub fn new(
-        _input_stream_id: MediaStreamId,
-        _output_stream_id: MediaStreamId,
-        mut compose_stats: crate::stats::Stats,
-    ) -> crate::Result<Self> {
+    pub fn new(mut compose_stats: crate::stats::Stats) -> crate::Result<Self> {
         compose_stats
             .string("engine")
             .set(EngineName::Opus.as_str());
@@ -245,12 +241,7 @@ pub struct VideoDecoder {
 }
 
 impl VideoDecoder {
-    pub fn new(
-        _input_stream_id: MediaStreamId,
-        _output_stream_id: MediaStreamId,
-        options: VideoDecoderOptions,
-        mut compose_stats: crate::stats::Stats,
-    ) -> Self {
+    pub fn new(options: VideoDecoderOptions, mut compose_stats: crate::stats::Stats) -> Self {
         let engine_metric = compose_stats.string("engine");
         let codec_metric = compose_stats.string("codec");
         let total_input_video_frame_count_metric =

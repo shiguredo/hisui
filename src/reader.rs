@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::{
     audio::AudioData,
     layout::AggregatedSourceInfo,
-    media::{MediaSample, MediaStreamId},
+    media::MediaSample,
     metadata::{ContainerFormat, SourceId},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
@@ -14,7 +14,6 @@ use crate::{
 
 #[derive(Debug)]
 pub struct AudioReader {
-    _output_stream_id: MediaStreamId,
     source_id: SourceId,
     timestamp_offset: Duration,
     next_timestamp_offset: Duration,
@@ -84,12 +83,10 @@ impl AudioReader {
     }
 
     pub fn from_source_info(
-        output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
         stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         Self::new(
-            output_stream_id,
             source_info.id.clone(),
             source_info.format,
             source_info.start_timestamp,
@@ -99,7 +96,6 @@ impl AudioReader {
     }
 
     pub fn new(
-        output_stream_id: MediaStreamId,
         source_id: SourceId,
         format: ContainerFormat,
         timestamp_offset: Duration,
@@ -137,7 +133,6 @@ impl AudioReader {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            _output_stream_id: output_stream_id,
             source_id,
             timestamp_offset,
             next_timestamp_offset: timestamp_offset,
@@ -250,7 +245,6 @@ impl Iterator for AudioReaderInner {
 
 #[derive(Debug)]
 pub struct VideoReader {
-    _output_stream_id: MediaStreamId,
     source_id: SourceId,
     timestamp_offset: Duration,
     next_timestamp_offset: Duration,
@@ -319,12 +313,10 @@ impl VideoReader {
     }
 
     pub fn from_source_info(
-        output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
         stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         Self::new(
-            output_stream_id,
             source_info.id.clone(),
             source_info.format,
             source_info.start_timestamp,
@@ -334,7 +326,6 @@ impl VideoReader {
     }
 
     pub fn new(
-        output_stream_id: MediaStreamId,
         source_id: SourceId,
         format: ContainerFormat,
         timestamp_offset: Duration,
@@ -370,7 +361,6 @@ impl VideoReader {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            _output_stream_id: output_stream_id,
             source_id,
             timestamp_offset,
             next_timestamp_offset: timestamp_offset,

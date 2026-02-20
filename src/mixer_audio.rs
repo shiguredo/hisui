@@ -7,7 +7,7 @@ use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::TrimSpans,
-    media::{MediaSample, MediaStreamId},
+    media::MediaSample,
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);
@@ -23,16 +23,16 @@ struct InputStream {
 #[derive(Debug)]
 pub struct AudioMixer {
     trim_spans: TrimSpans,
-    input_stream_ids: Vec<MediaStreamId>,
-    input_streams: HashMap<MediaStreamId, InputStream>,
-    _output_stream_id: MediaStreamId,
+    input_track_ids: Vec<TrackId>,
+    input_streams: HashMap<TrackId, InputStream>,
+    _output_track_id: TrackId,
     stats: AudioMixerStats,
 }
 
 #[derive(Debug)]
 pub enum AudioMixerOutput {
     Processed(MediaSample),
-    Pending(MediaStreamId),
+    Pending(TrackId),
     Finished,
 }
 
@@ -117,21 +117,21 @@ impl AudioMixerStats {
 impl AudioMixer {
     pub fn new(
         trim_spans: TrimSpans,
-        input_stream_ids: Vec<MediaStreamId>,
-        output_stream_id: MediaStreamId,
+        input_track_ids: Vec<TrackId>,
+        output_track_id: TrackId,
         mut stats: crate::stats::Stats,
     ) -> Self {
-        let input_streams = input_stream_ids
+        let input_streams = input_track_ids
             .iter()
-            .copied()
+            .cloned()
             .map(|id| (id, InputStream::default()))
             .collect();
         let stats = AudioMixerStats::new(&mut stats);
         Self {
             trim_spans,
-            input_stream_ids,
+            input_track_ids,
             input_streams,
-            _output_stream_id: output_stream_id,
+            _output_track_id: output_track_id,
             stats,
         }
     }
@@ -146,25 +146,28 @@ impl AudioMixer {
         input_track_ids: Vec<TrackId>,
         output_track_id: TrackId,
     ) -> Result<()> {
-        if input_track_ids.len() != self.input_stream_ids.len() {
+        if input_track_ids.len() != self.input_track_ids.len() {
             return Err(Error::new(format!(
                 "input track count mismatch: expected {}, got {}",
-                self.input_stream_ids.len(),
+                self.input_track_ids.len(),
                 input_track_ids.len()
             )));
         }
 
         let mut input_tracks = self
-            .input_stream_ids
+            .input_track_ids
             .iter()
-            .copied()
+            .cloned()
             .zip(input_track_ids.into_iter())
-            .map(|(stream_id, track_id)| InputTrack {
-                stream_id,
-                track_id: track_id.clone(),
-                rx: handle.subscribe_track(track_id),
+            .map(|(expected_track_id, subscribed_track_id)| {
+                (
+                    expected_track_id,
+                    InputTrack {
+                        rx: handle.subscribe_track(subscribed_track_id),
+                    },
+                )
             })
-            .collect::<Vec<_>>();
+            .collect::<HashMap<_, _>>();
         let mut output_tx = handle.publish_track(output_track_id).await?;
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
@@ -176,19 +179,15 @@ impl AudioMixer {
                         break;
                     }
                 }
-                AudioMixerOutput::Pending(stream_id) => {
-                    let input_track = input_tracks
-                        .iter_mut()
-                        .find(|track| track.stream_id == stream_id)
-                        .ok_or_else(|| {
-                            Error::new(format!(
-                                "audio mixer is waiting for unknown stream id: {}",
-                                stream_id.get()
-                            ))
-                        })?;
-                    let track_id = input_track.track_id.clone();
+                AudioMixerOutput::Pending(track_id) => {
+                    let input_track = input_tracks.get_mut(&track_id).ok_or_else(|| {
+                        Error::new(format!(
+                            "audio mixer is waiting for unknown track id: {}",
+                            track_id
+                        ))
+                    })?;
                     let message = input_track.rx.recv().await;
-                    self.handle_input_message(stream_id, &track_id, message)?;
+                    self.handle_input_message(&track_id, message)?;
                 }
                 AudioMixerOutput::Finished => {
                     output_tx.send_eos();
@@ -265,34 +264,29 @@ impl AudioMixer {
         })
     }
 
-    fn handle_input_message(
-        &mut self,
-        stream_id: MediaStreamId,
-        track_id: &TrackId,
-        message: Message,
-    ) -> Result<()> {
+    fn handle_input_message(&mut self, track_id: &TrackId, message: Message) -> Result<()> {
         match message {
             Message::Media(MediaSample::Audio(sample)) => {
-                self.handle_input_sample(stream_id, Some(MediaSample::Audio(sample)))
+                self.handle_input_sample(track_id, Some(MediaSample::Audio(sample)))
             }
             Message::Media(MediaSample::Video(_)) => Err(Error::new(format!(
                 "expected an audio sample on track {}, but got a video sample",
                 track_id.get()
             ))),
-            Message::Eos => self.handle_input_sample(stream_id, None),
+            Message::Eos => self.handle_input_sample(track_id, None),
             Message::Syn(_) => Ok(()),
         }
     }
 
     fn handle_input_sample(
         &mut self,
-        stream_id: MediaStreamId,
+        track_id: &TrackId,
         sample: Option<MediaSample>,
     ) -> Result<()> {
-        let input_stream = self.input_streams.get_mut(&stream_id).ok_or_else(|| {
+        let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
             crate::Error::new(format!(
-                "unknown input stream id for audio mixer: {}",
-                stream_id.get()
+                "unknown input track id for audio mixer: {}",
+                track_id
             ))
         })?;
         if let Some(sample) = sample {
@@ -347,7 +341,7 @@ impl AudioMixer {
             }
             if input_stream.sample_queue.len() < MIXED_AUDIO_DATA_SAMPLES {
                 // 次の合成に必要なサンプル数が足りないので待つ
-                return Ok(AudioMixerOutput::Pending(*input_stream_id));
+                return Ok(AudioMixerOutput::Pending(input_stream_id.clone()));
             }
         }
 
@@ -367,12 +361,8 @@ impl AudioMixer {
         )))
     }
 
-    pub fn push_input(
-        &mut self,
-        stream_id: MediaStreamId,
-        sample: Option<MediaSample>,
-    ) -> Result<()> {
-        self.handle_input_sample(stream_id, sample)
+    pub fn push_input(&mut self, track_id: TrackId, sample: Option<MediaSample>) -> Result<()> {
+        self.handle_input_sample(&track_id, sample)
     }
 
     pub fn next_output(&mut self) -> Result<AudioMixerOutput> {
@@ -382,7 +372,5 @@ impl AudioMixer {
 
 #[derive(Debug)]
 struct InputTrack {
-    stream_id: MediaStreamId,
-    track_id: TrackId,
     rx: crate::MessageReceiver,
 }

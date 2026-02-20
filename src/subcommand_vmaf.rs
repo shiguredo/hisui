@@ -15,7 +15,7 @@ use crate::{
     encoder::{VideoEncoder, VideoEncoderOptions},
     json::JsonObject,
     layout::Layout,
-    media::{MediaSample, MediaStreamId},
+    media::MediaSample,
     mixer_video::{VideoMixer, VideoMixerSpec},
     reader::VideoReader,
     video::FrameRate,
@@ -315,7 +315,6 @@ async fn setup_vmaf_pipeline(
     distorted_yuv_file_path: PathBuf,
     reference_yuv_file_path: PathBuf,
 ) -> Result<VmafPipelineSetup> {
-    let mut next_stream_id = MediaStreamId::new(0);
     let mut next_processor_number = 0usize;
     let mut next_track_number = 0usize;
     let mut processor_tasks = Vec::new();
@@ -327,7 +326,6 @@ async fn setup_vmaf_pipeline(
     };
     let video_source_ids = layout.video_source_ids().cloned().collect::<HashSet<_>>();
 
-    let mut mixer_input_stream_ids = Vec::new();
     let mut mixer_input_track_ids = Vec::new();
     for source_info in layout
         .sources
@@ -336,7 +334,6 @@ async fn setup_vmaf_pipeline(
             video_source_ids.contains(source_id).then_some(source_info)
         })
     {
-        let reader_output_stream_id = next_stream_id.fetch_add(1);
         let reader_output_track_id = next_track_id(&mut next_track_number, "reader_output");
         let source_info = source_info.clone();
         let reader_processor_id = next_processor_id(&mut next_processor_number, "video_reader");
@@ -346,18 +343,13 @@ async fn setup_vmaf_pipeline(
             reader_processor_id,
             crate::ProcessorMetadata::new(reader_processor_type),
             move |handle| async move {
-                let reader = VideoReader::from_source_info(
-                    reader_output_stream_id,
-                    &source_info,
-                    handle.stats(),
-                )?;
+                let reader = VideoReader::from_source_info(&source_info, handle.stats())?;
                 reader.run(handle).await
             },
             &mut processor_tasks,
         )
         .await?;
 
-        let decoder_output_stream_id = next_stream_id.fetch_add(1);
         let decoder_output_track_id = next_track_id(&mut next_track_number, "decoder_output");
         let decoder_processor_id = next_processor_id(&mut next_processor_number, "video_decoder");
         let decoder_processor_type = "video_decoder";
@@ -368,12 +360,7 @@ async fn setup_vmaf_pipeline(
             decoder_processor_id,
             crate::ProcessorMetadata::new(decoder_processor_type),
             move |handle| {
-                let decoder = VideoDecoder::new(
-                    reader_output_stream_id,
-                    decoder_output_stream_id,
-                    decoder_options_for_decoder,
-                    handle.stats(),
-                );
+                let decoder = VideoDecoder::new(decoder_options_for_decoder, handle.stats());
                 decoder.run(
                     handle,
                     reader_output_track_id.clone(),
@@ -384,15 +371,16 @@ async fn setup_vmaf_pipeline(
         )
         .await?;
 
-        mixer_input_stream_ids.push(decoder_output_stream_id);
         mixer_input_track_ids.push(decoder_output_track_id);
     }
 
-    let mixer_output_stream_id = next_stream_id.fetch_add(1);
     let mixer_output_track_id = next_track_id(&mut next_track_number, "mixer_output");
     let mixer_spec = VideoMixerSpec::from_layout(&layout);
+    let mixer_input_track_ids_for_new = mixer_input_track_ids.clone();
+    let mixer_input_track_ids_for_run = mixer_input_track_ids;
     let mixer_processor_id = next_processor_id(&mut next_processor_number, "video_mixer");
     let mixer_processor_type = "video_mixer";
+    let mixer_output_track_id_for_new = mixer_output_track_id.clone();
     let mixer_output_track_id_for_mixer = mixer_output_track_id.clone();
     spawn_processor_task(
         pipeline_handle,
@@ -401,13 +389,13 @@ async fn setup_vmaf_pipeline(
         move |handle| {
             let mixer = VideoMixer::new(
                 mixer_spec,
-                mixer_input_stream_ids,
-                mixer_output_stream_id,
+                mixer_input_track_ids_for_new,
+                mixer_output_track_id_for_new,
                 handle.stats(),
             );
             mixer.run(
                 handle,
-                mixer_input_track_ids,
+                mixer_input_track_ids_for_run,
                 mixer_output_track_id_for_mixer,
             )
         },
@@ -447,8 +435,6 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let limiter_output_stream_id = next_stream_id.fetch_add(1);
-    let encoder_output_stream_id = next_stream_id.fetch_add(1);
     let encoder_output_track_id = next_track_id(&mut next_track_number, "encoder_output");
     let encoder_options = VideoEncoderOptions::from_layout(&layout);
     let encoder_processor_id = next_processor_id(&mut next_processor_number, "video_encoder");
@@ -461,13 +447,8 @@ async fn setup_vmaf_pipeline(
         encoder_processor_id.clone(),
         crate::ProcessorMetadata::new(encoder_processor_type),
         move |handle| async move {
-            let encoder = VideoEncoder::new(
-                &encoder_options,
-                limiter_output_stream_id,
-                encoder_output_stream_id,
-                openh264_lib_for_encoder,
-                handle.stats(),
-            )?;
+            let encoder =
+                VideoEncoder::new(&encoder_options, openh264_lib_for_encoder, handle.stats())?;
             encoder
                 .run(
                     handle,
@@ -480,7 +461,6 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let decoder_output_stream_id = next_stream_id.fetch_add(1);
     let decoder_output_track_id = next_track_id(&mut next_track_number, "decoded_output");
     let decoded_decoder_processor_id =
         next_processor_id(&mut next_processor_number, "decoded_video_decoder");
@@ -492,12 +472,7 @@ async fn setup_vmaf_pipeline(
         decoded_decoder_processor_id,
         crate::ProcessorMetadata::new(decoded_decoder_processor_type),
         move |handle| {
-            let decoder = VideoDecoder::new(
-                encoder_output_stream_id,
-                decoder_output_stream_id,
-                decoder_options,
-                handle.stats(),
-            );
+            let decoder = VideoDecoder::new(decoder_options, handle.stats());
             decoder.run(
                 handle,
                 encoder_output_track_id_for_decoder.clone(),
