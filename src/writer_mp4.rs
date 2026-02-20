@@ -36,7 +36,9 @@ const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
 const MAX_INPUT_QUEUE_GAP: usize = 200;
 
 enum WriterRunOutput {
-    Pending { awaiting_track_id: Option<TrackId> },
+    Pending {
+        awaiting_track_kind: Option<InputTrackKind>,
+    },
     Finished,
 }
 
@@ -462,17 +464,13 @@ impl Mp4Writer {
 
     fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
         loop {
-            if let Some(id) = &self.input_video_track_id
-                && self.input_video_queue.is_empty()
-            {
+            if self.input_video_track_id.is_some() && self.input_video_queue.is_empty() {
                 return Ok(WriterRunOutput::Pending {
-                    awaiting_track_id: Some(id.clone()),
+                    awaiting_track_kind: Some(InputTrackKind::Video),
                 });
-            } else if let Some(id) = &self.input_audio_track_id
-                && self.input_audio_queue.is_empty()
-            {
+            } else if self.input_audio_track_id.is_some() && self.input_audio_queue.is_empty() {
                 return Ok(WriterRunOutput::Pending {
-                    awaiting_track_id: Some(id.clone()),
+                    awaiting_track_kind: Some(InputTrackKind::Audio),
                 });
             }
 
@@ -501,24 +499,20 @@ impl Mp4Writer {
         loop {
             match output {
                 WriterRunOutput::Finished => break,
-                WriterRunOutput::Pending { awaiting_track_id } => {
+                WriterRunOutput::Pending {
+                    awaiting_track_kind,
+                } => {
                     if audio_rx.is_none() && video_rx.is_none() {
                         output = self.poll_output()?;
                         continue;
                     }
 
-                    match awaiting_track_id {
-                        Some(id)
-                            if self.input_audio_track_id.as_ref() == Some(&id)
-                                && audio_rx.is_some() =>
-                        {
+                    match awaiting_track_kind {
+                        Some(InputTrackKind::Audio) if audio_rx.is_some() => {
                             let msg = crate::future::recv_or_pending(&mut audio_rx).await;
                             self.handle_audio_message(msg, &mut audio_rx)?;
                         }
-                        Some(id)
-                            if self.input_video_track_id.as_ref() == Some(&id)
-                                && video_rx.is_some() =>
-                        {
+                        Some(InputTrackKind::Video) if video_rx.is_some() => {
                             let msg = crate::future::recv_or_pending(&mut video_rx).await;
                             self.handle_video_message(msg, &mut video_rx)?;
                         }
