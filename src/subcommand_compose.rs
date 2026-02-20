@@ -174,13 +174,7 @@ struct ComposeResult {
 
 #[derive(Debug)]
 struct ComposePipelineSetup {
-    processor_tasks: Vec<SpawnedProcessorTask>,
-}
-
-#[derive(Debug)]
-struct SpawnedProcessorTask {
-    processor_id: ProcessorId,
-    task: tokio::task::JoinHandle<Result<()>>,
+    processor_tasks: tokio::task::JoinSet<(ProcessorId, Result<()>)>,
 }
 
 fn run_compose(
@@ -297,7 +291,7 @@ async fn setup_pipeline(
         (processor_id, ProcessorMetadata::new(processor_type))
     };
 
-    let mut processor_tasks = Vec::new();
+    let mut processor_tasks = tokio::task::JoinSet::new();
 
     // リーダーとデコーダーを登録する。
     let mut audio_mixer_input_track_ids = Vec::new();
@@ -632,7 +626,7 @@ async fn spawn_processor_task<F, T>(
     processor_id: ProcessorId,
     processor_metadata: ProcessorMetadata,
     f: F,
-    processor_tasks: &mut Vec<SpawnedProcessorTask>,
+    processor_tasks: &mut tokio::task::JoinSet<(ProcessorId, Result<()>)>,
 ) -> Result<()>
 where
     F: FnOnce(ProcessorHandle) -> T + Send + 'static,
@@ -652,33 +646,37 @@ where
         })?;
 
     let mut processor_stats = processor_handle.stats();
-    let task = tokio::spawn(async move {
-        if let Err(e) = f(processor_handle).await {
+    let task_processor_id = processor_id.clone();
+    processor_tasks.spawn(async move {
+        let result = f(processor_handle).await;
+        if let Err(e) = &result {
             processor_stats.flag("error").set(true);
-            return Err(e);
+            tracing::debug!(
+                "processor {} marked as error in stats: {}",
+                task_processor_id,
+                e.display()
+            );
         }
-        Ok(())
+        (task_processor_id, result)
     });
-    processor_tasks.push(SpawnedProcessorTask { processor_id, task });
+
     Ok(())
 }
 
-async fn wait_processor_tasks(processor_tasks: &mut Vec<SpawnedProcessorTask>) -> bool {
+async fn wait_processor_tasks(
+    processor_tasks: &mut tokio::task::JoinSet<(ProcessorId, Result<()>)>,
+) -> bool {
     let mut success = true;
-    while let Some(processor_task) = processor_tasks.pop() {
-        match processor_task.task.await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
+    while let Some(join_result) = processor_tasks.join_next().await {
+        match join_result {
+            Ok((_processor_id, Ok(()))) => {}
+            Ok((processor_id, Err(e))) => {
                 success = false;
-                tracing::error!(
-                    "processor {} failed: {}",
-                    processor_task.processor_id,
-                    e.display()
-                );
+                tracing::error!("processor {} failed: {}", processor_id, e.display());
             }
             Err(e) => {
                 success = false;
-                tracing::error!("processor task {} failed: {e}", processor_task.processor_id);
+                tracing::error!("processor task join failed: {e}");
             }
         }
     }
