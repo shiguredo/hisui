@@ -88,8 +88,6 @@
   - @sile
 - [UPDATE] noargs crate のバージョンを 0.4.2 に上げる
   - @sile
-- [UPDATE] orfail crate のバージョンを 2.0.0 に上げる
-  - @sile
 - [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
   - @sile
@@ -121,6 +119,9 @@
   - `processorId` 未指定時は `rtmpPublisher` を既定値として利用する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_rtmp を追加する
+  - @sile
+- [CHANGE] orfail crate を依存から削除する
+  - これにより、エラー発生時に標準エラー出力に表示されるメッセージの細部のフォーマットに非互換な変更が入ることになる
   - @sile
 - [CHANGE] indicatif の依存を削除して自前のプログレスバー実装に置き換える
   - @sile
