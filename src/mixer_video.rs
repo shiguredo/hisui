@@ -4,8 +4,6 @@ use std::{
     time::Duration,
 };
 
-use crate::ResultExt;
-
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
     layout::{Layout, Resolution, TrimSpans},
@@ -72,8 +70,7 @@ impl ResizeCachedVideoFrame {
             // キャッシュにないので新規リサイズが必要
             if let Some(resized) = self
                 .original
-                .resize(width, height, self.resize_filter_mode)
-                .or_fail()?
+                .resize(width, height, self.resize_filter_mode)?
             {
                 self.resized.push(((width, height), resized));
             }
@@ -106,14 +103,24 @@ impl Canvas {
     }
 
     fn draw_frame(&mut self, position: PixelPosition, frame: &VideoFrame) -> crate::Result<()> {
-        (frame.format == VideoFormat::I420).or_fail()?;
-        (frame.width <= self.width.get()).or_fail()?;
-        (frame.height <= self.height.get()).or_fail()?;
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new("condition is false"));
+        }
+        if frame.width > self.width.get() {
+            return Err(crate::Error::new("condition is false"));
+        }
+        if frame.height > self.height.get() {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         // セルの解像度は偶数前提なので、奇数になることはない
         // (入力が奇数の場合でもリサイズによって常に偶数解像度になる）
-        frame.width.is_multiple_of(2).or_fail()?;
-        frame.height.is_multiple_of(2).or_fail()?;
+        if !frame.width.is_multiple_of(2) {
+            return Err(crate::Error::new("condition is false"));
+        }
+        if !frame.height.is_multiple_of(2) {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         // Y成分の描画
         let offset_x = position.x.get();
@@ -408,7 +415,7 @@ impl VideoMixer {
         let mut canvas = Canvas::new(self.spec.resolution.width(), self.spec.resolution.height());
 
         for region in &self.spec.regions {
-            Self::mix_region(&mut canvas, region, &mut self.input_streams, now).or_fail()?;
+            Self::mix_region(&mut canvas, region, &mut self.input_streams, now)?;
         }
 
         self.stats.add_output_video_frame_count();
@@ -440,9 +447,7 @@ impl VideoMixer {
         //        (必要に応じて最適化する)
         let background_frame =
             VideoFrame::mono_color(region.background_color, region.width, region.height);
-        canvas
-            .draw_frame(region.position, &background_frame)
-            .or_fail()?;
+        canvas.draw_frame(region.position, &background_frame)?;
 
         let mut frames = Vec::new();
         for input_stream in input_streams.values_mut() {
@@ -474,8 +479,8 @@ impl VideoMixer {
                 EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
             position.y +=
                 EvenUsize::truncating_new((region.grid.cell_height - frame_height).get() / 2);
-            let resized_frame = frame.resize(frame_width, frame_height).or_fail()?;
-            canvas.draw_frame(position, resized_frame).or_fail()?;
+            let resized_frame = frame.resize(frame_width, frame_height)?;
+            canvas.draw_frame(position, resized_frame)?;
         }
 
         Ok(())
@@ -538,11 +543,16 @@ impl MediaProcessor for VideoMixer {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
+        let input_stream = self
+            .input_streams
+            .get_mut(&input.stream_id)
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
         if let Some(sample) = input.sample {
             // キューに要素を追加する
-            let frame = sample.expect_video_frame().or_fail()?;
-            (frame.format == VideoFormat::I420).or_fail()?;
+            let frame = sample.expect_video_frame()?;
+            if frame.format != VideoFormat::I420 {
+                return Err(crate::Error::new("condition is false"));
+            }
 
             input_stream
                 .frame_queue
@@ -594,8 +604,9 @@ impl MediaProcessor for VideoMixer {
             // 入力のタイムスタンプに極端なギャップがある場合の対応
             let gap = self.gap_until_next_frame_change(now);
             if gap > TIMESTAMP_GAP_THRESHOLD {
-                (gap <= TIMESTAMP_GAP_ERROR_THRESHOLD)
-                    .or_fail_with(|()| "too large timestamp gap".to_owned())?;
+                if gap > TIMESTAMP_GAP_ERROR_THRESHOLD {
+                    return Err(crate::Error::new("too large timestamp gap"));
+                }
 
                 // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
                 let duration = self.next_output_duration();
@@ -610,7 +621,7 @@ impl MediaProcessor for VideoMixer {
             }
 
             // 現在のフレームを合成する
-            let mixed_frame = self.mix(now).or_fail()?;
+            let mixed_frame = self.mix(now)?;
 
             if let Some(frame) = self.last_mixed_frame.replace(mixed_frame) {
                 return Ok(MediaProcessorOutput::video_frame(

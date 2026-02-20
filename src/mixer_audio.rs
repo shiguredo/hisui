@@ -3,8 +3,6 @@ use std::{
     time::Duration,
 };
 
-use crate::ResultExt;
-
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
@@ -312,9 +310,12 @@ impl MediaProcessor for AudioMixer {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
+        let input_stream = self
+            .input_streams
+            .get_mut(&input.stream_id)
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
         if let Some(sample) = input.sample {
-            let data = sample.expect_audio_data().or_fail()?;
+            let data = sample.expect_audio_data()?;
 
             if input_stream.start_timestamp.is_none() {
                 // 合成開始時刻の判断用に最初のタイムスタンプを覚えておく
@@ -334,10 +335,10 @@ impl MediaProcessor for AudioMixer {
             //
             // 想定外の入力が来ていないかを念のためにチェックする
             // (format と stereo については stereo_samples() の中でチェックしている)
-            (data.sample_rate == SAMPLE_RATE).or_fail()?;
-            input_stream
-                .sample_queue
-                .extend(data.stereo_samples().or_fail()?);
+            if data.sample_rate != SAMPLE_RATE {
+                return Err(crate::Error::new("condition is false"));
+            }
+            input_stream.sample_queue.extend(data.stereo_samples()?);
 
             self.stats.add_input_audio_data_count();
         } else {
@@ -378,7 +379,7 @@ impl MediaProcessor for AudioMixer {
         }
 
         // 合成
-        let mixed_data = self.mix_next_audio_data(now).or_fail()?;
+        let mixed_data = self.mix_next_audio_data(now)?;
 
         Ok(MediaProcessorOutput::Processed {
             stream_id: self.output_stream_id,

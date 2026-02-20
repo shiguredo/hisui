@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use crate::ResultExt;
-
 use crate::{
     encoder::VideoEncoderOptions,
     video::{VideoFormat, VideoFrame},
@@ -30,7 +28,7 @@ impl Openh264Encoder {
             target_bitrate: options.bitrate,
             ..options.encode_params.openh264.clone()
         };
-        let inner = shiguredo_openh264::Encoder::new(lib, &config).or_fail()?;
+        let inner = shiguredo_openh264::Encoder::new(lib, &config)?;
         Ok(Self {
             inner,
             encoded: None,
@@ -39,20 +37,25 @@ impl Openh264Encoder {
     }
 
     pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
-        (frame.format == VideoFormat::I420).or_fail()?;
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new("condition is false"));
+        }
 
-        let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
-        let encoded = self.inner.encode(y_plane, u_plane, v_plane).or_fail()?;
+        let (y_plane, u_plane, v_plane) = frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
+        let encoded = self.inner.encode(y_plane, u_plane, v_plane)?;
         let Some(encoded) = encoded else {
             return Ok(());
         };
 
         let sample_entry = if self.is_first {
             self.is_first = false;
-            Some(
-                video_h264::h264_sample_entry_from_annexb(frame.width, frame.height, &encoded.data)
-                    .or_fail()?,
-            )
+            Some(video_h264::h264_sample_entry_from_annexb(
+                frame.width,
+                frame.height,
+                &encoded.data,
+            )?)
         } else {
             None
         };
@@ -60,7 +63,7 @@ impl Openh264Encoder {
         // AnnexB から MP4 向けの形式に変換する
         let mut data = Vec::new();
         for nal in H264AnnexBNalUnits::new(&encoded.data) {
-            let nal = nal.or_fail()?;
+            let nal = nal?;
             if nal.ty == H264_NALU_TYPE_SEI {
                 // 一部のタイプは無視する
                 continue;

@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use crate::ResultExt;
 use shiguredo_mp4::{
     FixedPointNumber,
     boxes::{AudioSampleEntryFields, SampleEntry},
@@ -31,8 +30,12 @@ pub struct AudioData {
 
 impl AudioData {
     pub fn stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = (i16, i16)>> {
-        (self.format == AudioFormat::I16Be).or_fail()?;
-        self.stereo.or_fail()?;
+        if self.format != AudioFormat::I16Be {
+            return Err(crate::Error::new("condition is false"));
+        }
+        if !self.stereo {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         let samples = self.data.chunks_exact(4).map(|c| {
             (
@@ -44,8 +47,12 @@ impl AudioData {
     }
 
     pub fn interleaved_stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = i16>> {
-        (self.format == AudioFormat::I16Be).or_fail()?;
-        self.stereo.or_fail()?;
+        if self.format != AudioFormat::I16Be {
+            return Err(crate::Error::new("condition is false"));
+        }
+        if !self.stereo {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         let samples = self.data.chunks_exact(4).flat_map(|c| {
             [

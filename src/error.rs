@@ -106,6 +106,123 @@ impl From<shiguredo_mp4::demux::DemuxError> for Error {
     }
 }
 
+impl From<shiguredo_mp4::mux::MuxError> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_mp4::mux::MuxError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    #[track_caller]
+    fn from(e: std::num::ParseIntError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::num::TryFromIntError> for Error {
+    #[track_caller]
+    fn from(e: std::num::TryFromIntError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    #[track_caller]
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::time::SystemTimeError> for Error {
+    #[track_caller]
+    fn from(e: std::time::SystemTimeError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_rtmp::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_rtmp::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_dav1d::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_dav1d::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "libvpx")]
+impl From<shiguredo_libvpx::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_libvpx::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_libyuv::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_libyuv::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_openh264::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_openh264::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_opus::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_opus::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_svt_av1::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_svt_av1::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<shiguredo_audio_toolbox::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_audio_toolbox::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<shiguredo_video_toolbox::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_video_toolbox::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "fdk-aac")]
+impl From<shiguredo_fdk_aac::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_fdk_aac::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "nvcodec")]
+impl From<shiguredo_nvcodec::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_nvcodec::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

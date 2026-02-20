@@ -4,8 +4,6 @@ use std::{
     time::Duration,
 };
 
-use crate::ResultExt;
-
 /// Sora の report-*.json から必要な情報のみを取り出した構造体
 #[derive(Debug, Clone)]
 pub struct RecordingMetadata {
@@ -29,7 +27,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RecordingMetada
 
 impl RecordingMetadata {
     pub fn from_file<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        crate::json::parse_file(path).or_fail()
+        crate::json::parse_file(path)
     }
 
     pub fn archive_metadata_paths(&self) -> crate::Result<Vec<PathBuf>> {
@@ -38,8 +36,11 @@ impl RecordingMetadata {
             // 命名規則に従って生成する
             let mut paths = Vec::new();
             for archive in &self.archives {
-                let last_index_str = archive.split_last_index.as_ref().or_fail()?;
-                let last_index = last_index_str.parse::<usize>().or_fail()?;
+                let last_index_str = archive
+                    .split_last_index
+                    .as_ref()
+                    .ok_or_else(|| crate::Error::new("value is missing"))?;
+                let last_index = last_index_str.parse::<usize>()?;
                 for i in 1..=last_index {
                     let path = format!("split-archive-{}_{:04}.json", archive.connection_id, i);
                     paths.push(PathBuf::from(path));
@@ -121,7 +122,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
 
 impl ArchiveMetadata {
     pub fn from_file<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        crate::json::parse_file(path).or_fail()
+        crate::json::parse_file(path)
     }
 
     pub fn source_id(&self) -> SourceId {
@@ -184,10 +185,12 @@ pub enum ContainerFormat {
 
 impl ContainerFormat {
     pub fn from_path<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        let ext = path
-            .as_ref()
-            .extension()
-            .or_fail_with(|()| format!("no media file extension: {}", path.as_ref().display()))?;
+        let ext = path.as_ref().extension().ok_or_else(|| {
+            crate::Error::new(format!(
+                "no media file extension: {}",
+                path.as_ref().display()
+            ))
+        })?;
         if ext == "mp4" {
             Ok(Self::Mp4)
         } else if ext == "webm" {

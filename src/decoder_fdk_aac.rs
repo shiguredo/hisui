@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use crate::ResultExt;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
@@ -33,10 +32,10 @@ impl FdkAacDecoder {
 
     /// AAC データをデコードする
     pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
-        (data.format == AudioFormat::Aac).or_fail()?;
+        (data.format == AudioFormat::Aac)?;
 
         if self.inner.is_none() {
-            let sample_entry = data.sample_entry.as_ref().or_fail()?;
+            let sample_entry = data.sample_entry.as_ref()?;
             let audio_specific_config = extract_audio_specific_config(sample_entry)?;
             tracing::debug!(
                 "FDK AAC decoder initialized with config length: {}",
@@ -50,7 +49,7 @@ impl FdkAacDecoder {
             self.source_id = data.source_id.clone();
         }
 
-        let inner = self.inner.as_mut().or_fail()?;
+        let inner = self.inner.as_mut()?;
         let decoded_frame = inner
             .decode(&data.data)
             .map_err(|e| crate::Error::new(format!("Failed to decode AAC: {}", e)))?;
@@ -138,8 +137,7 @@ fn extract_audio_specific_config(sample_entry: &SampleEntry) -> crate::Result<Ve
                 .es
                 .dec_config_descr
                 .dec_specific_info
-                .as_ref()
-                .or_fail()?
+                .as_ref()?
                 .payload
                 .clone())
         }

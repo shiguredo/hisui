@@ -1,8 +1,6 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 
-use crate::ResultExt;
-
 use crate::layout_decode_params::LayoutDecodeParams;
 use crate::video::{VideoFormat, VideoFrame};
 use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
@@ -23,7 +21,7 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H264) decoder");
         let config = params.nvcodec_h264.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h264(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_h264(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -34,7 +32,7 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H265) decoder");
         let config = params.nvcodec_h265.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h265(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_h265(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -45,7 +43,7 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(AV1) decoder");
         let config = params.nvcodec_av1.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_av1(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_av1(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -56,7 +54,7 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP8) decoder");
         let config = params.nvcodec_vp8.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp8(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_vp8(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -67,7 +65,7 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP9) decoder");
         let config = params.nvcodec_vp9.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp9(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_vp9(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -83,15 +81,13 @@ impl NvcodecDecoder {
                 | VideoFormat::Vp8
                 | VideoFormat::Vp9
                 | VideoFormat::Av1
-        )
-        .or_fail()?;
+        )?;
 
         // サンプルエントリからパラメータセットを抽出してキャッシュ
         if self.parameter_sets.is_none()
             && let Some(sample_entry) = &frame.sample_entry
         {
-            self.parameter_sets =
-                Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
+            self.parameter_sets = Some(extract_parameter_sets_annexb(sample_entry, frame.format)?);
         }
 
         let data = if matches!(
@@ -117,11 +113,11 @@ impl NvcodecDecoder {
             }
 
             while !data.is_empty() {
-                (data.len() >= NALU_HEADER_LENGTH).or_fail()?;
+                (data.len() >= NALU_HEADER_LENGTH)?;
                 let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                 data = &data[NALU_HEADER_LENGTH..];
 
-                (data.len() >= n).or_fail()?;
+                (data.len() >= n)?;
                 data_annexb.extend_from_slice(&[0, 0, 0, 1]);
                 data_annexb.extend_from_slice(&data[..n]);
 
@@ -131,21 +127,21 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        self.inner.decode(&data).or_fail()?;
+        self.inner.decode(&data)?;
         self.input_queue.push_back(frame.to_stripped());
-        self.handle_decoded_frames().or_fail()?;
+        self.handle_decoded_frames()?;
         Ok(())
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        self.inner.finish().or_fail()?;
-        self.handle_decoded_frames().or_fail()?;
+        self.inner.finish()?;
+        self.handle_decoded_frames()?;
         Ok(())
     }
 
     fn handle_decoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(nv12_frame) = self.inner.next_frame().or_fail()? {
-            let input_frame = self.input_queue.pop_front().or_fail()?;
+        while let Some(nv12_frame) = self.inner.next_frame()? {
+            let input_frame = self.input_queue.pop_front()?;
 
             // NV12 から I420 への変換
             let width = nv12_frame.width();
@@ -180,7 +176,7 @@ impl NvcodecDecoder {
             };
 
             let size = shiguredo_libyuv::ImageSize::new(width, height);
-            shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size).or_fail()?;
+            shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size)?;
 
             // I420 VideoFrame を作成
             self.output_queue.push_back(VideoFrame::new_i420(

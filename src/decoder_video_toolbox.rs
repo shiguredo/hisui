@@ -1,4 +1,3 @@
-use crate::ResultExt;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use crate::{
@@ -20,11 +19,10 @@ pub struct VideoToolboxDecoder {
 
 impl VideoToolboxDecoder {
     pub fn new_h264(frame: &VideoFrame) -> crate::Result<Self> {
-        let (sps, pps) = get_h264_sps_pps(frame).or_fail()?;
+        let (sps, pps) = get_h264_sps_pps(frame)?;
         tracing::debug!("Initialize H.264 decoder: sps={sps:?}, pps={pps:?}");
 
-        let inner =
-            shiguredo_video_toolbox::Decoder::new_h264(&sps, &pps, NALU_HEADER_LENGTH).or_fail()?;
+        let inner = shiguredo_video_toolbox::Decoder::new_h264(&sps, &pps, NALU_HEADER_LENGTH)?;
         Ok(Self {
             inner,
             decoded: None,
@@ -35,11 +33,10 @@ impl VideoToolboxDecoder {
     }
 
     pub fn new_h265(frame: &VideoFrame) -> crate::Result<Self> {
-        let (vps, sps, pps) = get_h265_vps_sps_pps(frame).or_fail()?;
+        let (vps, sps, pps) = get_h265_vps_sps_pps(frame)?;
         tracing::debug!("Initialize H.264 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
 
-        let inner = shiguredo_video_toolbox::Decoder::new_h265(vps, sps, pps, NALU_HEADER_LENGTH)
-            .or_fail()?;
+        let inner = shiguredo_video_toolbox::Decoder::new_h265(vps, sps, pps, NALU_HEADER_LENGTH)?;
         Ok(Self {
             inner,
             decoded: None,
@@ -67,8 +64,10 @@ impl VideoToolboxDecoder {
                 }
 
                 // 変わっているので再初期化
-                self.decoded.is_none().or_fail()?;
-                *self = Self::new_h265(frame).or_fail()?;
+                if self.decoded.is_some() {
+                    return Err(crate::Error::new("condition is false"));
+                }
+                *self = Self::new_h265(frame)?;
             }
         } else {
             // [NOTE] VPS / SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
@@ -79,8 +78,10 @@ impl VideoToolboxDecoder {
                 }
 
                 // 変わっているので再初期化
-                self.decoded.is_none().or_fail()?;
-                *self = Self::new_h264(frame).or_fail()?;
+                if self.decoded.is_some() {
+                    return Err(crate::Error::new("condition is false"));
+                }
+                *self = Self::new_h264(frame)?;
             }
         }
 
@@ -88,25 +89,26 @@ impl VideoToolboxDecoder {
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
-        matches!(
+        if !matches!(
             frame.format,
             VideoFormat::H264 | VideoFormat::H264AnnexB | VideoFormat::H265
-        )
-        .or_fail()?;
+        ) {
+            return Err(crate::Error::new("condition is false"));
+        }
 
-        self.reinitialize_if_need(frame).or_fail()?;
+        self.reinitialize_if_need(frame)?;
 
         let decoded = if matches!(frame.format, VideoFormat::H264AnnexB) {
             // AVC 形式に変換する
             let mut data = Vec::new();
             for nalu in H264AnnexBNalUnits::new(&frame.data) {
-                let nalu = nalu.or_fail()?;
+                let nalu = nalu?;
                 data.extend_from_slice(&(nalu.data.len() as u32).to_be_bytes());
                 data.extend_from_slice(nalu.data);
             }
-            self.inner.decode(&data).or_fail()?
+            self.inner.decode(&data)?
         } else {
-            self.inner.decode(&frame.data).or_fail()?
+            self.inner.decode(&frame.data)?
         };
         let Some(decoded) = decoded else {
             return Ok(());
@@ -132,14 +134,16 @@ impl VideoToolboxDecoder {
 }
 
 fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
-    matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB).or_fail()?;
+    if !matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB) {
+        return Err(crate::Error::new("condition is false"));
+    }
 
     let mut sps = Vec::new();
     let mut pps = Vec::new();
     match frame.format {
         VideoFormat::H264AnnexB => {
             for nal in H264AnnexBNalUnits::new(&frame.data) {
-                let nal = nal.or_fail()?;
+                let nal = nal?;
                 match nal.ty {
                     H264_NALU_TYPE_SPS => sps = nal.data.to_vec(),
                     H264_NALU_TYPE_PPS => pps = nal.data.to_vec(),
@@ -159,19 +163,31 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
                     "missing sample entry for H.264 first frame",
                 ));
             };
-            sps = sps_list.first().or_fail()?.to_vec();
-            pps = pps_list.first().or_fail()?.to_vec();
+            sps = sps_list
+                .first()
+                .ok_or_else(|| crate::Error::new("value is missing"))?
+                .to_vec();
+            pps = pps_list
+                .first()
+                .ok_or_else(|| crate::Error::new("value is missing"))?
+                .to_vec();
         }
         _ => unreachable!(),
     }
-    (!sps.is_empty()).or_fail()?;
-    (!pps.is_empty()).or_fail()?;
+    if sps.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
+    if pps.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
 
     Ok((sps, pps))
 }
 
 fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8])> {
-    matches!(frame.format, VideoFormat::H265).or_fail()?;
+    if !matches!(frame.format, VideoFormat::H265) {
+        return Err(crate::Error::new("condition is false"));
+    }
 
     let hvcc = match &frame.sample_entry {
         Some(SampleEntry::Hev1(b)) => &b.hvcc_box,
@@ -194,9 +210,15 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
             _ => {}
         }
     }
-    (!vps.is_empty()).or_fail()?;
-    (!sps.is_empty()).or_fail()?;
-    (!pps.is_empty()).or_fail()?;
+    if vps.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
+    if sps.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
+    if pps.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
 
     Ok((vps, sps, pps))
 }

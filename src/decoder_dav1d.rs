@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-use crate::ResultExt;
-
 use crate::video::{VideoFormat, VideoFrame};
 
 #[derive(Debug)]
@@ -14,31 +12,37 @@ pub struct Dav1dDecoder {
 impl Dav1dDecoder {
     pub fn new() -> crate::Result<Self> {
         Ok(Self {
-            inner: shiguredo_dav1d::Decoder::new().or_fail()?,
+            inner: shiguredo_dav1d::Decoder::new()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
         })
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
-        (frame.format == VideoFormat::Av1).or_fail()?;
+        if frame.format != VideoFormat::Av1 {
+            return Err(crate::Error::new("condition is false"));
+        }
 
-        self.inner.decode(&frame.data).or_fail()?;
+        self.inner.decode(&frame.data)?;
         self.input_queue.push_back(frame.to_stripped());
-        self.handle_decoded_frames().or_fail()?;
+        self.handle_decoded_frames()?;
         Ok(())
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        self.inner.finish().or_fail()?;
-        self.handle_decoded_frames().or_fail()?;
+        self.inner.finish()?;
+        self.handle_decoded_frames()?;
         Ok(())
     }
 
     fn handle_decoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(decoded) = self.inner.next_frame().or_fail()? {
+        while let Some(decoded) = self.inner.next_frame()? {
+            let input_frame = self
+                .input_queue
+                .pop_front()
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
             self.output_queue.push_back(VideoFrame::new_i420(
-                self.input_queue.pop_front().or_fail()?,
+                input_frame,
                 decoded.width(),
                 decoded.height(),
                 decoded.y_plane(),

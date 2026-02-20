@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use crate::ResultExt;
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
@@ -41,10 +40,11 @@ pub struct Mp4VideoReader {
 
 impl Mp4VideoReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
-        let mut file = File::open(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+        let mut file = File::open(&path).map_err(|e| {
+            crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
+        })?;
         let mut demuxer = Mp4FileDemuxer::new();
-        initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
+        initialize_mp4_demuxer(&mut file, &mut demuxer, &path)?;
 
         Ok(Self {
             file,
@@ -85,7 +85,7 @@ impl Mp4VideoReader {
             match self
                 .demuxer
                 .next_sample()
-                .or_fail_with(|e| format!("Read sample error: {e}"))?
+                .map_err(|e| crate::Error::new(format!("Read sample error: {e}")))?
             {
                 None => return Ok(None),
                 Some(sample) if sample.track.kind != TrackKind::Video => {}
@@ -119,10 +119,10 @@ impl Mp4VideoReader {
         let mut data = vec![0; sample.data_size];
         self.file
             .seek(SeekFrom::Start(sample.data_offset))
-            .or_fail_with(|e| format!("Seek error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Seek error: {e}")))?;
         self.file
             .read_exact(&mut data)
-            .or_fail_with(|e| format!("Read error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Read error: {e}")))?;
 
         // タイムスタンプを計算する
         let timescale = sample.track.timescale.get();
@@ -160,7 +160,7 @@ impl Iterator for Mp4VideoReader {
     type Item = crate::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_sample().or_fail().transpose()
+        self.next_sample().transpose()
     }
 }
 
@@ -183,16 +183,17 @@ pub struct Mp4AudioReader {
 
 impl Mp4AudioReader {
     pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
-        let mut file = File::open(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+        let mut file = File::open(&path).map_err(|e| {
+            crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
+        })?;
         let mut demuxer = Mp4FileDemuxer::new();
-        initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
+        initialize_mp4_demuxer(&mut file, &mut demuxer, &path)?;
 
         // 利用可能な音声トラックがあるかをチェックする
         //
         // チェックのためにサンプルエントリーを取得するためには、
         // demuxer のサンプル読み込みが必要なので、clone して別インスタンスで行っている
-        let audio_track_id = check_audio_track(demuxer.clone()).or_fail()?;
+        let audio_track_id = check_audio_track(demuxer.clone())?;
 
         Ok(Self {
             file,
@@ -231,7 +232,7 @@ impl Mp4AudioReader {
             match self
                 .demuxer
                 .next_sample()
-                .or_fail_with(|e| format!("Read sample error: {e}"))?
+                .map_err(|e| crate::Error::new(format!("Read sample error: {e}")))?
             {
                 None => return Ok(None),
                 Some(sample) if Some(sample.track.track_id) != self.audio_track_id => {}
@@ -261,10 +262,10 @@ impl Mp4AudioReader {
         let mut data = vec![0; sample.data_size];
         self.file
             .seek(SeekFrom::Start(sample.data_offset))
-            .or_fail_with(|e| format!("Seek error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Seek error: {e}")))?;
         self.file
             .read_exact(&mut data)
-            .or_fail_with(|e| format!("Read error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Read error: {e}")))?;
 
         // タイムスタンプを計算する
         let timescale = sample.track.timescale.get();
@@ -292,7 +293,7 @@ impl Iterator for Mp4AudioReader {
     type Item = crate::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_sample().or_fail().transpose()
+        self.next_sample().transpose()
     }
 }
 
@@ -310,11 +311,11 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
     const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
 
     while let Some(required) = demuxer.required_input() {
-        let size = required.size.or_fail_with(|()| {
-            format!(
+        let size = required.size.ok_or_else(|| {
+            crate::Error::new(format!(
                 "MP4 file contains unexpected variable size box {}",
                 path.as_ref().display()
-            )
+            ))
         })?;
         if size > MAX_BUF_SIZE {
             return Err(crate::Error::new(format!(
@@ -324,10 +325,12 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
         }
 
         let mut buf = vec![0; size];
-        file.seek(SeekFrom::Start(required.position))
-            .or_fail_with(|e| format!("Seek error {}: {e}", path.as_ref().display()))?;
-        file.read_exact(&mut buf)
-            .or_fail_with(|e| format!("Read error {}: {e}", path.as_ref().display()))?;
+        file.seek(SeekFrom::Start(required.position)).map_err(|e| {
+            crate::Error::new(format!("Seek error {}: {e}", path.as_ref().display()))
+        })?;
+        file.read_exact(&mut buf).map_err(|e| {
+            crate::Error::new(format!("Read error {}: {e}", path.as_ref().display()))
+        })?;
         let input = required.to_input(&buf);
         demuxer.handle_input(input);
     }
@@ -337,7 +340,7 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
 /// 音声トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
 fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> crate::Result<Option<u32>> {
     let mut has_audio_track = false;
-    while let Some(sample) = demuxer.next_sample().or_fail()? {
+    while let Some(sample) = demuxer.next_sample()? {
         if sample.track.kind != TrackKind::Audio {
             continue;
         }

@@ -1,6 +1,5 @@
 use std::{num::NonZeroUsize, str::FromStr, time::Duration};
 
-use crate::ResultExt;
 use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields};
 
 use crate::{
@@ -226,13 +225,13 @@ impl VideoFrame {
         // Y プレーンを 10-bit から 8-bit に変換
         if width * 2 == y_stride {
             // パディングなし、チャンク単位で処理可能
-            (y_plane_16.len() >= y_size * 2).or_fail_with(|()| {
-                format!(
+            if y_plane_16.len() < y_size * 2 {
+                return Err(crate::Error::new(format!(
                     "Y plane data insufficient: expected {} bytes, got {}",
                     y_size * 2,
                     y_plane_16.len()
-                )
-            })?;
+                )));
+            }
             for chunk in y_plane_16[..y_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
@@ -242,14 +241,14 @@ impl VideoFrame {
             // ストライドにパディングがある場合の処理
             for row in 0..height {
                 let row_start = row * y_stride;
-                (row_start + width * 2 <= y_plane_16.len()).or_fail_with(|()| {
-                    format!(
+                if row_start + width * 2 > y_plane_16.len() {
+                    return Err(crate::Error::new(format!(
                         "Y plane data insufficient: row {} requires {} bytes but only {} available",
                         row,
                         row_start + width * 2,
                         y_plane_16.len()
-                    )
-                })?;
+                    )));
+                }
                 let row_data = &y_plane_16[row_start..row_start + width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
@@ -261,13 +260,13 @@ impl VideoFrame {
 
         // U プレーンを 10-bit から 8-bit に変換
         if uv_width * 2 == u_stride {
-            (u_plane_16.len() >= uv_size * 2).or_fail_with(|()| {
-                format!(
+            if u_plane_16.len() < uv_size * 2 {
+                return Err(crate::Error::new(format!(
                     "U plane data insufficient: expected {} bytes, got {}",
                     uv_size * 2,
                     u_plane_16.len()
-                )
-            })?;
+                )));
+            }
             for chunk in u_plane_16[..uv_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
@@ -276,14 +275,14 @@ impl VideoFrame {
         } else {
             for row in 0..uv_height {
                 let row_start = row * u_stride;
-                (row_start + uv_width * 2 <= u_plane_16.len()).or_fail_with(|()| {
-                    format!(
+                if row_start + uv_width * 2 > u_plane_16.len() {
+                    return Err(crate::Error::new(format!(
                         "U plane data insufficient: row {} requires {} bytes but only {} available",
                         row,
                         row_start + uv_width * 2,
                         u_plane_16.len()
-                    )
-                })?;
+                    )));
+                }
                 let row_data = &u_plane_16[row_start..row_start + uv_width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
@@ -295,13 +294,13 @@ impl VideoFrame {
 
         // V プレーンを 10-bit から 8-bit に変換
         if uv_width * 2 == v_stride {
-            (v_plane_16.len() >= uv_size * 2).or_fail_with(|()| {
-                format!(
+            if v_plane_16.len() < uv_size * 2 {
+                return Err(crate::Error::new(format!(
                     "V plane data insufficient: expected {} bytes, got {}",
                     uv_size * 2,
                     v_plane_16.len()
-                )
-            })?;
+                )));
+            }
             for chunk in v_plane_16[..uv_size * 2].chunks_exact(2) {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
@@ -310,14 +309,14 @@ impl VideoFrame {
         } else {
             for row in 0..uv_height {
                 let row_start = row * v_stride;
-                (row_start + uv_width * 2 <= v_plane_16.len()).or_fail_with(|()| {
-                    format!(
+                if row_start + uv_width * 2 > v_plane_16.len() {
+                    return Err(crate::Error::new(format!(
                         "V plane data insufficient: row {} requires {} bytes but only {} available",
                         row,
                         row_start + uv_width * 2,
                         v_plane_16.len()
-                    )
-                })?;
+                    )));
+                }
                 let row_data = &v_plane_16[row_start..row_start + uv_width * 2];
                 for chunk in row_data.chunks_exact(2) {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
@@ -456,7 +455,9 @@ impl VideoFrame {
         new_height: EvenUsize,
         filter_mode: shiguredo_libyuv::FilterMode,
     ) -> crate::Result<Option<Self>> {
-        matches!(self.format, VideoFormat::I420 | VideoFormat::I420A).or_fail()?;
+        if !matches!(self.format, VideoFormat::I420 | VideoFormat::I420A) {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         let width = self.width;
         let height = self.height;
@@ -468,11 +469,15 @@ impl VideoFrame {
         // 元の YUV プレーンを取得
         let (src_y, src_u, src_v, src_a) = match self.format {
             VideoFormat::I420 => {
-                let (src_y, src_u, src_v) = self.as_yuv_planes().or_fail()?;
+                let (src_y, src_u, src_v) = self
+                    .as_yuv_planes()
+                    .ok_or_else(|| crate::Error::new("value is missing"))?;
                 (src_y, src_u, src_v, None)
             }
             VideoFormat::I420A => {
-                let (src_y, src_u, src_v, src_a) = self.as_i420a_planes().or_fail()?;
+                let (src_y, src_u, src_v, src_a) = self
+                    .as_i420a_planes()
+                    .ok_or_else(|| crate::Error::new("value is missing"))?;
                 (src_y, src_u, src_v, Some(src_a))
             }
             _ => unreachable!("infallible"),
@@ -520,8 +525,7 @@ impl VideoFrame {
             &mut dst,
             shiguredo_libyuv::ImageSize::new(dst_width, new_height.get()), // 出力画像のサイズ
             filter_mode,
-        )
-        .or_fail()?;
+        )?;
 
         let data = if let Some(src_a) = src_a {
             let (src_uv_width, src_uv_height) = Self::i420_uv_dimensions(width, height);
@@ -567,20 +571,20 @@ impl VideoFrame {
         dst_width: usize,
         dst_height: usize,
     ) -> crate::Result<()> {
-        (src.len() >= src_width.saturating_mul(src_height)).or_fail_with(|()| {
-            format!(
+        if src.len() < src_width.saturating_mul(src_height) {
+            return Err(crate::Error::new(format!(
                 "source plane too small: expected at least {}, got {}",
                 src_width.saturating_mul(src_height),
                 src.len()
-            )
-        })?;
-        (dst.len() >= dst_width.saturating_mul(dst_height)).or_fail_with(|()| {
-            format!(
+            )));
+        }
+        if dst.len() < dst_width.saturating_mul(dst_height) {
+            return Err(crate::Error::new(format!(
                 "destination plane too small: expected at least {}, got {}",
                 dst_width.saturating_mul(dst_height),
                 dst.len()
-            )
-        })?;
+            )));
+        }
 
         if dst_width == 0 || dst_height == 0 {
             return Ok(());
@@ -598,14 +602,18 @@ impl VideoFrame {
     }
 
     pub fn to_bgr_data(&self) -> crate::Result<Vec<u8>> {
-        (self.format == VideoFormat::I420).or_fail()?;
+        if self.format != VideoFormat::I420 {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         // 実際の解像度（出力に使用）
         let actual_width = self.width;
         let actual_height = self.height;
 
         // YUV プレーンを取得
-        let (y_plane, u_plane, v_plane) = self.as_yuv_planes().or_fail()?;
+        let (y_plane, u_plane, v_plane) = self
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
 
         // ストライドは実際の幅を使用
         let y_stride = actual_width;

@@ -5,8 +5,6 @@ use std::{
     time::Duration,
 };
 
-use crate::ResultExt;
-
 use crate::{
     audio,
     json::JsonObject,
@@ -68,14 +66,14 @@ impl Layout {
         base_path: PathBuf,
         layout_file_path: &Path,
     ) -> crate::Result<Self> {
-        let raw: RawLayout = crate::json::parse_file(layout_file_path).or_fail()?;
-        raw.into_layout(base_path).or_fail()
+        let raw: RawLayout = crate::json::parse_file(layout_file_path)?;
+        raw.into_layout(base_path)
     }
 
     /// レイアウト JSON 文字列で指示されたレイアウトを作成する
     pub fn from_layout_json_str(base_path: PathBuf, layout_json_text: &str) -> crate::Result<Self> {
-        let raw: RawLayout = crate::json::parse_str(layout_json_text).or_fail()?;
-        raw.into_layout(base_path).or_fail()
+        let raw: RawLayout = crate::json::parse_str(layout_json_text)?;
+        raw.into_layout(base_path)
     }
 
     pub fn from_layout_json_file_or_default(
@@ -84,9 +82,9 @@ impl Layout {
         default_layout_json: &str,
     ) -> crate::Result<Self> {
         if let Some(layout_file_path) = layout_file_path {
-            Layout::from_layout_json_file(base_path, layout_file_path).or_fail()
+            Layout::from_layout_json_file(base_path, layout_file_path)
         } else {
-            Layout::from_layout_json_str(base_path, default_layout_json).or_fail()
+            Layout::from_layout_json_str(base_path, default_layout_json)
         }
     }
 
@@ -97,10 +95,9 @@ impl Layout {
         audio_only: bool,
         max_columns: usize,
     ) -> crate::Result<Self> {
-        let base_path = std::path::absolute(report_file_path)
-            .or_fail()?
+        let base_path = std::path::absolute(report_file_path)?
             .parent()
-            .or_fail()?
+            .ok_or_else(|| crate::Error::new("value is missing"))?
             .to_path_buf();
 
         // layout 未指定の場合にはセルの解像度は固定
@@ -119,10 +116,13 @@ impl Layout {
         let height = rows * cell_height;
 
         let source_paths = report
-            .archive_metadata_paths()
-            .or_fail()?
+            .archive_metadata_paths()?
             .into_iter()
-            .map(|path| path.file_name().or_fail().map(PathBuf::from))
+            .map(|path| {
+                path.file_name()
+                    .map(PathBuf::from)
+                    .ok_or_else(|| crate::Error::new("value is missing"))
+            })
             .collect::<crate::Result<Vec<_>>>()?;
         let video_layout = nojson::json(|f| {
             f.object(|f| {
@@ -149,8 +149,8 @@ impl Layout {
                 f.member("resolution", format!("{width}x{height}"))
             })
         });
-        let raw: RawLayout = crate::json::parse_str(&layout_json.to_string()).or_fail()?;
-        raw.into_layout(base_path).or_fail()
+        let raw: RawLayout = crate::json::parse_str(&layout_json.to_string())?;
+        raw.into_layout(base_path)
     }
 
     pub fn video_bitrate_bps(&self) -> usize {
@@ -289,11 +289,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
 
 impl RawLayout {
     fn into_layout(self, base_path: PathBuf) -> crate::Result<Layout> {
-        let base_path = base_path.canonicalize().or_fail_with(|e| {
-            format!(
+        let base_path = base_path.canonicalize().map_err(|e| {
+            crate::Error::new(format!(
                 "failed to canonicalize base dir {}: {e}",
                 base_path.display()
-            )
+            ))
         })?;
 
         // 利用するソース一覧を確定して、情報を読み込む
@@ -303,8 +303,7 @@ impl RawLayout {
             &base_path,
             &self.audio_sources,
             &self.audio_sources_excluded,
-        )
-        .or_fail()?;
+        )?;
         for (source, media_path) in resolved {
             sources
                 .entry(source.id.clone())
@@ -315,14 +314,12 @@ impl RawLayout {
 
         let mut video_regions = Vec::new();
         for (_region_name, raw_region) in self.video_layout {
-            let region = raw_region
-                .into_region(
-                    &base_path,
-                    &mut sources,
-                    self.resolution,
-                    resolve_source_and_media_path_pairs,
-                )
-                .or_fail()?;
+            let region = raw_region.into_region(
+                &base_path,
+                &mut sources,
+                self.resolution,
+                resolve_source_and_media_path_pairs,
+            )?;
             video_regions.push(region);
         }
         video_regions.sort_by_key(|r| r.z_pos);
@@ -332,10 +329,10 @@ impl RawLayout {
             resolution
         } else if video_regions.is_empty() {
             // 音声のみの場合は使われないので何でもいい
-            Resolution::new(Resolution::MIN, Resolution::MIN).or_fail()?
+            Resolution::new(Resolution::MIN, Resolution::MIN)?
         } else {
             // "resolution" が未指定の場合はリージョンから求める
-            let mut resolution = Resolution::new(Resolution::MIN, Resolution::MIN).or_fail()?;
+            let mut resolution = Resolution::new(Resolution::MIN, Resolution::MIN)?;
             for region in &video_regions {
                 resolution.width = resolution.width.max(region.position.x + region.width);
                 resolution.height = resolution.height.max(region.position.y + region.height);
@@ -346,7 +343,7 @@ impl RawLayout {
         let trim_spans = decide_trim_spans(&sources, !self.trim);
 
         for source in sources.values_mut() {
-            source.merge_overlapping_sources().or_fail()?;
+            source.merge_overlapping_sources()?;
         }
 
         Ok(Layout {
@@ -408,12 +405,14 @@ impl Resolution {
     /// [`Resolution`] インスタンスを生成する
     pub fn new(width: usize, height: usize) -> crate::Result<Self> {
         let range = Self::MIN..=Self::MAX;
-        range
-            .contains(&width)
-            .or_fail_with(|()| format!("width {width} is out of range"))?;
-        range
-            .contains(&height)
-            .or_fail_with(|()| format!("height {height} is out of range"))?;
+        if !range.contains(&width) {
+            return Err(crate::Error::new(format!("width {width} is out of range")));
+        }
+        if !range.contains(&height) {
+            return Err(crate::Error::new(format!(
+                "height {height} is out of range"
+            )));
+        }
         Ok(Self {
             width: EvenUsize::truncating_new(width),
             height: EvenUsize::truncating_new(height),
@@ -460,11 +459,11 @@ pub fn resolve_source_and_media_path_pairs(
     sources: &[PathBuf],
     excluded: &[PathBuf],
 ) -> crate::Result<Vec<(SourceInfo, PathBuf)>> {
-    let resolved_paths = resolve_source_paths(base_path, sources, excluded).or_fail()?;
+    let resolved_paths = resolve_source_paths(base_path, sources, excluded)?;
 
     let mut resolved = Vec::new();
     for path in resolved_paths {
-        let archive = ArchiveMetadata::from_file(&path).or_fail()?;
+        let archive = ArchiveMetadata::from_file(&path)?;
         let mut media_path = path.clone();
         match archive.format {
             ContainerFormat::Webm => media_path.set_extension("webm"),
@@ -484,23 +483,23 @@ pub fn resolve_source_paths(
 ) -> crate::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for source in sources {
-        for path in glob(base_path.join(source)).or_fail()? {
+        for path in glob(base_path.join(source))? {
             // 後段のチェックなどを簡単にするためにパスを正規化する
-            let path = path.canonicalize().or_fail_with(|e| {
-                format!(
+            let path = path.canonicalize().map_err(|e| {
+                crate::Error::new(format!(
                     "failed to canonicalize source file path {}: {e}",
                     path.display()
-                )
+                ))
             })?;
 
             // base_path の範囲外を参照しているパスがあったらエラー
-            path.starts_with(base_path).or_fail_with(|()| {
-                format!(
+            if !path.starts_with(base_path) {
+                return Err(crate::Error::new(format!(
                     "source path '{}' is outside the base dir '{}'",
                     path.display(),
                     base_path.display()
-                )
-            })?;
+                )));
+            }
 
             paths.push(path);
         }
@@ -510,9 +509,9 @@ pub fn resolve_source_paths(
     let mut known = HashSet::new();
     paths.retain(|path| known.insert(path.clone()));
 
-    let excluded = excluded
+    let excluded: Vec<PathBuf> = excluded
         .iter()
-        .map(|p| std::path::absolute(base_path.join(p)).or_fail())
+        .map(|p| std::path::absolute(base_path.join(p)).map_err(crate::Error::from))
         .collect::<crate::Result<Vec<_>>>()?;
 
     paths.retain(|path0| {
@@ -555,24 +554,40 @@ fn glob(path: PathBuf) -> crate::Result<Vec<PathBuf>> {
         .is_some_and(|name| name.contains('*'))
     {
         // 名前部分にワイルドカードを含んでいないなら通常のパスとして扱う
-        path.exists()
-            .or_fail_with(|()| format!("no such source file: {}", path.display()))?;
-        media_file_exists(&path)
-            .or_fail_with(|()| format!("no media file for the source: {}", path.display()))?;
+        if !path.exists() {
+            return Err(crate::Error::new(format!(
+                "no such source file: {}",
+                path.display()
+            )));
+        }
+        if !media_file_exists(&path) {
+            return Err(crate::Error::new(format!(
+                "no media file for the source: {}",
+                path.display()
+            )));
+        }
         return Ok(vec![path]);
     }
 
     // ここまで来たら名前部分にワイルドカードを含んでいるので展開する
-    let wildcard_name = path.file_name().and_then(|name| name.to_str()).or_fail()?;
+    let wildcard_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| crate::Error::new("source file name is missing"))?;
 
-    let parent = path.parent().or_fail()?;
-    parent
-        .exists()
-        .or_fail_with(|()| format!("no such source file directory: {}", parent.display()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| crate::Error::new("source file directory is missing"))?;
+    if !parent.exists() {
+        return Err(crate::Error::new(format!(
+            "no such source file directory: {}",
+            parent.display()
+        )));
+    }
 
     let mut paths = Vec::new();
-    for entry in path.parent().or_fail()?.read_dir().or_fail()? {
-        let entry = entry.or_fail()?;
+    for entry in parent.read_dir()? {
+        let entry = entry?;
         if !entry
             .path()
             .file_name()
@@ -775,7 +790,7 @@ mod tests {
         for json in jsons {
             // Layout をロードしようとすると関連する archive.json も用意する必要があって
             // 手間なのでここでは RawLayout を使っている
-            json.parse::<nojson::Json<RawLayout>>().or_fail()?;
+            json.parse::<nojson::Json<RawLayout>>()?;
         }
         Ok(())
     }
@@ -783,7 +798,10 @@ mod tests {
     #[test]
     fn test_duplicate_region_name() -> crate::Result<()> {
         let json = include_str!("../testdata/layouts/error-layout-duplicate-region-name.json");
-        let e = json.parse::<nojson::Json<RawLayout>>().err().or_fail()?;
+        let e = json
+            .parse::<nojson::Json<RawLayout>>()
+            .err()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
         let error_message = e.to_string();
         assert!(error_message.contains("duplicate region name"));
         Ok(())
@@ -800,7 +818,7 @@ mod tests {
         aggregated.update(&source1, Path::new("path1.webm"));
         aggregated.update(&source2, Path::new("path2.webm"));
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // 両方のソースが保持されるべき
         assert_eq!(aggregated.media_paths.len(), 2);
@@ -821,7 +839,7 @@ mod tests {
         aggregated.update(&long_source, Path::new("long.webm"));
         aggregated.update(&short_source, Path::new("short.webm"));
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // 長いソースのみが残るべき
         assert_eq!(aggregated.media_paths.len(), 1);
@@ -836,7 +854,7 @@ mod tests {
     fn test_merge_overlapping_sources_empty() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // 空の場合を適切に処理すべき
         assert_eq!(aggregated.media_paths.len(), 0);
@@ -857,7 +875,7 @@ mod tests {
         aggregated.update(&source1, Path::new("source1.webm"));
         aggregated.update(&source2, Path::new("source2.webm"));
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // 開始時刻順でソートし、長い方を優先する
         // source1 (0-15) が先に処理され、source2 (10-20) は source1 の終了時刻 (15) より前に開始するため除外される
@@ -885,7 +903,7 @@ mod tests {
         aggregated.update(&source1, Path::new("source1.webm"));
         aggregated.update(&source2, Path::new("source2.webm"));
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // 開始時刻が早い source1 が残り、source2 は除外される
         assert_eq!(aggregated.media_paths.len(), 1);
@@ -915,7 +933,7 @@ mod tests {
         aggregated.update(&source3, Path::new("source3.webm"));
         aggregated.update(&source4, Path::new("source4.webm"));
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // - source1 (0-30) が最初に処理される (開始時刻0、終了時刻30で最長)
         // - source2,3は source1の終了時刻30より前に開始するため除外
@@ -948,7 +966,7 @@ mod tests {
         aggregated.update(&short_source, Path::new("short.webm"));
         aggregated.update(&long_source, Path::new("long.webm"));
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // 同じ開始時刻の場合、長い方（終了時刻が後の方）が優先される
         assert_eq!(aggregated.media_paths.len(), 1);
@@ -972,7 +990,7 @@ mod tests {
         aggregated.update(&source2, Path::new("source2.webm"));
         aggregated.update(&source3, Path::new("source3.webm"));
 
-        aggregated.merge_overlapping_sources().or_fail()?;
+        aggregated.merge_overlapping_sources()?;
 
         // 境界で接触するソースは重複とみなさないため、すべてのソースが残る
         assert_eq!(aggregated.media_paths.len(), 3);

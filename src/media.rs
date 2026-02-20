@@ -3,8 +3,6 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
-use crate::ResultExt;
-
 use crate::audio::AudioData;
 use crate::metadata::SourceId;
 use crate::video::VideoFrame;
@@ -27,12 +25,16 @@ impl MediaStreamNameRegistry {
         self.name_to_id
             .get(name)
             .copied()
-            .or_fail_with(|()| format!("unknown stream name: {:?}", name.get()))
+            .ok_or_else(|| crate::Error::new(format!("unknown stream name: {:?}", name.get())))
     }
 
     pub fn register_name(&mut self, name: MediaStreamName) -> crate::Result<MediaStreamId> {
-        (!self.name_to_id.contains_key(&name))
-            .or_fail_with(|()| format!("duplicate stream name: {:?}", name.get()))?;
+        if self.name_to_id.contains_key(&name) {
+            return Err(crate::Error::new(format!(
+                "duplicate stream name: {:?}",
+                name.get()
+            )));
+        }
 
         let id = self.next_id.fetch_add(1);
         self.name_to_id.insert(name, id);

@@ -1,8 +1,6 @@
 use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant};
 
-use crate::ResultExt;
-
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
 use crate::video::VideoFrame;
@@ -236,7 +234,9 @@ impl RealtimePacer {
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_ids: Vec<MediaStreamId>,
     ) -> crate::Result<Self> {
-        (input_stream_ids.len() == output_stream_ids.len()).or_fail()?;
+        if input_stream_ids.len() != output_stream_ids.len() {
+            return Err(crate::Error::new("condition is false"));
+        }
         Ok(Self {
             stream_ids: input_stream_ids
                 .iter()
@@ -274,7 +274,11 @@ impl MediaProcessor for RealtimePacer {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        let output_stream_id = self.stream_ids.get(&input.stream_id).copied().or_fail()?;
+        let output_stream_id = self
+            .stream_ids
+            .get(&input.stream_id)
+            .copied()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
         if let Some(sample) = input.sample {
             self.stream_timestamps
                 .insert(input.stream_id, sample.timestamp());

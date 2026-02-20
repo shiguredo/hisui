@@ -1,4 +1,3 @@
-use hisui::ResultExt;
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 use hisui::{decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use hisui::{
@@ -19,11 +18,9 @@ const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 fn h264_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h264");
     let source_id1 = SourceId::new("archive-blue-640x480-h264");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h264.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h264.mp4").or_fail()?;
-    multi_resolutions_test(reader0, reader1).or_fail()?;
+    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h264.mp4")?;
+    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h264.mp4")?;
+    multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
 
@@ -32,11 +29,9 @@ fn h264_multi_resolutions() -> hisui::Result<()> {
 fn h265_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h265");
     let source_id1 = SourceId::new("archive-red-320x320-h265");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h265.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h265.mp4").or_fail()?;
-    multi_resolutions_test(reader0, reader1).or_fail()?;
+    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h265.mp4")?;
+    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h265.mp4")?;
+    multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
 
@@ -45,11 +40,9 @@ fn h265_multi_resolutions() -> hisui::Result<()> {
 fn vp9_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-vp9");
     let source_id1 = SourceId::new("archive-red-320x320-vp9");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-vp9.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-vp9.mp4").or_fail()?;
-    multi_resolutions_test(reader0, reader1).or_fail()?;
+    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-vp9.mp4")?;
+    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-vp9.mp4")?;
+    multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
 
@@ -57,11 +50,9 @@ fn vp9_multi_resolutions() -> hisui::Result<()> {
 fn av1_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-av1");
     let source_id1 = SourceId::new("archive-red-320x320-av1");
-    let reader0 =
-        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-av1.mp4").or_fail()?;
-    let reader1 =
-        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-av1.mp4").or_fail()?;
-    multi_resolutions_test(reader0, reader1).or_fail()?;
+    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-av1.mp4")?;
+    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-av1.mp4")?;
+    multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
 
@@ -71,7 +62,7 @@ where
 {
     let options = VideoDecoderOptions {
         openh264_lib: if let Ok(path) = std::env::var("OPENH264_PATH") {
-            Some(Openh264Library::load(path).or_fail()?)
+            Some(Openh264Library::load(path)?)
         } else if cfg!(target_os = "macos") {
             None
         } else {
@@ -95,23 +86,21 @@ where
     let mut red_count = 0;
 
     for input_frame in reader0 {
-        let input = prepend_h264_sps_pps(input_frame.or_fail()?);
-        decoder.process_input(input).or_fail()?;
+        let input = prepend_h264_sps_pps(input_frame?);
+        decoder.process_input(input)?;
         blue_count += 1;
     }
 
     // このタイミングで解像度などが切り替わる
     for input_frame in reader1 {
-        let input = prepend_h264_sps_pps(input_frame.or_fail()?);
-        decoder.process_input(input).or_fail()?;
+        let input = prepend_h264_sps_pps(input_frame?);
+        decoder.process_input(input)?;
         red_count += 1;
     }
 
-    decoder
-        .process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))
-        .or_fail()?;
-    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
-        let output_frame = sample.expect_video_frame().or_fail()?;
+    decoder.process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))?;
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
+        let output_frame = sample.expect_video_frame()?;
         output_frames.push(output_frame);
     }
 
@@ -123,7 +112,9 @@ where
             assert_eq!(output_frame.height, 480);
 
             // 単色青色かどうかのチェック
-            let (y_plane, u_plane, v_plane) = output_frame.as_yuv_planes().or_fail()?;
+            let (y_plane, u_plane, v_plane) = output_frame
+                .as_yuv_planes()
+                .ok_or_else(|| hisui::Error::new("value is missing"))?;
             y_plane.iter().for_each(|&y| assert_eq!(y, 41));
             u_plane.iter().for_each(|&y| assert_eq!(y, 240));
             v_plane.iter().for_each(|&y| assert_eq!(y, 110));
@@ -133,7 +124,9 @@ where
             assert_eq!(output_frame.height, 320);
 
             // 単色赤色かどうかのチェック
-            let (y_plane, u_plane, v_plane) = output_frame.as_yuv_planes().or_fail()?;
+            let (y_plane, u_plane, v_plane) = output_frame
+                .as_yuv_planes()
+                .ok_or_else(|| hisui::Error::new("value is missing"))?;
             y_plane.iter().for_each(|&y| assert_eq!(y, 81));
             u_plane.iter().for_each(|&u| assert_eq!(u, 90));
             v_plane.iter().for_each(|&v| assert_eq!(v, 240));
@@ -171,35 +164,30 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> hisui::Result<()> {
     let source_id = SourceId::new("beep-aac-audio");
-    let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4").or_fail()?;
+    let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4")?;
     let mut decoder = AudioDecoder::new(
         MediaStreamId::new(0),
         MediaStreamId::new(1),
         hisui::stats::Stats::new(),
-    )
-    .or_fail()?;
+    )?;
 
     let mut decoded_count = 0;
 
     for input_data in reader {
-        let input_data = input_data.or_fail()?;
+        let input_data = input_data?;
         let input = MediaProcessorInput::audio_data(MediaStreamId::new(0), input_data);
-        decoder.process_input(input).or_fail()?;
+        decoder.process_input(input)?;
 
-        while let MediaProcessorOutput::Processed { sample, .. } =
-            decoder.process_output().or_fail()?
-        {
-            let _output_data = sample.expect_audio_data().or_fail()?;
+        while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
+            let _output_data = sample.expect_audio_data()?;
             decoded_count += 1;
         }
     }
 
-    decoder
-        .process_input(MediaProcessorInput::eos(MediaStreamId::new(0)))
-        .or_fail()?;
+    decoder.process_input(MediaProcessorInput::eos(MediaStreamId::new(0)))?;
 
-    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
-        let _output_data = sample.expect_audio_data().or_fail()?;
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
+        let _output_data = sample.expect_audio_data()?;
         decoded_count += 1;
     }
 

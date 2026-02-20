@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use hisui::ResultExt;
 use hisui::{
     layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     layout_region::{Grid, Region},
@@ -501,8 +500,8 @@ fn mix_with_trim() -> hisui::Result<()> {
 
     // 合成結果を取得する
     let mut frames = Vec::new();
-    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output().or_fail()? {
-        let frame = sample.expect_video_frame().or_fail()?;
+    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output()? {
+        let frame = sample.expect_video_frame()?;
         frames.push(frame);
     }
 
@@ -579,8 +578,8 @@ fn mix_without_trim() -> hisui::Result<()> {
 
     // 合成結果を取得する
     let mut frames = Vec::new();
-    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output().or_fail()? {
-        let frame = sample.expect_video_frame().or_fail()?;
+    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output()? {
+        let frame = sample.expect_video_frame()?;
         frames.push(frame);
     }
 
@@ -591,8 +590,8 @@ fn mix_without_trim() -> hisui::Result<()> {
 
     // 次は入力ソースが存在しない空白期間
     let black = VideoFrame::black(
-        EvenUsize::new(size.width).or_fail()?,
-        EvenUsize::new(size.height).or_fail()?,
+        EvenUsize::new(size.width).ok_or_else(|| hisui::Error::new("value is missing"))?,
+        EvenUsize::new(size.height).ok_or_else(|| hisui::Error::new("value is missing"))?,
     );
     for frame in frames
         .iter()
@@ -1268,11 +1267,9 @@ fn grayscale_image<const W: usize, const H: usize>(image: [[u8; W]; H]) -> Vec<u
 
 fn next_mixed_frame(mixer: &mut VideoMixer) -> hisui::Result<Arc<VideoFrame>> {
     mixer
-        .process_output()
-        .or_fail()?
+        .process_output()?
         .expect_processed()
-        .or_fail()?
+        .ok_or_else(|| hisui::Error::new("value is missing"))?
         .1
         .expect_video_frame()
-        .or_fail()
 }

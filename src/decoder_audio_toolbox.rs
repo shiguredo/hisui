@@ -1,7 +1,6 @@
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-use crate::ResultExt;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
@@ -31,22 +30,32 @@ impl AudioToolboxDecoder {
     }
 
     pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
-        (data.format == AudioFormat::Aac).or_fail()?;
+        if data.format != AudioFormat::Aac {
+            return Err(crate::Error::new("condition is false"));
+        }
 
         if self.inner.is_none() {
-            let sample_entry = data.sample_entry.as_ref().or_fail()?;
+            let sample_entry = data
+                .sample_entry
+                .as_ref()
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
             let (sample_rate, channels) = extract_audio_config(sample_entry)?;
             tracing::debug!(
                 "Audio Toolbox AAC decoder configuration: sample_rate={sample_rate}Hz, channels={channels}"
             );
-            self.inner =
-                Some(shiguredo_audio_toolbox::Decoder::new(sample_rate, channels).or_fail()?);
+            self.inner = Some(shiguredo_audio_toolbox::Decoder::new(
+                sample_rate,
+                channels,
+            )?);
             self.sample_rate = sample_rate;
             self.source_id = data.source_id.clone();
         }
 
-        let inner = self.inner.as_mut().or_fail()?;
-        inner.decode(&data.data).or_fail()?;
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
+        inner.decode(&data.data)?;
 
         self.build_audio_data()
     }
@@ -56,7 +65,7 @@ impl AudioToolboxDecoder {
             return Ok(None);
         };
 
-        inner.finish().or_fail()?;
+        inner.finish()?;
 
         let audio_data = self.build_audio_data()?;
         if audio_data.data.is_empty() {
@@ -69,13 +78,11 @@ impl AudioToolboxDecoder {
     /// デコード済みデータをAudioDataに変換する共通処理
     fn build_audio_data(&mut self) -> crate::Result<AudioData> {
         let mut decoded_samples = Vec::new();
-        while let Some(samples) = self
+        let inner = self
             .inner
             .as_mut()
-            .or_fail()?
-            .next_decoded_data()
-            .or_fail()?
-        {
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
+        while let Some(samples) = inner.next_decoded_data()? {
             decoded_samples.extend(samples);
         }
 
@@ -121,11 +128,12 @@ fn extract_audio_config(sample_entry: &SampleEntry) -> crate::Result<(u32, NonZe
     match sample_entry {
         SampleEntry::Mp4a(mp4a) => {
             let sample_rate = mp4a.audio.samplerate.integer as u32;
-            let channels = NonZeroU8::new(mp4a.audio.channelcount as u8).or_fail()?;
+            let channels = NonZeroU8::new(mp4a.audio.channelcount as u8)
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
             Ok((sample_rate, channels))
         }
         _ => Err(crate::Error::new(
             "Only MP4a audio sample entries are currently supported",
-        ))?,
+        )),
     }
 }

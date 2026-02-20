@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ResultExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -134,7 +133,7 @@ impl RtmpInboundEndpoint {
                                     audio_track_tx,
                                 );
 
-                                if let Err(e) = handler.run().await.or_fail() {
+                                if let Err(e) = handler.run().await {
                                     tracing::error!("RTMP publisher handler error: {e}");
                                 }
                                 tracing::debug!("RTMP publisher disconnected: {peer_addr}");
@@ -291,15 +290,15 @@ impl RtmpPublisherHandler {
                 ) {
                     tracing::debug!("RTMP event: {:?}", event);
                 }
-                self.handle_event(&event).or_fail()?;
-                self.process_event(event).await.or_fail()?;
+                self.handle_event(&event)?;
+                self.process_event(event).await?;
             }
 
-            self.flush_send_buf().await.or_fail()?;
+            self.flush_send_buf().await?;
 
             tokio::select! {
                 read_result = self.stream.read(&mut self.recv_buf) => {
-                    if !self.handle_stream_read(read_result).await.or_fail()? {
+                    if !self.handle_stream_read(read_result).await? {
                         break;
                     }
                 }
@@ -323,10 +322,10 @@ impl RtmpPublisherHandler {
     ) -> crate::Result<()> {
         match event {
             shiguredo_rtmp::RtmpConnectionEvent::AudioReceived(frame) => {
-                self.handle_audio_frame(frame).await.or_fail()?;
+                self.handle_audio_frame(frame).await?;
             }
             shiguredo_rtmp::RtmpConnectionEvent::VideoReceived(frame) => {
-                self.handle_video_frame(frame).await.or_fail()?;
+                self.handle_video_frame(frame).await?;
             }
             _ => {}
         }
@@ -340,15 +339,13 @@ impl RtmpPublisherHandler {
                 app, stream_name, ..
             } => {
                 if app == &self.expected_app && stream_name == &self.expected_stream_name {
-                    self.connection.accept().or_fail()?;
+                    self.connection.accept()?;
                     tracing::debug!("Client started publishing stream: {}/{}", app, stream_name);
                 } else {
-                    self.connection
-                        .reject(&format!(
-                            "Stream not found: {}/{}. Expected: {}/{}",
-                            app, stream_name, self.expected_app, self.expected_stream_name
-                        ))
-                        .or_fail()?;
+                    self.connection.reject(&format!(
+                        "Stream not found: {}/{}. Expected: {}/{}",
+                        app, stream_name, self.expected_app, self.expected_stream_name
+                    ))?;
                     tracing::warn!(
                         "Client requested invalid stream: {}/{}, expected: {}/{}",
                         app,
@@ -360,8 +357,7 @@ impl RtmpPublisherHandler {
             }
             shiguredo_rtmp::RtmpConnectionEvent::PlayRequested { .. } => {
                 self.connection
-                    .reject("Playing is not supported by this server")
-                    .or_fail()?;
+                    .reject("Playing is not supported by this server")?;
             }
             _ => {}
         }
@@ -401,16 +397,14 @@ impl RtmpPublisherHandler {
                 Ok(false)
             }
             Ok(n) => {
-                self.connection
-                    .feed_recv_buf(&self.recv_buf[..n])
-                    .or_fail()?;
+                self.connection.feed_recv_buf(&self.recv_buf[..n])?;
                 Ok(true)
             }
             Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
                 tracing::debug!("Connection closed by publisher");
                 Ok(false)
             }
-            Err(e) => Err(e).or_fail(),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -418,7 +412,7 @@ impl RtmpPublisherHandler {
     async fn flush_send_buf(&mut self) -> crate::Result<()> {
         while !self.connection.send_buf().is_empty() {
             let send_data = self.connection.send_buf();
-            self.stream.write_all(send_data).await.or_fail()?;
+            self.stream.write_all(send_data).await?;
             self.connection.advance_send_buf(send_data.len());
         }
         Ok(())

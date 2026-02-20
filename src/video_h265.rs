@@ -1,4 +1,3 @@
-use crate::ResultExt;
 use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
@@ -142,12 +141,18 @@ pub fn h265_sample_entry_from_annexb(
         pos = nalu_end;
     }
 
-    (!vps_list.is_empty()).or_fail()?;
-    (!sps_list.is_empty()).or_fail()?;
-    (!pps_list.is_empty()).or_fail()?;
+    if vps_list.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
+    if sps_list.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
+    if pps_list.is_empty() {
+        return Err(crate::Error::new("condition is false"));
+    }
 
-    let width = EvenUsize::new(width).or_fail()?;
-    let height = EvenUsize::new(height).or_fail()?;
+    let width = EvenUsize::new(width).ok_or_else(|| crate::Error::new("value is missing"))?;
+    let height = EvenUsize::new(height).ok_or_else(|| crate::Error::new("value is missing"))?;
 
     h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
 }

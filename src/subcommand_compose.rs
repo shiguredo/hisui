@@ -1,6 +1,5 @@
 use std::{collections::BTreeSet, num::NonZeroUsize, path::PathBuf};
 
-use crate::ResultExt;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
@@ -96,13 +95,12 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         args.root_dir.clone(),
         args.layout_file_path.as_deref(),
         DEFAULT_LAYOUT_JSON,
-    )
-    .or_fail()?;
+    )?;
     tracing::debug!("layout: {layout:?}");
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
     let openh264_lib = if let Some(path) = args.openh264.as_ref().filter(|_| layout.has_video()) {
-        Some(Openh264Library::load(path).or_fail()?)
+        Some(Openh264Library::load(path)?)
     } else {
         None
     };
@@ -120,7 +118,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     composer.stats_file_path = args.stats_file_path;
 
     // 合成を実行
-    let result = composer.compose(&output_file_path).or_fail()?;
+    let result = composer.compose(&output_file_path)?;
     let entries = result
         .stats
         .entries()
@@ -147,8 +145,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
             Ok(())
         })
-    }))
-    .or_fail()?;
+    }))?;
 
     Ok(())
 }

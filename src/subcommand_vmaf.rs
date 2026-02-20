@@ -7,7 +7,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::ResultExt;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
@@ -122,24 +121,24 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     }
 
     // 最初に vmaf コマンドが利用可能かどうかをチェックする
-    check_vmaf_availability().or_fail()?;
+    check_vmaf_availability()?;
 
     // レイアウトを準備（音声処理は無効化）
     let mut layout = Layout::from_layout_json_file_or_default(
         args.root_dir.clone(),
         args.layout_file_path.as_deref(),
         DEFAULT_LAYOUT_JSON,
-    )
-    .or_fail()?;
+    )?;
     layout.audio_source_ids.clear();
     tracing::debug!("layout: {layout:?}");
     layout
         .has_video()
-        .or_fail_with(|()| "no video sources".to_owned())?;
+        .then_some(())
+        .ok_or_else(|| crate::Error::new("no video sources"))?;
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
     let openh264_lib = if let Some(path) = args.openh264.as_ref().filter(|_| layout.has_video()) {
-        Some(Openh264Library::load(path).or_fail()?)
+        Some(Openh264Library::load(path)?)
     } else {
         None
     };
@@ -157,8 +156,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     eprintln!("# Compose for VMAF");
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()
-        .or_fail()?;
+        .build()?;
     let compose_result = runtime
         .block_on(compose_for_vmaf(
             layout.clone(),
@@ -194,12 +192,11 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         &distorted_yuv_file_path,
         &vmaf_output_file_path,
         &layout,
-    )
-    .or_fail()?;
+    )?;
     eprintln!("=> done\n");
 
     // VMAF 結果を読み込んで解析
-    let vmaf = parse_vmaf_output(&vmaf_output_file_path).or_fail()?;
+    let vmaf = parse_vmaf_output(&vmaf_output_file_path)?;
 
     // 実行結果の要約を標準出力に出力する
     let output = Output {
@@ -715,15 +712,21 @@ fn run_vmaf_evaluation(
     let output = Command::new("vmaf")
         .args([
             "--reference",
-            reference_yuv_file_path.to_str().or_fail()?,
+            reference_yuv_file_path
+                .to_str()
+                .ok_or_else(|| crate::Error::new("invalid reference YUV file path"))?,
             "--distorted",
-            distorted_yuv_file_path.to_str().or_fail()?,
+            distorted_yuv_file_path
+                .to_str()
+                .ok_or_else(|| crate::Error::new("invalid distorted YUV file path"))?,
             "--width",
             &layout.resolution.width().get().to_string(),
             "--height",
             &layout.resolution.height().get().to_string(),
             "--output",
-            vmaf_output_file_path.to_str().or_fail()?,
+            vmaf_output_file_path
+                .to_str()
+                .ok_or_else(|| crate::Error::new("invalid VMAF output file path"))?,
             "--json",
             // 以降のパラメータは hisui では固定
             "--pixel_format",
@@ -732,31 +735,28 @@ fn run_vmaf_evaluation(
             "8",
         ])
         .stderr(Stdio::inherit())
-        .output()
-        .or_fail()?;
-    output
-        .status
-        .success()
-        .or_fail_with(|()| format!("vmaf failed: {}", String::from_utf8_lossy(&output.stderr)))?;
+        .output()?;
+    output.status.success().then_some(()).ok_or_else(|| {
+        crate::Error::new(format!(
+            "vmaf failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    })?;
     Ok(())
 }
 
 fn parse_vmaf_output(vmaf_output_file_path: &Path) -> crate::Result<VmafScoreStats> {
     let vmaf_content = std::fs::read_to_string(vmaf_output_file_path)
-        .or_fail_with(|e| format!("failed to read VMAF output file: {e}"))?;
-    let json = nojson::RawJson::parse(&vmaf_content).or_fail()?;
-    let vmaf_data = JsonObject::new(json.value()).or_fail()?;
-    let pooled_metrics = vmaf_data
-        .get_required_with("pooled_metrics", JsonObject::new)
-        .or_fail()?;
-    let vmaf_metrics = pooled_metrics
-        .get_required_with("vmaf", JsonObject::new)
-        .or_fail()?;
+        .map_err(|e| crate::Error::new(format!("failed to read VMAF output file: {e}")))?;
+    let json = nojson::RawJson::parse(&vmaf_content)?;
+    let vmaf_data = JsonObject::new(json.value())?;
+    let pooled_metrics = vmaf_data.get_required_with("pooled_metrics", JsonObject::new)?;
+    let vmaf_metrics = pooled_metrics.get_required_with("vmaf", JsonObject::new)?;
     Ok(VmafScoreStats {
-        min: vmaf_metrics.get_required("min").or_fail()?,
-        max: vmaf_metrics.get_required("max").or_fail()?,
-        mean: vmaf_metrics.get_required("mean").or_fail()?,
-        harmonic_mean: vmaf_metrics.get_required("harmonic_mean").or_fail()?,
+        min: vmaf_metrics.get_required("min")?,
+        max: vmaf_metrics.get_required("max")?,
+        mean: vmaf_metrics.get_required("mean")?,
+        harmonic_mean: vmaf_metrics.get_required("harmonic_mean")?,
     })
 }
 

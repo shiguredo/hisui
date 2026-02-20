@@ -1,8 +1,6 @@
 //! JSON 関連のユーティリティモジュール
 use std::{borrow::Cow, collections::BTreeMap, error::Error, io::Write, path::Path};
 
-use crate::ResultExt;
-
 // エラーメッセージに、入力 JSON の問題となっている行を表示する際の文字数の最大値。
 // これを超える場合には超過分の前後が ... で置換される。
 const MAX_ERROR_LINE_CHARS: usize = 80;
@@ -12,16 +10,20 @@ where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
     let enable_jsonc = path.as_ref().extension().is_some_and(|e| e == "jsonc");
-    let json = std::fs::read_to_string(&path)
-        .or_fail_with(|e| format!("failed to read file {}: {e}", path.as_ref().display()))?;
-    parse(&json, path.as_ref(), enable_jsonc).or_fail()
+    let json = std::fs::read_to_string(&path).map_err(|e| {
+        crate::Error::new(format!(
+            "failed to read file {}: {e}",
+            path.as_ref().display()
+        ))
+    })?;
+    parse(&json, path.as_ref(), enable_jsonc)
 }
 
 pub fn parse_str<T>(json: &str) -> crate::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
-    parse(json, Path::new(""), true).or_fail()
+    parse(json, Path::new(""), true)
 }
 
 fn parse<T>(text: &str, path: &Path, enable_jsonc: bool) -> crate::Result<T>
@@ -33,12 +35,10 @@ where
     } else {
         nojson::RawJson::parse(text)
     }
-    .map_err(|e| malformed_json_error(path, text, e))
-    .or_fail()?;
+    .map_err(|e| malformed_json_error(path, text, e))?;
     json.value()
         .try_into()
         .map_err(|e| invalid_json_error(path, &json, e))
-        .or_fail()
 }
 
 pub fn to_pretty_string<T: nojson::DisplayJson>(value: T) -> String {
@@ -66,7 +66,7 @@ pub fn pretty_print<T: nojson::DisplayJson>(value: T) -> crate::Result<()> {
             // 出力先のパイプが途中閉じられた場合はエラーにしない
             Ok(())
         }
-        Err(e) => Err(e).or_fail(),
+        Err(e) => Err(e.into()),
         Ok(()) => Ok(()),
     }
 }

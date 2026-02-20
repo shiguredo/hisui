@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::ResultExt;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
@@ -33,7 +32,7 @@ impl SvtAv1Encoder {
             fps_denominator: options.frame_rate.denumerator.get(),
             ..options.encode_params.svt_av1.clone()
         };
-        let inner = shiguredo_svt_av1::Encoder::new(&config).or_fail()?;
+        let inner = shiguredo_svt_av1::Encoder::new(&config)?;
         let sample_entry = video_av1::av1_sample_entry(width, height, inner.extra_data());
 
         Ok(Self {
@@ -47,19 +46,23 @@ impl SvtAv1Encoder {
     }
 
     pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
-        (frame.format == VideoFormat::I420).or_fail()?;
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new("condition is false"));
+        }
 
-        let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
-        self.inner.encode(y_plane, u_plane, v_plane).or_fail()?;
+        let (y_plane, u_plane, v_plane) = frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
+        self.inner.encode(y_plane, u_plane, v_plane)?;
         self.input_queue.push_back(frame);
-        self.handle_encoded_frames().or_fail()?;
+        self.handle_encoded_frames()?;
 
         Ok(())
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        self.inner.finish().or_fail()?;
-        self.handle_encoded_frames().or_fail()?;
+        self.inner.finish()?;
+        self.handle_encoded_frames()?;
         Ok(())
     }
 
@@ -68,9 +71,12 @@ impl SvtAv1Encoder {
     }
 
     fn handle_encoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(frame) = self.inner.next_frame().or_fail()? {
+        while let Some(frame) = self.inner.next_frame()? {
             // B フレームはない前提なので、タイムスタンプのいれかわりもない
-            let input_frame = self.input_queue.pop_front().or_fail()?;
+            let input_frame = self
+                .input_queue
+                .pop_front()
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
 
             self.output_queue.push_back(VideoFrame {
                 source_id: None,

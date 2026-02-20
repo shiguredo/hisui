@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use crate::ResultExt;
 use shiguredo_openh264::Openh264Library;
 
 use crate::audio::AudioFormat;
@@ -144,15 +143,18 @@ impl MediaProcessor for AudioDecoder {
             self.eos = true;
             return Ok(());
         };
-        let data = sample.expect_audio_data().or_fail()?;
+        let data = sample.expect_audio_data()?;
 
         // 遅延初期化
         if self.inner.is_none() {
-            self.inner = Some(AudioDecoderInner::new(&data).or_fail()?);
+            self.inner = Some(AudioDecoderInner::new(&data)?);
         }
 
-        let inner = self.inner.as_mut().or_fail()?;
-        let decoded = inner.decode(&data).or_fail()?;
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
+        let decoded = inner.decode(&data)?;
         self.total_audio_data_count_metric.inc();
         if let Some(id) = &data.source_id {
             self.source_id_metric.set(id.get());
@@ -170,13 +172,17 @@ impl MediaProcessor for AudioDecoder {
             })
         } else if self.eos {
             if let Some(inner) = self.inner.as_mut()
-                && let Some(remaining_data) = inner.finish().or_fail()?
+                && let Some(remaining_data) = inner.finish()?
             {
                 self.total_audio_data_count_metric.inc();
                 self.decoded.push_back(remaining_data);
+                let sample = self
+                    .decoded
+                    .pop_front()
+                    .ok_or_else(|| crate::Error::new("value is missing"))?;
                 return Ok(MediaProcessorOutput::Processed {
                     stream_id: self.output_stream_id,
-                    sample: MediaSample::audio_data(self.decoded.pop_front().or_fail()?),
+                    sample: MediaSample::audio_data(sample),
                 });
             }
             Ok(MediaProcessorOutput::Finished)
@@ -204,19 +210,15 @@ enum AudioDecoderInner {
 impl AudioDecoderInner {
     fn new(data: &AudioData) -> crate::Result<Self> {
         match data.format {
-            AudioFormat::Opus => OpusDecoder::new().or_fail().map(Self::Opus),
+            AudioFormat::Opus => OpusDecoder::new().map(Self::Opus),
             AudioFormat::Aac => {
                 #[cfg(feature = "fdk-aac")]
                 {
-                    crate::decoder_fdk_aac::FdkAacDecoder::new()
-                        .or_fail()
-                        .map(Self::FdkAac)
+                    crate::decoder_fdk_aac::FdkAacDecoder::new().map(Self::FdkAac)
                 }
                 #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
                 {
-                    crate::decoder_audio_toolbox::AudioToolboxDecoder::new()
-                        .or_fail()
-                        .map(Self::AudioToolbox)
+                    crate::decoder_audio_toolbox::AudioToolboxDecoder::new().map(Self::AudioToolbox)
                 }
                 #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
                 {
@@ -234,11 +236,11 @@ impl AudioDecoderInner {
 
     fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         match self {
-            Self::Opus(decoder) => decoder.decode(data).or_fail(),
+            Self::Opus(decoder) => decoder.decode(data),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(decoder) => decoder.decode(data).or_fail(),
+            Self::AudioToolbox(decoder) => decoder.decode(data),
             #[cfg(feature = "fdk-aac")]
-            Self::FdkAac(decoder) => decoder.decode(data).or_fail(),
+            Self::FdkAac(decoder) => decoder.decode(data),
         }
     }
 
@@ -246,7 +248,7 @@ impl AudioDecoderInner {
         match self {
             Self::Opus(_decoder) => Ok(None),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(decoder) => decoder.finish().or_fail(),
+            Self::AudioToolbox(decoder) => decoder.finish(),
             #[cfg(feature = "fdk-aac")]
             Self::FdkAac(_decoder) => Ok(None),
         }
@@ -432,7 +434,7 @@ impl MediaProcessor for VideoDecoder {
 
     fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         if let Some(sample) = input.sample {
-            let frame = sample.expect_video_frame().or_fail()?;
+            let frame = sample.expect_video_frame()?;
 
             self.total_input_video_frame_count_metric.inc();
             if let Some(id) = &frame.source_id {
@@ -440,11 +442,10 @@ impl MediaProcessor for VideoDecoder {
             }
 
             self.inner
-                .decode(&frame, &self.codec_metric, &self.engine_metric)
-                .or_fail()?;
+                .decode(&frame, &self.codec_metric, &self.engine_metric)?;
         } else {
             self.eos = true;
-            self.inner.finish().or_fail()?;
+            self.inner.finish()?;
         };
 
         while let Some(frame) = self.inner.next_decoded_frame() {
@@ -503,10 +504,9 @@ impl VideoDecoderInner {
         engine_metric: &crate::stats::StatsString,
         options: VideoDecoderOptions,
     ) -> crate::Result<()> {
-        let codec = frame
-            .format
-            .codec_name()
-            .or_fail_with(|()| format!("unexpected video format: {:?}", frame.format))?;
+        let codec = frame.format.codec_name().ok_or_else(|| {
+            crate::Error::new(format!("unexpected video format: {:?}", frame.format))
+        })?;
         codec_metric.set(codec.as_str());
 
         let candidate_engines = options
@@ -524,66 +524,52 @@ impl VideoDecoderInner {
         match (engine, codec) {
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H264) => {
-                *self = NvcodecDecoder::new_h264(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_h264(&options.decode_params).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H265) => {
-                *self = NvcodecDecoder::new_h265(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_h265(&options.decode_params).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp8) => {
-                *self = NvcodecDecoder::new_vp8(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_vp8(&options.decode_params).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp9) => {
-                *self = NvcodecDecoder::new_vp9(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_vp9(&options.decode_params).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Av1) => {
-                *self = NvcodecDecoder::new_av1(&options.decode_params)
-                    .or_fail()
-                    .map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_av1(&options.decode_params).map(Self::Nvcodec)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H264) => {
                 *self = VideoToolboxDecoder::new_h264(frame)
-                    .or_fail()
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
                 *self = VideoToolboxDecoder::new_h265(frame)
-                    .or_fail()
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             (Some(EngineName::Openh264), CodecName::H264) => {
-                let lib = options.openh264_lib.or_fail_with(|()| {
-                    "OpenH264 library is required for H.264 decoding".to_owned()
+                let lib = options.openh264_lib.ok_or_else(|| {
+                    crate::Error::new("OpenH264 library is required for H.264 decoding")
                 })?;
-                *self = Openh264Decoder::new(lib.clone())
-                    .or_fail()
-                    .map(Self::Openh264)?;
+                *self = Openh264Decoder::new(lib.clone()).map(Self::Openh264)?;
             }
             #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp8) => {
-                *self = LibvpxDecoder::new_vp8().or_fail().map(Self::Libvpx)?;
+                *self = LibvpxDecoder::new_vp8().map(Self::Libvpx)?;
             }
             #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp9) => {
-                *self = LibvpxDecoder::new_vp9().or_fail().map(Self::Libvpx)?;
+                *self = LibvpxDecoder::new_vp9().map(Self::Libvpx)?;
             }
             (Some(EngineName::Dav1d), CodecName::Av1) => {
-                *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
+                *self = Dav1dDecoder::new().map(Self::Dav1d)?;
             }
             _ => {
                 return Err(crate::Error::new(format!(
@@ -609,18 +595,17 @@ impl VideoDecoderInner {
         match self {
             Self::Initial { options } => {
                 let options = options.clone();
-                self.initialize_decoder(frame, codec_metric, engine_metric, options)
-                    .or_fail()?;
-                self.decode(frame, codec_metric, engine_metric).or_fail()
+                self.initialize_decoder(frame, codec_metric, engine_metric, options)?;
+                self.decode(frame, codec_metric, engine_metric)
             }
             #[cfg(feature = "libvpx")]
-            Self::Libvpx(decoder) => decoder.decode(frame).or_fail(),
-            Self::Openh264(decoder) => decoder.decode(frame).or_fail(),
-            Self::Dav1d(decoder) => decoder.decode(frame).or_fail(),
+            Self::Libvpx(decoder) => decoder.decode(frame),
+            Self::Openh264(decoder) => decoder.decode(frame),
+            Self::Dav1d(decoder) => decoder.decode(frame),
             #[cfg(target_os = "macos")]
-            Self::VideoToolbox(decoder) => decoder.decode(frame).or_fail(),
+            Self::VideoToolbox(decoder) => decoder.decode(frame),
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(decoder) => decoder.decode(frame).or_fail(),
+            Self::Nvcodec(decoder) => decoder.decode(frame),
         }
     }
 
@@ -628,13 +613,13 @@ impl VideoDecoderInner {
         match self {
             Self::Initial { .. } => {}
             #[cfg(feature = "libvpx")]
-            Self::Libvpx(decoder) => decoder.finish().or_fail()?,
-            Self::Openh264(decoder) => decoder.finish().or_fail()?,
-            Self::Dav1d(decoder) => decoder.finish().or_fail()?,
+            Self::Libvpx(decoder) => decoder.finish()?,
+            Self::Openh264(decoder) => decoder.finish()?,
+            Self::Dav1d(decoder) => decoder.finish()?,
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(_decoder) => {}
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(decoder) => decoder.finish().or_fail()?,
+            Self::Nvcodec(decoder) => decoder.finish()?,
         }
         Ok(())
     }

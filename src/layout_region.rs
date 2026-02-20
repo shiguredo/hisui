@@ -4,8 +4,6 @@ use std::{
     time::Duration,
 };
 
-use crate::ResultExt;
-
 use crate::{
     json::JsonObject,
     layout::{AggregatedSourceInfo, AssignedSource, Resolution},
@@ -135,8 +133,7 @@ impl RawRegion {
             ));
         }
 
-        let resolved =
-            resolve(base_path, &self.video_sources, &self.video_sources_excluded).or_fail()?;
+        let resolved = resolve(base_path, &self.video_sources, &self.video_sources_excluded)?;
 
         let mut source_ids = BTreeSet::new();
         for (source, media_path) in resolved {
@@ -192,29 +189,31 @@ impl RawRegion {
             resolution
         } else {
             // 全体の解像度が未指定の場合には、リージョンの width / height から求める
-            (self.width > 0).or_fail_with(|()| {
-                "Region width must be specified when resolution is not set".to_owned()
-            })?;
-            (self.height > 0).or_fail_with(|()| {
-                "Region height must be specified when resolution is not set".to_owned()
-            })?;
+            if self.width == 0 {
+                return Err(crate::Error::new(
+                    "Region width must be specified when resolution is not set",
+                ));
+            }
+            if self.height == 0 {
+                return Err(crate::Error::new(
+                    "Region height must be specified when resolution is not set",
+                ));
+            }
 
             // リージョンの位置とサイズから必要な解像度を計算
             let required_width = self.x_pos + self.width;
             let required_height = self.y_pos + self.height;
-            Resolution::new(required_width, required_height).or_fail()?
+            Resolution::new(required_width, required_height)?
         };
 
         // 高さの確認と調整
         if self.height != 0 {
-            (16..=resolution.height.get())
-                .contains(&self.height)
-                .or_fail_with(|()| {
-                    format!(
-                        "video_layout region height is out of range: {}",
-                        self.height
-                    )
-                })?;
+            if !(16..=resolution.height.get()).contains(&self.height) {
+                return Err(crate::Error::new(format!(
+                    "video_layout region height is out of range: {}",
+                    self.height
+                )));
+            }
             self.height -= self.height % 2; // 偶数にする
         } else {
             // 0 は自動計算を意味する
@@ -223,11 +222,12 @@ impl RawRegion {
 
         // 幅の確認と調整
         if self.width != 0 {
-            (16..=resolution.width.get())
-                .contains(&self.width)
-                .or_fail_with(|()| {
-                    format!("video_layout region width is out of range: {}", self.width)
-                })?;
+            if !(16..=resolution.width.get()).contains(&self.width) {
+                return Err(crate::Error::new(format!(
+                    "video_layout region width is out of range: {}",
+                    self.width
+                )));
+            }
             self.width -= self.width % 2; // 偶数にする
         } else {
             // 0 は自動計算を意味する
@@ -235,31 +235,33 @@ impl RawRegion {
         }
 
         // y_pos の確認
-        (self.y_pos + self.height <= resolution.height.get()).or_fail_with(|()| {
-            format!(
+        if self.y_pos + self.height > resolution.height.get() {
+            return Err(crate::Error::new(format!(
                 "video_layout region y_pos + height ({}) exceeds resolution height ({})",
                 self.y_pos + self.height,
                 resolution.height.get()
-            )
-        })?;
+            )));
+        }
 
         // x_pos の確認
-        (self.x_pos + self.width <= resolution.width.get()).or_fail_with(|()| {
-            format!(
+        if self.x_pos + self.width > resolution.width.get() {
+            return Err(crate::Error::new(format!(
                 "video_layout region x_pos + width ({}) exceeds resolution width ({})",
                 self.x_pos + self.width,
                 resolution.width.get()
-            )
-        })?;
+            )));
+        }
 
         // z_pos の確認
-        (-99..=99).contains(&self.z_pos).or_fail_with(|()| {
-            format!("video_layout region z_pos is out of range: {}", self.z_pos)
-        })?;
+        if !(-99..=99).contains(&self.z_pos) {
+            return Err(crate::Error::new(format!(
+                "video_layout region z_pos is out of range: {}",
+                self.z_pos
+            )));
+        }
 
-        let (cell_width, cell_height, top_border_pixels, left_border_pixels) = self
-            .decide_cell_resolution_and_borders(rows, columns, resolution)
-            .or_fail()?;
+        let (cell_width, cell_height, top_border_pixels, left_border_pixels) =
+            self.decide_cell_resolution_and_borders(rows, columns, resolution)?;
 
         let grid = Grid {
             assigned_sources: assigned,
@@ -297,21 +299,21 @@ impl RawRegion {
         if grid_width != resolution.width.get() {
             grid_width = grid_width
                 .checked_sub(self.border_pixels.get() * 2)
-                .or_fail_with(|()| {
-                    format!(
+                .ok_or_else(|| {
+                    crate::Error::new(format!(
                         "vertical outer border size ({}*2) are larger than grid width {grid_width}",
                         self.border_pixels.get(),
-                    )
+                    ))
                 })?;
         }
         if grid_height != resolution.height.get() {
             grid_height = grid_height
                 .checked_sub(self.border_pixels.get() * 2)
-                .or_fail_with(|()| {
-                    format!(
+                .ok_or_else(|| {
+                    crate::Error::new(format!(
                         "horizontal outer border size ({}*2) are larger than grid height {grid_height}",
                         self.border_pixels.get(),
-                    )
+                    ))
                 })?;
         }
 

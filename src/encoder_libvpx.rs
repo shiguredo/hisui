@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::ResultExt;
 use shiguredo_mp4::{
     Uint,
     boxes::{SampleEntry, Vp08Box, Vp09Box, VpccBox},
@@ -46,7 +45,7 @@ impl LibvpxEncoder {
             ..options.encode_params.libvpx_vp8.clone()
         };
         tracing::debug!("libvpx vp8 encoder config: {config:?}");
-        let inner = shiguredo_libvpx::Encoder::new_vp8(&config).or_fail()?;
+        let inner = shiguredo_libvpx::Encoder::new_vp8(&config)?;
         let sample_entry = vp8_sample_entry(width, height);
 
         Ok(Self {
@@ -70,7 +69,7 @@ impl LibvpxEncoder {
             ..options.encode_params.libvpx_vp9.clone()
         };
         tracing::debug!("libvpx vp9 encoder config: {config:?}");
-        let inner = shiguredo_libvpx::Encoder::new_vp9(&config).or_fail()?;
+        let inner = shiguredo_libvpx::Encoder::new_vp9(&config)?;
         let sample_entry = vp9_sample_entry(width, height);
 
         Ok(Self {
@@ -91,25 +90,32 @@ impl LibvpxEncoder {
     }
 
     pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
-        (frame.format == VideoFormat::I420).or_fail()?;
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new("condition is false"));
+        }
 
-        let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
-        self.inner.encode(y_plane, u_plane, v_plane).or_fail()?;
+        let (y_plane, u_plane, v_plane) = frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("value is missing"))?;
+        self.inner.encode(y_plane, u_plane, v_plane)?;
         self.input_queue.push_back(frame);
-        self.handle_encoded_frames().or_fail()?;
+        self.handle_encoded_frames()?;
 
         Ok(())
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        self.inner.finish().or_fail()?;
-        self.handle_encoded_frames().or_fail()?;
+        self.inner.finish()?;
+        self.handle_encoded_frames()?;
         Ok(())
     }
 
     fn handle_encoded_frames(&mut self) -> crate::Result<()> {
         while let Some(frame) = self.inner.next_frame() {
-            let input_frame = self.input_queue.pop_front().or_fail()?;
+            let input_frame = self
+                .input_queue
+                .pop_front()
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
             self.output_queue.push_back(VideoFrame {
                 source_id: None,
                 sample_entry: self.sample_entry.take(),

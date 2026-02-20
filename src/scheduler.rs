@@ -7,8 +7,6 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use crate::ResultExt;
-
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
@@ -79,7 +77,10 @@ impl Task {
     fn process_input(&mut self) -> crate::Result<bool> {
         let mut input = None;
         for &stream_id in &self.awaiting_input_stream_ids {
-            let rx = self.input_stream_rxs.get(&stream_id).or_fail()?;
+            let rx = self
+                .input_stream_rxs
+                .get(&stream_id)
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
             match rx.try_recv() {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     input = Some(MediaProcessorInput::eos(stream_id));
@@ -94,7 +95,7 @@ impl Task {
             }
         }
         if let Some(input) = input {
-            self.processor.process_input(input).or_fail()?;
+            self.processor.process_input(input)?;
             self.awaiting_input_stream_ids.clear();
             Ok(true)
         } else {
@@ -108,7 +109,10 @@ impl Task {
         }
 
         if let Some((stream_id, mut i, sample)) = self.output_sample.take() {
-            let txs = self.output_stream_txs.get_mut(&stream_id).or_fail()?;
+            let txs = self
+                .output_stream_txs
+                .get_mut(&stream_id)
+                .ok_or_else(|| crate::Error::new("value is missing"))?;
             while i < txs.len() {
                 match txs[i].try_send(sample.clone()) {
                     Ok(()) => {
@@ -128,7 +132,7 @@ impl Task {
             }
         }
 
-        match self.processor.process_output().or_fail()? {
+        match self.processor.process_output()? {
             MediaProcessorOutput::Finished => {
                 self.finished = true;
                 Ok(false)
@@ -158,7 +162,7 @@ impl Task {
 
     fn run_until_block(&mut self) -> crate::Result<bool> {
         let mut did_something = false;
-        while self.process_input().or_fail()? || self.process_output().or_fail()? {
+        while self.process_input()? || self.process_output()? {
             did_something = true;
         }
         Ok(did_something)
@@ -207,7 +211,7 @@ impl Scheduler {
     }
 
     fn spawn(mut self) -> crate::Result<SchedulerHandle> {
-        self.update_output_stream_txs().or_fail()?;
+        self.update_output_stream_txs()?;
 
         // コストが高い順にソートする
         // なお、現時点では、I/O タスクは「コストが最低の CPU タスク」として扱っている
@@ -230,8 +234,8 @@ impl Scheduler {
             let i = thread_costs
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, cost)| *cost) // 累積コストが一番低いスレッドを選ぶ
-                .or_fail()?
+                .min_by_key(|(_, cost)| *cost)
+                .ok_or_else(|| crate::Error::new("value is missing"))? // 累積コストが一番低いスレッドを選ぶ
                 .0;
             thread_costs[i] += cost.get();
             task.thread_number = i;
@@ -266,7 +270,7 @@ impl Scheduler {
 
     pub fn run(self) -> crate::Result<SchedulerResult> {
         let start = Instant::now();
-        let handle = self.spawn().or_fail()?;
+        let handle = self.spawn()?;
         for handle in handle.handles {
             if let Err(e) = handle.join() {
                 std::panic::resume_unwind(e);
@@ -284,7 +288,7 @@ impl Scheduler {
         const SLEEP_DURATION: Duration = Duration::from_millis(100);
 
         let start = Instant::now();
-        let mut handle = self.spawn().or_fail()?;
+        let mut handle = self.spawn()?;
         let mut timeout_expired = false;
         while !handle.handles.is_empty() {
             if !timeout_expired && timeout < start.elapsed() {
@@ -378,7 +382,7 @@ impl TaskRunner {
         let mut i = 0;
         let mut did_something = false;
         while i < self.tasks.len() {
-            let result = self.tasks[i].run_until_block().or_fail();
+            let result = self.tasks[i].run_until_block();
 
             match result {
                 Err(e) => {

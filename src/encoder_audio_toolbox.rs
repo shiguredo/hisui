@@ -1,6 +1,5 @@
 use std::{num::NonZeroUsize, time::Duration};
 
-use crate::ResultExt;
 use shiguredo_mp4::{
     Uint,
     boxes::{EsdsBox, Mp4aBox, SampleEntry},
@@ -18,7 +17,7 @@ pub struct AudioToolboxEncoder {
 
 impl AudioToolboxEncoder {
     pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
-        let inner = shiguredo_audio_toolbox::Encoder::new(bitrate.get()).or_fail()?;
+        let inner = shiguredo_audio_toolbox::Encoder::new(bitrate.get())?;
         let sample_entry = Some(sample_entry(bitrate));
         Ok(Self {
             inner,
@@ -28,7 +27,7 @@ impl AudioToolboxEncoder {
     }
 
     pub fn finish(&mut self) -> crate::Result<Option<AudioData>> {
-        if let Some(encoded) = self.inner.finish().or_fail()? {
+        if let Some(encoded) = self.inner.finish()? {
             Ok(Some(self.handle_encoded_frame(encoded)))
         } else {
             Ok(None)
@@ -36,14 +35,15 @@ impl AudioToolboxEncoder {
     }
 
     pub fn encode(&mut self, data: &AudioData) -> crate::Result<Option<AudioData>> {
-        (data.format == AudioFormat::I16Be).or_fail()?;
-        data.stereo.or_fail()?;
+        if data.format != AudioFormat::I16Be {
+            return Err(crate::Error::new("condition is false"));
+        }
+        if !data.stereo {
+            return Err(crate::Error::new("condition is false"));
+        }
 
-        let input = data
-            .interleaved_stereo_samples()
-            .or_fail()?
-            .collect::<Vec<_>>();
-        let Some(encoded) = self.inner.encode(&input).or_fail()? else {
+        let input = data.interleaved_stereo_samples()?.collect::<Vec<_>>();
+        let Some(encoded) = self.inner.encode(&input)? else {
             return Ok(None);
         };
         Ok(Some(self.handle_encoded_frame(encoded)))
