@@ -33,10 +33,7 @@ impl AudioReader {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await?;
         handle.notify_ready();
-        handle
-            .wait_subscribers_ready()
-            .await
-            .map_err(|e| crate::Error::new(e.to_string()))?;
+        handle.wait_subscribers_ready().await?;
 
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
@@ -264,10 +261,7 @@ impl VideoReader {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await?;
         handle.notify_ready();
-        handle
-            .wait_subscribers_ready()
-            .await
-            .map_err(|e| crate::Error::new(e.to_string()))?;
+        handle.wait_subscribers_ready().await?;
 
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
