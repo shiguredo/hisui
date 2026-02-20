@@ -1,3 +1,4 @@
+// Sora の録画ファイル合成処理固有
 use std::path::PathBuf;
 use std::time::Duration;
 
