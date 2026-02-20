@@ -500,7 +500,8 @@ impl Mp4Writer {
         let mut video_rx = input_video_track_id.map(|id| handle.subscribe_track(id));
         handle.notify_ready();
 
-        let mut in_progress = audio_rx.is_some() || video_rx.is_some();
+        // 入力トラックが 0 本でも finalize までは必ず 1 回実行する。
+        let mut in_progress = true;
         while in_progress {
             if audio_rx.is_none() && video_rx.is_none() {
                 // これ以上入力は増えないので、キューを空にするまで出力処理を続ける。
