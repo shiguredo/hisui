@@ -71,6 +71,15 @@ impl From<Error> for noargs::Error {
     }
 }
 
+// [NOTE]
+// `impl<E: std::error::Error> From<E> for Error` や
+// `impl<E: std::fmt::Display> From<E> for Error` は実装しない方針にしている。
+// `Error` を `Error` のまま再ラップした場合に reason / location / backtrace が重複して、
+// エラー出力が冗長になるのを防ぐため。
+// 既存の `Error` に文脈を追加したい場合は `Error::with_context()` を使うこと。
+//
+// そのため、新しいエラー型を導入して `?` で `crate::Error` へ変換したい場合は、
+// このファイルに個別の `impl From<NewError> for Error` を追加する。
 impl From<std::io::Error> for Error {
     #[track_caller]
     fn from(e: std::io::Error) -> Self {
