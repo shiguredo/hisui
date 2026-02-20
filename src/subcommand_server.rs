@@ -178,9 +178,7 @@ async fn run_server(
     tokio::spawn(pipeline.run());
 
     if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
-        crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle)
-            .await
-            .map_err(|e| crate::Error::new(e.display()))?;
+        crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle).await?;
         tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
     }
     pipeline_handle.complete_initial_processor_registration();

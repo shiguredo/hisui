@@ -342,7 +342,7 @@ impl VideoMixer {
         handle.wait_subscribers_ready().await?;
 
         loop {
-            match self.process_output().map_err(|e| Error::new(e.display()))? {
+            match self.process_output()? {
                 MediaProcessorOutput::Processed { sample, .. } => {
                     if !output_tx.send_media(sample) {
                         break;
@@ -512,19 +512,14 @@ impl VideoMixer {
         message: Message,
     ) -> Result<()> {
         match message {
-            Message::Media(MediaSample::Video(sample)) => self
-                .process_input(MediaProcessorInput::sample(
-                    stream_id,
-                    MediaSample::Video(sample),
-                ))
-                .map_err(|e| Error::new(e.display())),
+            Message::Media(MediaSample::Video(sample)) => self.process_input(
+                MediaProcessorInput::sample(stream_id, MediaSample::Video(sample)),
+            ),
             Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
                 "expected a video sample on track {}, but got an audio sample",
                 track_id.get()
             ))),
-            Message::Eos => self
-                .process_input(MediaProcessorInput::eos(stream_id))
-                .map_err(|e| Error::new(e.display())),
+            Message::Eos => self.process_input(MediaProcessorInput::eos(stream_id)),
             Message::Syn(_) => Ok(()),
         }
     }

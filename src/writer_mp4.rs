@@ -526,9 +526,7 @@ impl Mp4Writer {
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
             let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
 
-            in_progress = self
-                .handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                .map_err(|e| crate::Error::new(e.display()))?;
+            in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
         }
 
         Ok(())

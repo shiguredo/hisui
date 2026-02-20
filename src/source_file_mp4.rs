@@ -4,8 +4,8 @@ use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
 use crate::file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions};
 use crate::media::MediaStreamId;
 use crate::{
-    Error, MediaPipeline, MediaPipelineHandle, Message, ProcessorHandle, ProcessorId,
-    ProcessorMetadata, Result, TrackId,
+    MediaPipeline, MediaPipelineHandle, Message, ProcessorHandle, ProcessorId, ProcessorMetadata,
+    Result, TrackId,
 };
 
 #[derive(Debug, Clone)]
@@ -111,8 +111,7 @@ impl Mp4FileSource {
                 MediaStreamId::new(0),
                 MediaStreamId::new(1),
                 crate::stats::Stats::new(),
-            )
-            .map_err(|e| Error::new(e.display()))?;
+            )?;
 
             options.audio_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;

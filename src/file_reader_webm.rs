@@ -139,19 +139,13 @@ impl ReaderState {
         let source_id = SourceId::new("webm_file_reader");
 
         let audio_reader = if enable_audio {
-            Some(
-                WebmAudioReader::new(source_id.clone(), path.as_ref())
-                    .map_err(|e| Error::new(e.display()))?,
-            )
+            Some(WebmAudioReader::new(source_id.clone(), path.as_ref())?)
         } else {
             None
         };
 
         let video_reader = if enable_video {
-            Some(
-                WebmVideoReader::new(source_id, path.as_ref())
-                    .map_err(|e| Error::new(e.display()))?,
-            )
+            Some(WebmVideoReader::new(source_id, path.as_ref())?)
         } else {
             None
         };
@@ -176,10 +170,7 @@ impl ReaderState {
             return Ok(());
         }
         if let Some(reader) = self.audio_reader.as_mut() {
-            self.next_audio = reader
-                .next()
-                .transpose()
-                .map_err(|e| Error::new(e.display()))?;
+            self.next_audio = reader.next().transpose()?;
         }
         Ok(())
     }
@@ -189,10 +180,7 @@ impl ReaderState {
             return Ok(());
         }
         if let Some(reader) = self.video_reader.as_mut() {
-            self.next_video = reader
-                .next()
-                .transpose()
-                .map_err(|e| Error::new(e.display()))?;
+            self.next_video = reader.next().transpose()?;
         }
         Ok(())
     }

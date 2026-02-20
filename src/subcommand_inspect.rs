@@ -57,8 +57,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 }
 
 fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf>) -> Result<()> {
-    let format =
-        ContainerFormat::from_path(&input_file_path).map_err(|e| Error::new(e.display()))?;
+    let format = ContainerFormat::from_path(&input_file_path)?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -99,8 +98,7 @@ async fn setup_pipeline(
                     audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
                     video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
                 },
-            )
-            .map_err(|e| Error::new(e.display()))?;
+            )?;
 
             pipeline_handle
                 .spawn_processor(
@@ -140,8 +138,7 @@ async fn setup_pipeline(
             AUDIO_DECODER_INPUT_STREAM_ID,
             AUDIO_DECODER_OUTPUT_STREAM_ID,
             crate::stats::Stats::new(),
-        )
-        .map_err(|e| Error::new(e.display()))?;
+        )?;
 
         pipeline_handle
             .spawn_processor(
@@ -425,7 +422,7 @@ impl OutputPrinter {
             }
         }
 
-        crate::json::pretty_print(&self).map_err(|e| Error::new(e.display()))?;
+        crate::json::pretty_print(&self)?;
         Ok(())
     }
 

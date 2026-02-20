@@ -201,12 +201,10 @@ impl AudioEncoder {
 
             match message {
                 Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
-                        .map_err(|e| Error::new(e.display()))?;
+                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
                 }
                 Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))
-                        .map_err(|e| Error::new(e.display()))?;
+                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
                 }
                 Message::Syn(_) => {}
             }
@@ -231,10 +229,7 @@ fn drain_audio_encoder_output(
     output_tx: &mut crate::MessageSender,
 ) -> Result<bool> {
     loop {
-        match encoder
-            .process_output()
-            .map_err(|e| Error::new(e.display()))?
-        {
+        match encoder.process_output()? {
             MediaProcessorOutput::Processed { sample, .. } => {
                 if !output_tx.send_media(sample) {
                     return Ok(true);
@@ -577,12 +572,10 @@ impl VideoEncoder {
 
             match message {
                 Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
-                        .map_err(|e| Error::new(e.display()))?;
+                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
                 }
                 Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))
-                        .map_err(|e| Error::new(e.display()))?;
+                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
                 }
                 Message::Syn(_) => {}
             }
@@ -607,10 +600,7 @@ fn drain_video_encoder_output(
     output_tx: &mut crate::MessageSender,
 ) -> Result<bool> {
     loop {
-        match encoder
-            .process_output()
-            .map_err(|e| Error::new(e.display()))?
-        {
+        match encoder.process_output()? {
             MediaProcessorOutput::Processed { sample, .. } => {
                 if !output_tx.send_media(sample) {
                     return Ok(true);

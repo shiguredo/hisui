@@ -351,10 +351,7 @@ async fn setup_vmaf_pipeline(
                     &source_info,
                     handle.stats(),
                 )?;
-                reader
-                    .run(handle)
-                    .await
-                    .map_err(|e| Error::new(e.display()))
+                reader.run(handle).await
             },
             &mut processor_tasks,
         )

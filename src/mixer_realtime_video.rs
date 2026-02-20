@@ -498,8 +498,7 @@ fn compose_frame(
                 resize_width,
                 resize_height,
                 shiguredo_libyuv::FilterMode::Bilinear,
-            )
-            .map_err(|e| Error::new(e.display()))?
+            )?
             .ok_or_else(|| Error::new("failed to resize input frame"))?;
 
         canvas.draw_frame_clipped(x, y, &resized)?;
@@ -694,8 +693,7 @@ mod tests {
                 ],
                 "outputTrackId": "output"
             }"#,
-        )
-        .map_err(|e| Error::new(e.display()))?;
+        )?;
 
         assert_eq!(mixer.canvas_width.get(), 1280);
         assert_eq!(mixer.canvas_height.get(), 720);
@@ -748,8 +746,7 @@ mod tests {
                 ],
                 "outputTrackId": "output"
             }"#,
-        )
-        .map_err(|e| Error::new(e.display()))?;
+        )?;
 
         assert_eq!(mixer.frame_rate.numerator.get(), 30);
         assert_eq!(mixer.frame_rate.denumerator.get(), 1);
@@ -771,8 +768,7 @@ mod tests {
                 ],
                 "outputTrackId": "output"
             }"#,
-        )
-        .map_err(|e| Error::new(e.display()))?;
+        )?;
 
         let track = &mixer.input_tracks[0];
         assert_eq!(track.x, 0);
@@ -802,8 +798,7 @@ mod tests {
                 ],
                 "outputTrackId": "output"
             }"#,
-        )
-        .map_err(|e| Error::new(e.display()))?;
+        )?;
 
         assert_eq!(mixer.frame_rate.numerator.get(), 30000);
         assert_eq!(mixer.frame_rate.denumerator.get(), 1001);
@@ -919,8 +914,7 @@ mod tests {
                 ],
                 "outputTrackId": "output"
             }"#,
-        )
-        .map_err(|e| Error::new(e.display()))?;
+        )?;
 
         assert_eq!(mixer.canvas_width.get(), 0);
         Ok(())
@@ -961,8 +955,7 @@ mod tests {
                 ],
                 "outputTrackId": "output"
             }"#,
-        )
-        .map_err(|e| Error::new(e.display()))?;
+        )?;
 
         assert_eq!(mixer.input_tracks[0].height.map(EvenUsize::get), Some(0));
         Ok(())
