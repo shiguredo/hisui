@@ -1174,7 +1174,12 @@ fn layout(
         video_encode_engines: None,
         video_decode_engines: None,
     };
-    VideoMixerSpec::from_layout(&layout)
+    let input_track_source_ids = sources
+        .iter()
+        .enumerate()
+        .map(|(i, source)| (track_id(i), source.id.clone()))
+        .collect();
+    VideoMixerSpec::from_layout(&layout).with_input_track_source_ids(input_track_source_ids)
 }
 
 fn region(region_size: Size, cell_size: Size) -> Region {
