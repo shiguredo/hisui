@@ -106,10 +106,7 @@ impl AudioDecoder {
             self.inner = Some(AudioDecoderInner::new(&data)?);
         }
 
-        let inner = self
-            .inner
-            .as_mut()
-            .ok_or_else(|| crate::Error::new("audio decoder is not initialized"))?;
+        let inner = self.inner.as_mut().expect("infallible");
         let decoded = inner.decode(&data)?;
         self.total_audio_data_count_metric.inc();
         if let Some(id) = &data.source_id {
