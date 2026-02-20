@@ -372,7 +372,7 @@ impl RtmpPublisherHandler {
         let audio_data = self
             .frame_handler
             .process_audio_frame(frame)
-            .map_err(|e| crate::Error::new(e.to_string()))?;
+            .map_err(|e| crate::Error::new(e.display()))?;
         if let Some(tx) = &mut self.audio_track_tx {
             tx.send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
         }
@@ -384,7 +384,7 @@ impl RtmpPublisherHandler {
         if let Some(video_frame) = self
             .frame_handler
             .process_video_frame(frame)
-            .map_err(|e| crate::Error::new(e.to_string()))?
+            .map_err(|e| crate::Error::new(e.display()))?
             && let Some(tx) = &mut self.video_track_tx
         {
             tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));

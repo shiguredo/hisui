@@ -112,7 +112,7 @@ impl Mp4FileSource {
                 MediaStreamId::new(1),
                 crate::stats::Stats::new(),
             )
-            .map_err(|e| Error::new(e.to_string()))?;
+            .map_err(|e| Error::new(e.display()))?;
 
             options.audio_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;

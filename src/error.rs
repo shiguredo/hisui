@@ -41,13 +41,6 @@ impl Error {
         self.reason.clone()
     }
 
-    /// エラー理由のみの文字列表現を返す
-    ///
-    /// `display()` の互換メソッド。
-    pub fn to_string(&self) -> String {
-        self.display()
-    }
-
     /// `noargs::Error` に変換する
     pub fn to_noargs_error(self) -> noargs::Error {
         noargs::Error::Other {

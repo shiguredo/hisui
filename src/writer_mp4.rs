@@ -528,7 +528,7 @@ impl Mp4Writer {
 
             in_progress = self
                 .handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                .map_err(|e| crate::Error::new(e.to_string()))?;
+                .map_err(|e| crate::Error::new(e.display()))?;
         }
 
         Ok(())

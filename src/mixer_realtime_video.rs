@@ -499,7 +499,7 @@ fn compose_frame(
                 resize_height,
                 shiguredo_libyuv::FilterMode::Bilinear,
             )
-            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.display()))?
             .ok_or_else(|| Error::new("failed to resize input frame"))?;
 
         canvas.draw_frame_clipped(x, y, &resized)?;

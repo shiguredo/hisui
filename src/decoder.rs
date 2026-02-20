@@ -81,11 +81,11 @@ impl AudioDecoder {
             match message {
                 Message::Media(sample) => {
                     self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                        .map_err(|e| Error::new(e.display()))?;
                 }
                 Message::Eos => {
                     self.process_input(MediaProcessorInput::eos(self.input_stream_id))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                        .map_err(|e| Error::new(e.display()))?;
                 }
                 Message::Syn(_) => {}
             }
@@ -326,11 +326,11 @@ impl VideoDecoder {
             match message {
                 Message::Media(sample) => {
                     self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                        .map_err(|e| Error::new(e.display()))?;
                 }
                 Message::Eos => {
                     self.process_input(MediaProcessorInput::eos(self.input_stream_id))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                        .map_err(|e| Error::new(e.display()))?;
                 }
                 Message::Syn(_) => {}
             }
@@ -406,7 +406,7 @@ async fn drain_decoder_output<P: MediaProcessor>(
     loop {
         match decoder
             .process_output()
-            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.display()))?
         {
             MediaProcessorOutput::Processed { sample, .. } => {
                 if !output_tx.send_media(sample) {
