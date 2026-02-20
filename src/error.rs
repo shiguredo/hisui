@@ -33,16 +33,30 @@ impl Error {
         self.reason = format!("{}: {}", context.as_ref(), self.reason);
         self
     }
-}
 
-impl std::fmt::Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self}")
+    /// エラー理由のみの文字列表現を返す
+    ///
+    /// `Display` を実装していないため、互換用途で明示的に提供する。
+    pub fn display(&self) -> String {
+        self.reason.clone()
     }
-}
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    /// エラー理由のみの文字列表現を返す
+    ///
+    /// `display()` の互換メソッド。
+    pub fn to_string(&self) -> String {
+        self.display()
+    }
+
+    /// `noargs::Error` に変換する
+    pub fn to_noargs_error(self) -> noargs::Error {
+        noargs::Error::Other {
+            metadata: None,
+            error: Box::new(format!("{self:?}")),
+        }
+    }
+
+    fn fmt_detailed(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.reason)?;
         write!(f, " (at {}:{})", self.location.file(), self.location.line())?;
 
@@ -54,6 +68,18 @@ impl std::fmt::Display for Error {
         }
 
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_detailed(f)
+    }
+}
+
+impl From<Error> for noargs::Error {
+    fn from(error: Error) -> Self {
+        error.to_noargs_error()
     }
 }
 
@@ -244,5 +270,18 @@ mod tests {
         assert_eq!(err.location.file(), location.file());
         assert_eq!(err.location.line(), location.line());
         assert_eq!(err.backtrace.status(), backtrace_status);
+    }
+
+    #[test]
+    fn to_noargs_error_uses_other_variant() {
+        let err = Error::new("reason");
+        let noargs_err = err.to_noargs_error();
+
+        match noargs_err {
+            noargs::Error::Other { metadata, .. } => {
+                assert!(metadata.is_none());
+            }
+            _ => panic!("expected noargs::Error::Other"),
+        }
     }
 }

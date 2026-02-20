@@ -90,6 +90,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    run_internal(args).map_err(|e| e.to_noargs_error())
+}
+
+fn run_internal(args: Args) -> crate::Result<()> {
     // レイアウトを準備
     let layout = Layout::from_layout_json_file_or_default(
         args.root_dir.clone(),
@@ -122,7 +126,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     let entries = result
         .stats
         .entries()
-        .map_err(|e: crate::Error| crate::Error::new(e.to_string()))?;
+        .map_err(|e: crate::Error| e.with_context("failed to load compose stats entries"))?;
 
     if !result.success {
         // エラー発生時は終了コードを変える

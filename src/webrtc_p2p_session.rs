@@ -451,7 +451,10 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     };
                     if let Err(e) = crate::webrtc_video::push_i420_frame(&mut state.source, &frame)
                     {
-                        tracing::warn!("Failed to send video frame for track {track_id}: {e}");
+                        tracing::warn!(
+                            "Failed to send video frame for track {track_id}: {}",
+                            e.display()
+                        );
                     }
                 }
             }

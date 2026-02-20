@@ -52,7 +52,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    run_internal(input_file_path, decode, openh264)?;
+    run_internal(input_file_path, decode, openh264).map_err(|e| e.to_noargs_error())?;
     Ok(())
 }
 
@@ -72,7 +72,7 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
         if let Err(e) =
             setup_pipeline(pipeline_handle, input_file_path, format, decode, openh264).await
         {
-            tracing::error!("pipeline setup failed: {e}");
+            tracing::error!("pipeline setup failed: {e:?}");
         }
     });
 

@@ -134,7 +134,10 @@ impl RtmpInboundEndpoint {
                                 );
 
                                 if let Err(e) = handler.run().await {
-                                    tracing::error!("RTMP publisher handler error: {e}");
+                                    tracing::error!(
+                                        "RTMP publisher handler error: {}",
+                                        e.display()
+                                    );
                                 }
                                 tracing::debug!("RTMP publisher disconnected: {peer_addr}");
                             }

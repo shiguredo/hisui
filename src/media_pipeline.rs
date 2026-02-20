@@ -332,7 +332,7 @@ impl MediaPipelineHandle {
         tokio::spawn(async move {
             if let Err(e) = f(handle).await {
                 error_flag.set(true);
-                tracing::error!("failed to run processor {processor_id}: {e}");
+                tracing::error!("failed to run processor {processor_id}: {}", e.display());
             }
         });
         Ok(())
@@ -356,7 +356,7 @@ impl MediaPipelineHandle {
             tokio::task::spawn_local(async move {
                 if let Err(e) = f(handle).await {
                     error_flag.set(true);
-                    tracing::error!("failed to run processor {processor_id}: {e}");
+                    tracing::error!("failed to run processor {processor_id}: {}", e.display());
                 }
             });
         });

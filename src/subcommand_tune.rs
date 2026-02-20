@@ -131,6 +131,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    run_internal(args).map_err(|e| e.to_noargs_error())
+}
+
+fn run_internal(args: Args) -> crate::Result<()> {
     // 最初に optuna と vmaf コマンドが利用可能かどうかをチェックする
     OptunaStudy::check_optuna_availability()?;
     subcommand_vmaf::check_vmaf_availability()?;
@@ -174,8 +178,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
                 "that correspond to the parameters defined in the search space file."
             )
             .to_owned(),
-        )
-        .into());
+        ));
     }
 
     // 探索を始める前にいろいろと情報を表示する
@@ -232,7 +235,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
                 optuna.tell(ask_output.number, &metrics)?;
             }
             Err(e) => {
-                eprintln!("failed to VMAF evaluation: {e}",);
+                eprintln!("failed to VMAF evaluation: {e:?}",);
                 optuna.tell_fail(ask_output.number)?;
             }
         }

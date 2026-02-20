@@ -157,7 +157,10 @@ impl WhepSession {
                     let _ = frame_tx.send(video_frame);
                 }
                 Err(e) => {
-                    tracing::warn!("failed to convert incoming WHEP video frame: {e}");
+                    tracing::warn!(
+                        "failed to convert incoming WHEP video frame: {}",
+                        e.display()
+                    );
                 }
             }
         })
@@ -312,7 +315,7 @@ impl WhepSession {
             .await
             {
                 Ok(()) => tracing::info!("WHEP resource deleted: {resource_url}"),
-                Err(e) => tracing::warn!("failed to delete WHEP resource: {e}"),
+                Err(e) => tracing::warn!("failed to delete WHEP resource: {}", e.display()),
             }
         }
     }
@@ -358,7 +361,10 @@ async fn exchange_offer_answer(
         Some(location) => match crate::webrtc_http::resolve_resource_url(input_url, location) {
             Ok(url) => Some(url),
             Err(e) => {
-                tracing::warn!("failed to resolve WHEP resource URL from Location header: {e}");
+                tracing::warn!(
+                    "failed to resolve WHEP resource URL from Location header: {}",
+                    e.display()
+                );
                 None
             }
         },

@@ -372,7 +372,7 @@ impl WhipSession {
             .await
             {
                 Ok(()) => tracing::info!("WHIP resource deleted: {resource_url}"),
-                Err(e) => tracing::warn!("failed to delete WHIP resource: {e}"),
+                Err(e) => tracing::warn!("failed to delete WHIP resource: {}", e.display()),
             }
         }
     }
@@ -544,7 +544,10 @@ async fn exchange_offer_answer(
         Some(location) => match crate::webrtc_http::resolve_resource_url(output_url, location) {
             Ok(url) => Some(url),
             Err(e) => {
-                tracing::warn!("failed to resolve WHIP resource URL from Location header: {e}");
+                tracing::warn!(
+                    "failed to resolve WHIP resource URL from Location header: {}",
+                    e.display()
+                );
                 None
             }
         },

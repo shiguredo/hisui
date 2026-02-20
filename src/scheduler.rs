@@ -386,7 +386,7 @@ impl TaskRunner {
 
             match result {
                 Err(e) => {
-                    tracing::error!("{e}");
+                    tracing::error!("{}", e.display());
                     self.error_flag.store(true, Ordering::Relaxed);
                     self.tasks[i].processor.set_error();
                     self.tasks.swap_remove(i);

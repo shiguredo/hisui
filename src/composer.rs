@@ -221,8 +221,9 @@ impl Composer {
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "failed to build stats JSON: path={}, reason={e}",
-                        path.display()
+                        "failed to build stats JSON: path={}, reason={}",
+                        path.display(),
+                        e.display()
                     );
                 }
             }

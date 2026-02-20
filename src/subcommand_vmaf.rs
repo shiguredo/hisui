@@ -120,6 +120,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    run_internal(args).map_err(|e| e.to_noargs_error())
+}
+
+fn run_internal(args: Args) -> Result<()> {
     // 最初に vmaf コマンドが利用可能かどうかをチェックする
     check_vmaf_availability()?;
 
@@ -166,7 +170,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             distorted_yuv_file_path.clone(),
             reference_yuv_file_path.clone(),
         ))
-        .map_err(|e| crate::Error::new(e.to_string()))?;
+        .map_err(|e| e.with_context("failed to run VMAF compose pipeline"))?;
     if !compose_result.success {
         return Err(crate::Error::new(format!(
             "video composition process failed{}",
@@ -175,8 +179,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             } else {
                 ""
             }
-        ))
-        .into());
+        )));
     }
 
     // VMAF の下準備としての処理は全て完了した
@@ -347,8 +350,7 @@ async fn setup_vmaf_pipeline(
                     reader_output_stream_id,
                     &source_info,
                     handle.stats(),
-                )
-                .map_err(error_from)?;
+                )?;
                 reader
                     .run(handle)
                     .await
@@ -468,8 +470,7 @@ async fn setup_vmaf_pipeline(
                 encoder_output_stream_id,
                 openh264_lib_for_encoder,
                 handle.stats(),
-            )
-            .map_err(error_from)?;
+            )?;
             encoder
                 .run(
                     handle,
@@ -640,7 +641,11 @@ async fn wait_processor_tasks(
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 success = false;
-                tracing::error!("processor {} failed: {e}", processor_task.processor_id);
+                tracing::error!(
+                    "processor {} failed: {}",
+                    processor_task.processor_id,
+                    e.display()
+                );
             }
             Err(e) => {
                 success = false;
@@ -678,10 +683,6 @@ fn next_track_id(next_number: &mut usize, prefix: &str) -> TrackId {
     let number = *next_number;
     *next_number += 1;
     TrackId::new(format!("vmaf_{prefix}_{number}"))
-}
-
-fn error_from<E: std::fmt::Display>(error: E) -> Error {
-    Error::new(error.to_string())
 }
 
 pub fn check_vmaf_availability() -> crate::Result<()> {
