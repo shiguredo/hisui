@@ -456,7 +456,10 @@ impl VideoFrame {
         filter_mode: shiguredo_libyuv::FilterMode,
     ) -> crate::Result<Option<Self>> {
         if !matches!(self.format, VideoFormat::I420 | VideoFormat::I420A) {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "unsupported format for scaling: {:?}",
+                self.format
+            )));
         }
 
         let width = self.width;
@@ -471,13 +474,13 @@ impl VideoFrame {
             VideoFormat::I420 => {
                 let (src_y, src_u, src_v) = self
                     .as_yuv_planes()
-                    .ok_or_else(|| crate::Error::new("value is missing"))?;
+                    .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
                 (src_y, src_u, src_v, None)
             }
             VideoFormat::I420A => {
                 let (src_y, src_u, src_v, src_a) = self
                     .as_i420a_planes()
-                    .ok_or_else(|| crate::Error::new("value is missing"))?;
+                    .ok_or_else(|| crate::Error::new("invalid I420A frame data"))?;
                 (src_y, src_u, src_v, Some(src_a))
             }
             _ => unreachable!("infallible"),
@@ -603,7 +606,10 @@ impl VideoFrame {
 
     pub fn to_bgr_data(&self) -> crate::Result<Vec<u8>> {
         if self.format != VideoFormat::I420 {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "unsupported format for BGR conversion: {:?}",
+                self.format
+            )));
         }
 
         // 実際の解像度（出力に使用）
@@ -613,7 +619,7 @@ impl VideoFrame {
         // YUV プレーンを取得
         let (y_plane, u_plane, v_plane) = self
             .as_yuv_planes()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
 
         // ストライドは実際の幅を使用
         let y_stride = actual_width;

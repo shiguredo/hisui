@@ -31,10 +31,13 @@ pub struct AudioData {
 impl AudioData {
     pub fn stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = (i16, i16)>> {
         if self.format != AudioFormat::I16Be {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected I16Be format, got {}",
+                self.format
+            )));
         }
         if !self.stereo {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new("expected stereo audio data"));
         }
 
         let samples = self.data.chunks_exact(4).map(|c| {
@@ -48,10 +51,13 @@ impl AudioData {
 
     pub fn interleaved_stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = i16>> {
         if self.format != AudioFormat::I16Be {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected I16Be format, got {}",
+                self.format
+            )));
         }
         if !self.stereo {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new("expected stereo audio data"));
         }
 
         let samples = self.data.chunks_exact(4).flat_map(|c| {

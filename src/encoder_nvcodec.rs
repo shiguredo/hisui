@@ -131,7 +131,10 @@ impl NvcodecEncoder {
 
     pub fn encode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if frame.format != VideoFormat::I420 {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.format
+            )));
         }
 
         // I420 から NV12 への変換
@@ -139,7 +142,7 @@ impl NvcodecEncoder {
         let height = frame.height;
         let (y_plane, u_plane, v_plane) = frame
             .as_yuv_planes()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
 
         // NV12 用のバッファを確保
         let y_size = width * height;
@@ -189,7 +192,7 @@ impl NvcodecEncoder {
             let input_frame = self
                 .input_queue
                 .pop_front()
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+                .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
 
             // キーフレーム判定
             let keyframe = matches!(

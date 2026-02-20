@@ -82,7 +82,10 @@ impl NvcodecDecoder {
                 | VideoFormat::Vp9
                 | VideoFormat::Av1
         ) {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "unsupported input format for NVDEC: {:?}",
+                frame.format
+            )));
         }
 
         // サンプルエントリからパラメータセットを抽出してキャッシュ
@@ -116,13 +119,19 @@ impl NvcodecDecoder {
 
             while !data.is_empty() {
                 if data.len() < NALU_HEADER_LENGTH {
-                    return Err(crate::Error::new("condition is false"));
+                    return Err(crate::Error::new(format!(
+                        "invalid AVC/HEVC payload: NALU length header is truncated (remaining={})",
+                        data.len()
+                    )));
                 }
                 let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                 data = &data[NALU_HEADER_LENGTH..];
 
                 if data.len() < n {
-                    return Err(crate::Error::new("condition is false"));
+                    return Err(crate::Error::new(format!(
+                        "invalid AVC/HEVC payload: NALU data is truncated (required={n}, remaining={})",
+                        data.len()
+                    )));
                 }
                 data_annexb.extend_from_slice(&[0, 0, 0, 1]);
                 data_annexb.extend_from_slice(&data[..n]);
@@ -150,7 +159,7 @@ impl NvcodecDecoder {
             let input_frame = self
                 .input_queue
                 .pop_front()
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+                .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
 
             // NV12 から I420 への変換
             let width = nv12_frame.width();

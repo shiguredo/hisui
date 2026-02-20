@@ -22,7 +22,10 @@ impl Openh264Decoder {
 
     pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB) {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected H264 or H264AnnexB format, got {:?}",
+                frame.format
+            )));
         }
 
         if frame.keyframe {
@@ -38,13 +41,19 @@ impl Openh264Decoder {
             let mut data_annexb = Vec::new();
             while !data.is_empty() {
                 if data.len() <= 3 {
-                    return Err(crate::Error::new("condition is false"));
+                    return Err(crate::Error::new(format!(
+                        "invalid H264 AVCC payload: NALU length header is truncated (remaining={})",
+                        data.len()
+                    )));
                 }
                 let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                 data = &data[4..];
 
                 if data.len() < n {
-                    return Err(crate::Error::new("condition is false"));
+                    return Err(crate::Error::new(format!(
+                        "invalid H264 AVCC payload: NALU data is truncated (required={n}, remaining={})",
+                        data.len()
+                    )));
                 }
                 data_annexb.extend_from_slice(&[0, 0, 0, 1]);
                 data_annexb.extend_from_slice(&data[..n]);
@@ -66,7 +75,7 @@ impl Openh264Decoder {
         let input_frame = self
             .input_queue
             .pop_front()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
         let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
         self.output_queue.push_back(output_frame);
         Ok(())
@@ -79,7 +88,7 @@ impl Openh264Decoder {
         let input_frame = self
             .input_queue
             .pop_front()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
         let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
         self.output_queue.push_back(output_frame);
         Ok(())

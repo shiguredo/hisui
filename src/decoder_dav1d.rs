@@ -20,7 +20,10 @@ impl Dav1dDecoder {
 
     pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if frame.format != VideoFormat::Av1 {
-            return Err(crate::Error::new("condition is false"));
+            return Err(crate::Error::new(format!(
+                "expected AV1 format, got {:?}",
+                frame.format
+            )));
         }
 
         self.inner.decode(&frame.data)?;
@@ -40,7 +43,7 @@ impl Dav1dDecoder {
             let input_frame = self
                 .input_queue
                 .pop_front()
-                .ok_or_else(|| crate::Error::new("value is missing"))?;
+                .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
             self.output_queue.push_back(VideoFrame::new_i420(
                 input_frame,
                 decoded.width(),

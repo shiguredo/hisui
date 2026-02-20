@@ -151,7 +151,7 @@ impl MediaProcessor for AudioDecoder {
         let inner = self
             .inner
             .as_mut()
-            .ok_or_else(|| crate::Error::new("value is missing"))?;
+            .ok_or_else(|| crate::Error::new("audio decoder is not initialized"))?;
         let decoded = inner.decode(&data)?;
         self.total_audio_data_count_metric.inc();
         if let Some(id) = &data.source_id {
@@ -174,10 +174,9 @@ impl MediaProcessor for AudioDecoder {
             {
                 self.total_audio_data_count_metric.inc();
                 self.decoded.push_back(remaining_data);
-                let sample = self
-                    .decoded
-                    .pop_front()
-                    .ok_or_else(|| crate::Error::new("value is missing"))?;
+                let sample = self.decoded.pop_front().ok_or_else(|| {
+                    crate::Error::new("decoded audio queue is unexpectedly empty")
+                })?;
                 return Ok(MediaProcessorOutput::Processed {
                     stream_id: self.output_stream_id,
                     sample: MediaSample::audio_data(sample),
