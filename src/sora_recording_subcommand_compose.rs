@@ -201,7 +201,7 @@ fn run_compose(
     ))?;
 
     if let Some(path) = stats_file_path {
-        match crate::sora_recording_compose_stats_json::to_sora_recording_compose_stats_json(
+        match crate::sora_recording_compose_stats_json::to_json(
             &result.stats,
             result.elapsed_duration.as_secs_f64(),
         ) {
