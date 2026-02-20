@@ -37,8 +37,17 @@ impl FdkAacEncoder {
     }
 
     pub fn encode(&mut self, data: &AudioData) -> crate::Result<Option<AudioData>> {
-        (data.format == AudioFormat::I16Be)?;
-        data.stereo?;
+        if data.format != AudioFormat::I16Be {
+            return Err(crate::Error::new(format!(
+                "expected I16Be audio format, got {:?}",
+                data.format
+            )));
+        }
+        if !data.stereo {
+            return Err(crate::Error::new(
+                "FDK AAC encoder expects stereo audio input",
+            ));
+        }
 
         let input = data.interleaved_stereo_samples()?.collect::<Vec<_>>();
         let Some(encoded) = self.inner.encode(&input)? else {

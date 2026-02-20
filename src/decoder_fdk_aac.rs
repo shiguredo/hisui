@@ -32,10 +32,17 @@ impl FdkAacDecoder {
 
     /// AAC データをデコードする
     pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
-        (data.format == AudioFormat::Aac)?;
+        if data.format != AudioFormat::Aac {
+            return Err(crate::Error::new(format!(
+                "expected AAC audio format, got {:?}",
+                data.format
+            )));
+        }
 
         if self.inner.is_none() {
-            let sample_entry = data.sample_entry.as_ref()?;
+            let sample_entry = data.sample_entry.as_ref().ok_or_else(|| {
+                crate::Error::new("AAC sample entry is required to initialize FDK AAC decoder")
+            })?;
             let audio_specific_config = extract_audio_specific_config(sample_entry)?;
             tracing::debug!(
                 "FDK AAC decoder initialized with config length: {}",
@@ -43,16 +50,19 @@ impl FdkAacDecoder {
             );
             self.inner = Some(
                 shiguredo_fdk_aac::Decoder::new(&audio_specific_config).map_err(|e| {
-                    crate::Error::new(format!("Failed to create FDK AAC decoder: {}", e))
+                    crate::Error::from(e).with_context("Failed to create FDK AAC decoder")
                 })?,
             );
             self.source_id = data.source_id.clone();
         }
 
-        let inner = self.inner.as_mut()?;
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| crate::Error::new("FDK AAC decoder is not initialized"))?;
         let decoded_frame = inner
             .decode(&data.data)
-            .map_err(|e| crate::Error::new(format!("Failed to decode AAC: {}", e)))?;
+            .map_err(|e| crate::Error::from(e).with_context("Failed to decode AAC"))?;
 
         if let Some(frame) = decoded_frame {
             let audio_data = match frame.channels {
@@ -137,12 +147,15 @@ fn extract_audio_specific_config(sample_entry: &SampleEntry) -> crate::Result<Ve
                 .es
                 .dec_config_descr
                 .dec_specific_info
-                .as_ref()?
+                .as_ref()
+                .ok_or_else(|| {
+                    crate::Error::new("AudioSpecificConfig is missing in MP4a sample entry")
+                })?
                 .payload
                 .clone())
         }
         _ => Err(crate::Error::new(
             "Only MP4a audio sample entries are currently supported",
-        ))?,
+        )),
     }
 }
