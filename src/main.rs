@@ -56,9 +56,9 @@ fn main() -> noargs::Result<()> {
     } else if COMPOSE_COMMAND.take(&mut args).is_present() {
         hisui::sora_subcommand_compose::run(args)?;
     } else if VMAF_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_vmaf::run(args)?;
+        hisui::sora_subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_tune::run(args)?;
+        hisui::sora_subcommand_tune::run(args)?;
     } else if experimental && SERVER_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_server::run(args)?;
     } else if let Some(help) = args.finish()? {
