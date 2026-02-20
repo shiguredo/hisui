@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{

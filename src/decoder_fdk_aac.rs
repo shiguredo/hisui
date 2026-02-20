@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};

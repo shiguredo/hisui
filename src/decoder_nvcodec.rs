@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::layout_decode_params::LayoutDecodeParams;
 use crate::video::{VideoFormat, VideoFrame};

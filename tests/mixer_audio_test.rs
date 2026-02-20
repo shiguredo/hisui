@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
-use hisui::OrFail;
+use hisui::ResultExt;
 use hisui::{
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},

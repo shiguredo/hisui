@@ -7,7 +7,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{

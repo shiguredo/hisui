@@ -1,7 +1,7 @@
 //! JSON 関連のユーティリティモジュール
 use std::{borrow::Cow, collections::BTreeMap, error::Error, io::Write, path::Path};
 
-use crate::OrFail;
+use crate::ResultExt;
 
 // エラーメッセージに、入力 JSON の問題となっている行を表示する際の文字数の最大値。
 // これを超える場合には超過分の前後が ... で置換される。

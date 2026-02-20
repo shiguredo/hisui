@@ -1,4 +1,4 @@
-use hisui::OrFail;
+use hisui::ResultExt;
 use hisui::{
     metadata::SourceId,
     reader_webm::{WebmAudioReader, WebmVideoReader},

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use hisui::OrFail;
+use hisui::ResultExt;
 #[cfg(feature = "libvpx")]
 use hisui::decoder_libvpx::LibvpxDecoder;
 use hisui::{

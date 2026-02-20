@@ -3,7 +3,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::json::{JsonNumber, JsonObject, JsonObjectMemberPath, JsonValue};
 

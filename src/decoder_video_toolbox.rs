@@ -1,4 +1,4 @@
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use crate::{

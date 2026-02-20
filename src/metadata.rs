@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use crate::OrFail;
+use crate::ResultExt;
 
 /// Sora の report-*.json から必要な情報のみを取り出した構造体
 #[derive(Debug, Clone)]

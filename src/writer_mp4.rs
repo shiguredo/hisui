@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::Either;
 use shiguredo_mp4::boxes::HdlrBox;
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};

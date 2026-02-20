@@ -1,4 +1,4 @@
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::audio::{AudioData, AudioFormat, SAMPLE_RATE};
 

@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,

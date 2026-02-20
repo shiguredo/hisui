@@ -1,6 +1,6 @@
 use std::{num::NonZeroUsize, time::Duration};
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::{
     Uint,
     boxes::{EsdsBox, Mp4aBox, SampleEntry},

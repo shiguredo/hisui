@@ -1,6 +1,6 @@
 use std::{num::NonZeroUsize, str::FromStr, time::Duration};
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields};
 
 use crate::{

@@ -1,4 +1,4 @@
-use hisui::OrFail;
+use hisui::ResultExt;
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 use hisui::{decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use hisui::{

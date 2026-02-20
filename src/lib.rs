@@ -117,7 +117,7 @@ pub use video::VideoFrame;
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Failure = Error;
 
-pub trait OrFail {
+pub trait ResultExt {
     type Output;
     type Context;
 
@@ -129,7 +129,7 @@ pub trait OrFail {
         F: FnOnce(Self::Context) -> S;
 }
 
-impl<T> OrFail for std::result::Result<T, Error> {
+impl<T> ResultExt for std::result::Result<T, Error> {
     type Output = T;
     type Context = Error;
 
@@ -146,7 +146,7 @@ impl<T> OrFail for std::result::Result<T, Error> {
     }
 }
 
-impl<T, E: std::error::Error> OrFail for std::result::Result<T, E> {
+impl<T, E: std::error::Error> ResultExt for std::result::Result<T, E> {
     type Output = T;
     type Context = E;
 
@@ -163,7 +163,7 @@ impl<T, E: std::error::Error> OrFail for std::result::Result<T, E> {
     }
 }
 
-impl<T> OrFail for Option<T> {
+impl<T> ResultExt for Option<T> {
     type Output = T;
     type Context = ();
 
@@ -180,7 +180,7 @@ impl<T> OrFail for Option<T> {
     }
 }
 
-impl OrFail for bool {
+impl ResultExt for bool {
     type Output = ();
     type Context = ();
 

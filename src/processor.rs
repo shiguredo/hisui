@@ -1,7 +1,7 @@
 use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant};
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};

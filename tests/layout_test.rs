@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use hisui::OrFail;
+use hisui::ResultExt;
 use hisui::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},

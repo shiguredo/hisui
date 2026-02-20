@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::{
     encoder::VideoEncoderOptions,

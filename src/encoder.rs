@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_openh264::Openh264Library;
 
 #[cfg(target_os = "macos")]

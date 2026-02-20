@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::{
     audio::AudioData,

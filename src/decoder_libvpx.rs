@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::video::{VideoFormat, VideoFrame};
 

@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, num::NonZeroUsize, path::PathBuf};
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{

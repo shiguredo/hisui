@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use hisui::OrFail;
+use hisui::ResultExt;
 use hisui::{
     layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     layout_region::{Grid, Region},

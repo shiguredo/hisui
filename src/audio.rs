@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::{
     FixedPointNumber,
     boxes::{AudioSampleEntryFields, SampleEntry},

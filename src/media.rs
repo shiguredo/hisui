@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
-use crate::OrFail;
+use crate::ResultExt;
 
 use crate::audio::AudioData;
 use crate::metadata::SourceId;

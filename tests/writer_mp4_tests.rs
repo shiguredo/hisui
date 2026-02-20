@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use hisui::OrFail;
+use hisui::ResultExt;
 use hisui::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},

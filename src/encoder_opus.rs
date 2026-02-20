@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 
-use crate::OrFail;
+use crate::ResultExt;
 use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
 
 use crate::audio::{self, AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
