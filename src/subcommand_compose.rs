@@ -252,13 +252,13 @@ fn count_processors_by_types(entries: &[StatsEntry], processor_types: &[&str]) -
         if entry.metric_name != "error" {
             continue;
         }
-        let Some(processor_type) = label_value(entry, "processor_type") else {
+        let Some(processor_type) = label_value_non_empty(entry, "processor_type") else {
             continue;
         };
         if !processor_types.iter().any(|t| t == &processor_type) {
             continue;
         }
-        if let Some(processor_id) = label_value(entry, "processor_id") {
+        if let Some(processor_id) = label_value_non_empty(entry, "processor_id") {
             processor_ids.insert(processor_id.to_owned());
         }
     }
@@ -269,12 +269,17 @@ fn label_value<'a>(entry: &'a StatsEntry, name: &str) -> Option<&'a str> {
     entry.labels.get(name).map(String::as_str)
 }
 
+// 空文字を欠損扱いにしたいラベル用
+fn label_value_non_empty<'a>(entry: &'a StatsEntry, name: &str) -> Option<&'a str> {
+    label_value(entry, name).filter(|value| !value.is_empty())
+}
+
 fn find_first_processor_id_by_type(entries: &[StatsEntry], processor_type: &str) -> Option<String> {
     entries.iter().find_map(|entry| {
-        if label_value(entry, "processor_type") != Some(processor_type) {
+        if label_value_non_empty(entry, "processor_type") != Some(processor_type) {
             return None;
         }
-        label_value(entry, "processor_id").map(ToOwned::to_owned)
+        label_value_non_empty(entry, "processor_id").map(ToOwned::to_owned)
     })
 }
 
@@ -345,7 +350,7 @@ fn find_metric<T>(
         if entry.metric_name != metric_name {
             return None;
         }
-        if label_value(entry, label_name) != Some(label_value_to_match) {
+        if label_value_non_empty(entry, label_name) != Some(label_value_to_match) {
             return None;
         }
         extract(&entry.value)
