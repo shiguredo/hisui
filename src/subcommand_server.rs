@@ -186,9 +186,8 @@ async fn run_server(
     pipeline_handle.complete_initial_processor_registration();
 
     let bootstrap_endpoint = Rc::new(
-        BootstrapEndpoint::new(pipeline_handle.clone()).map_err(|e| {
-            crate::Error::new(format!("Failed to init /bootstrap: {}", e.display()))
-        })?,
+        BootstrapEndpoint::new(pipeline_handle.clone())
+            .map_err(|e| e.with_context("Failed to init /bootstrap"))?,
     );
 
     let listen_addr = SocketAddr::new(http_listen_address, http_port);

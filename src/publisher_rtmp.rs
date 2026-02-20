@@ -360,7 +360,7 @@ impl RtmpPublishRunner {
         let (seq_frame, audio_frame) = self
             .frame_handler
             .prepare_audio_frame(audio)
-            .map_err(|e| Error::new(format!("failed to prepare audio frame: {}", e.display())))?;
+            .map_err(|e| e.with_context("failed to prepare audio frame"))?;
         if let Some(seq) = seq_frame {
             self.connection
                 .send_audio(seq)
@@ -376,7 +376,7 @@ impl RtmpPublishRunner {
         if let Some((seq_frame, video_frame)) = self
             .frame_handler
             .prepare_video_frame(video)
-            .map_err(|e| Error::new(format!("failed to prepare video frame: {}", e.display())))?
+            .map_err(|e| e.with_context("failed to prepare video frame"))?
         {
             if let Some(seq) = seq_frame {
                 self.connection.send_video(seq).map_err(|e| {
