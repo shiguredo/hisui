@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
 
 use crate::audio::{self, AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
@@ -12,7 +12,7 @@ pub struct OpusEncoder {
 }
 
 impl OpusEncoder {
-    pub fn new(bitrate: NonZeroUsize) -> orfail::Result<Self> {
+    pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
         let inner = shiguredo_opus::Encoder::new(SAMPLE_RATE, CHANNELS as u8, bitrate.get() as u32)
             .or_fail()?;
 
@@ -26,7 +26,7 @@ impl OpusEncoder {
         })
     }
 
-    pub fn encode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
+    pub fn encode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         (data.format == AudioFormat::I16Be).or_fail()?;
         data.stereo.or_fail()?;
 

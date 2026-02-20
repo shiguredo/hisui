@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::audio::AudioFormat;
@@ -43,7 +43,7 @@ impl AudioDecoder {
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         mut compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         compose_stats
             .string("engine")
             .set(EngineName::Opus.as_str());
@@ -139,7 +139,7 @@ impl MediaProcessor for AudioDecoder {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         let Some(sample) = input.sample else {
             self.eos = true;
             return Ok(());
@@ -162,7 +162,7 @@ impl MediaProcessor for AudioDecoder {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         if let Some(data) = self.decoded.pop_front() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
@@ -202,7 +202,7 @@ enum AudioDecoderInner {
 }
 
 impl AudioDecoderInner {
-    fn new(data: &AudioData) -> orfail::Result<Self> {
+    fn new(data: &AudioData) -> crate::Result<Self> {
         match data.format {
             AudioFormat::Opus => OpusDecoder::new().or_fail().map(Self::Opus),
             AudioFormat::Aac => {
@@ -220,19 +220,19 @@ impl AudioDecoderInner {
                 }
                 #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
                 {
-                    Err(orfail::Failure::new(
+                    Err(crate::Error::new(
                         "AAC decoding is only available on macOS or with fdk-aac feature enabled",
                     ))
                 }
             }
-            _ => Err(orfail::Failure::new(format!(
+            _ => Err(crate::Error::new(format!(
                 "Unsupported audio format: {:?}",
                 data.format
             ))),
         }
     }
 
-    fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
+    fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         match self {
             Self::Opus(decoder) => decoder.decode(data).or_fail(),
             #[cfg(target_os = "macos")]
@@ -242,7 +242,7 @@ impl AudioDecoderInner {
         }
     }
 
-    fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
+    fn finish(&mut self) -> crate::Result<Option<AudioData>> {
         match self {
             Self::Opus(_decoder) => Ok(None),
             #[cfg(target_os = "macos")]
@@ -430,7 +430,7 @@ impl MediaProcessor for VideoDecoder {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
 
@@ -455,7 +455,7 @@ impl MediaProcessor for VideoDecoder {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         if let Some(frame) = self.decoded.pop_front() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
@@ -502,7 +502,7 @@ impl VideoDecoderInner {
         codec_metric: &crate::stats::StatsString,
         engine_metric: &crate::stats::StatsString,
         options: VideoDecoderOptions,
-    ) -> orfail::Result<()> {
+    ) -> crate::Result<()> {
         let codec = frame
             .format
             .codec_name()
@@ -586,7 +586,7 @@ impl VideoDecoderInner {
                 *self = Dav1dDecoder::new().or_fail().map(Self::Dav1d)?;
             }
             _ => {
-                return Err(orfail::Failure::new(format!(
+                return Err(crate::Error::new(format!(
                     "no available decoder for {} codec (candidate decoders: {})",
                     codec.as_str(),
                     candidate_engines
@@ -605,7 +605,7 @@ impl VideoDecoderInner {
         frame: &VideoFrame,
         codec_metric: &crate::stats::StatsString,
         engine_metric: &crate::stats::StatsString,
-    ) -> orfail::Result<()> {
+    ) -> crate::Result<()> {
         match self {
             Self::Initial { options } => {
                 let options = options.clone();
@@ -624,7 +624,7 @@ impl VideoDecoderInner {
         }
     }
 
-    fn finish(&mut self) -> orfail::Result<()> {
+    fn finish(&mut self) -> crate::Result<()> {
         match self {
             Self::Initial { .. } => {}
             #[cfg(feature = "libvpx")]

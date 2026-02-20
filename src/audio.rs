@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::{
     FixedPointNumber,
     boxes::{AudioSampleEntryFields, SampleEntry},
@@ -30,7 +30,7 @@ pub struct AudioData {
 }
 
 impl AudioData {
-    pub fn stereo_samples(&self) -> orfail::Result<impl '_ + Iterator<Item = (i16, i16)>> {
+    pub fn stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = (i16, i16)>> {
         (self.format == AudioFormat::I16Be).or_fail()?;
         self.stereo.or_fail()?;
 
@@ -43,7 +43,7 @@ impl AudioData {
         Ok(samples)
     }
 
-    pub fn interleaved_stereo_samples(&self) -> orfail::Result<impl '_ + Iterator<Item = i16>> {
+    pub fn interleaved_stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = i16>> {
         (self.format == AudioFormat::I16Be).or_fail()?;
         self.stereo.or_fail()?;
 

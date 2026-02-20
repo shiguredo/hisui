@@ -57,9 +57,51 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl<E: std::error::Error> From<E> for Error {
+impl From<std::io::Error> for Error {
     #[track_caller]
-    fn from(e: E) -> Self {
+    fn from(e: std::io::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<tokio::task::JoinError> for Error {
+    #[track_caller]
+    fn from(e: tokio::task::JoinError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<nojson::JsonParseError> for Error {
+    #[track_caller]
+    fn from(e: nojson::JsonParseError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<crate::PipelineTerminated> for Error {
+    #[track_caller]
+    fn from(e: crate::PipelineTerminated) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<crate::PublishTrackError> for Error {
+    #[track_caller]
+    fn from(e: crate::PublishTrackError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<crate::RegisterProcessorError> for Error {
+    #[track_caller]
+    fn from(e: crate::RegisterProcessorError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_mp4::demux::DemuxError> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_mp4::demux::DemuxError) -> Self {
         Self::new(e.to_string())
     }
 }

@@ -1,6 +1,6 @@
 use std::{num::NonZeroUsize, time::Duration};
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::{
     Uint,
     boxes::{EsdsBox, Mp4aBox, SampleEntry},
@@ -17,7 +17,7 @@ pub struct AudioToolboxEncoder {
 }
 
 impl AudioToolboxEncoder {
-    pub fn new(bitrate: NonZeroUsize) -> orfail::Result<Self> {
+    pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
         let inner = shiguredo_audio_toolbox::Encoder::new(bitrate.get()).or_fail()?;
         let sample_entry = Some(sample_entry(bitrate));
         Ok(Self {
@@ -27,7 +27,7 @@ impl AudioToolboxEncoder {
         })
     }
 
-    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
+    pub fn finish(&mut self) -> crate::Result<Option<AudioData>> {
         if let Some(encoded) = self.inner.finish().or_fail()? {
             Ok(Some(self.handle_encoded_frame(encoded)))
         } else {
@@ -35,7 +35,7 @@ impl AudioToolboxEncoder {
         }
     }
 
-    pub fn encode(&mut self, data: &AudioData) -> orfail::Result<Option<AudioData>> {
+    pub fn encode(&mut self, data: &AudioData) -> crate::Result<Option<AudioData>> {
         (data.format == AudioFormat::I16Be).or_fail()?;
         data.stereo.or_fail()?;
 

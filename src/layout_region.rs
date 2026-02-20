@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     json::JsonObject,
@@ -119,18 +119,18 @@ impl RawRegion {
         sources: &mut BTreeMap<SourceId, AggregatedSourceInfo>,
         resolution: Option<Resolution>,
         resolve: F,
-    ) -> orfail::Result<Region>
+    ) -> crate::Result<Region>
     where
-        F: Fn(&Path, &[PathBuf], &[PathBuf]) -> orfail::Result<Vec<(SourceInfo, PathBuf)>>,
+        F: Fn(&Path, &[PathBuf], &[PathBuf]) -> crate::Result<Vec<(SourceInfo, PathBuf)>>,
     {
         if self.width != 0 && self.cell_width != 0 {
-            return Err(orfail::Failure::new(
+            return Err(crate::Error::new(
                 "cannot specify both 'width' and 'cell_width' for the same region".to_owned(),
             ));
         }
 
         if self.height != 0 && self.cell_height != 0 {
-            return Err(orfail::Failure::new(
+            return Err(crate::Error::new(
                 "cannot specify both 'height' and 'cell_height' for the same region".to_owned(),
             ));
         }
@@ -291,7 +291,7 @@ impl RawRegion {
         rows: usize,
         columns: usize,
         resolution: Resolution,
-    ) -> orfail::Result<(EvenUsize, EvenUsize, EvenUsize, EvenUsize)> {
+    ) -> crate::Result<(EvenUsize, EvenUsize, EvenUsize, EvenUsize)> {
         let mut grid_width = self.width;
         let mut grid_height = self.height;
         if grid_width != resolution.width.get() {

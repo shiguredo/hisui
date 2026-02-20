@@ -1,4 +1,4 @@
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::{
     Uint,
     boxes::{Avc1Box, AvccBox, SampleEntry},
@@ -31,7 +31,7 @@ impl<'a> H264AnnexBNalUnits<'a> {
         Self { data }
     }
 
-    fn next_nal_unit(&mut self) -> orfail::Result<Option<H264NalUnit<'a>>> {
+    fn next_nal_unit(&mut self) -> crate::Result<Option<H264NalUnit<'a>>> {
         if self.data.is_empty() {
             return Ok(None);
         }
@@ -41,7 +41,7 @@ impl<'a> H264AnnexBNalUnits<'a> {
         } else if self.data.starts_with(&[0, 0, 0, 1]) {
             self.data = &self.data[4..];
         } else {
-            return Err(orfail::Failure::new("no H.264 start code prefix"));
+            return Err(crate::Error::new("no H.264 start code prefix"));
         };
         (!self.data.is_empty()).or_fail()?;
 
@@ -66,7 +66,7 @@ impl<'a> H264AnnexBNalUnits<'a> {
 }
 
 impl<'a> Iterator for H264AnnexBNalUnits<'a> {
-    type Item = orfail::Result<H264NalUnit<'a>>;
+    type Item = crate::Result<H264NalUnit<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_nal_unit().or_fail().transpose()
@@ -83,7 +83,7 @@ pub fn h264_sample_entry_from_annexb(
     width: usize,
     height: usize,
     data: &[u8],
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     // H.264 ストリームから SPS と PPS と取り出す
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
@@ -120,14 +120,14 @@ pub fn h264_sample_entry_from_annexb(
 }
 
 /// AVC1 サンプルエントリーから width, height を抽出
-pub fn extract_video_dimensions(entry: &SampleEntry) -> orfail::Result<(u32, u32)> {
+pub fn extract_video_dimensions(entry: &SampleEntry) -> crate::Result<(u32, u32)> {
     match entry {
         SampleEntry::Avc1(avc1) => {
             let width = avc1.visual.width as u32;
             let height = avc1.visual.height as u32;
             Ok((width, height))
         }
-        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
+        _ => Err(crate::Error::new("Not an H.264 video sample entry")),
     }
 }
 
@@ -155,7 +155,7 @@ pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>])
 }
 
 /// Annex.B 形式の H.264 を RTMP 用の AVC パケット形式（サイズ付き NALU）に変換
-pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
+pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec<u8>> {
     let mut result = Vec::new();
 
     (length_size > 0 && length_size <= 4)

@@ -1,13 +1,13 @@
 //! JSON 関連のユーティリティモジュール
 use std::{borrow::Cow, collections::BTreeMap, error::Error, io::Write, path::Path};
 
-use orfail::OrFail;
+use crate::OrFail;
 
 // エラーメッセージに、入力 JSON の問題となっている行を表示する際の文字数の最大値。
 // これを超える場合には超過分の前後が ... で置換される。
 const MAX_ERROR_LINE_CHARS: usize = 80;
 
-pub fn parse_file<P: AsRef<Path>, T>(path: P) -> orfail::Result<T>
+pub fn parse_file<P: AsRef<Path>, T>(path: P) -> crate::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
@@ -17,14 +17,14 @@ where
     parse(&json, path.as_ref(), enable_jsonc).or_fail()
 }
 
-pub fn parse_str<T>(json: &str) -> orfail::Result<T>
+pub fn parse_str<T>(json: &str) -> crate::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
     parse(json, Path::new(""), true).or_fail()
 }
 
-fn parse<T>(text: &str, path: &Path, enable_jsonc: bool) -> orfail::Result<T>
+fn parse<T>(text: &str, path: &Path, enable_jsonc: bool) -> crate::Result<T>
 where
     T: for<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>, Error = nojson::JsonParseError>,
 {
@@ -50,7 +50,7 @@ pub fn to_pretty_string<T: nojson::DisplayJson>(value: T) -> String {
     .to_string()
 }
 
-pub fn pretty_print<T: nojson::DisplayJson>(value: T) -> orfail::Result<()> {
+pub fn pretty_print<T: nojson::DisplayJson>(value: T) -> crate::Result<()> {
     let stdout = std::io::stdout();
     let result = writeln!(
         stdout.lock(),
@@ -254,7 +254,7 @@ impl std::fmt::Display for JsonObjectMemberPath {
     }
 }
 
-fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> orfail::Failure {
+fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> crate::Error {
     let (line_num, column_num) = e.get_line_and_column_numbers(text).expect("infallible");
     let line = e.get_line(text).expect("infallible");
     let prev_line = if line_num.get() == 1 {
@@ -270,7 +270,7 @@ fn malformed_json_error(path: &Path, text: &str, e: nojson::JsonParseError) -> o
         truncated
     });
 
-    orfail::Failure::new(format!(
+    crate::Error::new(format!(
         r#"{e}
 
 INPUT:{}{}{}
@@ -299,7 +299,7 @@ fn invalid_json_error(
     path: &Path,
     json: &nojson::RawJson,
     e: nojson::JsonParseError,
-) -> orfail::Failure {
+) -> crate::Error {
     let text = json.text();
     let (line_num, column_num) = e.get_line_and_column_numbers(text).expect("infallible");
     let line = e.get_line(text).expect("infallible");
@@ -325,7 +325,7 @@ fn invalid_json_error(
         display_line.chars().count() - display_column,
     );
 
-    orfail::Failure::new(format!(
+    crate::Error::new(format!(
         r#"{e}
 
 INPUT:{}{}{}
@@ -403,8 +403,7 @@ mod tests {
     fn test_parse_single_line_malformed_json() {
         let malformed_json = r#"{"key": "value", "another": 123"#; // 閉じカッコがない
 
-        let mut error = parse_str::<()>(malformed_json).expect_err("bug");
-        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        let error = parse_str::<()>(malformed_json).expect_err("bug");
         eprintln!("{}", error);
 
         let expected = r#"unexpected EOS while parsing Object at byte position 31
@@ -413,9 +412,8 @@ INPUT:
    1 |{"key": "value", "another": 123
      |                               ^ error
 
-BACKTRACE:
-"#;
-        assert_eq!(error.to_string(), expected);
+BACKTRACE:"#;
+        assert_eq!(error.reason, expected);
     }
 
     #[test]
@@ -427,8 +425,7 @@ BACKTRACE:
         "missing_comma": true
     }"#;
 
-        let mut error = parse_str::<()>(malformed_json).expect_err("bug");
-        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        let error = parse_str::<()>(malformed_json).expect_err("bug");
         eprintln!("{}", error);
 
         let expected = r#"unexpected char while parsing Object at byte position 57
@@ -438,9 +435,8 @@ INPUT:
    4 |        "missing_comma": true
      |        ^ error
 
-BACKTRACE:
-"#;
-        assert_eq!(error.to_string(), expected);
+BACKTRACE:"#;
+        assert_eq!(error.reason, expected);
     }
 
     #[test]
@@ -452,8 +448,7 @@ BACKTRACE:
             long_value
         );
 
-        let mut error = parse_str::<()>(&invalid_json).expect_err("bug");
-        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        let error = parse_str::<()>(&invalid_json).expect_err("bug");
         eprintln!("{}", error);
 
         // エラーメッセージの行が MAX_ERROR_LINE_CHARS 文字に収まるように切りつめられる
@@ -463,9 +458,8 @@ INPUT:
    1 |... "value", "foo": "bar", "very_long_key" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
      |                                           ^ error
 
-BACKTRACE:
-"#;
-        assert_eq!(error.to_string(), expected);
+BACKTRACE:"#;
+        assert_eq!(error.reason, expected);
     }
 
     #[test]
@@ -480,8 +474,7 @@ BACKTRACE:
             long_value
         );
 
-        let mut error = parse_str::<()>(&invalid_json).expect_err("bug");
-        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        let error = parse_str::<()>(&invalid_json).expect_err("bug");
         eprintln!("{}", error);
 
         // エラーメッセージの行が MAX_ERROR_LINE_CHARS 文字に収まるように切りつめられる
@@ -492,9 +485,8 @@ INPUT:
    3 |...": "value", "foo": "bar", "another_key" "missing_colon_value"
      |                                           ^ error
 
-BACKTRACE:
-"#;
-        assert_eq!(error.to_string(), expected);
+BACKTRACE:"#;
+        assert_eq!(error.reason, expected);
     }
 
     #[test]
@@ -502,8 +494,7 @@ BACKTRACE:
         // 文法的には正しいけど値が不正な JSON
         let invalid_json = r#""not_a_number""#;
 
-        let mut error = parse_str::<i32>(invalid_json).expect_err("bug");
-        error.backtrace.clear(); // 行番号を含めると壊れやすくなるので削除する
+        let error = parse_str::<i32>(invalid_json).expect_err("bug");
         eprintln!("{}", error);
 
         let expected = r#"JSON String at byte position 0 is invalid: expected Integer, but found String
@@ -512,8 +503,7 @@ INPUT:
    1 |"not_a_number"
      |^^^^^^^^^^^^^^ expected Integer, but found String
 
-BACKTRACE:
-"#;
-        assert_eq!(error.to_string(), expected);
+BACKTRACE:"#;
+        assert_eq!(error.reason, expected);
     }
 }

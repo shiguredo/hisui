@@ -693,7 +693,7 @@ mod tests {
             "outputUrl":"ws://example.com/whip/live",
             "inputVideoTrackId":"video-main"
         }"#;
-        let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
+        let result: crate::Result<WhipPublisher> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -704,7 +704,7 @@ mod tests {
             "inputVideoTrackId":"video-main",
             "videoCodecPreferences":["AV1","H266"]
         }"#;
-        let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
+        let result: crate::Result<WhipPublisher> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -726,7 +726,7 @@ mod tests {
             "inputVideoTrackId":"video-main",
             "bearerToken":"   "
         }"#;
-        let result: orfail::Result<WhipPublisher> = crate::json::parse_str(json);
+        let result: crate::Result<WhipPublisher> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 

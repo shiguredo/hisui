@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
+use hisui::OrFail;
 use hisui::{
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
@@ -10,7 +11,6 @@ use hisui::{
     types::CodecName,
     video::FrameRate,
 };
-use orfail::OrFail;
 
 const OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(100);
 
@@ -31,7 +31,7 @@ fn start_noop_audio_mixer() {
 }
 
 #[test]
-fn mix_three_sources_without_trim() -> orfail::Result<()> {
+fn mix_three_sources_without_trim() -> hisui::Result<()> {
     // それぞれ期間が異なる三つのソース
     // trim はしないので、合成後の尺は 300 ms になる
     let (source0, input_stream_id0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
@@ -130,7 +130,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 }
 
 #[test]
-fn mix_three_sources_with_trim() -> orfail::Result<()> {
+fn mix_three_sources_with_trim() -> hisui::Result<()> {
     // それぞれ期間が異なる三つのソース
     // trim をするので、合成後の尺は 260 ms になる
     let (source0, input_stream_id0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
@@ -229,7 +229,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
 /// AudioData.duration がソース毎に異なる場合のテスト
 #[test]
-fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
+fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
     // 100 ms のソースを三つ用意する
     let (source0, input_stream_id0) = source(0, 0, 100);
     let (source1, input_stream_id1) = source(1, 0, 100);
@@ -301,7 +301,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
 
 /// 不正なフォーマットの音声データを送るテスト
 #[test]
-fn non_pcm_audio_input_error() -> orfail::Result<()> {
+fn non_pcm_audio_input_error() -> hisui::Result<()> {
     let (source, input_stream_id) = source(0, 0, 100);
     let mut mixer = AudioMixer::new(
         layout(std::slice::from_ref(&source), None).trim_spans,
@@ -428,7 +428,7 @@ fn ms(value: u64) -> Duration {
     Duration::from_millis(value)
 }
 
-fn next_mixed_data(mixer: &mut AudioMixer) -> orfail::Result<Arc<AudioData>> {
+fn next_mixed_data(mixer: &mut AudioMixer) -> hisui::Result<Arc<AudioData>> {
     mixer
         .process_output()
         .or_fail()?

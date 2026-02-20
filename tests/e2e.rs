@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use hisui::OrFail;
 #[cfg(feature = "libvpx")]
 use hisui::decoder_libvpx::LibvpxDecoder;
 use hisui::{
@@ -12,7 +13,6 @@ use hisui::{
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
-use orfail::OrFail;
 
 fn run_hisui_command(args: &[&str]) -> noargs::Result<std::process::Output> {
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -277,8 +277,8 @@ fn test_simple_single_source_common(
         Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -324,7 +324,7 @@ fn test_simple_single_source_common(
     const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
     const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 
-    let check_decoded_frame = |decoded: &VideoFrame| -> orfail::Result<()> {
+    let check_decoded_frame = |decoded: &VideoFrame| -> hisui::Result<()> {
         // 画像が赤一色かどうかの確認する
         let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
         y_plane
@@ -827,8 +827,8 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
         Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -873,7 +873,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
+    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 画像が赤一色かどうかの確認する（ただし、右と下の枠線は黒色になる）
             let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
@@ -959,8 +959,8 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // レイアウトファイル未指定だと映像の解像度が大きめになって
     // テスト内でデコード結果を確認するのが少し面倒なので、このテストでは省略している
     // （統計値を取得するためにイテレーターを最後まで実行する必要はある）
-    let _audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let _video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let _audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let _video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -1040,8 +1040,8 @@ fn simple_split_archive() -> noargs::Result<()> {
         Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -1085,7 +1085,7 @@ fn simple_split_archive() -> noargs::Result<()> {
     // 映像をデコードをして中身を確認する
     // 時系列順に R -> G -> B の色変化を確認
     let check_decoded_frames =
-        |decoder: &mut LibvpxDecoder, frame_index: &mut usize| -> orfail::Result<()> {
+        |decoder: &mut LibvpxDecoder, frame_index: &mut usize| -> hisui::Result<()> {
             while let Some(decoded) = decoder.next_decoded_frame() {
                 // Y成分だけを確認して色の変化を検証
                 let (y_plane, _u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
@@ -1179,8 +1179,8 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -1223,7 +1223,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
+    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 完全なチェックは面倒なので Y 成分だけを確認する
             let (y_plane, _u_plane, _v_plane) = decoded.as_yuv_planes().or_fail()?;
@@ -1310,7 +1310,7 @@ fn two_regions() -> noargs::Result<()> {
     );
 
     // 後でデコードするために読み込み結果を覚えておく
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let video_stats = video_reader.stats();
@@ -1329,7 +1329,7 @@ fn two_regions() -> noargs::Result<()> {
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
+    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 完全なチェックは面倒なので Y 成分だけを確認する
             let (y_plane, _u_plane, _v_plane) = decoded.as_yuv_planes().or_fail()?;

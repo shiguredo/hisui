@@ -1,4 +1,4 @@
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
@@ -25,7 +25,7 @@ pub fn h265_sample_entry(
     vps_list: NalUnitArray,
     sps_list: NalUnitArray,
     pps_list: NalUnitArray,
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     // [NOTE]
     // H.265 を表現するためのボックスには hev1 もあり、機能的には hev1 と hvc1 は
     // ほぼ同様（後者の場合にはキーフレームのサンプルデータ本体に SPS などの情報を付与することが必須なのが異なる）だが、
@@ -86,7 +86,7 @@ pub fn h265_sample_entry_from_annexb(
     height: usize,
     fps: FrameRate,
     data: &[u8],
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     // H.265 ストリームから VPS, SPS, PPS を取り出す
     let mut vps_list = Vec::new();
     let mut sps_list = Vec::new();
@@ -100,9 +100,7 @@ pub fn h265_sample_entry_from_annexb(
         } else if pos + 3 <= data.len() && data[pos..pos + 3] == [0, 0, 1] {
             3
         } else if pos == 0 {
-            return Err(orfail::Failure::new(
-                "No H.265 start code found at beginning",
-            ));
+            return Err(crate::Error::new("No H.265 start code found at beginning"));
         } else {
             break;
         };

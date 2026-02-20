@@ -7,7 +7,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
@@ -76,7 +76,7 @@ impl Task {
         (task, input_stream_txs)
     }
 
-    fn process_input(&mut self) -> orfail::Result<bool> {
+    fn process_input(&mut self) -> crate::Result<bool> {
         let mut input = None;
         for &stream_id in &self.awaiting_input_stream_ids {
             let rx = self.input_stream_rxs.get(&stream_id).or_fail()?;
@@ -102,7 +102,7 @@ impl Task {
         }
     }
 
-    fn process_output(&mut self) -> orfail::Result<bool> {
+    fn process_output(&mut self) -> crate::Result<bool> {
         if !self.awaiting_input_stream_ids.is_empty() {
             return Ok(false);
         }
@@ -156,7 +156,7 @@ impl Task {
         }
     }
 
-    fn run_until_block(&mut self) -> orfail::Result<bool> {
+    fn run_until_block(&mut self) -> crate::Result<bool> {
         let mut did_something = false;
         while self.process_input().or_fail()? || self.process_output().or_fail()? {
             did_something = true;
@@ -192,7 +192,7 @@ impl Scheduler {
             error: Arc::new(AtomicBool::new(false)),
         }
     }
-    pub fn register<P>(&mut self, processor: P) -> orfail::Result<()>
+    pub fn register<P>(&mut self, processor: P) -> crate::Result<()>
     where
         P: 'static + Send + MediaProcessor,
     {
@@ -206,7 +206,7 @@ impl Scheduler {
         Ok(())
     }
 
-    fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
+    fn spawn(mut self) -> crate::Result<SchedulerHandle> {
         self.update_output_stream_txs().or_fail()?;
 
         // コストが高い順にソートする
@@ -264,7 +264,7 @@ impl Scheduler {
         })
     }
 
-    pub fn run(self) -> orfail::Result<SchedulerResult> {
+    pub fn run(self) -> crate::Result<SchedulerResult> {
         let start = Instant::now();
         let handle = self.spawn().or_fail()?;
         for handle in handle.handles {
@@ -278,7 +278,7 @@ impl Scheduler {
         })
     }
 
-    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, SchedulerResult)> {
+    pub fn run_timeout(self, timeout: Duration) -> crate::Result<(bool, SchedulerResult)> {
         // 完了待ちのビジーループを避けるためのスリープの時間
         // 適当に長めの時間ならなんでもいい
         const SLEEP_DURATION: Duration = Duration::from_millis(100);
@@ -326,7 +326,7 @@ impl Scheduler {
         ))
     }
 
-    fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
+    fn update_output_stream_txs(&mut self) -> crate::Result<()> {
         for task in &mut self.tasks {
             for id in task.processor.spec().output_stream_ids {
                 if let Some(tx) = self.stream_txs.get(&id).cloned() {

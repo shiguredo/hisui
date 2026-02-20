@@ -572,7 +572,7 @@ mod tests {
         let json = r#"{
             "inputUrl":"https://example.com/whep/live"
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -582,7 +582,7 @@ mod tests {
             "inputUrl":"ws://example.com/whep/live",
             "outputVideoTrackId":"video-main"
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -593,7 +593,7 @@ mod tests {
             "outputVideoTrackId":"video-main",
             "bearerToken":"   "
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -604,7 +604,7 @@ mod tests {
             "outputVideoTrackId":"video-main",
             "outputAudioTrackId":"audio-main"
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 

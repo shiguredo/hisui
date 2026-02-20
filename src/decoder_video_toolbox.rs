@@ -1,4 +1,4 @@
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use crate::{
@@ -19,7 +19,7 @@ pub struct VideoToolboxDecoder {
 }
 
 impl VideoToolboxDecoder {
-    pub fn new_h264(frame: &VideoFrame) -> orfail::Result<Self> {
+    pub fn new_h264(frame: &VideoFrame) -> crate::Result<Self> {
         let (sps, pps) = get_h264_sps_pps(frame).or_fail()?;
         tracing::debug!("Initialize H.264 decoder: sps={sps:?}, pps={pps:?}");
 
@@ -34,7 +34,7 @@ impl VideoToolboxDecoder {
         })
     }
 
-    pub fn new_h265(frame: &VideoFrame) -> orfail::Result<Self> {
+    pub fn new_h265(frame: &VideoFrame) -> crate::Result<Self> {
         let (vps, sps, pps) = get_h265_vps_sps_pps(frame).or_fail()?;
         tracing::debug!("Initialize H.264 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
 
@@ -52,7 +52,7 @@ impl VideoToolboxDecoder {
     // VPS / SPS / PPS の情報が変わっていたらデコーダーを再初期化する
     //
     // [NOTE] WebM 対応がなくなったら VideoDecoder 側でサンプルエントリーの変更を見てハンドリングできる
-    fn reinitialize_if_need(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+    fn reinitialize_if_need(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !frame.keyframe {
             // 切り替わりが発生するのは必ずキーフレーム
             return Ok(());
@@ -87,7 +87,7 @@ impl VideoToolboxDecoder {
         Ok(())
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         matches!(
             frame.format,
             VideoFormat::H264 | VideoFormat::H264AnnexB | VideoFormat::H265
@@ -131,7 +131,7 @@ impl VideoToolboxDecoder {
     }
 }
 
-fn get_h264_sps_pps(frame: &VideoFrame) -> orfail::Result<(Vec<u8>, Vec<u8>)> {
+fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
     matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB).or_fail()?;
 
     let mut sps = Vec::new();
@@ -155,7 +155,7 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> orfail::Result<(Vec<u8>, Vec<u8>)> {
                 ..
             })) = &frame.sample_entry
             else {
-                return Err(orfail::Failure::new(
+                return Err(crate::Error::new(
                     "missing sample entry for H.264 first frame",
                 ));
             };
@@ -170,13 +170,13 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> orfail::Result<(Vec<u8>, Vec<u8>)> {
     Ok((sps, pps))
 }
 
-fn get_h265_vps_sps_pps(frame: &VideoFrame) -> orfail::Result<(&[u8], &[u8], &[u8])> {
+fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8])> {
     matches!(frame.format, VideoFormat::H265).or_fail()?;
 
     let hvcc = match &frame.sample_entry {
         Some(SampleEntry::Hev1(b)) => &b.hvcc_box,
         Some(SampleEntry::Hvc1(b)) => &b.hvcc_box,
-        _ => return Err(orfail::Failure::new("no H.265 sample entry")),
+        _ => return Err(crate::Error::new("no H.265 sample entry")),
     };
 
     let mut vps = &[][..];

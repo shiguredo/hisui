@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use hisui::OrFail;
 use hisui::{
     layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     layout_region::{Grid, Region},
@@ -16,7 +17,6 @@ use hisui::{
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
-use orfail::OrFail;
 
 const MIN_OUTPUT_WIDTH: usize = 16;
 const MIN_OUTPUT_HEIGHT: usize = 16;
@@ -449,7 +449,7 @@ fn single_source_multiple_regions_with_resize() {
 
 /// トリム期間（入力ソースが存在しなくて合成結果から除去される期間）がある場合のテスト
 #[test]
-fn mix_with_trim() -> orfail::Result<()> {
+fn mix_with_trim() -> hisui::Result<()> {
     let input_stream_id0 = MediaStreamId::new(0);
     let input_stream_id1 = MediaStreamId::new(1);
 
@@ -528,7 +528,7 @@ fn mix_with_trim() -> orfail::Result<()> {
 
 /// `mix_with_trim()` とほぼ同様だけど、トリムは行わないテスト（空白期間は黒塗りになる）
 #[test]
-fn mix_without_trim() -> orfail::Result<()> {
+fn mix_without_trim() -> hisui::Result<()> {
     let input_stream_id0 = MediaStreamId::new(0);
     let input_stream_id1 = MediaStreamId::new(1);
 
@@ -625,7 +625,7 @@ fn mix_without_trim() -> orfail::Result<()> {
 /// 残りのセルには、開始・終了期間が異なるソースが割り当てられている。
 /// ただし、右下のセルは最初から最後まで未割り当てとする。
 #[test]
-fn mix_multiple_cells() -> orfail::Result<()> {
+fn mix_multiple_cells() -> hisui::Result<()> {
     let input_stream_id0 = MediaStreamId::new(0);
     let input_stream_id1 = MediaStreamId::new(1);
     let input_stream_id2 = MediaStreamId::new(2);
@@ -853,7 +853,7 @@ fn mix_multiple_cells() -> orfail::Result<()> {
 
 /// 枠線なしで複数セルがある場合のテスト
 #[test]
-fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
+fn mix_multiple_cells_with_no_borders() -> hisui::Result<()> {
     let input_stream_id0 = MediaStreamId::new(0);
     let input_stream_id1 = MediaStreamId::new(1);
     let input_stream_id2 = MediaStreamId::new(2);
@@ -1077,7 +1077,7 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
 
 /// 不正なフォーマットの映像フレームを送るテスト
 #[test]
-fn non_yuv_video_input_error() -> orfail::Result<()> {
+fn non_yuv_video_input_error() -> hisui::Result<()> {
     let input_stream_id = MediaStreamId::new(0);
     let total_duration = ms(1000);
 
@@ -1266,7 +1266,7 @@ fn grayscale_image<const W: usize, const H: usize>(image: [[u8; W]; H]) -> Vec<u
     yuv
 }
 
-fn next_mixed_frame(mixer: &mut VideoMixer) -> orfail::Result<Arc<VideoFrame>> {
+fn next_mixed_frame(mixer: &mut VideoMixer) -> hisui::Result<Arc<VideoFrame>> {
     mixer
         .process_output()
         .or_fail()?

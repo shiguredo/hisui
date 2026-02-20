@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::{
     Uint,
     boxes::{SampleEntry, Vp08Box, Vp09Box, VpccBox},
@@ -34,7 +34,7 @@ pub struct LibvpxEncoder {
 }
 
 impl LibvpxEncoder {
-    pub fn new_vp8(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_vp8(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         let config = shiguredo_libvpx::EncoderConfig {
@@ -58,7 +58,7 @@ impl LibvpxEncoder {
         })
     }
 
-    pub fn new_vp9(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_vp9(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         let config = shiguredo_libvpx::EncoderConfig {
@@ -90,7 +90,7 @@ impl LibvpxEncoder {
         }
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
 
         let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
@@ -101,13 +101,13 @@ impl LibvpxEncoder {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.finish().or_fail()?;
         self.handle_encoded_frames().or_fail()?;
         Ok(())
     }
 
-    fn handle_encoded_frames(&mut self) -> orfail::Result<()> {
+    fn handle_encoded_frames(&mut self) -> crate::Result<()> {
         while let Some(frame) = self.inner.next_frame() {
             let input_frame = self.input_queue.pop_front().or_fail()?;
             self.output_queue.push_back(VideoFrame {

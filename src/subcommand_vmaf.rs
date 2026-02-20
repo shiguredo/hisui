@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
@@ -168,9 +168,9 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             distorted_yuv_file_path.clone(),
             reference_yuv_file_path.clone(),
         ))
-        .map_err(|e| orfail::Failure::new(e.to_string()))?;
+        .map_err(|e| crate::Error::new(e.to_string()))?;
     if !compose_result.success {
-        return Err(orfail::Failure::new(format!(
+        return Err(crate::Error::new(format!(
             "video composition process failed{}",
             if compose_result.timeout_expired {
                 " (timeout)"
@@ -687,7 +687,7 @@ fn error_from<E: std::fmt::Display>(error: E) -> Error {
     Error::new(error.to_string())
 }
 
-pub fn check_vmaf_availability() -> orfail::Result<()> {
+pub fn check_vmaf_availability() -> crate::Result<()> {
     let output = Command::new("vmaf")
         .arg("--version")
         .stdout(Stdio::null())
@@ -696,13 +696,11 @@ pub fn check_vmaf_availability() -> orfail::Result<()> {
 
     match output {
         Ok(output) if output.status.success() => Ok(()),
-        Ok(_) => Err(orfail::Failure::new(
-            "vmaf command failed to execute properly",
-        )),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(orfail::Failure::new(
+        Ok(_) => Err(crate::Error::new("vmaf command failed to execute properly")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(crate::Error::new(
             "vmaf command not found. Please install vmaf and ensure it's in your PATH",
         )),
-        Err(e) => Err(orfail::Failure::new(format!(
+        Err(e) => Err(crate::Error::new(format!(
             "failed to check vmaf availability: {e}"
         ))),
     }
@@ -713,7 +711,7 @@ fn run_vmaf_evaluation(
     distorted_yuv_file_path: &Path,
     vmaf_output_file_path: &Path,
     layout: &Layout,
-) -> orfail::Result<()> {
+) -> crate::Result<()> {
     let output = Command::new("vmaf")
         .args([
             "--reference",
@@ -743,7 +741,7 @@ fn run_vmaf_evaluation(
     Ok(())
 }
 
-fn parse_vmaf_output(vmaf_output_file_path: &Path) -> orfail::Result<VmafScoreStats> {
+fn parse_vmaf_output(vmaf_output_file_path: &Path) -> crate::Result<VmafScoreStats> {
     let vmaf_content = std::fs::read_to_string(vmaf_output_file_path)
         .or_fail_with(|e| format!("failed to read VMAF output file: {e}"))?;
     let json = nojson::RawJson::parse(&vmaf_content).or_fail()?;

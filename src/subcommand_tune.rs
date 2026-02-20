@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     json::{JsonObject, JsonValue},
@@ -259,7 +259,7 @@ fn run_trial_evaluation(
     args: &Args,
     trial_number: usize,
     layout: &JsonValue,
-) -> orfail::Result<TrialValues> {
+) -> crate::Result<TrialValues> {
     // トライアルの作業用ディレクトリを作成
     let trial_dir = trial_dir(args, trial_number);
     std::fs::create_dir_all(&trial_dir).or_fail_with(|e| {
@@ -368,7 +368,7 @@ fn display_best_trials_if_updated(
     args: &Args,
     optuna: &mut OptunaStudy,
     force: bool,
-) -> orfail::Result<bool> {
+) -> crate::Result<bool> {
     let (updated, mut best_trials) = optuna.get_best_trials().or_fail()?;
     if !updated && !force {
         // 更新なし

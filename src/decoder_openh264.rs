@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::video::{VideoFormat, VideoFrame};
@@ -13,7 +13,7 @@ pub struct Openh264Decoder {
 }
 
 impl Openh264Decoder {
-    pub fn new(lib: Openh264Library) -> orfail::Result<Self> {
+    pub fn new(lib: Openh264Library) -> crate::Result<Self> {
         Ok(Self {
             inner: shiguredo_openh264::Decoder::new(lib).or_fail()?,
             input_queue: VecDeque::new(),
@@ -21,7 +21,7 @@ impl Openh264Decoder {
         })
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB).or_fail()?;
 
         if frame.keyframe {
@@ -64,7 +64,7 @@ impl Openh264Decoder {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         let Some(decoded) = self.inner.finish().or_fail()? else {
             return Ok(());
         };
@@ -77,7 +77,7 @@ impl Openh264Decoder {
     fn to_rgb_frame(
         input_frame: VideoFrame,
         frame: shiguredo_openh264::DecodedFrame,
-    ) -> orfail::Result<VideoFrame> {
+    ) -> crate::Result<VideoFrame> {
         Ok(VideoFrame::new_i420(
             input_frame,
             frame.width(),

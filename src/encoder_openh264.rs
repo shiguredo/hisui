@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     encoder::VideoEncoderOptions,
@@ -19,7 +19,7 @@ impl Openh264Encoder {
     pub fn new(
         lib: shiguredo_openh264::Openh264Library,
         options: &VideoEncoderOptions,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         let config = shiguredo_openh264::EncoderConfig {
@@ -38,7 +38,7 @@ impl Openh264Encoder {
         })
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
 
         let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
@@ -86,7 +86,7 @@ impl Openh264Encoder {
     }
 
     // 他のエンコーダーに合わせてメソッドだけ用意しておく
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         Ok(())
     }
 

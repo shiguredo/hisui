@@ -1,11 +1,11 @@
+use hisui::OrFail;
 use hisui::{
     metadata::SourceId,
     reader_webm::{WebmAudioReader, WebmVideoReader},
 };
-use orfail::OrFail;
 
 #[test]
-fn webm_audio_reader_test() -> orfail::Result<()> {
+fn webm_audio_reader_test() -> hisui::Result<()> {
     let reader = WebmAudioReader::new(SourceId::new("dummy"), "testdata/archive-black-silent.webm")
         .or_fail()?;
     for audio_data in reader {
@@ -15,7 +15,7 @@ fn webm_audio_reader_test() -> orfail::Result<()> {
 }
 
 #[test]
-fn webm_video_reader_test() -> orfail::Result<()> {
+fn webm_video_reader_test() -> hisui::Result<()> {
     let reader = WebmVideoReader::new(SourceId::new("dummy"), "testdata/archive-black-silent.webm")
         .or_fail()?;
     for video_frame in reader {

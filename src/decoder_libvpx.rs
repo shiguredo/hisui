@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::video::{VideoFormat, VideoFrame};
 
@@ -12,7 +12,7 @@ pub struct LibvpxDecoder {
 }
 
 impl LibvpxDecoder {
-    pub fn new_vp8() -> orfail::Result<Self> {
+    pub fn new_vp8() -> crate::Result<Self> {
         tracing::debug!("create libvpx(VP8) decoder");
         Ok(Self {
             inner: shiguredo_libvpx::Decoder::new_vp8().or_fail()?,
@@ -21,7 +21,7 @@ impl LibvpxDecoder {
         })
     }
 
-    pub fn new_vp9() -> orfail::Result<Self> {
+    pub fn new_vp9() -> crate::Result<Self> {
         tracing::debug!("create libvpx(VP9) decoder");
         Ok(Self {
             inner: shiguredo_libvpx::Decoder::new_vp9().or_fail()?,
@@ -30,7 +30,7 @@ impl LibvpxDecoder {
         })
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         matches!(frame.format, VideoFormat::Vp8 | VideoFormat::Vp9).or_fail()?;
 
         self.inner.decode(&frame.data).or_fail()?;
@@ -39,13 +39,13 @@ impl LibvpxDecoder {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.finish().or_fail()?;
         self.handle_decoded_frames().or_fail()?;
         Ok(())
     }
 
-    fn handle_decoded_frames(&mut self) -> orfail::Result<()> {
+    fn handle_decoded_frames(&mut self) -> crate::Result<()> {
         while let Some(image) = self.inner.next_frame() {
             if image.is_high_depth() {
                 // 高ビット深度データの処理

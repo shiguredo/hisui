@@ -1,4 +1,4 @@
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::audio::{AudioData, AudioFormat, SAMPLE_RATE};
 
@@ -14,13 +14,13 @@ pub struct OpusDecoder {
 }
 
 impl OpusDecoder {
-    pub fn new() -> orfail::Result<Self> {
+    pub fn new() -> crate::Result<Self> {
         Ok(Self {
             inner: shiguredo_opus::Decoder::new(SAMPLE_RATE, DECODED_CHANNELS).or_fail()?,
         })
     }
 
-    pub fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
+    pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         (data.format == AudioFormat::Opus).or_fail()?;
 
         let decoded_samples = self.inner.decode(&data.data).or_fail()?;

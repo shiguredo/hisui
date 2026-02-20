@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::{
     Uint,
     boxes::{Avc1Box, AvccBox, SampleEntry},
@@ -28,7 +28,7 @@ pub struct VideoToolboxEncoder {
 }
 
 impl VideoToolboxEncoder {
-    pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let config = shiguredo_video_toolbox::EncoderConfig {
@@ -52,7 +52,7 @@ impl VideoToolboxEncoder {
         })
     }
 
-    pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let config = shiguredo_video_toolbox::EncoderConfig {
@@ -84,7 +84,7 @@ impl VideoToolboxEncoder {
         }
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
 
         let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
@@ -101,7 +101,7 @@ impl VideoToolboxEncoder {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.finish().or_fail()?;
         self.handle_encoded().or_fail()?;
         Ok(())
@@ -111,7 +111,7 @@ impl VideoToolboxEncoder {
         self.output_queue.pop_front()
     }
 
-    fn handle_encoded(&mut self) -> orfail::Result<()> {
+    fn handle_encoded(&mut self) -> crate::Result<()> {
         while let Some(frame) = self.inner.next_frame() {
             let input_frame = self.input_queue.pop_front().or_fail()?;
             let sample_entry = if self.is_first {
@@ -161,7 +161,7 @@ fn h264_sample_entry(
     height: EvenUsize,
     sps_list: Vec<Vec<u8>>,
     pps_list: Vec<Vec<u8>>,
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     Ok(SampleEntry::Avc1(Avc1Box {
         visual: video::sample_entry_visual_fields(width.get(), height.get()),
         avcc_box: AvccBox {

@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     audio,
@@ -67,16 +67,13 @@ impl Layout {
     pub fn from_layout_json_file(
         base_path: PathBuf,
         layout_file_path: &Path,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let raw: RawLayout = crate::json::parse_file(layout_file_path).or_fail()?;
         raw.into_layout(base_path).or_fail()
     }
 
     /// レイアウト JSON 文字列で指示されたレイアウトを作成する
-    pub fn from_layout_json_str(
-        base_path: PathBuf,
-        layout_json_text: &str,
-    ) -> orfail::Result<Self> {
+    pub fn from_layout_json_str(base_path: PathBuf, layout_json_text: &str) -> crate::Result<Self> {
         let raw: RawLayout = crate::json::parse_str(layout_json_text).or_fail()?;
         raw.into_layout(base_path).or_fail()
     }
@@ -85,7 +82,7 @@ impl Layout {
         base_path: PathBuf,
         layout_file_path: Option<&Path>,
         default_layout_json: &str,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         if let Some(layout_file_path) = layout_file_path {
             Layout::from_layout_json_file(base_path, layout_file_path).or_fail()
         } else {
@@ -99,7 +96,7 @@ impl Layout {
         report: &RecordingMetadata,
         audio_only: bool,
         max_columns: usize,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let base_path = std::path::absolute(report_file_path)
             .or_fail()?
             .parent()
@@ -126,7 +123,7 @@ impl Layout {
             .or_fail()?
             .into_iter()
             .map(|path| path.file_name().or_fail().map(PathBuf::from))
-            .collect::<orfail::Result<Vec<_>>>()?;
+            .collect::<crate::Result<Vec<_>>>()?;
         let video_layout = nojson::json(|f| {
             f.object(|f| {
                 if audio_only {
@@ -291,7 +288,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
 }
 
 impl RawLayout {
-    fn into_layout(self, base_path: PathBuf) -> orfail::Result<Layout> {
+    fn into_layout(self, base_path: PathBuf) -> crate::Result<Layout> {
         let base_path = base_path.canonicalize().or_fail_with(|e| {
             format!(
                 "failed to canonicalize base dir {}: {e}",
@@ -409,7 +406,7 @@ impl Resolution {
     pub const MAX: usize = 3840;
 
     /// [`Resolution`] インスタンスを生成する
-    pub fn new(width: usize, height: usize) -> orfail::Result<Self> {
+    pub fn new(width: usize, height: usize) -> crate::Result<Self> {
         let range = Self::MIN..=Self::MAX;
         range
             .contains(&width)
@@ -454,7 +451,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Resolution {
         };
 
         Self::new(width, height)
-            .map_err(|e| value.invalid(format!("invalid resolution: {}", e.message)))
+            .map_err(|e| value.invalid(format!("invalid resolution: {}", e.reason)))
     }
 }
 
@@ -462,7 +459,7 @@ pub fn resolve_source_and_media_path_pairs(
     base_path: &Path,
     sources: &[PathBuf],
     excluded: &[PathBuf],
-) -> orfail::Result<Vec<(SourceInfo, PathBuf)>> {
+) -> crate::Result<Vec<(SourceInfo, PathBuf)>> {
     let resolved_paths = resolve_source_paths(base_path, sources, excluded).or_fail()?;
 
     let mut resolved = Vec::new();
@@ -484,7 +481,7 @@ pub fn resolve_source_paths(
     base_path: &Path,
     sources: &[PathBuf],
     excluded: &[PathBuf],
-) -> orfail::Result<Vec<PathBuf>> {
+) -> crate::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for source in sources {
         for path in glob(base_path.join(source)).or_fail()? {
@@ -516,7 +513,7 @@ pub fn resolve_source_paths(
     let excluded = excluded
         .iter()
         .map(|p| std::path::absolute(base_path.join(p)).or_fail())
-        .collect::<orfail::Result<Vec<_>>>()?;
+        .collect::<crate::Result<Vec<_>>>()?;
 
     paths.retain(|path0| {
         for path1 in &excluded {
@@ -551,7 +548,7 @@ fn media_file_exists<P: AsRef<Path>>(source_file_path: P) -> bool {
     false
 }
 
-fn glob(path: PathBuf) -> orfail::Result<Vec<PathBuf>> {
+fn glob(path: PathBuf) -> crate::Result<Vec<PathBuf>> {
     if !path
         .file_name()
         .and_then(|name| name.to_str())
@@ -691,7 +688,7 @@ impl AggregatedSourceInfo {
 
     // 一括録画と分割録画のファイルを統合するためのメソッド
     // 重なる期間があるソースは長い方を採用する
-    pub fn merge_overlapping_sources(&mut self) -> orfail::Result<()> {
+    pub fn merge_overlapping_sources(&mut self) -> crate::Result<()> {
         let mut sources_by_timespan: Vec<_> = self.media_paths.iter().collect();
 
         // 開始時刻でソート、次に長さでソート（長い方が先）
@@ -764,7 +761,7 @@ mod tests {
     use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
 
     #[test]
-    fn load_layout_jsons() -> orfail::Result<()> {
+    fn load_layout_jsons() -> crate::Result<()> {
         let jsons = [
             include_str!("../testdata/layouts/layout0.json"),
             include_str!("../testdata/layouts/layout1.json"),
@@ -784,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_region_name() -> orfail::Result<()> {
+    fn test_duplicate_region_name() -> crate::Result<()> {
         let json = include_str!("../testdata/layouts/error-layout-duplicate-region-name.json");
         let e = json.parse::<nojson::Json<RawLayout>>().err().or_fail()?;
         let error_message = e.to_string();
@@ -793,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_no_overlap() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_no_overlap() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 重複しないソースを追加
@@ -814,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_complete_containment() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_complete_containment() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 一方が他方を完全に含むソースを追加
@@ -836,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_empty() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_empty() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         aggregated.merge_overlapping_sources().or_fail()?;
@@ -850,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_partial_overlap() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_partial_overlap() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 部分的に重複するソースを追加
@@ -878,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_identical_duration() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_identical_duration() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 同じ長さだが異なる開始時刻のソースを追加
@@ -904,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_multiple_overlaps() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_multiple_overlaps() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 様々な重複パターンを持つ複数のソースを追加
@@ -941,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_different_durations_same_start() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_different_durations_same_start() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 同じ開始時刻で異なる長さのソースを追加
@@ -963,7 +960,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_sequential() -> orfail::Result<()> {
+    fn test_merge_overlapping_sources_sequential() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 連続するが重複しないソースを追加

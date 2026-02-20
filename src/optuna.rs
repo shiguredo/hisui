@@ -3,7 +3,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::json::{JsonNumber, JsonObject, JsonObjectMemberPath, JsonValue};
 
@@ -17,7 +17,7 @@ pub struct OptunaStudy {
 
 impl OptunaStudy {
     /// optuna コマンドが利用可能かどうかをチェックする
-    pub fn check_optuna_availability() -> orfail::Result<()> {
+    pub fn check_optuna_availability() -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("--version")
             .stdout(Stdio::null())
@@ -41,12 +41,12 @@ impl OptunaStudy {
 
                 error_msg.push_str("\nPlease ensure optuna is properly installed and configured");
 
-                Err(orfail::Failure::new(error_msg))
+                Err(crate::Error::new(error_msg))
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(orfail::Failure::new(
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(crate::Error::new(
                 "optuna command not found. Please install optuna and ensure it's in your PATH",
             )),
-            Err(e) => Err(orfail::Failure::new(format!(
+            Err(e) => Err(crate::Error::new(format!(
                 "failed to check optuna availability: {e}"
             ))),
         }
@@ -67,7 +67,7 @@ impl OptunaStudy {
     }
 
     /// スタディを作成する
-    pub fn create_study(&self) -> orfail::Result<()> {
+    pub fn create_study(&self) -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("create-study")
             .arg("--study-name")
@@ -90,7 +90,7 @@ impl OptunaStudy {
     }
 
     /// 次に探索すべきパラメータセットを問い合わせる
-    pub fn ask(&self, search_space: &SearchSpace) -> orfail::Result<Trial> {
+    pub fn ask(&self, search_space: &SearchSpace) -> crate::Result<Trial> {
         let output = Command::new("optuna")
             .arg("ask")
             .arg("--storage")
@@ -116,7 +116,7 @@ impl OptunaStudy {
     }
 
     /// 探索結果（成功応答）を optuna に伝える
-    pub fn tell(&self, trial_number: usize, values: &TrialValues) -> orfail::Result<()> {
+    pub fn tell(&self, trial_number: usize, values: &TrialValues) -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("tell")
             .arg("--storage")
@@ -145,7 +145,7 @@ impl OptunaStudy {
     }
 
     /// 探索結果（失敗応答）を optuna に伝える
-    pub fn tell_fail(&self, trial_number: usize) -> orfail::Result<()> {
+    pub fn tell_fail(&self, trial_number: usize) -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("tell")
             .arg("--storage")
@@ -171,7 +171,7 @@ impl OptunaStudy {
     }
 
     /// 現時点でのパレートフロント（最適解の集合）を取得する
-    pub fn get_best_trials(&mut self) -> orfail::Result<(bool, Vec<BestTrial>)> {
+    pub fn get_best_trials(&mut self) -> crate::Result<(bool, Vec<BestTrial>)> {
         let output = Command::new("optuna")
             .arg("best-trials")
             .arg("--storage")
@@ -209,7 +209,7 @@ pub struct Trial {
 
 impl Trial {
     /// Optuna が提案したパラメータセットを使ってレイアウトを更新する
-    pub fn apply_params_to_layout(&self, layout: &mut JsonValue) -> orfail::Result<()> {
+    pub fn apply_params_to_layout(&self, layout: &mut JsonValue) -> crate::Result<()> {
         for (path, value) in &self.params {
             *path.get_mut(layout).or_fail()? = value.clone();
         }

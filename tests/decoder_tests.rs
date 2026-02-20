@@ -1,3 +1,4 @@
+use hisui::OrFail;
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 use hisui::{decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use hisui::{
@@ -8,7 +9,6 @@ use hisui::{
     reader_mp4::Mp4VideoReader,
     video::VideoFrame,
 };
-use orfail::OrFail;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
 
@@ -16,7 +16,7 @@ const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 
 #[test]
-fn h264_multi_resolutions() -> orfail::Result<()> {
+fn h264_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h264");
     let source_id1 = SourceId::new("archive-blue-640x480-h264");
     let reader0 =
@@ -29,7 +29,7 @@ fn h264_multi_resolutions() -> orfail::Result<()> {
 
 #[test]
 #[cfg(target_os = "macos")]
-fn h265_multi_resolutions() -> orfail::Result<()> {
+fn h265_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h265");
     let source_id1 = SourceId::new("archive-red-320x320-h265");
     let reader0 =
@@ -42,7 +42,7 @@ fn h265_multi_resolutions() -> orfail::Result<()> {
 
 #[test]
 #[cfg(feature = "libvpx")]
-fn vp9_multi_resolutions() -> orfail::Result<()> {
+fn vp9_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-vp9");
     let source_id1 = SourceId::new("archive-red-320x320-vp9");
     let reader0 =
@@ -54,7 +54,7 @@ fn vp9_multi_resolutions() -> orfail::Result<()> {
 }
 
 #[test]
-fn av1_multi_resolutions() -> orfail::Result<()> {
+fn av1_multi_resolutions() -> hisui::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-av1");
     let source_id1 = SourceId::new("archive-red-320x320-av1");
     let reader0 =
@@ -65,9 +65,9 @@ fn av1_multi_resolutions() -> orfail::Result<()> {
     Ok(())
 }
 
-fn multi_resolutions_test<I>(reader0: I, reader1: I) -> orfail::Result<()>
+fn multi_resolutions_test<I>(reader0: I, reader1: I) -> hisui::Result<()>
 where
-    I: Iterator<Item = orfail::Result<VideoFrame>>,
+    I: Iterator<Item = hisui::Result<VideoFrame>>,
 {
     let options = VideoDecoderOptions {
         openh264_lib: if let Ok(path) = std::env::var("OPENH264_PATH") {
@@ -169,7 +169,7 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 
 #[test]
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-fn aac_decode() -> orfail::Result<()> {
+fn aac_decode() -> hisui::Result<()> {
     let source_id = SourceId::new("beep-aac-audio");
     let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4").or_fail()?;
     let mut decoder = AudioDecoder::new(

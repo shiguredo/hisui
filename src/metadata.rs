@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 /// Sora の report-*.json から必要な情報のみを取り出した構造体
 #[derive(Debug, Clone)]
@@ -28,11 +28,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RecordingMetada
 }
 
 impl RecordingMetadata {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         crate::json::parse_file(path).or_fail()
     }
 
-    pub fn archive_metadata_paths(&self) -> orfail::Result<Vec<PathBuf>> {
+    pub fn archive_metadata_paths(&self) -> crate::Result<Vec<PathBuf>> {
         if self.split_only {
             // split_only の場合には JSON 内に具体的なファイルパスは含まれていないので
             // 命名規則に従って生成する
@@ -120,7 +120,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
 }
 
 impl ArchiveMetadata {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         crate::json::parse_file(path).or_fail()
     }
 
@@ -183,7 +183,7 @@ pub enum ContainerFormat {
 }
 
 impl ContainerFormat {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> orfail::Result<Self> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         let ext = path
             .as_ref()
             .extension()
@@ -193,7 +193,7 @@ impl ContainerFormat {
         } else if ext == "webm" {
             Ok(Self::Webm)
         } else {
-            Err(orfail::Failure::new(format!(
+            Err(crate::Error::new(format!(
                 "unexpected media file extension: {}",
                 path.as_ref().display()
             )))

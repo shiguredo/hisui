@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::Either;
 use shiguredo_mp4::boxes::HdlrBox;
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
@@ -212,7 +212,7 @@ impl Mp4Writer {
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
         mut stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let reserved_moov_box_size = if let Some(options) = options {
             // 事前に尺などが分かっている場合には fast start 用の領域を計算する
 
@@ -276,7 +276,7 @@ impl Mp4Writer {
         &mut self,
         audio_timestamp: Option<Duration>,
         video_timestamp: Option<Duration>,
-    ) -> orfail::Result<bool> {
+    ) -> crate::Result<bool> {
         match (audio_timestamp, video_timestamp) {
             (None, None) => {
                 // 全部の入力の処理が完了した
@@ -323,7 +323,7 @@ impl Mp4Writer {
     }
 
     // 確定したチャンク数を統計値に反映する
-    fn update_finalized_chunk_counts(&mut self) -> orfail::Result<()> {
+    fn update_finalized_chunk_counts(&mut self) -> crate::Result<()> {
         let moov_box = self.muxer.finalized_boxes().or_fail()?.moov_box();
 
         for trak in &moov_box.trak_boxes {
@@ -347,7 +347,7 @@ impl Mp4Writer {
         Ok(())
     }
 
-    fn append_video_frame(&mut self) -> orfail::Result<()> {
+    fn append_video_frame(&mut self) -> crate::Result<()> {
         // 次の入力を取り出す（これは常に成功する）
         let frame = self.input_video_queue.pop_front().or_fail()?;
 
@@ -382,7 +382,7 @@ impl Mp4Writer {
         Ok(())
     }
 
-    fn append_audio_data(&mut self) -> orfail::Result<()> {
+    fn append_audio_data(&mut self) -> crate::Result<()> {
         // 次の入力を取り出す（これは常に成功する）
         let data = self.input_audio_queue.pop_front().or_fail()?;
 
@@ -430,7 +430,7 @@ impl MediaProcessor for Mp4Writer {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         match input.sample {
             Some(MediaSample::Audio(sample))
                 if Some(input.stream_id) == self.input_audio_stream_id =>
@@ -448,12 +448,12 @@ impl MediaProcessor for Mp4Writer {
             None if Some(input.stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
             }
-            _ => return Err(orfail::Failure::new("BUG: unexpected input stream")),
+            _ => return Err(crate::Error::new("BUG: unexpected input stream")),
         }
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         loop {
             if let Some(id) = self.input_video_stream_id
                 && self.input_video_queue.is_empty()

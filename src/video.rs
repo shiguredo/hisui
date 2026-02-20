@@ -1,6 +1,6 @@
 use std::{num::NonZeroUsize, str::FromStr, time::Duration};
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields};
 
 use crate::{
@@ -68,13 +68,13 @@ impl VideoFrame {
         height: EvenUsize,
         timestamp: Duration,
         duration: Duration,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let width_val = width.get();
         let height_val = height.get();
 
         let expected_size = width_val * height_val * 3;
         if bgr_data.len() != expected_size {
-            return Err(orfail::Failure::new(format!(
+            return Err(crate::Error::new(format!(
                 "BGR data size mismatch: expected {}, got {}",
                 expected_size,
                 bgr_data.len()
@@ -212,7 +212,7 @@ impl VideoFrame {
         y_stride: usize,
         u_stride: usize,
         v_stride: usize,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let (y_size, _, _) = Self::i420_plane_sizes(width, height);
         let (uv_width, uv_height) = Self::i420_uv_dimensions(width, height);
         let uv_size = uv_width * uv_height;
@@ -455,7 +455,7 @@ impl VideoFrame {
         new_width: EvenUsize,
         new_height: EvenUsize,
         filter_mode: shiguredo_libyuv::FilterMode,
-    ) -> orfail::Result<Option<Self>> {
+    ) -> crate::Result<Option<Self>> {
         matches!(self.format, VideoFormat::I420 | VideoFormat::I420A).or_fail()?;
 
         let width = self.width;
@@ -566,7 +566,7 @@ impl VideoFrame {
         dst: &mut [u8],
         dst_width: usize,
         dst_height: usize,
-    ) -> orfail::Result<()> {
+    ) -> crate::Result<()> {
         (src.len() >= src_width.saturating_mul(src_height)).or_fail_with(|()| {
             format!(
                 "source plane too small: expected at least {}, got {}",
@@ -597,7 +597,7 @@ impl VideoFrame {
         Ok(())
     }
 
-    pub fn to_bgr_data(&self) -> orfail::Result<Vec<u8>> {
+    pub fn to_bgr_data(&self) -> crate::Result<Vec<u8>> {
         (self.format == VideoFormat::I420).or_fail()?;
 
         // 実際の解像度（出力に使用）
@@ -857,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn resize_i420a_preserves_format_and_alpha_plane() -> orfail::Result<()> {
+    fn resize_i420a_preserves_format_and_alpha_plane() -> crate::Result<()> {
         let frame = VideoFrame {
             source_id: None,
             sample_entry: None,

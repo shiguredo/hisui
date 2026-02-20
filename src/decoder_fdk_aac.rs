@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
@@ -19,7 +19,7 @@ pub struct FdkAacDecoder {
 
 impl FdkAacDecoder {
     /// デコーダーインスタンスを生成する
-    pub fn new() -> orfail::Result<Self> {
+    pub fn new() -> crate::Result<Self> {
         // サンプルレートなどの情報が実際にデータが届くまで不明なので遅延初期化している
         Ok(Self {
             inner: None,
@@ -32,7 +32,7 @@ impl FdkAacDecoder {
     }
 
     /// AAC データをデコードする
-    pub fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
+    pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
         (data.format == AudioFormat::Aac).or_fail()?;
 
         if self.inner.is_none() {
@@ -44,7 +44,7 @@ impl FdkAacDecoder {
             );
             self.inner = Some(
                 shiguredo_fdk_aac::Decoder::new(&audio_specific_config).map_err(|e| {
-                    orfail::Failure::new(format!("Failed to create FDK AAC decoder: {}", e))
+                    crate::Error::new(format!("Failed to create FDK AAC decoder: {}", e))
                 })?,
             );
             self.source_id = data.source_id.clone();
@@ -53,14 +53,14 @@ impl FdkAacDecoder {
         let inner = self.inner.as_mut().or_fail()?;
         let decoded_frame = inner
             .decode(&data.data)
-            .map_err(|e| orfail::Failure::new(format!("Failed to decode AAC: {}", e)))?;
+            .map_err(|e| crate::Error::new(format!("Failed to decode AAC: {}", e)))?;
 
         if let Some(frame) = decoded_frame {
             let audio_data = match frame.channels {
                 1 => crate::audio::mono_to_stereo(&frame.data),
                 2 => frame.data,
                 _ => {
-                    return Err(orfail::Failure::new(format!(
+                    return Err(crate::Error::new(format!(
                         "Unsupported channel count: {}",
                         frame.channels
                     )));
@@ -88,7 +88,7 @@ impl FdkAacDecoder {
     }
 
     /// デコード済みデータを AudioData に変換する共通処理
-    fn build_audio_data(&mut self, decoded_samples: &[i16]) -> orfail::Result<AudioData> {
+    fn build_audio_data(&mut self, decoded_samples: &[i16]) -> crate::Result<AudioData> {
         let decoded_samples_len = decoded_samples.len() as u64;
 
         let resampled = if let Some(resampled) = crate::audio::resample(
@@ -127,7 +127,7 @@ impl FdkAacDecoder {
 }
 
 /// SampleEntry から Audio Specific Config を抽出する
-fn extract_audio_specific_config(sample_entry: &SampleEntry) -> orfail::Result<Vec<u8>> {
+fn extract_audio_specific_config(sample_entry: &SampleEntry) -> crate::Result<Vec<u8>> {
     match sample_entry {
         SampleEntry::Mp4a(mp4a) => {
             // esds (Elementary Stream Descriptor) ボックスから Audio Specific Config を取得
@@ -143,7 +143,7 @@ fn extract_audio_specific_config(sample_entry: &SampleEntry) -> orfail::Result<V
                 .payload
                 .clone())
         }
-        _ => Err(orfail::Failure::new(
+        _ => Err(crate::Error::new(
             "Only MP4a audio sample entries are currently supported",
         ))?,
     }

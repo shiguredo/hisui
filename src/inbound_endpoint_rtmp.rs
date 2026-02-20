@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orfail::OrFail;
+use crate::OrFail;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -281,7 +281,7 @@ impl RtmpPublisherHandler {
         }
     }
 
-    async fn run(&mut self) -> orfail::Result<()> {
+    async fn run(&mut self) -> crate::Result<()> {
         loop {
             while let Some(event) = self.connection.next_event() {
                 if !matches!(
@@ -320,7 +320,7 @@ impl RtmpPublisherHandler {
     async fn process_event(
         &mut self,
         event: shiguredo_rtmp::RtmpConnectionEvent,
-    ) -> orfail::Result<()> {
+    ) -> crate::Result<()> {
         match event {
             shiguredo_rtmp::RtmpConnectionEvent::AudioReceived(frame) => {
                 self.handle_audio_frame(frame).await.or_fail()?;
@@ -334,7 +334,7 @@ impl RtmpPublisherHandler {
     }
 
     /// RTMP イベントハンドラ（接続制御）
-    fn handle_event(&mut self, event: &shiguredo_rtmp::RtmpConnectionEvent) -> orfail::Result<()> {
+    fn handle_event(&mut self, event: &shiguredo_rtmp::RtmpConnectionEvent) -> crate::Result<()> {
         match event {
             shiguredo_rtmp::RtmpConnectionEvent::PublishRequested {
                 app, stream_name, ..
@@ -369,14 +369,11 @@ impl RtmpPublisherHandler {
     }
 
     /// オーディオフレームを処理する
-    async fn handle_audio_frame(
-        &mut self,
-        frame: shiguredo_rtmp::AudioFrame,
-    ) -> orfail::Result<()> {
+    async fn handle_audio_frame(&mut self, frame: shiguredo_rtmp::AudioFrame) -> crate::Result<()> {
         let audio_data = self
             .frame_handler
             .process_audio_frame(frame)
-            .map_err(|e| orfail::Failure::new(e.to_string()))?;
+            .map_err(|e| crate::Error::new(e.to_string()))?;
         if let Some(tx) = &mut self.audio_track_tx {
             tx.send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
         }
@@ -384,14 +381,11 @@ impl RtmpPublisherHandler {
     }
 
     /// ビデオフレームを処理する
-    async fn handle_video_frame(
-        &mut self,
-        frame: shiguredo_rtmp::VideoFrame,
-    ) -> orfail::Result<()> {
+    async fn handle_video_frame(&mut self, frame: shiguredo_rtmp::VideoFrame) -> crate::Result<()> {
         if let Some(video_frame) = self
             .frame_handler
             .process_video_frame(frame)
-            .map_err(|e| orfail::Failure::new(e.to_string()))?
+            .map_err(|e| crate::Error::new(e.to_string()))?
             && let Some(tx) = &mut self.video_track_tx
         {
             tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
@@ -400,7 +394,7 @@ impl RtmpPublisherHandler {
     }
 
     /// TCP/TLS ストリームからデータを読み込む
-    async fn handle_stream_read(&mut self, result: std::io::Result<usize>) -> orfail::Result<bool> {
+    async fn handle_stream_read(&mut self, result: std::io::Result<usize>) -> crate::Result<bool> {
         match result {
             Ok(0) => {
                 tracing::debug!("Connection closed by publisher");
@@ -421,7 +415,7 @@ impl RtmpPublisherHandler {
     }
 
     /// 送信バッファをストリームにフラッシュする
-    async fn flush_send_buf(&mut self) -> orfail::Result<()> {
+    async fn flush_send_buf(&mut self) -> crate::Result<()> {
         while !self.connection.send_buf().is_empty() {
             let send_data = self.connection.send_buf();
             self.stream.write_all(send_data).await.or_fail()?;

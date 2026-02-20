@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
@@ -60,7 +60,7 @@ impl ResizeCachedVideoFrame {
         self.original.source_id.as_ref()
     }
 
-    fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> orfail::Result<&VideoFrame> {
+    fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> crate::Result<&VideoFrame> {
         if self.original.width == width.get() && self.original.height == height.get() {
             // リサイズ不要
             return Ok(&self.original);
@@ -105,7 +105,7 @@ impl Canvas {
         }
     }
 
-    fn draw_frame(&mut self, position: PixelPosition, frame: &VideoFrame) -> orfail::Result<()> {
+    fn draw_frame(&mut self, position: PixelPosition, frame: &VideoFrame) -> crate::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
         (frame.width <= self.width.get()).or_fail()?;
         (frame.height <= self.height.get()).or_fail()?;
@@ -401,7 +401,7 @@ impl VideoMixer {
         ) - self.next_output_timestamp()
     }
 
-    fn mix(&mut self, now: Duration) -> orfail::Result<VideoFrame> {
+    fn mix(&mut self, now: Duration) -> crate::Result<VideoFrame> {
         let timestamp = self.next_output_timestamp();
         let duration = self.next_output_duration();
 
@@ -435,7 +435,7 @@ impl VideoMixer {
         region: &Region,
         input_streams: &mut HashMap<MediaStreamId, InputStream>,
         now: Duration,
-    ) -> orfail::Result<()> {
+    ) -> crate::Result<()> {
         // [NOTE] ここで実質的にやりたいのは外枠を引くことだけなので、リージョン全体を塗りつぶすのは少し過剰
         //        (必要に応じて最適化する)
         let background_frame =
@@ -537,7 +537,7 @@ impl MediaProcessor for VideoMixer {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
         if let Some(sample) = input.sample {
             // キューに要素を追加する
@@ -557,7 +557,7 @@ impl MediaProcessor for VideoMixer {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         loop {
             let mut now = self.next_input_timestamp();
 

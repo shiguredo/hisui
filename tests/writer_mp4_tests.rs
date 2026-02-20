@@ -1,5 +1,6 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
+use hisui::OrFail;
 use hisui::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
@@ -11,7 +12,6 @@ use hisui::{
     video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
-use orfail::OrFail;
 use shiguredo_mp4::{
     BoxSize, BoxType,
     boxes::{SampleEntry, UnknownBox},
@@ -21,7 +21,7 @@ const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 
 #[test]
-fn write_audio_only_mp4() -> orfail::Result<()> {
+fn write_audio_only_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(std::slice::from_ref(&source), &[]);
@@ -79,7 +79,7 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
 }
 
 #[test]
-fn write_video_only_mp4() -> orfail::Result<()> {
+fn write_video_only_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(&[], std::slice::from_ref(&source));
@@ -137,7 +137,7 @@ fn write_video_only_mp4() -> orfail::Result<()> {
 }
 
 #[test]
-fn write_video_and_audio_mp4() -> orfail::Result<()> {
+fn write_video_and_audio_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let audio_source = source(0, secs(0), secs(60));
     let video_source = source(1, secs(0), secs(60));
@@ -215,7 +215,7 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
 }
 
 #[test]
-fn no_video_and_audio_mp4() -> orfail::Result<()> {
+fn no_video_and_audio_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
     let layout = layout(&[], &[]);
 

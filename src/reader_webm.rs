@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
@@ -60,13 +60,13 @@ impl<R: Read> ElementReader<R> {
         }
     }
 
-    fn skip_all(&mut self) -> orfail::Result<()> {
+    fn skip_all(&mut self) -> crate::Result<()> {
         let mut buf = [0; 1024];
         while 0 != self.inner.read(&mut buf).or_fail()? {}
         Ok(())
     }
 
-    fn skip_until(&mut self, id: u32) -> orfail::Result<()> {
+    fn skip_until(&mut self, id: u32) -> crate::Result<()> {
         while id != self.peek_id().or_fail()? {
             self.read_id().or_fail()?;
             self.skip_element_data().or_fail()?;
@@ -74,7 +74,7 @@ impl<R: Read> ElementReader<R> {
         Ok(())
     }
 
-    fn skip_element_data(&mut self) -> orfail::Result<()> {
+    fn skip_element_data(&mut self) -> crate::Result<()> {
         let size = self.read_element_data_size().or_fail()?;
         let mut reader = self.inner.by_ref().take(size);
         let mut buf = [0; 1024];
@@ -82,7 +82,7 @@ impl<R: Read> ElementReader<R> {
         Ok(())
     }
 
-    fn read_element_data_size(&mut self) -> orfail::Result<u64> {
+    fn read_element_data_size(&mut self) -> crate::Result<u64> {
         let b0 = self.read_raw_u8().or_fail()?;
         let mut size = 0;
         for i in 0..8 {
@@ -91,7 +91,7 @@ impl<R: Read> ElementReader<R> {
                 size += ((b0 & mask) as u64) << (i * 8);
                 if size == (1 << (i * 8 + (7 - i))) - 1 {
                     // Sora は unknown-length なデータは使ってないはずなので対応不要
-                    return Err(orfail::Failure::new("unsupported: unknown length data"));
+                    return Err(crate::Error::new("unsupported: unknown length data"));
                 }
                 return Ok(size);
             }
@@ -99,13 +99,13 @@ impl<R: Read> ElementReader<R> {
             let b = self.read_raw_u8().or_fail()? as u64;
             size = (size << 8) + b;
         }
-        Err(orfail::Failure::new("invalid data"))
+        Err(crate::Error::new("invalid data"))
     }
 
     fn read_master(
         &mut self,
         expected_id: u32,
-    ) -> orfail::Result<ElementReader<std::io::Take<&mut R>>> {
+    ) -> crate::Result<ElementReader<std::io::Take<&mut R>>> {
         self.expect_id(expected_id).or_fail()?;
         let size = self.read_element_data_size().or_fail()?;
         Ok(ElementReader::new(self.inner.by_ref().take(size)))
@@ -114,13 +114,13 @@ impl<R: Read> ElementReader<R> {
     fn read_master_owned(
         mut self,
         expected_id: u32,
-    ) -> orfail::Result<ElementReader<std::io::Take<R>>> {
+    ) -> crate::Result<ElementReader<std::io::Take<R>>> {
         self.expect_id(expected_id).or_fail()?;
         let size = self.read_element_data_size().or_fail()?;
         Ok(ElementReader::new(self.inner.take(size)))
     }
 
-    fn expect_id(&mut self, expected_id: u32) -> orfail::Result<()> {
+    fn expect_id(&mut self, expected_id: u32) -> crate::Result<()> {
         let id = self.read_id().or_fail()?;
         (id == expected_id).or_fail_with(|()| {
             format!("expected WebM element ID 0x{expected_id:X}, but got 0x{id:X}")
@@ -128,7 +128,7 @@ impl<R: Read> ElementReader<R> {
         Ok(())
     }
 
-    fn expect_u64(&mut self, expected_id: u32, expected_value: u64) -> orfail::Result<()> {
+    fn expect_u64(&mut self, expected_id: u32, expected_value: u64) -> crate::Result<()> {
         let actual_value = self.read_u64(expected_id).or_fail()?;
         (actual_value == expected_value).or_fail_with(|()| {
             format!(
@@ -138,25 +138,25 @@ impl<R: Read> ElementReader<R> {
         Ok(())
     }
 
-    fn read_raw_u8(&mut self) -> orfail::Result<u8> {
+    fn read_raw_u8(&mut self) -> crate::Result<u8> {
         let mut buf = [0];
         self.inner.read_exact(&mut buf).or_fail()?;
         Ok(buf[0])
     }
 
-    fn read_raw_i16(&mut self) -> orfail::Result<i16> {
+    fn read_raw_i16(&mut self) -> crate::Result<i16> {
         let mut buf = [0; 2];
         self.inner.read_exact(&mut buf).or_fail()?;
         Ok(i16::from_be_bytes(buf))
     }
 
-    fn read_raw_data(&mut self) -> orfail::Result<Vec<u8>> {
+    fn read_raw_data(&mut self) -> crate::Result<Vec<u8>> {
         let mut buf = Vec::new();
         self.inner.read_to_end(&mut buf).or_fail()?;
         Ok(buf)
     }
 
-    fn read_u64(&mut self, expected_id: u32) -> orfail::Result<u64> {
+    fn read_u64(&mut self, expected_id: u32) -> crate::Result<u64> {
         let data = self.read_bytes(expected_id).or_fail()?;
         (data.len() <= 8).or_fail()?;
 
@@ -168,7 +168,7 @@ impl<R: Read> ElementReader<R> {
         Ok(u64::from_be_bytes(bytes))
     }
 
-    fn read_bytes(&mut self, expected_id: u32) -> orfail::Result<Vec<u8>> {
+    fn read_bytes(&mut self, expected_id: u32) -> crate::Result<Vec<u8>> {
         self.expect_id(expected_id).or_fail()?;
 
         let size = self.read_element_data_size().or_fail()?;
@@ -179,7 +179,7 @@ impl<R: Read> ElementReader<R> {
         Ok(buf)
     }
 
-    fn expect_str(&mut self, expected_id: u32, expected_value: &str) -> orfail::Result<()> {
+    fn expect_str(&mut self, expected_id: u32, expected_value: &str) -> crate::Result<()> {
         let actual_value = self.read_bytes(expected_id).or_fail()?;
         (actual_value == expected_value.as_bytes()).or_fail_with(|()| {
             format!(
@@ -192,7 +192,7 @@ impl<R: Read> ElementReader<R> {
         Ok(())
     }
 
-    fn peek_id(&mut self) -> orfail::Result<u32> {
+    fn peek_id(&mut self) -> crate::Result<u32> {
         if let Some(id) = self.next_id {
             Ok(id)
         } else {
@@ -202,7 +202,7 @@ impl<R: Read> ElementReader<R> {
         }
     }
 
-    fn read_id(&mut self) -> orfail::Result<u32> {
+    fn read_id(&mut self) -> crate::Result<u32> {
         if let Some(id) = self.next_id.take() {
             return Ok(id);
         }
@@ -233,7 +233,7 @@ impl<R: Read> ElementReader<std::io::Take<R>> {
     }
 }
 
-fn check_ebml_header_element<R: Read>(reader: &mut ElementReader<R>) -> orfail::Result<()> {
+fn check_ebml_header_element<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<()> {
     let mut reader = reader.read_master(ID_EBML).or_fail()?;
 
     reader // rustfmt の結果を揃えるためのコメント
@@ -260,7 +260,7 @@ fn check_ebml_header_element<R: Read>(reader: &mut ElementReader<R>) -> orfail::
     Ok(())
 }
 
-fn check_info_element<R: Read>(reader: &mut ElementReader<R>) -> orfail::Result<()> {
+fn check_info_element<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<()> {
     let mut reader = reader.read_master(ID_INFO).or_fail()?;
     reader
         .expect_u64(ID_TIMESTAMP_SCALE, TIMESTAMP_SCALE)
@@ -284,7 +284,7 @@ struct VideoTrackHeader {
 }
 
 impl VideoTrackHeader {
-    fn read<R: Read>(reader: &mut ElementReader<R>) -> orfail::Result<Self> {
+    fn read<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<Self> {
         let mut reader = reader.read_master(ID_TRACKS).or_fail()?;
         loop {
             if reader.is_eos() {
@@ -311,7 +311,7 @@ impl VideoTrackHeader {
                 b"V_AV1" => VideoFormat::Av1,
                 b"V_MPEG4/ISO/AVC" => VideoFormat::H264AnnexB,
                 _ => {
-                    return Err(orfail::Failure::new(format!(
+                    return Err(crate::Error::new(format!(
                         "unknown video codec ID: {bytes:?}"
                     )));
                 }
@@ -339,7 +339,7 @@ pub struct WebmAudioReader {
 }
 
 impl WebmAudioReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
         let file = std::fs::File::open(&path)
             .or_fail_with(|e| format!("failed to open {}: {e}", path.as_ref().display()))?;
         let mut reader = ElementReader::new(BufReader::new(file));
@@ -381,7 +381,7 @@ impl WebmAudioReader {
         self.track_duration_offset = prev.track_duration_offset;
     }
 
-    fn read_simple_block(&mut self) -> orfail::Result<Option<AudioData>> {
+    fn read_simple_block(&mut self) -> crate::Result<Option<AudioData>> {
         let mut reader = self.reader.read_master(ID_SIMPLE_BLOCK).or_fail()?;
 
         let track_number = reader.read_raw_u8().or_fail()?;
@@ -422,7 +422,7 @@ impl WebmAudioReader {
         }))
     }
 
-    fn read_audio_data(&mut self) -> orfail::Result<Option<AudioData>> {
+    fn read_audio_data(&mut self) -> crate::Result<Option<AudioData>> {
         loop {
             match self.reader.peek_id().or_fail()? {
                 ID_CLUSTER => {
@@ -452,7 +452,7 @@ impl WebmAudioReader {
                     return Ok(self.prev_audio_data.take());
                 }
                 id => {
-                    return Err(orfail::Failure::new(format!(
+                    return Err(crate::Error::new(format!(
                         "unexpected element ID: 0x{id:X}"
                     )));
                 }
@@ -462,7 +462,7 @@ impl WebmAudioReader {
 }
 
 impl Iterator for WebmAudioReader {
-    type Item = orfail::Result<AudioData>;
+    type Item = crate::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.read_audio_data().transpose()
@@ -486,7 +486,7 @@ pub struct WebmVideoReader {
 }
 
 impl WebmVideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
         let file = std::fs::File::open(&path).or_fail()?;
         let mut reader = ElementReader::new(BufReader::new(file));
         check_ebml_header_element(&mut reader).or_fail()?;
@@ -530,7 +530,7 @@ impl WebmVideoReader {
         self.track_duration_offset = prev.track_duration_offset;
     }
 
-    fn read_video_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
+    fn read_video_frame(&mut self) -> crate::Result<Option<VideoFrame>> {
         loop {
             match self.reader.peek_id().or_fail()? {
                 ID_CLUSTER => {
@@ -560,7 +560,7 @@ impl WebmVideoReader {
                     return Ok(self.prev_video_frame.take());
                 }
                 id => {
-                    return Err(orfail::Failure::new(format!(
+                    return Err(crate::Error::new(format!(
                         "unexpected element ID: 0x{id:X}"
                     )));
                 }
@@ -568,7 +568,7 @@ impl WebmVideoReader {
         }
     }
 
-    fn read_simple_block(&mut self) -> orfail::Result<Option<VideoFrame>> {
+    fn read_simple_block(&mut self) -> crate::Result<Option<VideoFrame>> {
         let mut reader = self.reader.read_master(ID_SIMPLE_BLOCK).or_fail()?;
 
         let track_number = reader.read_raw_u8().or_fail()?;
@@ -618,7 +618,7 @@ impl WebmVideoReader {
 }
 
 impl Iterator for WebmVideoReader {
-    type Item = orfail::Result<VideoFrame>;
+    type Item = crate::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.read_video_frame().transpose()

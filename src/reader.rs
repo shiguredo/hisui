@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     audio::AudioData,
@@ -36,14 +36,14 @@ pub struct AudioReader {
 }
 
 impl AudioReader {
-    pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> crate::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
         handle.notify_ready();
         handle
             .wait_subscribers_ready()
             .await
-            .map_err(|e| orfail::Failure::new(e.to_string()))?;
+            .map_err(|e| crate::Error::new(e.to_string()))?;
 
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
@@ -88,7 +88,7 @@ impl AudioReader {
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
         stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         Self::new(
             output_stream_id,
             source_info.id.clone(),
@@ -106,7 +106,7 @@ impl AudioReader {
         timestamp_offset: Duration,
         input_files: Vec<PathBuf>,
         mut compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let mut remaining_input_files = input_files.clone();
         remaining_input_files.reverse();
         let first_input_file = remaining_input_files.pop().or_fail()?;
@@ -154,7 +154,7 @@ impl AudioReader {
         })
     }
 
-    fn start_next_input_file(&mut self) -> orfail::Result<bool> {
+    fn start_next_input_file(&mut self) -> crate::Result<bool> {
         match &mut self.inner {
             AudioReaderInner::Mp4(inner) => {
                 if let Some(next_input_file) = self.remaining_input_files.pop() {
@@ -234,13 +234,13 @@ impl MediaProcessor for AudioReader {
         }
     }
 
-    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
-        Err(orfail::Failure::new(
+    fn process_input(&mut self, _input: MediaProcessorInput) -> crate::Result<()> {
+        Err(crate::Error::new(
             "BUG: reader does not require any input streams",
         ))
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         loop {
             match self.inner.next() {
                 None => {
@@ -285,7 +285,7 @@ impl AudioReaderInner {
 }
 
 impl Iterator for AudioReaderInner {
-    type Item = orfail::Result<AudioData>;
+    type Item = crate::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -313,14 +313,14 @@ pub struct VideoReader {
 }
 
 impl VideoReader {
-    pub async fn run(mut self, handle: crate::ProcessorHandle) -> orfail::Result<()> {
+    pub async fn run(mut self, handle: crate::ProcessorHandle) -> crate::Result<()> {
         let track_id = crate::TrackId::new(handle.processor_id().get());
         let mut track_handle = handle.publish_track(track_id).await.or_fail()?;
         handle.notify_ready();
         handle
             .wait_subscribers_ready()
             .await
-            .map_err(|e| orfail::Failure::new(e.to_string()))?;
+            .map_err(|e| crate::Error::new(e.to_string()))?;
 
         let mut ack = track_handle.send_syn();
         let mut noacked_sent = 0;
@@ -364,7 +364,7 @@ impl VideoReader {
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
         stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         Self::new(
             output_stream_id,
             source_info.id.clone(),
@@ -382,7 +382,7 @@ impl VideoReader {
         timestamp_offset: Duration,
         input_files: Vec<PathBuf>,
         mut compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let mut remaining_input_files = input_files.clone();
         remaining_input_files.reverse();
         let first_input_file = remaining_input_files.pop().or_fail()?;
@@ -428,7 +428,7 @@ impl VideoReader {
         })
     }
 
-    fn start_next_input_file(&mut self) -> orfail::Result<bool> {
+    fn start_next_input_file(&mut self) -> crate::Result<bool> {
         match &mut self.inner {
             VideoReaderInner::Mp4(inner) => {
                 if let Some(next_input_file) = self.remaining_input_files.pop() {
@@ -508,13 +508,13 @@ impl MediaProcessor for VideoReader {
         }
     }
 
-    fn process_input(&mut self, _input: MediaProcessorInput) -> orfail::Result<()> {
-        Err(orfail::Failure::new(
+    fn process_input(&mut self, _input: MediaProcessorInput) -> crate::Result<()> {
+        Err(crate::Error::new(
             "BUG: reader does not require any input streams",
         ))
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         loop {
             match self.inner.next() {
                 None => {
@@ -559,7 +559,7 @@ impl VideoReaderInner {
 }
 
 impl Iterator for VideoReaderInner {
-    type Item = orfail::Result<VideoFrame>;
+    type Item = crate::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {

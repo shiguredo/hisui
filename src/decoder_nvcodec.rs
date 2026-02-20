@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::layout_decode_params::LayoutDecodeParams;
 use crate::video::{VideoFormat, VideoFrame};
@@ -19,7 +19,7 @@ pub struct NvcodecDecoder {
 }
 
 impl NvcodecDecoder {
-    pub fn new_h264(params: &LayoutDecodeParams) -> orfail::Result<Self> {
+    pub fn new_h264(params: &LayoutDecodeParams) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H264) decoder");
         let config = params.nvcodec_h264.clone();
         Ok(Self {
@@ -30,7 +30,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_h265(params: &LayoutDecodeParams) -> orfail::Result<Self> {
+    pub fn new_h265(params: &LayoutDecodeParams) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H265) decoder");
         let config = params.nvcodec_h265.clone();
         Ok(Self {
@@ -41,7 +41,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_av1(params: &LayoutDecodeParams) -> orfail::Result<Self> {
+    pub fn new_av1(params: &LayoutDecodeParams) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(AV1) decoder");
         let config = params.nvcodec_av1.clone();
         Ok(Self {
@@ -52,7 +52,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_vp8(params: &LayoutDecodeParams) -> orfail::Result<Self> {
+    pub fn new_vp8(params: &LayoutDecodeParams) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP8) decoder");
         let config = params.nvcodec_vp8.clone();
         Ok(Self {
@@ -63,7 +63,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_vp9(params: &LayoutDecodeParams) -> orfail::Result<Self> {
+    pub fn new_vp9(params: &LayoutDecodeParams) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP9) decoder");
         let config = params.nvcodec_vp9.clone();
         Ok(Self {
@@ -74,7 +74,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         matches!(
             frame.format,
             VideoFormat::H264
@@ -137,13 +137,13 @@ impl NvcodecDecoder {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.finish().or_fail()?;
         self.handle_decoded_frames().or_fail()?;
         Ok(())
     }
 
-    fn handle_decoded_frames(&mut self) -> orfail::Result<()> {
+    fn handle_decoded_frames(&mut self) -> crate::Result<()> {
         while let Some(nv12_frame) = self.inner.next_frame().or_fail()? {
             let input_frame = self.input_queue.pop_front().or_fail()?;
 
@@ -207,7 +207,7 @@ impl NvcodecDecoder {
 fn extract_parameter_sets_annexb(
     sample_entry: &shiguredo_mp4::boxes::SampleEntry,
     format: VideoFormat,
-) -> orfail::Result<Vec<u8>> {
+) -> crate::Result<Vec<u8>> {
     use shiguredo_mp4::boxes::SampleEntry;
 
     match (sample_entry, format) {

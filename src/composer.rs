@@ -1,6 +1,6 @@
 use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
@@ -46,7 +46,7 @@ impl Composer {
         }
     }
 
-    pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
+    pub fn compose(&self, out_file_path: &std::path::Path) -> crate::Result<ComposeResult> {
         // プロセッサを準備
         let mut scheduler = Scheduler::with_thread_count(self.worker_threads);
         let mut next_stream_id = MediaStreamId::new(0);
@@ -264,7 +264,7 @@ impl MediaProcessor for ProgressBar {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         if let Some(sample) = input.sample {
             self.max_timestamp = self.max_timestamp.max(sample.timestamp());
             self.bar.set_position(self.max_timestamp.as_secs());
@@ -274,7 +274,7 @@ impl MediaProcessor for ProgressBar {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         if self.input_stream_ids.is_empty() {
             self.bar.finish();
             Ok(MediaProcessorOutput::Finished)

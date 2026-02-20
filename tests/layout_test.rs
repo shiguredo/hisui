@@ -4,15 +4,15 @@ use std::{
     time::Duration,
 };
 
+use hisui::OrFail;
 use hisui::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
     metadata::{SourceId, SourceInfo},
 };
-use orfail::OrFail;
 
 #[test]
-fn valid_resolutions() -> orfail::Result<()> {
+fn valid_resolutions() -> hisui::Result<()> {
     let valid_jsons = [r#""16x16""#, r#""3840x3840""#];
     for json in valid_jsons {
         json.parse::<nojson::Json<Resolution>>().or_fail()?;
@@ -502,7 +502,7 @@ fn assign_sources_works() {
 }
 
 #[test]
-fn invalid_resolutions() -> orfail::Result<()> {
+fn invalid_resolutions() -> hisui::Result<()> {
     let invalid_jsons = [
         // width が小さすぎる
         r#""15x20""#,
@@ -528,7 +528,7 @@ fn invalid_resolutions() -> orfail::Result<()> {
 }
 
 #[test]
-fn layout_without_resolution_specified() -> orfail::Result<()> {
+fn layout_without_resolution_specified() -> hisui::Result<()> {
     let base_path = PathBuf::from(".");
 
     // resolution を省略した場合、リージョンのサイズと位置から自動計算される
@@ -587,7 +587,7 @@ fn layout_without_resolution_specified() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .message
+            .reason
             .contains("Region width must be specified")
     );
 
@@ -595,7 +595,7 @@ fn layout_without_resolution_specified() -> orfail::Result<()> {
 }
 
 #[test]
-fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
+fn cell_width_and_cell_height_handling() -> hisui::Result<()> {
     let base_path = PathBuf::from(".");
 
     // 基本的な cell_width と cell_height の指定をテスト
@@ -648,7 +648,7 @@ fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .message
+            .reason
             .contains("cannot specify both 'width' and 'cell_width'")
     );
 
@@ -672,7 +672,7 @@ fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .message
+            .reason
             .contains("cannot specify both 'height' and 'cell_height'")
     );
 
@@ -715,7 +715,7 @@ fn source(start: u64, end: u64) -> SourceInfo {
 }
 
 #[test]
-fn source_wildcard() -> orfail::Result<()> {
+fn source_wildcard() -> hisui::Result<()> {
     let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
     let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
 
@@ -798,7 +798,7 @@ fn source_wildcard() -> orfail::Result<()> {
 }
 
 #[test]
-fn source_path_outside_base_dir_error() -> orfail::Result<()> {
+fn source_path_outside_base_dir_error() -> hisui::Result<()> {
     // ベースディレクトリの外をレイアウトの中で参照した場合にはエラーになる
     let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
 
@@ -816,7 +816,7 @@ fn source_path_outside_base_dir_error() -> orfail::Result<()> {
 }
 
 #[test]
-fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
+fn wildcard_excludes_sources_without_media_files() -> hisui::Result<()> {
     // files2/ ディレクトリには以下のファイルがある：
     // - foo-0.json + foo-0.mp4 (メディアファイルあり)
     // - source-without-media.json (メディアファイルなし)
@@ -872,7 +872,7 @@ fn invalid_layouts() {
     let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
     assert!(result.is_err());
 
-    let error_message = result.unwrap_err().message;
+    let error_message = result.unwrap_err().reason;
     assert!(error_message.contains("x_pos + width"));
     assert!(error_message.contains("exceeds resolution width"));
 
@@ -897,7 +897,7 @@ fn invalid_layouts() {
     let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
     assert!(result.is_err());
 
-    let error_message = result.unwrap_err().message;
+    let error_message = result.unwrap_err().reason;
     assert!(error_message.contains("y_pos + height"));
     assert!(error_message.contains("exceeds resolution height"));
 
@@ -908,7 +908,7 @@ fn invalid_layouts() {
 }
 
 #[test]
-fn source_timestamps() -> orfail::Result<()> {
+fn source_timestamps() -> hisui::Result<()> {
     // ソースのタイムスタンプ情報が適切に反映されているかどうかのテスト
     let base_path = PathBuf::from("./testdata/source_timestamps/");
 
@@ -966,7 +966,7 @@ fn source_timestamps() -> orfail::Result<()> {
 }
 
 #[test]
-fn trim() -> orfail::Result<()> {
+fn trim() -> hisui::Result<()> {
     // trim 指定が適切に反映されているかどうかのテスト
     let base_path = PathBuf::from("./testdata/trim/");
 

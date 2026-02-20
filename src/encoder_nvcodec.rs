@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
@@ -21,7 +21,7 @@ pub struct NvcodecEncoder {
 }
 
 impl NvcodecEncoder {
-    pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         tracing::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
@@ -51,7 +51,7 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         tracing::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
@@ -86,7 +86,7 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn new_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_av1(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         tracing::debug!(
@@ -132,7 +132,7 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn encode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+    pub fn encode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
 
         // I420 から NV12 への変換
@@ -177,13 +177,13 @@ impl NvcodecEncoder {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.finish().or_fail()?;
         self.handle_encoded_frames().or_fail()?;
         Ok(())
     }
 
-    fn handle_encoded_frames(&mut self) -> orfail::Result<()> {
+    fn handle_encoded_frames(&mut self) -> crate::Result<()> {
         while let Some(encoded_frame) = self.inner.next_frame() {
             let input_frame = self.input_queue.pop_front().or_fail()?;
 
@@ -273,7 +273,7 @@ impl NvcodecEncoder {
 ///
 /// Annex B 形式: スタートコード (0x00000001 or 0x000001) + NALU データ
 /// MP4 形式: サイズ (4バイト) + NALU データ
-fn convert_annexb_to_mp4(annexb_data: &[u8]) -> orfail::Result<Vec<u8>> {
+fn convert_annexb_to_mp4(annexb_data: &[u8]) -> crate::Result<Vec<u8>> {
     let mut mp4_data = Vec::new();
     let mut pos = 0;
 
@@ -285,7 +285,7 @@ fn convert_annexb_to_mp4(annexb_data: &[u8]) -> orfail::Result<Vec<u8>> {
             } else if pos + 3 <= annexb_data.len() && annexb_data[pos..pos + 3] == [0, 0, 1] {
                 3
             } else if pos == 0 {
-                return Err(orfail::Failure::new("No start code found at beginning"));
+                return Err(crate::Error::new("No start code found at beginning"));
             } else {
                 break;
             };

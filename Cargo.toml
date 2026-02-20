@@ -24,7 +24,6 @@ tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.22", features = ["fmt", "std"] }
 noargs = "=0.4.2"
 nojson = "=0.3.8"
-orfail = "=2.0.0"
 rustls = { version = "=0.23.36", default-features = false, features = [
     "std",
     "tls12",

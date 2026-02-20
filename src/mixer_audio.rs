@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
@@ -222,7 +222,7 @@ impl AudioMixer {
         Duration::from_secs(self.stats.total_output_sample_count()) / SAMPLE_RATE as u32
     }
 
-    fn mix_next_audio_data(&mut self, now: Duration) -> orfail::Result<AudioData> {
+    fn mix_next_audio_data(&mut self, now: Duration) -> crate::Result<AudioData> {
         let timestamp = self.next_output_timestamp();
 
         let bytes_per_sample = CHANNELS as usize * 2; // i16 で表現するので *2
@@ -311,7 +311,7 @@ impl MediaProcessor for AudioMixer {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
         if let Some(sample) = input.sample {
             let data = sample.expect_audio_data().or_fail()?;
@@ -346,7 +346,7 @@ impl MediaProcessor for AudioMixer {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         let mut now = self.next_input_timestamp();
         while self.trim_spans.contains(now) {
             self.stats

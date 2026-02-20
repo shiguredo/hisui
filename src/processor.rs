@@ -1,7 +1,7 @@
 use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant};
 
-use orfail::OrFail;
+use crate::OrFail;
 
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
@@ -10,8 +10,8 @@ use crate::video::VideoFrame;
 pub trait MediaProcessor {
     fn spec(&self) -> MediaProcessorSpec;
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()>;
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()>;
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput>;
 
     fn set_error(&self) {}
 }
@@ -36,11 +36,11 @@ impl MediaProcessor for BoxedMediaProcessor {
         self.0.spec()
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         self.0.process_input(input)
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         self.0.process_output()
     }
 }
@@ -235,7 +235,7 @@ impl RealtimePacer {
     pub fn new(
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_ids: Vec<MediaStreamId>,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         (input_stream_ids.len() == output_stream_ids.len()).or_fail()?;
         Ok(Self {
             stream_ids: input_stream_ids
@@ -273,7 +273,7 @@ impl MediaProcessor for RealtimePacer {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         let output_stream_id = self.stream_ids.get(&input.stream_id).copied().or_fail()?;
         if let Some(sample) = input.sample {
             self.stream_timestamps
@@ -287,7 +287,7 @@ impl MediaProcessor for RealtimePacer {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         let Some(PacerQueueItem(stream_id, sample)) = self.queue.pop() else {
             if self.stream_ids.is_empty() {
                 return Ok(MediaProcessorOutput::Finished);

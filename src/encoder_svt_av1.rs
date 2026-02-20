@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use orfail::OrFail;
+use crate::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
@@ -22,7 +22,7 @@ pub struct SvtAv1Encoder {
 }
 
 impl SvtAv1Encoder {
-    pub fn new(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let config = shiguredo_svt_av1::EncoderConfig {
@@ -46,7 +46,7 @@ impl SvtAv1Encoder {
         })
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
         (frame.format == VideoFormat::I420).or_fail()?;
 
         let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
@@ -57,7 +57,7 @@ impl SvtAv1Encoder {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
+    pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.finish().or_fail()?;
         self.handle_encoded_frames().or_fail()?;
         Ok(())
@@ -67,7 +67,7 @@ impl SvtAv1Encoder {
         self.output_queue.pop_front()
     }
 
-    fn handle_encoded_frames(&mut self) -> orfail::Result<()> {
+    fn handle_encoded_frames(&mut self) -> crate::Result<()> {
         while let Some(frame) = self.inner.next_frame().or_fail()? {
             // B フレームはない前提なので、タイムスタンプのいれかわりもない
             let input_frame = self.input_queue.pop_front().or_fail()?;
