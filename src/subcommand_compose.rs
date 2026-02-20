@@ -259,18 +259,22 @@ async fn run_compose_pipeline(
     pipeline_handle.complete_initial_processor_registration();
 
     let start = Instant::now();
-    let task_success = wait_processor_tasks(&mut setup.processor_tasks).await;
+    let all_processor_tasks_succeeded = wait_processor_tasks(&mut setup.processor_tasks).await;
     let elapsed_duration = start.elapsed();
 
     let stats = pipeline_handle.stats();
-    let metric_success = !has_processor_error_metric(&stats)?;
+    // NOTE:
+    // - task 側は「processor task が Err を返した / panic した / join できなかった」を検知する
+    // - metric 側は「task は成功扱いだが processor が内部的に error=true を立てた」を検知する
+    //   （将来的な実装差分も吸収するために、両方を評価する）
+    let has_no_processor_error_metric = !has_processor_error_metric(&stats)?;
 
     shutdown_pipeline(pipeline_handle, pipeline_task).await?;
 
     Ok(ComposeResult {
         stats,
         elapsed_duration,
-        success: task_success && metric_success,
+        success: all_processor_tasks_succeeded && has_no_processor_error_metric,
     })
 }
 
