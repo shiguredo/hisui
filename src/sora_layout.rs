@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     audio,
+    encoder::VideoEncoderOptions,
     json::JsonObject,
     sora_layout_decode_params::LayoutDecodeParams,
     sora_layout_encode_params::LayoutEncodeParams,
@@ -15,6 +16,7 @@ use crate::{
     sora_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, ContainerFormat, EngineName, EvenUsize},
     video::FrameRate,
+    writer_mp4::Mp4WriterOptions,
 };
 
 pub const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.jsonc");
@@ -200,6 +202,25 @@ impl Layout {
 
     pub fn output_duration(&self) -> Duration {
         self.duration().saturating_sub(self.trim_duration())
+    }
+
+    pub fn video_encoder_options(&self) -> VideoEncoderOptions {
+        VideoEncoderOptions {
+            codec: self.video_codec,
+            engines: self.video_encode_engines.clone(),
+            bitrate: self.video_bitrate_bps(),
+            width: self.resolution.width(),
+            height: self.resolution.height(),
+            frame_rate: self.frame_rate,
+            encode_params: self.encode_params.clone(),
+        }
+    }
+
+    pub fn mp4_writer_options(&self) -> Mp4WriterOptions {
+        Mp4WriterOptions {
+            duration: self.duration(),
+            frame_rate: self.frame_rate,
+        }
     }
 }
 

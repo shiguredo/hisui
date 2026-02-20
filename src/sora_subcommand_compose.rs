@@ -13,14 +13,14 @@ use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, Result,
     TrackId,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    encoder::{AudioEncoder, VideoEncoder, VideoEncoderOptions},
+    encoder::{AudioEncoder, VideoEncoder},
     sora_layout::{DEFAULT_LAYOUT_JSON, Layout},
     sora_mixer_audio::AudioMixer,
     sora_reader::{AudioReader, VideoReader},
     sora_video_mixer::{VideoMixer, VideoMixerSpec},
     stats::{StatsEntry, StatsValue},
     types::ContainerFormat,
-    writer_mp4::{Mp4Writer, Mp4WriterOptions},
+    writer_mp4::Mp4Writer,
 };
 
 #[derive(Debug)]
@@ -491,7 +491,7 @@ async fn setup_pipeline(
 
     let (video_encoder_processor_id, video_encoder_metadata) = next_processor("video_encoder");
     let video_encoder_output_track_id = TrackId::new(video_encoder_processor_id.get());
-    let video_encoder_options = VideoEncoderOptions::from_layout(layout);
+    let video_encoder_options = layout.video_encoder_options();
     let openh264_lib_for_encoder = openh264_lib;
     let video_mixer_output_track_id_for_encoder = video_mixer_output_track_id.clone();
     let video_encoder_output_track_id_for_encoder = video_encoder_output_track_id.clone();
@@ -519,7 +519,7 @@ async fn setup_pipeline(
 
     // ライターを登録する。
     let (writer_processor_id, writer_metadata) = next_processor("mp4_writer");
-    let writer_options = Mp4WriterOptions::from_layout(layout);
+    let writer_options = layout.mp4_writer_options();
     let writer_input_audio_track_id = layout
         .has_audio()
         .then_some(audio_encoder_output_track_id.clone());

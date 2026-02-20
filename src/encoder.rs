@@ -21,7 +21,6 @@ use crate::{
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
     media::MediaSample,
-    sora_layout::Layout,
     sora_layout_encode_params::LayoutEncodeParams,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
@@ -309,18 +308,6 @@ impl VideoEncoderOptions {
     // その（使われない）初期値の設定を行いやすくするための定数を定義しておく
     pub const DUMMY_WIDTH: EvenUsize = EvenUsize::ZERO;
     pub const DUMMY_HEIGHT: EvenUsize = EvenUsize::ZERO;
-
-    pub fn from_layout(layout: &Layout) -> Self {
-        Self {
-            codec: layout.video_codec,
-            engines: layout.video_encode_engines.clone(),
-            bitrate: layout.video_bitrate_bps(),
-            width: layout.resolution.width(),
-            height: layout.resolution.height(),
-            frame_rate: layout.frame_rate,
-            encode_params: layout.encode_params.clone(),
-        }
-    }
 }
 
 #[derive(Debug)]

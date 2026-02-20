@@ -28,7 +28,7 @@ fn write_audio_only_mp4() -> hisui::Result<()> {
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         Some(audio_samples),
         None,
     )?;
@@ -66,7 +66,7 @@ fn write_video_only_mp4() -> hisui::Result<()> {
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         None,
         Some(video_frames),
     )?;
@@ -112,7 +112,7 @@ fn write_video_and_audio_mp4() -> hisui::Result<()> {
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         Some(audio_samples),
         Some(video_frames),
     )?;
@@ -148,7 +148,7 @@ fn no_video_and_audio_mp4() -> hisui::Result<()> {
     let layout = layout(&[], &[]);
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         None,
         None,
     )?;

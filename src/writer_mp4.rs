@@ -16,7 +16,6 @@ use crate::{
     TrackId,
     audio::AudioData,
     media::MediaSample,
-    sora_layout::Layout,
     types::CodecName,
     video::{FrameRate, VideoFrame},
 };
@@ -52,15 +51,6 @@ enum InputTrackKind {
 pub struct Mp4WriterOptions {
     pub duration: Duration,
     pub frame_rate: FrameRate,
-}
-
-impl Mp4WriterOptions {
-    pub fn from_layout(layout: &Layout) -> Self {
-        Self {
-            duration: layout.duration(),
-            frame_rate: layout.frame_rate,
-        }
-    }
 }
 
 #[derive(Debug)]

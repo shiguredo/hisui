@@ -13,7 +13,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, Result, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    encoder::{VideoEncoder, VideoEncoderOptions},
+    encoder::VideoEncoder,
     json::JsonObject,
     media::MediaSample,
     sora_layout::Layout,
@@ -443,7 +443,7 @@ async fn setup_vmaf_pipeline(
     .await?;
 
     let encoder_output_track_id = next_track_id(&mut next_track_number, "encoder_output");
-    let encoder_options = VideoEncoderOptions::from_layout(&layout);
+    let encoder_options = layout.video_encoder_options();
     let encoder_processor_id = next_processor_id(&mut next_processor_number, "video_encoder");
     let encoder_processor_type = "video_encoder";
     let openh264_lib_for_encoder = openh264_lib;
