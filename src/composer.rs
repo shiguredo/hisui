@@ -16,7 +16,6 @@ use crate::{
     },
     reader::{AudioReader, VideoReader},
     scheduler::Scheduler,
-    stats::{ProcessorStats, Stats},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
 
@@ -31,7 +30,8 @@ pub struct Composer {
 
 #[derive(Debug)]
 pub struct ComposeResult {
-    pub stats: Stats,
+    pub stats: crate::stats::Stats,
+    pub elapsed_duration: Duration,
     pub success: bool,
 }
 
@@ -50,19 +50,45 @@ impl Composer {
         // プロセッサを準備
         let mut scheduler = Scheduler::with_thread_count(self.worker_threads);
         let mut next_stream_id = MediaStreamId::new(0);
+        let stats = crate::stats::Stats::new();
+        let mut next_processor_index = 0;
+        let mut scoped_stats = |processor_type: &'static str| {
+            let mut scoped = stats.clone();
+            scoped.set_default_label(
+                "processor_id",
+                &format!("{processor_type}:{next_processor_index}"),
+            );
+            scoped.set_default_label("processor_type", processor_type);
+            next_processor_index += 1;
+            scoped
+        };
 
         // リーダーとデコーダーを登録
         let mut audio_mixer_input_stream_ids = Vec::new();
         for source_id in self.layout.audio_source_ids() {
             let source_info = self.layout.sources.get(source_id).or_fail()?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
-            let reader =
-                AudioReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+            let reader = AudioReader::new(
+                reader_output_stream_id,
+                source_info.id.clone(),
+                source_info.format,
+                source_info.start_timestamp,
+                source_info.timestamp_sorted_media_paths(),
+                scoped_stats(match source_info.format {
+                    crate::metadata::ContainerFormat::Mp4 => "mp4_audio_reader",
+                    crate::metadata::ContainerFormat::Webm => "webm_audio_reader",
+                }),
+            )
+            .or_fail()?;
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
-            let decoder =
-                AudioDecoder::new(reader_output_stream_id, decoder_output_stream_id).or_fail()?;
+            let decoder = AudioDecoder::new(
+                reader_output_stream_id,
+                decoder_output_stream_id,
+                scoped_stats("audio_decoder"),
+            )
+            .or_fail()?;
             scheduler.register(decoder).or_fail()?;
 
             audio_mixer_input_stream_ids.push(decoder_output_stream_id);
@@ -77,8 +103,18 @@ impl Composer {
         for source_id in self.layout.video_source_ids() {
             let source_info = self.layout.sources.get(source_id).or_fail()?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
-            let reader =
-                VideoReader::from_source_info(reader_output_stream_id, source_info).or_fail()?;
+            let reader = VideoReader::new(
+                reader_output_stream_id,
+                source_info.id.clone(),
+                source_info.format,
+                source_info.start_timestamp,
+                source_info.timestamp_sorted_media_paths(),
+                scoped_stats(match source_info.format {
+                    crate::metadata::ContainerFormat::Mp4 => "mp4_video_reader",
+                    crate::metadata::ContainerFormat::Webm => "webm_video_reader",
+                }),
+            )
+            .or_fail()?;
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
@@ -86,6 +122,7 @@ impl Composer {
                 reader_output_stream_id,
                 decoder_output_stream_id,
                 video_decoder_options.clone(),
+                scoped_stats("video_decoder"),
             );
             scheduler.register(decoder).or_fail()?;
 
@@ -98,6 +135,7 @@ impl Composer {
             self.layout.trim_spans.clone(),
             audio_mixer_input_stream_ids,
             audio_mixer_output_stream_id,
+            scoped_stats("audio_mixer"),
         );
         scheduler.register(audio_mixer).or_fail()?;
 
@@ -106,6 +144,7 @@ impl Composer {
             VideoMixerSpec::from_layout(&self.layout),
             video_mixer_input_stream_ids,
             video_mixer_output_stream_id,
+            scoped_stats("video_mixer"),
         );
         scheduler.register(video_mixer).or_fail()?;
 
@@ -116,6 +155,7 @@ impl Composer {
             self.layout.audio_bitrate_bps(),
             audio_mixer_output_stream_id,
             audio_encoder_output_stream_id,
+            scoped_stats("audio_encoder"),
         )
         .or_fail()?;
         scheduler.register(audio_encoder).or_fail()?;
@@ -126,6 +166,7 @@ impl Composer {
             video_mixer_output_stream_id,
             video_encoder_output_stream_id,
             self.openh264_lib.clone(),
+            scoped_stats("video_encoder"),
         )
         .or_fail()?;
         scheduler.register(video_encoder).or_fail()?;
@@ -140,6 +181,7 @@ impl Composer {
             self.layout
                 .has_video()
                 .then_some(video_encoder_output_stream_id),
+            scoped_stats("mp4_writer"),
         )
         .or_fail()?;
         scheduler.register(writer).or_fail()?;
@@ -157,15 +199,38 @@ impl Composer {
         }
 
         // 合成を実行
-        let stats = scheduler.run().or_fail()?;
+        let scheduler_result = scheduler.run().or_fail()?;
 
         if let Some(path) = &self.stats_file_path {
-            stats.save(path);
+            // TODO: compose 実行基盤を tokio ランタイムへ移行した後に、
+            // `tokio::runtime::Handle::current().metrics()` を収集して
+            // stats JSON の `tokio_metrics` へ反映する。
+            match crate::stats_legacy_json::to_legacy_stats_json(
+                &stats,
+                scheduler_result.elapsed_duration.as_secs_f64(),
+            ) {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(path, json.to_string()) {
+                        // 統計が出力できなくても全体を失敗扱いにはしない
+                        tracing::warn!(
+                            "failed to write stats JSON: path={}, reason={e}",
+                            path.display()
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "failed to build stats JSON: path={}, reason={e}",
+                        path.display()
+                    );
+                }
+            }
         }
 
         Ok(ComposeResult {
-            success: !stats.error.get(),
             stats,
+            elapsed_duration: scheduler_result.elapsed_duration,
+            success: !scheduler_result.error,
         })
     }
 }
@@ -195,7 +260,6 @@ impl MediaProcessor for ProgressBar {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: Vec::new(),
-            stats: ProcessorStats::other("progress_bar"),
             workload_hint: MediaProcessorWorkloadHint::WRITER,
         }
     }

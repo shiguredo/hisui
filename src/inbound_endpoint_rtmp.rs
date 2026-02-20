@@ -1,11 +1,11 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use orfail::OrFail;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::stats::{SharedAtomicCounter, SharedAtomicDuration, SharedAtomicFlag};
 use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 
 #[derive(Debug, Clone)]
@@ -41,7 +41,6 @@ pub struct RtmpInboundEndpoint {
     pub stream_name: Option<String>,
     pub output_audio_track_id: Option<crate::TrackId>,
     pub output_video_track_id: Option<crate::TrackId>,
-    stats: RtmpInboundEndpointStats,
     pub options: RtmpInboundEndpointOptions,
 }
 
@@ -71,6 +70,7 @@ impl RtmpInboundEndpoint {
         let timeout = self.options.lifetime;
         let output_audio_track_id = self.output_audio_track_id.clone();
         let output_video_track_id = self.output_video_track_id.clone();
+        let client_slots = Arc::new(tokio::sync::Semaphore::new(1));
         let start_time = tokio::time::Instant::now();
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
@@ -87,15 +87,16 @@ impl RtmpInboundEndpoint {
                 Ok(Ok((stream, peer_addr))) => {
                     tracing::debug!("New RTMP client connection from: {peer_addr}");
 
-                    let stats = self.stats.clone();
-
-                    if stats.is_client_connected() {
-                        tracing::warn!(
-                            "Another client is already connected, rejecting new connection from {peer_addr}"
-                        );
-                        drop(stream);
-                        continue;
-                    }
+                    let permit = match client_slots.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            tracing::warn!(
+                                "Another client is already connected, rejecting new connection from {peer_addr}"
+                            );
+                            drop(stream);
+                            continue;
+                        }
+                    };
 
                     let expected_app = url.app.clone();
                     let expected_stream_name = url.stream_name.clone();
@@ -115,19 +116,7 @@ impl RtmpInboundEndpoint {
                     };
 
                     tokio::spawn(async move {
-                        let frame_handler_stats = crate::rtmp::RtmpIncomingFrameHandlerStats {
-                            total_audio_frame_count: stats.total_audio_frame_count.clone(),
-                            total_video_frame_count: stats.total_video_frame_count.clone(),
-                            total_video_keyframe_count: stats.total_video_keyframe_count.clone(),
-                            total_audio_sequence_header_count: stats
-                                .total_audio_sequence_header_count
-                                .clone(),
-                            total_video_sequence_header_count: stats
-                                .total_video_sequence_header_count
-                                .clone(),
-                        };
-
-                        stats.total_connected_clients.increment();
+                        let _permit = permit;
 
                         match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref())
                             .await
@@ -138,10 +127,8 @@ impl RtmpInboundEndpoint {
                                 }
                                 let mut handler = RtmpPublisherHandler::new(
                                     tls_stream,
-                                    stats.clone(),
                                     expected_app,
                                     expected_stream_name,
-                                    frame_handler_stats,
                                     timestamp_offset,
                                     video_track_tx,
                                     audio_track_tx,
@@ -149,15 +136,11 @@ impl RtmpInboundEndpoint {
 
                                 if let Err(e) = handler.run().await.or_fail() {
                                     tracing::error!("RTMP publisher handler error: {e}");
-                                    handler.stats.total_error_disconnected_clients.increment();
                                 }
-                                handler.stats.total_disconnected_clients.increment();
                                 tracing::debug!("RTMP publisher disconnected: {peer_addr}");
                             }
                             Err(e) => {
                                 tracing::error!("Connection setup failed with {peer_addr}: {e}");
-                                stats.total_error_disconnected_clients.increment();
-                                stats.total_disconnected_clients.increment();
                             }
                         }
                     });
@@ -246,7 +229,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndp
             stream_name,
             output_audio_track_id,
             output_video_track_id,
-            stats: RtmpInboundEndpointStats::default(),
             options: RtmpInboundEndpointOptions::default(),
         })
     }
@@ -271,7 +253,6 @@ struct RtmpPublisherHandler {
     stream: ServerTcpOrTlsStream,
     connection: shiguredo_rtmp::RtmpServerConnection,
     recv_buf: Vec<u8>,
-    stats: RtmpInboundEndpointStats,
     expected_app: String,
     expected_stream_name: String,
     frame_handler: crate::rtmp::RtmpIncomingFrameHandler,
@@ -280,13 +261,10 @@ struct RtmpPublisherHandler {
 }
 
 impl RtmpPublisherHandler {
-    #[expect(clippy::too_many_arguments)]
     fn new(
         stream: ServerTcpOrTlsStream,
-        stats: RtmpInboundEndpointStats,
         expected_app: String,
         expected_stream_name: String,
-        frame_handler_stats: crate::rtmp::RtmpIncomingFrameHandlerStats,
         timestamp_offset: std::time::Duration,
         video_track_tx: Option<crate::MessageSender>,
         audio_track_tx: Option<crate::MessageSender>,
@@ -295,13 +273,9 @@ impl RtmpPublisherHandler {
             stream,
             connection: shiguredo_rtmp::RtmpServerConnection::new(),
             recv_buf: vec![0u8; 4096],
-            stats,
             expected_app,
             expected_stream_name,
-            frame_handler: crate::rtmp::RtmpIncomingFrameHandler::new(
-                timestamp_offset,
-                frame_handler_stats,
-            ),
+            frame_handler: crate::rtmp::RtmpIncomingFrameHandler::new(timestamp_offset),
             video_track_tx,
             audio_track_tx,
         }
@@ -317,7 +291,6 @@ impl RtmpPublisherHandler {
                 ) {
                     tracing::debug!("RTMP event: {:?}", event);
                 }
-                self.stats.total_event_count.increment();
                 self.handle_event(&event).or_fail()?;
                 self.process_event(event).await.or_fail()?;
             }
@@ -434,7 +407,6 @@ impl RtmpPublisherHandler {
                 Ok(false)
             }
             Ok(n) => {
-                self.stats.total_received_bytes.add(n as u64);
                 self.connection
                     .feed_recv_buf(&self.recv_buf[..n])
                     .or_fail()?;
@@ -453,70 +425,8 @@ impl RtmpPublisherHandler {
         while !self.connection.send_buf().is_empty() {
             let send_data = self.connection.send_buf();
             self.stream.write_all(send_data).await.or_fail()?;
-            self.stats.total_sent_bytes.add(send_data.len() as u64);
             self.connection.advance_send_buf(send_data.len());
         }
         Ok(())
-    }
-}
-
-/// [`RtmpInboundEndpoint`] 用の統計情報
-#[derive(Debug, Default, Clone)]
-pub struct RtmpInboundEndpointStats {
-    pub total_audio_frame_count: SharedAtomicCounter,
-    pub total_video_frame_count: SharedAtomicCounter,
-    pub total_event_count: SharedAtomicCounter,
-    pub total_sent_bytes: SharedAtomicCounter,
-    pub total_received_bytes: SharedAtomicCounter,
-    pub total_video_keyframe_count: SharedAtomicCounter,
-    pub total_audio_sequence_header_count: SharedAtomicCounter,
-    pub total_video_sequence_header_count: SharedAtomicCounter,
-    pub total_processing_duration: SharedAtomicDuration,
-    pub total_connected_clients: SharedAtomicCounter,
-    pub total_disconnected_clients: SharedAtomicCounter,
-    pub total_error_disconnected_clients: SharedAtomicCounter,
-    pub error: SharedAtomicFlag,
-}
-
-impl RtmpInboundEndpointStats {
-    fn is_client_connected(&self) -> bool {
-        self.total_connected_clients.get() > self.total_disconnected_clients.get()
-    }
-}
-
-impl nojson::DisplayJson for RtmpInboundEndpointStats {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("type", "rtmp_inbound_endpoint")?;
-            f.member("total_audio_frame_count", &self.total_audio_frame_count)?;
-            f.member("total_video_frame_count", &self.total_video_frame_count)?;
-            f.member("total_event_count", &self.total_event_count)?;
-            f.member("total_sent_bytes", &self.total_sent_bytes)?;
-            f.member("total_received_bytes", &self.total_received_bytes)?;
-            f.member(
-                "total_video_keyframe_count",
-                &self.total_video_keyframe_count,
-            )?;
-            f.member(
-                "total_audio_sequence_header_count",
-                &self.total_audio_sequence_header_count,
-            )?;
-            f.member(
-                "total_video_sequence_header_count",
-                &self.total_video_sequence_header_count,
-            )?;
-            f.member("total_processing_seconds", &self.total_processing_duration)?;
-            f.member("total_connected_clients", &self.total_connected_clients)?;
-            f.member(
-                "total_disconnected_clients",
-                &self.total_disconnected_clients,
-            )?;
-            f.member(
-                "total_error_disconnected_clients",
-                &self.total_error_disconnected_clients,
-            )?;
-            f.member("error", self.error.get())?;
-            Ok(())
-        })
     }
 }

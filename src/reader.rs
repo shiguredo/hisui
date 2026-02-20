@@ -14,10 +14,6 @@ use crate::{
     },
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    stats::{
-        Mp4AudioReaderStats, Mp4VideoReaderStats, ProcessorStats, SharedOption,
-        WebmAudioReaderStats, WebmVideoReaderStats,
-    },
     types::CodecName,
     video::VideoFrame,
 };
@@ -30,6 +26,13 @@ pub struct AudioReader {
     next_timestamp_offset: Duration,
     remaining_input_files: Vec<PathBuf>,
     inner: AudioReaderInner,
+    total_sample_count_metric: crate::stats::StatsGauge,
+    total_cluster_count_metric: crate::stats::StatsGauge,
+    total_simple_block_count_metric: crate::stats::StatsGauge,
+    total_track_seconds_metric: crate::stats::StatsGaugeF64,
+    codec_metric: crate::stats::StatsString,
+    current_input_file_metric: crate::stats::StatsString,
+    error_flag: crate::stats::StatsFlag,
 }
 
 impl AudioReader {
@@ -84,6 +87,7 @@ impl AudioReader {
     pub fn from_source_info(
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
+        stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         Self::new(
             output_stream_id,
@@ -91,6 +95,7 @@ impl AudioReader {
             source_info.format,
             source_info.start_timestamp,
             source_info.timestamp_sorted_media_paths(),
+            stats,
         )
     }
 
@@ -100,36 +105,38 @@ impl AudioReader {
         format: ContainerFormat,
         timestamp_offset: Duration,
         input_files: Vec<PathBuf>,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let mut remaining_input_files = input_files.clone();
         remaining_input_files.reverse();
         let first_input_file = remaining_input_files.pop().or_fail()?;
         let inner = match format {
             ContainerFormat::Mp4 => {
-                let stats = Mp4AudioReaderStats {
-                    input_files,
-                    codec: Some(CodecName::Opus),
-                    start_time: timestamp_offset,
-                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
-                    ..Default::default()
-                };
-                AudioReaderInner::Mp4(Box::new(
-                    Mp4AudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    Mp4AudioReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.codec = Some(CodecName::Opus);
+                reader.current_input_file = Some(first_input_file.clone());
+                AudioReaderInner::Mp4(Box::new(reader))
             }
             ContainerFormat::Webm => {
-                let stats = WebmAudioReaderStats {
-                    input_files,
-                    codec: Some(CodecName::Opus),
-                    start_time: timestamp_offset,
-                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
-                    ..Default::default()
-                };
-                AudioReaderInner::Webm(Box::new(
-                    WebmAudioReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    WebmAudioReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.codec = Some(CodecName::Opus);
+                reader.current_input_file = Some(first_input_file.clone());
+                AudioReaderInner::Webm(Box::new(reader))
             }
         };
+        compose_stats
+            .gauge_f64("start_time_seconds")
+            .set(timestamp_offset.as_secs_f64());
+        let total_sample_count_metric = compose_stats.gauge("total_sample_count");
+        let total_cluster_count_metric = compose_stats.gauge("total_cluster_count");
+        let total_simple_block_count_metric = compose_stats.gauge("total_simple_block_count");
+        let total_track_seconds_metric = compose_stats.gauge_f64("total_track_seconds");
+        let codec_metric = compose_stats.string("codec");
+        let current_input_file_metric = compose_stats.string("current_input_file");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Ok(Self {
             output_stream_id,
             source_id,
@@ -137,29 +144,83 @@ impl AudioReader {
             next_timestamp_offset: timestamp_offset,
             remaining_input_files,
             inner,
+            total_sample_count_metric,
+            total_cluster_count_metric,
+            total_simple_block_count_metric,
+            total_track_seconds_metric,
+            codec_metric,
+            current_input_file_metric,
+            error_flag,
         })
     }
 
     fn start_next_input_file(&mut self) -> orfail::Result<bool> {
         match &mut self.inner {
-            AudioReaderInner::Mp4(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().current_input_file.clone(),
-                inner.stats().clone(),
-                Mp4AudioReader::new,
-            )
-            .map(|reader| reader.map(|reader| **inner = reader).is_some())
-            .or_fail(),
-            AudioReaderInner::Webm(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().current_input_file.clone(),
-                inner.stats().clone(),
-                WebmAudioReader::new,
-            )
-            .map(|reader| reader.map(|reader| **inner = reader).is_some())
-            .or_fail(),
+            AudioReaderInner::Mp4(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        Mp4AudioReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
+                    **inner = reader;
+                    Ok(true)
+                } else {
+                    inner.stats_mut().current_input_file = None;
+                    Ok(false)
+                }
+            }
+            AudioReaderInner::Webm(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        WebmAudioReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
+                    **inner = reader;
+                    Ok(true)
+                } else {
+                    inner.stats_mut().current_input_file = None;
+                    Ok(false)
+                }
+            }
+        }
+    }
+
+    fn update_metrics_from_inner(&mut self) {
+        match &self.inner {
+            AudioReaderInner::Mp4(reader) => {
+                let reader = reader.stats();
+                self.total_sample_count_metric
+                    .set(reader.total_sample_count as i64);
+                self.total_track_seconds_metric.set(
+                    (reader.track_duration_offset + reader.total_track_duration).as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec {
+                    self.codec_metric.set(codec.as_str());
+                }
+                if let Some(path) = &reader.current_input_file {
+                    self.current_input_file_metric
+                        .set(path.display().to_string());
+                }
+            }
+            AudioReaderInner::Webm(reader) => {
+                let reader = reader.stats();
+                self.total_cluster_count_metric
+                    .set(reader.total_cluster_count as i64);
+                self.total_simple_block_count_metric
+                    .set(reader.total_simple_block_count as i64);
+                self.total_track_seconds_metric.set(
+                    (reader.track_duration_offset + reader.total_track_duration).as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec {
+                    self.codec_metric.set(codec.as_str());
+                }
+                if let Some(path) = &reader.current_input_file {
+                    self.current_input_file_metric
+                        .set(path.display().to_string());
+                }
+            }
         }
     }
 }
@@ -169,7 +230,6 @@ impl MediaProcessor for AudioReader {
         MediaProcessorSpec {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
-            stats: self.inner.stats(),
             workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }
@@ -194,6 +254,7 @@ impl MediaProcessor for AudioReader {
                 Some(Ok(mut data)) => {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
+                    self.update_metrics_from_inner();
                     return Ok(MediaProcessorOutput::audio_data(
                         self.output_stream_id,
                         data,
@@ -201,6 +262,10 @@ impl MediaProcessor for AudioReader {
                 }
             }
         }
+    }
+
+    fn set_error(&self) {
+        self.error_flag.set(true);
     }
 }
 
@@ -211,17 +276,10 @@ enum AudioReaderInner {
 }
 
 impl AudioReaderInner {
-    fn stats(&self) -> ProcessorStats {
+    fn set_timestamp_offset(&mut self, offset: Duration) {
         match self {
-            Self::Mp4(r) => ProcessorStats::Mp4AudioReader(r.stats().clone()),
-            Self::Webm(r) => ProcessorStats::WebmAudioReader(r.stats().clone()),
-        }
-    }
-
-    fn set_timestamp_offset(&self, offset: Duration) {
-        match self {
-            Self::Mp4(r) => r.stats().track_duration_offset.set(offset),
-            Self::Webm(r) => r.stats().track_duration_offset.set(offset),
+            Self::Mp4(r) => r.stats_mut().track_duration_offset = offset,
+            Self::Webm(r) => r.stats_mut().track_duration_offset = offset,
         }
     }
 }
@@ -245,6 +303,13 @@ pub struct VideoReader {
     next_timestamp_offset: Duration,
     remaining_input_files: Vec<PathBuf>,
     inner: VideoReaderInner,
+    total_sample_count_metric: crate::stats::StatsGauge,
+    total_cluster_count_metric: crate::stats::StatsGauge,
+    total_simple_block_count_metric: crate::stats::StatsGauge,
+    total_track_seconds_metric: crate::stats::StatsGaugeF64,
+    codec_metric: crate::stats::StatsString,
+    current_input_file_metric: crate::stats::StatsString,
+    error_flag: crate::stats::StatsFlag,
 }
 
 impl VideoReader {
@@ -298,6 +363,7 @@ impl VideoReader {
     pub fn from_source_info(
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
+        stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         Self::new(
             output_stream_id,
@@ -305,6 +371,7 @@ impl VideoReader {
             source_info.format,
             source_info.start_timestamp,
             source_info.timestamp_sorted_media_paths(),
+            stats,
         )
     }
 
@@ -314,34 +381,36 @@ impl VideoReader {
         format: ContainerFormat,
         timestamp_offset: Duration,
         input_files: Vec<PathBuf>,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let mut remaining_input_files = input_files.clone();
         remaining_input_files.reverse();
         let first_input_file = remaining_input_files.pop().or_fail()?;
         let inner = match format {
             ContainerFormat::Mp4 => {
-                let stats = Mp4VideoReaderStats {
-                    input_files,
-                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
-                    start_time: timestamp_offset,
-                    ..Default::default()
-                };
-                VideoReaderInner::Mp4(Box::new(
-                    Mp4VideoReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    Mp4VideoReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.current_input_file = Some(first_input_file.clone());
+                VideoReaderInner::Mp4(Box::new(reader))
             }
             ContainerFormat::Webm => {
-                let stats = WebmVideoReaderStats {
-                    input_files,
-                    current_input_file: SharedOption::new(Some(first_input_file.clone())),
-                    start_time: timestamp_offset,
-                    ..Default::default()
-                };
-                VideoReaderInner::Webm(Box::new(
-                    WebmVideoReader::new(source_id.clone(), first_input_file, stats).or_fail()?,
-                ))
+                let mut reader =
+                    WebmVideoReader::new(source_id.clone(), first_input_file.clone()).or_fail()?;
+                reader.current_input_file = Some(first_input_file.clone());
+                VideoReaderInner::Webm(Box::new(reader))
             }
         };
+        compose_stats
+            .gauge_f64("start_time_seconds")
+            .set(timestamp_offset.as_secs_f64());
+        let total_sample_count_metric = compose_stats.gauge("total_sample_count");
+        let total_cluster_count_metric = compose_stats.gauge("total_cluster_count");
+        let total_simple_block_count_metric = compose_stats.gauge("total_simple_block_count");
+        let total_track_seconds_metric = compose_stats.gauge_f64("total_track_seconds");
+        let codec_metric = compose_stats.string("codec");
+        let current_input_file_metric = compose_stats.string("current_input_file");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Ok(Self {
             output_stream_id,
             source_id,
@@ -349,29 +418,83 @@ impl VideoReader {
             next_timestamp_offset: timestamp_offset,
             remaining_input_files,
             inner,
+            total_sample_count_metric,
+            total_cluster_count_metric,
+            total_simple_block_count_metric,
+            total_track_seconds_metric,
+            codec_metric,
+            current_input_file_metric,
+            error_flag,
         })
     }
 
     fn start_next_input_file(&mut self) -> orfail::Result<bool> {
         match &mut self.inner {
-            VideoReaderInner::Mp4(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().current_input_file.clone(),
-                inner.stats().clone(),
-                Mp4VideoReader::new,
-            )
-            .map(|reader| reader.map(|reader| **inner = reader).is_some())
-            .or_fail(),
-            VideoReaderInner::Webm(inner) => start_next_input_file(
-                &mut self.remaining_input_files,
-                self.source_id.clone(),
-                inner.stats().current_input_file.clone(),
-                inner.stats().clone(),
-                WebmVideoReader::new,
-            )
-            .map(|reader| reader.map(|reader| **inner = reader).is_some())
-            .or_fail(),
+            VideoReaderInner::Mp4(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        Mp4VideoReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
+                    **inner = reader;
+                    Ok(true)
+                } else {
+                    inner.stats_mut().current_input_file = None;
+                    Ok(false)
+                }
+            }
+            VideoReaderInner::Webm(inner) => {
+                if let Some(next_input_file) = self.remaining_input_files.pop() {
+                    let mut reader =
+                        WebmVideoReader::new(self.source_id.clone(), next_input_file.clone())
+                            .or_fail()?;
+                    reader.inherit_stats_from(inner.stats());
+                    reader.current_input_file = Some(next_input_file);
+                    **inner = reader;
+                    Ok(true)
+                } else {
+                    inner.stats_mut().current_input_file = None;
+                    Ok(false)
+                }
+            }
+        }
+    }
+
+    fn update_metrics_from_inner(&mut self) {
+        match &self.inner {
+            VideoReaderInner::Mp4(reader) => {
+                let reader = reader.stats();
+                self.total_sample_count_metric
+                    .set(reader.total_sample_count as i64);
+                self.total_track_seconds_metric.set(
+                    (reader.track_duration_offset + reader.total_track_duration).as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec {
+                    self.codec_metric.set(codec.as_str());
+                }
+                if let Some(path) = &reader.current_input_file {
+                    self.current_input_file_metric
+                        .set(path.display().to_string());
+                }
+            }
+            VideoReaderInner::Webm(reader) => {
+                let reader = reader.stats();
+                self.total_cluster_count_metric
+                    .set(reader.total_cluster_count as i64);
+                self.total_simple_block_count_metric
+                    .set(reader.total_simple_block_count as i64);
+                self.total_track_seconds_metric.set(
+                    (reader.track_duration_offset + reader.total_track_duration).as_secs_f64(),
+                );
+                if let Some(codec) = reader.codec {
+                    self.codec_metric.set(codec.as_str());
+                }
+                if let Some(path) = &reader.current_input_file {
+                    self.current_input_file_metric
+                        .set(path.display().to_string());
+                }
+            }
         }
     }
 }
@@ -381,7 +504,6 @@ impl MediaProcessor for VideoReader {
         MediaProcessorSpec {
             input_stream_ids: Vec::new(),
             output_stream_ids: vec![self.output_stream_id],
-            stats: self.inner.stats(),
             workload_hint: MediaProcessorWorkloadHint::READER,
         }
     }
@@ -406,6 +528,7 @@ impl MediaProcessor for VideoReader {
                 Some(Ok(mut frame)) => {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
+                    self.update_metrics_from_inner();
                     return Ok(MediaProcessorOutput::video_frame(
                         self.output_stream_id,
                         frame,
@@ -413,6 +536,10 @@ impl MediaProcessor for VideoReader {
                 }
             }
         }
+    }
+
+    fn set_error(&self) {
+        self.error_flag.set(true);
     }
 }
 
@@ -423,17 +550,10 @@ enum VideoReaderInner {
 }
 
 impl VideoReaderInner {
-    fn stats(&self) -> ProcessorStats {
+    fn set_timestamp_offset(&mut self, offset: Duration) {
         match self {
-            Self::Mp4(r) => ProcessorStats::Mp4VideoReader(r.stats().clone()),
-            Self::Webm(r) => ProcessorStats::WebmVideoReader(r.stats().clone()),
-        }
-    }
-
-    fn set_timestamp_offset(&self, offset: Duration) {
-        match self {
-            Self::Mp4(r) => r.stats().track_duration_offset.set(offset),
-            Self::Webm(r) => r.stats().track_duration_offset.set(offset),
+            Self::Mp4(r) => r.stats_mut().track_duration_offset = offset,
+            Self::Webm(r) => r.stats_mut().track_duration_offset = offset,
         }
     }
 }
@@ -446,25 +566,5 @@ impl Iterator for VideoReaderInner {
             Self::Mp4(r) => r.next(),
             Self::Webm(r) => r.next(),
         }
-    }
-}
-
-fn start_next_input_file<F, S, R>(
-    remaining_input_files: &mut Vec<PathBuf>,
-    source_id: SourceId,
-    current_input_file: SharedOption<PathBuf>,
-    stats: S,
-    f: F,
-) -> orfail::Result<Option<R>>
-where
-    F: FnOnce(SourceId, PathBuf, S) -> orfail::Result<R>,
-{
-    if let Some(next_input_file) = remaining_input_files.pop() {
-        current_input_file.set(next_input_file.clone());
-        let reader = f(source_id, next_input_file, stats).or_fail()?;
-        Ok(Some(reader))
-    } else {
-        current_input_file.clear();
-        Ok(None)
     }
 }

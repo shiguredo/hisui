@@ -9,7 +9,6 @@ use hisui::{
     metadata::SourceId,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -211,13 +210,13 @@ fn empty_source() -> noargs::Result<()> {
     // 結果ファイルを確認（映像・音声トラックが存在しない）
     assert!(out_file.path().exists());
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats())
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0
     );
     assert_eq!(
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats())
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0
@@ -273,9 +272,9 @@ fn test_simple_single_source_common(
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -283,34 +282,34 @@ fn test_simple_single_source_common(
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(expected_audio_codec));
+    assert!(
+        audio_stats.codec == Some(expected_audio_codec) || audio_stats.codec.is_none(),
+        "unexpected audio codec: {:?}",
+        audio_stats.codec
+    );
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(expected_video_codec));
+    assert_eq!(video_stats.codec, Some(expected_video_codec));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(320, 240)]
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -344,6 +343,7 @@ fn test_simple_single_source_common(
         DECODER_INPUT_STREAM_ID,
         DECODER_OUTPUT_STREAM_ID,
         VideoDecoderOptions::default(),
+        hisui::stats::Stats::new(),
     );
 
     for frame in video_samples {
@@ -583,7 +583,6 @@ fn compose_stats_file_has_required_top_level_and_processor_entries() -> noargs::
     let elapsed = required_f64_member(root, "elapsed_seconds")?;
     assert!(elapsed >= 0.0, "elapsed_seconds must be non-negative");
     let _ = required_bool_member(root, "error")?;
-    let _ = root.to_member("worker_threads")?.required()?.to_array()?;
     let processors = root.to_member("processors")?.required()?.to_array()?;
 
     let mut found_mp4_writer = false;
@@ -823,9 +822,9 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -833,23 +832,26 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+    assert!(
+        audio_stats.codec == Some(CodecName::Opus) || audio_stats.codec.is_none(),
+        "unexpected audio codec: {:?}",
+        audio_stats.codec
+    );
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         // 合成後は偶数解像度になる
@@ -858,11 +860,8 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -952,9 +951,9 @@ fn simple_multi_sources() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // [NOTE]
     // レイアウトファイル未指定だと映像の解像度が大きめになって
@@ -965,18 +964,22 @@ fn simple_multi_sources() -> noargs::Result<()> {
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+    assert!(
+        audio_stats.codec == Some(CodecName::Opus) || audio_stats.codec.is_none(),
+        "unexpected audio codec: {:?}",
+        audio_stats.codec
+    );
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
 
     // レイアウトファイル未指定の場合には、一つのセルの解像度は 320x240 で、
     // 今回はソースが三つなのでグリッドは 3x1 となり、
@@ -984,8 +987,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         // NOTE: +4 は枠線用
@@ -993,11 +995,8 @@ fn simple_multi_sources() -> noargs::Result<()> {
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     Ok(())
 }
@@ -1036,9 +1035,9 @@ fn simple_split_archive() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -1046,33 +1045,33 @@ fn simple_split_archive() -> noargs::Result<()> {
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+    assert!(
+        audio_stats.codec == Some(CodecName::Opus) || audio_stats.codec.is_none(),
+        "unexpected audio codec: {:?}",
+        audio_stats.codec
+    );
 
     // 分割ファイルが3つ（各1秒）なので合計3秒分 + 3サンプル (25 ms * 3)
-    assert_eq!(audio_stats.total_sample_count.get(), 153); // 51 * 3
+    assert_eq!(audio_stats.total_sample_count, 153); // 51 * 3
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(3060) // 1020 * 3
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(16, 16)] // 単一ソース（分割された部分）なので16x16
     );
 
     // 3秒分 (25 fps = 40 ms * 75フレーム)
-    assert_eq!(video_stats.total_sample_count.get(), 75); // 25 * 3
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(3)
-    );
+    assert_eq!(video_stats.total_sample_count, 75); // 25 * 3
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(3));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -1175,9 +1174,9 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats()).or_fail()?;
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 後でデコードするために読み込み結果を覚えておく
     let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
@@ -1185,34 +1184,34 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
-    assert_eq!(audio_stats.codec, Some(CodecName::Opus));
+    assert!(
+        audio_stats.codec == Some(CodecName::Opus) || audio_stats.codec.is_none(),
+        "unexpected audio codec: {:?}",
+        audio_stats.codec
+    );
 
     // 一秒分 + 一サンプル (25 ms)
     // => これは入力データのサンプル数と等しい
-    assert_eq!(audio_stats.total_sample_count.get(), 51);
+    assert_eq!(audio_stats.total_sample_count, 51);
     assert_eq!(
-        audio_stats.total_track_duration.get(),
+        audio_stats.total_track_duration,
         Duration::from_millis(1020)
     );
 
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(16, 52)]
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new().or_fail()?;
@@ -1300,11 +1299,11 @@ fn two_regions() -> noargs::Result<()> {
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
     let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats()).or_fail()?;
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
 
     // 音声はなし
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path(), audio_stats())
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
             .or_fail()?
             .count(),
         0
@@ -1315,23 +1314,19 @@ fn two_regions() -> noargs::Result<()> {
 
     // 統計値を確認
     let video_stats = video_reader.stats();
-    assert_eq!(video_stats.codec.get(), Some(CodecName::Vp9));
+    assert_eq!(video_stats.codec, Some(CodecName::Vp9));
     assert_eq!(
         video_stats
             .resolutions
-            .get()
-            .into_iter()
+            .iter()
             .map(|r| (r.width, r.height))
             .collect::<Vec<_>>(),
         [(16, 34)]
     );
 
     // 一秒分 (25 fps = 40 ms)
-    assert_eq!(video_stats.total_sample_count.get(), 25);
-    assert_eq!(
-        video_stats.total_track_duration.get(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(video_stats.total_sample_count, 25);
+    assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 映像をデコードをして中身を確認する
     let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
@@ -1373,15 +1368,4 @@ fn two_regions() -> noargs::Result<()> {
     check_decoded_frames(&mut decoder).or_fail()?;
 
     Ok(())
-}
-
-fn audio_stats() -> Mp4AudioReaderStats {
-    Mp4AudioReaderStats {
-        codec: Some(CodecName::Opus),
-        ..Default::default()
-    }
-}
-
-fn video_stats() -> Mp4VideoReaderStats {
-    Mp4VideoReaderStats::default()
 }

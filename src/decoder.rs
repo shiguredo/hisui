@@ -22,7 +22,6 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::{AudioDecoderStats, ProcessorStats, VideoDecoderStats, VideoResolution},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -31,7 +30,9 @@ use crate::{
 pub struct AudioDecoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
-    stats: AudioDecoderStats,
+    total_audio_data_count_metric: crate::stats::StatsCounter,
+    source_id_metric: crate::stats::StatsString,
+    error_flag: crate::stats::StatsFlag,
     decoded: VecDeque<AudioData>,
     eos: bool,
     inner: Option<AudioDecoderInner>,
@@ -41,16 +42,22 @@ impl AudioDecoder {
     pub fn new(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
+        mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        let stats = AudioDecoderStats {
-            engine: Some(EngineName::Opus),
-            codec: Some(CodecName::Opus),
-            ..Default::default()
-        };
+        compose_stats
+            .string("engine")
+            .set(EngineName::Opus.as_str());
+        compose_stats.string("codec").set(CodecName::Opus.as_str());
+        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
+        let source_id_metric = compose_stats.string("source_id");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            stats,
+            total_audio_data_count_metric,
+            source_id_metric,
+            error_flag,
             decoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -128,7 +135,6 @@ impl MediaProcessor for AudioDecoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::AudioDecoder(self.stats.clone()),
             workload_hint: MediaProcessorWorkloadHint::AUDIO_DECODER,
         }
     }
@@ -147,9 +153,9 @@ impl MediaProcessor for AudioDecoder {
 
         let inner = self.inner.as_mut().or_fail()?;
         let decoded = inner.decode(&data).or_fail()?;
-        self.stats.total_audio_data_count.add(1);
+        self.total_audio_data_count_metric.inc();
         if let Some(id) = &data.source_id {
-            self.stats.source_id.set_once(|| id.clone());
+            self.source_id_metric.set(id.get());
         }
 
         self.decoded.push_back(decoded);
@@ -166,7 +172,7 @@ impl MediaProcessor for AudioDecoder {
             if let Some(inner) = self.inner.as_mut()
                 && let Some(remaining_data) = inner.finish().or_fail()?
             {
-                self.stats.total_audio_data_count.add(1);
+                self.total_audio_data_count_metric.inc();
                 self.decoded.push_back(remaining_data);
                 return Ok(MediaProcessorOutput::Processed {
                     stream_id: self.output_stream_id,
@@ -179,6 +185,10 @@ impl MediaProcessor for AudioDecoder {
                 awaiting_stream_id: Some(self.input_stream_id),
             })
         }
+    }
+
+    fn set_error(&self) {
+        self.error_flag.set(true);
     }
 }
 
@@ -254,7 +264,12 @@ pub struct VideoDecoderOptions {
 pub struct VideoDecoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
-    stats: VideoDecoderStats,
+    engine_metric: crate::stats::StatsString,
+    codec_metric: crate::stats::StatsString,
+    total_input_video_frame_count_metric: crate::stats::StatsCounter,
+    total_output_video_frame_count_metric: crate::stats::StatsCounter,
+    source_id_metric: crate::stats::StatsString,
+    error_flag: crate::stats::StatsFlag,
     decoded: VecDeque<VideoFrame>,
     eos: bool,
     inner: VideoDecoderInner,
@@ -265,12 +280,26 @@ impl VideoDecoder {
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         options: VideoDecoderOptions,
+        mut compose_stats: crate::stats::Stats,
     ) -> Self {
-        let stats = VideoDecoderStats::default();
+        let engine_metric = compose_stats.string("engine");
+        let codec_metric = compose_stats.string("codec");
+        let total_input_video_frame_count_metric =
+            compose_stats.counter("total_input_video_frame_count");
+        let total_output_video_frame_count_metric =
+            compose_stats.counter("total_output_video_frame_count");
+        let source_id_metric = compose_stats.string("source_id");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Self {
             input_stream_id,
             output_stream_id,
-            stats,
+            engine_metric,
+            codec_metric,
+            total_input_video_frame_count_metric,
+            total_output_video_frame_count_metric,
+            source_id_metric,
+            error_flag,
             decoded: VecDeque::new(),
             eos: false,
             inner: VideoDecoderInner::new(options),
@@ -397,7 +426,6 @@ impl MediaProcessor for VideoDecoder {
         MediaProcessorSpec {
             input_stream_ids: vec![self.input_stream_id],
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::VideoDecoder(self.stats.clone()),
             workload_hint: MediaProcessorWorkloadHint::VIDEO_DECODER,
         }
     }
@@ -406,20 +434,21 @@ impl MediaProcessor for VideoDecoder {
         if let Some(sample) = input.sample {
             let frame = sample.expect_video_frame().or_fail()?;
 
-            self.stats.total_input_video_frame_count.add(1);
+            self.total_input_video_frame_count_metric.inc();
             if let Some(id) = &frame.source_id {
-                self.stats.source_id.set_once(|| id.clone());
+                self.source_id_metric.set(id.get());
             }
 
-            self.inner.decode(&frame, &mut self.stats).or_fail()?;
+            self.inner
+                .decode(&frame, &self.codec_metric, &self.engine_metric)
+                .or_fail()?;
         } else {
             self.eos = true;
             self.inner.finish().or_fail()?;
         };
 
         while let Some(frame) = self.inner.next_decoded_frame() {
-            self.stats.total_output_video_frame_count.add(1);
-            self.stats.resolutions.insert(VideoResolution::new(&frame));
+            self.total_output_video_frame_count_metric.inc();
             self.decoded.push_back(frame);
         }
 
@@ -439,6 +468,10 @@ impl MediaProcessor for VideoDecoder {
                 awaiting_stream_id: Some(self.input_stream_id),
             })
         }
+    }
+
+    fn set_error(&self) {
+        self.error_flag.set(true);
     }
 }
 
@@ -466,14 +499,15 @@ impl VideoDecoderInner {
     fn initialize_decoder(
         &mut self,
         frame: &VideoFrame,
-        stats: &mut VideoDecoderStats,
+        codec_metric: &crate::stats::StatsString,
+        engine_metric: &crate::stats::StatsString,
         options: VideoDecoderOptions,
     ) -> orfail::Result<()> {
         let codec = frame
             .format
             .codec_name()
             .or_fail_with(|()| format!("unexpected video format: {:?}", frame.format))?;
-        stats.codec.set(codec);
+        codec_metric.set(codec.as_str());
 
         let candidate_engines = options
             .engines
@@ -484,7 +518,7 @@ impl VideoDecoderInner {
             .find(|engine| engine.is_available_video_decode_codec(codec))
             .copied();
         if let Some(engine) = engine {
-            stats.engine.set(engine);
+            engine_metric.set(engine.as_str());
         }
 
         match (engine, codec) {
@@ -566,12 +600,18 @@ impl VideoDecoderInner {
         Ok(())
     }
 
-    fn decode(&mut self, frame: &VideoFrame, stats: &mut VideoDecoderStats) -> orfail::Result<()> {
+    fn decode(
+        &mut self,
+        frame: &VideoFrame,
+        codec_metric: &crate::stats::StatsString,
+        engine_metric: &crate::stats::StatsString,
+    ) -> orfail::Result<()> {
         match self {
             Self::Initial { options } => {
                 let options = options.clone();
-                self.initialize_decoder(frame, stats, options).or_fail()?;
-                self.decode(frame, stats).or_fail()
+                self.initialize_decoder(frame, codec_metric, engine_metric, options)
+                    .or_fail()?;
+                self.decode(frame, codec_metric, engine_metric).or_fail()
             }
             #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.decode(frame).or_fail(),

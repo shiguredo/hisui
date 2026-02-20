@@ -16,7 +16,12 @@ const OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(100);
 
 #[test]
 fn start_noop_audio_mixer() {
-    let mut mixer = AudioMixer::new(layout(&[], None).trim_spans, Vec::new(), OUTPUT_STREAM_ID);
+    let mut mixer = AudioMixer::new(
+        layout(&[], None).trim_spans,
+        Vec::new(),
+        OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
+    );
 
     // ミキサーへの入力が空なので、出力も空
     assert!(matches!(
@@ -37,6 +42,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
         layout(&[source0.clone(), source1.clone(), source2.clone()], None).trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // ソースに AudioData を供給する
@@ -105,21 +111,20 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // 統計値をチェックする
     let stats = mixer.stats();
-    assert!(!stats.error.get());
-    assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
-    assert_eq!(stats.total_output_audio_data_count.get(), 15); // 300 ms 分
-    assert_eq!(stats.total_output_audio_data_duration.get(), ms(300));
+    assert_eq!(stats.total_input_audio_data_count(), 15); // 100 ms * 3
+    assert_eq!(stats.total_output_audio_data_count(), 15); // 300 ms 分
+    assert_eq!(stats.total_output_audio_data_duration(), ms(300));
     assert_eq!(
-        stats.total_output_sample_count.get(),
+        stats.total_output_sample_count(),
         (SAMPLE_RATE as f64 * 0.3) as u64
     );
     assert_eq!(
-        stats.total_output_filled_sample_count.get(),
+        stats.total_output_filled_sample_count(),
         (SAMPLE_RATE as f64 * 0.04) as u64
     );
 
     // trim=false なのでトリム期間はなし
-    assert_eq!(stats.total_trimmed_sample_count.get(), 0);
+    assert_eq!(stats.total_trimmed_sample_count(), 0);
 
     Ok(())
 }
@@ -143,6 +148,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
         .trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // ソースに AudioData を供給する
@@ -203,19 +209,18 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // 統計値をチェックする
     let stats = mixer.stats();
-    assert!(!stats.error.get());
-    assert_eq!(stats.total_input_audio_data_count.get(), 15); // 100 ms * 3
-    assert_eq!(stats.total_output_audio_data_count.get(), 13); // 260 ms 分
-    assert_eq!(stats.total_output_audio_data_duration.get(), ms(260));
+    assert_eq!(stats.total_input_audio_data_count(), 15); // 100 ms * 3
+    assert_eq!(stats.total_output_audio_data_count(), 13); // 260 ms 分
+    assert_eq!(stats.total_output_audio_data_duration(), ms(260));
     assert_eq!(
-        stats.total_output_sample_count.get(),
+        stats.total_output_sample_count(),
         (SAMPLE_RATE as f64 * 0.26) as u64
     );
-    assert_eq!(stats.total_output_filled_sample_count.get(), 0);
+    assert_eq!(stats.total_output_filled_sample_count(), 0);
 
     // 40 ms 分がトリムされた
     assert_eq!(
-        stats.total_trimmed_sample_count.get(),
+        stats.total_trimmed_sample_count(),
         (SAMPLE_RATE as f64 * 0.04) as u64
     );
 
@@ -234,6 +239,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
         layout(&[source0.clone(), source1.clone(), source2.clone()], None).trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // それぞれのソースに AudioData を供給する
@@ -278,18 +284,17 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
 
     // 統計値をチェックする
     let stats = mixer.stats();
-    assert!(!stats.error.get());
-    assert_eq!(stats.total_input_audio_data_count.get(), 10 + 4 + 50);
-    assert_eq!(stats.total_output_audio_data_count.get(), 5); // 100 ms = 20 ms * 5
-    assert_eq!(stats.total_output_audio_data_duration.get(), ms(100));
+    assert_eq!(stats.total_input_audio_data_count(), 10 + 4 + 50);
+    assert_eq!(stats.total_output_audio_data_count(), 5); // 100 ms = 20 ms * 5
+    assert_eq!(stats.total_output_audio_data_duration(), ms(100));
     assert_eq!(
-        stats.total_output_sample_count.get(),
+        stats.total_output_sample_count(),
         (SAMPLE_RATE as f64 * 0.1) as u64
     );
 
     // 空白期間はないので無音補完やトリムは発生しない
-    assert_eq!(stats.total_output_filled_sample_count.get(), 0);
-    assert_eq!(stats.total_trimmed_sample_count.get(), 0);
+    assert_eq!(stats.total_output_filled_sample_count(), 0);
+    assert_eq!(stats.total_trimmed_sample_count(), 0);
 
     Ok(())
 }
@@ -302,6 +307,7 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
         layout(std::slice::from_ref(&source), None).trim_spans,
         vec![input_stream_id],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // 適当に不正なフォーマットを指定して AudioData を送る
@@ -325,13 +331,12 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
 
     // 統計値をチェックする
     let stats = mixer.stats();
-    assert!(!stats.error.get()); // このフラグはスケジューラ側で管理しているので、ここでは `true` にならない
-    assert_eq!(stats.total_input_audio_data_count.get(), 0);
-    assert_eq!(stats.total_output_audio_data_count.get(), 0);
-    assert_eq!(stats.total_output_audio_data_duration.get(), ms(0));
-    assert_eq!(stats.total_output_sample_count.get(), 0);
-    assert_eq!(stats.total_output_filled_sample_count.get(), 0);
-    assert_eq!(stats.total_trimmed_sample_count.get(), 0);
+    assert_eq!(stats.total_input_audio_data_count(), 0);
+    assert_eq!(stats.total_output_audio_data_count(), 0);
+    assert_eq!(stats.total_output_audio_data_duration(), ms(0));
+    assert_eq!(stats.total_output_sample_count(), 0);
+    assert_eq!(stats.total_output_filled_sample_count(), 0);
+    assert_eq!(stats.total_trimmed_sample_count(), 0);
 
     Ok(())
 }

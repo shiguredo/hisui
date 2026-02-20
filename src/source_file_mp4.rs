@@ -107,8 +107,12 @@ impl Mp4FileSource {
         // 音声トラックがあるならデコーダーを起動する＆結果を外側に転送する
         if let Some(id) = self.audio_track_id.clone() {
             let inner_id = TrackId::new(format!("{id}_encoded"));
-            let decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1))
-                .map_err(|e| Error::new(e.to_string()))?;
+            let decoder = AudioDecoder::new(
+                MediaStreamId::new(0),
+                MediaStreamId::new(1),
+                crate::stats::Stats::new(),
+            )
+            .map_err(|e| Error::new(e.to_string()))?;
 
             options.audio_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;
@@ -128,6 +132,7 @@ impl Mp4FileSource {
                 MediaStreamId::new(2),
                 MediaStreamId::new(3),
                 VideoDecoderOptions::default(),
+                crate::stats::Stats::new(),
             );
 
             options.video_track_id = Some(inner_id.clone());

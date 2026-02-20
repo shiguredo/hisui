@@ -5,7 +5,6 @@ use orfail::OrFail;
 
 use crate::audio::AudioData;
 use crate::media::{MediaSample, MediaStreamId};
-use crate::stats::ProcessorStats;
 use crate::video::VideoFrame;
 
 pub trait MediaProcessor {
@@ -14,9 +13,7 @@ pub trait MediaProcessor {
     fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()>;
     fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput>;
 
-    fn set_error(&self) {
-        self.spec().stats.set_error();
-    }
+    fn set_error(&self) {}
 }
 
 pub struct BoxedMediaProcessor(Box<dyn 'static + Send + MediaProcessor>);
@@ -95,7 +92,6 @@ pub struct MediaProcessorSpec {
     pub input_stream_ids: Vec<MediaStreamId>,
     pub output_stream_ids: Vec<MediaStreamId>,
     pub workload_hint: MediaProcessorWorkloadHint,
-    pub stats: ProcessorStats,
 }
 
 #[derive(Debug)]
@@ -273,7 +269,6 @@ impl MediaProcessor for RealtimePacer {
         MediaProcessorSpec {
             input_stream_ids: self.stream_ids.keys().copied().collect(),
             output_stream_ids: self.stream_ids.values().copied().collect(),
-            stats: ProcessorStats::other("realtime_pacer"),
             workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
         }
     }

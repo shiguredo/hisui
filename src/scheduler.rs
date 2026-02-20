@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use orfail::OrFail;
@@ -10,7 +14,6 @@ use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
     MediaProcessorWorkloadHint,
 };
-use crate::stats::{ProcessorStats, SharedAtomicFlag, Stats, WorkerThreadStats};
 
 type MediaSampleReceiver = mpsc::Receiver<MediaSample>;
 type MediaSampleSyncSender = mpsc::SyncSender<MediaSample>;
@@ -34,23 +37,18 @@ fn sync_channel_size() -> usize {
 
 #[derive(Debug)]
 pub struct Task {
-    sequence_number: usize,
     thread_number: usize,
     processor: BoxedMediaProcessor,
     input_stream_rxs: HashMap<MediaStreamId, MediaSampleReceiver>,
     output_stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
     awaiting_input_stream_ids: Vec<MediaStreamId>,
     output_sample: Option<(MediaStreamId, usize, MediaSample)>,
-    stats: ProcessorStats,
     workload_hint: MediaProcessorWorkloadHint,
     finished: bool,
 }
 
 impl Task {
-    fn new<P>(
-        sequence_number: usize,
-        processor: P,
-    ) -> (Self, Vec<(MediaStreamId, MediaSampleSyncSender)>)
+    fn new<P>(processor: P) -> (Self, Vec<(MediaStreamId, MediaSampleSyncSender)>)
     where
         P: 'static + Send + MediaProcessor,
     {
@@ -66,14 +64,12 @@ impl Task {
         }
 
         let task = Self {
-            sequence_number,
             thread_number: 0, // 複数スレッドを使う場合には、後で再割り当てされる
             processor: BoxedMediaProcessor::new(processor),
             input_stream_rxs,
             output_stream_txs: HashMap::new(),
             awaiting_input_stream_ids: Vec::new(),
             output_sample: None,
-            stats: spec.stats,
             workload_hint: spec.workload_hint,
             finished: false,
         };
@@ -174,7 +170,13 @@ pub struct Scheduler {
     tasks: Vec<Task>,
     thread_count: NonZeroUsize,
     stream_txs: HashMap<MediaStreamId, Vec<MediaSampleSyncSender>>,
-    stats: Stats,
+    error: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchedulerResult {
+    pub elapsed_duration: Duration,
+    pub error: bool,
 }
 
 impl Scheduler {
@@ -187,15 +189,14 @@ impl Scheduler {
             tasks: Vec::new(),
             thread_count,
             stream_txs: HashMap::new(),
-            stats: Stats::default(),
+            error: Arc::new(AtomicBool::new(false)),
         }
     }
     pub fn register<P>(&mut self, processor: P) -> orfail::Result<()>
     where
         P: 'static + Send + MediaProcessor,
     {
-        let (task, input_stream_txs) = Task::new(self.tasks.len(), processor);
-        self.stats.processors.push(task.stats.clone());
+        let (task, input_stream_txs) = Task::new(processor);
         self.tasks.push(task);
 
         for (id, tx) in input_stream_txs {
@@ -238,14 +239,12 @@ impl Scheduler {
 
         let mut handles = Vec::new();
         for i in 0..self.thread_count.get() {
-            let mut worker_thread_stats = WorkerThreadStats::default();
             let mut thread_tasks = Vec::new();
 
             let mut j = 0;
             while j < self.tasks.len() {
                 if self.tasks[j].thread_number == i {
                     let task = self.tasks.swap_remove(j);
-                    worker_thread_stats.processors.push(task.sequence_number);
                     thread_tasks.push(task);
                 } else {
                     j += 1
@@ -254,37 +253,32 @@ impl Scheduler {
             if thread_tasks.is_empty() {
                 continue;
             };
-            let runner = TaskRunner::new(
-                thread_tasks,
-                worker_thread_stats.clone(),
-                self.stats.error.clone(),
-            );
+            let runner = TaskRunner::new(thread_tasks, self.error.clone());
             let handle = std::thread::spawn(|| runner.run());
             handles.push(handle);
-
-            worker_thread_stats.processors.sort(); // JSON として出力する際の可読性向上用にソートする
-            self.stats.worker_threads.push(worker_thread_stats);
         }
 
         Ok(SchedulerHandle {
             handles,
-            stats: self.stats,
+            error: self.error,
         })
     }
 
-    pub fn run(self) -> orfail::Result<Stats> {
+    pub fn run(self) -> orfail::Result<SchedulerResult> {
         let start = Instant::now();
-        let mut handle = self.spawn().or_fail()?;
+        let handle = self.spawn().or_fail()?;
         for handle in handle.handles {
             if let Err(e) = handle.join() {
                 std::panic::resume_unwind(e);
             }
         }
-        handle.stats.elapsed_duration = start.elapsed();
-        Ok(handle.stats)
+        Ok(SchedulerResult {
+            elapsed_duration: start.elapsed(),
+            error: handle.error.load(Ordering::Relaxed),
+        })
     }
 
-    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, Stats)> {
+    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, SchedulerResult)> {
         // 完了待ちのビジーループを避けるためのスリープの時間
         // 適当に長めの時間ならなんでもいい
         const SLEEP_DURATION: Duration = Duration::from_millis(100);
@@ -295,7 +289,7 @@ impl Scheduler {
         while !handle.handles.is_empty() {
             if !timeout_expired && timeout < start.elapsed() {
                 // エラーフラグを立てて、ワーカースレッドを終了処理に移行させる
-                handle.stats.error.set(true);
+                handle.error.store(true, Ordering::Relaxed);
                 timeout_expired = true;
                 tracing::debug!(
                     "Timeout expired after {} seconds, signaling worker threads to terminate",
@@ -323,8 +317,13 @@ impl Scheduler {
             }
         }
 
-        handle.stats.elapsed_duration = start.elapsed();
-        Ok((timeout_expired, handle.stats))
+        Ok((
+            timeout_expired,
+            SchedulerResult {
+                elapsed_duration: start.elapsed(),
+                error: handle.error.load(Ordering::Relaxed),
+            },
+        ))
     }
 
     fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
@@ -350,29 +349,27 @@ impl Default for Scheduler {
 #[derive(Debug)]
 struct SchedulerHandle {
     handles: Vec<std::thread::JoinHandle<()>>,
-    stats: Stats,
+    error: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
 struct TaskRunner {
     tasks: Vec<Task>,
-    stats: WorkerThreadStats,
-    error_flag: SharedAtomicFlag,
+    error_flag: Arc<AtomicBool>,
     next_sleep_duration: Option<Duration>,
 }
 
 impl TaskRunner {
-    fn new(tasks: Vec<Task>, stats: WorkerThreadStats, error_flag: SharedAtomicFlag) -> Self {
+    fn new(tasks: Vec<Task>, error_flag: Arc<AtomicBool>) -> Self {
         Self {
             tasks,
-            stats,
             error_flag,
             next_sleep_duration: None,
         }
     }
 
     fn run(mut self) {
-        while !self.tasks.is_empty() && !self.error_flag.get() {
+        while !self.tasks.is_empty() && !self.error_flag.load(Ordering::Relaxed) {
             self.run_one();
         }
     }
@@ -381,17 +378,13 @@ impl TaskRunner {
         let mut i = 0;
         let mut did_something = false;
         while i < self.tasks.len() {
-            let start = Instant::now();
             let result = self.tasks[i].run_until_block().or_fail();
-            let elapsed = start.elapsed();
-            self.tasks[i].stats.total_processing_duration().add(elapsed);
-            self.stats.total_processing_duration.add(elapsed);
 
             match result {
                 Err(e) => {
                     tracing::error!("{e}");
-                    self.error_flag.set(true);
-                    self.tasks[i].stats.set_error();
+                    self.error_flag.store(true, Ordering::Relaxed);
+                    self.tasks[i].processor.set_error();
                     self.tasks.swap_remove(i);
                 }
                 Ok(task_did_something) if self.tasks[i].finished => {
@@ -414,7 +407,6 @@ impl TaskRunner {
             const MAX_SLEEP_DURATION: Duration = Duration::from_millis(50);
 
             std::thread::sleep(duration);
-            self.stats.total_waiting_duration.add(duration);
             self.next_sleep_duration = Some((duration * 2).min(MAX_SLEEP_DURATION));
         } else {
             self.next_sleep_duration = Some(Duration::from_millis(1));

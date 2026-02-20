@@ -1,7 +1,8 @@
 use std::{
+    collections::BTreeSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -11,9 +12,15 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 use crate::{
     audio::{AudioData, AudioFormat},
     metadata::SourceId,
-    stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
+    types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VideoResolution {
+    pub width: usize,
+    pub height: usize,
+}
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
@@ -23,15 +30,17 @@ pub struct Mp4VideoReader {
     format: VideoFormat,
     width: usize,
     height: usize,
-    stats: Mp4VideoReaderStats,
+
+    pub current_input_file: Option<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub resolutions: BTreeSet<VideoResolution>,
+    pub total_sample_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
 }
 
 impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        path: P,
-        stats: Mp4VideoReaderStats,
-    ) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
         let mut file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut demuxer = Mp4FileDemuxer::new();
@@ -41,17 +50,34 @@ impl Mp4VideoReader {
             file,
             demuxer,
             source_id,
-            stats,
 
             // 後で更新されるので適当な初期値を設定しておく
             format: VideoFormat::Vp8,
             width: 0,
             height: 0,
+            current_input_file: Some(path.as_ref().to_path_buf()),
+            codec: None,
+            resolutions: BTreeSet::new(),
+            total_sample_count: 0,
+            total_track_duration: Duration::ZERO,
+            track_duration_offset: Duration::ZERO,
         })
     }
 
-    pub fn stats(&self) -> &Mp4VideoReaderStats {
-        &self.stats
+    pub fn stats(&self) -> &Self {
+        self
+    }
+
+    pub fn stats_mut(&mut self) -> &mut Self {
+        self
+    }
+
+    pub fn inherit_stats_from(&mut self, prev: &Self) {
+        self.codec = prev.codec;
+        self.resolutions = prev.resolutions.clone();
+        self.total_sample_count = prev.total_sample_count;
+        self.total_track_duration = prev.total_track_duration;
+        self.track_duration_offset = prev.track_duration_offset;
     }
 
     fn next_sample(&mut self) -> orfail::Result<Option<VideoFrame>> {
@@ -104,14 +130,14 @@ impl Mp4VideoReader {
         let duration = Duration::from_secs(sample.duration as u64) / timescale;
 
         // 統計値を更新する
-        self.stats.total_sample_count.add(1);
-        self.stats.total_track_duration.set(timestamp + duration);
-        if self.stats.codec.get().is_none()
+        self.total_sample_count += 1;
+        self.total_track_duration = timestamp + duration;
+        if self.codec.is_none()
             && let Some(name) = self.format.codec_name()
         {
-            self.stats.codec.set(name);
+            self.codec = Some(name);
         }
-        self.stats.resolutions.insert(VideoResolution {
+        self.resolutions.insert(VideoResolution {
             width: self.width,
             height: self.height,
         });
@@ -147,15 +173,16 @@ pub struct Mp4AudioReader {
     format: AudioFormat,
     stereo: bool,
     sample_rate: u16,
-    stats: Mp4AudioReaderStats,
+
+    pub current_input_file: Option<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub total_sample_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
 }
 
 impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        path: P,
-        stats: Mp4AudioReaderStats,
-    ) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
         let mut file = File::open(&path)
             .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
         let mut demuxer = Mp4FileDemuxer::new();
@@ -172,16 +199,31 @@ impl Mp4AudioReader {
             demuxer,
             source_id,
             audio_track_id,
-            stats,
             // 後で更新されるので適当な初期値を設定しておく
             format: AudioFormat::Opus,
             stereo: false,
             sample_rate: 0,
+            current_input_file: Some(path.as_ref().to_path_buf()),
+            codec: None,
+            total_sample_count: 0,
+            total_track_duration: Duration::ZERO,
+            track_duration_offset: Duration::ZERO,
         })
     }
 
-    pub fn stats(&self) -> &Mp4AudioReaderStats {
-        &self.stats
+    pub fn stats(&self) -> &Self {
+        self
+    }
+
+    pub fn stats_mut(&mut self) -> &mut Self {
+        self
+    }
+
+    pub fn inherit_stats_from(&mut self, prev: &Self) {
+        self.codec = prev.codec;
+        self.total_sample_count = prev.total_sample_count;
+        self.total_track_duration = prev.total_track_duration;
+        self.track_duration_offset = prev.track_duration_offset;
     }
 
     fn next_sample(&mut self) -> orfail::Result<Option<AudioData>> {
@@ -230,8 +272,8 @@ impl Mp4AudioReader {
         let duration = Duration::from_secs(sample.duration as u64) / timescale;
 
         // 統計値を更新する
-        self.stats.total_sample_count.add(1);
-        self.stats.total_track_duration.set(timestamp + duration);
+        self.total_sample_count += 1;
+        self.total_track_duration = timestamp + duration;
 
         Ok(Some(AudioData {
             source_id: Some(self.source_id.clone()),

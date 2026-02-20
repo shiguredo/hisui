@@ -2,25 +2,7 @@ use std::sync::Arc;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::{Error, audio::AudioData, stats::SharedAtomicCounter, video::VideoFrame};
-
-#[derive(Debug)]
-pub struct RtmpOutgoingFrameHandlerStats {
-    pub total_audio_frame_count: SharedAtomicCounter,
-    pub total_video_frame_count: SharedAtomicCounter,
-    pub total_video_keyframe_count: SharedAtomicCounter,
-    pub total_audio_sequence_header_count: SharedAtomicCounter,
-    pub total_video_sequence_header_count: SharedAtomicCounter,
-}
-
-#[derive(Debug)]
-pub struct RtmpIncomingFrameHandlerStats {
-    pub total_audio_frame_count: SharedAtomicCounter,
-    pub total_video_frame_count: SharedAtomicCounter,
-    pub total_video_keyframe_count: SharedAtomicCounter,
-    pub total_audio_sequence_header_count: SharedAtomicCounter,
-    pub total_video_sequence_header_count: SharedAtomicCounter,
-}
+use crate::{Error, audio::AudioData, video::VideoFrame};
 
 /// RTMP フレーム処理の共通ロジック（送信側）
 #[derive(Debug)]
@@ -29,17 +11,15 @@ pub struct RtmpOutgoingFrameHandler {
     audio_sequence_header_data: Option<Vec<u8>>,
     video_nalu_length_size: u8,
     received_keyframe: bool,
-    stats: RtmpOutgoingFrameHandlerStats,
 }
 
 impl RtmpOutgoingFrameHandler {
-    pub fn new(stats: RtmpOutgoingFrameHandlerStats) -> Self {
+    pub fn new() -> Self {
         Self {
             video_sequence_header_data: None,
             audio_sequence_header_data: None,
             video_nalu_length_size: 4, // 後でちゃんとした値で更新されるが、最初は典型的な値を設定しておく
             received_keyframe: false,
-            stats,
         }
     }
 
@@ -65,7 +45,6 @@ impl RtmpOutgoingFrameHandler {
                     data: seq_header.clone(),
                 };
                 self.audio_sequence_header_data = Some(seq_header);
-                self.stats.total_audio_sequence_header_count.increment();
                 tracing::debug!("Sent AAC sequence header");
                 Some(frame)
             } else {
@@ -87,7 +66,6 @@ impl RtmpOutgoingFrameHandler {
             is_aac_sequence_header: false,
             data: audio.data.clone(),
         };
-        self.stats.total_audio_frame_count.increment();
 
         Ok((seq_frame, frame))
     }
@@ -113,8 +91,6 @@ impl RtmpOutgoingFrameHandler {
         let timestamp_ms = video.timestamp.as_millis() as u32;
 
         let seq_frame = if video.keyframe {
-            self.stats.total_video_keyframe_count.increment();
-
             if let Some(entry) = &video.sample_entry {
                 // サンプルエントリーから nalu_length_size を取得
                 self.video_nalu_length_size = extract_nalu_length_size(entry)?;
@@ -129,7 +105,6 @@ impl RtmpOutgoingFrameHandler {
                     data: seq_header_data.clone(),
                 };
                 self.video_sequence_header_data = Some(seq_header_data);
-                self.stats.total_video_sequence_header_count.increment();
                 tracing::debug!("Sent H.264 sequence header");
                 Some(frame)
             } else {
@@ -165,9 +140,14 @@ impl RtmpOutgoingFrameHandler {
             avc_packet_type: Some(shiguredo_rtmp::AvcPacketType::NalUnit),
             data: frame_data,
         };
-        self.stats.total_video_frame_count.increment();
 
         Ok(Some((seq_frame, frame)))
+    }
+}
+
+impl Default for RtmpOutgoingFrameHandler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -178,7 +158,6 @@ pub struct RtmpIncomingFrameHandler {
     audio_sample_entry: Option<SampleEntry>,
     video_sample_entry: Option<SampleEntry>,
     received_video_keyframe: bool,
-    stats: RtmpIncomingFrameHandlerStats,
     last_video_timestamp: Option<std::time::Duration>,
     rtmp_base_timestamp: Option<u32>,
     timestamp_offset: std::time::Duration,
@@ -192,16 +171,12 @@ struct AudioCodecInfo {
 }
 
 impl RtmpIncomingFrameHandler {
-    pub fn new(
-        timestamp_offset: std::time::Duration,
-        stats: RtmpIncomingFrameHandlerStats,
-    ) -> Self {
+    pub fn new(timestamp_offset: std::time::Duration) -> Self {
         Self {
             audio_codec_info: None,
             audio_sample_entry: None,
             video_sample_entry: None,
             received_video_keyframe: false,
-            stats,
             last_video_timestamp: None,
             rtmp_base_timestamp: None,
             timestamp_offset,
@@ -230,8 +205,6 @@ impl RtmpIncomingFrameHandler {
     ) -> crate::Result<AudioData> {
         // シーケンスヘッダーの処理
         if frame.is_aac_sequence_header {
-            self.stats.total_audio_sequence_header_count.increment();
-
             // AAC シーケンスヘッダー（Audio Specific Config）をパース
             let (sample_rate, channels) = parse_aac_audio_specific_config(&frame.data)?;
 
@@ -252,8 +225,6 @@ impl RtmpIncomingFrameHandler {
                 channels
             );
         }
-
-        self.stats.total_audio_frame_count.increment();
 
         // タイムスタンプを調整
         let adjusted_timestamp_ms = self.adjust_timestamp(frame.timestamp.as_millis() as u64);
@@ -282,8 +253,6 @@ impl RtmpIncomingFrameHandler {
     ) -> crate::Result<Option<VideoFrame>> {
         // シーケンスヘッダーの処理
         if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::SequenceHeader) {
-            self.stats.total_video_sequence_header_count.increment();
-
             let seq_header = shiguredo_rtmp::AvcSequenceHeader::from_bytes(&frame.data)
                 .map_err(|e| Error::new(format!("failed to parse AVC sequence header: {e}")))?;
 
@@ -309,10 +278,7 @@ impl RtmpIncomingFrameHandler {
 
         if frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame {
             self.received_video_keyframe = true;
-            self.stats.total_video_keyframe_count.increment();
         }
-
-        self.stats.total_video_frame_count.increment();
 
         // タイムスタンプを調整
         let adjusted_timestamp_ms = self.adjust_timestamp(frame.timestamp.as_millis() as u64);

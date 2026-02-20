@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
+use std::{collections::BTreeSet, num::NonZeroUsize, path::PathBuf};
 
 use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::{DEFAULT_LAYOUT_JSON, Layout},
-    stats::{ProcessorStats, Stats},
+    stats::{StatsEntry, StatsValue},
 };
 
 #[derive(Debug)]
@@ -121,6 +121,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
     // 合成を実行
     let result = composer.compose(&output_file_path).or_fail()?;
+    let entries = result
+        .stats
+        .entries()
+        .map_err(|e: crate::Error| orfail::Failure::new(e.to_string()))?;
 
     if !result.success {
         // エラー発生時は終了コードを変える
@@ -136,10 +140,10 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
                 f.member("stats_file_path", path)?;
             }
             f.member("input_root_dir", &args.root_dir)?;
-            print_input_stats_summary(f, &result.stats)?;
+            print_input_stats_summary(f, &entries)?;
             f.member("output_file_path", &output_file_path)?;
-            print_output_stats_summary(f, &result.stats)?;
-            print_time_stats_summary(f, &result.stats)?;
+            print_output_stats_summary(f, &entries)?;
+            print_time_stats_summary(f, result.elapsed_duration.as_secs_f64())?;
 
             Ok(())
         })
@@ -151,34 +155,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
 fn print_input_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    stats: &Stats,
+    entries: &[StatsEntry],
 ) -> std::fmt::Result {
     // NOTE: 個別の reader / decoder の情報を出すと JSON の要素数が可変かつ挙動になる可能性があるので省く
     //（その情報が必要なら stats ファイルを出力して、そっちを参照するのがいい）
-    let count = stats
-        .processors
-        .iter()
-        .filter(|s| {
-            matches!(
-                s,
-                ProcessorStats::WebmAudioReader(_) | ProcessorStats::Mp4AudioReader(_)
-            )
-        })
-        .count();
+    let count = count_processors_by_types(entries, &["mp4_audio_reader", "webm_audio_reader"]);
     if count > 0 {
         f.member("input_audio_source_count", count)?;
     }
 
-    let count = stats
-        .processors
-        .iter()
-        .filter(|s| {
-            matches!(
-                s,
-                ProcessorStats::WebmVideoReader(_) | ProcessorStats::Mp4VideoReader(_)
-            )
-        })
-        .count();
+    let count = count_processors_by_types(entries, &["mp4_video_reader", "webm_video_reader"]);
     if count > 0 {
         f.member("input_video_source_count", count)?;
     }
@@ -188,70 +174,64 @@ fn print_input_stats_summary(
 
 fn print_output_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    stats: &Stats,
+    entries: &[StatsEntry],
 ) -> std::fmt::Result {
-    let Some(ProcessorStats::Mp4Writer(writer)) = stats
-        .processors
-        .iter()
-        .find(|x| matches!(x, ProcessorStats::Mp4Writer(_)))
-    else {
+    let Some(writer_id) = find_first_processor_id_by_type(entries, "mp4_writer") else {
         return Ok(());
     };
 
-    if let Some(codec) = writer.audio_codec.get() {
+    if let Some(codec) = find_string_metric_by_processor(entries, &writer_id, "audio_codec") {
         f.member("output_audio_codec", codec)?;
-
-        for processor in &stats.processors {
-            if let ProcessorStats::AudioEncoder(encoder) = processor {
-                f.member("output_audio_encode_engine", encoder.engine)?;
-                break;
+        if let Some(engine) = find_first_string_metric_by_type(entries, "audio_encoder", "engine") {
+            f.member("output_audio_encode_engine", engine)?;
+        }
+        if let Some(duration_seconds) =
+            find_numeric_metric_by_processor(entries, &writer_id, "total_audio_track_seconds")
+        {
+            f.member("output_audio_duration_seconds", duration_seconds)?;
+            if duration_seconds > 0.0
+                && let Some(byte_size) = find_numeric_metric_by_processor(
+                    entries,
+                    &writer_id,
+                    "total_audio_sample_data_byte_size",
+                )
+            {
+                let bitrate = (byte_size * 8.0) / duration_seconds;
+                f.member("output_audio_bitrate", bitrate as u64)?;
             }
         }
-
-        f.member(
-            "output_audio_duration_seconds",
-            writer.total_audio_track_duration.get().as_secs_f32(),
-        )?;
-
-        let duration = writer.total_audio_track_duration.get();
-        if !duration.is_zero() {
-            let bitrate = (writer.total_audio_sample_data_byte_size.get() as f32 * 8.0)
-                / duration.as_secs_f32();
-            f.member("output_audio_bitrate", bitrate as u64)?;
-        }
     }
-    if let Some(codec) = writer.video_codec.get() {
+    if let Some(codec) = find_string_metric_by_processor(entries, &writer_id, "video_codec") {
         f.member("output_video_codec", codec)?;
-
-        for processor in &stats.processors {
-            if let ProcessorStats::VideoEncoder(encoder) = processor {
-                f.member("output_video_encode_engine", &encoder.engine)?;
-                break;
-            }
+        if let Some(engine) = find_first_string_metric_by_type(entries, "video_encoder", "engine") {
+            f.member("output_video_encode_engine", engine)?;
         }
-
-        f.member(
-            "output_video_duration_seconds",
-            writer.total_video_track_duration.get().as_secs_f32(),
-        )?;
-
-        let duration = writer.total_video_track_duration.get();
-        if !duration.is_zero() {
-            let bitrate = (writer.total_video_sample_data_byte_size.get() as f32 * 8.0)
-                / duration.as_secs_f32();
-            f.member("output_video_bitrate", bitrate as u64)?;
+        if let Some(duration_seconds) =
+            find_numeric_metric_by_processor(entries, &writer_id, "total_video_track_seconds")
+        {
+            f.member("output_video_duration_seconds", duration_seconds)?;
+            if duration_seconds > 0.0
+                && let Some(byte_size) = find_numeric_metric_by_processor(
+                    entries,
+                    &writer_id,
+                    "total_video_sample_data_byte_size",
+                )
+            {
+                let bitrate = (byte_size * 8.0) / duration_seconds;
+                f.member("output_video_bitrate", bitrate as u64)?;
+            }
         }
     }
 
-    for processor in &stats.processors {
-        match processor {
-            ProcessorStats::AudioMixer(_mixer) => {}
-            ProcessorStats::VideoMixer(mixer) => {
-                f.member("output_video_width", mixer.output_video_resolution.width)?;
-                f.member("output_video_height", mixer.output_video_resolution.height)?;
-            }
-            _ => {}
-        }
+    if let Some(width) =
+        find_first_numeric_metric_by_type(entries, "video_mixer", "output_video_width")
+    {
+        f.member("output_video_width", width as usize)?;
+    }
+    if let Some(height) =
+        find_first_numeric_metric_by_type(entries, "video_mixer", "output_video_height")
+    {
+        f.member("output_video_height", height as usize)?;
     }
 
     Ok(())
@@ -259,111 +239,121 @@ fn print_output_stats_summary(
 
 fn print_time_stats_summary(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
-    stats: &Stats,
+    elapsed_seconds: f64,
 ) -> std::fmt::Result {
-    let total_audio_decoder_processing_duration = stats
-        .processors
-        .iter()
-        .filter_map(|decoder| match decoder {
-            ProcessorStats::AudioDecoder(audio_decoder) => {
-                Some(audio_decoder.total_processing_duration.get())
-            }
-            _ => None,
-        })
-        .sum::<Duration>();
-    if !total_audio_decoder_processing_duration.is_zero() {
-        f.member(
-            "total_audio_decoder_processing_seconds",
-            total_audio_decoder_processing_duration.as_secs_f64(),
-        )?;
-    }
-
-    let total_video_decoder_processing_duration = stats
-        .processors
-        .iter()
-        .filter_map(|decoder| match decoder {
-            ProcessorStats::VideoDecoder(video_decoder) => {
-                Some(video_decoder.total_processing_duration.get())
-            }
-            _ => None,
-        })
-        .sum::<Duration>();
-    if !total_video_decoder_processing_duration.is_zero() {
-        f.member(
-            "total_video_decoder_processing_seconds",
-            total_video_decoder_processing_duration.as_secs_f64(),
-        )?;
-    }
-
-    let total_audio_encoder_processing_duration = stats
-        .processors
-        .iter()
-        .filter_map(|encoder| match encoder {
-            ProcessorStats::AudioEncoder(audio_encoder) => {
-                Some(audio_encoder.total_processing_duration.get())
-            }
-            _ => None,
-        })
-        .sum::<Duration>();
-    if !total_audio_encoder_processing_duration.is_zero() {
-        f.member(
-            "total_audio_encoder_processing_seconds",
-            total_audio_encoder_processing_duration.as_secs_f64(),
-        )?;
-    }
-
-    let total_video_encoder_processing_duration = stats
-        .processors
-        .iter()
-        .filter_map(|encoder| match encoder {
-            ProcessorStats::VideoEncoder(video_encoder) => {
-                Some(video_encoder.total_processing_duration.get())
-            }
-            _ => None,
-        })
-        .sum::<Duration>();
-    if !total_video_encoder_processing_duration.is_zero() {
-        f.member(
-            "total_video_encoder_processing_seconds",
-            total_video_encoder_processing_duration.as_secs_f64(),
-        )?;
-    }
-
-    let total_audio_mixer_processing_duration = stats
-        .processors
-        .iter()
-        .filter_map(|mixer| match mixer {
-            ProcessorStats::AudioMixer(audio_mixer) => {
-                Some(audio_mixer.total_processing_duration.get())
-            }
-            _ => None,
-        })
-        .sum::<Duration>();
-    if !total_audio_mixer_processing_duration.is_zero() {
-        f.member(
-            "total_audio_mixer_processing_seconds",
-            total_audio_mixer_processing_duration.as_secs_f64(),
-        )?;
-    }
-
-    let total_video_mixer_processing_duration = stats
-        .processors
-        .iter()
-        .filter_map(|mixer| match mixer {
-            ProcessorStats::VideoMixer(video_mixer) => {
-                Some(video_mixer.total_processing_duration.get())
-            }
-            _ => None,
-        })
-        .sum::<Duration>();
-    if !total_video_mixer_processing_duration.is_zero() {
-        f.member(
-            "total_video_mixer_processing_seconds",
-            total_video_mixer_processing_duration.as_secs_f64(),
-        )?;
-    }
-
-    f.member("elapsed_seconds", stats.elapsed_duration.as_secs_f32())?;
+    f.member("elapsed_seconds", elapsed_seconds)?;
 
     Ok(())
+}
+
+fn count_processors_by_types(entries: &[StatsEntry], processor_types: &[&str]) -> usize {
+    let mut processor_ids = BTreeSet::new();
+    for entry in entries {
+        // 1 つの processor は複数の metric を出すため、
+        // processor_id / processor_type label が付いた entry から
+        // processor_id を一意化して processor 数を求める。
+        let Some(processor_id) = label_value_non_empty(entry, "processor_id") else {
+            continue;
+        };
+        let Some(processor_type) = label_value_non_empty(entry, "processor_type") else {
+            continue;
+        };
+        if !processor_types.iter().any(|t| t == &processor_type) {
+            continue;
+        }
+        processor_ids.insert(processor_id.to_owned());
+    }
+    processor_ids.len()
+}
+
+fn label_value<'a>(entry: &'a StatsEntry, name: &str) -> Option<&'a str> {
+    entry.labels.get(name).map(String::as_str)
+}
+
+// 空文字を欠損扱いにしたいラベル用
+fn label_value_non_empty<'a>(entry: &'a StatsEntry, name: &str) -> Option<&'a str> {
+    label_value(entry, name).filter(|value| !value.is_empty())
+}
+
+fn find_first_processor_id_by_type(entries: &[StatsEntry], processor_type: &str) -> Option<String> {
+    entries.iter().find_map(|entry| {
+        if label_value_non_empty(entry, "processor_type") != Some(processor_type) {
+            return None;
+        }
+        label_value_non_empty(entry, "processor_id").map(ToOwned::to_owned)
+    })
+}
+
+fn find_string_metric_by_processor(
+    entries: &[StatsEntry],
+    processor_id: &str,
+    metric_name: &str,
+) -> Option<String> {
+    find_metric(
+        entries,
+        "processor_id",
+        processor_id,
+        metric_name,
+        |value| value.as_string().filter(|s| !s.is_empty()),
+    )
+}
+
+fn find_numeric_metric_by_processor(
+    entries: &[StatsEntry],
+    processor_id: &str,
+    metric_name: &str,
+) -> Option<f64> {
+    find_metric(
+        entries,
+        "processor_id",
+        processor_id,
+        metric_name,
+        |value| value.as_numeric_f64(),
+    )
+}
+
+fn find_first_string_metric_by_type(
+    entries: &[StatsEntry],
+    processor_type: &str,
+    metric_name: &str,
+) -> Option<String> {
+    find_metric(
+        entries,
+        "processor_type",
+        processor_type,
+        metric_name,
+        |value| value.as_string().filter(|s| !s.is_empty()),
+    )
+}
+
+fn find_first_numeric_metric_by_type(
+    entries: &[StatsEntry],
+    processor_type: &str,
+    metric_name: &str,
+) -> Option<f64> {
+    find_metric(
+        entries,
+        "processor_type",
+        processor_type,
+        metric_name,
+        |value| value.as_numeric_f64(),
+    )
+}
+
+fn find_metric<T>(
+    entries: &[StatsEntry],
+    label_name: &str,
+    label_value_to_match: &str,
+    metric_name: &str,
+    extract: impl Fn(&StatsValue) -> Option<T>,
+) -> Option<T> {
+    entries.iter().find_map(|entry| {
+        if entry.metric_name != metric_name {
+            return None;
+        }
+        if label_value_non_empty(entry, label_name) != Some(label_value_to_match) {
+            return None;
+        }
+        extract(&entry.value)
+    })
 }

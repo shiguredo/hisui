@@ -1,6 +1,6 @@
 use std::{
     io::{BufReader, Read},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -9,7 +9,7 @@ use orfail::OrFail;
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     metadata::SourceId,
-    stats::{WebmAudioReaderStats, WebmVideoReaderStats},
+    types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -329,15 +329,17 @@ pub struct WebmAudioReader {
     cluster_timestamp: Duration,
     last_duration: Duration,
     prev_audio_data: Option<AudioData>,
-    stats: WebmAudioReaderStats,
+
+    pub current_input_file: Option<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub total_cluster_count: u64,
+    pub total_simple_block_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
 }
 
 impl WebmAudioReader {
-    pub fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        path: P,
-        stats: WebmAudioReaderStats,
-    ) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
         let file = std::fs::File::open(&path)
             .or_fail_with(|e| format!("failed to open {}: {e}", path.as_ref().display()))?;
         let mut reader = ElementReader::new(BufReader::new(file));
@@ -354,12 +356,29 @@ impl WebmAudioReader {
             cluster_timestamp: Duration::ZERO,
             last_duration: Duration::ZERO,
             prev_audio_data: None,
-            stats,
+            current_input_file: Some(path.as_ref().to_path_buf()),
+            codec: None,
+            total_cluster_count: 0,
+            total_simple_block_count: 0,
+            total_track_duration: Duration::ZERO,
+            track_duration_offset: Duration::ZERO,
         })
     }
 
-    pub fn stats(&self) -> &WebmAudioReaderStats {
-        &self.stats
+    pub fn stats(&self) -> &Self {
+        self
+    }
+
+    pub fn stats_mut(&mut self) -> &mut Self {
+        self
+    }
+
+    pub fn inherit_stats_from(&mut self, prev: &Self) {
+        self.codec = prev.codec;
+        self.total_cluster_count = prev.total_cluster_count;
+        self.total_simple_block_count = prev.total_simple_block_count;
+        self.total_track_duration = prev.total_track_duration;
+        self.track_duration_offset = prev.track_duration_offset;
     }
 
     fn read_simple_block(&mut self) -> orfail::Result<Option<AudioData>> {
@@ -383,10 +402,8 @@ impl WebmAudioReader {
         let _flags = reader.read_raw_u8().or_fail()?;
         let data = reader.read_raw_data().or_fail()?;
 
-        self.stats.total_simple_block_count.add(1);
-        self.stats
-            .total_track_duration
-            .set(timestamp + self.last_duration);
+        self.total_simple_block_count += 1;
+        self.total_track_duration = timestamp + self.last_duration;
 
         Ok(Some(AudioData {
             source_id: Some(self.source_id.clone()),
@@ -416,7 +433,7 @@ impl WebmAudioReader {
 
                     let value = self.reader.read_u64(ID_TIMESTAMP).or_fail()?;
                     self.cluster_timestamp = Duration::from_millis(value);
-                    self.stats.total_cluster_count.add(1);
+                    self.total_cluster_count += 1;
                 }
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block().or_fail()? {
@@ -460,15 +477,16 @@ pub struct WebmVideoReader {
     cluster_timestamp: Duration,
     last_duration: Duration,
     prev_video_frame: Option<VideoFrame>,
-    stats: WebmVideoReaderStats,
+    pub current_input_file: Option<PathBuf>,
+    pub codec: Option<CodecName>,
+    pub total_cluster_count: u64,
+    pub total_simple_block_count: u64,
+    pub total_track_duration: Duration,
+    pub track_duration_offset: Duration,
 }
 
 impl WebmVideoReader {
-    pub fn new<P: AsRef<Path>>(
-        source_id: SourceId,
-        path: P,
-        stats: WebmVideoReaderStats,
-    ) -> orfail::Result<Self> {
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
         let file = std::fs::File::open(&path).or_fail()?;
         let mut reader = ElementReader::new(BufReader::new(file));
         check_ebml_header_element(&mut reader).or_fail()?;
@@ -487,12 +505,29 @@ impl WebmVideoReader {
             cluster_timestamp: Duration::ZERO,
             last_duration: Duration::ZERO,
             prev_video_frame: None,
-            stats,
+            current_input_file: Some(path.as_ref().to_path_buf()),
+            codec: None,
+            total_cluster_count: 0,
+            total_simple_block_count: 0,
+            total_track_duration: Duration::ZERO,
+            track_duration_offset: Duration::ZERO,
         })
     }
 
-    pub fn stats(&self) -> &WebmVideoReaderStats {
-        &self.stats
+    pub fn stats(&self) -> &Self {
+        self
+    }
+
+    pub fn stats_mut(&mut self) -> &mut Self {
+        self
+    }
+
+    pub fn inherit_stats_from(&mut self, prev: &Self) {
+        self.codec = prev.codec;
+        self.total_cluster_count = prev.total_cluster_count;
+        self.total_simple_block_count = prev.total_simple_block_count;
+        self.total_track_duration = prev.total_track_duration;
+        self.track_duration_offset = prev.track_duration_offset;
     }
 
     fn read_video_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {
@@ -506,7 +541,7 @@ impl WebmVideoReader {
 
                     let value = self.reader.read_u64(ID_TIMESTAMP).or_fail()?;
                     self.cluster_timestamp = Duration::from_millis(value);
-                    self.stats.total_cluster_count.add(1);
+                    self.total_cluster_count += 1;
                 }
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block().or_fail()? {
@@ -555,14 +590,12 @@ impl WebmVideoReader {
         let keyframe = (flags >> 7) == 1;
         let data = reader.read_raw_data().or_fail()?;
 
-        self.stats.total_simple_block_count.add(1);
-        self.stats
-            .total_track_duration
-            .set(timestamp + self.last_duration);
-        if self.stats.codec.get().is_none()
+        self.total_simple_block_count += 1;
+        self.total_track_duration = timestamp + self.last_duration;
+        if self.codec.is_none()
             && let Some(name) = self.header.codec.codec_name()
         {
-            self.stats.codec.set(name);
+            self.codec = Some(name);
         }
 
         Ok(Some(VideoFrame {

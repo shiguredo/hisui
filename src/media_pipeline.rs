@@ -12,7 +12,7 @@ pub struct MediaPipeline {
     pending_initial_processors: std::collections::HashSet<ProcessorId>,
     initial_ready_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
-    stats: crate::stats2::Stats,
+    stats: crate::stats::Stats,
 }
 
 impl MediaPipeline {
@@ -39,7 +39,7 @@ impl MediaPipeline {
             pending_initial_processors: std::collections::HashSet::new(),
             initial_ready_waiters: Vec::new(),
             tracks: std::collections::HashMap::new(),
-            stats: crate::stats2::Stats::new(),
+            stats: crate::stats::Stats::new(),
         })
     }
 
@@ -311,7 +311,7 @@ impl MediaPipeline {
 pub struct MediaPipelineHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>,
     local_processor_task_tx: tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>,
-    stats: crate::stats2::Stats,
+    stats: crate::stats::Stats,
 }
 
 impl MediaPipelineHandle {
@@ -328,9 +328,8 @@ impl MediaPipelineHandle {
         let handle = self
             .register_processor(processor_id.clone(), metadata)
             .await?;
+        let error_flag = handle.error_flag.clone();
         tokio::spawn(async move {
-            let mut stats = handle.stats();
-            let error_flag = stats.flag("error");
             if let Err(e) = f(handle).await {
                 error_flag.set(true);
                 tracing::error!("failed to run processor {processor_id}: {e}");
@@ -352,10 +351,9 @@ impl MediaPipelineHandle {
         let handle = self
             .register_processor(processor_id.clone(), metadata)
             .await?;
+        let error_flag = handle.error_flag.clone();
         let task: LocalProcessorTask = Box::new(move || {
             tokio::task::spawn_local(async move {
-                let mut stats = handle.stats();
-                let error_flag = stats.flag("error");
                 if let Err(e) = f(handle).await {
                     error_flag.set(true);
                     tracing::error!("failed to run processor {processor_id}: {e}");
@@ -386,16 +384,18 @@ impl MediaPipelineHandle {
             Ok(true) => {
                 let mut stats = self.stats();
                 // [NOTE]
-                // stats2 の label は取得時点で固定されるため、
+                // stats の label は取得時点で固定されるため、
                 // ここで default label を先に確定してから最初のメトリクスを取得する。
                 stats.set_default_label("processor_id", processor_id.get());
                 stats.set_default_label("processor_type", metadata.processor_type());
                 // `error` は初期化時に必ず 0 で作っておく（後続タスク側は true への遷移のみ担当）。
-                stats.flag("error").set(false);
+                let error_flag = stats.flag("error");
+                error_flag.set(false);
                 Ok(ProcessorHandle {
                     pipeline_handle: self.clone(),
                     processor_id,
                     stats,
+                    error_flag,
                 })
             }
             Ok(false) => Err(RegisterProcessorError::DuplicateProcessorId),
@@ -408,7 +408,7 @@ impl MediaPipelineHandle {
         self.send(MediaPipelineCommand::CompleteInitialProcessorRegistration);
     }
 
-    pub fn stats(&self) -> crate::stats2::Stats {
+    pub fn stats(&self) -> crate::stats::Stats {
         self.stats.clone()
     }
 
@@ -582,7 +582,8 @@ struct ProcessorState {
 pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
     processor_id: ProcessorId,
-    stats: crate::stats2::Stats,
+    stats: crate::stats::Stats,
+    error_flag: crate::stats::StatsFlag,
 }
 
 impl ProcessorHandle {
@@ -590,7 +591,7 @@ impl ProcessorHandle {
         &self.processor_id
     }
 
-    pub fn stats(&self) -> crate::stats2::Stats {
+    pub fn stats(&self) -> crate::stats::Stats {
         self.stats.clone()
     }
 

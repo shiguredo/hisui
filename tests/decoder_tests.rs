@@ -19,18 +19,10 @@ const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 fn h264_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h264");
     let source_id1 = SourceId::new("archive-blue-640x480-h264");
-    let reader0 = Mp4VideoReader::new(
-        source_id0,
-        "testdata/archive-blue-640x480-h264.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
-    let reader1 = Mp4VideoReader::new(
-        source_id1,
-        "testdata/archive-red-320x320-h264.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
+    let reader0 =
+        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h264.mp4").or_fail()?;
+    let reader1 =
+        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h264.mp4").or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -40,18 +32,10 @@ fn h264_multi_resolutions() -> orfail::Result<()> {
 fn h265_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-h265");
     let source_id1 = SourceId::new("archive-red-320x320-h265");
-    let reader0 = Mp4VideoReader::new(
-        source_id0,
-        "testdata/archive-blue-640x480-h265.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
-    let reader1 = Mp4VideoReader::new(
-        source_id1,
-        "testdata/archive-red-320x320-h265.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
+    let reader0 =
+        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h265.mp4").or_fail()?;
+    let reader1 =
+        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h265.mp4").or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -61,18 +45,10 @@ fn h265_multi_resolutions() -> orfail::Result<()> {
 fn vp9_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-vp9");
     let source_id1 = SourceId::new("archive-red-320x320-vp9");
-    let reader0 = Mp4VideoReader::new(
-        source_id0,
-        "testdata/archive-blue-640x480-vp9.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
-    let reader1 = Mp4VideoReader::new(
-        source_id1,
-        "testdata/archive-red-320x320-vp9.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
+    let reader0 =
+        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-vp9.mp4").or_fail()?;
+    let reader1 =
+        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-vp9.mp4").or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -81,18 +57,10 @@ fn vp9_multi_resolutions() -> orfail::Result<()> {
 fn av1_multi_resolutions() -> orfail::Result<()> {
     let source_id0 = SourceId::new("archive-blue-640x480-av1");
     let source_id1 = SourceId::new("archive-red-320x320-av1");
-    let reader0 = Mp4VideoReader::new(
-        source_id0,
-        "testdata/archive-blue-640x480-av1.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
-    let reader1 = Mp4VideoReader::new(
-        source_id1,
-        "testdata/archive-red-320x320-av1.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
+    let reader0 =
+        Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-av1.mp4").or_fail()?;
+    let reader1 =
+        Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-av1.mp4").or_fail()?;
     multi_resolutions_test(reader0, reader1).or_fail()?;
     Ok(())
 }
@@ -116,7 +84,12 @@ where
     };
 
     // デコードする
-    let mut decoder = VideoDecoder::new(DECODER_INPUT_STREAM_ID, DECODER_OUTPUT_STREAM_ID, options);
+    let mut decoder = VideoDecoder::new(
+        DECODER_INPUT_STREAM_ID,
+        DECODER_OUTPUT_STREAM_ID,
+        options,
+        hisui::stats::Stats::new(),
+    );
     let mut output_frames = Vec::new();
     let mut blue_count = 0;
     let mut red_count = 0;
@@ -198,9 +171,13 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> orfail::Result<()> {
     let source_id = SourceId::new("beep-aac-audio");
-    let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4", Default::default())
-        .or_fail()?;
-    let mut decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1)).or_fail()?;
+    let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4").or_fail()?;
+    let mut decoder = AudioDecoder::new(
+        MediaStreamId::new(0),
+        MediaStreamId::new(1),
+        hisui::stats::Stats::new(),
+    )
+    .or_fail()?;
 
     let mut decoded_count = 0;
 

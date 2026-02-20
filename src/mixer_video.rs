@@ -16,7 +16,6 @@ use crate::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
     },
-    stats::{ProcessorStats, VideoMixerStats, VideoResolution},
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -198,11 +197,86 @@ pub struct VideoMixer {
     stats: VideoMixerStats,
 }
 
+#[derive(Debug)]
+pub struct VideoMixerStats {
+    total_input_video_frame_count: crate::stats::StatsCounter,
+    total_output_video_frame_count: crate::stats::StatsCounter,
+    total_output_video_frame_duration: crate::stats::StatsDuration,
+    total_trimmed_video_frame_count: crate::stats::StatsCounter,
+    total_extended_video_frame_count: crate::stats::StatsCounter,
+    error: crate::stats::StatsFlag,
+}
+
+impl VideoMixerStats {
+    fn new(stats: &mut crate::stats::Stats) -> Self {
+        let total_input_video_frame_count = stats.counter("total_input_video_frame_count");
+        let total_output_video_frame_count = stats.counter("total_output_video_frame_count");
+        let total_output_video_frame_duration = stats.duration("total_output_video_frame_seconds");
+        let total_trimmed_video_frame_count = stats.counter("total_trimmed_video_frame_count");
+        let total_extended_video_frame_count = stats.counter("total_extended_video_frame_count");
+        let error = stats.flag("error");
+        error.set(false);
+        Self {
+            total_input_video_frame_count,
+            total_output_video_frame_count,
+            total_output_video_frame_duration,
+            total_trimmed_video_frame_count,
+            total_extended_video_frame_count,
+            error,
+        }
+    }
+
+    fn add_input_video_frame_count(&self) {
+        self.total_input_video_frame_count.inc();
+    }
+
+    fn add_output_video_frame_count(&self) {
+        self.total_output_video_frame_count.inc();
+    }
+
+    fn add_output_video_frame_duration(&self, duration: Duration) {
+        self.total_output_video_frame_duration.add(duration);
+    }
+
+    fn add_trimmed_video_frame_count(&self) {
+        self.total_trimmed_video_frame_count.inc();
+    }
+
+    fn add_extended_video_frame_count(&self) {
+        self.total_extended_video_frame_count.inc();
+    }
+
+    fn set_error(&self) {
+        self.error.set(true);
+    }
+
+    pub fn total_input_video_frame_count(&self) -> u64 {
+        self.total_input_video_frame_count.get()
+    }
+
+    pub fn total_output_video_frame_count(&self) -> u64 {
+        self.total_output_video_frame_count.get()
+    }
+
+    pub fn total_output_video_frame_duration(&self) -> Duration {
+        self.total_output_video_frame_duration.get()
+    }
+
+    pub fn total_trimmed_video_frame_count(&self) -> u64 {
+        self.total_trimmed_video_frame_count.get()
+    }
+
+    pub fn total_extended_video_frame_count(&self) -> u64 {
+        self.total_extended_video_frame_count.get()
+    }
+}
+
 impl VideoMixer {
     pub fn new(
         spec: VideoMixerSpec,
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_id: MediaStreamId,
+        mut stats: crate::stats::Stats,
     ) -> Self {
         let resolution = spec.resolution;
         let input_streams = input_stream_ids
@@ -210,19 +284,20 @@ impl VideoMixer {
             .copied()
             .map(|id| (id, InputStream::default()))
             .collect();
+        stats
+            .gauge("output_video_width")
+            .set(resolution.width().get() as i64);
+        stats
+            .gauge("output_video_height")
+            .set(resolution.height().get() as i64);
+        let stats = VideoMixerStats::new(&mut stats);
         Self {
             spec,
             input_stream_ids,
             input_streams,
             output_stream_id,
             last_mixed_frame: None,
-            stats: VideoMixerStats {
-                output_video_resolution: VideoResolution {
-                    width: resolution.width().get(),
-                    height: resolution.height().get(),
-                },
-                ..Default::default()
-            },
+            stats,
         }
     }
 
@@ -298,9 +373,9 @@ impl VideoMixer {
 
     fn next_input_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count.get()
-                + self.stats.total_extended_video_frame_count.get()
-                + self.stats.total_trimmed_video_frame_count.get(),
+            self.stats.total_output_video_frame_count()
+                + self.stats.total_extended_video_frame_count()
+                + self.stats.total_trimmed_video_frame_count(),
         )
     }
 
@@ -312,16 +387,16 @@ impl VideoMixer {
 
     fn next_output_timestamp(&self) -> Duration {
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count.get()
-                + self.stats.total_extended_video_frame_count.get(),
+            self.stats.total_output_video_frame_count()
+                + self.stats.total_extended_video_frame_count(),
         )
     }
 
     fn next_output_duration(&self) -> Duration {
         // 丸め誤差が蓄積しないように次のフレームのタイスタンプとの差をとる
         self.frames_to_timestamp(
-            self.stats.total_output_video_frame_count.get()
-                + self.stats.total_extended_video_frame_count.get()
+            self.stats.total_output_video_frame_count()
+                + self.stats.total_extended_video_frame_count()
                 + 1,
         ) - self.next_output_timestamp()
     }
@@ -336,8 +411,8 @@ impl VideoMixer {
             Self::mix_region(&mut canvas, region, &mut self.input_streams, now).or_fail()?;
         }
 
-        self.stats.total_output_video_frame_count.add(1);
-        self.stats.total_output_video_frame_duration.add(duration);
+        self.stats.add_output_video_frame_count();
+        self.stats.add_output_video_frame_duration(duration);
 
         Ok(VideoFrame {
             // 固定値
@@ -458,7 +533,6 @@ impl MediaProcessor for VideoMixer {
         MediaProcessorSpec {
             input_stream_ids: self.input_stream_ids.clone(),
             output_stream_ids: vec![self.output_stream_id],
-            stats: ProcessorStats::VideoMixer(self.stats.clone()),
             workload_hint: MediaProcessorWorkloadHint::VIDEO_MIXER,
         }
     }
@@ -476,7 +550,7 @@ impl MediaProcessor for VideoMixer {
                     frame,
                     self.spec.resize_filter_mode,
                 ));
-            self.stats.total_input_video_frame_count.add(1);
+            self.stats.add_input_video_frame_count();
         } else {
             input_stream.eos = true;
         }
@@ -489,7 +563,7 @@ impl MediaProcessor for VideoMixer {
 
             // トリム対象期間ならその分はスキップする
             while self.spec.trim_spans.contains(now) {
-                self.stats.total_trimmed_video_frame_count.add(1);
+                self.stats.add_trimmed_video_frame_count();
                 now = self.next_input_timestamp();
             }
 
@@ -528,8 +602,9 @@ impl MediaProcessor for VideoMixer {
                 let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
 
                 last_frame.duration += duration;
-                self.stats.total_extended_video_frame_count.add(1);
-                self.stats.total_output_video_frame_duration.add(duration); // 出力フレーム数は増えないけど尺は伸びる
+                self.stats.add_extended_video_frame_count();
+                // 出力フレーム数は増えないが、出力尺は伸びる。
+                self.stats.add_output_video_frame_duration(duration);
 
                 continue;
             }
@@ -544,6 +619,10 @@ impl MediaProcessor for VideoMixer {
                 ));
             }
         }
+    }
+
+    fn set_error(&self) {
+        self.stats.set_error();
     }
 }
 

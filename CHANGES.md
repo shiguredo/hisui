@@ -11,6 +11,13 @@
 
 ## develop
 
+- [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
+  - トップレベルの `worker_threads` が削除される
+  - `processors` から `progress_bar` が削除される
+  - `processors` の各要素から `total_processing_seconds` が削除される
+  - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
+  - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
+  - @sile
 - [ADD] server サブコマンドの JSON-RPC で Video Device source を作成できるようにする
   - JSON-RPC に `createVideoDeviceSource` メソッドを追加する
   - `outputVideoTrackId` にカメラ映像を配信できる
