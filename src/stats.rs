@@ -13,8 +13,6 @@ pub struct Stats {
     // `Stats` を clone した後にどちらかで `set_default_label()` を呼ぶと、
     // `Arc` を差し替えるため、もう片方には影響しない。
     default_labels: Arc<StatsLabels>,
-    // 同一 `Stats` インスタンス内での再取得時にロックを減らすためのキャッシュ。
-    entry_cache: BTreeMap<StatsKey, StatsValue>,
 }
 
 impl Stats {
@@ -180,19 +178,11 @@ impl Stats {
         key: StatsKey,
         create: impl FnOnce() -> StatsValue,
     ) -> StatsValue {
-        if let Some(entry) = self.entry_cache.get(&key) {
-            return entry.clone();
-        }
         let mut shared_entries = self
             .shared_entries
             .lock()
             .expect("lock() failed unexpectedly");
-        let entry = shared_entries
-            .entry(key.clone())
-            .or_insert_with(create)
-            .clone();
-        self.entry_cache.insert(key, entry.clone());
-        entry
+        shared_entries.entry(key).or_insert_with(create).clone()
     }
 }
 

@@ -112,11 +112,10 @@ fn mix_single_source() {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 2);
-    assert_eq!(stats.total_output_video_frame_count, 5);
-    assert_eq!(stats.total_output_video_frame_duration, ms(1000));
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
+    assert_eq!(stats.total_input_video_frame_count(), 2);
+    assert_eq!(stats.total_output_video_frame_count(), 5);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(1000));
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
 }
 
 /// リージョンの位置調整が入った合成のテスト
@@ -227,11 +226,10 @@ fn mix_single_source_with_offset() {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 2);
-    assert_eq!(stats.total_output_video_frame_count, 5);
-    assert_eq!(stats.total_output_video_frame_duration, ms(1000));
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
+    assert_eq!(stats.total_input_video_frame_count(), 2);
+    assert_eq!(stats.total_output_video_frame_count(), 5);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(1000));
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
 }
 
 /// 一つのソースを複数のリージョンで使用するテスト
@@ -354,11 +352,10 @@ fn single_source_multiple_regions() {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 2);
-    assert_eq!(stats.total_output_video_frame_count, 5);
-    assert_eq!(stats.total_output_video_frame_duration, ms(1000));
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
+    assert_eq!(stats.total_input_video_frame_count(), 2);
+    assert_eq!(stats.total_output_video_frame_count(), 5);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(1000));
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
 }
 
 /// 一つのソースを複数のリージョンで使用するテストのリサイズあり版
@@ -439,11 +436,10 @@ fn single_source_multiple_regions_with_resize() {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 1);
-    assert_eq!(stats.total_output_video_frame_count, 5);
-    assert_eq!(stats.total_output_video_frame_duration, ms(1000));
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
+    assert_eq!(stats.total_input_video_frame_count(), 1);
+    assert_eq!(stats.total_output_video_frame_count(), 5);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(1000));
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
 }
 
 /// トリム期間（入力ソースが存在しなくて合成結果から除去される期間）がある場合のテスト
@@ -516,11 +512,10 @@ fn mix_with_trim() -> orfail::Result<()> {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 2);
-    assert_eq!(stats.total_output_video_frame_count, 3);
-    assert_eq!(stats.total_trimmed_video_frame_count, 2);
-    assert_eq!(stats.total_output_video_frame_duration, ms(600));
+    assert_eq!(stats.total_input_video_frame_count(), 2);
+    assert_eq!(stats.total_output_video_frame_count(), 3);
+    assert_eq!(stats.total_trimmed_video_frame_count(), 2);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(600));
 
     Ok(())
 }
@@ -606,11 +601,10 @@ fn mix_without_trim() -> orfail::Result<()> {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 2);
-    assert_eq!(stats.total_output_video_frame_count, 5);
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
-    assert_eq!(stats.total_output_video_frame_duration, ms(1000));
+    assert_eq!(stats.total_input_video_frame_count(), 2);
+    assert_eq!(stats.total_output_video_frame_count(), 5);
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(1000));
 
     Ok(())
 }
@@ -841,11 +835,10 @@ fn mix_multiple_cells() -> orfail::Result<()> {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 4);
-    assert_eq!(stats.total_output_video_frame_count, 5);
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
-    assert_eq!(stats.total_output_video_frame_duration, ms(1000));
+    assert_eq!(stats.total_input_video_frame_count(), 4);
+    assert_eq!(stats.total_output_video_frame_count(), 5);
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(1000));
 
     Ok(())
 }
@@ -1065,11 +1058,10 @@ fn mix_multiple_cells_with_no_borders() -> orfail::Result<()> {
 
     // 統計情報を確認する
     let stats = mixer.stats();
-    assert!(!stats.error);
-    assert_eq!(stats.total_input_video_frame_count, 4);
-    assert_eq!(stats.total_output_video_frame_count, 5);
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
-    assert_eq!(stats.total_output_video_frame_duration, ms(1000));
+    assert_eq!(stats.total_input_video_frame_count(), 4);
+    assert_eq!(stats.total_output_video_frame_count(), 5);
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(1000));
 
     Ok(())
 }
@@ -1119,13 +1111,12 @@ fn non_yuv_video_input_error() -> orfail::Result<()> {
 
     // エラーは発生した
     let stats = mixer.stats();
-    assert!(!stats.error); // このフラグはスケジューラ側で管理しているので、ここでは `true` にならない
 
     // 統計値をチェックする
-    assert_eq!(stats.total_input_video_frame_count, 0);
-    assert_eq!(stats.total_output_video_frame_count, 0);
-    assert_eq!(stats.total_output_video_frame_duration, ms(0));
-    assert_eq!(stats.total_trimmed_video_frame_count, 0);
+    assert_eq!(stats.total_input_video_frame_count(), 0);
+    assert_eq!(stats.total_output_video_frame_count(), 0);
+    assert_eq!(stats.total_output_video_frame_duration(), ms(0));
+    assert_eq!(stats.total_trimmed_video_frame_count(), 0);
 
     Ok(())
 }

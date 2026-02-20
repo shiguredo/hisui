@@ -31,15 +31,12 @@ pub struct Mp4VideoReader {
     width: usize,
     height: usize,
 
-    pub input_files: Vec<PathBuf>,
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
     pub resolutions: BTreeSet<VideoResolution>,
     pub total_sample_count: u64,
     pub total_track_duration: Duration,
     pub track_duration_offset: Duration,
-    pub start_time: Duration,
-    pub error: bool,
 }
 
 impl Mp4VideoReader {
@@ -58,15 +55,12 @@ impl Mp4VideoReader {
             format: VideoFormat::Vp8,
             width: 0,
             height: 0,
-            input_files: Vec::new(),
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             resolutions: BTreeSet::new(),
             total_sample_count: 0,
             total_track_duration: Duration::ZERO,
             track_duration_offset: Duration::ZERO,
-            start_time: Duration::ZERO,
-            error: false,
         })
     }
 
@@ -79,14 +73,11 @@ impl Mp4VideoReader {
     }
 
     pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.input_files = prev.input_files.clone();
         self.codec = prev.codec;
         self.resolutions = prev.resolutions.clone();
         self.total_sample_count = prev.total_sample_count;
         self.total_track_duration = prev.total_track_duration;
         self.track_duration_offset = prev.track_duration_offset;
-        self.start_time = prev.start_time;
-        self.error = prev.error;
     }
 
     fn next_sample(&mut self) -> orfail::Result<Option<VideoFrame>> {
@@ -183,14 +174,11 @@ pub struct Mp4AudioReader {
     stereo: bool,
     sample_rate: u16,
 
-    pub input_files: Vec<PathBuf>,
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
     pub total_sample_count: u64,
     pub total_track_duration: Duration,
     pub track_duration_offset: Duration,
-    pub start_time: Duration,
-    pub error: bool,
 }
 
 impl Mp4AudioReader {
@@ -215,14 +203,11 @@ impl Mp4AudioReader {
             format: AudioFormat::Opus,
             stereo: false,
             sample_rate: 0,
-            input_files: Vec::new(),
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_sample_count: 0,
             total_track_duration: Duration::ZERO,
             track_duration_offset: Duration::ZERO,
-            start_time: Duration::ZERO,
-            error: false,
         })
     }
 
@@ -235,13 +220,10 @@ impl Mp4AudioReader {
     }
 
     pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.input_files = prev.input_files.clone();
         self.codec = prev.codec;
         self.total_sample_count = prev.total_sample_count;
         self.total_track_duration = prev.total_track_duration;
         self.track_duration_offset = prev.track_duration_offset;
-        self.start_time = prev.start_time;
-        self.error = prev.error;
     }
 
     fn next_sample(&mut self) -> orfail::Result<Option<AudioData>> {

@@ -330,15 +330,12 @@ pub struct WebmAudioReader {
     last_duration: Duration,
     prev_audio_data: Option<AudioData>,
 
-    pub input_files: Vec<PathBuf>,
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
     pub total_cluster_count: u64,
     pub total_simple_block_count: u64,
     pub total_track_duration: Duration,
     pub track_duration_offset: Duration,
-    pub start_time: Duration,
-    pub error: bool,
 }
 
 impl WebmAudioReader {
@@ -359,15 +356,12 @@ impl WebmAudioReader {
             cluster_timestamp: Duration::ZERO,
             last_duration: Duration::ZERO,
             prev_audio_data: None,
-            input_files: Vec::new(),
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_cluster_count: 0,
             total_simple_block_count: 0,
             total_track_duration: Duration::ZERO,
             track_duration_offset: Duration::ZERO,
-            start_time: Duration::ZERO,
-            error: false,
         })
     }
 
@@ -380,14 +374,11 @@ impl WebmAudioReader {
     }
 
     pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.input_files = prev.input_files.clone();
         self.codec = prev.codec;
         self.total_cluster_count = prev.total_cluster_count;
         self.total_simple_block_count = prev.total_simple_block_count;
         self.total_track_duration = prev.total_track_duration;
         self.track_duration_offset = prev.track_duration_offset;
-        self.start_time = prev.start_time;
-        self.error = prev.error;
     }
 
     fn read_simple_block(&mut self) -> orfail::Result<Option<AudioData>> {
@@ -486,15 +477,12 @@ pub struct WebmVideoReader {
     cluster_timestamp: Duration,
     last_duration: Duration,
     prev_video_frame: Option<VideoFrame>,
-    pub input_files: Vec<PathBuf>,
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
     pub total_cluster_count: u64,
     pub total_simple_block_count: u64,
     pub total_track_duration: Duration,
     pub track_duration_offset: Duration,
-    pub start_time: Duration,
-    pub error: bool,
 }
 
 impl WebmVideoReader {
@@ -517,15 +505,12 @@ impl WebmVideoReader {
             cluster_timestamp: Duration::ZERO,
             last_duration: Duration::ZERO,
             prev_video_frame: None,
-            input_files: Vec::new(),
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_cluster_count: 0,
             total_simple_block_count: 0,
             total_track_duration: Duration::ZERO,
             track_duration_offset: Duration::ZERO,
-            start_time: Duration::ZERO,
-            error: false,
         })
     }
 
@@ -538,14 +523,11 @@ impl WebmVideoReader {
     }
 
     pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.input_files = prev.input_files.clone();
         self.codec = prev.codec;
         self.total_cluster_count = prev.total_cluster_count;
         self.total_simple_block_count = prev.total_simple_block_count;
         self.total_track_duration = prev.total_track_duration;
         self.track_duration_offset = prev.track_duration_offset;
-        self.start_time = prev.start_time;
-        self.error = prev.error;
     }
 
     fn read_video_frame(&mut self) -> orfail::Result<Option<VideoFrame>> {

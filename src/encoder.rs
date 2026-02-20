@@ -36,7 +36,8 @@ use crate::{
 pub struct AudioEncoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
-    compose_stats: crate::stats::Stats,
+    total_audio_data_count_metric: crate::stats::StatsCounter,
+    error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<AudioData>,
     eos: bool,
     inner: AudioEncoderInner,
@@ -99,11 +100,14 @@ impl AudioEncoder {
             .string("engine")
             .set(EngineName::Opus.as_str());
         compose_stats.string("codec").set(CodecName::Opus.as_str());
-        compose_stats.flag("error").set(false);
+        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            compose_stats,
+            total_audio_data_count_metric,
+            error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_opus(bitrate).or_fail()?,
@@ -121,11 +125,14 @@ impl AudioEncoder {
             .string("engine")
             .set(EngineName::FdkAac.as_str());
         compose_stats.string("codec").set(CodecName::Aac.as_str());
-        compose_stats.flag("error").set(false);
+        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            compose_stats,
+            total_audio_data_count_metric,
+            error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_fdk_aac(bitrate).or_fail()?,
@@ -143,11 +150,14 @@ impl AudioEncoder {
             .string("engine")
             .set(EngineName::AudioToolbox.as_str());
         compose_stats.string("codec").set(CodecName::Aac.as_str());
-        compose_stats.flag("error").set(false);
+        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            compose_stats,
+            total_audio_data_count_metric,
+            error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate).or_fail()?,
@@ -278,7 +288,7 @@ impl MediaProcessor for AudioEncoder {
         };
 
         if let Some(encoded) = encoded {
-            self.compose_stats.counter("total_audio_data_count").inc();
+            self.total_audio_data_count_metric.inc();
             self.encoded.push_back(encoded);
         }
         Ok(())
@@ -300,8 +310,7 @@ impl MediaProcessor for AudioEncoder {
     }
 
     fn set_error(&self) {
-        let mut stats = self.compose_stats.clone();
-        stats.flag("error").set(true);
+        self.error_flag.set(true);
     }
 }
 
@@ -386,7 +395,11 @@ impl VideoEncoderOptions {
 pub struct VideoEncoder {
     input_stream_id: MediaStreamId,
     output_stream_id: MediaStreamId,
-    compose_stats: crate::stats::Stats,
+    engine_metric: crate::stats::StatsString,
+    codec_metric: crate::stats::StatsString,
+    total_input_video_frame_count_metric: crate::stats::StatsCounter,
+    total_output_video_frame_count_metric: crate::stats::StatsCounter,
+    error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
@@ -418,11 +431,22 @@ impl VideoEncoder {
         openh264_lib: Option<Openh264Library>,
         mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        compose_stats.flag("error").set(false);
+        let engine_metric = compose_stats.string("engine");
+        let codec_metric = compose_stats.string("codec");
+        let total_input_video_frame_count_metric =
+            compose_stats.counter("total_input_video_frame_count");
+        let total_output_video_frame_count_metric =
+            compose_stats.counter("total_output_video_frame_count");
+        let error_flag = compose_stats.flag("error");
+        error_flag.set(false);
         Ok(Self {
             input_stream_id,
             output_stream_id,
-            compose_stats,
+            engine_metric,
+            codec_metric,
+            total_input_video_frame_count_metric,
+            total_output_video_frame_count_metric,
+            error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -450,12 +474,8 @@ impl VideoEncoder {
         let inner = self.create_inner()?;
 
         // エンジン名とコーデックを設定
-        self.compose_stats
-            .string("engine")
-            .set(inner.name().as_str());
-        self.compose_stats
-            .string("codec")
-            .set(inner.codec().as_str());
+        self.engine_metric.set(inner.name().as_str());
+        self.codec_metric.set(inner.codec().as_str());
 
         self.inner = Some(inner);
         Ok(())
@@ -664,9 +684,7 @@ impl MediaProcessor for VideoEncoder {
                 self.initialize_inner(frame.width, frame.height).or_fail()?;
             }
 
-            self.compose_stats
-                .counter("total_input_video_frame_count")
-                .inc();
+            self.total_input_video_frame_count_metric.inc();
             self.inner
                 .as_mut()
                 .expect("infallible")
@@ -682,9 +700,7 @@ impl MediaProcessor for VideoEncoder {
         // エンコード済みフレームを取得
         if let Some(inner) = &mut self.inner {
             while let Some(encoded) = inner.next_encoded_frame() {
-                self.compose_stats
-                    .counter("total_output_video_frame_count")
-                    .inc();
+                self.total_output_video_frame_count_metric.inc();
                 self.encoded.push_back(encoded);
             }
         }
@@ -707,8 +723,7 @@ impl MediaProcessor for VideoEncoder {
     }
 
     fn set_error(&self) {
-        let mut stats = self.compose_stats.clone();
-        stats.flag("error").set(true);
+        self.error_flag.set(true);
     }
 }
 

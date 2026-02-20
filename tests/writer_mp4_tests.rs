@@ -63,16 +63,16 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
 
     // 統計値を確認する
     let stats = writer.stats();
-    assert!(stats.actual_moov_box_size > 0);
-    assert!(stats.actual_moov_box_size <= stats.reserved_moov_box_size);
+    assert!(stats.actual_moov_box_size() > 0);
+    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
 
-    assert_eq!(stats.total_audio_chunk_count, 1);
-    assert_eq!(stats.total_audio_sample_count, 60);
-    assert_eq!(stats.total_audio_track_duration, secs(60));
+    assert_eq!(stats.total_audio_chunk_count(), 1);
+    assert_eq!(stats.total_audio_sample_count(), 60);
+    assert_eq!(stats.total_audio_track_duration(), secs(60));
 
-    assert_eq!(stats.total_video_chunk_count, 0);
-    assert_eq!(stats.total_video_sample_count, 0);
-    assert_eq!(stats.total_video_track_duration, secs(0));
+    assert_eq!(stats.total_video_chunk_count(), 0);
+    assert_eq!(stats.total_video_sample_count(), 0);
+    assert_eq!(stats.total_video_track_duration(), secs(0));
 
     Ok(())
 }
@@ -120,16 +120,16 @@ fn write_video_only_mp4() -> orfail::Result<()> {
 
     // 統計値を確認する
     let stats = writer.stats();
-    assert!(stats.actual_moov_box_size > 0);
-    assert!(stats.actual_moov_box_size <= stats.reserved_moov_box_size);
+    assert!(stats.actual_moov_box_size() > 0);
+    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
 
-    assert_eq!(stats.total_audio_chunk_count, 0);
-    assert_eq!(stats.total_audio_sample_count, 0);
-    assert_eq!(stats.total_audio_track_duration, secs(0));
+    assert_eq!(stats.total_audio_chunk_count(), 0);
+    assert_eq!(stats.total_audio_sample_count(), 0);
+    assert_eq!(stats.total_audio_track_duration(), secs(0));
 
-    assert_eq!(stats.total_video_chunk_count, 1);
-    assert_eq!(stats.total_video_sample_count, 60);
-    assert_eq!(stats.total_video_track_duration, secs(60));
+    assert_eq!(stats.total_video_chunk_count(), 1);
+    assert_eq!(stats.total_video_sample_count(), 60);
+    assert_eq!(stats.total_video_track_duration(), secs(60));
 
     Ok(())
 }
@@ -197,16 +197,16 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
 
     // 統計値を確認する
     let stats = writer.stats();
-    assert!(stats.actual_moov_box_size > 0);
-    assert!(stats.actual_moov_box_size <= stats.reserved_moov_box_size);
+    assert!(stats.actual_moov_box_size() > 0);
+    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
 
-    assert_eq!(stats.total_audio_chunk_count, 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
-    assert_eq!(stats.total_audio_sample_count, 60);
-    assert_eq!(stats.total_audio_track_duration, secs(60));
+    assert_eq!(stats.total_audio_chunk_count(), 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
+    assert_eq!(stats.total_audio_sample_count(), 60);
+    assert_eq!(stats.total_audio_track_duration(), secs(60));
 
-    assert_eq!(stats.total_video_chunk_count, 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
-    assert_eq!(stats.total_video_sample_count, 60);
-    assert_eq!(stats.total_video_track_duration, secs(60));
+    assert_eq!(stats.total_video_chunk_count(), 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
+    assert_eq!(stats.total_video_sample_count(), 60);
+    assert_eq!(stats.total_video_track_duration(), secs(60));
 
     Ok(())
 }
@@ -233,16 +233,16 @@ fn no_video_and_audio_mp4() -> orfail::Result<()> {
 
     // 統計値を確認する
     let stats = writer.stats();
-    assert!(stats.actual_moov_box_size > 0);
-    assert!(stats.actual_moov_box_size <= stats.reserved_moov_box_size);
+    assert!(stats.actual_moov_box_size() > 0);
+    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
 
-    assert_eq!(stats.total_audio_chunk_count, 0);
-    assert_eq!(stats.total_audio_sample_count, 0);
-    assert_eq!(stats.total_audio_track_duration, secs(0));
+    assert_eq!(stats.total_audio_chunk_count(), 0);
+    assert_eq!(stats.total_audio_sample_count(), 0);
+    assert_eq!(stats.total_audio_track_duration(), secs(0));
 
-    assert_eq!(stats.total_video_chunk_count, 0);
-    assert_eq!(stats.total_video_sample_count, 0);
-    assert_eq!(stats.total_video_track_duration, secs(0));
+    assert_eq!(stats.total_video_chunk_count(), 0);
+    assert_eq!(stats.total_video_sample_count(), 0);
+    assert_eq!(stats.total_video_track_duration(), secs(0));
 
     Ok(())
 }

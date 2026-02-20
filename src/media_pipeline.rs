@@ -328,9 +328,8 @@ impl MediaPipelineHandle {
         let handle = self
             .register_processor(processor_id.clone(), metadata)
             .await?;
+        let error_flag = handle.error_flag.clone();
         tokio::spawn(async move {
-            let mut stats = handle.stats();
-            let error_flag = stats.flag("error");
             if let Err(e) = f(handle).await {
                 error_flag.set(true);
                 tracing::error!("failed to run processor {processor_id}: {e}");
@@ -352,10 +351,9 @@ impl MediaPipelineHandle {
         let handle = self
             .register_processor(processor_id.clone(), metadata)
             .await?;
+        let error_flag = handle.error_flag.clone();
         let task: LocalProcessorTask = Box::new(move || {
             tokio::task::spawn_local(async move {
-                let mut stats = handle.stats();
-                let error_flag = stats.flag("error");
                 if let Err(e) = f(handle).await {
                     error_flag.set(true);
                     tracing::error!("failed to run processor {processor_id}: {e}");
@@ -391,11 +389,13 @@ impl MediaPipelineHandle {
                 stats.set_default_label("processor_id", processor_id.get());
                 stats.set_default_label("processor_type", metadata.processor_type());
                 // `error` は初期化時に必ず 0 で作っておく（後続タスク側は true への遷移のみ担当）。
-                stats.flag("error").set(false);
+                let error_flag = stats.flag("error");
+                error_flag.set(false);
                 Ok(ProcessorHandle {
                     pipeline_handle: self.clone(),
                     processor_id,
                     stats,
+                    error_flag,
                 })
             }
             Ok(false) => Err(RegisterProcessorError::DuplicateProcessorId),
@@ -583,6 +583,7 @@ pub struct ProcessorHandle {
     pipeline_handle: MediaPipelineHandle,
     processor_id: ProcessorId,
     stats: crate::stats::Stats,
+    error_flag: crate::stats::StatsFlag,
 }
 
 impl ProcessorHandle {
