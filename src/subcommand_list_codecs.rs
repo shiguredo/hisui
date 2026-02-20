@@ -20,7 +20,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    run_internal(openh264).map_err(|e| e.to_noargs_error())
+    run_internal(openh264).map_err(noargs::Error::from)
 }
 
 fn run_internal(openh264: Option<PathBuf>) -> crate::Result<()> {

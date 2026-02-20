@@ -120,7 +120,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    run_internal(args).map_err(|e| e.to_noargs_error())
+    run_internal(args).map_err(noargs::Error::from)
 }
 
 fn run_internal(args: Args) -> Result<()> {

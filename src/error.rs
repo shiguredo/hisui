@@ -41,14 +41,6 @@ impl Error {
         self.reason.clone()
     }
 
-    /// `noargs::Error` に変換する
-    pub fn to_noargs_error(self) -> noargs::Error {
-        noargs::Error::Other {
-            metadata: None,
-            error: Box::new(format!("{self:?}")),
-        }
-    }
-
     fn fmt_detailed(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.reason)?;
         write!(f, " (at {}:{})", self.location.file(), self.location.line())?;
@@ -72,7 +64,10 @@ impl std::fmt::Debug for Error {
 
 impl From<Error> for noargs::Error {
     fn from(error: Error) -> Self {
-        error.to_noargs_error()
+        noargs::Error::Other {
+            metadata: None,
+            error: Box::new(format!("{error:?}")),
+        }
     }
 }
 
@@ -266,9 +261,9 @@ mod tests {
     }
 
     #[test]
-    fn to_noargs_error_uses_other_variant() {
+    fn from_error_to_noargs_error_uses_other_variant() {
         let err = Error::new("reason");
-        let noargs_err = err.to_noargs_error();
+        let noargs_err = noargs::Error::from(err);
 
         match noargs_err {
             noargs::Error::Other { metadata, .. } => {

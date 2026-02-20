@@ -52,7 +52,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    run_internal(input_file_path, decode, openh264).map_err(|e| e.to_noargs_error())?;
+    run_internal(input_file_path, decode, openh264).map_err(noargs::Error::from)?;
     Ok(())
 }
 

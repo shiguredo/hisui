@@ -116,7 +116,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ui_remote_url,
         startup_rpc_file,
     )
-    .map_err(|e| e.to_noargs_error())
+    .map_err(noargs::Error::from)
 }
 
 fn run_internal(
