@@ -63,7 +63,6 @@ pub mod mixer_realtime_video;
 pub mod mixer_video;
 pub mod optuna;
 pub mod outbound_endpoint_rtmp;
-pub mod processor;
 pub mod progress;
 pub mod publisher_rtmp;
 pub mod publisher_whip;
