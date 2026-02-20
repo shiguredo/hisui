@@ -12,8 +12,8 @@ use crate::{
     sora_layout_decode_params::LayoutDecodeParams,
     sora_layout_encode_params::LayoutEncodeParams,
     sora_layout_region::{self, RawRegion, Region},
-    sora_metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
-    types::{CodecName, EngineName, EvenUsize},
+    sora_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
+    types::{CodecName, ContainerFormat, EngineName, EvenUsize},
     video::FrameRate,
 };
 
@@ -774,7 +774,10 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::sora_metadata::{ContainerFormat, SourceId, SourceInfo};
+    use crate::{
+        sora_metadata::{SourceId, SourceInfo},
+        types::ContainerFormat,
+    };
 
     #[test]
     fn load_layout_jsons() -> crate::Result<()> {

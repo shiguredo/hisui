@@ -5,6 +5,8 @@ use std::{
     time::Duration,
 };
 
+use crate::types::ContainerFormat;
+
 /// Sora の report-*.json から必要な情報のみを取り出した構造体
 #[derive(Debug, Clone)]
 pub struct RecordingMetadata {
@@ -174,53 +176,4 @@ pub struct SourceInfo {
     pub video: bool,
     pub start_timestamp: Duration,
     pub stop_timestamp: Duration,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum ContainerFormat {
-    #[default]
-    Webm,
-    Mp4,
-}
-
-impl ContainerFormat {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        let ext = path.as_ref().extension().ok_or_else(|| {
-            crate::Error::new(format!(
-                "no media file extension: {}",
-                path.as_ref().display()
-            ))
-        })?;
-        if ext == "mp4" {
-            Ok(Self::Mp4)
-        } else if ext == "webm" {
-            Ok(Self::Webm)
-        } else {
-            Err(crate::Error::new(format!(
-                "unexpected media file extension: {}",
-                path.as_ref().display()
-            )))
-        }
-    }
-}
-
-impl nojson::DisplayJson for ContainerFormat {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        match self {
-            ContainerFormat::Webm => f.string("webm"),
-            ContainerFormat::Mp4 => f.string("mp4"),
-        }
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ContainerFormat {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
-        match value.to_unquoted_string_str()?.as_ref() {
-            "webm" => Ok(Self::Webm),
-            "mp4" => Ok(Self::Mp4),
-            v => Err(value.invalid(format!("unknown container format: {v}"))),
-        }
-    }
 }
