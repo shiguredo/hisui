@@ -786,7 +786,7 @@ mod tests {
         let err = stats
             .to_prometheus_text()
             .expect_err("to_prometheus_text must fail");
-        assert!(err.to_string().contains("invalid Prometheus metric name"));
+        assert!(err.display().contains("invalid Prometheus metric name"));
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
         let err = stats
             .to_prometheus_text()
             .expect_err("to_prometheus_text must fail");
-        assert!(err.to_string().contains("invalid Prometheus label name"));
+        assert!(err.display().contains("invalid Prometheus label name"));
     }
 
     fn panic_message(panic: std::result::Result<(), Box<dyn std::any::Any + Send>>) -> String {

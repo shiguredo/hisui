@@ -695,7 +695,7 @@ mod tests {
                 "outputTrackId": "output"
             }"#,
         )
-        .map_err(|e| Error::new(e.to_string()))?;
+        .map_err(|e| Error::new(e.display()))?;
 
         assert_eq!(mixer.canvas_width.get(), 1280);
         assert_eq!(mixer.canvas_height.get(), 720);
@@ -749,7 +749,7 @@ mod tests {
                 "outputTrackId": "output"
             }"#,
         )
-        .map_err(|e| Error::new(e.to_string()))?;
+        .map_err(|e| Error::new(e.display()))?;
 
         assert_eq!(mixer.frame_rate.numerator.get(), 30);
         assert_eq!(mixer.frame_rate.denumerator.get(), 1);
@@ -772,7 +772,7 @@ mod tests {
                 "outputTrackId": "output"
             }"#,
         )
-        .map_err(|e| Error::new(e.to_string()))?;
+        .map_err(|e| Error::new(e.display()))?;
 
         let track = &mixer.input_tracks[0];
         assert_eq!(track.x, 0);
@@ -803,7 +803,7 @@ mod tests {
                 "outputTrackId": "output"
             }"#,
         )
-        .map_err(|e| Error::new(e.to_string()))?;
+        .map_err(|e| Error::new(e.display()))?;
 
         assert_eq!(mixer.frame_rate.numerator.get(), 30000);
         assert_eq!(mixer.frame_rate.denumerator.get(), 1001);
@@ -920,7 +920,7 @@ mod tests {
                 "outputTrackId": "output"
             }"#,
         )
-        .map_err(|e| Error::new(e.to_string()))?;
+        .map_err(|e| Error::new(e.display()))?;
 
         assert_eq!(mixer.canvas_width.get(), 0);
         Ok(())
@@ -962,7 +962,7 @@ mod tests {
                 "outputTrackId": "output"
             }"#,
         )
-        .map_err(|e| Error::new(e.to_string()))?;
+        .map_err(|e| Error::new(e.display()))?;
 
         assert_eq!(mixer.input_tracks[0].height.map(EvenUsize::get), Some(0));
         Ok(())

@@ -802,7 +802,7 @@ fn source_path_outside_base_dir_error() -> hisui::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .to_string()
+            .display()
             .contains("outside the base dir")
     );
 
@@ -836,7 +836,7 @@ fn wildcard_excludes_sources_without_media_files() -> hisui::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .to_string()
+            .display()
             .contains("no media file for the source")
     );
 
