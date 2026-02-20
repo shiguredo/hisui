@@ -249,18 +249,19 @@ fn print_time_stats_summary(
 fn count_processors_by_types(entries: &[StatsEntry], processor_types: &[&str]) -> usize {
     let mut processor_ids = BTreeSet::new();
     for entry in entries {
-        if entry.metric_name != "error" {
+        // 1 つの processor は複数の metric を出すため、
+        // processor_id / processor_type label が付いた entry から
+        // processor_id を一意化して processor 数を求める。
+        let Some(processor_id) = label_value_non_empty(entry, "processor_id") else {
             continue;
-        }
+        };
         let Some(processor_type) = label_value_non_empty(entry, "processor_type") else {
             continue;
         };
         if !processor_types.iter().any(|t| t == &processor_type) {
             continue;
         }
-        if let Some(processor_id) = label_value_non_empty(entry, "processor_id") {
-            processor_ids.insert(processor_id.to_owned());
-        }
+        processor_ids.insert(processor_id.to_owned());
     }
     processor_ids.len()
 }
