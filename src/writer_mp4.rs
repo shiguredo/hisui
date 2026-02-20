@@ -40,6 +40,12 @@ enum WriterRunOutput {
     Finished,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum InputTrackKind {
+    Audio,
+    Video,
+}
+
 #[derive(Debug, Clone)]
 pub struct Mp4WriterOptions {
     pub duration: Duration,
@@ -430,24 +436,20 @@ impl Mp4Writer {
 impl Mp4Writer {
     fn handle_input_sample(
         &mut self,
-        track_id: &TrackId,
+        track_kind: InputTrackKind,
         sample: Option<MediaSample>,
     ) -> crate::Result<()> {
-        match sample {
-            Some(MediaSample::Audio(sample))
-                if Some(track_id) == self.input_audio_track_id.as_ref() =>
-            {
+        match (track_kind, sample) {
+            (InputTrackKind::Audio, Some(MediaSample::Audio(sample))) => {
                 self.input_audio_queue.push_back(sample);
             }
-            None if Some(track_id) == self.input_audio_track_id.as_ref() => {
+            (InputTrackKind::Audio, None) => {
                 self.input_audio_track_id = None;
             }
-            Some(MediaSample::Video(sample))
-                if Some(track_id) == self.input_video_track_id.as_ref() =>
-            {
+            (InputTrackKind::Video, Some(MediaSample::Video(sample))) => {
                 self.input_video_queue.push_back(sample);
             }
-            None if Some(track_id) == self.input_video_track_id.as_ref() => {
+            (InputTrackKind::Video, None) => {
                 self.input_video_track_id = None;
             }
             _ => {
@@ -558,13 +560,16 @@ impl Mp4Writer {
     ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaSample::Audio(sample)) => {
-                if let Some(track_id) = self.input_audio_track_id.clone() {
-                    self.handle_input_sample(&track_id, Some(crate::MediaSample::Audio(sample)))?;
+                if self.input_audio_track_id.is_some() {
+                    self.handle_input_sample(
+                        InputTrackKind::Audio,
+                        Some(crate::MediaSample::Audio(sample)),
+                    )?;
                 }
             }
             crate::Message::Eos => {
-                if let Some(track_id) = self.input_audio_track_id.clone() {
-                    self.handle_input_sample(&track_id, None)?;
+                if self.input_audio_track_id.is_some() {
+                    self.handle_input_sample(InputTrackKind::Audio, None)?;
                 }
                 *audio_rx = None;
             }
@@ -580,13 +585,16 @@ impl Mp4Writer {
     ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaSample::Video(sample)) => {
-                if let Some(track_id) = self.input_video_track_id.clone() {
-                    self.handle_input_sample(&track_id, Some(crate::MediaSample::Video(sample)))?;
+                if self.input_video_track_id.is_some() {
+                    self.handle_input_sample(
+                        InputTrackKind::Video,
+                        Some(crate::MediaSample::Video(sample)),
+                    )?;
                 }
             }
             crate::Message::Eos => {
-                if let Some(track_id) = self.input_video_track_id.clone() {
-                    self.handle_input_sample(&track_id, None)?;
+                if self.input_video_track_id.is_some() {
+                    self.handle_input_sample(InputTrackKind::Video, None)?;
                 }
                 *video_rx = None;
             }
