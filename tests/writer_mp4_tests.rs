@@ -1,12 +1,12 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::Path, path::PathBuf, time::Duration};
 
 use hisui::{
+    Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
     layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     layout_region::{Grid, Region},
-    media::{MediaSample, MediaStreamId},
+    media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
@@ -18,57 +18,43 @@ use shiguredo_mp4::{
 
 const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+const AUDIO_TRACK_ID: &str = "writer_test_audio";
+const VIDEO_TRACK_ID: &str = "writer_test_video";
 
 #[test]
 fn write_audio_only_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(std::slice::from_ref(&source), &[]);
-
-    // ライターを作成する
-    let mut writer = Mp4Writer::new(
+    let audio_samples = (0..60)
+        .map(|i| audio_data(&source, i, secs(1)))
+        .collect::<Vec<_>>();
+    let entries = run_writer_with_pipeline(
         output_file_path.path(),
         Some(Mp4WriterOptions::from_layout(&layout)),
-        Some(AUDIO_STREAM_ID),
+        Some(audio_samples),
         None,
-        hisui::stats::Stats::new(),
     )?;
 
-    // 1 秒尺の音声データを供給する
-    for i in 0..60 {
-        let input = MediaProcessorInput {
-            stream_id: AUDIO_STREAM_ID,
-            sample: Some(MediaSample::Audio(Arc::new(audio_data(
-                &source,
-                i,
-                secs(1),
-            )))),
-        };
-        writer.process_input(input)?;
-    }
-
-    // 音声入力の終了を通知
-    let input = MediaProcessorInput {
-        stream_id: AUDIO_STREAM_ID,
-        sample: None,
-    };
-    writer.process_input(input)?;
-
-    // 最後まで書き込む
-    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
-
     // 統計値を確認する
-    let stats = writer.stats();
-    assert!(stats.actual_moov_box_size() > 0);
-    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
+    let actual_moov = writer_gauge(&entries, "actual_moov_box_size")?;
+    let reserved_moov = writer_gauge(&entries, "reserved_moov_box_size")?;
+    assert!(actual_moov > 0);
+    assert!(actual_moov <= reserved_moov);
 
-    assert_eq!(stats.total_audio_chunk_count(), 1);
-    assert_eq!(stats.total_audio_sample_count(), 60);
-    assert_eq!(stats.total_audio_track_duration(), secs(60));
+    assert_eq!(writer_gauge(&entries, "total_audio_chunk_count")?, 1);
+    assert_eq!(writer_counter(&entries, "total_audio_sample_count")?, 60);
+    assert_eq!(
+        writer_duration(&entries, "total_audio_track_seconds")?,
+        secs(60)
+    );
 
-    assert_eq!(stats.total_video_chunk_count(), 0);
-    assert_eq!(stats.total_video_sample_count(), 0);
-    assert_eq!(stats.total_video_track_duration(), secs(0));
+    assert_eq!(writer_gauge(&entries, "total_video_chunk_count")?, 0);
+    assert_eq!(writer_counter(&entries, "total_video_sample_count")?, 0);
+    assert_eq!(
+        writer_duration(&entries, "total_video_track_seconds")?,
+        secs(0)
+    );
 
     Ok(())
 }
@@ -78,51 +64,35 @@ fn write_video_only_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(&[], std::slice::from_ref(&source));
-
-    // ライターを作成する
-    let mut writer = Mp4Writer::new(
+    let video_frames = (0..60)
+        .map(|i| video_frame(&source, i, secs(1)))
+        .collect::<Vec<_>>();
+    let entries = run_writer_with_pipeline(
         output_file_path.path(),
         Some(Mp4WriterOptions::from_layout(&layout)),
         None,
-        Some(VIDEO_STREAM_ID),
-        hisui::stats::Stats::new(),
+        Some(video_frames),
     )?;
 
-    // 1 秒尺の映像フレームを供給する
-    for i in 0..60 {
-        let input = MediaProcessorInput {
-            stream_id: VIDEO_STREAM_ID,
-            sample: Some(MediaSample::Video(Arc::new(video_frame(
-                &source,
-                i,
-                secs(1),
-            )))),
-        };
-        writer.process_input(input)?;
-    }
-
-    // 映像入力の終了を通知
-    let input = MediaProcessorInput {
-        stream_id: VIDEO_STREAM_ID,
-        sample: None,
-    };
-    writer.process_input(input)?;
-
-    // 最後まで書き込む
-    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
-
     // 統計値を確認する
-    let stats = writer.stats();
-    assert!(stats.actual_moov_box_size() > 0);
-    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
+    let actual_moov = writer_gauge(&entries, "actual_moov_box_size")?;
+    let reserved_moov = writer_gauge(&entries, "reserved_moov_box_size")?;
+    assert!(actual_moov > 0);
+    assert!(actual_moov <= reserved_moov);
 
-    assert_eq!(stats.total_audio_chunk_count(), 0);
-    assert_eq!(stats.total_audio_sample_count(), 0);
-    assert_eq!(stats.total_audio_track_duration(), secs(0));
+    assert_eq!(writer_gauge(&entries, "total_audio_chunk_count")?, 0);
+    assert_eq!(writer_counter(&entries, "total_audio_sample_count")?, 0);
+    assert_eq!(
+        writer_duration(&entries, "total_audio_track_seconds")?,
+        secs(0)
+    );
 
-    assert_eq!(stats.total_video_chunk_count(), 1);
-    assert_eq!(stats.total_video_sample_count(), 60);
-    assert_eq!(stats.total_video_track_duration(), secs(60));
+    assert_eq!(writer_gauge(&entries, "total_video_chunk_count")?, 1);
+    assert_eq!(writer_counter(&entries, "total_video_sample_count")?, 60);
+    assert_eq!(
+        writer_duration(&entries, "total_video_track_seconds")?,
+        secs(60)
+    );
 
     Ok(())
 }
@@ -137,66 +107,40 @@ fn write_video_and_audio_mp4() -> hisui::Result<()> {
         std::slice::from_ref(&video_source),
     );
 
-    // ライターを作成する
-    let mut writer = Mp4Writer::new(
+    let audio_samples = (0..60)
+        .map(|i| audio_data(&audio_source, i, secs(1)))
+        .collect::<Vec<_>>();
+    let video_frames = (0..60)
+        .map(|i| video_frame(&video_source, i, secs(1)))
+        .collect::<Vec<_>>();
+    let entries = run_writer_with_pipeline(
         output_file_path.path(),
         Some(Mp4WriterOptions::from_layout(&layout)),
-        Some(AUDIO_STREAM_ID),
-        Some(VIDEO_STREAM_ID),
-        hisui::stats::Stats::new(),
+        Some(audio_samples),
+        Some(video_frames),
     )?;
 
-    // 1 秒尺の音声データ・映像フレームを供給する
-    for i in 0..60 {
-        let audio_input = MediaProcessorInput {
-            stream_id: AUDIO_STREAM_ID,
-            sample: Some(MediaSample::Audio(Arc::new(audio_data(
-                &audio_source,
-                i,
-                secs(1),
-            )))),
-        };
-        writer.process_input(audio_input)?;
-
-        let video_input = MediaProcessorInput {
-            stream_id: VIDEO_STREAM_ID,
-            sample: Some(MediaSample::Video(Arc::new(video_frame(
-                &video_source,
-                i,
-                secs(1),
-            )))),
-        };
-        writer.process_input(video_input)?;
-    }
-
-    // 入力の終了を通知
-    let audio_end_input = MediaProcessorInput {
-        stream_id: AUDIO_STREAM_ID,
-        sample: None,
-    };
-    writer.process_input(audio_end_input)?;
-
-    let video_end_input = MediaProcessorInput {
-        stream_id: VIDEO_STREAM_ID,
-        sample: None,
-    };
-    writer.process_input(video_end_input)?;
-
-    // 最後まで書き込む
-    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
-
     // 統計値を確認する
-    let stats = writer.stats();
-    assert!(stats.actual_moov_box_size() > 0);
-    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
+    let actual_moov = writer_gauge(&entries, "actual_moov_box_size")?;
+    let reserved_moov = writer_gauge(&entries, "reserved_moov_box_size")?;
+    assert!(actual_moov > 0);
+    assert!(actual_moov <= reserved_moov);
 
-    assert_eq!(stats.total_audio_chunk_count(), 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
-    assert_eq!(stats.total_audio_sample_count(), 60);
-    assert_eq!(stats.total_audio_track_duration(), secs(60));
+    // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
+    assert_eq!(writer_gauge(&entries, "total_audio_chunk_count")?, 6);
+    assert_eq!(writer_counter(&entries, "total_audio_sample_count")?, 60);
+    assert_eq!(
+        writer_duration(&entries, "total_audio_track_seconds")?,
+        secs(60)
+    );
 
-    assert_eq!(stats.total_video_chunk_count(), 6); // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
-    assert_eq!(stats.total_video_sample_count(), 60);
-    assert_eq!(stats.total_video_track_duration(), secs(60));
+    // 映像・音声混在時には 10 秒毎にチャンクが切り替わる
+    assert_eq!(writer_gauge(&entries, "total_video_chunk_count")?, 6);
+    assert_eq!(writer_counter(&entries, "total_video_sample_count")?, 60);
+    assert_eq!(
+        writer_duration(&entries, "total_video_track_seconds")?,
+        secs(60)
+    );
 
     Ok(())
 }
@@ -205,33 +149,254 @@ fn write_video_and_audio_mp4() -> hisui::Result<()> {
 fn no_video_and_audio_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new()?;
     let layout = layout(&[], &[]);
-
-    // ライターを作成する
-    let mut writer = Mp4Writer::new(
+    let entries = run_writer_with_pipeline(
         output_file_path.path(),
         Some(Mp4WriterOptions::from_layout(&layout)),
         None,
         None,
-        hisui::stats::Stats::new(),
     )?;
 
-    // 最後まで書き込む
-    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
-
     // 統計値を確認する
-    let stats = writer.stats();
-    assert!(stats.actual_moov_box_size() > 0);
-    assert!(stats.actual_moov_box_size() <= stats.reserved_moov_box_size());
+    let actual_moov = writer_gauge(&entries, "actual_moov_box_size")?;
+    let reserved_moov = writer_gauge(&entries, "reserved_moov_box_size")?;
+    assert!(actual_moov > 0);
+    assert!(actual_moov <= reserved_moov);
 
-    assert_eq!(stats.total_audio_chunk_count(), 0);
-    assert_eq!(stats.total_audio_sample_count(), 0);
-    assert_eq!(stats.total_audio_track_duration(), secs(0));
+    assert_eq!(writer_gauge(&entries, "total_audio_chunk_count")?, 0);
+    assert_eq!(writer_counter(&entries, "total_audio_sample_count")?, 0);
+    assert_eq!(
+        writer_duration(&entries, "total_audio_track_seconds")?,
+        secs(0)
+    );
 
-    assert_eq!(stats.total_video_chunk_count(), 0);
-    assert_eq!(stats.total_video_sample_count(), 0);
-    assert_eq!(stats.total_video_track_duration(), secs(0));
+    assert_eq!(writer_gauge(&entries, "total_video_chunk_count")?, 0);
+    assert_eq!(writer_counter(&entries, "total_video_sample_count")?, 0);
+    assert_eq!(
+        writer_duration(&entries, "total_video_track_seconds")?,
+        secs(0)
+    );
 
     Ok(())
+}
+
+fn run_writer_with_pipeline(
+    output_path: &Path,
+    options: Option<Mp4WriterOptions>,
+    audio_samples: Option<Vec<AudioData>>,
+    video_frames: Option<Vec<VideoFrame>>,
+) -> hisui::Result<Vec<hisui::stats::StatsEntry>> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let pipeline = MediaPipeline::new()?;
+        let pipeline_handle = pipeline.handle();
+        let mut pipeline_task = tokio::spawn(pipeline.run());
+
+        let has_audio = audio_samples.is_some();
+        let has_video = video_frames.is_some();
+        let mut processor_tasks = Vec::new();
+
+        match (audio_samples, video_frames) {
+            (Some(audio_samples), Some(video_frames)) => {
+                let av_source_handle = register_processor(
+                    &pipeline_handle,
+                    ProcessorId::new("writer_test_av_source"),
+                    ProcessorMetadata::new("writer_test_av_source"),
+                )
+                .await?;
+                let task = tokio::spawn(async move {
+                    run_audio_video_source(av_source_handle, audio_samples, video_frames).await
+                });
+                processor_tasks.push(task);
+            }
+            (Some(audio_samples), None) => {
+                let audio_source_handle = register_processor(
+                    &pipeline_handle,
+                    ProcessorId::new("writer_test_audio_source"),
+                    ProcessorMetadata::new("writer_test_audio_source"),
+                )
+                .await?;
+                let task = tokio::spawn(async move {
+                    run_audio_source(audio_source_handle, audio_samples).await
+                });
+                processor_tasks.push(task);
+            }
+            (None, Some(video_frames)) => {
+                let video_source_handle = register_processor(
+                    &pipeline_handle,
+                    ProcessorId::new("writer_test_video_source"),
+                    ProcessorMetadata::new("writer_test_video_source"),
+                )
+                .await?;
+                let task = tokio::spawn(async move {
+                    run_video_source(video_source_handle, video_frames).await
+                });
+                processor_tasks.push(task);
+            }
+            (None, None) => {}
+        }
+
+        let writer_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("writer_test_mp4_writer"),
+            ProcessorMetadata::new("mp4_writer"),
+        )
+        .await?;
+        let output_path = output_path.to_path_buf();
+        let writer_task = tokio::spawn(async move {
+            let writer = Mp4Writer::new(
+                &output_path,
+                options,
+                has_audio.then_some(AUDIO_STREAM_ID),
+                has_video.then_some(VIDEO_STREAM_ID),
+                writer_handle.stats(),
+            )?;
+            writer
+                .run(
+                    writer_handle,
+                    has_audio.then_some(TrackId::new(AUDIO_TRACK_ID)),
+                    has_video.then_some(TrackId::new(VIDEO_TRACK_ID)),
+                )
+                .await
+        });
+        processor_tasks.push(writer_task);
+
+        pipeline_handle.complete_initial_processor_registration();
+
+        for task in processor_tasks {
+            match task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e),
+                Err(e) => return Err(Error::new(format!("processor task join failed: {e}"))),
+            }
+        }
+
+        let entries = pipeline_handle.stats().entries()?;
+        drop(pipeline_handle);
+        match tokio::time::timeout(Duration::from_secs(5), &mut pipeline_task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(Error::new(format!("media pipeline task failed: {e}"))),
+            Err(_) => {
+                pipeline_task.abort();
+                let _ = pipeline_task.await;
+            }
+        }
+        Ok(entries)
+    })
+}
+
+async fn register_processor(
+    pipeline_handle: &hisui::MediaPipelineHandle,
+    processor_id: ProcessorId,
+    metadata: ProcessorMetadata,
+) -> hisui::Result<ProcessorHandle> {
+    pipeline_handle
+        .register_processor(processor_id.clone(), metadata)
+        .await
+        .map_err(|e| match e {
+            hisui::RegisterProcessorError::PipelineTerminated => {
+                Error::new("failed to register processor: pipeline has terminated")
+            }
+            hisui::RegisterProcessorError::DuplicateProcessorId => Error::new(format!(
+                "processor ID already exists: {}",
+                processor_id.get()
+            )),
+        })
+}
+
+async fn run_audio_source(handle: ProcessorHandle, samples: Vec<AudioData>) -> hisui::Result<()> {
+    let mut tx = handle.publish_track(TrackId::new(AUDIO_TRACK_ID)).await?;
+    handle.notify_ready();
+    handle.wait_subscribers_ready().await?;
+
+    for sample in samples {
+        if !tx.send_audio(sample) {
+            break;
+        }
+    }
+    tx.send_eos();
+    Ok(())
+}
+
+async fn run_video_source(handle: ProcessorHandle, frames: Vec<VideoFrame>) -> hisui::Result<()> {
+    let mut tx = handle.publish_track(TrackId::new(VIDEO_TRACK_ID)).await?;
+    handle.notify_ready();
+    handle.wait_subscribers_ready().await?;
+
+    for frame in frames {
+        if !tx.send_video(frame) {
+            break;
+        }
+    }
+    tx.send_eos();
+    Ok(())
+}
+
+async fn run_audio_video_source(
+    handle: ProcessorHandle,
+    audio_samples: Vec<AudioData>,
+    video_frames: Vec<VideoFrame>,
+) -> hisui::Result<()> {
+    let mut audio_tx = handle.publish_track(TrackId::new(AUDIO_TRACK_ID)).await?;
+    let mut video_tx = handle.publish_track(TrackId::new(VIDEO_TRACK_ID)).await?;
+    handle.notify_ready();
+    handle.wait_subscribers_ready().await?;
+
+    let max_len = audio_samples.len().max(video_frames.len());
+    for i in 0..max_len {
+        if let Some(sample) = audio_samples.get(i)
+            && !audio_tx.send_audio(sample.clone())
+        {
+            break;
+        }
+        if let Some(frame) = video_frames.get(i)
+            && !video_tx.send_video(frame.clone())
+        {
+            break;
+        }
+    }
+
+    audio_tx.send_eos();
+    video_tx.send_eos();
+    Ok(())
+}
+
+fn writer_metric<'a>(
+    entries: &'a [hisui::stats::StatsEntry],
+    metric_name: &str,
+) -> Option<&'a hisui::stats::StatsValue> {
+    entries.iter().find_map(|entry| {
+        if entry.metric_name != metric_name {
+            return None;
+        }
+        if entry.labels.get("processor_type").map(String::as_str) != Some("mp4_writer") {
+            return None;
+        }
+        Some(&entry.value)
+    })
+}
+
+fn writer_counter(entries: &[hisui::stats::StatsEntry], metric_name: &str) -> hisui::Result<u64> {
+    writer_metric(entries, metric_name)
+        .and_then(|v| v.as_counter())
+        .ok_or_else(|| Error::new(format!("missing writer counter metric: {metric_name}")))
+}
+
+fn writer_gauge(entries: &[hisui::stats::StatsEntry], metric_name: &str) -> hisui::Result<u64> {
+    writer_metric(entries, metric_name)
+        .and_then(|v| v.as_gauge())
+        .map(|v| v.max(0) as u64)
+        .ok_or_else(|| Error::new(format!("missing writer gauge metric: {metric_name}")))
+}
+
+fn writer_duration(
+    entries: &[hisui::stats::StatsEntry],
+    metric_name: &str,
+) -> hisui::Result<Duration> {
+    writer_metric(entries, metric_name)
+        .and_then(|v| v.as_duration())
+        .ok_or_else(|| Error::new(format!("missing writer duration metric: {metric_name}")))
 }
 
 fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout {

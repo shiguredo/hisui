@@ -500,54 +500,60 @@ impl Mp4Writer {
         let mut video_rx = input_video_track_id.map(|id| handle.subscribe_track(id));
         handle.notify_ready();
 
-        // 入力トラックが 0 本でも finalize までは必ず 1 回実行する。
-        let mut in_progress = true;
-        while in_progress {
-            if audio_rx.is_none() && video_rx.is_none() {
-                // これ以上入力は増えないので、キューを空にするまで出力処理を続ける。
-                loop {
-                    let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
-                    let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
-                    in_progress =
-                        self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
-                    if !in_progress {
-                        break;
+        // 入力トラックが 0 本でも finalize まで到達する。
+        let mut output = self.process_output()?;
+        loop {
+            match output {
+                MediaProcessorOutput::Finished => break,
+                MediaProcessorOutput::Pending { awaiting_stream_id } => {
+                    if audio_rx.is_none() && video_rx.is_none() {
+                        output = self.process_output()?;
+                        continue;
                     }
-                }
-                break;
-            }
 
-            let audio_len = self.input_audio_queue.len();
-            let video_len = self.input_video_queue.len();
-            let mut suppress_audio = false;
-            let mut suppress_video = false;
-            if audio_rx.is_some() && video_rx.is_some() {
-                if audio_len > video_len + MAX_INPUT_QUEUE_GAP {
-                    suppress_audio = true;
-                } else if video_len > audio_len + MAX_INPUT_QUEUE_GAP {
-                    suppress_video = true;
-                }
-            }
+                    match awaiting_stream_id {
+                        Some(id)
+                            if Some(id) == self.input_audio_stream_id && audio_rx.is_some() =>
+                        {
+                            let msg = crate::future::recv_or_pending(&mut audio_rx).await;
+                            self.handle_audio_message(msg, &mut audio_rx);
+                        }
+                        Some(id)
+                            if Some(id) == self.input_video_stream_id && video_rx.is_some() =>
+                        {
+                            let msg = crate::future::recv_or_pending(&mut video_rx).await;
+                            self.handle_video_message(msg, &mut video_rx);
+                        }
+                        _ => {
+                            let audio_len = self.input_audio_queue.len();
+                            let video_len = self.input_video_queue.len();
+                            let mut suppress_audio = false;
+                            let mut suppress_video = false;
+                            if audio_rx.is_some() && video_rx.is_some() {
+                                if audio_len > video_len + MAX_INPUT_QUEUE_GAP {
+                                    suppress_audio = true;
+                                } else if video_len > audio_len + MAX_INPUT_QUEUE_GAP {
+                                    suppress_video = true;
+                                }
+                            }
 
-            tokio::select! {
-                msg = crate::future::recv_or_pending(&mut audio_rx), if !suppress_audio => {
-                    self.handle_audio_message(msg, &mut audio_rx);
+                            tokio::select! {
+                                msg = crate::future::recv_or_pending(&mut audio_rx), if !suppress_audio => {
+                                    self.handle_audio_message(msg, &mut audio_rx);
+                                }
+                                msg = crate::future::recv_or_pending(&mut video_rx), if !suppress_video => {
+                                    self.handle_video_message(msg, &mut video_rx);
+                                }
+                            }
+                        }
+                    }
+                    output = self.process_output()?;
                 }
-                msg = crate::future::recv_or_pending(&mut video_rx), if !suppress_video => {
-                    self.handle_video_message(msg, &mut video_rx);
+                MediaProcessorOutput::Processed { .. } => {
+                    return Err(crate::Error::new(
+                        "BUG: writer process_output returned unexpected processed output",
+                    ));
                 }
-            }
-
-            let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
-            let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
-            if audio_timestamp.is_none() && video_timestamp.is_none() {
-                if audio_rx.is_some() || video_rx.is_some() {
-                    // 入力待ち中は finalize せず、次のメッセージ到着を待つ。
-                    continue;
-                }
-                in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
-            } else {
-                in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
             }
         }
 
