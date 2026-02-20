@@ -16,10 +16,6 @@ use crate::{
     audio::AudioData,
     layout::Layout,
     media::{MediaSample, MediaStreamId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
     types::CodecName,
     video::{FrameRate, VideoFrame},
 };
@@ -37,6 +33,13 @@ const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
 //
 // 適当に大きな値ならなんでもいい
 const MAX_INPUT_QUEUE_GAP: usize = 200;
+
+enum WriterRunOutput {
+    Pending {
+        awaiting_stream_id: Option<MediaStreamId>,
+    },
+    Finished,
+}
 
 #[derive(Debug, Clone)]
 pub struct Mp4WriterOptions {
@@ -425,52 +428,47 @@ impl Mp4Writer {
     }
 }
 
-impl MediaProcessor for Mp4Writer {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: self
-                .input_audio_stream_id
-                .into_iter()
-                .chain(self.input_video_stream_id)
-                .collect(),
-            output_stream_ids: Vec::new(),
-            workload_hint: MediaProcessorWorkloadHint::WRITER,
-        }
-    }
-
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        match input.sample {
-            Some(MediaSample::Audio(sample))
-                if Some(input.stream_id) == self.input_audio_stream_id =>
-            {
+impl Mp4Writer {
+    fn handle_input_sample(
+        &mut self,
+        stream_id: MediaStreamId,
+        sample: Option<MediaSample>,
+    ) -> crate::Result<()> {
+        match sample {
+            Some(MediaSample::Audio(sample)) if Some(stream_id) == self.input_audio_stream_id => {
                 self.input_audio_queue.push_back(sample);
             }
-            None if Some(input.stream_id) == self.input_audio_stream_id => {
+            None if Some(stream_id) == self.input_audio_stream_id => {
                 self.input_audio_stream_id = None;
             }
-            Some(MediaSample::Video(sample))
-                if Some(input.stream_id) == self.input_video_stream_id =>
-            {
+            Some(MediaSample::Video(sample)) if Some(stream_id) == self.input_video_stream_id => {
                 self.input_video_queue.push_back(sample);
             }
-            None if Some(input.stream_id) == self.input_video_stream_id => {
+            None if Some(stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
             }
-            _ => return Err(crate::Error::new("BUG: unexpected input stream")),
+            _ => {
+                self.stats.set_error();
+                return Err(crate::Error::new("BUG: unexpected input stream"));
+            }
         }
         Ok(())
     }
 
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+    fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
         loop {
             if let Some(id) = self.input_video_stream_id
                 && self.input_video_queue.is_empty()
             {
-                return Ok(MediaProcessorOutput::pending(id));
+                return Ok(WriterRunOutput::Pending {
+                    awaiting_stream_id: Some(id),
+                });
             } else if let Some(id) = self.input_audio_stream_id
                 && self.input_audio_queue.is_empty()
             {
-                return Ok(MediaProcessorOutput::pending(id));
+                return Ok(WriterRunOutput::Pending {
+                    awaiting_stream_id: Some(id),
+                });
             }
 
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
@@ -479,17 +477,10 @@ impl MediaProcessor for Mp4Writer {
             let in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
 
             if !in_progress {
-                return Ok(MediaProcessorOutput::Finished);
+                return Ok(WriterRunOutput::Finished);
             }
         }
     }
-
-    fn set_error(&self) {
-        self.stats.set_error();
-    }
-}
-
-impl Mp4Writer {
     pub async fn run(
         mut self,
         handle: crate::ProcessorHandle,
@@ -501,13 +492,13 @@ impl Mp4Writer {
         handle.notify_ready();
 
         // 入力トラックが 0 本でも finalize まで到達する。
-        let mut output = self.process_output()?;
+        let mut output = self.poll_output()?;
         loop {
             match output {
-                MediaProcessorOutput::Finished => break,
-                MediaProcessorOutput::Pending { awaiting_stream_id } => {
+                WriterRunOutput::Finished => break,
+                WriterRunOutput::Pending { awaiting_stream_id } => {
                     if audio_rx.is_none() && video_rx.is_none() {
-                        output = self.process_output()?;
+                        output = self.poll_output()?;
                         continue;
                     }
 
@@ -516,13 +507,13 @@ impl Mp4Writer {
                             if Some(id) == self.input_audio_stream_id && audio_rx.is_some() =>
                         {
                             let msg = crate::future::recv_or_pending(&mut audio_rx).await;
-                            self.handle_audio_message(msg, &mut audio_rx);
+                            self.handle_audio_message(msg, &mut audio_rx)?;
                         }
                         Some(id)
                             if Some(id) == self.input_video_stream_id && video_rx.is_some() =>
                         {
                             let msg = crate::future::recv_or_pending(&mut video_rx).await;
-                            self.handle_video_message(msg, &mut video_rx);
+                            self.handle_video_message(msg, &mut video_rx)?;
                         }
                         _ => {
                             let audio_len = self.input_audio_queue.len();
@@ -539,20 +530,15 @@ impl Mp4Writer {
 
                             tokio::select! {
                                 msg = crate::future::recv_or_pending(&mut audio_rx), if !suppress_audio => {
-                                    self.handle_audio_message(msg, &mut audio_rx);
+                                    self.handle_audio_message(msg, &mut audio_rx)?;
                                 }
                                 msg = crate::future::recv_or_pending(&mut video_rx), if !suppress_video => {
-                                    self.handle_video_message(msg, &mut video_rx);
+                                    self.handle_video_message(msg, &mut video_rx)?;
                                 }
                             }
                         }
                     }
-                    output = self.process_output()?;
-                }
-                MediaProcessorOutput::Processed { .. } => {
-                    return Err(crate::Error::new(
-                        "BUG: writer process_output returned unexpected processed output",
-                    ));
+                    output = self.poll_output()?;
                 }
             }
         }
@@ -564,33 +550,43 @@ impl Mp4Writer {
         &mut self,
         msg: crate::Message,
         audio_rx: &mut Option<crate::MessageReceiver>,
-    ) {
+    ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaSample::Audio(sample)) => {
-                self.input_audio_queue.push_back(sample);
+                if let Some(stream_id) = self.input_audio_stream_id {
+                    self.handle_input_sample(stream_id, Some(crate::MediaSample::Audio(sample)))?;
+                }
             }
             crate::Message::Eos => {
-                self.input_audio_stream_id = None;
+                if let Some(stream_id) = self.input_audio_stream_id {
+                    self.handle_input_sample(stream_id, None)?;
+                }
                 *audio_rx = None;
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn handle_video_message(
         &mut self,
         msg: crate::Message,
         video_rx: &mut Option<crate::MessageReceiver>,
-    ) {
+    ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaSample::Video(sample)) => {
-                self.input_video_queue.push_back(sample);
+                if let Some(stream_id) = self.input_video_stream_id {
+                    self.handle_input_sample(stream_id, Some(crate::MediaSample::Video(sample)))?;
+                }
             }
             crate::Message::Eos => {
-                self.input_video_stream_id = None;
+                if let Some(stream_id) = self.input_video_stream_id {
+                    self.handle_input_sample(stream_id, None)?;
+                }
                 *video_rx = None;
             }
             _ => {}
         }
+        Ok(())
     }
 }

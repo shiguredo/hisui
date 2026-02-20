@@ -6,10 +6,6 @@ use crate::{
     layout::AggregatedSourceInfo,
     media::{MediaSample, MediaStreamId},
     metadata::{ContainerFormat, SourceId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     types::CodecName,
@@ -18,7 +14,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct AudioReader {
-    output_stream_id: MediaStreamId,
+    _output_stream_id: MediaStreamId,
     source_id: SourceId,
     timestamp_offset: Duration,
     next_timestamp_offset: Duration,
@@ -63,10 +59,14 @@ impl AudioReader {
                     self.timestamp_offset = self.next_timestamp_offset;
                     self.inner.set_timestamp_offset(self.timestamp_offset);
                 }
-                Some(Err(e)) => return Err(e),
+                Some(Err(e)) => {
+                    self.error_flag.set(true);
+                    return Err(e);
+                }
                 Some(Ok(mut data)) => {
                     data.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = data.timestamp + data.duration;
+                    self.update_metrics_from_inner();
 
                     if !track_handle.send_media(MediaSample::new_audio(data)) {
                         // パイプライン処理が中断された
@@ -77,6 +77,7 @@ impl AudioReader {
             }
         }
 
+        self.update_metrics_from_inner();
         track_handle.send_eos();
 
         Ok(())
@@ -136,7 +137,7 @@ impl AudioReader {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            output_stream_id,
+            _output_stream_id: output_stream_id,
             source_id,
             timestamp_offset,
             next_timestamp_offset: timestamp_offset,
@@ -221,50 +222,6 @@ impl AudioReader {
     }
 }
 
-impl MediaProcessor for AudioReader {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: Vec::new(),
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::READER,
-        }
-    }
-
-    fn process_input(&mut self, _input: MediaProcessorInput) -> crate::Result<()> {
-        Err(crate::Error::new(
-            "BUG: reader does not require any input streams",
-        ))
-    }
-
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        loop {
-            match self.inner.next() {
-                None => {
-                    if !self.start_next_input_file()? {
-                        return Ok(MediaProcessorOutput::Finished);
-                    }
-                    self.timestamp_offset = self.next_timestamp_offset;
-                    self.inner.set_timestamp_offset(self.timestamp_offset);
-                }
-                Some(Err(e)) => return Err(e),
-                Some(Ok(mut data)) => {
-                    data.timestamp += self.timestamp_offset;
-                    self.next_timestamp_offset = data.timestamp + data.duration;
-                    self.update_metrics_from_inner();
-                    return Ok(MediaProcessorOutput::audio_data(
-                        self.output_stream_id,
-                        data,
-                    ));
-                }
-            }
-        }
-    }
-
-    fn set_error(&self) {
-        self.error_flag.set(true);
-    }
-}
-
 #[derive(Debug)]
 enum AudioReaderInner {
     Mp4(Box<Mp4AudioReader>),
@@ -293,7 +250,7 @@ impl Iterator for AudioReaderInner {
 
 #[derive(Debug)]
 pub struct VideoReader {
-    output_stream_id: MediaStreamId,
+    _output_stream_id: MediaStreamId,
     source_id: SourceId,
     timestamp_offset: Duration,
     next_timestamp_offset: Duration,
@@ -338,10 +295,14 @@ impl VideoReader {
                     self.timestamp_offset = self.next_timestamp_offset;
                     self.inner.set_timestamp_offset(self.timestamp_offset);
                 }
-                Some(Err(e)) => return Err(e),
+                Some(Err(e)) => {
+                    self.error_flag.set(true);
+                    return Err(e);
+                }
                 Some(Ok(mut frame)) => {
                     frame.timestamp += self.timestamp_offset;
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
+                    self.update_metrics_from_inner();
 
                     if !track_handle.send_media(MediaSample::new_video(frame)) {
                         // パイプライン処理が中断された
@@ -351,6 +312,7 @@ impl VideoReader {
                 }
             }
         }
+        self.update_metrics_from_inner();
         track_handle.send_eos();
 
         Ok(())
@@ -408,7 +370,7 @@ impl VideoReader {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            output_stream_id,
+            _output_stream_id: output_stream_id,
             source_id,
             timestamp_offset,
             next_timestamp_offset: timestamp_offset,
@@ -490,50 +452,6 @@ impl VideoReader {
                 }
             }
         }
-    }
-}
-
-impl MediaProcessor for VideoReader {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: Vec::new(),
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::READER,
-        }
-    }
-
-    fn process_input(&mut self, _input: MediaProcessorInput) -> crate::Result<()> {
-        Err(crate::Error::new(
-            "BUG: reader does not require any input streams",
-        ))
-    }
-
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        loop {
-            match self.inner.next() {
-                None => {
-                    if !self.start_next_input_file()? {
-                        return Ok(MediaProcessorOutput::Finished);
-                    }
-                    self.timestamp_offset = self.next_timestamp_offset;
-                    self.inner.set_timestamp_offset(self.timestamp_offset);
-                }
-                Some(Err(e)) => return Err(e),
-                Some(Ok(mut frame)) => {
-                    frame.timestamp += self.timestamp_offset;
-                    self.next_timestamp_offset = frame.timestamp + frame.duration;
-                    self.update_metrics_from_inner();
-                    return Ok(MediaProcessorOutput::video_frame(
-                        self.output_stream_id,
-                        frame,
-                    ));
-                }
-            }
-        }
-    }
-
-    fn set_error(&self) {
-        self.error_flag.set(true);
     }
 }
 
