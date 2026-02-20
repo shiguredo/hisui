@@ -10,8 +10,6 @@ pub mod decoder_fdk_aac;
 pub mod decoder_libvpx;
 #[cfg(feature = "nvcodec")]
 pub mod decoder_nvcodec;
-#[cfg(feature = "nvcodec")]
-pub mod decoder_nvcodec_params;
 pub mod decoder_openh264;
 pub mod decoder_opus;
 #[cfg(target_os = "macos")]
@@ -55,6 +53,8 @@ pub mod reader_webm;
 mod rpc_request_file;
 pub mod rtmp;
 mod sora_compose_stats_json;
+#[cfg(feature = "nvcodec")]
+pub mod sora_decoder_nvcodec_params;
 #[cfg(feature = "libvpx")]
 pub mod sora_encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
