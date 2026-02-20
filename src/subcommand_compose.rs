@@ -255,7 +255,12 @@ async fn run_compose_pipeline(
     {
         Ok(setup) => setup,
         Err(e) => {
-            let _ = shutdown_pipeline(pipeline_handle, pipeline_task).await;
+            if let Err(shutdown_error) = shutdown_pipeline(pipeline_handle, pipeline_task).await {
+                tracing::warn!(
+                    "failed to shutdown compose pipeline after setup failure: {}",
+                    shutdown_error.display()
+                );
+            }
             return Err(e);
         }
     };
@@ -691,13 +696,27 @@ async fn shutdown_pipeline(
     pipeline_handle: crate::MediaPipelineHandle,
     mut pipeline_task: tokio::task::JoinHandle<()>,
 ) -> Result<()> {
+    const SHUTDOWN_TIMEOUT_SECONDS: u64 = 5;
     drop(pipeline_handle);
-    match tokio::time::timeout(Duration::from_secs(5), &mut pipeline_task).await {
+    match tokio::time::timeout(
+        Duration::from_secs(SHUTDOWN_TIMEOUT_SECONDS),
+        &mut pipeline_task,
+    )
+    .await
+    {
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => Err(Error::new(format!("media pipeline task failed: {e}"))),
         Err(_) => {
+            tracing::warn!(
+                "compose pipeline shutdown timed out after {} seconds; aborting pipeline task",
+                SHUTDOWN_TIMEOUT_SECONDS
+            );
             pipeline_task.abort();
-            let _ = pipeline_task.await;
+            if let Err(e) = pipeline_task.await
+                && !e.is_cancelled()
+            {
+                tracing::warn!("pipeline task join after abort failed: {e}");
+            }
             Ok(())
         }
     }
