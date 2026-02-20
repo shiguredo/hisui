@@ -8,10 +8,6 @@ use crate::{
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
     layout::TrimSpans,
     media::{MediaSample, MediaStreamId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);
@@ -29,11 +25,12 @@ pub struct AudioMixer {
     trim_spans: TrimSpans,
     input_stream_ids: Vec<MediaStreamId>,
     input_streams: HashMap<MediaStreamId, InputStream>,
-    output_stream_id: MediaStreamId,
+    _output_stream_id: MediaStreamId,
     stats: AudioMixerStats,
 }
 
-enum AudioMixerRunOutput {
+#[derive(Debug)]
+pub enum AudioMixerOutput {
     Processed(MediaSample),
     Pending(MediaStreamId),
     Finished,
@@ -47,7 +44,6 @@ pub struct AudioMixerStats {
     total_output_sample_count: crate::stats::StatsCounter,
     total_output_filled_sample_count: crate::stats::StatsCounter,
     total_trimmed_sample_count: crate::stats::StatsCounter,
-    error: crate::stats::StatsFlag,
 }
 
 impl AudioMixerStats {
@@ -58,8 +54,7 @@ impl AudioMixerStats {
         let total_output_sample_count = stats.counter("total_output_sample_count");
         let total_output_filled_sample_count = stats.counter("total_output_filled_sample_count");
         let total_trimmed_sample_count = stats.counter("total_trimmed_sample_count");
-        let error = stats.flag("error");
-        error.set(false);
+        stats.flag("error").set(false);
         Self {
             total_input_audio_data_count,
             total_output_audio_data_count,
@@ -67,7 +62,6 @@ impl AudioMixerStats {
             total_output_sample_count,
             total_output_filled_sample_count,
             total_trimmed_sample_count,
-            error,
         }
     }
 
@@ -93,10 +87,6 @@ impl AudioMixerStats {
 
     fn add_trimmed_sample_count(&self, value: u64) {
         self.total_trimmed_sample_count.add(value);
-    }
-
-    fn set_error(&self) {
-        self.error.set(true);
     }
 
     pub fn total_input_audio_data_count(&self) -> u64 {
@@ -141,7 +131,7 @@ impl AudioMixer {
             trim_spans,
             input_stream_ids,
             input_streams,
-            output_stream_id,
+            _output_stream_id: output_stream_id,
             stats,
         }
     }
@@ -181,12 +171,12 @@ impl AudioMixer {
 
         loop {
             match self.poll_output()? {
-                AudioMixerRunOutput::Processed(sample) => {
+                AudioMixerOutput::Processed(sample) => {
                     if !output_tx.send_media(sample) {
                         break;
                     }
                 }
-                AudioMixerRunOutput::Pending(stream_id) => {
+                AudioMixerOutput::Pending(stream_id) => {
                     let input_track = input_tracks
                         .iter_mut()
                         .find(|track| track.stream_id == stream_id)
@@ -200,7 +190,7 @@ impl AudioMixer {
                     let message = input_track.rx.recv().await;
                     self.handle_input_message(stream_id, &track_id, message)?;
                 }
-                AudioMixerRunOutput::Finished => {
+                AudioMixerOutput::Finished => {
                     output_tx.send_eos();
                     break;
                 }
@@ -341,7 +331,7 @@ impl AudioMixer {
         Ok(())
     }
 
-    fn poll_output(&mut self) -> Result<AudioMixerRunOutput> {
+    fn poll_output(&mut self) -> Result<AudioMixerOutput> {
         let mut now = self.next_input_timestamp();
         while self.trim_spans.contains(now) {
             self.stats
@@ -357,7 +347,7 @@ impl AudioMixer {
             }
             if input_stream.sample_queue.len() < MIXED_AUDIO_DATA_SAMPLES {
                 // 次の合成に必要なサンプル数が足りないので待つ
-                return Ok(AudioMixerRunOutput::Pending(*input_stream_id));
+                return Ok(AudioMixerOutput::Pending(*input_stream_id));
             }
         }
 
@@ -367,45 +357,26 @@ impl AudioMixer {
             .values()
             .all(|s| s.eos && s.sample_queue.is_empty());
         if eos {
-            return Ok(AudioMixerRunOutput::Finished);
+            return Ok(AudioMixerOutput::Finished);
         }
 
         // 合成
         let mixed_data = self.mix_next_audio_data(now)?;
-        Ok(AudioMixerRunOutput::Processed(MediaSample::audio_data(
+        Ok(AudioMixerOutput::Processed(MediaSample::audio_data(
             mixed_data,
         )))
     }
-}
 
-impl MediaProcessor for AudioMixer {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: self.input_stream_ids.clone(),
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::AUDIO_MIXER,
-        }
+    pub fn push_input(
+        &mut self,
+        stream_id: MediaStreamId,
+        sample: Option<MediaSample>,
+    ) -> Result<()> {
+        self.handle_input_sample(stream_id, sample)
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        self.handle_input_sample(input.stream_id, input.sample)
-    }
-
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        match self.poll_output()? {
-            AudioMixerRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample,
-            }),
-            AudioMixerRunOutput::Pending(stream_id) => Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: Some(stream_id),
-            }),
-            AudioMixerRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
-        }
-    }
-
-    fn set_error(&self) {
-        self.stats.set_error();
+    pub fn next_output(&mut self) -> Result<AudioMixerOutput> {
+        self.poll_output()
     }
 }
 

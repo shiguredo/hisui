@@ -5,8 +5,7 @@ use hisui::{
     layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     media::{MediaSample, MediaStreamId},
     metadata::{SourceId, SourceInfo},
-    mixer_audio::AudioMixer,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
+    mixer_audio::{AudioMixer, AudioMixerOutput},
     types::CodecName,
     video::FrameRate,
 };
@@ -24,8 +23,8 @@ fn start_noop_audio_mixer() {
 
     // ミキサーへの入力が空なので、出力も空
     assert!(matches!(
-        mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        mixer.next_output(),
+        Ok(AudioMixerOutput::Finished)
     ));
 }
 
@@ -48,13 +47,13 @@ fn mix_three_sources_without_trim() -> hisui::Result<()> {
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
-        mixer.process_input(audio_data(&source0, i, duration, sample))?;
-        mixer.process_input(audio_data(&source1, i, duration, sample * 2))?;
-        mixer.process_input(audio_data(&source2, i, duration, sample * 4))?;
+        push_input(&mut mixer, audio_data(&source0, i, duration, sample))?;
+        push_input(&mut mixer, audio_data(&source1, i, duration, sample * 2))?;
+        push_input(&mut mixer, audio_data(&source2, i, duration, sample * 4))?;
     }
-    mixer.process_input(eos(0))?;
-    mixer.process_input(eos(1))?;
-    mixer.process_input(eos(2))?;
+    push_input(&mut mixer, eos(0))?;
+    push_input(&mut mixer, eos(1))?;
+    push_input(&mut mixer, eos(2))?;
 
     // source0 だけが存在する期間: 0 ms ~ 60 ms
     for _ in 0..3 {
@@ -98,8 +97,8 @@ fn mix_three_sources_without_trim() -> hisui::Result<()> {
 
     // 全てのソースの音声データの処理が終わったので、これ以上は出力もない
     assert!(matches!(
-        mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        mixer.next_output(),
+        Ok(AudioMixerOutput::Finished)
     ));
 
     // 統計値をチェックする
@@ -148,13 +147,13 @@ fn mix_three_sources_with_trim() -> hisui::Result<()> {
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
-        mixer.process_input(audio_data(&source0, i, duration, sample))?;
-        mixer.process_input(audio_data(&source1, i, duration, sample * 2))?;
-        mixer.process_input(audio_data(&source2, i, duration, sample * 4))?;
+        push_input(&mut mixer, audio_data(&source0, i, duration, sample))?;
+        push_input(&mut mixer, audio_data(&source1, i, duration, sample * 2))?;
+        push_input(&mut mixer, audio_data(&source2, i, duration, sample * 4))?;
     }
-    mixer.process_input(eos(0))?;
-    mixer.process_input(eos(1))?;
-    mixer.process_input(eos(2))?;
+    push_input(&mut mixer, eos(0))?;
+    push_input(&mut mixer, eos(1))?;
+    push_input(&mut mixer, eos(2))?;
 
     // source0 だけが存在する期間: 0 ms ~ 60 ms
     for _ in 0..3 {
@@ -190,8 +189,8 @@ fn mix_three_sources_with_trim() -> hisui::Result<()> {
 
     // 全てのソースの音声データの処理が終わったので、これ以上は出力もない
     assert!(matches!(
-        mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        mixer.next_output(),
+        Ok(AudioMixerOutput::Finished)
     ));
 
     // 統計値をチェックする
@@ -233,21 +232,21 @@ fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
     for i in 0..10 {
         let sample = 2;
         let duration = Duration::from_millis(10); // 尺は 10 ms
-        mixer.process_input(audio_data(&source0, i, duration, sample))?;
+        push_input(&mut mixer, audio_data(&source0, i, duration, sample))?;
     }
     for i in 0..4 {
         let sample = 4;
         let duration = Duration::from_millis(25); // 尺は 25 ms
-        mixer.process_input(audio_data(&source1, i, duration, sample))?;
+        push_input(&mut mixer, audio_data(&source1, i, duration, sample))?;
     }
     for i in 0..50 {
         let sample = 8;
         let duration = Duration::from_millis(2); // 尺は 2 ms
-        mixer.process_input(audio_data(&source2, i, duration, sample))?;
+        push_input(&mut mixer, audio_data(&source2, i, duration, sample))?;
     }
-    mixer.process_input(eos(0))?;
-    mixer.process_input(eos(1))?;
-    mixer.process_input(eos(2))?;
+    push_input(&mut mixer, eos(0))?;
+    push_input(&mut mixer, eos(1))?;
+    push_input(&mut mixer, eos(2))?;
 
     // 合成結果を確認する (合成後の AudioData.duraiton は 20 ms に固定）
     for _ in 0..5 {
@@ -259,8 +258,8 @@ fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
 
     // 全てのソースの音声データの処理が終わったので、これ以上は出力もない
     assert!(matches!(
-        mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        mixer.next_output(),
+        Ok(AudioMixerOutput::Finished)
     ));
 
     // 統計値をチェックする
@@ -294,20 +293,19 @@ fn non_pcm_audio_input_error() -> hisui::Result<()> {
     // 適当に不正なフォーマットを指定して AudioData を送る
     let duration = Duration::from_millis(20);
     let mut input = audio_data(&source, 0, duration, 0);
-    // MediaProcessorInput から AudioData を取得して format を変更
     if let Some(MediaSample::Audio(audio_data)) = &mut input.sample {
         let audio_data = Arc::make_mut(audio_data);
         audio_data.format = AudioFormat::Opus;
     }
 
     // 不正なフォーマットのデータを送信
-    assert!(mixer.process_input(input).is_err());
-    mixer.process_input(eos(0))?;
+    assert!(push_input(&mut mixer, input).is_err());
+    push_input(&mut mixer, eos(0))?;
 
     // エラーになるので、出力も存在しない
     assert!(matches!(
-        mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        mixer.next_output(),
+        Ok(AudioMixerOutput::Finished)
     ));
 
     // 統計値をチェックする
@@ -378,12 +376,13 @@ fn source(id: usize, start_time_ms: u64, end_time_ms: u64) -> (SourceInfo, Media
     (source, MediaStreamId::new(id as u64))
 }
 
-fn audio_data(
-    source: &SourceInfo,
-    i: usize,
-    duration: Duration,
-    sample: u8,
-) -> MediaProcessorInput {
+#[derive(Debug)]
+struct MixerInput {
+    stream_id: MediaStreamId,
+    sample: Option<MediaSample>,
+}
+
+fn audio_data(source: &SourceInfo, i: usize, duration: Duration, sample: u8) -> MixerInput {
     let sample_bytes = 2; // 一つのサンプルは i16 で表現されるので 2 バイト
     let sample_count =
         (SAMPLE_RATE as f64 * duration.as_secs_f64()) as usize * CHANNELS as usize * sample_bytes;
@@ -398,22 +397,34 @@ fn audio_data(
         sample_entry: None,
     };
     let id = MediaStreamId::new(source.id.get().parse().expect("infallible"));
-    MediaProcessorInput::audio_data(id, data)
+    MixerInput {
+        stream_id: id,
+        sample: Some(MediaSample::audio_data(data)),
+    }
 }
 
-fn eos(i: usize) -> MediaProcessorInput {
-    MediaProcessorInput::eos(MediaStreamId::new(i as u64))
+fn eos(i: usize) -> MixerInput {
+    MixerInput {
+        stream_id: MediaStreamId::new(i as u64),
+        sample: None,
+    }
 }
 
 fn ms(value: u64) -> Duration {
     Duration::from_millis(value)
 }
 
+fn push_input(mixer: &mut AudioMixer, input: MixerInput) -> hisui::Result<()> {
+    mixer.push_input(input.stream_id, input.sample)
+}
+
 fn next_mixed_data(mixer: &mut AudioMixer) -> hisui::Result<Arc<AudioData>> {
-    mixer
-        .process_output()?
-        .expect_processed()
-        .ok_or_else(|| hisui::Error::new("value is missing"))?
-        .1
-        .expect_audio_data()
+    match mixer.next_output()? {
+        AudioMixerOutput::Processed(sample) => sample.expect_audio_data(),
+        AudioMixerOutput::Pending(stream_id) => Err(hisui::Error::new(format!(
+            "audio mixer is unexpectedly pending on stream {}",
+            stream_id.get()
+        ))),
+        AudioMixerOutput::Finished => Err(hisui::Error::new("audio mixer finished unexpectedly")),
+    }
 }

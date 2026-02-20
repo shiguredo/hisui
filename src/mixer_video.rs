@@ -10,10 +10,6 @@ use crate::{
     layout_region::Region,
     media::MediaStreamId,
     metadata::SourceId,
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -221,6 +217,51 @@ pub struct VideoMixer {
     stats: VideoMixerStats,
 }
 
+#[derive(Debug)]
+pub struct VideoMixerInput {
+    pub stream_id: MediaStreamId,
+    pub sample: Option<MediaSample>,
+}
+
+impl VideoMixerInput {
+    pub fn video_frame(stream_id: MediaStreamId, frame: VideoFrame) -> Self {
+        Self {
+            stream_id,
+            sample: Some(MediaSample::video_frame(frame)),
+        }
+    }
+
+    pub fn eos(stream_id: MediaStreamId) -> Self {
+        Self {
+            stream_id,
+            sample: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum VideoMixerOutput {
+    Processed {
+        stream_id: MediaStreamId,
+        sample: MediaSample,
+    },
+    Pending {
+        awaiting_stream_id: Option<MediaStreamId>,
+    },
+    Finished,
+}
+
+impl VideoMixerOutput {
+    pub fn expect_processed(self) -> Option<(MediaStreamId, MediaSample)> {
+        if let Self::Processed { stream_id, sample } = self {
+            Some((stream_id, sample))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
 enum VideoMixerRunOutput {
     Processed(MediaSample),
     Pending(MediaStreamId),
@@ -234,7 +275,6 @@ pub struct VideoMixerStats {
     total_output_video_frame_duration: crate::stats::StatsDuration,
     total_trimmed_video_frame_count: crate::stats::StatsCounter,
     total_extended_video_frame_count: crate::stats::StatsCounter,
-    error: crate::stats::StatsFlag,
 }
 
 impl VideoMixerStats {
@@ -244,15 +284,13 @@ impl VideoMixerStats {
         let total_output_video_frame_duration = stats.duration("total_output_video_frame_seconds");
         let total_trimmed_video_frame_count = stats.counter("total_trimmed_video_frame_count");
         let total_extended_video_frame_count = stats.counter("total_extended_video_frame_count");
-        let error = stats.flag("error");
-        error.set(false);
+        stats.flag("error").set(false);
         Self {
             total_input_video_frame_count,
             total_output_video_frame_count,
             total_output_video_frame_duration,
             total_trimmed_video_frame_count,
             total_extended_video_frame_count,
-            error,
         }
     }
 
@@ -274,10 +312,6 @@ impl VideoMixerStats {
 
     fn add_extended_video_frame_count(&self) {
         self.total_extended_video_frame_count.inc();
-    }
-
-    fn set_error(&self) {
-        self.error.set(true);
     }
 
     pub fn total_input_video_frame_count(&self) -> u64 {
@@ -640,36 +674,34 @@ impl VideoMixer {
             }
         }
     }
-}
 
-impl MediaProcessor for VideoMixer {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: self.input_stream_ids.clone(),
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::VIDEO_MIXER,
-        }
+    pub fn push_input(
+        &mut self,
+        stream_id: MediaStreamId,
+        sample: Option<MediaSample>,
+    ) -> Result<()> {
+        self.handle_input_sample(stream_id, sample)
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        self.handle_input_sample(input.stream_id, input.sample)
+    pub fn process_input(&mut self, input: VideoMixerInput) -> Result<()> {
+        self.push_input(input.stream_id, input.sample)
     }
 
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+    pub fn next_output(&mut self) -> Result<VideoMixerOutput> {
         match self.poll_output()? {
-            VideoMixerRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
+            VideoMixerRunOutput::Processed(sample) => Ok(VideoMixerOutput::Processed {
                 stream_id: self.output_stream_id,
                 sample,
             }),
-            VideoMixerRunOutput::Pending(stream_id) => Ok(MediaProcessorOutput::Pending {
+            VideoMixerRunOutput::Pending(stream_id) => Ok(VideoMixerOutput::Pending {
                 awaiting_stream_id: Some(stream_id),
             }),
-            VideoMixerRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
+            VideoMixerRunOutput::Finished => Ok(VideoMixerOutput::Finished),
         }
     }
 
-    fn set_error(&self) {
-        self.stats.set_error();
+    pub fn process_output(&mut self) -> Result<VideoMixerOutput> {
+        self.next_output()
     }
 }
 

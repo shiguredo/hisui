@@ -11,8 +11,7 @@ use hisui::{
     layout_region::{Grid, Region},
     media::MediaStreamId,
     metadata::{SourceId, SourceInfo},
-    mixer_video::{VideoMixer, VideoMixerSpec},
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
+    mixer_video::{VideoMixer, VideoMixerInput, VideoMixerOutput, VideoMixerSpec},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -43,7 +42,7 @@ fn start_noop_video_mixer() {
     // ミキサーへの入力が空なので、出力も空
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 }
 
@@ -73,19 +72,19 @@ fn mix_single_source() {
     let input_frame0 = video_frame(&source, size, ms(0), ms(500), 2);
     let input_frame1 = video_frame(&source, size, ms(500), ms(500), 4);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id,
             input_frame0.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id,
             input_frame1.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .process_input(VideoMixerInput::eos(input_stream_id))
         .unwrap();
 
     // 合成結果を取得する
@@ -108,7 +107,7 @@ fn mix_single_source() {
     // 全ての出力を取得した
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 
     // 統計情報を確認する
@@ -152,19 +151,19 @@ fn mix_single_source_with_offset() {
     let input_frame0 = video_frame(&source, output_size, ms(0), ms(500), 2);
     let input_frame1 = video_frame(&source, output_size, ms(500), ms(500), 4);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id,
             input_frame0.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id,
             input_frame1.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .process_input(VideoMixerInput::eos(input_stream_id))
         .unwrap();
 
     // 合成結果を取得する
@@ -223,7 +222,7 @@ fn mix_single_source_with_offset() {
     // 全ての出力を取得した
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 
     // 統計情報を確認する
@@ -279,19 +278,19 @@ fn single_source_multiple_regions() {
     let input_frame0 = video_frame(&source, cell_size, ms(0), ms(500), 2);
     let input_frame1 = video_frame(&source, cell_size, ms(500), ms(500), 4);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id,
             input_frame0.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id,
             input_frame1.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .process_input(VideoMixerInput::eos(input_stream_id))
         .unwrap();
 
     // 合成結果を取得する
@@ -350,7 +349,7 @@ fn single_source_multiple_regions() {
     // 全ての出力を取得した
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 
     // 統計情報を確認する
@@ -408,13 +407,10 @@ fn single_source_multiple_regions_with_resize() {
     // サイズは cell_size0 に合わせているので region1 での合成の際にはリサイズが発生する
     let input_frame = video_frame(&source, cell_size0, ms(0), ms(1000), 2);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id,
-            input_frame,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id, input_frame))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .process_input(VideoMixerInput::eos(input_stream_id))
         .unwrap();
 
     // 比較用に最初の合成フレームを覚えておく
@@ -435,7 +431,7 @@ fn single_source_multiple_regions_with_resize() {
     // 全ての出力を取得した
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 
     // 統計情報を確認する
@@ -480,27 +476,27 @@ fn mix_with_trim() -> hisui::Result<()> {
     let input_frame0 = video_frame(&source0, size, ms(0), ms(400), 2);
     let input_frame1 = video_frame(&source1, size, ms(800), ms(200), 4);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id0,
             input_frame0.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id1,
             input_frame1.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .process_input(VideoMixerInput::eos(input_stream_id0))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .process_input(VideoMixerInput::eos(input_stream_id1))
         .unwrap();
 
     // 合成結果を取得する
     let mut frames = Vec::new();
-    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output()? {
+    while let VideoMixerOutput::Processed { sample, .. } = mixer.process_output()? {
         let frame = sample.expect_video_frame()?;
         frames.push(frame);
     }
@@ -558,27 +554,27 @@ fn mix_without_trim() -> hisui::Result<()> {
     let input_frame0 = video_frame(&source0, size, ms(0), ms(400), 2);
     let input_frame1 = video_frame(&source1, size, ms(800), ms(200), 4);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id0,
             input_frame0.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
+        .process_input(VideoMixerInput::video_frame(
             input_stream_id1,
             input_frame1.clone(),
         ))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .process_input(VideoMixerInput::eos(input_stream_id0))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .process_input(VideoMixerInput::eos(input_stream_id1))
         .unwrap();
 
     // 合成結果を取得する
     let mut frames = Vec::new();
-    while let MediaProcessorOutput::Processed { sample, .. } = mixer.process_output()? {
+    while let VideoMixerOutput::Processed { sample, .. } = mixer.process_output()? {
         let frame = sample.expect_video_frame()?;
         frames.push(frame);
     }
@@ -687,40 +683,28 @@ fn mix_multiple_cells() -> hisui::Result<()> {
     let input_frame2 = video_frame(&source2, region_size, ms(200), ms(800), 3);
     let input_frame3 = video_frame(&source3, region_size, ms(0), ms(600), 4);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id0,
-            input_frame0,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id0, input_frame0))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id1,
-            input_frame1,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id1, input_frame1))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id2,
-            input_frame2,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id2, input_frame2))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id3,
-            input_frame3,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id3, input_frame3))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .process_input(VideoMixerInput::eos(input_stream_id0))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .process_input(VideoMixerInput::eos(input_stream_id1))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id2))
+        .process_input(VideoMixerInput::eos(input_stream_id2))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id3))
+        .process_input(VideoMixerInput::eos(input_stream_id3))
         .unwrap();
 
     // 合成結果を取得する
@@ -837,7 +821,7 @@ fn mix_multiple_cells() -> hisui::Result<()> {
     // 全ての出力を取得した
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 
     // 統計情報を確認する
@@ -911,40 +895,28 @@ fn mix_multiple_cells_with_no_borders() -> hisui::Result<()> {
     let input_frame2 = video_frame(&source2, region_size, ms(200), ms(800), 3);
     let input_frame3 = video_frame(&source3, region_size, ms(0), ms(600), 4);
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id0,
-            input_frame0,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id0, input_frame0))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id1,
-            input_frame1,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id1, input_frame1))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id2,
-            input_frame2,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id2, input_frame2))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::video_frame(
-            input_stream_id3,
-            input_frame3,
-        ))
+        .process_input(VideoMixerInput::video_frame(input_stream_id3, input_frame3))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id0))
+        .process_input(VideoMixerInput::eos(input_stream_id0))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id1))
+        .process_input(VideoMixerInput::eos(input_stream_id1))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id2))
+        .process_input(VideoMixerInput::eos(input_stream_id2))
         .unwrap();
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id3))
+        .process_input(VideoMixerInput::eos(input_stream_id3))
         .unwrap();
 
     // 合成結果を取得する
@@ -1061,7 +1033,7 @@ fn mix_multiple_cells_with_no_borders() -> hisui::Result<()> {
     // 全ての出力を取得した
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 
     // 統計情報を確認する
@@ -1102,20 +1074,17 @@ fn non_yuv_video_input_error() -> hisui::Result<()> {
     input_frame.format = VideoFormat::Av1;
     assert!(
         mixer
-            .process_input(MediaProcessorInput::video_frame(
-                input_stream_id,
-                input_frame,
-            ))
+            .process_input(VideoMixerInput::video_frame(input_stream_id, input_frame,))
             .is_err()
     );
     mixer
-        .process_input(MediaProcessorInput::eos(input_stream_id))
+        .process_input(VideoMixerInput::eos(input_stream_id))
         .unwrap();
 
     // エラーになるので、出力も存在しない
     assert!(matches!(
         mixer.process_output(),
-        Ok(MediaProcessorOutput::Finished)
+        Ok(VideoMixerOutput::Finished)
     ));
 
     // エラーは発生した
