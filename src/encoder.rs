@@ -23,20 +23,16 @@ use crate::{
     layout::Layout,
     layout_encode_params::LayoutEncodeParams,
     media::{MediaSample, MediaStreamId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
 };
 
 #[derive(Debug)]
 pub struct AudioEncoder {
-    input_stream_id: MediaStreamId,
-    output_stream_id: MediaStreamId,
+    _input_stream_id: MediaStreamId,
+    _output_stream_id: MediaStreamId,
     total_audio_data_count_metric: crate::stats::StatsCounter,
-    error_flag: crate::stats::StatsFlag,
+    _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<AudioData>,
     eos: bool,
     inner: AudioEncoderInner,
@@ -91,10 +87,10 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
+            _input_stream_id: input_stream_id,
+            _output_stream_id: output_stream_id,
             total_audio_data_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_opus(bitrate)?,
@@ -116,10 +112,10 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
+            _input_stream_id: input_stream_id,
+            _output_stream_id: output_stream_id,
             total_audio_data_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_fdk_aac(bitrate)?,
@@ -141,10 +137,10 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
+            _input_stream_id: input_stream_id,
+            _output_stream_id: output_stream_id,
             total_audio_data_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate)?,
@@ -277,37 +273,6 @@ fn drain_audio_encoder_output(
     }
 }
 
-impl MediaProcessor for AudioEncoder {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::AUDIO_ENCODER,
-        }
-    }
-
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        self.handle_input_sample(input.sample)
-    }
-
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        match self.poll_output()? {
-            EncoderRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample,
-            }),
-            EncoderRunOutput::Pending => Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: Some(self.input_stream_id),
-            }),
-            EncoderRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
-        }
-    }
-
-    fn set_error(&self) {
-        self.error_flag.set(true);
-    }
-}
-
 #[derive(Debug)]
 enum AudioEncoderInner {
     #[cfg(feature = "fdk-aac")]
@@ -385,13 +350,13 @@ impl VideoEncoderOptions {
 
 #[derive(Debug)]
 pub struct VideoEncoder {
-    input_stream_id: MediaStreamId,
-    output_stream_id: MediaStreamId,
+    _input_stream_id: MediaStreamId,
+    _output_stream_id: MediaStreamId,
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_output_video_frame_count_metric: crate::stats::StatsCounter,
-    error_flag: crate::stats::StatsFlag,
+    _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
@@ -417,13 +382,13 @@ impl VideoEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
+            _input_stream_id: input_stream_id,
+            _output_stream_id: output_stream_id,
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
             total_output_video_frame_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -669,37 +634,6 @@ fn drain_video_encoder_output(
                 return Ok(true);
             }
         }
-    }
-}
-
-impl MediaProcessor for VideoEncoder {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::VIDEO_ENCODER,
-        }
-    }
-
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        self.handle_input_sample(input.sample)
-    }
-
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        match self.poll_output()? {
-            EncoderRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample,
-            }),
-            EncoderRunOutput::Pending => Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: Some(self.input_stream_id),
-            }),
-            EncoderRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
-        }
-    }
-
-    fn set_error(&self) {
-        self.error_flag.set(true);
     }
 }
 

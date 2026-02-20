@@ -1,18 +1,24 @@
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-use hisui::{decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use hisui::{
+    MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
     metadata::SourceId,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::Mp4VideoReader,
     video::VideoFrame,
 };
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+use hisui::{audio::AudioData, decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
 
 const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
+const VIDEO_INPUT_TRACK_ID: &str = "decoder_test_video_input";
+const VIDEO_OUTPUT_TRACK_ID: &str = "decoder_test_video_output";
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+const AUDIO_INPUT_TRACK_ID: &str = "decoder_test_audio_input";
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+const AUDIO_OUTPUT_TRACK_ID: &str = "decoder_test_audio_output";
 
 #[test]
 fn h264_multi_resolutions() -> hisui::Result<()> {
@@ -75,34 +81,22 @@ where
     };
 
     // デコードする
-    let mut decoder = VideoDecoder::new(
-        DECODER_INPUT_STREAM_ID,
-        DECODER_OUTPUT_STREAM_ID,
-        options,
-        hisui::stats::Stats::new(),
-    );
     let mut output_frames = Vec::new();
     let mut blue_count = 0;
     let mut red_count = 0;
+    let mut input_frames = Vec::new();
 
     for input_frame in reader0 {
-        let input = prepend_h264_sps_pps(input_frame?);
-        decoder.process_input(input)?;
+        input_frames.push(prepend_h264_sps_pps(input_frame?));
         blue_count += 1;
     }
 
     // このタイミングで解像度などが切り替わる
     for input_frame in reader1 {
-        let input = prepend_h264_sps_pps(input_frame?);
-        decoder.process_input(input)?;
+        input_frames.push(prepend_h264_sps_pps(input_frame?));
         red_count += 1;
     }
-
-    decoder.process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))?;
-    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
-        let output_frame = sample.expect_video_frame()?;
-        output_frames.push(output_frame);
-    }
+    output_frames.extend(decode_video_frames_with_pipeline(input_frames, options)?);
 
     // デコード結果を確認する
     for output_frame in output_frames {
@@ -138,7 +132,7 @@ where
     Ok(())
 }
 
-fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
+fn prepend_h264_sps_pps(mut frame: VideoFrame) -> VideoFrame {
     if let Some(SampleEntry::Avc1(Avc1Box {
         avcc_box: AvccBox {
             sps_list, pps_list, ..
@@ -157,7 +151,7 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
     };
 
     // 対象外のフレームはそのまま返す
-    MediaProcessorInput::video_frame(DECODER_INPUT_STREAM_ID, frame)
+    frame
 }
 
 #[test]
@@ -165,32 +159,327 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 fn aac_decode() -> hisui::Result<()> {
     let source_id = SourceId::new("beep-aac-audio");
     let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4")?;
-    let mut decoder = AudioDecoder::new(
-        MediaStreamId::new(0),
-        MediaStreamId::new(1),
-        hisui::stats::Stats::new(),
-    )?;
-
-    let mut decoded_count = 0;
-
+    let mut input_samples = Vec::new();
     for input_data in reader {
-        let input_data = input_data?;
-        let input = MediaProcessorInput::audio_data(MediaStreamId::new(0), input_data);
-        decoder.process_input(input)?;
+        input_samples.push(input_data?);
+    }
+    let decoded_count = decode_audio_count_with_pipeline(input_samples)?;
+    assert!(decoded_count > 0, "Should decode at least one audio frame");
+    Ok(())
+}
 
-        while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
-            let _output_data = sample.expect_audio_data()?;
-            decoded_count += 1;
+fn decode_video_frames_with_pipeline(
+    input_frames: Vec<VideoFrame>,
+    options: VideoDecoderOptions,
+) -> hisui::Result<Vec<VideoFrame>> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let pipeline = MediaPipeline::new()?;
+        let pipeline_handle = pipeline.handle();
+        let mut pipeline_task = tokio::spawn(pipeline.run());
+
+        let source_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_video_source"),
+            ProcessorMetadata::new("decoder_test_video_source"),
+        )
+        .await?;
+        let source_task = tokio::spawn(async move {
+            run_video_source(
+                source_handle,
+                input_frames,
+                TrackId::new(VIDEO_INPUT_TRACK_ID),
+            )
+            .await
+        });
+
+        let decoder_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_video_decoder"),
+            ProcessorMetadata::new("video_decoder"),
+        )
+        .await?;
+        let decoder_task = tokio::spawn(async move {
+            let decoder = VideoDecoder::new(
+                DECODER_INPUT_STREAM_ID,
+                DECODER_OUTPUT_STREAM_ID,
+                options,
+                decoder_handle.stats(),
+            );
+            decoder
+                .run(
+                    decoder_handle,
+                    TrackId::new(VIDEO_INPUT_TRACK_ID),
+                    TrackId::new(VIDEO_OUTPUT_TRACK_ID),
+                )
+                .await
+        });
+
+        let sink_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_video_sink"),
+            ProcessorMetadata::new("decoder_test_video_sink"),
+        )
+        .await?;
+        let sink_task = tokio::spawn(async move {
+            collect_video_frames(sink_handle, TrackId::new(VIDEO_OUTPUT_TRACK_ID)).await
+        });
+
+        pipeline_handle.complete_initial_processor_registration();
+
+        let output_frames = await_video_pipeline_tasks(
+            source_task,
+            decoder_task,
+            sink_task,
+            pipeline_handle,
+            &mut pipeline_task,
+        )
+        .await?;
+        Ok(output_frames)
+    })
+}
+
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+fn decode_audio_count_with_pipeline(input_samples: Vec<AudioData>) -> hisui::Result<usize> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let pipeline = MediaPipeline::new()?;
+        let pipeline_handle = pipeline.handle();
+        let mut pipeline_task = tokio::spawn(pipeline.run());
+
+        let source_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_audio_source"),
+            ProcessorMetadata::new("decoder_test_audio_source"),
+        )
+        .await?;
+        let source_task = tokio::spawn(async move {
+            run_audio_source(
+                source_handle,
+                input_samples,
+                TrackId::new(AUDIO_INPUT_TRACK_ID),
+            )
+            .await
+        });
+
+        let decoder_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_audio_decoder"),
+            ProcessorMetadata::new("audio_decoder"),
+        )
+        .await?;
+        let decoder_task = tokio::spawn(async move {
+            let decoder = AudioDecoder::new(
+                DECODER_INPUT_STREAM_ID,
+                DECODER_OUTPUT_STREAM_ID,
+                decoder_handle.stats(),
+            )?;
+            decoder
+                .run(
+                    decoder_handle,
+                    TrackId::new(AUDIO_INPUT_TRACK_ID),
+                    TrackId::new(AUDIO_OUTPUT_TRACK_ID),
+                )
+                .await
+        });
+
+        let sink_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_audio_sink"),
+            ProcessorMetadata::new("decoder_test_audio_sink"),
+        )
+        .await?;
+        let sink_task = tokio::spawn(async move {
+            collect_audio_count(sink_handle, TrackId::new(AUDIO_OUTPUT_TRACK_ID)).await
+        });
+
+        pipeline_handle.complete_initial_processor_registration();
+
+        let output_count = await_audio_pipeline_tasks(
+            source_task,
+            decoder_task,
+            sink_task,
+            pipeline_handle,
+            &mut pipeline_task,
+        )
+        .await?;
+        Ok(output_count)
+    })
+}
+
+async fn register_processor(
+    pipeline_handle: &hisui::MediaPipelineHandle,
+    processor_id: ProcessorId,
+    metadata: ProcessorMetadata,
+) -> hisui::Result<ProcessorHandle> {
+    pipeline_handle
+        .register_processor(processor_id.clone(), metadata)
+        .await
+        .map_err(|e| match e {
+            hisui::RegisterProcessorError::PipelineTerminated => {
+                hisui::Error::new("failed to register processor: pipeline has terminated")
+            }
+            hisui::RegisterProcessorError::DuplicateProcessorId => hisui::Error::new(format!(
+                "processor ID already exists: {}",
+                processor_id.get()
+            )),
+        })
+}
+
+async fn run_video_source(
+    handle: ProcessorHandle,
+    frames: Vec<VideoFrame>,
+    track_id: TrackId,
+) -> hisui::Result<()> {
+    let mut tx = handle.publish_track(track_id).await?;
+    handle.notify_ready();
+    handle.wait_subscribers_ready().await?;
+    for frame in frames {
+        if !tx.send_video(frame) {
+            break;
+        }
+    }
+    tx.send_eos();
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+async fn run_audio_source(
+    handle: ProcessorHandle,
+    samples: Vec<AudioData>,
+    track_id: TrackId,
+) -> hisui::Result<()> {
+    let mut tx = handle.publish_track(track_id).await?;
+    handle.notify_ready();
+    handle.wait_subscribers_ready().await?;
+    for sample in samples {
+        if !tx.send_audio(sample) {
+            break;
+        }
+    }
+    tx.send_eos();
+    Ok(())
+}
+
+async fn collect_video_frames(
+    handle: ProcessorHandle,
+    track_id: TrackId,
+) -> hisui::Result<Vec<VideoFrame>> {
+    let mut rx = handle.subscribe_track(track_id);
+    handle.notify_ready();
+    let mut frames = Vec::new();
+    loop {
+        match rx.recv().await {
+            Message::Media(sample) => {
+                let frame = sample.expect_video_frame()?;
+                frames.push((*frame).clone());
+            }
+            Message::Eos => break,
+            Message::Syn(_) => {}
+        }
+    }
+    Ok(frames)
+}
+
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+async fn collect_audio_count(handle: ProcessorHandle, track_id: TrackId) -> hisui::Result<usize> {
+    let mut rx = handle.subscribe_track(track_id);
+    handle.notify_ready();
+    let mut count = 0usize;
+    loop {
+        match rx.recv().await {
+            Message::Media(sample) => {
+                let _data = sample.expect_audio_data()?;
+                count += 1;
+            }
+            Message::Eos => break,
+            Message::Syn(_) => {}
+        }
+    }
+    Ok(count)
+}
+
+async fn await_video_pipeline_tasks(
+    source_task: tokio::task::JoinHandle<hisui::Result<()>>,
+    decoder_task: tokio::task::JoinHandle<hisui::Result<()>>,
+    sink_task: tokio::task::JoinHandle<hisui::Result<Vec<VideoFrame>>>,
+    pipeline_handle: hisui::MediaPipelineHandle,
+    pipeline_task: &mut tokio::task::JoinHandle<()>,
+) -> hisui::Result<Vec<VideoFrame>> {
+    match source_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(hisui::Error::new(format!("source task join failed: {e}"))),
+    }
+    match decoder_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(hisui::Error::new(format!("decoder task join failed: {e}"))),
+    }
+    let output_frames = match sink_task.await {
+        Ok(Ok(frames)) => frames,
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(hisui::Error::new(format!("sink task join failed: {e}"))),
+    };
+
+    drop(pipeline_handle);
+    match tokio::time::timeout(std::time::Duration::from_secs(5), &mut *pipeline_task).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            return Err(hisui::Error::new(format!(
+                "media pipeline task failed: {e}"
+            )));
+        }
+        Err(_) => {
+            pipeline_task.abort();
+            let _ = pipeline_task.await;
         }
     }
 
-    decoder.process_input(MediaProcessorInput::eos(MediaStreamId::new(0)))?;
+    Ok(output_frames)
+}
 
-    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
-        let _output_data = sample.expect_audio_data()?;
-        decoded_count += 1;
+#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
+async fn await_audio_pipeline_tasks(
+    source_task: tokio::task::JoinHandle<hisui::Result<()>>,
+    decoder_task: tokio::task::JoinHandle<hisui::Result<()>>,
+    sink_task: tokio::task::JoinHandle<hisui::Result<usize>>,
+    pipeline_handle: hisui::MediaPipelineHandle,
+    pipeline_task: &mut tokio::task::JoinHandle<()>,
+) -> hisui::Result<usize> {
+    match source_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(hisui::Error::new(format!("source task join failed: {e}"))),
+    }
+    match decoder_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(hisui::Error::new(format!("decoder task join failed: {e}"))),
+    }
+    let output_count = match sink_task.await {
+        Ok(Ok(count)) => count,
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(hisui::Error::new(format!("sink task join failed: {e}"))),
+    };
+
+    drop(pipeline_handle);
+    match tokio::time::timeout(std::time::Duration::from_secs(5), &mut *pipeline_task).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            return Err(hisui::Error::new(format!(
+                "media pipeline task failed: {e}"
+            )));
+        }
+        Err(_) => {
+            pipeline_task.abort();
+            let _ = pipeline_task.await;
+        }
     }
 
-    assert!(decoded_count > 0, "Should decode at least one audio frame");
-    Ok(())
+    Ok(output_count)
 }

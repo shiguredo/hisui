@@ -17,21 +17,14 @@ use crate::{
     decoder_opus::OpusDecoder,
     layout_decode_params::LayoutDecodeParams,
     media::{MediaSample, MediaStreamId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
 
 #[derive(Debug)]
 pub struct AudioDecoder {
-    input_stream_id: MediaStreamId,
-    output_stream_id: MediaStreamId,
     total_audio_data_count_metric: crate::stats::StatsCounter,
     source_id_metric: crate::stats::StatsString,
-    error_flag: crate::stats::StatsFlag,
     decoded: VecDeque<AudioData>,
     eos: bool,
     inner: Option<AudioDecoderInner>,
@@ -45,8 +38,8 @@ enum DecoderRunOutput {
 
 impl AudioDecoder {
     pub fn new(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
+        _input_stream_id: MediaStreamId,
+        _output_stream_id: MediaStreamId,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         compose_stats
@@ -55,14 +48,10 @@ impl AudioDecoder {
         compose_stats.string("codec").set(CodecName::Opus.as_str());
         let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
         let source_id_metric = compose_stats.string("source_id");
-        let error_flag = compose_stats.flag("error");
-        error_flag.set(false);
+        compose_stats.flag("error").set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
             total_audio_data_count_metric,
             source_id_metric,
-            error_flag,
             decoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -179,37 +168,6 @@ impl AudioDecoder {
     }
 }
 
-impl MediaProcessor for AudioDecoder {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::AUDIO_DECODER,
-        }
-    }
-
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        self.handle_input_sample(input.sample)
-    }
-
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        match self.poll_output()? {
-            DecoderRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample,
-            }),
-            DecoderRunOutput::Pending => Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: Some(self.input_stream_id),
-            }),
-            DecoderRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
-        }
-    }
-
-    fn set_error(&self) {
-        self.error_flag.set(true);
-    }
-}
-
 #[derive(Debug)]
 enum AudioDecoderInner {
     Opus(OpusDecoder),
@@ -276,14 +234,11 @@ pub struct VideoDecoderOptions {
 
 #[derive(Debug)]
 pub struct VideoDecoder {
-    input_stream_id: MediaStreamId,
-    output_stream_id: MediaStreamId,
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_output_video_frame_count_metric: crate::stats::StatsCounter,
     source_id_metric: crate::stats::StatsString,
-    error_flag: crate::stats::StatsFlag,
     decoded: VecDeque<VideoFrame>,
     eos: bool,
     inner: VideoDecoderInner,
@@ -291,8 +246,8 @@ pub struct VideoDecoder {
 
 impl VideoDecoder {
     pub fn new(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
+        _input_stream_id: MediaStreamId,
+        _output_stream_id: MediaStreamId,
         options: VideoDecoderOptions,
         mut compose_stats: crate::stats::Stats,
     ) -> Self {
@@ -303,17 +258,13 @@ impl VideoDecoder {
         let total_output_video_frame_count_metric =
             compose_stats.counter("total_output_video_frame_count");
         let source_id_metric = compose_stats.string("source_id");
-        let error_flag = compose_stats.flag("error");
-        error_flag.set(false);
+        compose_stats.flag("error").set(false);
         Self {
-            input_stream_id,
-            output_stream_id,
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
             total_output_video_frame_count_metric,
             source_id_metric,
-            error_flag,
             decoded: VecDeque::new(),
             eos: false,
             inner: VideoDecoderInner::new(options),
@@ -482,37 +433,6 @@ fn drain_video_decoder_output(
                 return Ok(true);
             }
         }
-    }
-}
-
-impl MediaProcessor for VideoDecoder {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::VIDEO_DECODER,
-        }
-    }
-
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        self.handle_input_sample(input.sample)
-    }
-
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        match self.poll_output()? {
-            DecoderRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample,
-            }),
-            DecoderRunOutput::Pending => Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: Some(self.input_stream_id),
-            }),
-            DecoderRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
-        }
-    }
-
-    fn set_error(&self) {
-        self.error_flag.set(true);
     }
 }
 
