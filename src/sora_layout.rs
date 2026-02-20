@@ -212,7 +212,7 @@ impl Layout {
             width: self.resolution.width(),
             height: self.resolution.height(),
             frame_rate: self.frame_rate,
-            encode_params: self.encode_params.clone(),
+            encode_params: self.encode_params.config.clone(),
         }
     }
 

@@ -1,4 +1,5 @@
 // Sora の録画ファイル合成処理固有
+use crate::encoder::EncodeConfig;
 #[cfg(feature = "libvpx")]
 use crate::sora_encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
@@ -10,79 +11,64 @@ use crate::{sora_encoder_openh264_params, sora_encoder_svt_av1_params};
 
 #[derive(Debug, Clone)]
 pub struct LayoutEncodeParams {
-    #[cfg(feature = "libvpx")]
-    pub libvpx_vp8: shiguredo_libvpx::EncoderConfig,
-    #[cfg(feature = "libvpx")]
-    pub libvpx_vp9: shiguredo_libvpx::EncoderConfig,
-    pub openh264: shiguredo_openh264::EncoderConfig,
-    pub svt_av1: shiguredo_svt_av1::EncoderConfig,
-    #[cfg(target_os = "macos")]
-    pub video_toolbox_h264: shiguredo_video_toolbox::EncoderConfig,
-    #[cfg(target_os = "macos")]
-    pub video_toolbox_h265: shiguredo_video_toolbox::EncoderConfig,
-    #[cfg(feature = "nvcodec")]
-    pub nvcodec_h264: shiguredo_nvcodec::EncoderConfig,
-    #[cfg(feature = "nvcodec")]
-    pub nvcodec_h265: shiguredo_nvcodec::EncoderConfig,
-    #[cfg(feature = "nvcodec")]
-    pub nvcodec_av1: shiguredo_nvcodec::EncoderConfig,
+    pub config: EncodeConfig,
 }
 
 impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodeParams {
     type Error = nojson::JsonParseError;
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
-        let mut params = Self::default();
+        let mut config = Self::default().config;
         for (key, value) in value.to_object()? {
             match &*key.to_unquoted_string_str()? {
                 #[cfg(feature = "libvpx")]
                 "libvpx_vp8_encode_params" => {
-                    params.libvpx_vp8 = sora_encoder_libvpx_params::parse_vp8_encode_params(value)?;
+                    config.libvpx_vp8 = sora_encoder_libvpx_params::parse_vp8_encode_params(value)?;
                 }
                 #[cfg(feature = "libvpx")]
                 "libvpx_vp9_encode_params" => {
-                    params.libvpx_vp9 = sora_encoder_libvpx_params::parse_vp9_encode_params(value)?;
+                    config.libvpx_vp9 = sora_encoder_libvpx_params::parse_vp9_encode_params(value)?;
                 }
                 "openh264_encode_params" => {
-                    params.openh264 = sora_encoder_openh264_params::parse_encode_params(value)?;
+                    config.openh264 = sora_encoder_openh264_params::parse_encode_params(value)?;
                 }
                 "svt_av1_encode_params" => {
-                    params.svt_av1 = sora_encoder_svt_av1_params::parse_encode_params(value)?;
+                    config.svt_av1 = sora_encoder_svt_av1_params::parse_encode_params(value)?;
                 }
                 #[cfg(target_os = "macos")]
                 "video_toolbox_h264_encode_params" => {
-                    params.video_toolbox_h264 =
+                    config.video_toolbox_h264 =
                         sora_encoder_video_toolbox_params::parse_h264_encode_params(value)?;
                 }
                 #[cfg(target_os = "macos")]
                 "video_toolbox_h265_encode_params" => {
-                    params.video_toolbox_h265 =
+                    config.video_toolbox_h265 =
                         sora_encoder_video_toolbox_params::parse_h265_encode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_h264_encode_params" => {
-                    params.nvcodec_h264 =
+                    config.nvcodec_h264 =
                         sora_encoder_nvcodec_params::parse_h264_encode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_h265_encode_params" => {
-                    params.nvcodec_h265 =
+                    config.nvcodec_h265 =
                         sora_encoder_nvcodec_params::parse_h265_encode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_av1_encode_params" => {
-                    params.nvcodec_av1 =
+                    config.nvcodec_av1 =
                         sora_encoder_nvcodec_params::parse_av1_encode_params(value)?;
                 }
                 _ => {}
             }
         }
-        Ok(params)
+        Ok(Self { config })
     }
 }
 
 impl LayoutEncodeParams {
-    fn new_from_default_layout() -> Result<Self, nojson::JsonParseError> {
+    fn new_config_from_default_layout() -> Result<EncodeConfig, nojson::JsonParseError> {
         let default_layout = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
         let value = default_layout.value();
 
@@ -133,7 +119,7 @@ impl LayoutEncodeParams {
             value.to_member("nvcodec_av1_encode_params")?.required()?,
         )?;
 
-        Ok(Self {
+        Ok(EncodeConfig {
             #[cfg(feature = "libvpx")]
             libvpx_vp8,
             #[cfg(feature = "libvpx")]
@@ -156,6 +142,8 @@ impl LayoutEncodeParams {
 
 impl Default for LayoutEncodeParams {
     fn default() -> Self {
-        Self::new_from_default_layout().expect("bug")
+        Self {
+            config: Self::new_config_from_default_layout().expect("bug"),
+        }
     }
 }

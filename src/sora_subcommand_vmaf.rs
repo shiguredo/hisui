@@ -322,7 +322,7 @@ async fn setup_vmaf_pipeline(
 
     let decoder_options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
-        decode_params: layout.decode_params.clone(),
+        decode_params: layout.decode_params.config.clone(),
         engines: None,
     };
     let video_source_ids = layout.video_source_ids().cloned().collect::<HashSet<_>>();

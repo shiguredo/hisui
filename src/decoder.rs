@@ -16,7 +16,6 @@ use crate::{
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
     media::MediaSample,
-    sora_layout_decode_params::LayoutDecodeParams,
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -212,10 +211,24 @@ impl AudioDecoderInner {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct DecodeConfig {
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_h264: shiguredo_nvcodec::DecoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_h265: shiguredo_nvcodec::DecoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_av1: shiguredo_nvcodec::DecoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_vp8: shiguredo_nvcodec::DecoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_vp9: shiguredo_nvcodec::DecoderConfig,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct VideoDecoderOptions {
     pub openh264_lib: Option<Openh264Library>,
-    pub decode_params: LayoutDecodeParams,
+    pub decode_params: DecodeConfig,
     pub engines: Option<Vec<EngineName>>,
 }
 

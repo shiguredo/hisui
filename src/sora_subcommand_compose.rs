@@ -353,7 +353,7 @@ async fn setup_pipeline(
     let mut video_mixer_input_track_source_ids = HashMap::new();
     let decoder_options = VideoDecoderOptions {
         openh264_lib: openh264_lib.clone(),
-        decode_params: layout.decode_params.clone(),
+        decode_params: layout.decode_params.config.clone(),
         engines: layout.video_decode_engines.clone(),
     };
     for source_id in layout.video_source_ids() {
