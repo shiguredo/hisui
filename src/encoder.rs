@@ -22,58 +22,45 @@ use crate::{
     encoder_svt_av1::SvtAv1Encoder,
     layout::Layout,
     layout_encode_params::LayoutEncodeParams,
-    media::{MediaSample, MediaStreamId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
+    media::MediaSample,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
 };
 
 #[derive(Debug)]
 pub struct AudioEncoder {
-    input_stream_id: MediaStreamId,
-    output_stream_id: MediaStreamId,
     total_audio_data_count_metric: crate::stats::StatsCounter,
-    error_flag: crate::stats::StatsFlag,
+    _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<AudioData>,
     eos: bool,
     inner: AudioEncoderInner,
+}
+
+enum EncoderRunOutput {
+    Processed(MediaSample),
+    Pending,
+    Finished,
 }
 
 impl AudioEncoder {
     pub fn new(
         codec: CodecName,
         bitrate: NonZeroUsize,
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         match codec {
             #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => {
-                AudioEncoder::new_fdk_aac(input_stream_id, output_stream_id, bitrate, compose_stats)
-            }
+            CodecName::Aac => AudioEncoder::new_fdk_aac(bitrate, compose_stats),
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
-            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
-                input_stream_id,
-                output_stream_id,
-                bitrate,
-                compose_stats,
-            ),
+            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(bitrate, compose_stats),
             #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
             CodecName::Aac => Err(crate::Error::new("AAC output is not supported")),
-            CodecName::Opus => {
-                AudioEncoder::new_opus(input_stream_id, output_stream_id, bitrate, compose_stats)
-            }
+            CodecName::Opus => AudioEncoder::new_opus(bitrate, compose_stats),
             _ => unreachable!(),
         }
     }
 
     fn new_opus(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -85,10 +72,8 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
             total_audio_data_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_opus(bitrate)?,
@@ -97,8 +82,6 @@ impl AudioEncoder {
 
     #[cfg(feature = "fdk-aac")]
     fn new_fdk_aac(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -110,10 +93,8 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
             total_audio_data_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_fdk_aac(bitrate)?,
@@ -122,8 +103,6 @@ impl AudioEncoder {
 
     #[cfg(target_os = "macos")]
     fn new_audio_toolbox_aac(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -135,10 +114,8 @@ impl AudioEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
             total_audio_data_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate)?,
@@ -199,15 +176,7 @@ impl AudioEncoder {
             let message = input_rx.recv().await;
             let is_eos = matches!(message, Message::Eos);
 
-            match message {
-                Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
-                }
-                Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
-                }
-                Message::Syn(_) => {}
-            }
+            self.handle_input_message(message)?;
 
             let finished = drain_audio_encoder_output(&mut self, &mut output_tx)?;
             if finished {
@@ -222,40 +191,17 @@ impl AudioEncoder {
 
         Ok(())
     }
-}
 
-fn drain_audio_encoder_output(
-    encoder: &mut AudioEncoder,
-    output_tx: &mut crate::MessageSender,
-) -> Result<bool> {
-    loop {
-        match encoder.process_output()? {
-            MediaProcessorOutput::Processed { sample, .. } => {
-                if !output_tx.send_media(sample) {
-                    return Ok(true);
-                }
-            }
-            MediaProcessorOutput::Pending { .. } => {
-                return Ok(false);
-            }
-            MediaProcessorOutput::Finished => {
-                return Ok(true);
-            }
-        }
-    }
-}
-
-impl MediaProcessor for AudioEncoder {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::AUDIO_ENCODER,
+    fn handle_input_message(&mut self, message: Message) -> Result<()> {
+        match message {
+            Message::Media(sample) => self.handle_input_sample(Some(sample)),
+            Message::Eos => self.handle_input_sample(None),
+            Message::Syn(_) => Ok(()),
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        let encoded = if let Some(sample) = input.sample {
+    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+        let encoded = if let Some(sample) = sample {
             let data = sample.expect_audio_data()?;
             self.inner.encode(&data)?
         } else {
@@ -270,23 +216,35 @@ impl MediaProcessor for AudioEncoder {
         Ok(())
     }
 
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+    fn poll_output(&mut self) -> Result<EncoderRunOutput> {
         if let Some(data) = self.encoded.pop_front() {
-            Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample: MediaSample::audio_data(data),
-            })
+            Ok(EncoderRunOutput::Processed(MediaSample::audio_data(data)))
         } else if self.eos {
-            Ok(MediaProcessorOutput::Finished)
+            Ok(EncoderRunOutput::Finished)
         } else {
-            Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: Some(self.input_stream_id),
-            })
+            Ok(EncoderRunOutput::Pending)
         }
     }
+}
 
-    fn set_error(&self) {
-        self.error_flag.set(true);
+fn drain_audio_encoder_output(
+    encoder: &mut AudioEncoder,
+    output_tx: &mut crate::MessageSender,
+) -> Result<bool> {
+    loop {
+        match encoder.poll_output()? {
+            EncoderRunOutput::Processed(sample) => {
+                if !output_tx.send_media(sample) {
+                    return Ok(true);
+                }
+            }
+            EncoderRunOutput::Pending => {
+                return Ok(false);
+            }
+            EncoderRunOutput::Finished => {
+                return Ok(true);
+            }
+        }
     }
 }
 
@@ -367,13 +325,11 @@ impl VideoEncoderOptions {
 
 #[derive(Debug)]
 pub struct VideoEncoder {
-    input_stream_id: MediaStreamId,
-    output_stream_id: MediaStreamId,
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_output_video_frame_count_metric: crate::stats::StatsCounter,
-    error_flag: crate::stats::StatsFlag,
+    _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
@@ -385,8 +341,6 @@ pub struct VideoEncoder {
 impl VideoEncoder {
     pub fn new(
         options: &VideoEncoderOptions,
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -399,13 +353,11 @@ impl VideoEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
-            input_stream_id,
-            output_stream_id,
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
             total_output_video_frame_count_metric,
-            error_flag,
+            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             inner: None,
@@ -570,15 +522,7 @@ impl VideoEncoder {
             let message = input_rx.recv().await;
             let is_eos = matches!(message, Message::Eos);
 
-            match message {
-                Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
-                }
-                Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
-                }
-                Message::Syn(_) => {}
-            }
+            self.handle_input_message(message)?;
 
             let finished = drain_video_encoder_output(&mut self, &mut output_tx)?;
             if finished {
@@ -593,40 +537,17 @@ impl VideoEncoder {
 
         Ok(())
     }
-}
 
-fn drain_video_encoder_output(
-    encoder: &mut VideoEncoder,
-    output_tx: &mut crate::MessageSender,
-) -> Result<bool> {
-    loop {
-        match encoder.process_output()? {
-            MediaProcessorOutput::Processed { sample, .. } => {
-                if !output_tx.send_media(sample) {
-                    return Ok(true);
-                }
-            }
-            MediaProcessorOutput::Pending { .. } => {
-                return Ok(false);
-            }
-            MediaProcessorOutput::Finished => {
-                return Ok(true);
-            }
-        }
-    }
-}
-
-impl MediaProcessor for VideoEncoder {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: vec![self.input_stream_id],
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::VIDEO_ENCODER,
+    fn handle_input_message(&mut self, message: Message) -> Result<()> {
+        match message {
+            Message::Media(sample) => self.handle_input_sample(Some(sample)),
+            Message::Eos => self.handle_input_sample(None),
+            Message::Syn(_) => Ok(()),
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        if let Some(sample) = input.sample {
+    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+        if let Some(sample) = sample {
             let frame = sample.expect_video_frame()?;
 
             // 最初のフレームで、解像度を使って初期化する
@@ -653,23 +574,35 @@ impl MediaProcessor for VideoEncoder {
         Ok(())
     }
 
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+    fn poll_output(&mut self) -> Result<EncoderRunOutput> {
         if let Some(frame) = self.encoded.pop_front() {
-            Ok(MediaProcessorOutput::Processed {
-                stream_id: self.output_stream_id,
-                sample: MediaSample::video_frame(frame),
-            })
+            Ok(EncoderRunOutput::Processed(MediaSample::video_frame(frame)))
         } else if self.eos {
-            Ok(MediaProcessorOutput::Finished)
+            Ok(EncoderRunOutput::Finished)
         } else {
-            Ok(MediaProcessorOutput::Pending {
-                awaiting_stream_id: Some(self.input_stream_id),
-            })
+            Ok(EncoderRunOutput::Pending)
         }
     }
+}
 
-    fn set_error(&self) {
-        self.error_flag.set(true);
+fn drain_video_encoder_output(
+    encoder: &mut VideoEncoder,
+    output_tx: &mut crate::MessageSender,
+) -> Result<bool> {
+    loop {
+        match encoder.poll_output()? {
+            EncoderRunOutput::Processed(sample) => {
+                if !output_tx.send_media(sample) {
+                    return Ok(true);
+                }
+            }
+            EncoderRunOutput::Pending => {
+                return Ok(false);
+            }
+            EncoderRunOutput::Finished => {
+                return Ok(true);
+            }
+        }
     }
 }
 

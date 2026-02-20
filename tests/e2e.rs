@@ -3,11 +3,10 @@ use std::time::Duration;
 #[cfg(feature = "libvpx")]
 use hisui::decoder_libvpx::LibvpxDecoder;
 use hisui::{
+    MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     decoder_opus::OpusDecoder,
-    media::MediaStreamId,
     metadata::SourceId,
-    processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     types::{CodecName, EngineName},
     video::VideoFrame,
@@ -311,9 +310,6 @@ fn test_simple_single_source_common(
     }
 
     // 映像をデコードをして中身を確認する
-    const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
-    const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
-
     let check_decoded_frame = |decoded: &VideoFrame| -> hisui::Result<()> {
         // 画像が赤一色かどうかの確認する
         let (y_plane, u_plane, v_plane) = decoded
@@ -331,32 +327,161 @@ fn test_simple_single_source_common(
         Ok(())
     };
 
-    let mut decoder = VideoDecoder::new(
-        DECODER_INPUT_STREAM_ID,
-        DECODER_OUTPUT_STREAM_ID,
-        VideoDecoderOptions::default(),
-        hisui::stats::Stats::new(),
-    );
-
-    for frame in video_samples {
-        decoder.process_input(MediaProcessorInput::video_frame(
-            DECODER_INPUT_STREAM_ID,
-            frame,
-        ))?;
-        while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
-            let decoded = sample.expect_video_frame()?;
-            check_decoded_frame(&decoded)?;
-        }
-    }
-
-    decoder.process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))?;
-
-    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
-        let decoded = sample.expect_video_frame()?;
+    let decoded_frames = decode_video_frames_with_pipeline(video_samples)?;
+    for decoded in decoded_frames {
         check_decoded_frame(&decoded)?;
     }
 
     Ok(())
+}
+
+fn decode_video_frames_with_pipeline(
+    video_samples: Vec<VideoFrame>,
+) -> hisui::Result<Vec<VideoFrame>> {
+    const INPUT_TRACK_ID: &str = "e2e_decoder_input";
+    const OUTPUT_TRACK_ID: &str = "e2e_decoder_output";
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let pipeline = MediaPipeline::new()?;
+        let pipeline_handle = pipeline.handle();
+        let mut pipeline_task = tokio::spawn(pipeline.run());
+
+        let source_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("e2e_decoder_source"),
+            ProcessorMetadata::new("e2e_decoder_source"),
+        )
+        .await?;
+        let source_task = tokio::spawn(async move {
+            run_video_source(source_handle, video_samples, TrackId::new(INPUT_TRACK_ID)).await
+        });
+
+        let decoder_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("e2e_video_decoder"),
+            ProcessorMetadata::new("video_decoder"),
+        )
+        .await?;
+        let decoder_task = tokio::spawn(async move {
+            let decoder = VideoDecoder::new(VideoDecoderOptions::default(), decoder_handle.stats());
+            decoder
+                .run(
+                    decoder_handle,
+                    TrackId::new(INPUT_TRACK_ID),
+                    TrackId::new(OUTPUT_TRACK_ID),
+                )
+                .await
+        });
+
+        let sink_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("e2e_decoder_sink"),
+            ProcessorMetadata::new("e2e_decoder_sink"),
+        )
+        .await?;
+        let sink_task = tokio::spawn(async move {
+            collect_video_frames(sink_handle, TrackId::new(OUTPUT_TRACK_ID)).await
+        });
+
+        pipeline_handle.complete_initial_processor_registration();
+
+        match source_task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(hisui::Error::new(format!("source task join failed: {e}"))),
+        }
+        match decoder_task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(hisui::Error::new(format!("decoder task join failed: {e}"))),
+        }
+        let decoded_frames = match sink_task.await {
+            Ok(Ok(frames)) => frames,
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(hisui::Error::new(format!("sink task join failed: {e}"))),
+        };
+
+        drop(pipeline_handle);
+        match tokio::time::timeout(Duration::from_secs(5), &mut pipeline_task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                return Err(hisui::Error::new(format!(
+                    "media pipeline task failed: {e}"
+                )));
+            }
+            Err(_) => {
+                pipeline_task.abort();
+                let join_error = pipeline_task
+                    .await
+                    .expect_err("media pipeline task should be cancelled after timeout abort");
+                assert!(
+                    join_error.is_cancelled(),
+                    "media pipeline task join failed after timeout abort: {join_error}"
+                );
+            }
+        }
+
+        Ok(decoded_frames)
+    })
+}
+
+async fn register_processor(
+    pipeline_handle: &hisui::MediaPipelineHandle,
+    processor_id: ProcessorId,
+    metadata: ProcessorMetadata,
+) -> hisui::Result<ProcessorHandle> {
+    pipeline_handle
+        .register_processor(processor_id.clone(), metadata)
+        .await
+        .map_err(|e| match e {
+            hisui::RegisterProcessorError::PipelineTerminated => {
+                hisui::Error::new("failed to register processor: pipeline has terminated")
+            }
+            hisui::RegisterProcessorError::DuplicateProcessorId => hisui::Error::new(format!(
+                "processor ID already exists: {}",
+                processor_id.get()
+            )),
+        })
+}
+
+async fn run_video_source(
+    handle: ProcessorHandle,
+    frames: Vec<VideoFrame>,
+    track_id: TrackId,
+) -> hisui::Result<()> {
+    let mut tx = handle.publish_track(track_id).await?;
+    handle.notify_ready();
+    handle.wait_subscribers_ready().await?;
+    for frame in frames {
+        if !tx.send_video(frame) {
+            break;
+        }
+    }
+    tx.send_eos();
+    Ok(())
+}
+
+async fn collect_video_frames(
+    handle: ProcessorHandle,
+    track_id: TrackId,
+) -> hisui::Result<Vec<VideoFrame>> {
+    let mut rx = handle.subscribe_track(track_id);
+    handle.notify_ready();
+    let mut frames = Vec::new();
+    loop {
+        match rx.recv().await {
+            Message::Media(sample) => {
+                let frame = sample.expect_video_frame()?;
+                frames.push((*frame).clone());
+            }
+            Message::Eos => break,
+            Message::Syn(_) => {}
+        }
+    }
+    Ok(frames)
 }
 
 /// stats_file を確認して、デコーダーとエンコーダーの engine が期待通りかをチェックする

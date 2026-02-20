@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
 use crate::file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions};
-use crate::media::MediaStreamId;
 use crate::{
     MediaPipeline, MediaPipelineHandle, Message, ProcessorHandle, ProcessorId, ProcessorMetadata,
     Result, TrackId,
@@ -107,11 +106,7 @@ impl Mp4FileSource {
         // 音声トラックがあるならデコーダーを起動する＆結果を外側に転送する
         if let Some(id) = self.audio_track_id.clone() {
             let inner_id = TrackId::new(format!("{id}_encoded"));
-            let decoder = AudioDecoder::new(
-                MediaStreamId::new(0),
-                MediaStreamId::new(1),
-                crate::stats::Stats::new(),
-            )?;
+            let decoder = AudioDecoder::new(crate::stats::Stats::new())?;
 
             options.audio_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;
@@ -127,12 +122,8 @@ impl Mp4FileSource {
         // 映像トラックがあるならデコーダーを起動する＆結果を外側に転送する
         if let Some(id) = self.video_track_id.clone() {
             let inner_id = TrackId::new(format!("{id}_encoded"));
-            let decoder = VideoDecoder::new(
-                MediaStreamId::new(2),
-                MediaStreamId::new(3),
-                VideoDecoderOptions::default(),
-                crate::stats::Stats::new(),
-            );
+            let decoder =
+                VideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
 
             options.video_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;

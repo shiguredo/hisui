@@ -21,15 +21,6 @@ const VIDEO_ENCODED_TRACK_ID: &str = "video_encoded";
 const AUDIO_DECODED_TRACK_ID: &str = "audio_decoded";
 const VIDEO_DECODED_TRACK_ID: &str = "video_decoded";
 
-const AUDIO_DECODER_INPUT_STREAM_ID: crate::media::MediaStreamId =
-    crate::media::MediaStreamId::new(0);
-const AUDIO_DECODER_OUTPUT_STREAM_ID: crate::media::MediaStreamId =
-    crate::media::MediaStreamId::new(1);
-const VIDEO_DECODER_INPUT_STREAM_ID: crate::media::MediaStreamId =
-    crate::media::MediaStreamId::new(2);
-const VIDEO_DECODER_OUTPUT_STREAM_ID: crate::media::MediaStreamId =
-    crate::media::MediaStreamId::new(3);
-
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
         .doc("指定された場合にはデコードまで行います")
@@ -134,11 +125,7 @@ async fn setup_pipeline(
             .transpose()
             .map_err(|e| Error::new(e.to_string()))?;
 
-        let audio_decoder = AudioDecoder::new(
-            AUDIO_DECODER_INPUT_STREAM_ID,
-            AUDIO_DECODER_OUTPUT_STREAM_ID,
-            crate::stats::Stats::new(),
-        )?;
+        let audio_decoder = AudioDecoder::new(crate::stats::Stats::new())?;
 
         pipeline_handle
             .spawn_processor(
@@ -155,8 +142,6 @@ async fn setup_pipeline(
             .await?;
 
         let video_decoder = VideoDecoder::new(
-            VIDEO_DECODER_INPUT_STREAM_ID,
-            VIDEO_DECODER_OUTPUT_STREAM_ID,
             VideoDecoderOptions {
                 openh264_lib,
                 decode_params: Default::default(),

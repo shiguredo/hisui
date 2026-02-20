@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use shiguredo_http11::{Request, Response};
 
 pub async fn handle_request(
@@ -11,7 +13,8 @@ pub async fn handle_request(
     }
 
     match pipeline_handle.stats().to_prometheus_text() {
-        Ok(text) => {
+        Ok(mut text) => {
+            append_tokio_runtime_metrics(&mut text);
             let mut response = Response::new(200, "OK");
             response.add_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
             response.body = text.into_bytes();
@@ -25,6 +28,30 @@ pub async fn handle_request(
             response
         }
     }
+}
+
+fn append_tokio_runtime_metrics(text: &mut String) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let metrics = handle.metrics();
+
+    text.push_str("# TYPE hisui_tokio_num_workers gauge\n");
+    let _ = writeln!(text, "hisui_tokio_num_workers {}", metrics.num_workers());
+
+    text.push_str("# TYPE hisui_tokio_num_alive_tasks gauge\n");
+    let _ = writeln!(
+        text,
+        "hisui_tokio_num_alive_tasks {}",
+        metrics.num_alive_tasks()
+    );
+
+    text.push_str("# TYPE hisui_tokio_global_queue_depth gauge\n");
+    let _ = writeln!(
+        text,
+        "hisui_tokio_global_queue_depth {}",
+        metrics.global_queue_depth()
+    );
 }
 
 #[cfg(test)]
@@ -63,6 +90,9 @@ mod tests {
         let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
         assert!(body.contains("# TYPE hisui_requests_total counter"));
         assert!(body.contains("hisui_requests_total 1"));
+        assert!(body.contains("# TYPE hisui_tokio_num_workers gauge"));
+        assert!(body.contains("# TYPE hisui_tokio_num_alive_tasks gauge"));
+        assert!(body.contains("# TYPE hisui_tokio_global_queue_depth gauge"));
     }
 
     #[tokio::test]

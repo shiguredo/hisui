@@ -13,13 +13,10 @@ use shiguredo_mp4::boxes::HdlrBox;
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
 
 use crate::{
+    TrackId,
     audio::AudioData,
     layout::Layout,
-    media::{MediaSample, MediaStreamId},
-    processor::{
-        MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
-        MediaProcessorWorkloadHint,
-    },
+    media::MediaSample,
     types::CodecName,
     video::{FrameRate, VideoFrame},
 };
@@ -37,6 +34,19 @@ const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
 //
 // 適当に大きな値ならなんでもいい
 const MAX_INPUT_QUEUE_GAP: usize = 200;
+
+enum WriterRunOutput {
+    Pending {
+        awaiting_track_kind: Option<InputTrackKind>,
+    },
+    Finished,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum InputTrackKind {
+    Audio,
+    Video,
+}
 
 #[derive(Debug, Clone)]
 pub struct Mp4WriterOptions {
@@ -195,8 +205,8 @@ pub struct Mp4Writer {
     file: BufWriter<File>,
     muxer: Mp4FileMuxer,
     next_position: u64,
-    input_audio_stream_id: Option<MediaStreamId>,
-    input_video_stream_id: Option<MediaStreamId>,
+    input_audio_track_id: Option<TrackId>,
+    input_video_track_id: Option<TrackId>,
     input_audio_queue: VecDeque<Arc<AudioData>>,
     input_video_queue: VecDeque<Arc<VideoFrame>>,
     appending_video_chunk: bool,
@@ -208,20 +218,20 @@ impl Mp4Writer {
     pub fn new<P: AsRef<Path>>(
         path: P,
         options: Option<Mp4WriterOptions>, // ライブの場合は None になる
-        input_audio_stream_id: Option<MediaStreamId>,
-        input_video_stream_id: Option<MediaStreamId>,
+        input_audio_track_id: Option<TrackId>,
+        input_video_track_id: Option<TrackId>,
         mut stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         let reserved_moov_box_size = if let Some(options) = options {
             // 事前に尺などが分かっている場合には fast start 用の領域を計算する
 
             let mut sample_counts = Vec::new();
-            if input_audio_stream_id.is_some() {
+            if input_audio_track_id.is_some() {
                 // 音声サンプルの尺は 20 ms と仮定する（つまり一秒に 50 sample）
                 let count = options.duration.as_secs() * 50;
                 sample_counts.push(count as usize);
             }
-            if input_video_stream_id.is_some() {
+            if input_video_track_id.is_some() {
                 let count = options.duration.as_secs() as f64 * options.frame_rate.as_f64();
                 sample_counts.push(count.ceil() as usize);
             }
@@ -250,8 +260,8 @@ impl Mp4Writer {
             file: BufWriter::new(file),
             muxer,
             next_position,
-            input_audio_stream_id,
-            input_video_stream_id,
+            input_audio_track_id,
+            input_video_track_id,
             input_audio_queue: VecDeque::new(),
             input_video_queue: VecDeque::new(),
             appending_video_chunk: true,
@@ -425,52 +435,43 @@ impl Mp4Writer {
     }
 }
 
-impl MediaProcessor for Mp4Writer {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: self
-                .input_audio_stream_id
-                .into_iter()
-                .chain(self.input_video_stream_id)
-                .collect(),
-            output_stream_ids: Vec::new(),
-            workload_hint: MediaProcessorWorkloadHint::WRITER,
-        }
-    }
-
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        match input.sample {
-            Some(MediaSample::Audio(sample))
-                if Some(input.stream_id) == self.input_audio_stream_id =>
-            {
+impl Mp4Writer {
+    fn handle_input_sample(
+        &mut self,
+        track_kind: InputTrackKind,
+        sample: Option<MediaSample>,
+    ) -> crate::Result<()> {
+        match (track_kind, sample) {
+            (InputTrackKind::Audio, Some(MediaSample::Audio(sample))) => {
                 self.input_audio_queue.push_back(sample);
             }
-            None if Some(input.stream_id) == self.input_audio_stream_id => {
-                self.input_audio_stream_id = None;
+            (InputTrackKind::Audio, None) => {
+                self.input_audio_track_id = None;
             }
-            Some(MediaSample::Video(sample))
-                if Some(input.stream_id) == self.input_video_stream_id =>
-            {
+            (InputTrackKind::Video, Some(MediaSample::Video(sample))) => {
                 self.input_video_queue.push_back(sample);
             }
-            None if Some(input.stream_id) == self.input_video_stream_id => {
-                self.input_video_stream_id = None;
+            (InputTrackKind::Video, None) => {
+                self.input_video_track_id = None;
             }
-            _ => return Err(crate::Error::new("BUG: unexpected input stream")),
+            _ => {
+                self.stats.set_error();
+                return Err(crate::Error::new("BUG: unexpected input stream"));
+            }
         }
         Ok(())
     }
 
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+    fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
         loop {
-            if let Some(id) = self.input_video_stream_id
-                && self.input_video_queue.is_empty()
-            {
-                return Ok(MediaProcessorOutput::pending(id));
-            } else if let Some(id) = self.input_audio_stream_id
-                && self.input_audio_queue.is_empty()
-            {
-                return Ok(MediaProcessorOutput::pending(id));
+            if self.input_video_track_id.is_some() && self.input_video_queue.is_empty() {
+                return Ok(WriterRunOutput::Pending {
+                    awaiting_track_kind: Some(InputTrackKind::Video),
+                });
+            } else if self.input_audio_track_id.is_some() && self.input_audio_queue.is_empty() {
+                return Ok(WriterRunOutput::Pending {
+                    awaiting_track_kind: Some(InputTrackKind::Audio),
+                });
             }
 
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
@@ -479,17 +480,10 @@ impl MediaProcessor for Mp4Writer {
             let in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
 
             if !in_progress {
-                return Ok(MediaProcessorOutput::Finished);
+                return Ok(WriterRunOutput::Finished);
             }
         }
     }
-
-    fn set_error(&self) {
-        self.stats.set_error();
-    }
-}
-
-impl Mp4Writer {
     pub async fn run(
         mut self,
         handle: crate::ProcessorHandle,
@@ -500,33 +494,54 @@ impl Mp4Writer {
         let mut video_rx = input_video_track_id.map(|id| handle.subscribe_track(id));
         handle.notify_ready();
 
-        let mut in_progress = audio_rx.is_some() || video_rx.is_some();
-        while in_progress {
-            let audio_len = self.input_audio_queue.len();
-            let video_len = self.input_video_queue.len();
-            let mut suppress_audio = false;
-            let mut suppress_video = false;
-            if audio_rx.is_some() && video_rx.is_some() {
-                if audio_len > video_len + MAX_INPUT_QUEUE_GAP {
-                    suppress_audio = true;
-                } else if video_len > audio_len + MAX_INPUT_QUEUE_GAP {
-                    suppress_video = true;
+        // 入力トラックが 0 本でも finalize まで到達する。
+        let mut output = self.poll_output()?;
+        loop {
+            match output {
+                WriterRunOutput::Finished => break,
+                WriterRunOutput::Pending {
+                    awaiting_track_kind,
+                } => {
+                    if audio_rx.is_none() && video_rx.is_none() {
+                        output = self.poll_output()?;
+                        continue;
+                    }
+
+                    match awaiting_track_kind {
+                        Some(InputTrackKind::Audio) if audio_rx.is_some() => {
+                            let msg = crate::future::recv_or_pending(&mut audio_rx).await;
+                            self.handle_audio_message(msg, &mut audio_rx)?;
+                        }
+                        Some(InputTrackKind::Video) if video_rx.is_some() => {
+                            let msg = crate::future::recv_or_pending(&mut video_rx).await;
+                            self.handle_video_message(msg, &mut video_rx)?;
+                        }
+                        _ => {
+                            let audio_len = self.input_audio_queue.len();
+                            let video_len = self.input_video_queue.len();
+                            let mut suppress_audio = false;
+                            let mut suppress_video = false;
+                            if audio_rx.is_some() && video_rx.is_some() {
+                                if audio_len > video_len + MAX_INPUT_QUEUE_GAP {
+                                    suppress_audio = true;
+                                } else if video_len > audio_len + MAX_INPUT_QUEUE_GAP {
+                                    suppress_video = true;
+                                }
+                            }
+
+                            tokio::select! {
+                                msg = crate::future::recv_or_pending(&mut audio_rx), if !suppress_audio => {
+                                    self.handle_audio_message(msg, &mut audio_rx)?;
+                                }
+                                msg = crate::future::recv_or_pending(&mut video_rx), if !suppress_video => {
+                                    self.handle_video_message(msg, &mut video_rx)?;
+                                }
+                            }
+                        }
+                    }
+                    output = self.poll_output()?;
                 }
             }
-
-            tokio::select! {
-                msg = crate::future::recv_or_pending(&mut audio_rx), if !suppress_audio => {
-                    self.handle_audio_message(msg, &mut audio_rx);
-                }
-                msg = crate::future::recv_or_pending(&mut video_rx), if !suppress_video => {
-                    self.handle_video_message(msg, &mut video_rx);
-                }
-            }
-
-            let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
-            let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
-
-            in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
         }
 
         Ok(())
@@ -536,33 +551,49 @@ impl Mp4Writer {
         &mut self,
         msg: crate::Message,
         audio_rx: &mut Option<crate::MessageReceiver>,
-    ) {
+    ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaSample::Audio(sample)) => {
-                self.input_audio_queue.push_back(sample);
+                if self.input_audio_track_id.is_some() {
+                    self.handle_input_sample(
+                        InputTrackKind::Audio,
+                        Some(crate::MediaSample::Audio(sample)),
+                    )?;
+                }
             }
             crate::Message::Eos => {
-                self.input_audio_stream_id = None;
+                if self.input_audio_track_id.is_some() {
+                    self.handle_input_sample(InputTrackKind::Audio, None)?;
+                }
                 *audio_rx = None;
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn handle_video_message(
         &mut self,
         msg: crate::Message,
         video_rx: &mut Option<crate::MessageReceiver>,
-    ) {
+    ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaSample::Video(sample)) => {
-                self.input_video_queue.push_back(sample);
+                if self.input_video_track_id.is_some() {
+                    self.handle_input_sample(
+                        InputTrackKind::Video,
+                        Some(crate::MediaSample::Video(sample)),
+                    )?;
+                }
             }
             crate::Message::Eos => {
-                self.input_video_stream_id = None;
+                if self.input_video_track_id.is_some() {
+                    self.handle_input_sample(InputTrackKind::Video, None)?;
+                }
                 *video_rx = None;
             }
             _ => {}
         }
+        Ok(())
     }
 }
