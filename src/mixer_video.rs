@@ -221,6 +221,12 @@ pub struct VideoMixer {
     stats: VideoMixerStats,
 }
 
+enum VideoMixerRunOutput {
+    Processed(MediaSample),
+    Pending(MediaStreamId),
+    Finished,
+}
+
 #[derive(Debug)]
 pub struct VideoMixerStats {
     total_input_video_frame_count: crate::stats::StatsCounter,
@@ -359,16 +365,13 @@ impl VideoMixer {
         handle.wait_subscribers_ready().await?;
 
         loop {
-            match self.process_output()? {
-                MediaProcessorOutput::Processed { sample, .. } => {
+            match self.poll_output()? {
+                VideoMixerRunOutput::Processed(sample) => {
                     if !output_tx.send_media(sample) {
                         break;
                     }
                 }
-                MediaProcessorOutput::Pending { awaiting_stream_id } => {
-                    let Some(stream_id) = awaiting_stream_id else {
-                        return Err(Error::new("video mixer returned pending without stream id"));
-                    };
+                VideoMixerRunOutput::Pending(stream_id) => {
                     let input_track = input_tracks
                         .iter_mut()
                         .find(|track| track.stream_id == stream_id)
@@ -382,7 +385,7 @@ impl VideoMixer {
                     let message = input_track.rx.recv().await;
                     self.handle_input_message(stream_id, &track_id, message)?;
                 }
-                MediaProcessorOutput::Finished => {
+                VideoMixerRunOutput::Finished => {
                     output_tx.send_eos();
                     break;
                 }
@@ -529,39 +532,30 @@ impl VideoMixer {
         message: Message,
     ) -> Result<()> {
         match message {
-            Message::Media(MediaSample::Video(sample)) => self.process_input(
-                MediaProcessorInput::sample(stream_id, MediaSample::Video(sample)),
-            ),
+            Message::Media(MediaSample::Video(sample)) => {
+                self.handle_input_sample(stream_id, Some(MediaSample::Video(sample)))
+            }
             Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
                 "expected a video sample on track {}, but got an audio sample",
                 track_id.get()
             ))),
-            Message::Eos => self.process_input(MediaProcessorInput::eos(stream_id)),
+            Message::Eos => self.handle_input_sample(stream_id, None),
             Message::Syn(_) => Ok(()),
         }
     }
-}
 
-impl MediaProcessor for VideoMixer {
-    fn spec(&self) -> MediaProcessorSpec {
-        MediaProcessorSpec {
-            input_stream_ids: self.input_stream_ids.clone(),
-            output_stream_ids: vec![self.output_stream_id],
-            workload_hint: MediaProcessorWorkloadHint::VIDEO_MIXER,
-        }
-    }
-
-    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        let input_stream = self
-            .input_streams
-            .get_mut(&input.stream_id)
-            .ok_or_else(|| {
-                crate::Error::new(format!(
-                    "unknown input stream id for video mixer: {}",
-                    input.stream_id.get()
-                ))
-            })?;
-        if let Some(sample) = input.sample {
+    fn handle_input_sample(
+        &mut self,
+        stream_id: MediaStreamId,
+        sample: Option<MediaSample>,
+    ) -> Result<()> {
+        let input_stream = self.input_streams.get_mut(&stream_id).ok_or_else(|| {
+            crate::Error::new(format!(
+                "unknown input stream id for video mixer: {}",
+                stream_id.get()
+            ))
+        })?;
+        if let Some(sample) = sample {
             // キューに要素を追加する
             let frame = sample.expect_video_frame()?;
             if frame.format != VideoFormat::I420 {
@@ -584,7 +578,7 @@ impl MediaProcessor for VideoMixer {
         Ok(())
     }
 
-    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+    fn poll_output(&mut self) -> Result<VideoMixerRunOutput> {
         loop {
             let mut now = self.next_input_timestamp();
 
@@ -598,7 +592,7 @@ impl MediaProcessor for VideoMixer {
             for (input_stream_id, input_stream) in &mut self.input_streams {
                 if !input_stream.pop_outdated_frame(now) {
                     // 十分な数のフレームが溜まっていないので入力を待つ
-                    return Ok(MediaProcessorOutput::pending(*input_stream_id));
+                    return Ok(VideoMixerRunOutput::Pending(*input_stream_id));
                 }
             }
 
@@ -610,12 +604,11 @@ impl MediaProcessor for VideoMixer {
             {
                 if let Some(frame) = self.last_mixed_frame.take() {
                     // バッファにフレームが残っていたらそれを返す
-                    return Ok(MediaProcessorOutput::video_frame(
-                        self.output_stream_id,
+                    return Ok(VideoMixerRunOutput::Processed(MediaSample::video_frame(
                         frame,
-                    ));
+                    )));
                 }
-                return Ok(MediaProcessorOutput::Finished);
+                return Ok(VideoMixerRunOutput::Finished);
             }
 
             // 入力のタイムスタンプに極端なギャップがある場合の対応
@@ -641,11 +634,37 @@ impl MediaProcessor for VideoMixer {
             let mixed_frame = self.mix(now)?;
 
             if let Some(frame) = self.last_mixed_frame.replace(mixed_frame) {
-                return Ok(MediaProcessorOutput::video_frame(
-                    self.output_stream_id,
+                return Ok(VideoMixerRunOutput::Processed(MediaSample::video_frame(
                     frame,
-                ));
+                )));
             }
+        }
+    }
+}
+
+impl MediaProcessor for VideoMixer {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: self.input_stream_ids.clone(),
+            output_stream_ids: vec![self.output_stream_id],
+            workload_hint: MediaProcessorWorkloadHint::VIDEO_MIXER,
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
+        self.handle_input_sample(input.stream_id, input.sample)
+    }
+
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+        match self.poll_output()? {
+            VideoMixerRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
+                stream_id: self.output_stream_id,
+                sample,
+            }),
+            VideoMixerRunOutput::Pending(stream_id) => Ok(MediaProcessorOutput::Pending {
+                awaiting_stream_id: Some(stream_id),
+            }),
+            VideoMixerRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
         }
     }
 

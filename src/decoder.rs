@@ -37,6 +37,12 @@ pub struct AudioDecoder {
     inner: Option<AudioDecoderInner>,
 }
 
+enum DecoderRunOutput {
+    Processed(MediaSample),
+    Pending,
+    Finished,
+}
+
 impl AudioDecoder {
     pub fn new(
         input_stream_id: MediaStreamId,
@@ -78,17 +84,9 @@ impl AudioDecoder {
             let message = input_rx.recv().await;
             let is_eos = matches!(message, Message::Eos);
 
-            match message {
-                Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
-                }
-                Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
-                }
-                Message::Syn(_) => {}
-            }
+            self.handle_input_message(message)?;
 
-            let finished = drain_decoder_output(&mut self, &mut output_tx).await?;
+            let finished = drain_audio_decoder_output(&mut self, &mut output_tx)?;
 
             if finished {
                 output_tx.send_eos();
@@ -101,6 +99,60 @@ impl AudioDecoder {
         }
 
         Ok(())
+    }
+
+    fn handle_input_message(&mut self, message: Message) -> Result<()> {
+        match message {
+            Message::Media(sample) => self.handle_input_sample(Some(sample)),
+            Message::Eos => self.handle_input_sample(None),
+            Message::Syn(_) => Ok(()),
+        }
+    }
+
+    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+        let Some(sample) = sample else {
+            self.eos = true;
+            return Ok(());
+        };
+        let data = sample.expect_audio_data()?;
+
+        // 遅延初期化
+        if self.inner.is_none() {
+            self.inner = Some(AudioDecoderInner::new(&data)?);
+        }
+
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| crate::Error::new("audio decoder is not initialized"))?;
+        let decoded = inner.decode(&data)?;
+        self.total_audio_data_count_metric.inc();
+        if let Some(id) = &data.source_id {
+            self.source_id_metric.set(id.get());
+        }
+
+        self.decoded.push_back(decoded);
+        Ok(())
+    }
+
+    fn poll_output(&mut self) -> Result<DecoderRunOutput> {
+        if let Some(data) = self.decoded.pop_front() {
+            Ok(DecoderRunOutput::Processed(MediaSample::audio_data(data)))
+        } else if self.eos {
+            if let Some(inner) = self.inner.as_mut()
+                && let Some(remaining_data) = inner.finish()?
+            {
+                self.total_audio_data_count_metric.inc();
+                self.decoded.push_back(remaining_data);
+                let sample = self.decoded.pop_front().ok_or_else(|| {
+                    crate::Error::new("decoded audio queue is unexpectedly empty")
+                })?;
+                return Ok(DecoderRunOutput::Processed(MediaSample::audio_data(sample)));
+            }
+            Ok(DecoderRunOutput::Finished)
+        } else {
+            Ok(DecoderRunOutput::Pending)
+        }
     }
 
     pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
@@ -137,56 +189,19 @@ impl MediaProcessor for AudioDecoder {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        let Some(sample) = input.sample else {
-            self.eos = true;
-            return Ok(());
-        };
-        let data = sample.expect_audio_data()?;
-
-        // 遅延初期化
-        if self.inner.is_none() {
-            self.inner = Some(AudioDecoderInner::new(&data)?);
-        }
-
-        let inner = self
-            .inner
-            .as_mut()
-            .ok_or_else(|| crate::Error::new("audio decoder is not initialized"))?;
-        let decoded = inner.decode(&data)?;
-        self.total_audio_data_count_metric.inc();
-        if let Some(id) = &data.source_id {
-            self.source_id_metric.set(id.get());
-        }
-
-        self.decoded.push_back(decoded);
-        Ok(())
+        self.handle_input_sample(input.sample)
     }
 
     fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        if let Some(data) = self.decoded.pop_front() {
-            Ok(MediaProcessorOutput::Processed {
+        match self.poll_output()? {
+            DecoderRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
-                sample: MediaSample::audio_data(data),
-            })
-        } else if self.eos {
-            if let Some(inner) = self.inner.as_mut()
-                && let Some(remaining_data) = inner.finish()?
-            {
-                self.total_audio_data_count_metric.inc();
-                self.decoded.push_back(remaining_data);
-                let sample = self.decoded.pop_front().ok_or_else(|| {
-                    crate::Error::new("decoded audio queue is unexpectedly empty")
-                })?;
-                return Ok(MediaProcessorOutput::Processed {
-                    stream_id: self.output_stream_id,
-                    sample: MediaSample::audio_data(sample),
-                });
-            }
-            Ok(MediaProcessorOutput::Finished)
-        } else {
-            Ok(MediaProcessorOutput::Pending {
+                sample,
+            }),
+            DecoderRunOutput::Pending => Ok(MediaProcessorOutput::Pending {
                 awaiting_stream_id: Some(self.input_stream_id),
-            })
+            }),
+            DecoderRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
         }
     }
 
@@ -320,17 +335,9 @@ impl VideoDecoder {
             let message = input_rx.recv().await;
             let is_eos = matches!(message, Message::Eos);
 
-            match message {
-                Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
-                }
-                Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
-                }
-                Message::Syn(_) => {}
-            }
+            self.handle_input_message(message)?;
 
-            let finished = drain_decoder_output(&mut self, &mut output_tx).await?;
+            let finished = drain_video_decoder_output(&mut self, &mut output_tx)?;
 
             if finished {
                 output_tx.send_eos();
@@ -343,6 +350,48 @@ impl VideoDecoder {
         }
 
         Ok(())
+    }
+
+    fn handle_input_message(&mut self, message: Message) -> Result<()> {
+        match message {
+            Message::Media(sample) => self.handle_input_sample(Some(sample)),
+            Message::Eos => self.handle_input_sample(None),
+            Message::Syn(_) => Ok(()),
+        }
+    }
+
+    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+        if let Some(sample) = sample {
+            let frame = sample.expect_video_frame()?;
+
+            self.total_input_video_frame_count_metric.inc();
+            if let Some(id) = &frame.source_id {
+                self.source_id_metric.set(id.get());
+            }
+
+            self.inner
+                .decode(&frame, &self.codec_metric, &self.engine_metric)?;
+        } else {
+            self.eos = true;
+            self.inner.finish()?;
+        };
+
+        while let Some(frame) = self.inner.next_decoded_frame() {
+            self.total_output_video_frame_count_metric.inc();
+            self.decoded.push_back(frame);
+        }
+
+        Ok(())
+    }
+
+    fn poll_output(&mut self) -> Result<DecoderRunOutput> {
+        if let Some(frame) = self.decoded.pop_front() {
+            Ok(DecoderRunOutput::Processed(MediaSample::video_frame(frame)))
+        } else if self.eos {
+            Ok(DecoderRunOutput::Finished)
+        } else {
+            Ok(DecoderRunOutput::Pending)
+        }
     }
 
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
@@ -394,21 +443,42 @@ impl VideoDecoder {
     }
 }
 
-async fn drain_decoder_output<P: MediaProcessor>(
-    decoder: &mut P,
+fn drain_audio_decoder_output(
+    decoder: &mut AudioDecoder,
     output_tx: &mut crate::MessageSender,
 ) -> Result<bool> {
     loop {
-        match decoder.process_output()? {
-            MediaProcessorOutput::Processed { sample, .. } => {
+        match decoder.poll_output()? {
+            DecoderRunOutput::Processed(sample) => {
                 if !output_tx.send_media(sample) {
                     return Ok(true);
                 }
             }
-            MediaProcessorOutput::Pending { .. } => {
+            DecoderRunOutput::Pending => {
                 return Ok(false);
             }
-            MediaProcessorOutput::Finished => {
+            DecoderRunOutput::Finished => {
+                return Ok(true);
+            }
+        }
+    }
+}
+
+fn drain_video_decoder_output(
+    decoder: &mut VideoDecoder,
+    output_tx: &mut crate::MessageSender,
+) -> Result<bool> {
+    loop {
+        match decoder.poll_output()? {
+            DecoderRunOutput::Processed(sample) => {
+                if !output_tx.send_media(sample) {
+                    return Ok(true);
+                }
+            }
+            DecoderRunOutput::Pending => {
+                return Ok(false);
+            }
+            DecoderRunOutput::Finished => {
                 return Ok(true);
             }
         }
@@ -425,41 +495,19 @@ impl MediaProcessor for VideoDecoder {
     }
 
     fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
-        if let Some(sample) = input.sample {
-            let frame = sample.expect_video_frame()?;
-
-            self.total_input_video_frame_count_metric.inc();
-            if let Some(id) = &frame.source_id {
-                self.source_id_metric.set(id.get());
-            }
-
-            self.inner
-                .decode(&frame, &self.codec_metric, &self.engine_metric)?;
-        } else {
-            self.eos = true;
-            self.inner.finish()?;
-        };
-
-        while let Some(frame) = self.inner.next_decoded_frame() {
-            self.total_output_video_frame_count_metric.inc();
-            self.decoded.push_back(frame);
-        }
-
-        Ok(())
+        self.handle_input_sample(input.sample)
     }
 
     fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
-        if let Some(frame) = self.decoded.pop_front() {
-            Ok(MediaProcessorOutput::Processed {
+        match self.poll_output()? {
+            DecoderRunOutput::Processed(sample) => Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
-                sample: MediaSample::video_frame(frame),
-            })
-        } else if self.eos {
-            Ok(MediaProcessorOutput::Finished)
-        } else {
-            Ok(MediaProcessorOutput::Pending {
+                sample,
+            }),
+            DecoderRunOutput::Pending => Ok(MediaProcessorOutput::Pending {
                 awaiting_stream_id: Some(self.input_stream_id),
-            })
+            }),
+            DecoderRunOutput::Finished => Ok(MediaProcessorOutput::Finished),
         }
     }
 
