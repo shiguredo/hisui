@@ -1,6 +1,5 @@
 use std::{collections::BTreeSet, num::NonZeroUsize, path::PathBuf};
 
-use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
@@ -91,18 +90,21 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    run_internal(args).map_err(noargs::Error::from)
+}
+
+fn run_internal(args: Args) -> crate::Result<()> {
     // レイアウトを準備
     let layout = Layout::from_layout_json_file_or_default(
         args.root_dir.clone(),
         args.layout_file_path.as_deref(),
         DEFAULT_LAYOUT_JSON,
-    )
-    .or_fail()?;
+    )?;
     tracing::debug!("layout: {layout:?}");
 
     // 必要に応じて openh264 の共有ライブラリを読み込む
     let openh264_lib = if let Some(path) = args.openh264.as_ref().filter(|_| layout.has_video()) {
-        Some(Openh264Library::load(path).or_fail()?)
+        Some(Openh264Library::load(path)?)
     } else {
         None
     };
@@ -120,11 +122,11 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     composer.stats_file_path = args.stats_file_path;
 
     // 合成を実行
-    let result = composer.compose(&output_file_path).or_fail()?;
+    let result = composer.compose(&output_file_path)?;
     let entries = result
         .stats
         .entries()
-        .map_err(|e: crate::Error| orfail::Failure::new(e.to_string()))?;
+        .map_err(|e: crate::Error| e.with_context("failed to load compose stats entries"))?;
 
     if !result.success {
         // エラー発生時は終了コードを変える
@@ -147,8 +149,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 
             Ok(())
         })
-    }))
-    .or_fail()?;
+    }))?;
 
     Ok(())
 }

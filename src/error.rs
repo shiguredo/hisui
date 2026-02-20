@@ -33,16 +33,15 @@ impl Error {
         self.reason = format!("{}: {}", context.as_ref(), self.reason);
         self
     }
-}
 
-impl std::fmt::Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self}")
+    /// エラー理由のみの文字列表現を返す
+    ///
+    /// `Display` を実装していないため、互換用途で明示的に提供する。
+    pub fn display(&self) -> String {
+        self.reason.clone()
     }
-}
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_detailed(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.reason)?;
         write!(f, " (at {}:{})", self.location.file(), self.location.line())?;
 
@@ -57,9 +56,192 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl<E: std::error::Error> From<E> for Error {
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_detailed(f)
+    }
+}
+
+impl From<Error> for noargs::Error {
+    fn from(error: Error) -> Self {
+        noargs::Error::Other {
+            metadata: None,
+            error: Box::new(format!("{error:?}")),
+        }
+    }
+}
+
+// [NOTE]
+// `impl<E: std::error::Error> From<E> for Error` や
+// `impl<E: std::fmt::Display> From<E> for Error` は実装しない方針にしている。
+// `Error` を `Error` のまま再ラップした場合に reason / location / backtrace が重複して、
+// エラー出力が冗長になるのを防ぐため。
+// 既存の `Error` に文脈を追加したい場合は `Error::with_context()` を使うこと。
+//
+// そのため、新しいエラー型を導入して `?` で `crate::Error` へ変換したい場合は、
+// このファイルに個別の `impl From<NewError> for Error` を追加する。
+impl From<std::io::Error> for Error {
     #[track_caller]
-    fn from(e: E) -> Self {
+    fn from(e: std::io::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<tokio::task::JoinError> for Error {
+    #[track_caller]
+    fn from(e: tokio::task::JoinError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<nojson::JsonParseError> for Error {
+    #[track_caller]
+    fn from(e: nojson::JsonParseError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<crate::PipelineTerminated> for Error {
+    #[track_caller]
+    fn from(e: crate::PipelineTerminated) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<crate::PublishTrackError> for Error {
+    #[track_caller]
+    fn from(e: crate::PublishTrackError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<crate::RegisterProcessorError> for Error {
+    #[track_caller]
+    fn from(e: crate::RegisterProcessorError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_mp4::demux::DemuxError> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_mp4::demux::DemuxError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_mp4::mux::MuxError> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_mp4::mux::MuxError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    #[track_caller]
+    fn from(e: std::num::ParseIntError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::num::TryFromIntError> for Error {
+    #[track_caller]
+    fn from(e: std::num::TryFromIntError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    #[track_caller]
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::time::SystemTimeError> for Error {
+    #[track_caller]
+    fn from(e: std::time::SystemTimeError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_rtmp::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_rtmp::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_dav1d::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_dav1d::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "libvpx")]
+impl From<shiguredo_libvpx::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_libvpx::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_libyuv::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_libyuv::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_openh264::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_openh264::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_opus::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_opus::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_svt_av1::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_svt_av1::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<shiguredo_audio_toolbox::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_audio_toolbox::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<shiguredo_video_toolbox::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_video_toolbox::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "fdk-aac")]
+impl From<shiguredo_fdk_aac::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_fdk_aac::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "nvcodec")]
+impl From<shiguredo_nvcodec::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_nvcodec::Error) -> Self {
         Self::new(e.to_string())
     }
 }
@@ -85,5 +267,18 @@ mod tests {
         assert_eq!(err.location.file(), location.file());
         assert_eq!(err.location.line(), location.line());
         assert_eq!(err.backtrace.status(), backtrace_status);
+    }
+
+    #[test]
+    fn from_error_to_noargs_error_uses_other_variant() {
+        let err = Error::new("reason");
+        let noargs_err = noargs::Error::from(err);
+
+        match noargs_err {
+            noargs::Error::Other { metadata, .. } => {
+                assert!(metadata.is_none());
+            }
+            _ => panic!("expected noargs::Error::Other"),
+        }
     }
 }

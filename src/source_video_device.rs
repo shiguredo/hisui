@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn video_device_source_requires_output_video_track_id() {
         let json = r#"{}"#;
-        let result: orfail::Result<VideoDeviceSource> = crate::json::parse_str(json);
+        let result: crate::Result<VideoDeviceSource> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -327,7 +327,7 @@ mod tests {
             "outputVideoTrackId": "video-main",
             "width": 640
         }"#;
-        let result: orfail::Result<VideoDeviceSource> = crate::json::parse_str(json);
+        let result: crate::Result<VideoDeviceSource> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -337,7 +337,7 @@ mod tests {
             "outputVideoTrackId": "video-main",
             "fps": 0
         }"#;
-        let result: orfail::Result<VideoDeviceSource> = crate::json::parse_str(json);
+        let result: crate::Result<VideoDeviceSource> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 

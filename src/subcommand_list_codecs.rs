@@ -20,6 +20,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    run_internal(openh264).map_err(noargs::Error::from)
+}
+
+fn run_internal(openh264: Option<PathBuf>) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
         .and_then(|path| Openh264Library::load(path).ok());

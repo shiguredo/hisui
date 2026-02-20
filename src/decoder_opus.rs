@@ -1,5 +1,3 @@
-use orfail::OrFail;
-
 use crate::audio::{AudioData, AudioFormat, SAMPLE_RATE};
 
 // 以下の理由で Opus デコーダーは常にステレオ扱いにする:
@@ -14,16 +12,21 @@ pub struct OpusDecoder {
 }
 
 impl OpusDecoder {
-    pub fn new() -> orfail::Result<Self> {
+    pub fn new() -> crate::Result<Self> {
         Ok(Self {
-            inner: shiguredo_opus::Decoder::new(SAMPLE_RATE, DECODED_CHANNELS).or_fail()?,
+            inner: shiguredo_opus::Decoder::new(SAMPLE_RATE, DECODED_CHANNELS)?,
         })
     }
 
-    pub fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
-        (data.format == AudioFormat::Opus).or_fail()?;
+    pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
+        if data.format != AudioFormat::Opus {
+            return Err(crate::Error::new(format!(
+                "expected Opus format, got {}",
+                data.format
+            )));
+        }
 
-        let decoded_samples = self.inner.decode(&data.data).or_fail()?;
+        let decoded_samples = self.inner.decode(&data.data)?;
         let decoded = AudioData {
             source_id: data.source_id.clone(),
             data: decoded_samples

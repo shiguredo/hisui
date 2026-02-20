@@ -5,8 +5,6 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
-
 use crate::{
     json::{JsonObject, JsonValue},
     optuna::{OptunaStudy, SearchSpace, TrialValues},
@@ -133,33 +131,37 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    run_internal(args).map_err(noargs::Error::from)
+}
+
+fn run_internal(args: Args) -> crate::Result<()> {
     // 最初に optuna と vmaf コマンドが利用可能かどうかをチェックする
-    OptunaStudy::check_optuna_availability().or_fail()?;
-    subcommand_vmaf::check_vmaf_availability().or_fail()?;
+    OptunaStudy::check_optuna_availability()?;
+    subcommand_vmaf::check_vmaf_availability()?;
 
     // 必要なら tune_working_dir を作る
     if !args.tune_working_dir().exists() {
-        std::fs::create_dir_all(args.tune_working_dir()).or_fail_with(|e| {
-            format!(
+        std::fs::create_dir_all(args.tune_working_dir()).map_err(|e| {
+            crate::Error::new(format!(
                 "failed to create working directory {}: {e}",
                 args.tune_working_dir().display()
-            )
+            ))
         })?;
     }
 
     // レイアウトファイル（テンプレート）を読み込む
     let layout_template: JsonValue = if let Some(path) = &args.layout_file_path {
-        crate::json::parse_file(path).or_fail()?
+        crate::json::parse_file(path)?
     } else {
-        crate::json::parse_str(DEFAULT_LAYOUT_JSON).or_fail()?
+        crate::json::parse_str(DEFAULT_LAYOUT_JSON)?
     };
     tracing::debug!("layout template: {layout_template:?}");
 
     // 探索空間ファイルを読み込む
     let mut search_space: SearchSpace = if let Some(path) = &args.search_space_file_path {
-        crate::json::parse_file(path).or_fail()?
+        crate::json::parse_file(path)?
     } else {
-        crate::json::parse_str(DEFAULT_SEARCH_SPACE_JSON).or_fail()?
+        crate::json::parse_str(DEFAULT_SEARCH_SPACE_JSON)?
     };
 
     // 探索空間から不要なエントリを除外する（Optuna の探索を効率化するため）
@@ -168,14 +170,16 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
     tracing::debug!("search space: {search_space:?}");
 
-    (!search_space.params.is_empty()).or_fail_with(|()| {
-        concat!(
-            "No tunable parameters found in the search space. ",
-            "This could happen if the layout file doesn't contain any null values ",
-            "that correspond to the parameters defined in the search space file."
-        )
-        .to_owned()
-    })?;
+    if search_space.params.is_empty() {
+        return Err(crate::Error::new(
+            concat!(
+                "No tunable parameters found in the search space. ",
+                "This could happen if the layout file doesn't contain any null values ",
+                "that correspond to the parameters defined in the search space file."
+            )
+            .to_owned(),
+        ));
+    }
 
     // 探索を始める前にいろいろと情報を表示する
     let storage_url = format!(
@@ -209,7 +213,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
     // optuna の study を作る
     eprintln!("====== CREATE OPTUNA STUDY ======");
     let mut optuna = OptunaStudy::new(args.study_name.clone(), storage_url);
-    optuna.create_study().or_fail()?;
+    optuna.create_study()?;
     eprintln!();
 
     let mut displayed_best_trials = false;
@@ -220,30 +224,29 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
             args.trial_count
         );
         eprintln!("=== SAMPLE PARAMETERS ===");
-        let ask_output = optuna.ask(&search_space).or_fail()?;
+        let ask_output = optuna.ask(&search_space)?;
 
         let mut layout = layout_template.clone();
-        ask_output.apply_params_to_layout(&mut layout).or_fail()?;
+        ask_output.apply_params_to_layout(&mut layout)?;
         tracing::debug!("actual layout: {layout:?}");
 
-        match run_trial_evaluation(&args, ask_output.number, &layout).or_fail() {
+        match run_trial_evaluation(&args, ask_output.number, &layout) {
             Ok(metrics) => {
-                optuna.tell(ask_output.number, &metrics).or_fail()?;
+                optuna.tell(ask_output.number, &metrics)?;
             }
             Err(e) => {
-                eprintln!("failed to VMAF evaluation: {e}",);
-                optuna.tell_fail(ask_output.number).or_fail()?;
+                eprintln!("failed to VMAF evaluation: {e:?}",);
+                optuna.tell_fail(ask_output.number)?;
             }
         }
         eprintln!();
 
-        displayed_best_trials =
-            display_best_trials_if_updated(&args, &mut optuna, false).or_fail()?;
+        displayed_best_trials = display_best_trials_if_updated(&args, &mut optuna, false)?;
     }
 
     if !displayed_best_trials {
         // 直前で表示していないなら、最後に結果を表示する
-        display_best_trials_if_updated(&args, &mut optuna, true).or_fail()?;
+        display_best_trials_if_updated(&args, &mut optuna, true)?;
     }
 
     Ok(())
@@ -259,25 +262,25 @@ fn run_trial_evaluation(
     args: &Args,
     trial_number: usize,
     layout: &JsonValue,
-) -> orfail::Result<TrialValues> {
+) -> crate::Result<TrialValues> {
     // トライアルの作業用ディレクトリを作成
     let trial_dir = trial_dir(args, trial_number);
-    std::fs::create_dir_all(&trial_dir).or_fail_with(|e| {
-        format!(
+    std::fs::create_dir_all(&trial_dir).map_err(|e| {
+        crate::Error::new(format!(
             "failed to create trial directory {}: {e}",
             trial_dir.display()
-        )
+        ))
     })?;
-    let trial_dir = trial_dir.canonicalize().or_fail()?;
+    let trial_dir = trial_dir.canonicalize()?;
 
     // レイアウトファイルを作成
     let layout_file_path = trial_dir.join("layout.jsonc");
     let layout_json = crate::json::to_pretty_string(layout);
-    std::fs::write(&layout_file_path, layout_json).or_fail_with(|e| {
-        format!(
+    std::fs::write(&layout_file_path, layout_json).map_err(|e| {
+        crate::Error::new(format!(
             "failed to write layout file {}: {e}",
             layout_file_path.display(),
-        )
+        ))
     })?;
 
     // hisui vmaf コマンドを実行
@@ -313,12 +316,13 @@ fn run_trial_evaluation(
 
     let result = cmd
         .output()
-        .or_fail_with(|e| format!("failed to execute `$ hisui vmaf` command: {e}"))
+        .map_err(|e| crate::Error::new(format!("failed to execute `$ hisui vmaf` command: {e}")))
         .and_then(|output| {
             output
                 .status
                 .success()
-                .or_fail_with(|()| "`$ hisui vmaf` command failed".to_owned())?;
+                .then_some(())
+                .ok_or_else(|| crate::Error::new("`$ hisui vmaf` command failed"))?;
             Ok(output)
         });
 
@@ -334,13 +338,13 @@ fn run_trial_evaluation(
     let output = result?;
 
     // 出力結果をパース
-    let stdout = String::from_utf8(output.stdout).or_fail()?;
-    let result = nojson::RawJson::parse(&stdout).or_fail()?;
-    let object = JsonObject::new(result.value()).or_fail()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let result = nojson::RawJson::parse(&stdout)?;
+    let object = JsonObject::new(result.value())?;
 
     // メトリクスを抽出
-    let vmaf_mean: f64 = object.get_required("vmaf_mean").or_fail()?;
-    let elapsed_seconds: f64 = object.get_required("elapsed_seconds").or_fail()?;
+    let vmaf_mean: f64 = object.get_required("vmaf_mean")?;
+    let elapsed_seconds: f64 = object.get_required("elapsed_seconds")?;
 
     // TODO(sile): hisui compose コマンドを実行して所要時間を計測することを検討する
     //
@@ -356,7 +360,7 @@ fn run_trial_evaluation(
     // とも考えられるので、この TODO は実際に必要になったタイミングで改めて対応を検討することにする。
 
     // 後から参照できるように保存しておく
-    std::fs::write(trial_dir.join("metrics.json"), &stdout).or_fail()?;
+    std::fs::write(trial_dir.join("metrics.json"), &stdout)?;
 
     Ok(TrialValues {
         elapsed_seconds,
@@ -368,8 +372,8 @@ fn display_best_trials_if_updated(
     args: &Args,
     optuna: &mut OptunaStudy,
     force: bool,
-) -> orfail::Result<bool> {
-    let (updated, mut best_trials) = optuna.get_best_trials().or_fail()?;
+) -> crate::Result<bool> {
+    let (updated, mut best_trials) = optuna.get_best_trials()?;
     if !updated && !force {
         // 更新なし
         return Ok(false);

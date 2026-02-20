@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use orfail::OrFail;
 use shiguredo_mp4::{
     FixedPointNumber,
     boxes::{AudioSampleEntryFields, SampleEntry},
@@ -30,9 +29,16 @@ pub struct AudioData {
 }
 
 impl AudioData {
-    pub fn stereo_samples(&self) -> orfail::Result<impl '_ + Iterator<Item = (i16, i16)>> {
-        (self.format == AudioFormat::I16Be).or_fail()?;
-        self.stereo.or_fail()?;
+    pub fn stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = (i16, i16)>> {
+        if self.format != AudioFormat::I16Be {
+            return Err(crate::Error::new(format!(
+                "expected I16Be format, got {}",
+                self.format
+            )));
+        }
+        if !self.stereo {
+            return Err(crate::Error::new("expected stereo audio data"));
+        }
 
         let samples = self.data.chunks_exact(4).map(|c| {
             (
@@ -43,9 +49,16 @@ impl AudioData {
         Ok(samples)
     }
 
-    pub fn interleaved_stereo_samples(&self) -> orfail::Result<impl '_ + Iterator<Item = i16>> {
-        (self.format == AudioFormat::I16Be).or_fail()?;
-        self.stereo.or_fail()?;
+    pub fn interleaved_stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = i16>> {
+        if self.format != AudioFormat::I16Be {
+            return Err(crate::Error::new(format!(
+                "expected I16Be format, got {}",
+                self.format
+            )));
+        }
+        if !self.stereo {
+            return Err(crate::Error::new("expected stereo audio data"));
+        }
 
         let samples = self.data.chunks_exact(4).flat_map(|c| {
             [

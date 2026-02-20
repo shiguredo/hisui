@@ -8,7 +8,6 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
 use shiguredo_mp4::Either;
 use shiguredo_mp4::boxes::HdlrBox;
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
@@ -212,7 +211,7 @@ impl Mp4Writer {
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
         mut stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let reserved_moov_box_size = if let Some(options) = options {
             // 事前に尺などが分かっている場合には fast start 用の領域を計算する
 
@@ -231,19 +230,18 @@ impl Mp4Writer {
             0
         };
         let muxer_options = Mp4FileMuxerOptions {
-            creation_timestamp: std::time::UNIX_EPOCH.elapsed().or_fail()?,
+            creation_timestamp: std::time::UNIX_EPOCH.elapsed()?,
             reserved_moov_box_size,
         };
-        let muxer = Mp4FileMuxer::with_options(muxer_options).or_fail()?;
+        let muxer = Mp4FileMuxer::with_options(muxer_options)?;
 
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
-            .open(path)
-            .or_fail()?;
+            .open(path)?;
         let initial_bytes = muxer.initial_boxes_bytes();
-        file.write_all(initial_bytes).or_fail()?;
+        file.write_all(initial_bytes)?;
 
         let next_position = initial_bytes.len() as u64;
         let stats = Mp4WriterStats::new(&mut stats, reserved_moov_box_size as u64);
@@ -276,20 +274,20 @@ impl Mp4Writer {
         &mut self,
         audio_timestamp: Option<Duration>,
         video_timestamp: Option<Duration>,
-    ) -> orfail::Result<bool> {
+    ) -> crate::Result<bool> {
         match (audio_timestamp, video_timestamp) {
             (None, None) => {
                 // 全部の入力の処理が完了した
-                let finalized = self.muxer.finalize().or_fail()?;
+                let finalized = self.muxer.finalize()?;
 
                 let actual_moov_size = finalized.moov_box_size() as u64;
                 self.stats.set_actual_moov_box_size(actual_moov_size);
 
                 for (offset, bytes) in finalized.offset_and_bytes_pairs() {
-                    self.file.seek(SeekFrom::Start(offset)).or_fail()?;
-                    self.file.write_all(bytes).or_fail()?;
+                    self.file.seek(SeekFrom::Start(offset))?;
+                    self.file.write_all(bytes)?;
                 }
-                self.file.flush().or_fail()?;
+                self.file.flush()?;
 
                 self.update_finalized_chunk_counts()?;
 
@@ -297,24 +295,24 @@ impl Mp4Writer {
             }
             (None, Some(_)) => {
                 // 残りは映像のみ
-                self.append_video_frame().or_fail()?;
+                self.append_video_frame()?;
             }
             (Some(_), None) => {
                 // 残りは音声のみ
-                self.append_audio_data().or_fail()?;
+                self.append_audio_data()?;
             }
             (Some(audio_timestamp), Some(video_timestamp)) => {
                 if self.appending_video_chunk
                     && video_timestamp.saturating_sub(audio_timestamp) > MAX_CHUNK_DURATION
                 {
                     // 音声が一定以上遅れている場合は映像に追従する
-                    self.append_audio_data().or_fail()?;
+                    self.append_audio_data()?;
                 } else if !self.appending_video_chunk && video_timestamp > audio_timestamp {
                     // 一度音声追記モードに入った場合には、映像に追いつくまでは音声を追記し続ける
-                    self.append_audio_data().or_fail()?;
+                    self.append_audio_data()?;
                 } else {
                     // 音声との差が一定以内の場合は、映像の処理を進める
-                    self.append_video_frame().or_fail()?;
+                    self.append_video_frame()?;
                 }
             }
         }
@@ -323,8 +321,12 @@ impl Mp4Writer {
     }
 
     // 確定したチャンク数を統計値に反映する
-    fn update_finalized_chunk_counts(&mut self) -> orfail::Result<()> {
-        let moov_box = self.muxer.finalized_boxes().or_fail()?.moov_box();
+    fn update_finalized_chunk_counts(&mut self) -> crate::Result<()> {
+        let finalized = self
+            .muxer
+            .finalized_boxes()
+            .ok_or_else(|| crate::Error::new("muxer finalized boxes are not available"))?;
+        let moov_box = finalized.moov_box();
 
         for trak in &moov_box.trak_boxes {
             let stbl = &trak.mdia_box.minf_box.stbl_box;
@@ -347,9 +349,12 @@ impl Mp4Writer {
         Ok(())
     }
 
-    fn append_video_frame(&mut self) -> orfail::Result<()> {
+    fn append_video_frame(&mut self) -> crate::Result<()> {
         // 次の入力を取り出す（これは常に成功する）
-        let frame = self.input_video_queue.pop_front().or_fail()?;
+        let frame = self
+            .input_video_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("video input queue is unexpectedly empty"))?;
 
         if self.stats.video_codec().is_none()
             && let Some(name) = frame.format.codec_name()
@@ -358,7 +363,7 @@ impl Mp4Writer {
         }
 
         // ファイルへのデータ追記
-        self.file.write_all(&frame.data).or_fail()?;
+        self.file.write_all(&frame.data)?;
         let data_offset = self.next_position;
 
         // muxer へのサンプル登録
@@ -371,7 +376,7 @@ impl Mp4Writer {
             data_offset,
             data_size: frame.data.len(),
         };
-        self.muxer.append_sample(&sample).or_fail()?;
+        self.muxer.append_sample(&sample)?;
 
         // ポジションを更新
         self.next_position += frame.data.len() as u64;
@@ -382,9 +387,12 @@ impl Mp4Writer {
         Ok(())
     }
 
-    fn append_audio_data(&mut self) -> orfail::Result<()> {
+    fn append_audio_data(&mut self) -> crate::Result<()> {
         // 次の入力を取り出す（これは常に成功する）
-        let data = self.input_audio_queue.pop_front().or_fail()?;
+        let data = self
+            .input_audio_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("audio input queue is unexpectedly empty"))?;
 
         if self.stats.audio_codec().is_none()
             && let Some(name) = data.format.codec_name()
@@ -393,7 +401,7 @@ impl Mp4Writer {
         }
 
         // ファイルへのデータ追記
-        self.file.write_all(&data.data).or_fail()?;
+        self.file.write_all(&data.data)?;
         let data_offset = self.next_position;
 
         // muxer へのサンプル登録
@@ -406,7 +414,7 @@ impl Mp4Writer {
             data_offset,
             data_size: data.data.len(),
         };
-        self.muxer.append_sample(&sample).or_fail()?;
+        self.muxer.append_sample(&sample)?;
 
         // ポジションを更新
         self.next_position += data.data.len() as u64;
@@ -430,7 +438,7 @@ impl MediaProcessor for Mp4Writer {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         match input.sample {
             Some(MediaSample::Audio(sample))
                 if Some(input.stream_id) == self.input_audio_stream_id =>
@@ -448,12 +456,12 @@ impl MediaProcessor for Mp4Writer {
             None if Some(input.stream_id) == self.input_video_stream_id => {
                 self.input_video_stream_id = None;
             }
-            _ => return Err(orfail::Failure::new("BUG: unexpected input stream")),
+            _ => return Err(crate::Error::new("BUG: unexpected input stream")),
         }
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         loop {
             if let Some(id) = self.input_video_stream_id
                 && self.input_video_queue.is_empty()
@@ -468,9 +476,7 @@ impl MediaProcessor for Mp4Writer {
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
             let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
 
-            let in_progress = self
-                .handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                .or_fail()?;
+            let in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
 
             if !in_progress {
                 return Ok(MediaProcessorOutput::Finished);
@@ -520,9 +526,7 @@ impl Mp4Writer {
             let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
             let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
 
-            in_progress = self
-                .handle_next_audio_and_video(audio_timestamp, video_timestamp)
-                .map_err(|e| crate::Error::new(e.to_string()))?;
+            in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
         }
 
         Ok(())

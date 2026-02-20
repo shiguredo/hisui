@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
@@ -21,7 +20,7 @@ pub struct NvcodecEncoder {
 }
 
 impl NvcodecEncoder {
-    pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         tracing::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
@@ -36,10 +35,9 @@ impl NvcodecEncoder {
         };
         tracing::debug!("nvcodec h264 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new_h264(config).or_fail()?;
-        let seq_params = inner.get_sequence_params().or_fail()?;
-        let sample_entry =
-            video_h264::h264_sample_entry_from_annexb(width, height, &seq_params).or_fail()?;
+        let mut inner = shiguredo_nvcodec::Encoder::new_h264(config)?;
+        let seq_params = inner.get_sequence_params()?;
+        let sample_entry = video_h264::h264_sample_entry_from_annexb(width, height, &seq_params)?;
 
         Ok(Self {
             inner,
@@ -51,7 +49,7 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         tracing::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
@@ -66,15 +64,14 @@ impl NvcodecEncoder {
         };
         tracing::debug!("nvcodec h265 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new_h265(config).or_fail()?;
-        let seq_params = inner.get_sequence_params().or_fail()?;
+        let mut inner = shiguredo_nvcodec::Encoder::new_h265(config)?;
+        let seq_params = inner.get_sequence_params()?;
         let sample_entry = video_h265::h265_sample_entry_from_annexb(
             width,
             height,
             options.frame_rate,
             &seq_params,
-        )
-        .or_fail()?;
+        )?;
 
         Ok(Self {
             inner,
@@ -86,7 +83,7 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn new_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_av1(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         tracing::debug!(
@@ -105,7 +102,7 @@ impl NvcodecEncoder {
         };
         tracing::debug!("nvcodec av1 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new_av1(config).or_fail()?;
+        let mut inner = shiguredo_nvcodec::Encoder::new_av1(config)?;
 
         // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
         // には以下の記載がある:
@@ -118,7 +115,7 @@ impl NvcodecEncoder {
         // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
         // キーフレームのエンコード時に Sequence Header が含まれていない場合は、
         // hisui 側で明示的に付与するワークアラウンドを実装している。
-        let seq_params = inner.get_sequence_params().or_fail()?;
+        let seq_params = inner.get_sequence_params()?;
 
         let sample_entry = video_av1::av1_sample_entry(width, height, &seq_params);
 
@@ -132,13 +129,20 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn encode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
-        (frame.format == VideoFormat::I420).or_fail()?;
+    pub fn encode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.format
+            )));
+        }
 
         // I420 から NV12 への変換
         let width = frame.width;
         let height = frame.height;
-        let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
+        let (y_plane, u_plane, v_plane) = frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
 
         // NV12 用のバッファを確保
         let y_size = width * height;
@@ -168,24 +172,27 @@ impl NvcodecEncoder {
         };
 
         let size = shiguredo_libyuv::ImageSize::new(width, height);
-        shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size).or_fail()?;
+        shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
         // エンコード実行
-        self.inner.encode(&nv12_data).or_fail()?;
+        self.inner.encode(&nv12_data)?;
         self.input_queue.push_back(frame.to_stripped());
-        self.handle_encoded_frames().or_fail()?;
+        self.handle_encoded_frames()?;
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
-        self.inner.finish().or_fail()?;
-        self.handle_encoded_frames().or_fail()?;
+    pub fn finish(&mut self) -> crate::Result<()> {
+        self.inner.finish()?;
+        self.handle_encoded_frames()?;
         Ok(())
     }
 
-    fn handle_encoded_frames(&mut self) -> orfail::Result<()> {
+    fn handle_encoded_frames(&mut self) -> crate::Result<()> {
         while let Some(encoded_frame) = self.inner.next_frame() {
-            let input_frame = self.input_queue.pop_front().or_fail()?;
+            let input_frame = self
+                .input_queue
+                .pop_front()
+                .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
 
             // キーフレーム判定
             let keyframe = matches!(
@@ -213,7 +220,7 @@ impl NvcodecEncoder {
                 }
                 data
             } else {
-                convert_annexb_to_mp4(encoded_frame.data()).or_fail()?
+                convert_annexb_to_mp4(encoded_frame.data())?
             };
 
             // VideoFrame を作成
@@ -273,7 +280,7 @@ impl NvcodecEncoder {
 ///
 /// Annex B 形式: スタートコード (0x00000001 or 0x000001) + NALU データ
 /// MP4 形式: サイズ (4バイト) + NALU データ
-fn convert_annexb_to_mp4(annexb_data: &[u8]) -> orfail::Result<Vec<u8>> {
+fn convert_annexb_to_mp4(annexb_data: &[u8]) -> crate::Result<Vec<u8>> {
     let mut mp4_data = Vec::new();
     let mut pos = 0;
 
@@ -285,7 +292,7 @@ fn convert_annexb_to_mp4(annexb_data: &[u8]) -> orfail::Result<Vec<u8>> {
             } else if pos + 3 <= annexb_data.len() && annexb_data[pos..pos + 3] == [0, 0, 1] {
                 3
             } else if pos == 0 {
-                return Err(orfail::Failure::new("No start code found at beginning"));
+                return Err(crate::Error::new("No start code found at beginning"));
             } else {
                 break;
             };

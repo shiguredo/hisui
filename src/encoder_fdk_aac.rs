@@ -1,6 +1,5 @@
 use std::{num::NonZeroUsize, time::Duration};
 
-use orfail::OrFail;
 use shiguredo_mp4::{
     Uint,
     boxes::{EsdsBox, Mp4aBox, SampleEntry},
@@ -17,11 +16,11 @@ pub struct FdkAacEncoder {
 }
 
 impl FdkAacEncoder {
-    pub fn new(bitrate: NonZeroUsize) -> orfail::Result<Self> {
+    pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
         let config = shiguredo_fdk_aac::EncoderConfig {
             target_bitrate: bitrate.get(),
         };
-        let inner = shiguredo_fdk_aac::Encoder::new(config).or_fail()?;
+        let inner = shiguredo_fdk_aac::Encoder::new(config)?;
         let sample_entry = Some(sample_entry(&inner, bitrate));
         Ok(Self {
             inner,
@@ -30,22 +29,28 @@ impl FdkAacEncoder {
         })
     }
 
-    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
-        let Some(encoded) = self.inner.finish().or_fail()? else {
+    pub fn finish(&mut self) -> crate::Result<Option<AudioData>> {
+        let Some(encoded) = self.inner.finish()? else {
             return Ok(None);
         };
         Ok(Some(self.handle_encoded_frame(encoded)))
     }
 
-    pub fn encode(&mut self, data: &AudioData) -> orfail::Result<Option<AudioData>> {
-        (data.format == AudioFormat::I16Be).or_fail()?;
-        data.stereo.or_fail()?;
+    pub fn encode(&mut self, data: &AudioData) -> crate::Result<Option<AudioData>> {
+        if data.format != AudioFormat::I16Be {
+            return Err(crate::Error::new(format!(
+                "expected I16Be audio format, got {:?}",
+                data.format
+            )));
+        }
+        if !data.stereo {
+            return Err(crate::Error::new(
+                "FDK AAC encoder expects stereo audio input",
+            ));
+        }
 
-        let input = data
-            .interleaved_stereo_samples()
-            .or_fail()?
-            .collect::<Vec<_>>();
-        let Some(encoded) = self.inner.encode(&input).or_fail()? else {
+        let input = data.interleaved_stereo_samples()?.collect::<Vec<_>>();
+        let Some(encoded) = self.inner.encode(&input)? else {
             return Ok(None);
         };
         Ok(Some(self.handle_encoded_frame(encoded)))

@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::video::{VideoFormat, VideoFrame};
@@ -13,22 +12,27 @@ pub struct Openh264Decoder {
 }
 
 impl Openh264Decoder {
-    pub fn new(lib: Openh264Library) -> orfail::Result<Self> {
+    pub fn new(lib: Openh264Library) -> crate::Result<Self> {
         Ok(Self {
-            inner: shiguredo_openh264::Decoder::new(lib).or_fail()?,
+            inner: shiguredo_openh264::Decoder::new(lib)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
         })
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
-        matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB).or_fail()?;
+    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
+        if !matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB) {
+            return Err(crate::Error::new(format!(
+                "expected H264 or H264AnnexB format, got {:?}",
+                frame.format
+            )));
+        }
 
         if frame.keyframe {
             // SPS / PPS などが変わると、デコーダーのバッファ内のフレームが失われることがあるようなので、
             // 変更の可能性があるキーフレームを処理する前に、常に finish() を呼ぶようにしている。
             // （よりちゃんとやるなら、frame.data をパースして SPS / PPS の変更をチェックするようにするといい）
-            self.finish().or_fail()?;
+            self.finish()?;
         }
 
         let decoded = if matches!(frame.format, VideoFormat::H264) {
@@ -36,20 +40,30 @@ impl Openh264Decoder {
             let mut data = &frame.data[..];
             let mut data_annexb = Vec::new();
             while !data.is_empty() {
-                (data.len() > 3).or_fail()?;
+                if data.len() <= 3 {
+                    return Err(crate::Error::new(format!(
+                        "invalid H264 AVCC payload: NALU length header is truncated (remaining={})",
+                        data.len()
+                    )));
+                }
                 let n = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                 data = &data[4..];
 
-                (data.len() >= n).or_fail()?;
+                if data.len() < n {
+                    return Err(crate::Error::new(format!(
+                        "invalid H264 AVCC payload: NALU data is truncated (required={n}, remaining={})",
+                        data.len()
+                    )));
+                }
                 data_annexb.extend_from_slice(&[0, 0, 0, 1]);
                 data_annexb.extend_from_slice(&data[..n]);
 
                 data = &data[n..];
             }
 
-            self.inner.decode(&data_annexb).or_fail()?
+            self.inner.decode(&data_annexb)?
         } else {
-            self.inner.decode(&frame.data).or_fail()?
+            self.inner.decode(&frame.data)?
         };
         self.input_queue.push_back(frame.to_stripped());
 
@@ -58,18 +72,24 @@ impl Openh264Decoder {
             return Ok(());
         };
 
-        let input_frame = self.input_queue.pop_front().or_fail()?;
-        let output_frame = Self::to_rgb_frame(input_frame, decoded).or_fail()?;
+        let input_frame = self
+            .input_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
+        let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
         self.output_queue.push_back(output_frame);
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
-        let Some(decoded) = self.inner.finish().or_fail()? else {
+    pub fn finish(&mut self) -> crate::Result<()> {
+        let Some(decoded) = self.inner.finish()? else {
             return Ok(());
         };
-        let input_frame = self.input_queue.pop_front().or_fail()?;
-        let output_frame = Self::to_rgb_frame(input_frame, decoded).or_fail()?;
+        let input_frame = self
+            .input_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
+        let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
         self.output_queue.push_back(output_frame);
         Ok(())
     }
@@ -77,7 +97,7 @@ impl Openh264Decoder {
     fn to_rgb_frame(
         input_frame: VideoFrame,
         frame: shiguredo_openh264::DecodedFrame,
-    ) -> orfail::Result<VideoFrame> {
+    ) -> crate::Result<VideoFrame> {
         Ok(VideoFrame::new_i420(
             input_frame,
             frame.width(),

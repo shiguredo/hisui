@@ -108,11 +108,31 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    run_internal(
+        http_listen_address,
+        http_port,
+        https_cert_path,
+        https_key_path,
+        ui_remote_url,
+        startup_rpc_file,
+    )
+    .map_err(noargs::Error::from)
+}
+
+fn run_internal(
+    http_listen_address: IpAddr,
+    http_port: u16,
+    https_cert_path: Option<PathBuf>,
+    https_key_path: Option<PathBuf>,
+    ui_remote_url: Option<String>,
+    startup_rpc_file: Option<PathBuf>,
+) -> crate::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?;
+        .build()
+        .map_err(crate::Error::from)?;
 
-    Ok(runtime.block_on(async move {
+    runtime.block_on(async move {
         // webrtc_p2p_session が spawn_local() で !Send タスクを起動するため、
         // /bootstrap を扱う server 実行コンテキストは LocalSet 上で動かす必要がある。
         let local = tokio::task::LocalSet::new();
@@ -126,7 +146,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
                 startup_rpc_file,
             ))
             .await
-    })?)
+    })
 }
 
 async fn run_server(
@@ -158,16 +178,14 @@ async fn run_server(
     tokio::spawn(pipeline.run());
 
     if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
-        crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle)
-            .await
-            .map_err(|e| crate::Error::new(e.to_string()))?;
+        crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle).await?;
         tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
     }
     pipeline_handle.complete_initial_processor_registration();
 
     let bootstrap_endpoint = Rc::new(
         BootstrapEndpoint::new(pipeline_handle.clone())
-            .map_err(|e| crate::Error::new(format!("Failed to init /bootstrap: {e}")))?,
+            .map_err(|e| e.with_context("Failed to init /bootstrap"))?,
     );
 
     let listen_addr = SocketAddr::new(http_listen_address, http_port);

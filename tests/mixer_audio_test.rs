@@ -10,7 +10,6 @@ use hisui::{
     types::CodecName,
     video::FrameRate,
 };
-use orfail::OrFail;
 
 const OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(100);
 
@@ -31,7 +30,7 @@ fn start_noop_audio_mixer() {
 }
 
 #[test]
-fn mix_three_sources_without_trim() -> orfail::Result<()> {
+fn mix_three_sources_without_trim() -> hisui::Result<()> {
     // それぞれ期間が異なる三つのソース
     // trim はしないので、合成後の尺は 300 ms になる
     let (source0, input_stream_id0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
@@ -49,23 +48,17 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
-        mixer
-            .process_input(audio_data(&source0, i, duration, sample))
-            .or_fail()?;
-        mixer
-            .process_input(audio_data(&source1, i, duration, sample * 2))
-            .or_fail()?;
-        mixer
-            .process_input(audio_data(&source2, i, duration, sample * 4))
-            .or_fail()?;
+        mixer.process_input(audio_data(&source0, i, duration, sample))?;
+        mixer.process_input(audio_data(&source1, i, duration, sample * 2))?;
+        mixer.process_input(audio_data(&source2, i, duration, sample * 4))?;
     }
-    mixer.process_input(eos(0)).or_fail()?;
-    mixer.process_input(eos(1)).or_fail()?;
-    mixer.process_input(eos(2)).or_fail()?;
+    mixer.process_input(eos(0))?;
+    mixer.process_input(eos(1))?;
+    mixer.process_input(eos(2))?;
 
     // source0 だけが存在する期間: 0 ms ~ 60 ms
     for _ in 0..3 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202);
         }
@@ -73,7 +66,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // source0 と sourde1 が混在する期間: 60 ms ~ 100 ms
     for _ in 0..2 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202 + 0x0404);
         }
@@ -81,7 +74,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // source1 だけが存在する期間: 100 ms ~ 160 ms
     for _ in 0..3 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0404);
         }
@@ -89,7 +82,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // 空白期間: 160 ms ~ 200 ms
     for _ in 0..2 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0);
         }
@@ -97,7 +90,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 
     // source2 だけが存在する期間: 200 ms ~ 300 ms
     for _ in 0..5 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0808);
         }
@@ -130,7 +123,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
 }
 
 #[test]
-fn mix_three_sources_with_trim() -> orfail::Result<()> {
+fn mix_three_sources_with_trim() -> hisui::Result<()> {
     // それぞれ期間が異なる三つのソース
     // trim をするので、合成後の尺は 260 ms になる
     let (source0, input_stream_id0) = source(0, 0, 100); // 範囲: 0 ms ~ 100 ms
@@ -155,23 +148,17 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
-        mixer
-            .process_input(audio_data(&source0, i, duration, sample))
-            .or_fail()?;
-        mixer
-            .process_input(audio_data(&source1, i, duration, sample * 2))
-            .or_fail()?;
-        mixer
-            .process_input(audio_data(&source2, i, duration, sample * 4))
-            .or_fail()?;
+        mixer.process_input(audio_data(&source0, i, duration, sample))?;
+        mixer.process_input(audio_data(&source1, i, duration, sample * 2))?;
+        mixer.process_input(audio_data(&source2, i, duration, sample * 4))?;
     }
-    mixer.process_input(eos(0)).or_fail()?;
-    mixer.process_input(eos(1)).or_fail()?;
-    mixer.process_input(eos(2)).or_fail()?;
+    mixer.process_input(eos(0))?;
+    mixer.process_input(eos(1))?;
+    mixer.process_input(eos(2))?;
 
     // source0 だけが存在する期間: 0 ms ~ 60 ms
     for _ in 0..3 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202);
         }
@@ -179,7 +166,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source0 と sourde1 が混在する期間: 60 ms ~ 100 ms
     for _ in 0..2 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0202 + 0x0404);
         }
@@ -187,7 +174,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source1 だけが存在する期間: 100 ms ~ 160 ms
     for _ in 0..3 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0404);
         }
@@ -195,7 +182,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
     // source2 だけが存在する期間: 200 ms ~ 300 ms
     for _ in 0..5 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0808);
         }
@@ -229,7 +216,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
 
 /// AudioData.duration がソース毎に異なる場合のテスト
 #[test]
-fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
+fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
     // 100 ms のソースを三つ用意する
     let (source0, input_stream_id0) = source(0, 0, 100);
     let (source1, input_stream_id1) = source(1, 0, 100);
@@ -246,31 +233,25 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
     for i in 0..10 {
         let sample = 2;
         let duration = Duration::from_millis(10); // 尺は 10 ms
-        mixer
-            .process_input(audio_data(&source0, i, duration, sample))
-            .or_fail()?;
+        mixer.process_input(audio_data(&source0, i, duration, sample))?;
     }
     for i in 0..4 {
         let sample = 4;
         let duration = Duration::from_millis(25); // 尺は 25 ms
-        mixer
-            .process_input(audio_data(&source1, i, duration, sample))
-            .or_fail()?;
+        mixer.process_input(audio_data(&source1, i, duration, sample))?;
     }
     for i in 0..50 {
         let sample = 8;
         let duration = Duration::from_millis(2); // 尺は 2 ms
-        mixer
-            .process_input(audio_data(&source2, i, duration, sample))
-            .or_fail()?;
+        mixer.process_input(audio_data(&source2, i, duration, sample))?;
     }
-    mixer.process_input(eos(0)).or_fail()?;
-    mixer.process_input(eos(1)).or_fail()?;
-    mixer.process_input(eos(2)).or_fail()?;
+    mixer.process_input(eos(0))?;
+    mixer.process_input(eos(1))?;
+    mixer.process_input(eos(2))?;
 
     // 合成結果を確認する (合成後の AudioData.duraiton は 20 ms に固定）
     for _ in 0..5 {
-        let audio_data = next_mixed_data(&mut mixer).or_fail()?;
+        let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
             assert_eq!(i16::from_be_bytes([c[0], c[1]]), 0x0E0E);
         }
@@ -301,7 +282,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
 
 /// 不正なフォーマットの音声データを送るテスト
 #[test]
-fn non_pcm_audio_input_error() -> orfail::Result<()> {
+fn non_pcm_audio_input_error() -> hisui::Result<()> {
     let (source, input_stream_id) = source(0, 0, 100);
     let mut mixer = AudioMixer::new(
         layout(std::slice::from_ref(&source), None).trim_spans,
@@ -321,7 +302,7 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
 
     // 不正なフォーマットのデータを送信
     assert!(mixer.process_input(input).is_err());
-    mixer.process_input(eos(0)).or_fail()?;
+    mixer.process_input(eos(0))?;
 
     // エラーになるので、出力も存在しない
     assert!(matches!(
@@ -428,13 +409,11 @@ fn ms(value: u64) -> Duration {
     Duration::from_millis(value)
 }
 
-fn next_mixed_data(mixer: &mut AudioMixer) -> orfail::Result<Arc<AudioData>> {
+fn next_mixed_data(mixer: &mut AudioMixer) -> hisui::Result<Arc<AudioData>> {
     mixer
-        .process_output()
-        .or_fail()?
+        .process_output()?
         .expect_processed()
-        .or_fail()?
+        .ok_or_else(|| hisui::Error::new("value is missing"))?
         .1
         .expect_audio_data()
-        .or_fail()
 }

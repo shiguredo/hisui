@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
@@ -40,11 +39,12 @@ pub struct Mp4VideoReader {
 }
 
 impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let mut file = File::open(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
+        let mut file = File::open(&path).map_err(|e| {
+            crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
+        })?;
         let mut demuxer = Mp4FileDemuxer::new();
-        initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
+        initialize_mp4_demuxer(&mut file, &mut demuxer, &path)?;
 
         Ok(Self {
             file,
@@ -80,12 +80,12 @@ impl Mp4VideoReader {
         self.track_duration_offset = prev.track_duration_offset;
     }
 
-    fn next_sample(&mut self) -> orfail::Result<Option<VideoFrame>> {
+    fn next_sample(&mut self) -> crate::Result<Option<VideoFrame>> {
         let sample = 'next_sample: loop {
             match self
                 .demuxer
                 .next_sample()
-                .or_fail_with(|e| format!("Read sample error: {e}"))?
+                .map_err(|e| crate::Error::new(format!("Read sample error: {e}")))?
             {
                 None => return Ok(None),
                 Some(sample) if sample.track.kind != TrackKind::Video => {}
@@ -104,7 +104,7 @@ impl Mp4VideoReader {
                 SampleEntry::Vp09(b) => (&b.visual, VideoFormat::Vp9),
                 SampleEntry::Av01(b) => (&b.visual, VideoFormat::Av1),
                 entry => {
-                    return Err(orfail::Failure::new(format!(
+                    return Err(crate::Error::new(format!(
                         "unsupported sample entry: {entry:?}"
                     )));
                 }
@@ -119,10 +119,10 @@ impl Mp4VideoReader {
         let mut data = vec![0; sample.data_size];
         self.file
             .seek(SeekFrom::Start(sample.data_offset))
-            .or_fail_with(|e| format!("Seek error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Seek error: {e}")))?;
         self.file
             .read_exact(&mut data)
-            .or_fail_with(|e| format!("Read error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Read error: {e}")))?;
 
         // タイムスタンプを計算する
         let timescale = sample.track.timescale.get();
@@ -157,10 +157,10 @@ impl Mp4VideoReader {
 }
 
 impl Iterator for Mp4VideoReader {
-    type Item = orfail::Result<VideoFrame>;
+    type Item = crate::Result<VideoFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_sample().or_fail().transpose()
+        self.next_sample().transpose()
     }
 }
 
@@ -182,17 +182,18 @@ pub struct Mp4AudioReader {
 }
 
 impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> orfail::Result<Self> {
-        let mut file = File::open(&path)
-            .or_fail_with(|e| format!("Cannot open file {}: {e}", path.as_ref().display()))?;
+    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
+        let mut file = File::open(&path).map_err(|e| {
+            crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
+        })?;
         let mut demuxer = Mp4FileDemuxer::new();
-        initialize_mp4_demuxer(&mut file, &mut demuxer, &path).or_fail()?;
+        initialize_mp4_demuxer(&mut file, &mut demuxer, &path)?;
 
         // 利用可能な音声トラックがあるかをチェックする
         //
         // チェックのためにサンプルエントリーを取得するためには、
         // demuxer のサンプル読み込みが必要なので、clone して別インスタンスで行っている
-        let audio_track_id = check_audio_track(demuxer.clone()).or_fail()?;
+        let audio_track_id = check_audio_track(demuxer.clone())?;
 
         Ok(Self {
             file,
@@ -226,12 +227,12 @@ impl Mp4AudioReader {
         self.track_duration_offset = prev.track_duration_offset;
     }
 
-    fn next_sample(&mut self) -> orfail::Result<Option<AudioData>> {
+    fn next_sample(&mut self) -> crate::Result<Option<AudioData>> {
         let sample = 'next_sample: loop {
             match self
                 .demuxer
                 .next_sample()
-                .or_fail_with(|e| format!("Read sample error: {e}"))?
+                .map_err(|e| crate::Error::new(format!("Read sample error: {e}")))?
             {
                 None => return Ok(None),
                 Some(sample) if Some(sample.track.track_id) != self.audio_track_id => {}
@@ -246,7 +247,7 @@ impl Mp4AudioReader {
                 SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
                 SampleEntry::Mp4a(b) => (&b.audio, AudioFormat::Aac),
                 entry => {
-                    return Err(orfail::Failure::new(format!(
+                    return Err(crate::Error::new(format!(
                         "unsupported sample entry: {entry:?}"
                     )));
                 }
@@ -261,10 +262,10 @@ impl Mp4AudioReader {
         let mut data = vec![0; sample.data_size];
         self.file
             .seek(SeekFrom::Start(sample.data_offset))
-            .or_fail_with(|e| format!("Seek error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Seek error: {e}")))?;
         self.file
             .read_exact(&mut data)
-            .or_fail_with(|e| format!("Read error: {e}"))?;
+            .map_err(|e| crate::Error::new(format!("Read error: {e}")))?;
 
         // タイムスタンプを計算する
         let timescale = sample.track.timescale.get();
@@ -289,10 +290,10 @@ impl Mp4AudioReader {
 }
 
 impl Iterator for Mp4AudioReader {
-    type Item = orfail::Result<AudioData>;
+    type Item = crate::Result<AudioData>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_sample().or_fail().transpose()
+        self.next_sample().transpose()
     }
 }
 
@@ -303,31 +304,33 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
     file: &mut R,
     demuxer: &mut Mp4FileDemuxer,
     path: P,
-) -> orfail::Result<()> {
+) -> crate::Result<()> {
     // 念のために（壊れたファイルが渡された時のため）、バッファサイズの上限を 100 MBに設定しておく。
     // 正常なファイルの場合には、これは moov ボックスのサイズ上限となるが、
     // 典型的には、100 MB あれば、MP4 ファイル自体としては数百 GB 程度のものを扱えるため、実用上の問題はない想定。
     const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
 
     while let Some(required) = demuxer.required_input() {
-        let size = required.size.or_fail_with(|()| {
-            format!(
+        let size = required.size.ok_or_else(|| {
+            crate::Error::new(format!(
                 "MP4 file contains unexpected variable size box {}",
                 path.as_ref().display()
-            )
+            ))
         })?;
         if size > MAX_BUF_SIZE {
-            return Err(orfail::Failure::new(format!(
+            return Err(crate::Error::new(format!(
                 "MP4 file contains box larger than maximum allowed size ({size} > {MAX_BUF_SIZE}): {}",
                 path.as_ref().display()
             )));
         }
 
         let mut buf = vec![0; size];
-        file.seek(SeekFrom::Start(required.position))
-            .or_fail_with(|e| format!("Seek error {}: {e}", path.as_ref().display()))?;
-        file.read_exact(&mut buf)
-            .or_fail_with(|e| format!("Read error {}: {e}", path.as_ref().display()))?;
+        file.seek(SeekFrom::Start(required.position)).map_err(|e| {
+            crate::Error::new(format!("Seek error {}: {e}", path.as_ref().display()))
+        })?;
+        file.read_exact(&mut buf).map_err(|e| {
+            crate::Error::new(format!("Read error {}: {e}", path.as_ref().display()))
+        })?;
         let input = required.to_input(&buf);
         demuxer.handle_input(input);
     }
@@ -335,9 +338,9 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
 }
 
 /// 音声トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
-fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> orfail::Result<Option<u32>> {
+fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> crate::Result<Option<u32>> {
     let mut has_audio_track = false;
-    while let Some(sample) = demuxer.next_sample().or_fail()? {
+    while let Some(sample) = demuxer.next_sample()? {
         if sample.track.kind != TrackKind::Audio {
             continue;
         }
@@ -365,7 +368,7 @@ fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> orfail::Result<Option<u32>>
 
     if has_audio_track {
         // 音声トラックがあるのにサポートしているコーデックがない場合はエラーにする
-        Err(orfail::Failure::new(
+        Err(crate::Error::new(
             "No supported audio track found in the file".to_owned(),
         ))
     } else {

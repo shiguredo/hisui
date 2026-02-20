@@ -446,7 +446,6 @@ version = "2026.1.0-canary.0"
 dependencies = [
  "noargs",
  "nojson",
- "orfail",
  "png",
  "rustls",
  "rustls-platform-verifier",
@@ -697,12 +696,6 @@ name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
-
-[[package]]
-name = "orfail"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d047c6764bd82c0195d8d392c043a37e9d4a152379e1dd88f7e63b19eb7c1d6"
 
 [[package]]
 name = "password-hash"

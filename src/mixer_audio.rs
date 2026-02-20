@@ -3,8 +3,6 @@ use std::{
     time::Duration,
 };
 
-use orfail::OrFail;
-
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
@@ -176,10 +174,7 @@ impl AudioMixer {
         handle.wait_subscribers_ready().await?;
 
         loop {
-            match self
-                .process_output()
-                .map_err(|e| Error::new(e.to_string()))?
-            {
+            match self.process_output()? {
                 MediaProcessorOutput::Processed { sample, .. } => {
                     if !output_tx.send_media(sample) {
                         break;
@@ -222,7 +217,7 @@ impl AudioMixer {
         Duration::from_secs(self.stats.total_output_sample_count()) / SAMPLE_RATE as u32
     }
 
-    fn mix_next_audio_data(&mut self, now: Duration) -> orfail::Result<AudioData> {
+    fn mix_next_audio_data(&mut self, now: Duration) -> crate::Result<AudioData> {
         let timestamp = self.next_output_timestamp();
 
         let bytes_per_sample = CHANNELS as usize * 2; // i16 で表現するので *2
@@ -284,19 +279,14 @@ impl AudioMixer {
         message: Message,
     ) -> Result<()> {
         match message {
-            Message::Media(MediaSample::Audio(sample)) => self
-                .process_input(MediaProcessorInput::sample(
-                    stream_id,
-                    MediaSample::Audio(sample),
-                ))
-                .map_err(|e| Error::new(e.to_string())),
+            Message::Media(MediaSample::Audio(sample)) => self.process_input(
+                MediaProcessorInput::sample(stream_id, MediaSample::Audio(sample)),
+            ),
             Message::Media(MediaSample::Video(_)) => Err(Error::new(format!(
                 "expected an audio sample on track {}, but got a video sample",
                 track_id.get()
             ))),
-            Message::Eos => self
-                .process_input(MediaProcessorInput::eos(stream_id))
-                .map_err(|e| Error::new(e.to_string())),
+            Message::Eos => self.process_input(MediaProcessorInput::eos(stream_id)),
             Message::Syn(_) => Ok(()),
         }
     }
@@ -311,10 +301,18 @@ impl MediaProcessor for AudioMixer {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
-        let input_stream = self.input_streams.get_mut(&input.stream_id).or_fail()?;
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
+        let input_stream = self
+            .input_streams
+            .get_mut(&input.stream_id)
+            .ok_or_else(|| {
+                crate::Error::new(format!(
+                    "unknown input stream id for audio mixer: {}",
+                    input.stream_id.get()
+                ))
+            })?;
         if let Some(sample) = input.sample {
-            let data = sample.expect_audio_data().or_fail()?;
+            let data = sample.expect_audio_data()?;
 
             if input_stream.start_timestamp.is_none() {
                 // 合成開始時刻の判断用に最初のタイムスタンプを覚えておく
@@ -334,10 +332,13 @@ impl MediaProcessor for AudioMixer {
             //
             // 想定外の入力が来ていないかを念のためにチェックする
             // (format と stereo については stereo_samples() の中でチェックしている)
-            (data.sample_rate == SAMPLE_RATE).or_fail()?;
-            input_stream
-                .sample_queue
-                .extend(data.stereo_samples().or_fail()?);
+            if data.sample_rate != SAMPLE_RATE {
+                return Err(crate::Error::new(format!(
+                    "expected sample rate {}Hz, got {}Hz",
+                    SAMPLE_RATE, data.sample_rate
+                )));
+            }
+            input_stream.sample_queue.extend(data.stereo_samples()?);
 
             self.stats.add_input_audio_data_count();
         } else {
@@ -346,7 +347,7 @@ impl MediaProcessor for AudioMixer {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         let mut now = self.next_input_timestamp();
         while self.trim_spans.contains(now) {
             self.stats
@@ -378,7 +379,7 @@ impl MediaProcessor for AudioMixer {
         }
 
         // 合成
-        let mixed_data = self.mix_next_audio_data(now).or_fail()?;
+        let mixed_data = self.mix_next_audio_data(now)?;
 
         Ok(MediaProcessorOutput::Processed {
             stream_id: self.output_stream_id,

@@ -7,8 +7,6 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use orfail::OrFail;
-
 use crate::media::{MediaSample, MediaStreamId};
 use crate::processor::{
     BoxedMediaProcessor, MediaProcessor, MediaProcessorInput, MediaProcessorOutput,
@@ -76,10 +74,15 @@ impl Task {
         (task, input_stream_txs)
     }
 
-    fn process_input(&mut self) -> orfail::Result<bool> {
+    fn process_input(&mut self) -> crate::Result<bool> {
         let mut input = None;
         for &stream_id in &self.awaiting_input_stream_ids {
-            let rx = self.input_stream_rxs.get(&stream_id).or_fail()?;
+            let rx = self.input_stream_rxs.get(&stream_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing input receiver for stream id: {}",
+                    stream_id.get()
+                ))
+            })?;
             match rx.try_recv() {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     input = Some(MediaProcessorInput::eos(stream_id));
@@ -94,7 +97,7 @@ impl Task {
             }
         }
         if let Some(input) = input {
-            self.processor.process_input(input).or_fail()?;
+            self.processor.process_input(input)?;
             self.awaiting_input_stream_ids.clear();
             Ok(true)
         } else {
@@ -102,13 +105,18 @@ impl Task {
         }
     }
 
-    fn process_output(&mut self) -> orfail::Result<bool> {
+    fn process_output(&mut self) -> crate::Result<bool> {
         if !self.awaiting_input_stream_ids.is_empty() {
             return Ok(false);
         }
 
         if let Some((stream_id, mut i, sample)) = self.output_sample.take() {
-            let txs = self.output_stream_txs.get_mut(&stream_id).or_fail()?;
+            let txs = self.output_stream_txs.get_mut(&stream_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing output sender list for stream id: {}",
+                    stream_id.get()
+                ))
+            })?;
             while i < txs.len() {
                 match txs[i].try_send(sample.clone()) {
                     Ok(()) => {
@@ -128,7 +136,7 @@ impl Task {
             }
         }
 
-        match self.processor.process_output().or_fail()? {
+        match self.processor.process_output()? {
             MediaProcessorOutput::Finished => {
                 self.finished = true;
                 Ok(false)
@@ -156,9 +164,9 @@ impl Task {
         }
     }
 
-    fn run_until_block(&mut self) -> orfail::Result<bool> {
+    fn run_until_block(&mut self) -> crate::Result<bool> {
         let mut did_something = false;
-        while self.process_input().or_fail()? || self.process_output().or_fail()? {
+        while self.process_input()? || self.process_output()? {
             did_something = true;
         }
         Ok(did_something)
@@ -192,7 +200,7 @@ impl Scheduler {
             error: Arc::new(AtomicBool::new(false)),
         }
     }
-    pub fn register<P>(&mut self, processor: P) -> orfail::Result<()>
+    pub fn register<P>(&mut self, processor: P) -> crate::Result<()>
     where
         P: 'static + Send + MediaProcessor,
     {
@@ -206,8 +214,8 @@ impl Scheduler {
         Ok(())
     }
 
-    fn spawn(mut self) -> orfail::Result<SchedulerHandle> {
-        self.update_output_stream_txs().or_fail()?;
+    fn spawn(mut self) -> crate::Result<SchedulerHandle> {
+        self.update_output_stream_txs()?;
 
         // コストが高い順にソートする
         // なお、現時点では、I/O タスクは「コストが最低の CPU タスク」として扱っている
@@ -230,8 +238,8 @@ impl Scheduler {
             let i = thread_costs
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, cost)| *cost) // 累積コストが一番低いスレッドを選ぶ
-                .or_fail()?
+                .min_by_key(|(_, cost)| *cost)
+                .ok_or_else(|| crate::Error::new("no thread cost entries found"))? // 累積コストが一番低いスレッドを選ぶ
                 .0;
             thread_costs[i] += cost.get();
             task.thread_number = i;
@@ -264,9 +272,9 @@ impl Scheduler {
         })
     }
 
-    pub fn run(self) -> orfail::Result<SchedulerResult> {
+    pub fn run(self) -> crate::Result<SchedulerResult> {
         let start = Instant::now();
-        let handle = self.spawn().or_fail()?;
+        let handle = self.spawn()?;
         for handle in handle.handles {
             if let Err(e) = handle.join() {
                 std::panic::resume_unwind(e);
@@ -278,13 +286,13 @@ impl Scheduler {
         })
     }
 
-    pub fn run_timeout(self, timeout: Duration) -> orfail::Result<(bool, SchedulerResult)> {
+    pub fn run_timeout(self, timeout: Duration) -> crate::Result<(bool, SchedulerResult)> {
         // 完了待ちのビジーループを避けるためのスリープの時間
         // 適当に長めの時間ならなんでもいい
         const SLEEP_DURATION: Duration = Duration::from_millis(100);
 
         let start = Instant::now();
-        let mut handle = self.spawn().or_fail()?;
+        let mut handle = self.spawn()?;
         let mut timeout_expired = false;
         while !handle.handles.is_empty() {
             if !timeout_expired && timeout < start.elapsed() {
@@ -326,7 +334,7 @@ impl Scheduler {
         ))
     }
 
-    fn update_output_stream_txs(&mut self) -> orfail::Result<()> {
+    fn update_output_stream_txs(&mut self) -> crate::Result<()> {
         for task in &mut self.tasks {
             for id in task.processor.spec().output_stream_ids {
                 if let Some(tx) = self.stream_txs.get(&id).cloned() {
@@ -378,11 +386,11 @@ impl TaskRunner {
         let mut i = 0;
         let mut did_something = false;
         while i < self.tasks.len() {
-            let result = self.tasks[i].run_until_block().or_fail();
+            let result = self.tasks[i].run_until_block();
 
             match result {
                 Err(e) => {
-                    tracing::error!("{e}");
+                    tracing::error!("{}", e.display());
                     self.error_flag.store(true, Ordering::Relaxed);
                     self.tasks[i].processor.set_error();
                     self.tasks.swap_remove(i);

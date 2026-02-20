@@ -9,19 +9,18 @@ use hisui::{
     layout_region::{ReuseKind, assign_sources, decide_grid_dimensions, decide_required_cells},
     metadata::{SourceId, SourceInfo},
 };
-use orfail::OrFail;
 
 #[test]
-fn valid_resolutions() -> orfail::Result<()> {
+fn valid_resolutions() -> hisui::Result<()> {
     let valid_jsons = [r#""16x16""#, r#""3840x3840""#];
     for json in valid_jsons {
-        json.parse::<nojson::Json<Resolution>>().or_fail()?;
+        json.parse::<nojson::Json<Resolution>>()?;
     }
 
     // 値は 2 の倍数に丸められる
     for i in 0..2 {
         let json = format!(r#""{}x{}""#, 32 + i, 32 + i);
-        let v = json.parse::<nojson::Json<Resolution>>().or_fail()?;
+        let v = json.parse::<nojson::Json<Resolution>>()?;
         assert_eq!(v.0.width().get(), 32);
         assert_eq!(v.0.height().get(), 32);
     }
@@ -502,7 +501,7 @@ fn assign_sources_works() {
 }
 
 #[test]
-fn invalid_resolutions() -> orfail::Result<()> {
+fn invalid_resolutions() -> hisui::Result<()> {
     let invalid_jsons = [
         // width が小さすぎる
         r#""15x20""#,
@@ -528,7 +527,7 @@ fn invalid_resolutions() -> orfail::Result<()> {
 }
 
 #[test]
-fn layout_without_resolution_specified() -> orfail::Result<()> {
+fn layout_without_resolution_specified() -> hisui::Result<()> {
     let base_path = PathBuf::from(".");
 
     // resolution を省略した場合、リージョンのサイズと位置から自動計算される
@@ -587,7 +586,7 @@ fn layout_without_resolution_specified() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .message
+            .reason
             .contains("Region width must be specified")
     );
 
@@ -595,7 +594,7 @@ fn layout_without_resolution_specified() -> orfail::Result<()> {
 }
 
 #[test]
-fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
+fn cell_width_and_cell_height_handling() -> hisui::Result<()> {
     let base_path = PathBuf::from(".");
 
     // 基本的な cell_width と cell_height の指定をテスト
@@ -648,7 +647,7 @@ fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .message
+            .reason
             .contains("cannot specify both 'width' and 'cell_width'")
     );
 
@@ -672,7 +671,7 @@ fn cell_width_and_cell_height_handling() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .message
+            .reason
             .contains("cannot specify both 'height' and 'cell_height'")
     );
 
@@ -715,17 +714,16 @@ fn source(start: u64, end: u64) -> SourceInfo {
 }
 
 #[test]
-fn source_wildcard() -> orfail::Result<()> {
-    let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
-    let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
+fn source_wildcard() -> hisui::Result<()> {
+    let base_path = PathBuf::from("testdata/files/").canonicalize()?;
+    let to_absolute = |path| std::path::absolute(base_path.join(path));
 
     // ソースパスを明示的に指定
     let resolved = layout::resolve_source_paths(
         &base_path,
         &[PathBuf::from("bar-0.json"), PathBuf::from("foo-1.json")],
         &[],
-    )
-    .or_fail()?;
+    )?;
     assert_eq!(
         resolved,
         &[to_absolute("bar-0.json")?, to_absolute("foo-1.json")?]
@@ -739,13 +737,11 @@ fn source_wildcard() -> orfail::Result<()> {
             PathBuf::from("foo-1.json"),
             PathBuf::from("foo-2.json"), // こっちはマッチしない
         ],
-    )
-    .or_fail()?;
+    )?;
     assert_eq!(resolved, &[to_absolute("bar-0.json")?]);
 
     // ソースパスをワイルドカードで指定
-    let resolved =
-        layout::resolve_source_paths(&base_path, &[PathBuf::from("foo-*.json")], &[]).or_fail()?;
+    let resolved = layout::resolve_source_paths(&base_path, &[PathBuf::from("foo-*.json")], &[])?;
     assert_eq!(
         resolved,
         &[
@@ -760,8 +756,7 @@ fn source_wildcard() -> orfail::Result<()> {
         &base_path,
         &[PathBuf::from("*.json")],
         &[PathBuf::from("*-1.json")],
-    )
-    .or_fail()?;
+    )?;
     assert_eq!(
         resolved,
         &[
@@ -783,8 +778,7 @@ fn source_wildcard() -> orfail::Result<()> {
             PathBuf::from("baz-0.json"),
         ],
         &[PathBuf::from("bar-2.json"), PathBuf::from("baz-*.json")],
-    )
-    .or_fail()?;
+    )?;
     assert_eq!(
         resolved,
         &[
@@ -798,9 +792,9 @@ fn source_wildcard() -> orfail::Result<()> {
 }
 
 #[test]
-fn source_path_outside_base_dir_error() -> orfail::Result<()> {
+fn source_path_outside_base_dir_error() -> hisui::Result<()> {
     // ベースディレクトリの外をレイアウトの中で参照した場合にはエラーになる
-    let base_path = PathBuf::from("testdata/files/").canonicalize().or_fail()?;
+    let base_path = PathBuf::from("testdata/files/").canonicalize()?;
 
     let result =
         layout::resolve_source_paths(&base_path, &[PathBuf::from("../files2/foo-0.json")], &[]);
@@ -808,7 +802,7 @@ fn source_path_outside_base_dir_error() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .to_string()
+            .display()
             .contains("outside the base dir")
     );
 
@@ -816,16 +810,15 @@ fn source_path_outside_base_dir_error() -> orfail::Result<()> {
 }
 
 #[test]
-fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
+fn wildcard_excludes_sources_without_media_files() -> hisui::Result<()> {
     // files2/ ディレクトリには以下のファイルがある：
     // - foo-0.json + foo-0.mp4 (メディアファイルあり)
     // - source-without-media.json (メディアファイルなし)
-    let base_path = PathBuf::from("testdata/files2/").canonicalize().or_fail()?;
-    let to_absolute = |path| std::path::absolute(base_path.join(path)).or_fail();
+    let base_path = PathBuf::from("testdata/files2/").canonicalize()?;
+    let to_absolute = |path| std::path::absolute(base_path.join(path));
 
     // ワイルドカードで全 JSON ファイルを指定
-    let resolved =
-        layout::resolve_source_paths(&base_path, &[PathBuf::from("*.json")], &[]).or_fail()?;
+    let resolved = layout::resolve_source_paths(&base_path, &[PathBuf::from("*.json")], &[])?;
 
     // メディアファイルが存在するソースのみが含まれることを確認
     // source-without-media.json は対応するメディアファイル（.webm または .mp4）が
@@ -843,7 +836,7 @@ fn wildcard_excludes_sources_without_media_files() -> orfail::Result<()> {
     assert!(
         result
             .unwrap_err()
-            .to_string()
+            .display()
             .contains("no media file for the source")
     );
 
@@ -872,7 +865,7 @@ fn invalid_layouts() {
     let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
     assert!(result.is_err());
 
-    let error_message = result.unwrap_err().message;
+    let error_message = result.unwrap_err().reason;
     assert!(error_message.contains("x_pos + width"));
     assert!(error_message.contains("exceeds resolution width"));
 
@@ -897,7 +890,7 @@ fn invalid_layouts() {
     let result = Layout::from_layout_json_str(base_path.clone(), invalid_json);
     assert!(result.is_err());
 
-    let error_message = result.unwrap_err().message;
+    let error_message = result.unwrap_err().reason;
     assert!(error_message.contains("y_pos + height"));
     assert!(error_message.contains("exceeds resolution height"));
 
@@ -908,57 +901,81 @@ fn invalid_layouts() {
 }
 
 #[test]
-fn source_timestamps() -> orfail::Result<()> {
+fn source_timestamps() -> hisui::Result<()> {
     // ソースのタイムスタンプ情報が適切に反映されているかどうかのテスト
     let base_path = PathBuf::from("./testdata/source_timestamps/");
 
     // 一括録画の場合
     let layout_path = base_path.join("layout.json");
-    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path)?;
     assert_eq!(layout.sources.len(), 4);
 
     let id = SourceId::new("0TFGTG90RS5J55VGR0D7Z5QKJC");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 0);
     assert_eq!(source.stop_timestamp.as_secs(), 31);
 
     let id = SourceId::new("EVYCT2Q86H6ZDCD08JV3YTXCDR");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 22);
     assert_eq!(source.stop_timestamp.as_secs(), 61);
 
     let id = SourceId::new("SBRZKAAYF526HCRFGPB5VXCX78");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 41);
     assert_eq!(source.stop_timestamp.as_secs(), 73);
 
     let id = SourceId::new("Z2EDY12WX13QK8X8JDZK81MM0G");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 11);
     assert_eq!(source.stop_timestamp.as_secs(), 51);
 
     // 分割録画の場合
     let layout_path = base_path.join("split-layout.json");
-    let layout = Layout::from_layout_json_file(base_path, &layout_path).or_fail()?;
+    let layout = Layout::from_layout_json_file(base_path, &layout_path)?;
     assert_eq!(layout.sources.len(), 4);
 
     let id = SourceId::new("0TFGTG90RS5J55VGR0D7Z5QKJC");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 0);
     assert_eq!(source.stop_timestamp.as_secs(), 31);
 
     let id = SourceId::new("EVYCT2Q86H6ZDCD08JV3YTXCDR");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 22);
     assert_eq!(source.stop_timestamp.as_secs(), 61);
 
     let id = SourceId::new("SBRZKAAYF526HCRFGPB5VXCX78");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 41);
     assert_eq!(source.stop_timestamp.as_secs(), 73);
 
     let id = SourceId::new("Z2EDY12WX13QK8X8JDZK81MM0G");
-    let source = layout.sources.get(&id).or_fail()?;
+    let source = layout
+        .sources
+        .get(&id)
+        .ok_or_else(|| hisui::Error::new("value is missing"))?;
     assert_eq!(source.start_timestamp.as_secs(), 11);
     assert_eq!(source.stop_timestamp.as_secs(), 51);
 
@@ -966,19 +983,22 @@ fn source_timestamps() -> orfail::Result<()> {
 }
 
 #[test]
-fn trim() -> orfail::Result<()> {
+fn trim() -> hisui::Result<()> {
     // trim 指定が適切に反映されているかどうかのテスト
     let base_path = PathBuf::from("./testdata/trim/");
 
     // trim:true の場合は、ソースが存在しない全ての期間がトリム対象となる
     let layout_path = base_path.join("layout-trim-true.json");
-    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path)?;
     assert_eq!(layout.sources.len(), 3);
 
     // ソースの時刻情報を確認
     for (start, stop) in [(5, 15), (10, 20), (25, 30)] {
         let id = SourceId::new(&format!("{start}-{stop}"));
-        let source = layout.sources.get(&id).or_fail()?;
+        let source = layout
+            .sources
+            .get(&id)
+            .ok_or_else(|| hisui::Error::new("value is missing"))?;
         assert_eq!(source.start_timestamp.as_secs(), start);
         assert_eq!(source.stop_timestamp.as_secs(), stop);
     }
@@ -1001,7 +1021,7 @@ fn trim() -> orfail::Result<()> {
 
     // trim:false の場合は、ソースが存在しない冒頭期間のみがトリム対象となる
     let layout_path = base_path.join("layout-trim-false.json");
-    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path).or_fail()?;
+    let layout = Layout::from_layout_json_file(base_path.clone(), &layout_path)?;
     assert_eq!(layout.sources.len(), 3);
 
     // [NOTE] ソースの時刻情報は上と同様

@@ -123,7 +123,7 @@ impl RtmpOutgoingFrameHandler {
             crate::video::VideoFormat::H264AnnexB => {
                 // Annex B 形式（開始コード付き）から AVC 形式に変換が必要
                 crate::video_h264::convert_annexb_to_nalu(&video.data, self.video_nalu_length_size)
-                    .map_err(|e| Error::new(format!("failed to convert Annex B to NALU: {e}")))?
+                    .map_err(|e| e.with_context("failed to convert Annex B to NALU"))?
             }
             _ => return Err(Error::new("unsupported video format")),
         };
@@ -292,7 +292,7 @@ impl RtmpIncomingFrameHandler {
 
         // サンプルエントリーから解像度を取得
         let (width, height) = crate::video_h264::extract_video_dimensions(sample_entry)
-            .map_err(|e| Error::new(format!("failed to extract video dimensions: {e}")))?;
+            .map_err(|e| e.with_context("failed to extract video dimensions"))?;
 
         // durationを計算
         //

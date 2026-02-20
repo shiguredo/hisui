@@ -1,7 +1,6 @@
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
@@ -18,7 +17,7 @@ pub struct AudioToolboxDecoder {
 }
 
 impl AudioToolboxDecoder {
-    pub fn new() -> orfail::Result<Self> {
+    pub fn new() -> crate::Result<Self> {
         // サンプルレートなどの情報が実際にデータが届くまで不明なので遅延初期化している
         Ok(Self {
             inner: None,
@@ -30,33 +29,46 @@ impl AudioToolboxDecoder {
         })
     }
 
-    pub fn decode(&mut self, data: &AudioData) -> orfail::Result<AudioData> {
-        (data.format == AudioFormat::Aac).or_fail()?;
+    pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
+        if data.format != AudioFormat::Aac {
+            return Err(crate::Error::new(format!(
+                "expected AAC format, got {}",
+                data.format
+            )));
+        }
 
         if self.inner.is_none() {
-            let sample_entry = data.sample_entry.as_ref().or_fail()?;
+            let sample_entry = data
+                .sample_entry
+                .as_ref()
+                .ok_or_else(|| crate::Error::new("missing sample entry for AAC decoder"))?;
             let (sample_rate, channels) = extract_audio_config(sample_entry)?;
             tracing::debug!(
                 "Audio Toolbox AAC decoder configuration: sample_rate={sample_rate}Hz, channels={channels}"
             );
-            self.inner =
-                Some(shiguredo_audio_toolbox::Decoder::new(sample_rate, channels).or_fail()?);
+            self.inner = Some(shiguredo_audio_toolbox::Decoder::new(
+                sample_rate,
+                channels,
+            )?);
             self.sample_rate = sample_rate;
             self.source_id = data.source_id.clone();
         }
 
-        let inner = self.inner.as_mut().or_fail()?;
-        inner.decode(&data.data).or_fail()?;
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| crate::Error::new("audio toolbox decoder is not initialized"))?;
+        inner.decode(&data.data)?;
 
         self.build_audio_data()
     }
 
-    pub fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
+    pub fn finish(&mut self) -> crate::Result<Option<AudioData>> {
         let Some(inner) = &mut self.inner else {
             return Ok(None);
         };
 
-        inner.finish().or_fail()?;
+        inner.finish()?;
 
         let audio_data = self.build_audio_data()?;
         if audio_data.data.is_empty() {
@@ -67,15 +79,13 @@ impl AudioToolboxDecoder {
     }
 
     /// デコード済みデータをAudioDataに変換する共通処理
-    fn build_audio_data(&mut self) -> orfail::Result<AudioData> {
+    fn build_audio_data(&mut self) -> crate::Result<AudioData> {
         let mut decoded_samples = Vec::new();
-        while let Some(samples) = self
+        let inner = self
             .inner
             .as_mut()
-            .or_fail()?
-            .next_decoded_data()
-            .or_fail()?
-        {
+            .ok_or_else(|| crate::Error::new("audio toolbox decoder is not initialized"))?;
+        while let Some(samples) = inner.next_decoded_data()? {
             decoded_samples.extend(samples);
         }
 
@@ -117,15 +127,16 @@ impl AudioToolboxDecoder {
     }
 }
 
-fn extract_audio_config(sample_entry: &SampleEntry) -> orfail::Result<(u32, NonZeroU8)> {
+fn extract_audio_config(sample_entry: &SampleEntry) -> crate::Result<(u32, NonZeroU8)> {
     match sample_entry {
         SampleEntry::Mp4a(mp4a) => {
             let sample_rate = mp4a.audio.samplerate.integer as u32;
-            let channels = NonZeroU8::new(mp4a.audio.channelcount as u8).or_fail()?;
+            let channels = NonZeroU8::new(mp4a.audio.channelcount as u8)
+                .ok_or_else(|| crate::Error::new("invalid AAC channel count: 0"))?;
             Ok((sample_rate, channels))
         }
-        _ => Err(orfail::Failure::new(
+        _ => Err(crate::Error::new(
             "Only MP4a audio sample entries are currently supported",
-        ))?,
+        )),
     }
 }

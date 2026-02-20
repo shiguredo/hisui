@@ -20,7 +20,8 @@ pub async fn handle_request(
         Err(e) => {
             let mut response = Response::new(500, "Internal Server Error");
             response.add_header("Content-Type", "text/plain; charset=utf-8");
-            response.body = format!("failed to render Prometheus metrics: {e}").into_bytes();
+            response.body =
+                format!("failed to render Prometheus metrics: {}", e.display()).into_bytes();
             response
         }
     }

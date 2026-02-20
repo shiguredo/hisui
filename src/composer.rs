@@ -1,6 +1,5 @@
 use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
 
-use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 use crate::{
@@ -46,7 +45,7 @@ impl Composer {
         }
     }
 
-    pub fn compose(&self, out_file_path: &std::path::Path) -> orfail::Result<ComposeResult> {
+    pub fn compose(&self, out_file_path: &std::path::Path) -> crate::Result<ComposeResult> {
         // プロセッサを準備
         let mut scheduler = Scheduler::with_thread_count(self.worker_threads);
         let mut next_stream_id = MediaStreamId::new(0);
@@ -66,7 +65,12 @@ impl Composer {
         // リーダーとデコーダーを登録
         let mut audio_mixer_input_stream_ids = Vec::new();
         for source_id in self.layout.audio_source_ids() {
-            let source_info = self.layout.sources.get(source_id).or_fail()?;
+            let source_info = self.layout.sources.get(source_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing source info for source id: {}",
+                    source_id.get()
+                ))
+            })?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
             let reader = AudioReader::new(
                 reader_output_stream_id,
@@ -78,18 +82,16 @@ impl Composer {
                     crate::metadata::ContainerFormat::Mp4 => "mp4_audio_reader",
                     crate::metadata::ContainerFormat::Webm => "webm_audio_reader",
                 }),
-            )
-            .or_fail()?;
-            scheduler.register(reader).or_fail()?;
+            )?;
+            scheduler.register(reader)?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
             let decoder = AudioDecoder::new(
                 reader_output_stream_id,
                 decoder_output_stream_id,
                 scoped_stats("audio_decoder"),
-            )
-            .or_fail()?;
-            scheduler.register(decoder).or_fail()?;
+            )?;
+            scheduler.register(decoder)?;
 
             audio_mixer_input_stream_ids.push(decoder_output_stream_id);
         }
@@ -101,7 +103,12 @@ impl Composer {
             engines: self.layout.video_decode_engines.clone(),
         };
         for source_id in self.layout.video_source_ids() {
-            let source_info = self.layout.sources.get(source_id).or_fail()?;
+            let source_info = self.layout.sources.get(source_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "missing source info for source id: {}",
+                    source_id.get()
+                ))
+            })?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
             let reader = VideoReader::new(
                 reader_output_stream_id,
@@ -113,9 +120,8 @@ impl Composer {
                     crate::metadata::ContainerFormat::Mp4 => "mp4_video_reader",
                     crate::metadata::ContainerFormat::Webm => "webm_video_reader",
                 }),
-            )
-            .or_fail()?;
-            scheduler.register(reader).or_fail()?;
+            )?;
+            scheduler.register(reader)?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
             let decoder = VideoDecoder::new(
@@ -124,7 +130,7 @@ impl Composer {
                 video_decoder_options.clone(),
                 scoped_stats("video_decoder"),
             );
-            scheduler.register(decoder).or_fail()?;
+            scheduler.register(decoder)?;
 
             video_mixer_input_stream_ids.push(decoder_output_stream_id);
         }
@@ -137,7 +143,7 @@ impl Composer {
             audio_mixer_output_stream_id,
             scoped_stats("audio_mixer"),
         );
-        scheduler.register(audio_mixer).or_fail()?;
+        scheduler.register(audio_mixer)?;
 
         let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
         let video_mixer = VideoMixer::new(
@@ -146,7 +152,7 @@ impl Composer {
             video_mixer_output_stream_id,
             scoped_stats("video_mixer"),
         );
-        scheduler.register(video_mixer).or_fail()?;
+        scheduler.register(video_mixer)?;
 
         // エンコーダーを登録
         let audio_encoder_output_stream_id = next_stream_id.fetch_add(1);
@@ -156,9 +162,8 @@ impl Composer {
             audio_mixer_output_stream_id,
             audio_encoder_output_stream_id,
             scoped_stats("audio_encoder"),
-        )
-        .or_fail()?;
-        scheduler.register(audio_encoder).or_fail()?;
+        )?;
+        scheduler.register(audio_encoder)?;
 
         let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
         let video_encoder = VideoEncoder::new(
@@ -167,9 +172,8 @@ impl Composer {
             video_encoder_output_stream_id,
             self.openh264_lib.clone(),
             scoped_stats("video_encoder"),
-        )
-        .or_fail()?;
-        scheduler.register(video_encoder).or_fail()?;
+        )?;
+        scheduler.register(video_encoder)?;
 
         // ライターを登録
         let writer = Mp4Writer::new(
@@ -182,9 +186,8 @@ impl Composer {
                 .has_video()
                 .then_some(video_encoder_output_stream_id),
             scoped_stats("mp4_writer"),
-        )
-        .or_fail()?;
-        scheduler.register(writer).or_fail()?;
+        )?;
+        scheduler.register(writer)?;
 
         // プログレスバーを登録
         if self.show_progress_bar {
@@ -195,11 +198,11 @@ impl Composer {
                 ],
                 self.layout.output_duration(),
             );
-            scheduler.register(progress).or_fail()?;
+            scheduler.register(progress)?;
         }
 
         // 合成を実行
-        let scheduler_result = scheduler.run().or_fail()?;
+        let scheduler_result = scheduler.run()?;
 
         if let Some(path) = &self.stats_file_path {
             // TODO: compose 実行基盤を tokio ランタイムへ移行した後に、
@@ -220,8 +223,9 @@ impl Composer {
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "failed to build stats JSON: path={}, reason={e}",
-                        path.display()
+                        "failed to build stats JSON: path={}, reason={}",
+                        path.display(),
+                        e.display()
                     );
                 }
             }
@@ -264,7 +268,7 @@ impl MediaProcessor for ProgressBar {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         if let Some(sample) = input.sample {
             self.max_timestamp = self.max_timestamp.max(sample.timestamp());
             self.bar.set_position(self.max_timestamp.as_secs());
@@ -274,7 +278,7 @@ impl MediaProcessor for ProgressBar {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         if self.input_stream_ids.is_empty() {
             self.bar.finish();
             Ok(MediaProcessorOutput::Finished)

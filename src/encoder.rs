@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use orfail::OrFail;
 use shiguredo_openh264::Openh264Library;
 
 #[cfg(target_os = "macos")]
@@ -50,12 +49,11 @@ impl AudioEncoder {
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         match codec {
             #[cfg(feature = "fdk-aac")]
             CodecName::Aac => {
                 AudioEncoder::new_fdk_aac(input_stream_id, output_stream_id, bitrate, compose_stats)
-                    .or_fail()
             }
             #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
             CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(
@@ -63,13 +61,11 @@ impl AudioEncoder {
                 output_stream_id,
                 bitrate,
                 compose_stats,
-            )
-            .or_fail(),
+            ),
             #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
-            CodecName::Aac => Err(orfail::Failure::new("AAC output is not supported")),
+            CodecName::Aac => Err(crate::Error::new("AAC output is not supported")),
             CodecName::Opus => {
                 AudioEncoder::new_opus(input_stream_id, output_stream_id, bitrate, compose_stats)
-                    .or_fail()
             }
             _ => unreachable!(),
         }
@@ -80,7 +76,7 @@ impl AudioEncoder {
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         compose_stats
             .string("engine")
             .set(EngineName::Opus.as_str());
@@ -95,7 +91,7 @@ impl AudioEncoder {
             error_flag,
             encoded: VecDeque::new(),
             eos: false,
-            inner: AudioEncoderInner::new_opus(bitrate).or_fail()?,
+            inner: AudioEncoderInner::new_opus(bitrate)?,
         })
     }
 
@@ -105,7 +101,7 @@ impl AudioEncoder {
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         compose_stats
             .string("engine")
             .set(EngineName::FdkAac.as_str());
@@ -120,7 +116,7 @@ impl AudioEncoder {
             error_flag,
             encoded: VecDeque::new(),
             eos: false,
-            inner: AudioEncoderInner::new_fdk_aac(bitrate).or_fail()?,
+            inner: AudioEncoderInner::new_fdk_aac(bitrate)?,
         })
     }
 
@@ -130,7 +126,7 @@ impl AudioEncoder {
         output_stream_id: MediaStreamId,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         compose_stats
             .string("engine")
             .set(EngineName::AudioToolbox.as_str());
@@ -145,7 +141,7 @@ impl AudioEncoder {
             error_flag,
             encoded: VecDeque::new(),
             eos: false,
-            inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate).or_fail()?,
+            inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate)?,
         })
     }
 
@@ -205,12 +201,10 @@ impl AudioEncoder {
 
             match message {
                 Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
                 }
                 Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
                 }
                 Message::Syn(_) => {}
             }
@@ -235,10 +229,7 @@ fn drain_audio_encoder_output(
     output_tx: &mut crate::MessageSender,
 ) -> Result<bool> {
     loop {
-        match encoder
-            .process_output()
-            .map_err(|e| Error::new(e.to_string()))?
-        {
+        match encoder.process_output()? {
             MediaProcessorOutput::Processed { sample, .. } => {
                 if !output_tx.send_media(sample) {
                     return Ok(true);
@@ -263,13 +254,13 @@ impl MediaProcessor for AudioEncoder {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         let encoded = if let Some(sample) = input.sample {
-            let data = sample.expect_audio_data().or_fail()?;
-            self.inner.encode(&data).or_fail()?
+            let data = sample.expect_audio_data()?;
+            self.inner.encode(&data)?
         } else {
             self.eos = true;
-            self.inner.finish().or_fail()?
+            self.inner.finish()?
         };
 
         if let Some(encoded) = encoded {
@@ -279,7 +270,7 @@ impl MediaProcessor for AudioEncoder {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         if let Some(data) = self.encoded.pop_front() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
@@ -309,38 +300,36 @@ enum AudioEncoderInner {
 }
 
 impl AudioEncoderInner {
-    fn new_opus(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        OpusEncoder::new(bitrate).map(Self::Opus).or_fail()
+    fn new_opus(bitrate: NonZeroUsize) -> crate::Result<Self> {
+        OpusEncoder::new(bitrate).map(Self::Opus)
     }
 
     #[cfg(feature = "fdk-aac")]
-    fn new_fdk_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        FdkAacEncoder::new(bitrate).map(Self::FdkAac).or_fail()
+    fn new_fdk_aac(bitrate: NonZeroUsize) -> crate::Result<Self> {
+        FdkAacEncoder::new(bitrate).map(Self::FdkAac)
     }
 
     #[cfg(target_os = "macos")]
-    fn new_audio_toolbox_aac(bitrate: NonZeroUsize) -> orfail::Result<Self> {
-        AudioToolboxEncoder::new(bitrate)
-            .map(Self::AudioToolbox)
-            .or_fail()
+    fn new_audio_toolbox_aac(bitrate: NonZeroUsize) -> crate::Result<Self> {
+        AudioToolboxEncoder::new(bitrate).map(Self::AudioToolbox)
     }
 
-    fn encode(&mut self, data: &AudioData) -> orfail::Result<Option<AudioData>> {
+    fn encode(&mut self, data: &AudioData) -> crate::Result<Option<AudioData>> {
         match self {
             #[cfg(feature = "fdk-aac")]
-            Self::FdkAac(encoder) => encoder.encode(data).or_fail(),
+            Self::FdkAac(encoder) => encoder.encode(data),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(encoder) => encoder.encode(data).or_fail(),
-            Self::Opus(encoder) => encoder.encode(data).map(Some).or_fail(),
+            Self::AudioToolbox(encoder) => encoder.encode(data),
+            Self::Opus(encoder) => encoder.encode(data).map(Some),
         }
     }
 
-    fn finish(&mut self) -> orfail::Result<Option<AudioData>> {
+    fn finish(&mut self) -> crate::Result<Option<AudioData>> {
         match self {
             #[cfg(feature = "fdk-aac")]
-            Self::FdkAac(encoder) => encoder.finish().or_fail(),
+            Self::FdkAac(encoder) => encoder.finish(),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(encoder) => encoder.finish().or_fail(),
+            Self::AudioToolbox(encoder) => encoder.finish(),
             Self::Opus(_encoder) => Ok(None),
         }
     }
@@ -400,7 +389,7 @@ impl VideoEncoder {
         output_stream_id: MediaStreamId,
         openh264_lib: Option<Openh264Library>,
         mut compose_stats: crate::stats::Stats,
-    ) -> orfail::Result<Self> {
+    ) -> crate::Result<Self> {
         let engine_metric = compose_stats.string("engine");
         let codec_metric = compose_stats.string("codec");
         let total_input_video_frame_count_metric =
@@ -426,7 +415,7 @@ impl VideoEncoder {
     }
 
     /// 最初のフレームの解像度を使用して、内部エンコーダを初期化する
-    fn initialize_inner(&mut self, width: usize, height: usize) -> orfail::Result<()> {
+    fn initialize_inner(&mut self, width: usize, height: usize) -> crate::Result<()> {
         // 既に初期化されている場合はスキップ
         if self.inner.is_some() {
             return Ok(());
@@ -436,9 +425,9 @@ impl VideoEncoder {
         //
         // [NOTE] ここでは偶数解像度を期待する（奇数になる場合は前段でリサイズなどをする必要がある）
         self.options.width = EvenUsize::new(width)
-            .or_fail_with(|()| format!("frame width must be even, got {width}"))?;
+            .ok_or_else(|| crate::Error::new(format!("frame width must be even, got {width}")))?;
         self.options.height = EvenUsize::new(height)
-            .or_fail_with(|()| format!("frame height must be even, got {height}"))?;
+            .ok_or_else(|| crate::Error::new(format!("frame height must be even, got {height}")))?;
 
         // エンコーダーのインスタンスを作成
         let inner = self.create_inner()?;
@@ -452,7 +441,7 @@ impl VideoEncoder {
     }
 
     /// エンコーダーのインスタンスを生成する
-    fn create_inner(&self) -> orfail::Result<VideoEncoderInner> {
+    fn create_inner(&self) -> crate::Result<VideoEncoderInner> {
         let options = &self.options;
         let candidate_engines = options
             .engines
@@ -465,48 +454,44 @@ impl VideoEncoder {
 
         match (engine, options.codec) {
             #[cfg(feature = "libvpx")]
-            (Some(EngineName::Libvpx), CodecName::Vp8) => {
-                VideoEncoderInner::new_vp8(options).or_fail()
-            }
+            (Some(EngineName::Libvpx), CodecName::Vp8) => VideoEncoderInner::new_vp8(options),
             #[cfg(feature = "libvpx")]
-            (Some(EngineName::Libvpx), CodecName::Vp9) => {
-                VideoEncoderInner::new_vp9(options).or_fail()
-            }
+            (Some(EngineName::Libvpx), CodecName::Vp9) => VideoEncoderInner::new_vp9(options),
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H264) => {
-                VideoEncoderInner::new_nvcodec_h264(options).or_fail()
+                VideoEncoderInner::new_nvcodec_h264(options)
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H265) => {
-                VideoEncoderInner::new_nvcodec_h265(options).or_fail()
+                VideoEncoderInner::new_nvcodec_h265(options)
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Av1) => {
-                VideoEncoderInner::new_nvcodec_av1(options).or_fail()
+                VideoEncoderInner::new_nvcodec_av1(options)
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H264) => {
-                VideoEncoderInner::new_video_toolbox_h264(options).or_fail()
+                VideoEncoderInner::new_video_toolbox_h264(options)
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
-                VideoEncoderInner::new_video_toolbox_h265(options).or_fail()
+                VideoEncoderInner::new_video_toolbox_h265(options)
             }
             (Some(EngineName::Openh264), CodecName::H264) => {
-                let lib = self.openh264_lib.clone().or_fail_with(|()| {
-                    concat!(
+                let lib = self.openh264_lib.clone().ok_or_else(|| {
+                    crate::Error::new(
+                        concat!(
                         "OpenH264 library is required for H.264 encoding. ",
                         "Please specify the library path using --openh264 command line argument or ",
                         "HISUI_OPENH264_PATH environment variable."
                     )
-                    .to_owned()
+                        .to_owned(),
+                    )
                 })?;
-                VideoEncoderInner::new_openh264(lib, options).or_fail()
+                VideoEncoderInner::new_openh264(lib, options)
             }
-            (Some(EngineName::SvtAv1), CodecName::Av1) => {
-                VideoEncoderInner::new_svt_av1(options).or_fail()
-            }
-            _ => Err(orfail::Failure::new(format!(
+            (Some(EngineName::SvtAv1), CodecName::Av1) => VideoEncoderInner::new_svt_av1(options),
+            _ => Err(crate::Error::new(format!(
                 "no available encoder for {} codec (candidate encoders: {})",
                 options.codec.as_str(),
                 candidate_engines
@@ -587,12 +572,10 @@ impl VideoEncoder {
 
             match message {
                 Message::Media(sample) => {
-                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                    self.process_input(MediaProcessorInput::sample(self.input_stream_id, sample))?;
                 }
                 Message::Eos => {
-                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))
-                        .map_err(|e| Error::new(e.to_string()))?;
+                    self.process_input(MediaProcessorInput::eos(self.input_stream_id))?;
                 }
                 Message::Syn(_) => {}
             }
@@ -617,10 +600,7 @@ fn drain_video_encoder_output(
     output_tx: &mut crate::MessageSender,
 ) -> Result<bool> {
     loop {
-        match encoder
-            .process_output()
-            .map_err(|e| Error::new(e.to_string()))?
-        {
+        match encoder.process_output()? {
             MediaProcessorOutput::Processed { sample, .. } => {
                 if !output_tx.send_media(sample) {
                     return Ok(true);
@@ -645,25 +625,21 @@ impl MediaProcessor for VideoEncoder {
         }
     }
 
-    fn process_input(&mut self, input: MediaProcessorInput) -> orfail::Result<()> {
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
         if let Some(sample) = input.sample {
-            let frame = sample.expect_video_frame().or_fail()?;
+            let frame = sample.expect_video_frame()?;
 
             // 最初のフレームで、解像度を使って初期化する
             if self.inner.is_none() {
-                self.initialize_inner(frame.width, frame.height).or_fail()?;
+                self.initialize_inner(frame.width, frame.height)?;
             }
 
             self.total_input_video_frame_count_metric.inc();
-            self.inner
-                .as_mut()
-                .expect("infallible")
-                .encode(frame)
-                .or_fail()?;
+            self.inner.as_mut().expect("infallible").encode(frame)?;
         } else {
             self.eos = true;
             if let Some(inner) = &mut self.inner {
-                inner.finish().or_fail()?;
+                inner.finish()?;
             }
         }
 
@@ -677,7 +653,7 @@ impl MediaProcessor for VideoEncoder {
         Ok(())
     }
 
-    fn process_output(&mut self) -> orfail::Result<MediaProcessorOutput> {
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
         if let Some(frame) = self.encoded.pop_front() {
             Ok(MediaProcessorOutput::Processed {
                 stream_id: self.output_stream_id,
@@ -711,80 +687,80 @@ enum VideoEncoderInner {
 
 impl VideoEncoderInner {
     #[cfg(feature = "libvpx")]
-    fn new_vp8(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp8(options).or_fail()?;
+    fn new_vp8(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp8(options)?;
         Ok(Self::Libvpx(encoder))
     }
 
     #[cfg(feature = "libvpx")]
-    fn new_vp9(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp9(options).or_fail()?;
+    fn new_vp9(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp9(options)?;
         Ok(Self::Libvpx(encoder))
     }
 
-    fn new_openh264(lib: Openh264Library, options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = Openh264Encoder::new(lib, options).or_fail()?;
+    fn new_openh264(lib: Openh264Library, options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = Openh264Encoder::new(lib, options)?;
         Ok(Self::Openh264(encoder))
     }
 
-    fn new_svt_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = SvtAv1Encoder::new(options).or_fail()?;
+    fn new_svt_av1(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = SvtAv1Encoder::new(options)?;
         Ok(Self::SvtAv1(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    fn new_video_toolbox_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = VideoToolboxEncoder::new_h264(options).or_fail()?;
+    fn new_video_toolbox_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = VideoToolboxEncoder::new_h264(options)?;
         Ok(Self::VideoToolbox(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    fn new_video_toolbox_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = VideoToolboxEncoder::new_h265(options).or_fail()?;
+    fn new_video_toolbox_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = VideoToolboxEncoder::new_h265(options)?;
         Ok(Self::VideoToolbox(encoder))
     }
 
     #[cfg(feature = "nvcodec")]
-    fn new_nvcodec_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = NvcodecEncoder::new_h265(options).or_fail()?;
+    fn new_nvcodec_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = NvcodecEncoder::new_h265(options)?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
     #[cfg(feature = "nvcodec")]
-    fn new_nvcodec_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = NvcodecEncoder::new_h264(options).or_fail()?;
+    fn new_nvcodec_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = NvcodecEncoder::new_h264(options)?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
     #[cfg(feature = "nvcodec")]
-    fn new_nvcodec_av1(options: &VideoEncoderOptions) -> orfail::Result<Self> {
-        let encoder = NvcodecEncoder::new_av1(options).or_fail()?;
+    fn new_nvcodec_av1(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let encoder = NvcodecEncoder::new_av1(options)?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
-    fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
+    fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
         match self {
             #[cfg(feature = "libvpx")]
-            Self::Libvpx(encoder) => encoder.encode(frame).or_fail(),
-            Self::Openh264(encoder) => encoder.encode(frame).or_fail(),
-            Self::SvtAv1(encoder) => encoder.encode(frame).or_fail(),
+            Self::Libvpx(encoder) => encoder.encode(frame),
+            Self::Openh264(encoder) => encoder.encode(frame),
+            Self::SvtAv1(encoder) => encoder.encode(frame),
             #[cfg(target_os = "macos")]
-            Self::VideoToolbox(encoder) => encoder.encode(frame).or_fail(),
+            Self::VideoToolbox(encoder) => encoder.encode(frame),
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(encoder) => encoder.encode(&frame).or_fail(),
+            Self::Nvcodec(encoder) => encoder.encode(&frame),
         }
     }
 
-    fn finish(&mut self) -> orfail::Result<()> {
+    fn finish(&mut self) -> crate::Result<()> {
         match self {
             #[cfg(feature = "libvpx")]
-            Self::Libvpx(encoder) => encoder.finish().or_fail(),
-            Self::Openh264(encoder) => encoder.finish().or_fail(),
-            Self::SvtAv1(encoder) => encoder.finish().or_fail(),
+            Self::Libvpx(encoder) => encoder.finish(),
+            Self::Openh264(encoder) => encoder.finish(),
+            Self::SvtAv1(encoder) => encoder.finish(),
             #[cfg(target_os = "macos")]
-            Self::VideoToolbox(encoder) => encoder.finish().or_fail(),
+            Self::VideoToolbox(encoder) => encoder.finish(),
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(encoder) => encoder.finish().or_fail(),
+            Self::Nvcodec(encoder) => encoder.finish(),
         }
     }
 

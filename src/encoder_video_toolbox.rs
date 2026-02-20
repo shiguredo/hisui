@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use orfail::OrFail;
 use shiguredo_mp4::{
     Uint,
     boxes::{Avc1Box, AvccBox, SampleEntry},
@@ -28,7 +27,7 @@ pub struct VideoToolboxEncoder {
 }
 
 impl VideoToolboxEncoder {
-    pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let config = shiguredo_video_toolbox::EncoderConfig {
@@ -39,7 +38,7 @@ impl VideoToolboxEncoder {
             fps_denominator: options.frame_rate.denumerator.get(),
             ..options.encode_params.video_toolbox_h264.clone()
         };
-        let inner = shiguredo_video_toolbox::Encoder::new_h264(&config).or_fail()?;
+        let inner = shiguredo_video_toolbox::Encoder::new_h264(&config)?;
         Ok(Self {
             inner,
             input_queue: VecDeque::new(),
@@ -52,7 +51,7 @@ impl VideoToolboxEncoder {
         })
     }
 
-    pub fn new_h265(options: &VideoEncoderOptions) -> orfail::Result<Self> {
+    pub fn new_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let config = shiguredo_video_toolbox::EncoderConfig {
@@ -63,7 +62,7 @@ impl VideoToolboxEncoder {
             fps_denominator: options.frame_rate.denumerator.get(),
             ..options.encode_params.video_toolbox_h265.clone()
         };
-        let inner = shiguredo_video_toolbox::Encoder::new_h265(&config).or_fail()?;
+        let inner = shiguredo_video_toolbox::Encoder::new_h265(&config)?;
         Ok(Self {
             inner,
             input_queue: VecDeque::new(),
@@ -84,11 +83,18 @@ impl VideoToolboxEncoder {
         }
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> orfail::Result<()> {
-        (frame.format == VideoFormat::I420).or_fail()?;
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.format
+            )));
+        }
 
-        let (y_plane, u_plane, v_plane) = frame.as_yuv_planes().or_fail()?;
-        self.inner.encode(y_plane, u_plane, v_plane).or_fail()?;
+        let (y_plane, u_plane, v_plane) = frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
+        self.inner.encode(y_plane, u_plane, v_plane)?;
 
         // Video Toolbox のエンコーダーは非同期で動作し、
         // エンコードが終わるまでは入力バッファへの参照を保持する必要があるので、
@@ -96,14 +102,14 @@ impl VideoToolboxEncoder {
         // (将来的にはこの辺りはエンコーダー内で隠蔽した方が使いやすそう）
         self.input_queue.push_back(frame);
 
-        self.handle_encoded().or_fail()?;
+        self.handle_encoded()?;
 
         Ok(())
     }
 
-    pub fn finish(&mut self) -> orfail::Result<()> {
-        self.inner.finish().or_fail()?;
-        self.handle_encoded().or_fail()?;
+    pub fn finish(&mut self) -> crate::Result<()> {
+        self.inner.finish()?;
+        self.handle_encoded()?;
         Ok(())
     }
 
@@ -111,9 +117,12 @@ impl VideoToolboxEncoder {
         self.output_queue.pop_front()
     }
 
-    fn handle_encoded(&mut self) -> orfail::Result<()> {
+    fn handle_encoded(&mut self) -> crate::Result<()> {
         while let Some(frame) = self.inner.next_frame() {
-            let input_frame = self.input_queue.pop_front().or_fail()?;
+            let input_frame = self
+                .input_queue
+                .pop_front()
+                .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
             let sample_entry = if self.is_first {
                 self.is_first = false;
                 let sample_entry = if self.format == VideoFormat::H264 {
@@ -122,8 +131,7 @@ impl VideoToolboxEncoder {
                         self.height,
                         frame.sps_list.clone(),
                         frame.pps_list.clone(),
-                    )
-                    .or_fail()?
+                    )?
                 } else {
                     video_h265::h265_sample_entry(
                         self.width,
@@ -132,8 +140,7 @@ impl VideoToolboxEncoder {
                         frame.vps_list.clone(),
                         frame.sps_list.clone(),
                         frame.pps_list.clone(),
-                    )
-                    .or_fail()?
+                    )?
                 };
                 Some(sample_entry)
             } else {
@@ -161,7 +168,7 @@ fn h264_sample_entry(
     height: EvenUsize,
     sps_list: Vec<Vec<u8>>,
     pps_list: Vec<Vec<u8>>,
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     Ok(SampleEntry::Avc1(Avc1Box {
         visual: video::sample_entry_visual_fields(width.get(), height.get()),
         avcc_box: AvccBox {

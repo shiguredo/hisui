@@ -3,8 +3,6 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
-use orfail::OrFail;
-
 use crate::audio::AudioData;
 use crate::metadata::SourceId;
 use crate::video::VideoFrame;
@@ -23,16 +21,20 @@ impl MediaStreamNameRegistry {
         }
     }
 
-    pub fn get_id(&self, name: &MediaStreamName) -> orfail::Result<MediaStreamId> {
+    pub fn get_id(&self, name: &MediaStreamName) -> crate::Result<MediaStreamId> {
         self.name_to_id
             .get(name)
             .copied()
-            .or_fail_with(|()| format!("unknown stream name: {:?}", name.get()))
+            .ok_or_else(|| crate::Error::new(format!("unknown stream name: {:?}", name.get())))
     }
 
-    pub fn register_name(&mut self, name: MediaStreamName) -> orfail::Result<MediaStreamId> {
-        (!self.name_to_id.contains_key(&name))
-            .or_fail_with(|()| format!("duplicate stream name: {:?}", name.get()))?;
+    pub fn register_name(&mut self, name: MediaStreamName) -> crate::Result<MediaStreamId> {
+        if self.name_to_id.contains_key(&name) {
+            return Err(crate::Error::new(format!(
+                "duplicate stream name: {:?}",
+                name.get()
+            )));
+        }
 
         let id = self.next_id.fetch_add(1);
         self.name_to_id.insert(name, id);
@@ -122,21 +124,21 @@ impl MediaSample {
         }
     }
 
-    pub fn expect_audio_data(self) -> orfail::Result<Arc<AudioData>> {
+    pub fn expect_audio_data(self) -> crate::Result<Arc<AudioData>> {
         if let Self::Audio(sample) = self {
             Ok(sample)
         } else {
-            Err(orfail::Failure::new(
+            Err(crate::Error::new(
                 "expected an audio sample, but got a video sample",
             ))
         }
     }
 
-    pub fn expect_video_frame(self) -> orfail::Result<Arc<VideoFrame>> {
+    pub fn expect_video_frame(self) -> crate::Result<Arc<VideoFrame>> {
         if let Self::Video(frame) = self {
             Ok(frame)
         } else {
-            Err(orfail::Failure::new(
+            Err(crate::Error::new(
                 "expected a video sample, but got an audio sample",
             ))
         }

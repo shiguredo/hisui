@@ -115,3 +115,4 @@ pub use source_video_device::VideoDeviceSource;
 pub use video::VideoFrame;
 
 pub type Result<T> = std::result::Result<T, Error>;
+pub type Failure = Error;

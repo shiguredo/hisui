@@ -151,7 +151,7 @@ impl RtmpOutboundEndpoint {
             };
 
             if let Err(e) = server.run().await {
-                tracing::error!("RTMP play server error: {e}");
+                tracing::error!("RTMP play server error: {}", e.display());
                 return Err(e);
             }
             Ok(())
@@ -370,7 +370,7 @@ impl RtmpPlayServer {
                     );
 
                     if let Err(e) = handler.run().await {
-                        tracing::error!("RTMP client handler error: {e}");
+                        tracing::error!("RTMP client handler error: {}", e.display());
                     }
                     tracing::debug!("RTMP client disconnected: {peer_addr}");
                 }
@@ -515,7 +515,7 @@ impl RtmpClientHandler {
                 let (seq_frame, audio_frame) = self
                     .frame_handler
                     .prepare_audio_frame(audio)
-                    .map_err(|e| Error::new(format!("failed to prepare audio frame: {e}")))?;
+                    .map_err(|e| e.with_context("failed to prepare audio frame"))?;
                 if let Some(seq) = seq_frame {
                     self.connection.send_audio(seq).map_err(|e| {
                         Error::new(format!("failed to send audio sequence header: {e}"))
@@ -529,7 +529,7 @@ impl RtmpClientHandler {
                 if let Some((seq_frame, video_frame)) = self
                     .frame_handler
                     .prepare_video_frame(video)
-                    .map_err(|e| Error::new(format!("failed to prepare video frame: {e}")))?
+                    .map_err(|e| e.with_context("failed to prepare video frame"))?
                 {
                     if let Some(seq) = seq_frame {
                         self.connection.send_video(seq).map_err(|e| {

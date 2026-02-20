@@ -3,8 +3,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-use orfail::OrFail;
-
 use crate::json::{JsonNumber, JsonObject, JsonObjectMemberPath, JsonValue};
 
 /// Optuna のスタディ関連操作を行いやすくするための構造体
@@ -17,7 +15,7 @@ pub struct OptunaStudy {
 
 impl OptunaStudy {
     /// optuna コマンドが利用可能かどうかをチェックする
-    pub fn check_optuna_availability() -> orfail::Result<()> {
+    pub fn check_optuna_availability() -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("--version")
             .stdout(Stdio::null())
@@ -41,12 +39,12 @@ impl OptunaStudy {
 
                 error_msg.push_str("\nPlease ensure optuna is properly installed and configured");
 
-                Err(orfail::Failure::new(error_msg))
+                Err(crate::Error::new(error_msg))
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(orfail::Failure::new(
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(crate::Error::new(
                 "optuna command not found. Please install optuna and ensure it's in your PATH",
             )),
-            Err(e) => Err(orfail::Failure::new(format!(
+            Err(e) => Err(crate::Error::new(format!(
                 "failed to check optuna availability: {e}"
             ))),
         }
@@ -67,7 +65,7 @@ impl OptunaStudy {
     }
 
     /// スタディを作成する
-    pub fn create_study(&self) -> orfail::Result<()> {
+    pub fn create_study(&self) -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("create-study")
             .arg("--study-name")
@@ -81,16 +79,21 @@ impl OptunaStudy {
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute `$ optuna create-study` command: {e}"))?;
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to execute `$ optuna create-study` command: {e}"
+                ))
+            })?;
         output
             .status
             .success()
-            .or_fail_with(|()| "`$ optuna create-study` command failed".to_owned())?;
+            .then_some(())
+            .ok_or_else(|| crate::Error::new("`$ optuna create-study` command failed"))?;
         Ok(())
     }
 
     /// 次に探索すべきパラメータセットを問い合わせる
-    pub fn ask(&self, search_space: &SearchSpace) -> orfail::Result<Trial> {
+    pub fn ask(&self, search_space: &SearchSpace) -> crate::Result<Trial> {
         let output = Command::new("optuna")
             .arg("ask")
             .arg("--storage")
@@ -105,18 +108,21 @@ impl OptunaStudy {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute `$ optuna ask` command: {e}"))?;
+            .map_err(|e| {
+                crate::Error::new(format!("failed to execute `$ optuna ask` command: {e}"))
+            })?;
         output
             .status
             .success()
-            .or_fail_with(|()| "`$ optuna ask` command failed".to_owned())?;
+            .then_some(())
+            .ok_or_else(|| crate::Error::new("`$ optuna ask` command failed"))?;
 
-        let stdout = String::from_utf8(output.stdout).or_fail()?;
-        crate::json::parse_str(&stdout).or_fail()
+        let stdout = String::from_utf8(output.stdout)?;
+        crate::json::parse_str(&stdout)
     }
 
     /// 探索結果（成功応答）を optuna に伝える
-    pub fn tell(&self, trial_number: usize, values: &TrialValues) -> orfail::Result<()> {
+    pub fn tell(&self, trial_number: usize, values: &TrialValues) -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("tell")
             .arg("--storage")
@@ -136,16 +142,19 @@ impl OptunaStudy {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute `$ optuna tell` command: {e}"))?;
+            .map_err(|e| {
+                crate::Error::new(format!("failed to execute `$ optuna tell` command: {e}"))
+            })?;
         output
             .status
             .success()
-            .or_fail_with(|()| "`$ optuna tell` command failed".to_owned())?;
+            .then_some(())
+            .ok_or_else(|| crate::Error::new("`$ optuna tell` command failed"))?;
         Ok(())
     }
 
     /// 探索結果（失敗応答）を optuna に伝える
-    pub fn tell_fail(&self, trial_number: usize) -> orfail::Result<()> {
+    pub fn tell_fail(&self, trial_number: usize) -> crate::Result<()> {
         let output = Command::new("optuna")
             .arg("tell")
             .arg("--storage")
@@ -162,16 +171,19 @@ impl OptunaStudy {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute `$ optuna tell` command: {e}"))?;
+            .map_err(|e| {
+                crate::Error::new(format!("failed to execute `$ optuna tell` command: {e}"))
+            })?;
         output
             .status
             .success()
-            .or_fail_with(|()| "`$ optuna tell` command failed".to_owned())?;
+            .then_some(())
+            .ok_or_else(|| crate::Error::new("`$ optuna tell` command failed"))?;
         Ok(())
     }
 
     /// 現時点でのパレートフロント（最適解の集合）を取得する
-    pub fn get_best_trials(&mut self) -> orfail::Result<(bool, Vec<BestTrial>)> {
+    pub fn get_best_trials(&mut self) -> crate::Result<(bool, Vec<BestTrial>)> {
         let output = Command::new("optuna")
             .arg("best-trials")
             .arg("--storage")
@@ -186,14 +198,19 @@ impl OptunaStudy {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .output()
-            .or_fail_with(|e| format!("failed to execute `$ optuna best-trials` command: {e}"))?;
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to execute `$ optuna best-trials` command: {e}"
+                ))
+            })?;
         output
             .status
             .success()
-            .or_fail_with(|()| "`$ optuna best-trials` command failed".to_owned())?;
+            .then_some(())
+            .ok_or_else(|| crate::Error::new("`$ optuna best-trials` command failed"))?;
 
-        let stdout = String::from_utf8(output.stdout).or_fail()?;
-        let trials: Vec<BestTrial> = crate::json::parse_str(&stdout).or_fail()?;
+        let stdout = String::from_utf8(output.stdout)?;
+        let trials: Vec<BestTrial> = crate::json::parse_str(&stdout)?;
         let updated = self.last_best_trials != trials;
         self.last_best_trials = trials.clone();
         Ok((updated, trials))
@@ -209,9 +226,11 @@ pub struct Trial {
 
 impl Trial {
     /// Optuna が提案したパラメータセットを使ってレイアウトを更新する
-    pub fn apply_params_to_layout(&self, layout: &mut JsonValue) -> orfail::Result<()> {
+    pub fn apply_params_to_layout(&self, layout: &mut JsonValue) -> crate::Result<()> {
         for (path, value) in &self.params {
-            *path.get_mut(layout).or_fail()? = value.clone();
+            *path.get_mut(layout).ok_or_else(|| {
+                crate::Error::new(format!("target JSON path not found in layout: {}", path))
+            })? = value.clone();
         }
         Ok(())
     }

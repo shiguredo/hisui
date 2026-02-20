@@ -338,8 +338,7 @@ mod tests {
             r#"{{"path":"{}","outputVideoTrackId":"video-main"}}"#,
             png_file.path().display()
         );
-        let source: PngFileSource =
-            crate::json::parse_str(&json).map_err(|e| Error::new(e.to_string()))?;
+        let source: PngFileSource = crate::json::parse_str(&json)?;
 
         assert_eq!(source.frame_rate, FrameRate::FPS_1);
         assert_eq!(source.output_video_track_id.get(), "video-main");

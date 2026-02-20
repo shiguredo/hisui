@@ -1,4 +1,3 @@
-use orfail::OrFail;
 use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
@@ -25,7 +24,7 @@ pub fn h265_sample_entry(
     vps_list: NalUnitArray,
     sps_list: NalUnitArray,
     pps_list: NalUnitArray,
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     // [NOTE]
     // H.265 を表現するためのボックスには hev1 もあり、機能的には hev1 と hvc1 は
     // ほぼ同様（後者の場合にはキーフレームのサンプルデータ本体に SPS などの情報を付与することが必須なのが異なる）だが、
@@ -86,7 +85,7 @@ pub fn h265_sample_entry_from_annexb(
     height: usize,
     fps: FrameRate,
     data: &[u8],
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     // H.265 ストリームから VPS, SPS, PPS を取り出す
     let mut vps_list = Vec::new();
     let mut sps_list = Vec::new();
@@ -100,9 +99,7 @@ pub fn h265_sample_entry_from_annexb(
         } else if pos + 3 <= data.len() && data[pos..pos + 3] == [0, 0, 1] {
             3
         } else if pos == 0 {
-            return Err(orfail::Failure::new(
-                "No H.265 start code found at beginning",
-            ));
+            return Err(crate::Error::new("No H.265 start code found at beginning"));
         } else {
             break;
         };
@@ -144,12 +141,20 @@ pub fn h265_sample_entry_from_annexb(
         pos = nalu_end;
     }
 
-    (!vps_list.is_empty()).or_fail()?;
-    (!sps_list.is_empty()).or_fail()?;
-    (!pps_list.is_empty()).or_fail()?;
+    if vps_list.is_empty() {
+        return Err(crate::Error::new("missing H.265 VPS"));
+    }
+    if sps_list.is_empty() {
+        return Err(crate::Error::new("missing H.265 SPS"));
+    }
+    if pps_list.is_empty() {
+        return Err(crate::Error::new("missing H.265 PPS"));
+    }
 
-    let width = EvenUsize::new(width).or_fail()?;
-    let height = EvenUsize::new(height).or_fail()?;
+    let width = EvenUsize::new(width)
+        .ok_or_else(|| crate::Error::new(format!("H.265 width must be even, got {width}")))?;
+    let height = EvenUsize::new(height)
+        .ok_or_else(|| crate::Error::new(format!("H.265 height must be even, got {height}")))?;
 
     h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
 }

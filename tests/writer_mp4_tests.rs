@@ -11,7 +11,6 @@ use hisui::{
     video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
 };
-use orfail::OrFail;
 use shiguredo_mp4::{
     BoxSize, BoxType,
     boxes::{SampleEntry, UnknownBox},
@@ -21,8 +20,8 @@ const AUDIO_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
 const VIDEO_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 
 #[test]
-fn write_audio_only_mp4() -> orfail::Result<()> {
-    let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
+fn write_audio_only_mp4() -> hisui::Result<()> {
+    let output_file_path = tempfile::NamedTempFile::new()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(std::slice::from_ref(&source), &[]);
 
@@ -33,8 +32,7 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
         Some(AUDIO_STREAM_ID),
         None,
         hisui::stats::Stats::new(),
-    )
-    .or_fail()?;
+    )?;
 
     // 1 秒尺の音声データを供給する
     for i in 0..60 {
@@ -46,7 +44,7 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
                 secs(1),
             )))),
         };
-        writer.process_input(input).or_fail()?;
+        writer.process_input(input)?;
     }
 
     // 音声入力の終了を通知
@@ -54,13 +52,10 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
         stream_id: AUDIO_STREAM_ID,
         sample: None,
     };
-    writer.process_input(input).or_fail()?;
+    writer.process_input(input)?;
 
     // 最後まで書き込む
-    while !matches!(
-        writer.process_output().or_fail()?,
-        MediaProcessorOutput::Finished
-    ) {}
+    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
 
     // 統計値を確認する
     let stats = writer.stats();
@@ -79,8 +74,8 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
 }
 
 #[test]
-fn write_video_only_mp4() -> orfail::Result<()> {
-    let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
+fn write_video_only_mp4() -> hisui::Result<()> {
+    let output_file_path = tempfile::NamedTempFile::new()?;
     let source = source(0, secs(0), secs(60));
     let layout = layout(&[], std::slice::from_ref(&source));
 
@@ -91,8 +86,7 @@ fn write_video_only_mp4() -> orfail::Result<()> {
         None,
         Some(VIDEO_STREAM_ID),
         hisui::stats::Stats::new(),
-    )
-    .or_fail()?;
+    )?;
 
     // 1 秒尺の映像フレームを供給する
     for i in 0..60 {
@@ -104,7 +98,7 @@ fn write_video_only_mp4() -> orfail::Result<()> {
                 secs(1),
             )))),
         };
-        writer.process_input(input).or_fail()?;
+        writer.process_input(input)?;
     }
 
     // 映像入力の終了を通知
@@ -112,13 +106,10 @@ fn write_video_only_mp4() -> orfail::Result<()> {
         stream_id: VIDEO_STREAM_ID,
         sample: None,
     };
-    writer.process_input(input).or_fail()?;
+    writer.process_input(input)?;
 
     // 最後まで書き込む
-    while !matches!(
-        writer.process_output().or_fail()?,
-        MediaProcessorOutput::Finished
-    ) {}
+    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
 
     // 統計値を確認する
     let stats = writer.stats();
@@ -137,8 +128,8 @@ fn write_video_only_mp4() -> orfail::Result<()> {
 }
 
 #[test]
-fn write_video_and_audio_mp4() -> orfail::Result<()> {
-    let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
+fn write_video_and_audio_mp4() -> hisui::Result<()> {
+    let output_file_path = tempfile::NamedTempFile::new()?;
     let audio_source = source(0, secs(0), secs(60));
     let video_source = source(1, secs(0), secs(60));
     let layout = layout(
@@ -153,8 +144,7 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
         Some(AUDIO_STREAM_ID),
         Some(VIDEO_STREAM_ID),
         hisui::stats::Stats::new(),
-    )
-    .or_fail()?;
+    )?;
 
     // 1 秒尺の音声データ・映像フレームを供給する
     for i in 0..60 {
@@ -166,7 +156,7 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
                 secs(1),
             )))),
         };
-        writer.process_input(audio_input).or_fail()?;
+        writer.process_input(audio_input)?;
 
         let video_input = MediaProcessorInput {
             stream_id: VIDEO_STREAM_ID,
@@ -176,7 +166,7 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
                 secs(1),
             )))),
         };
-        writer.process_input(video_input).or_fail()?;
+        writer.process_input(video_input)?;
     }
 
     // 入力の終了を通知
@@ -184,19 +174,16 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
         stream_id: AUDIO_STREAM_ID,
         sample: None,
     };
-    writer.process_input(audio_end_input).or_fail()?;
+    writer.process_input(audio_end_input)?;
 
     let video_end_input = MediaProcessorInput {
         stream_id: VIDEO_STREAM_ID,
         sample: None,
     };
-    writer.process_input(video_end_input).or_fail()?;
+    writer.process_input(video_end_input)?;
 
     // 最後まで書き込む
-    while !matches!(
-        writer.process_output().or_fail()?,
-        MediaProcessorOutput::Finished
-    ) {}
+    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
 
     // 統計値を確認する
     let stats = writer.stats();
@@ -215,8 +202,8 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
 }
 
 #[test]
-fn no_video_and_audio_mp4() -> orfail::Result<()> {
-    let output_file_path = tempfile::NamedTempFile::new().or_fail()?;
+fn no_video_and_audio_mp4() -> hisui::Result<()> {
+    let output_file_path = tempfile::NamedTempFile::new()?;
     let layout = layout(&[], &[]);
 
     // ライターを作成する
@@ -226,14 +213,10 @@ fn no_video_and_audio_mp4() -> orfail::Result<()> {
         None,
         None,
         hisui::stats::Stats::new(),
-    )
-    .or_fail()?;
+    )?;
 
     // 最後まで書き込む
-    while !matches!(
-        writer.process_output().or_fail()?,
-        MediaProcessorOutput::Finished
-    ) {}
+    while !matches!(writer.process_output()?, MediaProcessorOutput::Finished) {}
 
     // 統計値を確認する
     let stats = writer.stats();

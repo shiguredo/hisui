@@ -1,4 +1,3 @@
-use orfail::OrFail;
 use shiguredo_mp4::{
     Uint,
     boxes::{Avc1Box, AvccBox, SampleEntry},
@@ -31,7 +30,7 @@ impl<'a> H264AnnexBNalUnits<'a> {
         Self { data }
     }
 
-    fn next_nal_unit(&mut self) -> orfail::Result<Option<H264NalUnit<'a>>> {
+    fn next_nal_unit(&mut self) -> crate::Result<Option<H264NalUnit<'a>>> {
         if self.data.is_empty() {
             return Ok(None);
         }
@@ -41,12 +40,18 @@ impl<'a> H264AnnexBNalUnits<'a> {
         } else if self.data.starts_with(&[0, 0, 0, 1]) {
             self.data = &self.data[4..];
         } else {
-            return Err(orfail::Failure::new("no H.264 start code prefix"));
+            return Err(crate::Error::new("no H.264 start code prefix"));
         };
-        (!self.data.is_empty()).or_fail()?;
+        if self.data.is_empty() {
+            return Err(crate::Error::new("empty H.264 NAL unit"));
+        }
 
         let header = self.data[0];
-        ((header >> 7) == 0).or_fail()?;
+        if (header >> 7) != 0 {
+            return Err(crate::Error::new(
+                "invalid H.264 NAL header: forbidden_zero_bit is set",
+            ));
+        }
 
         let _nal_ref_idc = header >> 5;
         let nal_unit_type = header & 0b0001_1111;
@@ -66,10 +71,10 @@ impl<'a> H264AnnexBNalUnits<'a> {
 }
 
 impl<'a> Iterator for H264AnnexBNalUnits<'a> {
-    type Item = orfail::Result<H264NalUnit<'a>>;
+    type Item = crate::Result<H264NalUnit<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_nal_unit().or_fail().transpose()
+        self.next_nal_unit().transpose()
     }
 }
 
@@ -83,20 +88,24 @@ pub fn h264_sample_entry_from_annexb(
     width: usize,
     height: usize,
     data: &[u8],
-) -> orfail::Result<SampleEntry> {
+) -> crate::Result<SampleEntry> {
     // H.264 ストリームから SPS と PPS と取り出す
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
     for nalu in H264AnnexBNalUnits::new(data) {
-        let nalu = nalu.or_fail()?;
+        let nalu = nalu?;
         match nalu.ty {
             H264_NALU_TYPE_SPS => sps_list.push(nalu.data.to_vec()),
             H264_NALU_TYPE_PPS => pps_list.push(nalu.data.to_vec()),
             _ => {}
         }
     }
-    (!sps_list.is_empty()).or_fail()?;
-    (!pps_list.is_empty()).or_fail()?;
+    if sps_list.is_empty() {
+        return Err(crate::Error::new("missing H.264 SPS"));
+    }
+    if pps_list.is_empty() {
+        return Err(crate::Error::new("missing H.264 PPS"));
+    }
 
     Ok(SampleEntry::Avc1(Avc1Box {
         visual: video::sample_entry_visual_fields(width, height),
@@ -120,14 +129,14 @@ pub fn h264_sample_entry_from_annexb(
 }
 
 /// AVC1 サンプルエントリーから width, height を抽出
-pub fn extract_video_dimensions(entry: &SampleEntry) -> orfail::Result<(u32, u32)> {
+pub fn extract_video_dimensions(entry: &SampleEntry) -> crate::Result<(u32, u32)> {
     match entry {
         SampleEntry::Avc1(avc1) => {
             let width = avc1.visual.width as u32;
             let height = avc1.visual.height as u32;
             Ok((width, height))
         }
-        _ => Err(orfail::Failure::new("Not an H.264 video sample entry")),
+        _ => Err(crate::Error::new("Not an H.264 video sample entry")),
     }
 }
 
@@ -155,32 +164,39 @@ pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>])
 }
 
 /// Annex.B 形式の H.264 を RTMP 用の AVC パケット形式（サイズ付き NALU）に変換
-pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> orfail::Result<Vec<u8>> {
+pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec<u8>> {
     let mut result = Vec::new();
 
-    (length_size > 0 && length_size <= 4)
-        .or_fail_with(|()| format!("invalid NALU length size: {length_size}"))?;
+    if length_size == 0 || length_size > 4 {
+        return Err(crate::Error::new(format!(
+            "invalid NALU length size: {length_size}"
+        )));
+    }
 
     for nalu in H264AnnexBNalUnits::new(data) {
-        let nalu = nalu.or_fail()?;
+        let nalu = nalu?;
 
         // サイズをバイト列に変換
         let size_bytes = match length_size {
             1 => {
-                let size = u8::try_from(nalu.data.len()).or_fail()?;
+                let size = u8::try_from(nalu.data.len())?;
                 &[size][..]
             }
             2 => {
-                let size = u16::try_from(nalu.data.len()).or_fail()?;
+                let size = u16::try_from(nalu.data.len())?;
                 &size.to_be_bytes()[..]
             }
             3 => {
-                let size = u32::try_from(nalu.data.len()).or_fail()?;
-                (size <= 0x00FF_FFFF).or_fail()?;
+                let size = u32::try_from(nalu.data.len())?;
+                if size > 0x00FF_FFFF {
+                    return Err(crate::Error::new(format!(
+                        "NALU size does not fit in 3-byte length field: {size}"
+                    )));
+                }
                 &[(size >> 16) as u8, (size >> 8) as u8, size as u8]
             }
             4 => {
-                let size = u32::try_from(nalu.data.len()).or_fail()?;
+                let size = u32::try_from(nalu.data.len())?;
                 &size.to_be_bytes()[..]
             }
             _ => unreachable!(),

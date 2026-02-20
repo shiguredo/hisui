@@ -12,15 +12,13 @@ use hisui::{
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
-use orfail::OrFail;
 
 fn run_hisui_command(args: &[&str]) -> noargs::Result<std::process::Output> {
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
     let output = std::process::Command::new(hisui_bin)
         .args(["--verbose"])
         .args(args)
-        .output()
-        .or_fail()?;
+        .output()?;
 
     eprintln!("hisui args: --verbose {}", args.join(" "));
     eprintln!("hisui stdout:\n{}", String::from_utf8_lossy(&output.stdout));
@@ -186,7 +184,7 @@ fn inspect_webm_with_decode() -> noargs::Result<()> {
 #[cfg(feature = "libvpx")]
 fn empty_source() -> noargs::Result<()> {
     // 変換を実行
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -198,8 +196,7 @@ fn empty_source() -> noargs::Result<()> {
             &out_file.path().display().to_string(),
             "testdata/e2e/empty_source/",
         ])
-        .output()
-        .or_fail()?;
+        .output()?;
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -210,15 +207,11 @@ fn empty_source() -> noargs::Result<()> {
     // 結果ファイルを確認（映像・音声トラックが存在しない）
     assert!(out_file.path().exists());
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
-            .or_fail()?
-            .count(),
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())?.count(),
         0
     );
     assert_eq!(
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())
-            .or_fail()?
-            .count(),
+        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())?.count(),
         0
     );
 
@@ -233,8 +226,8 @@ fn test_simple_single_source_common(
     expected_audio_codec: CodecName,
 ) -> noargs::Result<()> {
     // 変換を実行
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let stats_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
+    let stats_file = tempfile::NamedTempFile::new()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -250,8 +243,7 @@ fn test_simple_single_source_common(
             &stats_file.path().display().to_string(),
             test_data_dir,
         ])
-        .output()
-        .or_fail()?;
+        .output()?;
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -271,14 +263,12 @@ fn test_simple_single_source_common(
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
-    let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
-    let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
+    let mut audio_reader = Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())?;
+    let mut video_reader = Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -312,9 +302,9 @@ fn test_simple_single_source_common(
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
-    let mut decoder = OpusDecoder::new().or_fail()?;
+    let mut decoder = OpusDecoder::new()?;
     for data in audio_samples {
-        let decoded = decoder.decode(&data).or_fail()?;
+        let decoded = decoder.decode(&data)?;
 
         // 無音期間があるのは想定外
         assert!(!decoded.data.iter().all(|v| *v == 0));
@@ -324,9 +314,11 @@ fn test_simple_single_source_common(
     const DECODER_INPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(0);
     const DECODER_OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(1);
 
-    let check_decoded_frame = |decoded: &VideoFrame| -> orfail::Result<()> {
+    let check_decoded_frame = |decoded: &VideoFrame| -> hisui::Result<()> {
         // 画像が赤一色かどうかの確認する
-        let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
+        let (y_plane, u_plane, v_plane) = decoded
+            .as_yuv_planes()
+            .ok_or_else(|| hisui::Error::new("value is missing"))?;
         y_plane
             .iter()
             .for_each(|x| assert!(matches!(x, 80..=83), "y={x}"));
@@ -347,27 +339,21 @@ fn test_simple_single_source_common(
     );
 
     for frame in video_samples {
-        decoder
-            .process_input(MediaProcessorInput::video_frame(
-                DECODER_INPUT_STREAM_ID,
-                frame,
-            ))
-            .or_fail()?;
-        while let MediaProcessorOutput::Processed { sample, .. } =
-            decoder.process_output().or_fail()?
-        {
-            let decoded = sample.expect_video_frame().or_fail()?;
-            check_decoded_frame(&decoded).or_fail()?;
+        decoder.process_input(MediaProcessorInput::video_frame(
+            DECODER_INPUT_STREAM_ID,
+            frame,
+        ))?;
+        while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
+            let decoded = sample.expect_video_frame()?;
+            check_decoded_frame(&decoded)?;
         }
     }
 
-    decoder
-        .process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))
-        .or_fail()?;
+    decoder.process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))?;
 
-    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
-        let decoded = sample.expect_video_frame().or_fail()?;
-        check_decoded_frame(&decoded).or_fail()?;
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output()? {
+        let decoded = sample.expect_video_frame()?;
+        check_decoded_frame(&decoded)?;
     }
 
     Ok(())
@@ -506,8 +492,8 @@ fn optional_f64_member(
 #[test]
 #[cfg(feature = "libvpx")]
 fn compose_stdout_summary_has_required_fields() -> noargs::Result<()> {
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let stats_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
+    let stats_file = tempfile::NamedTempFile::new()?;
 
     let output = run_hisui_command(&[
         "compose",
@@ -559,8 +545,8 @@ fn compose_stdout_summary_has_required_fields() -> noargs::Result<()> {
 #[test]
 #[cfg(feature = "libvpx")]
 fn compose_stats_file_has_required_top_level_and_processor_entries() -> noargs::Result<()> {
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
-    let stats_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
+    let stats_file = tempfile::NamedTempFile::new()?;
 
     let _ = run_hisui_command(&[
         "compose",
@@ -618,7 +604,7 @@ fn compose_stats_file_has_required_top_level_and_processor_entries() -> noargs::
 #[test]
 #[cfg(feature = "libvpx")]
 fn compose_empty_source_summary_omits_media_specific_fields() -> noargs::Result<()> {
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
 
     let output = run_hisui_command(&[
         "compose",
@@ -798,7 +784,7 @@ fn simple_single_source_av1() -> noargs::Result<()> {
 #[cfg(feature = "libvpx")]
 fn odd_resolution_single_source() -> noargs::Result<()> {
     // 変換を実行
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -810,8 +796,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
             &out_file.path().display().to_string(),
             "testdata/e2e/odd_resolution_single_source/",
         ])
-        .output()
-        .or_fail()?;
+        .output()?;
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -821,14 +806,12 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
-    let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
-    let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
+    let mut audio_reader = Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())?;
+    let mut video_reader = Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -864,19 +847,21 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
-    let mut decoder = OpusDecoder::new().or_fail()?;
+    let mut decoder = OpusDecoder::new()?;
     for data in audio_samples {
-        let decoded = decoder.decode(&data).or_fail()?;
+        let decoded = decoder.decode(&data)?;
 
         // 無音期間があるのは想定外
         assert!(!decoded.data.iter().all(|v| *v == 0));
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
+    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 画像が赤一色かどうかの確認する（ただし、右と下の枠線は黒色になる）
-            let (y_plane, u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
+            let (y_plane, u_plane, v_plane) = decoded
+                .as_yuv_planes()
+                .ok_or_else(|| hisui::Error::new("value is missing"))?;
 
             y_plane.iter().enumerate().for_each(|(i, &x)| {
                 let col = i % 320;
@@ -911,13 +896,13 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    let mut decoder = LibvpxDecoder::new_vp9()?;
     for frame in video_samples {
-        decoder.decode(&frame).or_fail()?;
-        check_decoded_frames(&mut decoder).or_fail()?;
+        decoder.decode(&frame)?;
+        check_decoded_frames(&mut decoder)?;
     }
-    decoder.finish().or_fail()?;
-    check_decoded_frames(&mut decoder).or_fail()?;
+    decoder.finish()?;
+    check_decoded_frames(&mut decoder)?;
 
     Ok(())
 }
@@ -927,7 +912,7 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 #[cfg(feature = "libvpx")]
 fn simple_multi_sources() -> noargs::Result<()> {
     // 変換を実行
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -939,8 +924,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
             &out_file.path().display().to_string(),
             "testdata/e2e/simple_multi_sources/",
         ])
-        .output()
-        .or_fail()?;
+        .output()?;
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -950,17 +934,15 @@ fn simple_multi_sources() -> noargs::Result<()> {
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
-    let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
-    let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
+    let mut audio_reader = Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())?;
+    let mut video_reader = Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())?;
 
     // [NOTE]
     // レイアウトファイル未指定だと映像の解像度が大きめになって
     // テスト内でデコード結果を確認するのが少し面倒なので、このテストでは省略している
     // （統計値を取得するためにイテレーターを最後まで実行する必要はある）
-    let _audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let _video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let _audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let _video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -1009,7 +991,7 @@ fn simple_multi_sources() -> noargs::Result<()> {
 #[cfg(feature = "libvpx")]
 fn simple_split_archive() -> noargs::Result<()> {
     // 変換を実行
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -1023,8 +1005,7 @@ fn simple_split_archive() -> noargs::Result<()> {
             &out_file.path().display().to_string(),
             "testdata/e2e/simple_split_archive/",
         ])
-        .output()
-        .or_fail()?;
+        .output()?;
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -1034,14 +1015,12 @@ fn simple_split_archive() -> noargs::Result<()> {
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
-    let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
-    let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
+    let mut audio_reader = Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())?;
+    let mut video_reader = Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -1074,9 +1053,9 @@ fn simple_split_archive() -> noargs::Result<()> {
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(3));
 
     // 音声をデコードをして中身を確認する
-    let mut decoder = OpusDecoder::new().or_fail()?;
+    let mut decoder = OpusDecoder::new()?;
     for data in audio_samples {
-        let decoded = decoder.decode(&data).or_fail()?;
+        let decoded = decoder.decode(&data)?;
 
         // 無音期間があるのは想定外
         assert!(!decoded.data.iter().all(|v| *v == 0));
@@ -1085,10 +1064,12 @@ fn simple_split_archive() -> noargs::Result<()> {
     // 映像をデコードをして中身を確認する
     // 時系列順に R -> G -> B の色変化を確認
     let check_decoded_frames =
-        |decoder: &mut LibvpxDecoder, frame_index: &mut usize| -> orfail::Result<()> {
+        |decoder: &mut LibvpxDecoder, frame_index: &mut usize| -> hisui::Result<()> {
             while let Some(decoded) = decoder.next_decoded_frame() {
                 // Y成分だけを確認して色の変化を検証
-                let (y_plane, _u_plane, v_plane) = decoded.as_yuv_planes().or_fail()?;
+                let (y_plane, _u_plane, v_plane) = decoded
+                    .as_yuv_planes()
+                    .ok_or_else(|| hisui::Error::new("value is missing"))?;
 
                 // フレーム番号に基づいて期待される色を判定
                 // 0-24: 赤, 25-49: 緑, 50-74: 青
@@ -1128,14 +1109,14 @@ fn simple_split_archive() -> noargs::Result<()> {
             Ok(())
         };
 
-    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    let mut decoder = LibvpxDecoder::new_vp9()?;
     let mut frame_index = 0;
     for frame in video_samples {
-        decoder.decode(&frame).or_fail()?;
-        check_decoded_frames(&mut decoder, &mut frame_index).or_fail()?;
+        decoder.decode(&frame)?;
+        check_decoded_frames(&mut decoder, &mut frame_index)?;
     }
-    decoder.finish().or_fail()?;
-    check_decoded_frames(&mut decoder, &mut frame_index).or_fail()?;
+    decoder.finish()?;
+    check_decoded_frames(&mut decoder, &mut frame_index)?;
 
     // 全フレームが処理されたことを確認
     assert_eq!(frame_index, 75);
@@ -1148,7 +1129,7 @@ fn simple_split_archive() -> noargs::Result<()> {
 #[cfg(feature = "libvpx")]
 fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換を実行
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -1162,8 +1143,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
             &out_file.path().display().to_string(),
             "testdata/e2e/multi_sources_single_column/",
         ])
-        .output()
-        .or_fail()?;
+        .output()?;
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -1173,14 +1153,12 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
-    let mut audio_reader =
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
-    let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
+    let mut audio_reader = Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())?;
+    let mut video_reader = Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())?;
 
     // 後でデコードするために読み込み結果を覚えておく
-    let audio_samples = audio_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let audio_samples = audio_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let audio_stats = audio_reader.stats();
@@ -1214,19 +1192,21 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 音声をデコードをして中身を確認する
-    let mut decoder = OpusDecoder::new().or_fail()?;
+    let mut decoder = OpusDecoder::new()?;
     for data in audio_samples {
-        let decoded = decoder.decode(&data).or_fail()?;
+        let decoded = decoder.decode(&data)?;
 
         // 無音期間があるのは想定外
         assert!(!decoded.data.iter().all(|v| *v == 0));
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
+    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 完全なチェックは面倒なので Y 成分だけを確認する
-            let (y_plane, _u_plane, _v_plane) = decoded.as_yuv_planes().or_fail()?;
+            let (y_plane, _u_plane, _v_plane) = decoded
+                .as_yuv_planes()
+                .ok_or_else(|| hisui::Error::new("value is missing"))?;
 
             let width = 16;
             for (i, y) in y_plane.iter().copied().enumerate() {
@@ -1253,13 +1233,13 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    let mut decoder = LibvpxDecoder::new_vp9()?;
     for frame in video_samples {
-        decoder.decode(&frame).or_fail()?;
-        check_decoded_frames(&mut decoder).or_fail()?;
+        decoder.decode(&frame)?;
+        check_decoded_frames(&mut decoder)?;
     }
-    decoder.finish().or_fail()?;
-    check_decoded_frames(&mut decoder).or_fail()?;
+    decoder.finish()?;
+    check_decoded_frames(&mut decoder)?;
 
     Ok(())
 }
@@ -1273,7 +1253,7 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 #[cfg(feature = "libvpx")]
 fn two_regions() -> noargs::Result<()> {
     // 変換を実行
-    let out_file = tempfile::NamedTempFile::new().or_fail()?;
+    let out_file = tempfile::NamedTempFile::new()?;
 
     // ビルド済みバイナリのパスを取得
     let hisui_bin = env!("CARGO_BIN_EXE_hisui");
@@ -1287,8 +1267,7 @@ fn two_regions() -> noargs::Result<()> {
             &out_file.path().display().to_string(),
             "testdata/e2e/two_regions/",
         ])
-        .output()
-        .or_fail()?;
+        .output()?;
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -1298,19 +1277,16 @@ fn two_regions() -> noargs::Result<()> {
 
     // 変換結果ファイルを読み込む
     assert!(out_file.path().exists());
-    let mut video_reader =
-        Mp4VideoReader::new(SourceId::new("dummy"), out_file.path()).or_fail()?;
+    let mut video_reader = Mp4VideoReader::new(SourceId::new("dummy"), out_file.path())?;
 
     // 音声はなし
     assert_eq!(
-        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())
-            .or_fail()?
-            .count(),
+        Mp4AudioReader::new(SourceId::new("dummy"), out_file.path())?.count(),
         0
     );
 
     // 後でデコードするために読み込み結果を覚えておく
-    let video_samples = video_reader.by_ref().collect::<orfail::Result<Vec<_>>>()?;
+    let video_samples = video_reader.by_ref().collect::<hisui::Result<Vec<_>>>()?;
 
     // 統計値を確認
     let video_stats = video_reader.stats();
@@ -1329,10 +1305,12 @@ fn two_regions() -> noargs::Result<()> {
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> orfail::Result<()> {
+    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
         while let Some(decoded) = decoder.next_decoded_frame() {
             // 完全なチェックは面倒なので Y 成分だけを確認する
-            let (y_plane, _u_plane, _v_plane) = decoded.as_yuv_planes().or_fail()?;
+            let (y_plane, _u_plane, _v_plane) = decoded
+                .as_yuv_planes()
+                .ok_or_else(|| hisui::Error::new("value is missing"))?;
 
             let width = 16;
             for (i, y) in y_plane.iter().copied().enumerate() {
@@ -1359,13 +1337,13 @@ fn two_regions() -> noargs::Result<()> {
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9().or_fail()?;
+    let mut decoder = LibvpxDecoder::new_vp9()?;
     for frame in video_samples {
-        decoder.decode(&frame).or_fail()?;
-        check_decoded_frames(&mut decoder).or_fail()?;
+        decoder.decode(&frame)?;
+        check_decoded_frames(&mut decoder)?;
     }
-    decoder.finish().or_fail()?;
-    check_decoded_frames(&mut decoder).or_fail()?;
+    decoder.finish()?;
+    check_decoded_frames(&mut decoder)?;
 
     Ok(())
 }

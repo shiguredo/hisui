@@ -55,7 +55,7 @@ impl BootstrapEndpoint {
             Ok(answer_sdp) => build_sdp_response(201, "Created", &answer_sdp),
             Err(BootstrapError::SessionAlreadyExists) => build_error_response(409, "Conflict"),
             Err(BootstrapError::Internal(e)) => {
-                tracing::warn!("Bootstrap error: {e}");
+                tracing::warn!("Bootstrap error: {}", e.display());
                 build_error_response(500, "Internal Server Error")
             }
         }

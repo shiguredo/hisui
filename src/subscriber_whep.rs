@@ -157,7 +157,10 @@ impl WhepSession {
                     let _ = frame_tx.send(video_frame);
                 }
                 Err(e) => {
-                    tracing::warn!("failed to convert incoming WHEP video frame: {e}");
+                    tracing::warn!(
+                        "failed to convert incoming WHEP video frame: {}",
+                        e.display()
+                    );
                 }
             }
         })
@@ -312,7 +315,7 @@ impl WhepSession {
             .await
             {
                 Ok(()) => tracing::info!("WHEP resource deleted: {resource_url}"),
-                Err(e) => tracing::warn!("failed to delete WHEP resource: {e}"),
+                Err(e) => tracing::warn!("failed to delete WHEP resource: {}", e.display()),
             }
         }
     }
@@ -358,7 +361,10 @@ async fn exchange_offer_answer(
         Some(location) => match crate::webrtc_http::resolve_resource_url(input_url, location) {
             Ok(url) => Some(url),
             Err(e) => {
-                tracing::warn!("failed to resolve WHEP resource URL from Location header: {e}");
+                tracing::warn!(
+                    "failed to resolve WHEP resource URL from Location header: {}",
+                    e.display()
+                );
                 None
             }
         },
@@ -572,7 +578,7 @@ mod tests {
         let json = r#"{
             "inputUrl":"https://example.com/whep/live"
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -582,7 +588,7 @@ mod tests {
             "inputUrl":"ws://example.com/whep/live",
             "outputVideoTrackId":"video-main"
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -593,7 +599,7 @@ mod tests {
             "outputVideoTrackId":"video-main",
             "bearerToken":"   "
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
@@ -604,7 +610,7 @@ mod tests {
             "outputVideoTrackId":"video-main",
             "outputAudioTrackId":"audio-main"
         }"#;
-        let result: orfail::Result<WhepSubscriber> = crate::json::parse_str(json);
+        let result: crate::Result<WhepSubscriber> = crate::json::parse_str(json);
         assert!(result.is_err());
     }
 
