@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use crate::{
     Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    sora_metadata::SourceId,
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -136,16 +135,14 @@ struct ReaderState {
 
 impl ReaderState {
     fn open<P: AsRef<Path>>(path: P, enable_audio: bool, enable_video: bool) -> Result<Self> {
-        let source_id = SourceId::new("webm_file_reader");
-
         let audio_reader = if enable_audio {
-            Some(WebmAudioReader::new(source_id.clone(), path.as_ref())?)
+            Some(WebmAudioReader::new(path.as_ref())?)
         } else {
             None
         };
 
         let video_reader = if enable_video {
-            Some(WebmVideoReader::new(source_id, path.as_ref())?)
+            Some(WebmVideoReader::new(path.as_ref())?)
         } else {
             None
         };

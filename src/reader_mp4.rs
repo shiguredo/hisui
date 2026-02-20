@@ -10,7 +10,6 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
     audio::{AudioData, AudioFormat},
-    sora_metadata::SourceId,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -38,7 +37,7 @@ pub struct Mp4VideoReader {
 }
 
 impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(_source_id: SourceId, path: P) -> crate::Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         let mut file = File::open(&path).map_err(|e| {
             crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
         })?;
@@ -178,7 +177,7 @@ pub struct Mp4AudioReader {
 }
 
 impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(_source_id: SourceId, path: P) -> crate::Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         let mut file = File::open(&path).map_err(|e| {
             crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
         })?;
