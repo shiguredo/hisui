@@ -34,6 +34,9 @@ struct LegacyStatsJson {
     elapsed_seconds: f64,
     error: bool,
     processors: Vec<LegacyProcessorStats>,
+    // TODO: compose の tokio 化後は、トップレベルに `tokio_metrics`
+    // （例: `num_workers`, `num_alive_tasks`, `global_queue_depth`）
+    // を追加できるようにする。
 }
 
 impl nojson::DisplayJson for LegacyStatsJson {
