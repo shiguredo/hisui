@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     composer::Composer,
     layout::{DEFAULT_LAYOUT_JSON, Layout},
-    stats::StatsEntry,
+    stats::{StatsEntry, StatsValue},
 };
 
 #[derive(Debug)]
@@ -283,15 +283,13 @@ fn find_string_metric_by_processor(
     processor_id: &str,
     metric_name: &str,
 ) -> Option<String> {
-    entries.iter().find_map(|entry| {
-        if entry.metric_name != metric_name {
-            return None;
-        }
-        if label_value(entry, "processor_id") != Some(processor_id) {
-            return None;
-        }
-        entry.value.as_string().filter(|s| !s.is_empty())
-    })
+    find_metric(
+        entries,
+        "processor_id",
+        processor_id,
+        metric_name,
+        |value| value.as_string().filter(|s| !s.is_empty()),
+    )
 }
 
 fn find_numeric_metric_by_processor(
@@ -299,15 +297,13 @@ fn find_numeric_metric_by_processor(
     processor_id: &str,
     metric_name: &str,
 ) -> Option<f64> {
-    entries.iter().find_map(|entry| {
-        if entry.metric_name != metric_name {
-            return None;
-        }
-        if label_value(entry, "processor_id") != Some(processor_id) {
-            return None;
-        }
-        entry.value.as_numeric_f64()
-    })
+    find_metric(
+        entries,
+        "processor_id",
+        processor_id,
+        metric_name,
+        |value| value.as_numeric_f64(),
+    )
 }
 
 fn find_first_string_metric_by_type(
@@ -315,15 +311,13 @@ fn find_first_string_metric_by_type(
     processor_type: &str,
     metric_name: &str,
 ) -> Option<String> {
-    entries.iter().find_map(|entry| {
-        if entry.metric_name != metric_name {
-            return None;
-        }
-        if label_value(entry, "processor_type") != Some(processor_type) {
-            return None;
-        }
-        entry.value.as_string().filter(|s| !s.is_empty())
-    })
+    find_metric(
+        entries,
+        "processor_type",
+        processor_type,
+        metric_name,
+        |value| value.as_string().filter(|s| !s.is_empty()),
+    )
 }
 
 fn find_first_numeric_metric_by_type(
@@ -331,13 +325,29 @@ fn find_first_numeric_metric_by_type(
     processor_type: &str,
     metric_name: &str,
 ) -> Option<f64> {
+    find_metric(
+        entries,
+        "processor_type",
+        processor_type,
+        metric_name,
+        |value| value.as_numeric_f64(),
+    )
+}
+
+fn find_metric<T>(
+    entries: &[StatsEntry],
+    label_name: &str,
+    label_value_to_match: &str,
+    metric_name: &str,
+    extract: impl Fn(&StatsValue) -> Option<T>,
+) -> Option<T> {
     entries.iter().find_map(|entry| {
         if entry.metric_name != metric_name {
             return None;
         }
-        if label_value(entry, "processor_type") != Some(processor_type) {
+        if label_value(entry, label_name) != Some(label_value_to_match) {
             return None;
         }
-        entry.value.as_numeric_f64()
+        extract(&entry.value)
     })
 }
