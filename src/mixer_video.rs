@@ -276,20 +276,7 @@ impl VideoMixer {
         spec: VideoMixerSpec,
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_id: MediaStreamId,
-    ) -> Self {
-        Self::new_with_stats(
-            spec,
-            input_stream_ids,
-            output_stream_id,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
-        spec: VideoMixerSpec,
-        input_stream_ids: Vec<MediaStreamId>,
-        output_stream_id: MediaStreamId,
-        mut compose_stats: crate::stats::Stats,
+        mut stats: crate::stats::Stats,
     ) -> Self {
         let resolution = spec.resolution;
         let input_streams = input_stream_ids
@@ -297,13 +284,13 @@ impl VideoMixer {
             .copied()
             .map(|id| (id, InputStream::default()))
             .collect();
-        compose_stats
+        stats
             .gauge("output_video_width")
             .set(resolution.width().get() as i64);
-        compose_stats
+        stats
             .gauge("output_video_height")
             .set(resolution.height().get() as i64);
-        let stats = VideoMixerStats::new(&mut compose_stats);
+        let stats = VideoMixerStats::new(&mut stats);
         Self {
             spec,
             input_stream_ids,

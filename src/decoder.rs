@@ -42,17 +42,6 @@ impl AudioDecoder {
     pub fn new(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
-    ) -> orfail::Result<Self> {
-        Self::new_with_stats(
-            input_stream_id,
-            output_stream_id,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         mut compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         compose_stats
@@ -288,19 +277,6 @@ pub struct VideoDecoder {
 
 impl VideoDecoder {
     pub fn new(
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
-        options: VideoDecoderOptions,
-    ) -> Self {
-        Self::new_with_stats(
-            input_stream_id,
-            output_stream_id,
-            options,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
         options: VideoDecoderOptions,

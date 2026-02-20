@@ -125,27 +125,14 @@ impl AudioMixer {
         trim_spans: TrimSpans,
         input_stream_ids: Vec<MediaStreamId>,
         output_stream_id: MediaStreamId,
-    ) -> Self {
-        Self::new_with_stats(
-            trim_spans,
-            input_stream_ids,
-            output_stream_id,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
-        trim_spans: TrimSpans,
-        input_stream_ids: Vec<MediaStreamId>,
-        output_stream_id: MediaStreamId,
-        mut compose_stats: crate::stats::Stats,
+        mut stats: crate::stats::Stats,
     ) -> Self {
         let input_streams = input_stream_ids
             .iter()
             .copied()
             .map(|id| (id, InputStream::default()))
             .collect();
-        let stats = AudioMixerStats::new(&mut compose_stats);
+        let stats = AudioMixerStats::new(&mut stats);
         Self {
             trim_spans,
             input_stream_ids,

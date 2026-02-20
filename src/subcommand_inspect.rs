@@ -139,6 +139,7 @@ async fn setup_pipeline(
         let audio_decoder = AudioDecoder::new(
             AUDIO_DECODER_INPUT_STREAM_ID,
             AUDIO_DECODER_OUTPUT_STREAM_ID,
+            crate::stats::Stats::new(),
         )
         .map_err(|e| Error::new(e.to_string()))?;
 
@@ -164,6 +165,7 @@ async fn setup_pipeline(
                 decode_params: Default::default(),
                 engines: None,
             },
+            crate::stats::Stats::new(),
         );
         pipeline_handle
             .spawn_processor(

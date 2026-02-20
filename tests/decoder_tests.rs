@@ -84,7 +84,12 @@ where
     };
 
     // デコードする
-    let mut decoder = VideoDecoder::new(DECODER_INPUT_STREAM_ID, DECODER_OUTPUT_STREAM_ID, options);
+    let mut decoder = VideoDecoder::new(
+        DECODER_INPUT_STREAM_ID,
+        DECODER_OUTPUT_STREAM_ID,
+        options,
+        hisui::stats::Stats::new(),
+    );
     let mut output_frames = Vec::new();
     let mut blue_count = 0;
     let mut red_count = 0;
@@ -167,7 +172,12 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 fn aac_decode() -> orfail::Result<()> {
     let source_id = SourceId::new("beep-aac-audio");
     let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4").or_fail()?;
-    let mut decoder = AudioDecoder::new(MediaStreamId::new(0), MediaStreamId::new(1)).or_fail()?;
+    let mut decoder = AudioDecoder::new(
+        MediaStreamId::new(0),
+        MediaStreamId::new(1),
+        hisui::stats::Stats::new(),
+    )
+    .or_fail()?;
 
     let mut decoded_count = 0;
 

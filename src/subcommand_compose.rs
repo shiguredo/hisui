@@ -290,7 +290,7 @@ fn find_string_metric_by_processor(
         if label_value(entry, "processor_id") != Some(processor_id) {
             return None;
         }
-        entry.value.as_string()
+        entry.value.as_string().filter(|s| !s.is_empty())
     })
 }
 
@@ -322,7 +322,7 @@ fn find_first_string_metric_by_type(
         if label_value(entry, "processor_type") != Some(processor_type) {
             return None;
         }
-        entry.value.as_string()
+        entry.value.as_string().filter(|s| !s.is_empty())
     })
 }
 

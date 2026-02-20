@@ -32,6 +32,7 @@ fn write_audio_only_mp4() -> orfail::Result<()> {
         Some(Mp4WriterOptions::from_layout(&layout)),
         Some(AUDIO_STREAM_ID),
         None,
+        hisui::stats::Stats::new(),
     )
     .or_fail()?;
 
@@ -89,6 +90,7 @@ fn write_video_only_mp4() -> orfail::Result<()> {
         Some(Mp4WriterOptions::from_layout(&layout)),
         None,
         Some(VIDEO_STREAM_ID),
+        hisui::stats::Stats::new(),
     )
     .or_fail()?;
 
@@ -150,6 +152,7 @@ fn write_video_and_audio_mp4() -> orfail::Result<()> {
         Some(Mp4WriterOptions::from_layout(&layout)),
         Some(AUDIO_STREAM_ID),
         Some(VIDEO_STREAM_ID),
+        hisui::stats::Stats::new(),
     )
     .or_fail()?;
 
@@ -222,6 +225,7 @@ fn no_video_and_audio_mp4() -> orfail::Result<()> {
         Some(Mp4WriterOptions::from_layout(&layout)),
         None,
         None,
+        hisui::stats::Stats::new(),
     )
     .or_fail()?;
 

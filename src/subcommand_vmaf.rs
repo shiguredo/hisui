@@ -338,8 +338,12 @@ async fn setup_vmaf_pipeline(
     {
         let reader_output_stream_id = next_stream_id.fetch_add(1);
         let reader_output_track_id = next_track_id(&mut next_track_number, "reader_output");
-        let reader = VideoReader::from_source_info(reader_output_stream_id, source_info)
-            .map_err(error_from)?;
+        let reader = VideoReader::from_source_info(
+            reader_output_stream_id,
+            source_info,
+            crate::stats::Stats::new(),
+        )
+        .map_err(error_from)?;
         spawn_processor_task(
             pipeline_handle,
             next_processor_id(&mut next_processor_number, "video_reader"),
@@ -360,6 +364,7 @@ async fn setup_vmaf_pipeline(
             reader_output_stream_id,
             decoder_output_stream_id,
             decoder_options.clone(),
+            crate::stats::Stats::new(),
         );
         let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
         spawn_processor_task(
@@ -387,6 +392,7 @@ async fn setup_vmaf_pipeline(
         VideoMixerSpec::from_layout(&layout),
         mixer_input_stream_ids,
         mixer_output_stream_id,
+        crate::stats::Stats::new(),
     );
     let mixer_output_track_id_for_mixer = mixer_output_track_id.clone();
     spawn_processor_task(
@@ -444,6 +450,7 @@ async fn setup_vmaf_pipeline(
         limiter_output_stream_id,
         encoder_output_stream_id,
         openh264_lib,
+        crate::stats::Stats::new(),
     )
     .map_err(error_from)?;
     let encoder_processor_id = next_processor_id(&mut next_processor_number, "video_encoder");
@@ -470,6 +477,7 @@ async fn setup_vmaf_pipeline(
         encoder_output_stream_id,
         decoder_output_stream_id,
         decoder_options,
+        crate::stats::Stats::new(),
     );
     let encoder_output_track_id_for_decoder = encoder_output_track_id.clone();
     let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();

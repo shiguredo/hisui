@@ -16,7 +16,12 @@ const OUTPUT_STREAM_ID: MediaStreamId = MediaStreamId::new(100);
 
 #[test]
 fn start_noop_audio_mixer() {
-    let mut mixer = AudioMixer::new(layout(&[], None).trim_spans, Vec::new(), OUTPUT_STREAM_ID);
+    let mut mixer = AudioMixer::new(
+        layout(&[], None).trim_spans,
+        Vec::new(),
+        OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
+    );
 
     // ミキサーへの入力が空なので、出力も空
     assert!(matches!(
@@ -37,6 +42,7 @@ fn mix_three_sources_without_trim() -> orfail::Result<()> {
         layout(&[source0.clone(), source1.clone(), source2.clone()], None).trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // ソースに AudioData を供給する
@@ -142,6 +148,7 @@ fn mix_three_sources_with_trim() -> orfail::Result<()> {
         .trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // ソースに AudioData を供給する
@@ -232,6 +239,7 @@ fn mix_three_sources_with_mixed_duration() -> orfail::Result<()> {
         layout(&[source0.clone(), source1.clone(), source2.clone()], None).trim_spans,
         vec![input_stream_id0, input_stream_id1, input_stream_id2],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // それぞれのソースに AudioData を供給する
@@ -299,6 +307,7 @@ fn non_pcm_audio_input_error() -> orfail::Result<()> {
         layout(std::slice::from_ref(&source), None).trim_spans,
         vec![input_stream_id],
         OUTPUT_STREAM_ID,
+        hisui::stats::Stats::new(),
     );
 
     // 適当に不正なフォーマットを指定して AudioData を送る

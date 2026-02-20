@@ -68,7 +68,7 @@ impl Composer {
         for source_id in self.layout.audio_source_ids() {
             let source_info = self.layout.sources.get(source_id).or_fail()?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
-            let reader = AudioReader::new_with_stats(
+            let reader = AudioReader::new(
                 reader_output_stream_id,
                 source_info.id.clone(),
                 source_info.format,
@@ -83,7 +83,7 @@ impl Composer {
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
-            let decoder = AudioDecoder::new_with_stats(
+            let decoder = AudioDecoder::new(
                 reader_output_stream_id,
                 decoder_output_stream_id,
                 scoped_stats("audio_decoder"),
@@ -103,7 +103,7 @@ impl Composer {
         for source_id in self.layout.video_source_ids() {
             let source_info = self.layout.sources.get(source_id).or_fail()?;
             let reader_output_stream_id = next_stream_id.fetch_add(1);
-            let reader = VideoReader::new_with_stats(
+            let reader = VideoReader::new(
                 reader_output_stream_id,
                 source_info.id.clone(),
                 source_info.format,
@@ -118,7 +118,7 @@ impl Composer {
             scheduler.register(reader).or_fail()?;
 
             let decoder_output_stream_id = next_stream_id.fetch_add(1);
-            let decoder = VideoDecoder::new_with_stats(
+            let decoder = VideoDecoder::new(
                 reader_output_stream_id,
                 decoder_output_stream_id,
                 video_decoder_options.clone(),
@@ -131,7 +131,7 @@ impl Composer {
 
         // ミキサーを登録
         let audio_mixer_output_stream_id = next_stream_id.fetch_add(1);
-        let audio_mixer = AudioMixer::new_with_stats(
+        let audio_mixer = AudioMixer::new(
             self.layout.trim_spans.clone(),
             audio_mixer_input_stream_ids,
             audio_mixer_output_stream_id,
@@ -140,7 +140,7 @@ impl Composer {
         scheduler.register(audio_mixer).or_fail()?;
 
         let video_mixer_output_stream_id = next_stream_id.fetch_add(1);
-        let video_mixer = VideoMixer::new_with_stats(
+        let video_mixer = VideoMixer::new(
             VideoMixerSpec::from_layout(&self.layout),
             video_mixer_input_stream_ids,
             video_mixer_output_stream_id,
@@ -150,7 +150,7 @@ impl Composer {
 
         // エンコーダーを登録
         let audio_encoder_output_stream_id = next_stream_id.fetch_add(1);
-        let audio_encoder = AudioEncoder::new_with_stats(
+        let audio_encoder = AudioEncoder::new(
             self.layout.audio_codec,
             self.layout.audio_bitrate_bps(),
             audio_mixer_output_stream_id,
@@ -161,7 +161,7 @@ impl Composer {
         scheduler.register(audio_encoder).or_fail()?;
 
         let video_encoder_output_stream_id = next_stream_id.fetch_add(1);
-        let video_encoder = VideoEncoder::new_with_stats(
+        let video_encoder = VideoEncoder::new(
             &VideoEncoderOptions::from_layout(&self.layout),
             video_mixer_output_stream_id,
             video_encoder_output_stream_id,
@@ -172,7 +172,7 @@ impl Composer {
         scheduler.register(video_encoder).or_fail()?;
 
         // ライターを登録
-        let writer = Mp4Writer::new_with_stats(
+        let writer = Mp4Writer::new(
             out_file_path,
             Some(Mp4WriterOptions::from_layout(&self.layout)),
             self.layout

@@ -343,6 +343,7 @@ fn test_simple_single_source_common(
         DECODER_INPUT_STREAM_ID,
         DECODER_OUTPUT_STREAM_ID,
         VideoDecoderOptions::default(),
+        hisui::stats::Stats::new(),
     );
 
     for frame in video_samples {

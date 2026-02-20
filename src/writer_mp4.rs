@@ -211,22 +211,7 @@ impl Mp4Writer {
         options: Option<Mp4WriterOptions>, // ライブの場合は None になる
         input_audio_stream_id: Option<MediaStreamId>,
         input_video_stream_id: Option<MediaStreamId>,
-    ) -> orfail::Result<Self> {
-        Self::new_with_stats(
-            path,
-            options,
-            input_audio_stream_id,
-            input_video_stream_id,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats<P: AsRef<Path>>(
-        path: P,
-        options: Option<Mp4WriterOptions>, // ライブの場合は None になる
-        input_audio_stream_id: Option<MediaStreamId>,
-        input_video_stream_id: Option<MediaStreamId>,
-        mut compose_stats: crate::stats::Stats,
+        mut stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         let reserved_moov_box_size = if let Some(options) = options {
             // 事前に尺などが分かっている場合には fast start 用の領域を計算する
@@ -261,7 +246,7 @@ impl Mp4Writer {
         file.write_all(initial_bytes).or_fail()?;
 
         let next_position = initial_bytes.len() as u64;
-        let stats = Mp4WriterStats::new(&mut compose_stats, reserved_moov_box_size as u64);
+        let stats = Mp4WriterStats::new(&mut stats, reserved_moov_box_size as u64);
 
         Ok(Self {
             file: BufWriter::new(file),

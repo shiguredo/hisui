@@ -87,35 +87,19 @@ impl AudioReader {
     pub fn from_source_info(
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
+        stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        Self::new_with_stats(
+        Self::new(
             output_stream_id,
             source_info.id.clone(),
             source_info.format,
             source_info.start_timestamp,
             source_info.timestamp_sorted_media_paths(),
-            crate::stats::Stats::new(),
+            stats,
         )
     }
 
     pub fn new(
-        output_stream_id: MediaStreamId,
-        source_id: SourceId,
-        format: ContainerFormat,
-        timestamp_offset: Duration,
-        input_files: Vec<PathBuf>,
-    ) -> orfail::Result<Self> {
-        Self::new_with_stats(
-            output_stream_id,
-            source_id,
-            format,
-            timestamp_offset,
-            input_files,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
         output_stream_id: MediaStreamId,
         source_id: SourceId,
         format: ContainerFormat,
@@ -379,35 +363,19 @@ impl VideoReader {
     pub fn from_source_info(
         output_stream_id: MediaStreamId,
         source_info: &AggregatedSourceInfo,
+        stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
-        Self::new_with_stats(
+        Self::new(
             output_stream_id,
             source_info.id.clone(),
             source_info.format,
             source_info.start_timestamp,
             source_info.timestamp_sorted_media_paths(),
-            crate::stats::Stats::new(),
+            stats,
         )
     }
 
     pub fn new(
-        output_stream_id: MediaStreamId,
-        source_id: SourceId,
-        format: ContainerFormat,
-        timestamp_offset: Duration,
-        input_files: Vec<PathBuf>,
-    ) -> orfail::Result<Self> {
-        Self::new_with_stats(
-            output_stream_id,
-            source_id,
-            format,
-            timestamp_offset,
-            input_files,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
         output_stream_id: MediaStreamId,
         source_id: SourceId,
         format: ContainerFormat,

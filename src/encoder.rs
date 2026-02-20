@@ -49,21 +49,6 @@ impl AudioEncoder {
         bitrate: NonZeroUsize,
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
-    ) -> orfail::Result<Self> {
-        Self::new_with_stats(
-            codec,
-            bitrate,
-            input_stream_id,
-            output_stream_id,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
-        codec: CodecName,
-        bitrate: NonZeroUsize,
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
         compose_stats: crate::stats::Stats,
     ) -> orfail::Result<Self> {
         match codec {
@@ -410,21 +395,6 @@ pub struct VideoEncoder {
 
 impl VideoEncoder {
     pub fn new(
-        options: &VideoEncoderOptions,
-        input_stream_id: MediaStreamId,
-        output_stream_id: MediaStreamId,
-        openh264_lib: Option<Openh264Library>,
-    ) -> orfail::Result<Self> {
-        Self::new_with_stats(
-            options,
-            input_stream_id,
-            output_stream_id,
-            openh264_lib,
-            crate::stats::Stats::new(),
-        )
-    }
-
-    pub fn new_with_stats(
         options: &VideoEncoderOptions,
         input_stream_id: MediaStreamId,
         output_stream_id: MediaStreamId,
