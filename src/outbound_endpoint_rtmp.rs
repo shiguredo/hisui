@@ -315,11 +315,11 @@ impl RtmpPlayServer {
                 accept_result = listener.accept() => {
                     self.handle_new_client(accept_result, tls_acceptor.clone()).await?;
                 }
-                Some(sample) = self.rx.recv() => {
+                sample = self.rx.recv() => {
+                    let Some(sample) = sample else {
+                        break;
+                    };
                     self.handle_media_sample(sample).await?;
-                }
-                else => {
-                    break;
                 }
             }
         }

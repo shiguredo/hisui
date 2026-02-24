@@ -176,6 +176,9 @@
 - [ADD] e2e-tests に ffmpeg を使った RtmpInboundEndpoint のテストを追加する
   - `createRtmpInboundEndpoint` で作成した endpoint に H.264 映像のみ、または H.264 映像 + AAC 音声を配信して統計値を確認する
   - @sile
+- [ADD] e2e-tests に ffmpeg 受信と inspect 検証を使った RtmpOutboundEndpoint のテストを追加する
+  - `createRtmpOutboundEndpoint` と `createMp4VideoReader` を組み合わせて配信された映像を MP4 へ保存し、`hisui inspect` で内容を確認する
+  - @sile
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
