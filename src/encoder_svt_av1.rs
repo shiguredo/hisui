@@ -82,7 +82,6 @@ impl SvtAv1Encoder {
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
 
             self.output_queue.push_back(VideoFrame {
-                source_id: None,
                 data: frame.data().to_vec(),
                 format: VideoFormat::Av1,
                 keyframe: frame.is_keyframe(),

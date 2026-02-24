@@ -1,5 +1,5 @@
 use crate::json::JsonObject;
-use crate::layout::DEFAULT_LAYOUT_JSON;
+use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 
 pub fn parse_vp8_encode_params(
     value: nojson::RawJsonValue<'_, '_>,

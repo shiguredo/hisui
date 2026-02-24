@@ -1,13 +1,14 @@
+// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
-struct LegacyProcessorStats {
+struct SoraComposeProcessorStats {
     processor_type: String,
     error: bool,
     values: BTreeMap<String, crate::stats::StatsValue>,
 }
 
-impl LegacyProcessorStats {
+impl SoraComposeProcessorStats {
     fn new() -> Self {
         Self {
             processor_type: "unknown".to_owned(),
@@ -17,7 +18,7 @@ impl LegacyProcessorStats {
     }
 }
 
-impl nojson::DisplayJson for LegacyProcessorStats {
+impl nojson::DisplayJson for SoraComposeProcessorStats {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("type", &self.processor_type)?;
@@ -30,13 +31,13 @@ impl nojson::DisplayJson for LegacyProcessorStats {
     }
 }
 
-struct LegacyStatsJson {
+struct SoraComposeStatsJson {
     elapsed_seconds: f64,
     error: bool,
-    processors: Vec<LegacyProcessorStats>,
+    processors: Vec<SoraComposeProcessorStats>,
 }
 
-impl nojson::DisplayJson for LegacyStatsJson {
+impl nojson::DisplayJson for SoraComposeStatsJson {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("elapsed_seconds", self.elapsed_seconds)?;
@@ -47,18 +48,18 @@ impl nojson::DisplayJson for LegacyStatsJson {
     }
 }
 
-pub fn to_legacy_stats_json(
+pub fn to_json(
     stats: &crate::stats::Stats,
     elapsed_seconds: f64,
 ) -> crate::Result<nojson::RawJsonOwned> {
-    let mut processors = BTreeMap::<String, LegacyProcessorStats>::new();
+    let mut processors = BTreeMap::<String, SoraComposeProcessorStats>::new();
     for entry in stats.entries()? {
         let Some(processor_id) = entry.labels.get("processor_id") else {
             continue;
         };
         let processor = processors
             .entry(processor_id.clone())
-            .or_insert_with(LegacyProcessorStats::new);
+            .or_insert_with(SoraComposeProcessorStats::new);
         if let Some(processor_type) = entry.labels.get("processor_type") {
             processor.processor_type = processor_type.clone();
         }
@@ -74,7 +75,7 @@ pub fn to_legacy_stats_json(
         }
 
         if entry.metric_name == "error" {
-            processor.error = entry.value.as_bool_for_legacy();
+            processor.error = entry.value.as_bool_for_sora_recording_compose();
             continue;
         }
         processor
@@ -83,7 +84,7 @@ pub fn to_legacy_stats_json(
     }
 
     let processors = processors.into_values().collect::<Vec<_>>();
-    let stats = LegacyStatsJson {
+    let stats = SoraComposeStatsJson {
         elapsed_seconds,
         error: processors.iter().any(|p| p.error),
         processors,
@@ -97,7 +98,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn to_legacy_stats_json_excludes_worker_thread_processors_and_groups_by_processor() {
+    fn to_json_excludes_worker_thread_processors_and_groups_by_processor() {
         let mut stats = crate::stats::Stats::new();
         stats.set_default_label("processor_id", "reader0");
         stats.set_default_label("processor_type", "mp4_reader");
@@ -109,7 +110,7 @@ mod tests {
         stats.counter("total_output_video_frame_count").add(4);
         stats.flag("error").set(true);
 
-        let json = to_legacy_stats_json(&stats, 3.0).expect("to_legacy_stats_json must succeed");
+        let json = to_json(&stats, 3.0).expect("to_json must succeed");
 
         let text = json.to_string();
         assert!(text.contains("\"elapsed_seconds\":3"));
@@ -122,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn to_legacy_stats_json_skips_metrics_with_extra_labels() {
+    fn to_json_skips_metrics_with_extra_labels() {
         let mut stats = crate::stats::Stats::new();
         stats.set_default_label("processor_id", "mixer0");
         stats.set_default_label("processor_type", "video_mixer");
@@ -130,7 +131,7 @@ mod tests {
         stats.counter("frames_total").add(10);
         stats.flag("error").set(false);
 
-        let json = to_legacy_stats_json(&stats, 0.0).expect("to_legacy_stats_json must succeed");
+        let json = to_json(&stats, 0.0).expect("to_json must succeed");
         let text = json.to_string();
         assert!(!text.contains("\"frames_total\":10"));
         assert!(text.contains("\"type\":\"video_mixer\""));

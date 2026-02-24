@@ -1,3 +1,4 @@
+// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
@@ -6,8 +7,8 @@ use std::{
 
 use crate::{
     json::JsonObject,
-    layout::{AggregatedSourceInfo, AssignedSource, Resolution},
-    metadata::{SourceId, SourceInfo},
+    sora_recording_layout::{AggregatedSourceInfo, AssignedSource, Resolution},
+    sora_recording_metadata::{SourceId, SourceInfo},
     types::{EvenUsize, PixelPosition},
     video::VideoFrame,
 };

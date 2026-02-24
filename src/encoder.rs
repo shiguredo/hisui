@@ -20,8 +20,6 @@ use crate::{
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
-    layout::Layout,
-    layout_encode_params::LayoutEncodeParams,
     media::MediaSample,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
@@ -294,6 +292,26 @@ impl AudioEncoderInner {
 }
 
 #[derive(Debug, Clone)]
+pub struct EncodeConfig {
+    #[cfg(feature = "libvpx")]
+    pub libvpx_vp8: shiguredo_libvpx::EncoderConfig,
+    #[cfg(feature = "libvpx")]
+    pub libvpx_vp9: shiguredo_libvpx::EncoderConfig,
+    pub openh264: shiguredo_openh264::EncoderConfig,
+    pub svt_av1: shiguredo_svt_av1::EncoderConfig,
+    #[cfg(target_os = "macos")]
+    pub video_toolbox_h264: shiguredo_video_toolbox::EncoderConfig,
+    #[cfg(target_os = "macos")]
+    pub video_toolbox_h265: shiguredo_video_toolbox::EncoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_h264: shiguredo_nvcodec::EncoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_h265: shiguredo_nvcodec::EncoderConfig,
+    #[cfg(feature = "nvcodec")]
+    pub nvcodec_av1: shiguredo_nvcodec::EncoderConfig,
+}
+
+#[derive(Debug, Clone)]
 pub struct VideoEncoderOptions {
     pub codec: CodecName,
     pub engines: Option<Vec<EngineName>>,
@@ -301,7 +319,7 @@ pub struct VideoEncoderOptions {
     pub width: EvenUsize,
     pub height: EvenUsize,
     pub frame_rate: FrameRate,
-    pub encode_params: LayoutEncodeParams,
+    pub encode_params: EncodeConfig,
 }
 
 impl VideoEncoderOptions {
@@ -309,18 +327,6 @@ impl VideoEncoderOptions {
     // その（使われない）初期値の設定を行いやすくするための定数を定義しておく
     pub const DUMMY_WIDTH: EvenUsize = EvenUsize::ZERO;
     pub const DUMMY_HEIGHT: EvenUsize = EvenUsize::ZERO;
-
-    pub fn from_layout(layout: &Layout) -> Self {
-        Self {
-            codec: layout.video_codec,
-            engines: layout.video_encode_engines.clone(),
-            bitrate: layout.video_bitrate_bps(),
-            width: layout.resolution.width(),
-            height: layout.resolution.height(),
-            frame_rate: layout.frame_rate,
-            encode_params: layout.encode_params.clone(),
-        }
-    }
 }
 
 #[derive(Debug)]

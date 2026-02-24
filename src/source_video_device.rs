@@ -224,7 +224,6 @@ fn convert_captured_frame_to_i420(
             .map_err(|e| Error::new(format!("failed to convert NV12 to I420: {e}")))?;
 
             let input_frame = VideoFrame {
-                source_id: None,
                 data: Vec::new(),
                 format: crate::video::VideoFormat::I420,
                 keyframe: true,
@@ -265,7 +264,6 @@ fn convert_captured_frame_to_i420(
             let u_plane = &frame.data[y_size..(y_size + uv_size)];
             let v_plane = &frame.data[(y_size + uv_size)..(y_size + uv_size * 2)];
             let input_frame = VideoFrame {
-                source_id: None,
                 data: Vec::new(),
                 format: crate::video::VideoFormat::I420,
                 keyframe: true,

@@ -546,7 +546,6 @@ fn convert_webrtc_video_frame_to_i420(
     let v_stride = usize::try_from(buffer.stride_v())
         .map_err(|_| Error::new("incoming video frame V stride is negative"))?;
     let input_frame = crate::VideoFrame {
-        source_id: None,
         data: Vec::new(),
         format: crate::video::VideoFormat::I420,
         keyframe: true,

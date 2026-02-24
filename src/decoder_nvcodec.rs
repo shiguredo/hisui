@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 
-use crate::layout_decode_params::LayoutDecodeParams;
+use crate::decoder::DecodeConfig;
 use crate::video::{VideoFormat, VideoFrame};
 use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video_h265::{
@@ -17,7 +17,7 @@ pub struct NvcodecDecoder {
 }
 
 impl NvcodecDecoder {
-    pub fn new_h264(params: &LayoutDecodeParams) -> crate::Result<Self> {
+    pub fn new_h264(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H264) decoder");
         let config = params.nvcodec_h264.clone();
         Ok(Self {
@@ -28,7 +28,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_h265(params: &LayoutDecodeParams) -> crate::Result<Self> {
+    pub fn new_h265(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H265) decoder");
         let config = params.nvcodec_h265.clone();
         Ok(Self {
@@ -39,7 +39,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_av1(params: &LayoutDecodeParams) -> crate::Result<Self> {
+    pub fn new_av1(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(AV1) decoder");
         let config = params.nvcodec_av1.clone();
         Ok(Self {
@@ -50,7 +50,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_vp8(params: &LayoutDecodeParams) -> crate::Result<Self> {
+    pub fn new_vp8(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP8) decoder");
         let config = params.nvcodec_vp8.clone();
         Ok(Self {
@@ -61,7 +61,7 @@ impl NvcodecDecoder {
         })
     }
 
-    pub fn new_vp9(params: &LayoutDecodeParams) -> crate::Result<Self> {
+    pub fn new_vp9(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP9) decoder");
         let config = params.nvcodec_vp9.clone();
         Ok(Self {

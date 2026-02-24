@@ -505,7 +505,6 @@ fn compose_frame(
     }
 
     Ok(VideoFrame {
-        source_id: None,
         sample_entry: None,
         keyframe: true,
         format: VideoFormat::I420,
@@ -1276,7 +1275,6 @@ mod tests {
 
     fn dummy_i420a_frame(timestamp: Duration, y: u8, alpha: u8) -> VideoFrame {
         VideoFrame {
-            source_id: None,
             sample_entry: None,
             keyframe: true,
             format: VideoFormat::I420A,

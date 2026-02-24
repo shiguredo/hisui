@@ -168,7 +168,6 @@ impl Mp4FileReader {
         }
 
         let audio_data = AudioData {
-            source_id: None,
             data,
             format: state.audio_format,
             stereo: state.audio_stereo,
@@ -216,7 +215,6 @@ impl Mp4FileReader {
         }
 
         let video_frame = VideoFrame {
-            source_id: None,
             data,
             format: state.video_format,
             keyframe: context.keyframe,

@@ -1,3 +1,4 @@
+// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{HashMap, VecDeque},
     time::Duration,
@@ -6,8 +7,8 @@ use std::{
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
-    layout::TrimSpans,
     media::MediaSample,
+    sora_recording_layout::TrimSpans,
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);
@@ -251,7 +252,6 @@ impl AudioMixer {
 
         Ok(AudioData {
             // 以下は固定値
-            source_id: None, // 合成後は常に None になる
             format: AudioFormat::I16Be,
             stereo: true, // Hisui では音声は常にステレオとして扱う
             sample_rate: SAMPLE_RATE,

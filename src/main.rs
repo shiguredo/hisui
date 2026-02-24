@@ -54,11 +54,11 @@ fn main() -> noargs::Result<()> {
     } else if LIST_CODECS_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_list_codecs::run(args)?;
     } else if COMPOSE_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_compose::run(args)?;
+        hisui::sora_recording_subcommand_compose::run(args)?;
     } else if VMAF_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_vmaf::run(args)?;
+        hisui::sora_recording_subcommand_vmaf::run(args)?;
     } else if TUNE_COMMAND.take(&mut args).is_present() {
-        hisui::subcommand_tune::run(args)?;
+        hisui::sora_recording_subcommand_tune::run(args)?;
     } else if experimental && SERVER_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_server::run(args)?;
     } else if let Some(help) = args.finish()? {

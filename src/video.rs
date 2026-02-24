@@ -2,10 +2,7 @@ use std::{num::NonZeroUsize, str::FromStr, time::Duration};
 
 use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields};
 
-use crate::{
-    metadata::SourceId,
-    types::{CodecName, EvenUsize},
-};
+use crate::types::{CodecName, EvenUsize};
 
 pub type I420Planes<'a> = (&'a [u8], &'a [u8], &'a [u8]);
 pub type I420APlanes<'a> = (&'a [u8], &'a [u8], &'a [u8], &'a [u8]);
@@ -23,7 +20,6 @@ pub(crate) fn rgb_to_yuv_bt601_int(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
-    pub source_id: Option<SourceId>,
     pub data: Vec<u8>,
     pub format: VideoFormat,
     pub keyframe: bool,
@@ -111,7 +107,6 @@ impl VideoFrame {
         yuv_data.extend_from_slice(&v_plane);
 
         Ok(Self {
-            source_id: None,
             data: yuv_data,
             format: VideoFormat::I420,
             keyframe: true,
@@ -125,7 +120,6 @@ impl VideoFrame {
 
     pub fn to_stripped(&self) -> Self {
         Self {
-            source_id: self.source_id.clone(),
             data: Vec::new(),
             format: self.format,
             keyframe: self.keyframe,
@@ -184,7 +178,6 @@ impl VideoFrame {
         }
 
         Self {
-            source_id: input_frame.source_id,
             sample_entry: None, // 生データにはサンプルエントリは存在しない
             data,
             format: VideoFormat::I420,
@@ -327,7 +320,6 @@ impl VideoFrame {
         }
 
         Ok(Self {
-            source_id: input_frame.source_id,
             sample_entry: None, // 生データにはサンプルエントリは存在しない
             data,
             format: VideoFormat::I420,
@@ -365,7 +357,6 @@ impl VideoFrame {
         data.resize(total_size, v);
 
         Self {
-            source_id: None,
             data,
             format: VideoFormat::I420,
             keyframe: true,
@@ -389,7 +380,6 @@ impl VideoFrame {
         }
 
         Self {
-            source_id: None,
             data,
             format: VideoFormat::I420,
             keyframe: true,
@@ -553,7 +543,6 @@ impl VideoFrame {
         };
 
         let resized = Self {
-            source_id: self.source_id.clone(),
             data,
             format: self.format,
             keyframe: self.keyframe,
@@ -873,7 +862,6 @@ mod tests {
     #[test]
     fn resize_i420a_preserves_format_and_alpha_plane() -> crate::Result<()> {
         let frame = VideoFrame {
-            source_id: None,
             sample_entry: None,
             keyframe: true,
             format: VideoFormat::I420A,

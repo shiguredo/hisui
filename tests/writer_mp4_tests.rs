@@ -3,9 +3,9 @@ use std::{path::Path, path::PathBuf, time::Duration};
 use hisui::{
     Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
-    layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
-    layout_region::{Grid, Region},
-    metadata::{SourceId, SourceInfo},
+    sora_recording_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
+    sora_recording_layout_region::{Grid, Region},
+    sora_recording_metadata::{SourceId, SourceInfo},
     types::{CodecName, EvenUsize, PixelPosition},
     video::{FrameRate, VideoFormat, VideoFrame},
     writer_mp4::{Mp4Writer, Mp4WriterOptions},
@@ -28,7 +28,7 @@ fn write_audio_only_mp4() -> hisui::Result<()> {
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         Some(audio_samples),
         None,
     )?;
@@ -66,7 +66,7 @@ fn write_video_only_mp4() -> hisui::Result<()> {
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         None,
         Some(video_frames),
     )?;
@@ -112,7 +112,7 @@ fn write_video_and_audio_mp4() -> hisui::Result<()> {
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         Some(audio_samples),
         Some(video_frames),
     )?;
@@ -148,7 +148,7 @@ fn no_video_and_audio_mp4() -> hisui::Result<()> {
     let layout = layout(&[], &[]);
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(Mp4WriterOptions::from_layout(&layout)),
+        Some(layout.mp4_writer_options()),
         None,
         None,
     )?;
@@ -488,7 +488,6 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
 
 fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioData {
     AudioData {
-        source_id: Some(source.id.clone()),
         data: vec![0], // 中身はなんでもいい
         format: AudioFormat::I16Be,
         stereo: true,
@@ -510,7 +509,6 @@ fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioData {
 
 fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame {
     VideoFrame {
-        source_id: Some(source.id.clone()),
         data: vec![0], // 中身はなんでもいい
         format: VideoFormat::I420,
         keyframe: i.is_multiple_of(2),

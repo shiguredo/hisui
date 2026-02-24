@@ -77,7 +77,6 @@ impl Openh264Encoder {
         }
 
         self.encoded = Some(VideoFrame {
-            source_id: None,
             data,
             format: VideoFormat::H264,
             keyframe: encoded.keyframe,

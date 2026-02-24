@@ -66,7 +66,6 @@ impl FdkAacEncoder {
             format: AudioFormat::Aac,
             stereo: true,
             sample_rate: SAMPLE_RATE,
-            source_id: None,
 
             // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
             sample_entry: self.sample_entry.take(),

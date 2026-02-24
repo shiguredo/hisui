@@ -46,7 +46,6 @@ impl OpusEncoder {
             sample_rate: SAMPLE_RATE,
 
             // 入力の値をそのまま引きつぐ
-            source_id: data.source_id.clone(),
             timestamp: data.timestamp,
             duration: data.duration,
 

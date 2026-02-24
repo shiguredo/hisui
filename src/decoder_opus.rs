@@ -28,7 +28,6 @@ impl OpusDecoder {
 
         let decoded_samples = self.inner.decode(&data.data)?;
         let decoded = AudioData {
-            source_id: data.source_id.clone(),
             data: decoded_samples
                 .iter()
                 .flat_map(|v| v.to_be_bytes().into_iter())

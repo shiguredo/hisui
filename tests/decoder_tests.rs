@@ -1,7 +1,6 @@
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    metadata::SourceId,
     reader_mp4::Mp4VideoReader,
     video::VideoFrame,
 };
@@ -19,10 +18,8 @@ const AUDIO_OUTPUT_TRACK_ID: &str = "decoder_test_audio_output";
 
 #[test]
 fn h264_multi_resolutions() -> hisui::Result<()> {
-    let source_id0 = SourceId::new("archive-blue-640x480-h264");
-    let source_id1 = SourceId::new("archive-blue-640x480-h264");
-    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h264.mp4")?;
-    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h264.mp4")?;
+    let reader0 = Mp4VideoReader::new("testdata/archive-blue-640x480-h264.mp4")?;
+    let reader1 = Mp4VideoReader::new("testdata/archive-red-320x320-h264.mp4")?;
     multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
@@ -30,10 +27,8 @@ fn h264_multi_resolutions() -> hisui::Result<()> {
 #[test]
 #[cfg(target_os = "macos")]
 fn h265_multi_resolutions() -> hisui::Result<()> {
-    let source_id0 = SourceId::new("archive-blue-640x480-h265");
-    let source_id1 = SourceId::new("archive-red-320x320-h265");
-    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-h265.mp4")?;
-    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-h265.mp4")?;
+    let reader0 = Mp4VideoReader::new("testdata/archive-blue-640x480-h265.mp4")?;
+    let reader1 = Mp4VideoReader::new("testdata/archive-red-320x320-h265.mp4")?;
     multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
@@ -41,20 +36,16 @@ fn h265_multi_resolutions() -> hisui::Result<()> {
 #[test]
 #[cfg(feature = "libvpx")]
 fn vp9_multi_resolutions() -> hisui::Result<()> {
-    let source_id0 = SourceId::new("archive-blue-640x480-vp9");
-    let source_id1 = SourceId::new("archive-red-320x320-vp9");
-    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-vp9.mp4")?;
-    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-vp9.mp4")?;
+    let reader0 = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
+    let reader1 = Mp4VideoReader::new("testdata/archive-red-320x320-vp9.mp4")?;
     multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
 
 #[test]
 fn av1_multi_resolutions() -> hisui::Result<()> {
-    let source_id0 = SourceId::new("archive-blue-640x480-av1");
-    let source_id1 = SourceId::new("archive-red-320x320-av1");
-    let reader0 = Mp4VideoReader::new(source_id0, "testdata/archive-blue-640x480-av1.mp4")?;
-    let reader1 = Mp4VideoReader::new(source_id1, "testdata/archive-red-320x320-av1.mp4")?;
+    let reader0 = Mp4VideoReader::new("testdata/archive-blue-640x480-av1.mp4")?;
+    let reader1 = Mp4VideoReader::new("testdata/archive-red-320x320-av1.mp4")?;
     multi_resolutions_test(reader0, reader1)?;
     Ok(())
 }
@@ -154,8 +145,7 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> VideoFrame {
 #[test]
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> hisui::Result<()> {
-    let source_id = SourceId::new("beep-aac-audio");
-    let reader = Mp4AudioReader::new(source_id, "testdata/beep-aac-audio.mp4")?;
+    let reader = Mp4AudioReader::new("testdata/beep-aac-audio.mp4")?;
     let mut input_samples = Vec::new();
     for input_data in reader {
         input_samples.push(input_data?);

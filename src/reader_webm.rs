@@ -6,7 +6,6 @@ use std::{
 
 use crate::{
     audio::{AudioData, AudioFormat, SAMPLE_RATE},
-    metadata::SourceId,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -312,7 +311,6 @@ impl VideoTrackHeader {
 
 #[derive(Debug)]
 pub struct WebmAudioReader {
-    source_id: SourceId,
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
     last_duration: Duration,
@@ -327,7 +325,7 @@ pub struct WebmAudioReader {
 }
 
 impl WebmAudioReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         let file = std::fs::File::open(&path).map_err(|e| {
             crate::Error::new(format!("failed to open {}: {e}", path.as_ref().display()))
         })?;
@@ -340,7 +338,6 @@ impl WebmAudioReader {
         reader.skip_until(ID_CLUSTER)?;
 
         Ok(Self {
-            source_id,
             reader,
             cluster_timestamp: Duration::ZERO,
             last_duration: Duration::ZERO,
@@ -395,7 +392,6 @@ impl WebmAudioReader {
         self.total_track_duration = timestamp + self.last_duration;
 
         Ok(Some(AudioData {
-            source_id: Some(self.source_id.clone()),
             data,
             format: AudioFormat::Opus,
             timestamp,
@@ -460,7 +456,6 @@ impl Iterator for WebmAudioReader {
 
 #[derive(Debug)]
 pub struct WebmVideoReader {
-    source_id: SourceId,
     header: VideoTrackHeader,
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
@@ -475,7 +470,7 @@ pub struct WebmVideoReader {
 }
 
 impl WebmVideoReader {
-    pub fn new<P: AsRef<Path>>(source_id: SourceId, path: P) -> crate::Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         let file = std::fs::File::open(&path)?;
         let mut reader = ElementReader::new(BufReader::new(file));
         check_ebml_header_element(&mut reader)?;
@@ -488,7 +483,6 @@ impl WebmVideoReader {
         reader.skip_until(ID_CLUSTER)?;
 
         Ok(Self {
-            source_id,
             header,
             reader,
             cluster_timestamp: Duration::ZERO,
@@ -588,7 +582,6 @@ impl WebmVideoReader {
         }
 
         Ok(Some(VideoFrame {
-            source_id: Some(self.source_id.clone()),
             data,
             format: self.header.codec,
             keyframe,

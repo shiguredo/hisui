@@ -1,3 +1,4 @@
+// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     num::NonZeroUsize,
@@ -7,13 +8,15 @@ use std::{
 
 use crate::{
     audio,
+    encoder::VideoEncoderOptions,
     json::JsonObject,
-    layout_decode_params::LayoutDecodeParams,
-    layout_encode_params::LayoutEncodeParams,
-    layout_region::{self, RawRegion, Region},
-    metadata::{ArchiveMetadata, ContainerFormat, RecordingMetadata, SourceId, SourceInfo},
-    types::{CodecName, EngineName, EvenUsize},
+    sora_recording_layout_decode_params::LayoutDecodeParams,
+    sora_recording_layout_encode_params::LayoutEncodeParams,
+    sora_recording_layout_region::{self, RawRegion, Region},
+    sora_recording_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
+    types::{CodecName, ContainerFormat, EngineName, EvenUsize},
     video::FrameRate,
+    writer_mp4::Mp4WriterOptions,
 };
 
 pub const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.jsonc");
@@ -108,7 +111,11 @@ impl Layout {
         let (rows, columns) = if audio_only {
             (1, 1)
         } else {
-            layout_region::decide_grid_dimensions(0, max_columns, report.archives.len())
+            sora_recording_layout_region::decide_grid_dimensions(
+                0,
+                max_columns,
+                report.archives.len(),
+            )
         };
 
         // 全体の解像度を求める（キリを良くするために内枠のことはここでは考慮しない）
@@ -199,6 +206,25 @@ impl Layout {
 
     pub fn output_duration(&self) -> Duration {
         self.duration().saturating_sub(self.trim_duration())
+    }
+
+    pub fn video_encoder_options(&self) -> VideoEncoderOptions {
+        VideoEncoderOptions {
+            codec: self.video_codec,
+            engines: self.video_encode_engines.clone(),
+            bitrate: self.video_bitrate_bps(),
+            width: self.resolution.width(),
+            height: self.resolution.height(),
+            frame_rate: self.frame_rate,
+            encode_params: self.encode_params.config.clone(),
+        }
+    }
+
+    pub fn mp4_writer_options(&self) -> Mp4WriterOptions {
+        Mp4WriterOptions {
+            duration: self.duration(),
+            frame_rate: self.frame_rate,
+        }
     }
 }
 
@@ -773,7 +799,10 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::metadata::{ContainerFormat, SourceId, SourceInfo};
+    use crate::{
+        sora_recording_metadata::{SourceId, SourceInfo},
+        types::ContainerFormat,
+    };
 
     #[test]
     fn load_layout_jsons() -> crate::Result<()> {
