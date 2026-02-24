@@ -35,7 +35,7 @@ class HisuiServer:
         self.port: int | None = None
         self.log_file: Path | None = None
 
-        self._process: subprocess.Popen[bytes] | None = None
+        self._process: subprocess.Popen[None] | None = None
         self._log_handle = None
         self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
         self._verify: ssl.SSLContext | bool = True
