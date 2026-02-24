@@ -105,8 +105,11 @@ class HisuiServer:
         )
 
         self._verify = True
-        if self.is_https and self.https_cert_path is not None:
-            self._verify = ssl.create_default_context(cafile=str(self.https_cert_path))
+        if self.is_https:
+            cert_path = self.https_cert_path
+            if cert_path is None:
+                raise RuntimeError("Internal error: https_cert_path is missing")
+            self._verify = ssl.create_default_context(cafile=str(cert_path))
 
         if not wait_for_server(port, scheme=self.scheme, verify=self._verify):
             self._terminate_process()
