@@ -169,7 +169,6 @@
   - @voluntas
 - [ADD] e2e-tests に `HisuiServer` 補助クラスを追加する
   - server サブコマンドの起動・終了処理を共通化する
-  - `/metrics` / `/metrics?format=json` の E2E テストを追加する
   - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
   - 内部的な PoC 目的の機能だったが、不要となったので削除する
