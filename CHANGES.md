@@ -79,6 +79,10 @@
   - `GET /metrics?format=json` で `prom2json` 準拠の JSON を返す
   - 既存の `GET /metrics` は従来どおり Prometheus text 形式を返す
   - @sile
+- [ADD] server サブコマンドの JSON-RPC に `createMp4VideoReader` と `waitProcessorTerminated` を追加する
+  - `createMp4VideoReader` で MP4 入力ファイルを読み込む `mp4_video_reader` processor を起動できる
+  - `waitProcessorTerminated` で指定した processor の終了待機を行える
+  - @sile
 - [ADD] 依存ライブラリに shiguredo_http11 を追加する
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_webrtc を追加する
@@ -163,6 +167,9 @@
   - @voluntas
 - [ADD] python/tests に Hisui Python バインディングのテストコードを追加する
   - @voluntas
+- [ADD] e2e-tests に `HisuiServer` 補助クラスを追加する
+  - server サブコマンドの起動・終了処理を共通化する
+  - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
   - 内部的な PoC 目的の機能だったが、不要となったので削除する
   - @sile
