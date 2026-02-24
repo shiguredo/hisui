@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -14,14 +13,6 @@ pub struct RtmpInboundEndpointOptions {
 
     /// TLS接続時の秘密鍵ファイルパス（オプション）
     pub key_path: Option<PathBuf>,
-
-    // サーバーの起動時間指定
-    //
-    // TODO: 暫定値（当面はこれでいいけど将来的には変更する）
-    //       そもそも将来的には外部から停止できるようにするべきだが、今はそのための口が hisui にないのと、
-    //       WriterMp4 が fmp4 に対応しておらず、finalize() を呼ばずにプロセスを停止すると再生できない
-    //       MP4 ファイルができてしまうため、この設定を用意しているが、あくまでも暫定的なもの
-    pub lifetime: Duration,
 }
 
 impl Default for RtmpInboundEndpointOptions {
@@ -29,7 +20,6 @@ impl Default for RtmpInboundEndpointOptions {
         Self {
             cert_path: None,
             key_path: None,
-            lifetime: Duration::from_secs(60),
         }
     }
 }
@@ -66,24 +56,16 @@ impl RtmpInboundEndpoint {
             None
         };
 
-        let timeout = self.options.lifetime;
         let output_audio_track_id = self.output_audio_track_id.clone();
         let output_video_track_id = self.output_video_track_id.clone();
         let client_slots = Arc::new(tokio::sync::Semaphore::new(1));
-        let start_time = tokio::time::Instant::now();
+        let server_started_at = tokio::time::Instant::now();
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
 
         loop {
-            let elapsed = start_time.elapsed();
-            if elapsed >= timeout {
-                tracing::info!("RTMP server lifetime expired, shutting down");
-                break;
-            }
-            let remaining = timeout - elapsed;
-
-            match tokio::time::timeout(remaining, listener.accept()).await {
-                Ok(Ok((stream, peer_addr))) => {
+            match listener.accept().await {
+                Ok((stream, peer_addr)) => {
                     tracing::debug!("New RTMP client connection from: {peer_addr}");
 
                     let permit = match client_slots.clone().try_acquire_owned() {
@@ -100,7 +82,7 @@ impl RtmpInboundEndpoint {
                     let expected_app = url.app.clone();
                     let expected_stream_name = url.stream_name.clone();
                     let tls_acceptor = tls_acceptor.clone();
-                    let timestamp_offset = start_time.elapsed();
+                    let timestamp_offset = server_started_at.elapsed();
 
                     let video_track_tx = if let Some(track_id) = &output_video_track_id {
                         Some(handle.publish_track(track_id.clone()).await?)
@@ -147,15 +129,9 @@ impl RtmpInboundEndpoint {
                         }
                     });
                 }
-                Ok(Err(e)) => return Err(e.into()),
-                Err(_) => {
-                    tracing::info!("RTMP server lifetime expired, shutting down");
-                    break;
-                }
+                Err(e) => return Err(e.into()),
             }
         }
-
-        Ok(())
     }
 
     fn get_cert_and_key_paths(&self) -> crate::Result<(PathBuf, PathBuf)> {
