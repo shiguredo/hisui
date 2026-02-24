@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有
+// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::path::PathBuf;
 use std::time::Duration;
 

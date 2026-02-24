@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "nvcodec"), expect(unused_variables, unused_mut))]
 
-// Sora の録画ファイル合成処理固有
+// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use crate::decoder::DecodeConfig;
 #[cfg(feature = "nvcodec")]
 use crate::sora_recording_decoder_nvcodec_params;
