@@ -355,6 +355,8 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         assert metrics.value("hisui_video_codec", value="H264") == "1"
         assert metrics.value("hisui_audio_codec", value="AAC") == "1"
         assert video_count == 25
+        # ffmpeg の終了待機後でも、RTMP / FLV の終端処理タイミング差で
+        # 音声カウントが 43 - 45 付近で揺れることがあるため、下限チェックにしている。
         assert audio_count >= 43
 
 
