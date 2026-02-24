@@ -24,6 +24,41 @@ pub struct RtmpInboundEndpoint {
     pub options: RtmpInboundEndpointOptions,
 }
 
+#[derive(Debug, Clone)]
+struct RtmpInboundEndpointStats {
+    audio_codec_metric: crate::stats::StatsString,
+    total_input_audio_data_count_metric: crate::stats::StatsCounter,
+    video_codec_metric: crate::stats::StatsString,
+    total_input_video_frame_count_metric: crate::stats::StatsCounter,
+}
+
+impl RtmpInboundEndpointStats {
+    fn new(mut stats: crate::stats::Stats) -> Self {
+        Self {
+            audio_codec_metric: stats.string("audio_codec"),
+            total_input_audio_data_count_metric: stats.counter("total_input_audio_data_count"),
+            video_codec_metric: stats.string("video_codec"),
+            total_input_video_frame_count_metric: stats.counter("total_input_video_frame_count"),
+        }
+    }
+
+    fn set_audio_codec(&self, codec: crate::types::CodecName) {
+        self.audio_codec_metric.set(codec.as_str());
+    }
+
+    fn add_input_audio_data_count(&self) {
+        self.total_input_audio_data_count_metric.inc();
+    }
+
+    fn set_video_codec(&self, codec: crate::types::CodecName) {
+        self.video_codec_metric.set(codec.as_str());
+    }
+
+    fn add_input_video_frame_count(&self) {
+        self.total_input_video_frame_count_metric.inc();
+    }
+}
+
 impl RtmpInboundEndpoint {
     /// Start the RTMP Inbound Endpoint
     pub async fn run(self, handle: crate::ProcessorHandle) -> crate::Result<()> {
@@ -49,6 +84,7 @@ impl RtmpInboundEndpoint {
 
         let output_audio_track_id = self.output_audio_track_id.clone();
         let output_video_track_id = self.output_video_track_id.clone();
+        let stats = RtmpInboundEndpointStats::new(handle.stats());
         let client_slots = Arc::new(tokio::sync::Semaphore::new(1));
         let server_started_at = tokio::time::Instant::now();
         handle.notify_ready();
@@ -74,6 +110,7 @@ impl RtmpInboundEndpoint {
                     let expected_stream_name = url.stream_name.clone();
                     let tls_acceptor = tls_acceptor.clone();
                     let timestamp_offset = server_started_at.elapsed();
+                    let stats = stats.clone();
 
                     let video_track_tx = if let Some(track_id) = &output_video_track_id {
                         Some(handle.publish_track(track_id.clone()).await?)
@@ -104,6 +141,7 @@ impl RtmpInboundEndpoint {
                                     timestamp_offset,
                                     video_track_tx,
                                     audio_track_tx,
+                                    stats,
                                 );
 
                                 if let Err(e) = handler.run().await {
@@ -227,6 +265,7 @@ struct RtmpPublisherHandler {
     frame_handler: crate::rtmp::RtmpIncomingFrameHandler,
     video_track_tx: Option<crate::MessageSender>,
     audio_track_tx: Option<crate::MessageSender>,
+    stats: RtmpInboundEndpointStats,
 }
 
 impl RtmpPublisherHandler {
@@ -237,6 +276,7 @@ impl RtmpPublisherHandler {
         timestamp_offset: std::time::Duration,
         video_track_tx: Option<crate::MessageSender>,
         audio_track_tx: Option<crate::MessageSender>,
+        stats: RtmpInboundEndpointStats,
     ) -> Self {
         Self {
             stream,
@@ -247,6 +287,7 @@ impl RtmpPublisherHandler {
             frame_handler: crate::rtmp::RtmpIncomingFrameHandler::new(timestamp_offset),
             video_track_tx,
             audio_track_tx,
+            stats,
         }
     }
 
@@ -338,6 +379,10 @@ impl RtmpPublisherHandler {
     async fn handle_audio_frame(&mut self, frame: shiguredo_rtmp::AudioFrame) -> crate::Result<()> {
         let audio_data = self.frame_handler.process_audio_frame(frame)?;
         if let Some(tx) = &mut self.audio_track_tx {
+            if let Some(codec) = audio_data.format.codec_name() {
+                self.stats.set_audio_codec(codec);
+            }
+            self.stats.add_input_audio_data_count();
             tx.send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
         }
         Ok(())
@@ -348,6 +393,10 @@ impl RtmpPublisherHandler {
         if let Some(video_frame) = self.frame_handler.process_video_frame(frame)?
             && let Some(tx) = &mut self.video_track_tx
         {
+            if let Some(codec) = video_frame.format.codec_name() {
+                self.stats.set_video_codec(codec);
+            }
+            self.stats.add_input_video_frame_count();
             tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
         }
         Ok(())

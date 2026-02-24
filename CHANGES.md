@@ -170,6 +170,14 @@
 - [ADD] e2e-tests に `HisuiServer` 補助クラスを追加する
   - server サブコマンドの起動・終了処理を共通化する
   - @sile
+- [ADD] RtmpInboundEndpoint の統計項目を追加する
+  - `audio_codec` / `video_codec` と `total_input_audio_data_count` / `total_input_video_frame_count` を追加する
+  - @sile
+- [ADD] e2e-tests に ffmpeg を使った RtmpInboundEndpoint のテストを追加する
+  - `createRtmpInboundEndpoint` で作成した endpoint に H.264 映像のみ、または H.264 映像 + AAC 音声を配信して統計値を確認する
+  - @sile
+- [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
+  - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
   - 内部的な PoC 目的の機能だったが、不要となったので削除する
   - @sile
