@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 
+use shiguredo_http11::uri::{Uri, percent_decode};
 use shiguredo_http11::{Request, Response};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,30 +69,26 @@ pub async fn handle_request(
 }
 
 fn parse_metrics_response_format(uri: &str) -> Result<MetricsResponseFormat, String> {
-    let (_, query) = split_path_and_query(uri);
-    let mut format_value = None;
+    let parsed_uri = Uri::parse(uri).map_err(|e| format!("invalid request URI: {e}"))?;
+    let mut format_value = None::<String>;
 
-    if let Some(query) = query {
+    if let Some(query) = parsed_uri.query() {
         for pair in query.split('&').filter(|pair| !pair.is_empty()) {
-            let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-            if name == "format" {
-                format_value = Some(value);
+            let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+            let name = percent_decode(raw_name).map_err(|e| format!("invalid request URI: {e}"))?;
+            if name != "format" {
+                continue;
             }
+            let value =
+                percent_decode(raw_value).map_err(|e| format!("invalid request URI: {e}"))?;
+            format_value = Some(value);
         }
     }
 
-    match format_value {
+    match format_value.as_deref() {
         None => Ok(MetricsResponseFormat::PrometheusText),
         Some("json") => Ok(MetricsResponseFormat::PrometheusJson),
         Some(value) => Err(format!("unsupported metrics format: {value}")),
-    }
-}
-
-fn split_path_and_query(uri: &str) -> (&str, Option<&str>) {
-    if let Some((path, query)) = uri.split_once('?') {
-        (path, Some(query))
-    } else {
-        (uri, None)
     }
 }
 
@@ -240,5 +237,30 @@ mod tests {
         assert_eq!(response.status_code, 400);
         let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
         assert!(body.contains("unsupported metrics format"));
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_accepts_percent_encoded_json_format() {
+        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let handle = pipeline.handle();
+        let request = Request::new("GET", "/metrics?format=%6a%73%6f%6e");
+
+        let response = handle_request(&request, &handle).await;
+        assert_eq!(response.status_code, 200);
+        assert!(response.headers.iter().any(|(name, value)| {
+            name == "Content-Type" && value == "application/json; charset=utf-8"
+        }));
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_rejects_invalid_percent_encoding() {
+        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let handle = pipeline.handle();
+        let request = Request::new("GET", "/metrics?format=%ZZ");
+
+        let response = handle_request(&request, &handle).await;
+        assert_eq!(response.status_code, 400);
+        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert!(body.contains("invalid request URI"));
     }
 }
