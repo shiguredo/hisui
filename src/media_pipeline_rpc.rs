@@ -59,6 +59,7 @@ impl MediaPipelineHandle {
         let result = match method {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
             "createMp4VideoReader" => self.handle_create_mp4_video_reader_rpc(maybe_params).await,
+            "createMp4AudioReader" => self.handle_create_mp4_audio_reader_rpc(maybe_params).await,
             "createPngFileSource" => self.handle_create_png_file_source_rpc(maybe_params).await,
             "createVideoDeviceSource" => {
                 self.handle_create_video_device_source_rpc(maybe_params)
@@ -185,6 +186,62 @@ impl MediaPipelineHandle {
         })?;
 
         Ok(RpcSuccessResult::CreateMp4VideoReader { processor_id })
+    }
+
+    async fn handle_create_mp4_audio_reader_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (path, processor_id): (std::path::PathBuf, Option<ProcessorId>) =
+            parse_params(maybe_params, |params| {
+                let path: std::path::PathBuf = params.to_member("path")?.required()?.try_into()?;
+                if !path.exists() {
+                    let error_value = params.to_member("path")?.required()?;
+                    return Err(error_value
+                        .invalid(format!("input path does not exist: {}", path.display())));
+                }
+                if path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .filter(|ext| ext.eq_ignore_ascii_case("mp4"))
+                    .is_none()
+                {
+                    let error_value = params.to_member("path")?.required()?;
+                    return Err(error_value.invalid(format!(
+                        "input path must be an mp4 file: {}",
+                        path.display()
+                    )));
+                }
+                let processor_id = params.to_member("processorId")?.try_into()?;
+                Ok((path, processor_id))
+            })?;
+        let processor_id =
+            processor_id.unwrap_or_else(|| ProcessorId::new(path.display().to_string()));
+
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("mp4_audio_reader"),
+            move |handle| async move {
+                let reader = crate::sora_recording_reader::AudioReader::new(
+                    crate::types::ContainerFormat::Mp4,
+                    std::time::Duration::ZERO,
+                    vec![path],
+                    handle.stats(),
+                )?;
+                reader.run(handle).await
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
+
+        Ok(RpcSuccessResult::CreateMp4AudioReader { processor_id })
     }
 
     async fn handle_create_png_file_source_rpc(
@@ -494,6 +551,7 @@ impl MediaPipelineHandle {
 enum RpcSuccessResult {
     CreateMp4FileSource { processor_id: ProcessorId },
     CreateMp4VideoReader { processor_id: ProcessorId },
+    CreateMp4AudioReader { processor_id: ProcessorId },
     CreatePngFileSource { processor_id: ProcessorId },
     CreateVideoDeviceSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
@@ -514,6 +572,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateMp4VideoReader { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateMp4AudioReader { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreatePngFileSource { processor_id } => {
@@ -566,6 +627,7 @@ mod tests {
     };
 
     const TEST_MP4_PATH: &str = "testdata/archive-red-320x320-av1.mp4";
+    const TEST_MP4_AUDIO_PATH: &str = "testdata/red-320x320-h264-aac.mp4";
 
     #[tokio::test]
     async fn notification_error_returns_no_response() {
@@ -766,6 +828,80 @@ mod tests {
         assert_eq!(
             result_processor_id(&first_response).expect("parse result.processorId"),
             "duplicate-mp4-video-reader"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_mp4_audio_reader_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createMp4AudioReader"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_mp4_audio_reader_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4AudioReader","params":{{"path":"{TEST_MP4_AUDIO_PATH}","processorId":"custom-mp4-audio-reader"}}}}"#
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-mp4-audio-reader"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_mp4_audio_reader_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4AudioReader","params":{{"path":"{TEST_MP4_AUDIO_PATH}","processorId":"duplicate-mp4-audio-reader"}}}}"#
+        );
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-mp4-audio-reader"
         );
 
         let second_response = handle

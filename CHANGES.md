@@ -179,6 +179,12 @@
 - [ADD] e2e-tests に ffmpeg 受信と inspect 検証を使った RtmpOutboundEndpoint のテストを追加する
   - `createRtmpOutboundEndpoint` と `createMp4VideoReader` を組み合わせて配信された映像を MP4 へ保存し、`hisui inspect` で内容を確認する
   - @sile
+- [ADD] server サブコマンドの JSON-RPC に `createMp4AudioReader` を追加する
+  - `createMp4AudioReader` で MP4 入力ファイルを読み込む `mp4_audio_reader` processor を起動できる
+  - @sile
+- [ADD] e2e-tests に ffmpeg 受信と inspect 検証を使った RtmpOutboundEndpoint の映像 + 音声テストを追加する
+  - `createRtmpOutboundEndpoint` と `createMp4VideoReader` / `createMp4AudioReader` を組み合わせて配信された映像 + 音声を MP4 へ保存し、`hisui inspect` で内容を確認する
+  - @sile
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する

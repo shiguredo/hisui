@@ -134,30 +134,41 @@ def _wait_for_tcp_listen(port: int, timeout: float = 10.0) -> None:
     raise AssertionError(f"RTMP listener did not start within timeout: port={port}")
 
 
-def _start_ffmpeg_rtmp_receive(receive_url: str, output_path: Path) -> subprocess.Popen[str]:
+def _start_ffmpeg_rtmp_receive(
+    receive_url: str,
+    output_path: Path,
+    *,
+    with_audio: bool,
+    max_video_frames: int | None,
+) -> subprocess.Popen[str]:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
         pytest.skip("ffmpeg is required for RTMP outbound endpoint test")
 
+    cmd = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        receive_url,
+    ]
+    if max_video_frames is not None:
+        cmd.extend(["-frames:v", str(max_video_frames)])
+    if not with_audio:
+        cmd.append("-an")
+    cmd.extend([
+        "-c",
+        "copy",
+        "-f",
+        "mp4",
+        str(output_path),
+    ])
+
     return subprocess.Popen(
-        [
-            ffmpeg_path,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-y",
-            "-i",
-            receive_url,
-            "-frames:v",
-            "25",
-            "-an",
-            "-c",
-            "copy",
-            "-f",
-            "mp4",
-            str(output_path),
-        ],
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -364,7 +375,12 @@ def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(
             assert create_outbound_response["result"]["processorId"] == outbound_processor_id
 
             _wait_for_tcp_listen(port)
-            ffmpeg_process = _start_ffmpeg_rtmp_receive(receive_url, output_path)
+            ffmpeg_process = _start_ffmpeg_rtmp_receive(
+                receive_url,
+                output_path,
+                with_audio=False,
+                max_video_frames=25,
+            )
             try:
                 _wait_for_server_log_contains(server, "Client started playing stream")
 
@@ -400,3 +416,120 @@ def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(
         assert inspect_output["video_codec"] == "H264"
         assert inspect_output["video_sample_count"] == 25
         assert len(inspect_output["video_samples"]) == 25
+
+
+def test_create_rtmp_outbound_endpoint_with_mp4_audio_video_readers_and_inspect_output(
+    binary_path: Path,
+):
+    """createRtmpOutboundEndpoint で配信した映像 + 音声を受信し inspect で確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "red-320x320-h264-aac.mp4"
+    )
+    video_reader_processor_id = "e2e-mp4-video-reader-for-rtmp-outbound-av"
+    audio_reader_processor_id = "e2e-mp4-audio-reader-for-rtmp-outbound-av"
+    outbound_processor_id = "e2e-rtmp-outbound-endpoint-av"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    output_url = f"rtmp://127.0.0.1:{port}/live"
+    receive_url = f"{output_url}/stream-main"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        output_path = Path(tmp_dir) / "received-av.mp4"
+
+        with HisuiServer(binary_path) as server:
+            create_outbound_response = server.rpc_call(
+                "createRtmpOutboundEndpoint",
+                {
+                    "outputUrl": output_url,
+                    "streamName": "stream-main",
+                    "inputVideoTrackId": video_reader_processor_id,
+                    "inputAudioTrackId": audio_reader_processor_id,
+                    "processorId": outbound_processor_id,
+                },
+            )
+            assert create_outbound_response["result"]["processorId"] == outbound_processor_id
+
+            _wait_for_tcp_listen(port)
+            ffmpeg_process = _start_ffmpeg_rtmp_receive(
+                receive_url,
+                output_path,
+                with_audio=True,
+                max_video_frames=None,
+            )
+            try:
+                _wait_for_server_log_contains(server, "Client started playing stream")
+
+                create_video_reader_response = server.rpc_call(
+                    "createMp4VideoReader",
+                    {
+                        "path": str(input_path),
+                        "processorId": video_reader_processor_id,
+                    },
+                )
+                assert (
+                    create_video_reader_response["result"]["processorId"]
+                    == video_reader_processor_id
+                )
+
+                create_audio_reader_response = server.rpc_call(
+                    "createMp4AudioReader",
+                    {
+                        "path": str(input_path),
+                        "processorId": audio_reader_processor_id,
+                    },
+                )
+                assert (
+                    create_audio_reader_response["result"]["processorId"]
+                    == audio_reader_processor_id
+                )
+
+                wait_video_reader_response = server.rpc_call(
+                    "waitProcessorTerminated",
+                    {
+                        "processorId": video_reader_processor_id,
+                    },
+                    timeout=10.0,
+                )
+                assert (
+                    wait_video_reader_response["result"]["processorId"]
+                    == video_reader_processor_id
+                )
+
+                wait_audio_reader_response = server.rpc_call(
+                    "waitProcessorTerminated",
+                    {
+                        "processorId": audio_reader_processor_id,
+                    },
+                    timeout=10.0,
+                )
+                assert (
+                    wait_audio_reader_response["result"]["processorId"]
+                    == audio_reader_processor_id
+                )
+
+                wait_outbound_response = server.rpc_call(
+                    "waitProcessorTerminated",
+                    {
+                        "processorId": outbound_processor_id,
+                    },
+                    timeout=10.0,
+                )
+                assert wait_outbound_response["result"]["processorId"] == outbound_processor_id
+
+                _wait_process_exit(ffmpeg_process, timeout=20.0)
+            finally:
+                if ffmpeg_process.poll() is None:
+                    ffmpeg_process.kill()
+                    ffmpeg_process.communicate(timeout=5)
+
+        assert output_path.exists(), "RTMP received output file must exist"
+        assert output_path.stat().st_size > 0, "RTMP received output file must not be empty"
+
+        inspect_output = _inspect_mp4(binary_path, output_path)
+        assert inspect_output["format"] == "mp4"
+        assert inspect_output["video_codec"] == "H264"
+        assert inspect_output["audio_codec"] == "AAC"
+        assert inspect_output["video_sample_count"] == 25
+        assert inspect_output["audio_sample_count"] == 45
