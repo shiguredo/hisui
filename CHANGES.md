@@ -170,31 +170,6 @@
 - [ADD] e2e-tests に `HisuiServer` 補助クラスを追加する
   - server サブコマンドの起動・終了処理を共通化する
   - @sile
-- [ADD] RtmpInboundEndpoint の統計項目を追加する
-  - `audio_codec` / `video_codec` と `total_input_audio_data_count` / `total_input_video_frame_count` を追加する
-  - @sile
-- [ADD] e2e-tests に ffmpeg を使った RtmpInboundEndpoint のテストを追加する
-  - `createRtmpInboundEndpoint` で作成した endpoint に H.264 映像のみ、または H.264 映像 + AAC 音声を配信して統計値を確認する
-  - @sile
-- [ADD] e2e-tests に ffmpeg 受信と inspect 検証を使った RtmpOutboundEndpoint のテストを追加する
-  - `createRtmpOutboundEndpoint` と `createMp4VideoReader` を組み合わせて配信された映像を MP4 へ保存し、`hisui inspect` で内容を確認する
-  - @sile
-- [ADD] server サブコマンドの JSON-RPC に `createMp4AudioReader` を追加する
-  - `createMp4AudioReader` で MP4 入力ファイルを読み込む `mp4_audio_reader` processor を起動できる
-  - @sile
-- [ADD] e2e-tests に ffmpeg 受信と inspect 検証を使った RtmpOutboundEndpoint の映像 + 音声テストを追加する
-  - `createRtmpOutboundEndpoint` と `createMp4VideoReader` / `createMp4AudioReader` を組み合わせて配信された映像 + 音声を MP4 へ保存し、`hisui inspect` で内容を確認する
-  - @sile
-- [ADD] e2e-tests に ffmpeg サーバー受信と inspect 検証を使った RtmpPublisher のテストを追加する
-  - `createRtmpPublisher` と `createMp4VideoReader` / `createMp4AudioReader` を組み合わせて配信された映像（+ 音声）を MP4 へ保存し、`hisui inspect` で内容を確認する
-  - @sile
-- [ADD] server サブコマンドに `--manual-start-trigger` オプションを追加する
-  - 指定時は起動直後の自動開始を行わず、`triggerStart` RPC まで初期登録フェーズを維持する
-  - @sile
-- [ADD] server サブコマンドの JSON-RPC に `triggerStart` を追加する
-  - media pipeline の初期登録完了トリガーを外部から実行できる
-  - すでに開始済みの場合は `INVALID_REQUEST` を返す
-  - @sile
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
@@ -204,9 +179,6 @@
   - @voluntas
 - [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
   - @voluntas
-- [FIX] RtmpPublisher が入力ストリーム終了時に停止しないことがある問題を修正する
-  - 入力チャネルの終端を検出した時点で配信ループを正常終了するようにする
-  - @sile
 
 ## 2025.3.1
 
