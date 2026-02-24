@@ -471,10 +471,7 @@ impl MediaPipelineHandle {
         loop {
             let processor_ids = self.list_processor_ids_for_rpc().await?;
             if !processor_ids.iter().any(|id| id == &processor_id) {
-                return Ok(RpcSuccessResult::WaitProcessorTerminated {
-                    processor_id,
-                    terminated: true,
-                });
+                return Ok(RpcSuccessResult::WaitProcessorTerminated { processor_id });
             }
             // 現状は e2e テスト用途を主眼にした簡易実装として、短い間隔でポーリングしている。
             // これを汎用用途でも使う場合は media pipeline 側に終了待機コマンドを追加して待機する方が望ましい。
@@ -495,46 +492,19 @@ impl MediaPipelineHandle {
 }
 
 enum RpcSuccessResult {
-    CreateMp4FileSource {
-        processor_id: ProcessorId,
-    },
-    CreateMp4VideoReader {
-        processor_id: ProcessorId,
-    },
-    CreatePngFileSource {
-        processor_id: ProcessorId,
-    },
-    CreateVideoDeviceSource {
-        processor_id: ProcessorId,
-    },
-    CreateVideoMixer {
-        processor_id: ProcessorId,
-    },
-    CreateRtmpPublisher {
-        processor_id: ProcessorId,
-    },
-    CreateRtmpInboundEndpoint {
-        processor_id: ProcessorId,
-    },
-    CreateRtmpOutboundEndpoint {
-        processor_id: ProcessorId,
-    },
-    CreateWhipPublisher {
-        processor_id: ProcessorId,
-    },
-    CreateWhepSubscriber {
-        processor_id: ProcessorId,
-    },
-    ListTracks {
-        track_ids: Vec<TrackId>,
-    },
-    ListProcessors {
-        processor_ids: Vec<ProcessorId>,
-    },
-    WaitProcessorTerminated {
-        processor_id: ProcessorId,
-        terminated: bool,
-    },
+    CreateMp4FileSource { processor_id: ProcessorId },
+    CreateMp4VideoReader { processor_id: ProcessorId },
+    CreatePngFileSource { processor_id: ProcessorId },
+    CreateVideoDeviceSource { processor_id: ProcessorId },
+    CreateVideoMixer { processor_id: ProcessorId },
+    CreateRtmpPublisher { processor_id: ProcessorId },
+    CreateRtmpInboundEndpoint { processor_id: ProcessorId },
+    CreateRtmpOutboundEndpoint { processor_id: ProcessorId },
+    CreateWhipPublisher { processor_id: ProcessorId },
+    CreateWhepSubscriber { processor_id: ProcessorId },
+    ListTracks { track_ids: Vec<TrackId> },
+    ListProcessors { processor_ids: Vec<ProcessorId> },
+    WaitProcessorTerminated { processor_id: ProcessorId },
 }
 
 impl nojson::DisplayJson for RpcSuccessResult {
@@ -580,13 +550,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                     nojson::json(move |f| f.object(|f| f.member("processorId", processor_id)))
                 }))
             }),
-            Self::WaitProcessorTerminated {
-                processor_id,
-                terminated,
-            } => f.object(|f| {
-                f.member("processorId", processor_id)?;
-                f.member("terminated", *terminated)
-            }),
+            Self::WaitProcessorTerminated { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
         }
     }
 }
@@ -2287,7 +2253,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_processor_terminated_returns_true_when_processor_absent() {
+    async fn wait_processor_terminated_returns_processor_id_when_processor_absent() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"waitProcessorTerminated","params":{"processorId":"missing-processor"}}"#;
 
@@ -2296,10 +2262,8 @@ mod tests {
             .await
             .expect("response must exist");
 
-        let (processor_id, terminated) =
-            result_wait_processor_terminated(&response).expect("parse result");
+        let processor_id = result_wait_processor_terminated(&response).expect("parse result");
         assert_eq!(processor_id, "missing-processor");
-        assert!(terminated);
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -2333,10 +2297,8 @@ mod tests {
             .await
             .expect("rpc wait timed out")
             .expect("response must exist");
-        let (processor_id, terminated) =
-            result_wait_processor_terminated(&response).expect("parse result");
+        let processor_id = result_wait_processor_terminated(&response).expect("parse result");
         assert_eq!(processor_id, "alive-processor");
-        assert!(terminated);
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
@@ -2401,11 +2363,9 @@ mod tests {
 
     fn result_wait_processor_terminated(
         response: &nojson::RawJsonOwned,
-    ) -> Result<(String, bool), nojson::JsonParseError> {
+    ) -> Result<String, nojson::JsonParseError> {
         let result = response.value().to_member("result")?.required()?;
-        let processor_id = result.to_member("processorId")?.required()?.try_into()?;
-        let terminated = result.to_member("terminated")?.required()?.try_into()?;
-        Ok((processor_id, terminated))
+        result.to_member("processorId")?.required()?.try_into()
     }
 
     fn create_video_mixer_request(output_track_id: &str, processor_id: Option<&str>) -> String {
