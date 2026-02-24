@@ -42,7 +42,6 @@ def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
                 "path": str(input_path),
                 "processorId": processor_id,
             },
-            request_id=1,
         )
         assert create_response["result"]["processorId"] == processor_id
 
@@ -52,7 +51,6 @@ def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
                 "processorId": processor_id,
                 "timeoutMs": 10000,
             },
-            request_id=2,
         )
         assert wait_response["result"]["processorId"] == processor_id
         assert wait_response["result"]["terminated"] is True

@@ -38,6 +38,7 @@ class HisuiServer:
         self._process: subprocess.Popen[bytes] | None = None
         self._log_handle = None
         self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
+        self._next_rpc_request_id = 1
 
     def __enter__(self):
         return self.start()
@@ -135,14 +136,13 @@ class HisuiServer:
         self,
         method: str,
         params: dict[str, object] | None = None,
-        *,
-        request_id: int = 1,
     ) -> dict[str, Any]:
         payload: dict[str, object] = {
             "jsonrpc": "2.0",
-            "id": request_id,
+            "id": self._next_rpc_request_id,
             "method": method,
         }
+        self._next_rpc_request_id += 1
         if params is not None:
             payload["params"] = params
         response = self.rpc(payload)
