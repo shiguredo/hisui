@@ -94,6 +94,9 @@
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
+- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.0 にあげる
+  - このバージョンから shiguredo_openh264 crate のリポジトリが https://github.com/shiguredo/openh264-rs に独立したので、hisui のワークスペースからは削除されている
+  - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.1.0 にあげる
   - @sile
 - [ADD] FDK-AAC を使った AAC デコードに対応する

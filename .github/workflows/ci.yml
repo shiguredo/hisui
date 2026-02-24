@@ -35,9 +35,9 @@ jobs:
           os: ubuntu-24.04
           toolchain: stable
       - run: cargo fmt --all --check
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
-      - run: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- --deny warnings
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_openh264 --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
+      - run: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec -- --deny warnings
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec
 
   test-nvidia-video-codec:
     runs-on:
@@ -75,7 +75,7 @@ jobs:
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
       - run: cargo check --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx
       - run: cargo clippy --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx -- --deny warnings
-      - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx --exclude shiguredo_openh264
+      - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_nvcodec --exclude shiguredo_libvpx
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
@@ -129,7 +129,7 @@ jobs:
           curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
           mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
-      - run: cargo test --no-default-features -p hisui -p shiguredo_openh264
+      - run: cargo test --no-default-features -p hisui
 
   valgrind:
     # [NOTE]
