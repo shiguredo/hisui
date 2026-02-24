@@ -185,6 +185,9 @@
 - [ADD] e2e-tests に ffmpeg 受信と inspect 検証を使った RtmpOutboundEndpoint の映像 + 音声テストを追加する
   - `createRtmpOutboundEndpoint` と `createMp4VideoReader` / `createMp4AudioReader` を組み合わせて配信された映像 + 音声を MP4 へ保存し、`hisui inspect` で内容を確認する
   - @sile
+- [ADD] e2e-tests に ffmpeg サーバー受信と inspect 検証を使った RtmpPublisher のテストを追加する
+  - `createRtmpPublisher` と `createMp4VideoReader` / `createMp4AudioReader` を組み合わせて配信された映像（+ 音声）を MP4 へ保存し、`hisui inspect` で内容を確認する
+  - @sile
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
@@ -194,6 +197,9 @@
   - @voluntas
 - [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
   - @voluntas
+- [FIX] RtmpPublisher が入力ストリーム終了時に停止しないことがある問題を修正する
+  - 入力チャネルの終端を検出した時点で配信ループを正常終了するようにする
+  - @sile
 
 ## 2025.3.1
 

@@ -316,13 +316,13 @@ impl RtmpPublishRunner {
                     // TCP / TLS ストリームからデータを受信
                     self.handle_read_result(result)?;
                 }
-                Some(sample) = self.rx.recv(), if self.ready => {
+                sample = self.rx.recv(), if self.ready => {
+                    let Some(sample) = sample else {
+                        // 配信すべき入力サンプルがなくなった（正常終了）
+                        break;
+                    };
                     // RTMP サーバーとの接続処理が完了したら、メディアサンプルを受信処理
                     self.handle_media_sample(sample)?;
-                }
-                else => {
-                    // 配信すべき入力サンプルがなくなった（正常終了）
-                    break;
                 }
             }
         }
