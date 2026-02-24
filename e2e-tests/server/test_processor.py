@@ -15,7 +15,10 @@ from hisui_server import HisuiServer, reserve_ephemeral_port
 from processor_metrics import ProcessorMetrics
 
 
-def _run_ffmpeg_rtmp_publish(input_path: Path, publish_url: str) -> None:
+def _run_ffmpeg_rtmp_publish(
+    input_path: Path,
+    publish_url: str,
+) -> None:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
         pytest.skip("ffmpeg is required for RTMP inbound endpoint test")
@@ -50,7 +53,10 @@ def _run_ffmpeg_rtmp_publish(input_path: Path, publish_url: str) -> None:
     )
 
 
-def _run_ffmpeg_rtmp_publish_audio_video(input_path: Path, publish_url: str) -> None:
+def _run_ffmpeg_rtmp_publish_audio_video(
+    input_path: Path,
+    publish_url: str,
+) -> None:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
         pytest.skip("ffmpeg is required for RTMP inbound endpoint test")
@@ -84,7 +90,11 @@ def _run_ffmpeg_rtmp_publish_audio_video(input_path: Path, publish_url: str) -> 
     )
 
 
-def _wait_for_video_frame_count(server: HisuiServer, processor_id: str) -> int:
+def _wait_for_video_frame_count(
+    server: HisuiServer,
+    processor_id: str,
+    expected_count: int,
+) -> int:
     deadline = time.time() + 10.0
     while time.time() < deadline:
         metrics = ProcessorMetrics(
@@ -97,30 +107,16 @@ def _wait_for_video_frame_count(server: HisuiServer, processor_id: str) -> int:
         except (AssertionError, ValueError):
             time.sleep(0.1)
             continue
-        if frame_count >= 1:
+        if frame_count == expected_count:
             return frame_count
+        if frame_count > expected_count:
+            raise AssertionError(
+                f"RTMP inbound endpoint video frame count exceeded expected value: expected={expected_count}, actual={frame_count}"
+            )
         time.sleep(0.1)
-    raise AssertionError("RTMP inbound endpoint did not receive video frames in time")
-
-
-def _wait_for_audio_and_video_data_count(server: HisuiServer, processor_id: str) -> tuple[int, int]:
-    deadline = time.time() + 10.0
-    while time.time() < deadline:
-        metrics = ProcessorMetrics(
-            server.metrics_json(),
-            processor_id=processor_id,
-            processor_type="rtmp_inbound_endpoint",
-        )
-        try:
-            video_count = int(metrics.value("hisui_total_input_video_frame_count"))
-            audio_count = int(metrics.value("hisui_total_input_audio_data_count"))
-        except (AssertionError, ValueError):
-            time.sleep(0.1)
-            continue
-        if video_count >= 1 and audio_count >= 1:
-            return video_count, audio_count
-        time.sleep(0.1)
-    raise AssertionError("RTMP inbound endpoint did not receive audio/video data in time")
+    raise AssertionError(
+        f"RTMP inbound endpoint did not reach expected video frame count in time: expected={expected_count}"
+    )
 
 
 def _wait_for_tcp_listen(port: int, timeout: float = 10.0) -> None:
@@ -292,8 +288,15 @@ def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
         )
         assert create_response["result"]["processorId"] == processor_id
 
-        _run_ffmpeg_rtmp_publish(input_path, publish_url)
-        frame_count = _wait_for_video_frame_count(server, processor_id)
+        _run_ffmpeg_rtmp_publish(
+            input_path,
+            publish_url,
+        )
+        frame_count = _wait_for_video_frame_count(
+            server,
+            processor_id,
+            expected_count=25,
+        )
 
         metrics = ProcessorMetrics(
             server.metrics_json(),
@@ -301,7 +304,7 @@ def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
             processor_type="rtmp_inbound_endpoint",
         )
         assert metrics.value("hisui_video_codec", value="H264") == "1"
-        assert frame_count >= 1
+        assert frame_count == 25
 
 
 def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
@@ -334,10 +337,14 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         )
         assert create_response["result"]["processorId"] == processor_id
 
-        _run_ffmpeg_rtmp_publish_audio_video(av_input_path, publish_url)
-        video_count, audio_count = _wait_for_audio_and_video_data_count(
+        _run_ffmpeg_rtmp_publish_audio_video(
+            av_input_path,
+            publish_url,
+        )
+        video_count = _wait_for_video_frame_count(
             server,
             processor_id,
+            expected_count=25,
         )
 
         metrics = ProcessorMetrics(
@@ -345,10 +352,11 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
             processor_id=processor_id,
             processor_type="rtmp_inbound_endpoint",
         )
+        audio_count = int(metrics.value("hisui_total_input_audio_data_count"))
         assert metrics.value("hisui_video_codec", value="H264") == "1"
         assert metrics.value("hisui_audio_codec", value="AAC") == "1"
-        assert video_count >= 1
-        assert audio_count >= 1
+        assert video_count == 25
+        assert audio_count >= 43
 
 
 def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(

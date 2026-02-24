@@ -377,8 +377,9 @@ impl RtmpPublisherHandler {
 
     /// オーディオフレームを処理する
     async fn handle_audio_frame(&mut self, frame: shiguredo_rtmp::AudioFrame) -> crate::Result<()> {
-        let audio_data = self.frame_handler.process_audio_frame(frame)?;
-        if let Some(tx) = &mut self.audio_track_tx {
+        if let Some(audio_data) = self.frame_handler.process_audio_frame(frame)?
+            && let Some(tx) = &mut self.audio_track_tx
+        {
             if let Some(codec) = audio_data.format.codec_name() {
                 self.stats.set_audio_codec(codec);
             }
