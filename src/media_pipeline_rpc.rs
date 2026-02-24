@@ -38,6 +38,29 @@ fn internal_error(message: impl Into<String>) -> RpcError {
     (crate::jsonrpc::INTERNAL_ERROR, message.into())
 }
 
+fn parse_required_mp4_path(
+    params: &nojson::RawJsonValue<'_, '_>,
+) -> Result<std::path::PathBuf, nojson::JsonParseError> {
+    let path: std::path::PathBuf = params.to_member("path")?.required()?.try_into()?;
+    if !path.exists() {
+        let error_value = params.to_member("path")?.required()?;
+        return Err(error_value.invalid(format!("input path does not exist: {}", path.display())));
+    }
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| ext.eq_ignore_ascii_case("mp4"))
+        .is_none()
+    {
+        let error_value = params.to_member("path")?.required()?;
+        return Err(error_value.invalid(format!(
+            "input path must be an mp4 file: {}",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
 impl MediaPipelineHandle {
     // JSON-RPC リクエストを処理する
     //
@@ -143,24 +166,7 @@ impl MediaPipelineHandle {
     ) -> Result<RpcSuccessResult, RpcError> {
         let (path, processor_id): (std::path::PathBuf, Option<ProcessorId>) =
             parse_params(maybe_params, |params| {
-                let path: std::path::PathBuf = params.to_member("path")?.required()?.try_into()?;
-                if !path.exists() {
-                    let error_value = params.to_member("path")?.required()?;
-                    return Err(error_value
-                        .invalid(format!("input path does not exist: {}", path.display())));
-                }
-                if path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .filter(|ext| ext.eq_ignore_ascii_case("mp4"))
-                    .is_none()
-                {
-                    let error_value = params.to_member("path")?.required()?;
-                    return Err(error_value.invalid(format!(
-                        "input path must be an mp4 file: {}",
-                        path.display()
-                    )));
-                }
+                let path = parse_required_mp4_path(&params)?;
                 let processor_id = params.to_member("processorId")?.try_into()?;
                 Ok((path, processor_id))
             })?;
@@ -199,24 +205,7 @@ impl MediaPipelineHandle {
     ) -> Result<RpcSuccessResult, RpcError> {
         let (path, processor_id): (std::path::PathBuf, Option<ProcessorId>) =
             parse_params(maybe_params, |params| {
-                let path: std::path::PathBuf = params.to_member("path")?.required()?.try_into()?;
-                if !path.exists() {
-                    let error_value = params.to_member("path")?.required()?;
-                    return Err(error_value
-                        .invalid(format!("input path does not exist: {}", path.display())));
-                }
-                if path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .filter(|ext| ext.eq_ignore_ascii_case("mp4"))
-                    .is_none()
-                {
-                    let error_value = params.to_member("path")?.required()?;
-                    return Err(error_value.invalid(format!(
-                        "input path must be an mp4 file: {}",
-                        path.display()
-                    )));
-                }
+                let path = parse_required_mp4_path(&params)?;
                 let processor_id = params.to_member("processorId")?.try_into()?;
                 Ok((path, processor_id))
             })?;
