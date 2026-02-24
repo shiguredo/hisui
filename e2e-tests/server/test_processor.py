@@ -370,7 +370,16 @@ def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_path = Path(tmp_dir) / "received.mp4"
 
-        with HisuiServer(binary_path) as server:
+        with HisuiServer(binary_path, manual_start_trigger=True) as server:
+            create_reader_response = server.rpc_call(
+                "createMp4VideoReader",
+                {
+                    "path": str(input_path),
+                    "processorId": reader_processor_id,
+                },
+            )
+            assert create_reader_response["result"]["processorId"] == reader_processor_id
+
             create_outbound_response = server.rpc_call(
                 "createRtmpOutboundEndpoint",
                 {
@@ -391,15 +400,8 @@ def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(
             )
             try:
                 _wait_for_server_log_contains(server, "Client started playing stream")
-
-                create_reader_response = server.rpc_call(
-                    "createMp4VideoReader",
-                    {
-                        "path": str(input_path),
-                        "processorId": reader_processor_id,
-                    },
-                )
-                assert create_reader_response["result"]["processorId"] == reader_processor_id
+                start_response = server.trigger_start()
+                assert start_response["result"]["started"] is True
 
                 wait_reader_response = server.rpc_call(
                     "waitProcessorTerminated",
@@ -446,7 +448,31 @@ def test_create_rtmp_outbound_endpoint_with_mp4_audio_video_readers_and_inspect_
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_path = Path(tmp_dir) / "received-av.mp4"
 
-        with HisuiServer(binary_path) as server:
+        with HisuiServer(binary_path, manual_start_trigger=True) as server:
+            create_video_reader_response = server.rpc_call(
+                "createMp4VideoReader",
+                {
+                    "path": str(input_path),
+                    "processorId": video_reader_processor_id,
+                },
+            )
+            assert (
+                create_video_reader_response["result"]["processorId"]
+                == video_reader_processor_id
+            )
+
+            create_audio_reader_response = server.rpc_call(
+                "createMp4AudioReader",
+                {
+                    "path": str(input_path),
+                    "processorId": audio_reader_processor_id,
+                },
+            )
+            assert (
+                create_audio_reader_response["result"]["processorId"]
+                == audio_reader_processor_id
+            )
+
             create_outbound_response = server.rpc_call(
                 "createRtmpOutboundEndpoint",
                 {
@@ -468,30 +494,8 @@ def test_create_rtmp_outbound_endpoint_with_mp4_audio_video_readers_and_inspect_
             )
             try:
                 _wait_for_server_log_contains(server, "Client started playing stream")
-
-                create_video_reader_response = server.rpc_call(
-                    "createMp4VideoReader",
-                    {
-                        "path": str(input_path),
-                        "processorId": video_reader_processor_id,
-                    },
-                )
-                assert (
-                    create_video_reader_response["result"]["processorId"]
-                    == video_reader_processor_id
-                )
-
-                create_audio_reader_response = server.rpc_call(
-                    "createMp4AudioReader",
-                    {
-                        "path": str(input_path),
-                        "processorId": audio_reader_processor_id,
-                    },
-                )
-                assert (
-                    create_audio_reader_response["result"]["processorId"]
-                    == audio_reader_processor_id
-                )
+                start_response = server.trigger_start()
+                assert start_response["result"]["started"] is True
 
                 wait_video_reader_response = server.rpc_call(
                     "waitProcessorTerminated",
@@ -562,7 +566,7 @@ def test_create_rtmp_publisher_with_mp4_video_reader_and_inspect_output(
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_path = Path(tmp_dir) / "publisher-received.mp4"
 
-        with HisuiServer(binary_path) as server:
+        with HisuiServer(binary_path, manual_start_trigger=True) as server:
             ffmpeg_process = _start_ffmpeg_rtmp_receive(
                 receive_url,
                 output_path,
@@ -574,6 +578,15 @@ def test_create_rtmp_publisher_with_mp4_video_reader_and_inspect_output(
             try:
                 # ffmpeg 側の待受準備待ち
                 time.sleep(0.5)
+
+                create_reader_response = server.rpc_call(
+                    "createMp4VideoReader",
+                    {
+                        "path": str(input_path),
+                        "processorId": reader_processor_id,
+                    },
+                )
+                assert create_reader_response["result"]["processorId"] == reader_processor_id
 
                 create_publisher_response = server.rpc_call(
                     "createRtmpPublisher",
@@ -589,15 +602,8 @@ def test_create_rtmp_publisher_with_mp4_video_reader_and_inspect_output(
                     == publisher_processor_id
                 )
                 _wait_for_server_log_contains(server, "StateChanged(Publishing)")
-
-                create_reader_response = server.rpc_call(
-                    "createMp4VideoReader",
-                    {
-                        "path": str(input_path),
-                        "processorId": reader_processor_id,
-                    },
-                )
-                assert create_reader_response["result"]["processorId"] == reader_processor_id
+                start_response = server.trigger_start()
+                assert start_response["result"]["started"] is True
 
                 wait_reader_response = server.rpc_call(
                     "waitProcessorTerminated",
@@ -652,7 +658,7 @@ def test_create_rtmp_publisher_with_mp4_audio_video_readers_and_inspect_output(
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_path = Path(tmp_dir) / "publisher-received-av.mp4"
 
-        with HisuiServer(binary_path) as server:
+        with HisuiServer(binary_path, manual_start_trigger=True) as server:
             ffmpeg_process = _start_ffmpeg_rtmp_receive(
                 receive_url,
                 output_path,
@@ -664,22 +670,6 @@ def test_create_rtmp_publisher_with_mp4_audio_video_readers_and_inspect_output(
             try:
                 # ffmpeg 側の待受準備待ち
                 time.sleep(0.5)
-
-                create_publisher_response = server.rpc_call(
-                    "createRtmpPublisher",
-                    {
-                        "outputUrl": output_url,
-                        "streamName": "stream-main",
-                        "inputVideoTrackId": video_reader_processor_id,
-                        "inputAudioTrackId": audio_reader_processor_id,
-                        "processorId": publisher_processor_id,
-                    },
-                )
-                assert (
-                    create_publisher_response["result"]["processorId"]
-                    == publisher_processor_id
-                )
-                _wait_for_server_log_contains(server, "StateChanged(Publishing)")
 
                 create_video_reader_response = server.rpc_call(
                     "createMp4VideoReader",
@@ -704,6 +694,24 @@ def test_create_rtmp_publisher_with_mp4_audio_video_readers_and_inspect_output(
                     create_audio_reader_response["result"]["processorId"]
                     == audio_reader_processor_id
                 )
+
+                create_publisher_response = server.rpc_call(
+                    "createRtmpPublisher",
+                    {
+                        "outputUrl": output_url,
+                        "streamName": "stream-main",
+                        "inputVideoTrackId": video_reader_processor_id,
+                        "inputAudioTrackId": audio_reader_processor_id,
+                        "processorId": publisher_processor_id,
+                    },
+                )
+                assert (
+                    create_publisher_response["result"]["processorId"]
+                    == publisher_processor_id
+                )
+                _wait_for_server_log_contains(server, "StateChanged(Publishing)")
+                start_response = server.trigger_start()
+                assert start_response["result"]["started"] is True
 
                 wait_video_reader_response = server.rpc_call(
                     "waitProcessorTerminated",

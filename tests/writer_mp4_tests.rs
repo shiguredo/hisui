@@ -257,7 +257,10 @@ fn run_writer_with_pipeline(
         });
         processor_tasks.push(writer_task);
 
-        pipeline_handle.complete_initial_processor_registration();
+        pipeline_handle
+            .trigger_start()
+            .await
+            .map_err(|_| Error::new("failed to trigger start: pipeline has terminated"))?;
 
         for task in processor_tasks {
             match task.await {

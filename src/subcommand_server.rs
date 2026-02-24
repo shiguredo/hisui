@@ -90,6 +90,11 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
 
+    let manual_start_trigger = noargs::flag("manual-start-trigger")
+        .doc("初期 processor 登録完了の自動トリガーを無効化する")
+        .take(&mut args)
+        .is_present();
+
     // 片方のみ指定はエラー
     match (&https_cert_path, &https_key_path) {
         (Some(_), None) => {
@@ -119,6 +124,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         https_key_path,
         ui_remote_url,
         startup_rpc_file,
+        manual_start_trigger,
     )
     .map_err(noargs::Error::from)
 }
@@ -130,6 +136,7 @@ fn run_internal(
     https_key_path: Option<PathBuf>,
     ui_remote_url: Option<String>,
     startup_rpc_file: Option<PathBuf>,
+    manual_start_trigger: bool,
 ) -> crate::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -148,6 +155,7 @@ fn run_internal(
                 https_key_path,
                 ui_remote_url,
                 startup_rpc_file,
+                manual_start_trigger,
             ))
             .await
     })
@@ -160,6 +168,7 @@ async fn run_server(
     https_key_path: Option<PathBuf>,
     ui_remote_url: Option<String>,
     startup_rpc_file: Option<PathBuf>,
+    manual_start_trigger: bool,
 ) -> crate::Result<()> {
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
@@ -185,7 +194,17 @@ async fn run_server(
         crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle).await?;
         tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
     }
-    pipeline_handle.complete_initial_processor_registration();
+    if manual_start_trigger {
+        tracing::info!("Manual start mode enabled: waiting for triggerStart RPC");
+    } else {
+        let started = pipeline_handle
+            .trigger_start()
+            .await
+            .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+        if !started {
+            tracing::debug!("Initial start trigger was already completed");
+        }
+    }
 
     let bootstrap_endpoint = Rc::new(
         BootstrapEndpoint::new(pipeline_handle.clone())

@@ -188,6 +188,13 @@
 - [ADD] e2e-tests に ffmpeg サーバー受信と inspect 検証を使った RtmpPublisher のテストを追加する
   - `createRtmpPublisher` と `createMp4VideoReader` / `createMp4AudioReader` を組み合わせて配信された映像（+ 音声）を MP4 へ保存し、`hisui inspect` で内容を確認する
   - @sile
+- [ADD] server サブコマンドに `--manual-start-trigger` オプションを追加する
+  - 指定時は起動直後の自動開始を行わず、`triggerStart` RPC まで初期登録フェーズを維持する
+  - @sile
+- [ADD] server サブコマンドの JSON-RPC に `triggerStart` を追加する
+  - media pipeline の初期登録完了トリガーを外部から実行できる
+  - すでに開始済みの場合は `INVALID_REQUEST` を返す
+  - @sile
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する

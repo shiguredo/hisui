@@ -1023,7 +1023,12 @@ mod tests {
         sink_processor.notify_ready();
         sender1_processor.notify_ready();
         sender2_processor.notify_ready();
-        pipeline_handle.complete_initial_processor_registration();
+        assert!(
+            pipeline_handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
 
         let mixer_task = tokio::spawn(async move { mixer.run(mixer_processor).await });
 
@@ -1103,7 +1108,12 @@ mod tests {
             .await?;
         sender_processor.notify_ready();
         receiver_processor.notify_ready();
-        pipeline_handle.complete_initial_processor_registration();
+        assert!(
+            pipeline_handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
 
         let track_id = TrackId::new("syn-track");
         let mut tx = sender_processor.publish_track(track_id.clone()).await?;

@@ -23,6 +23,7 @@ class HisuiServer:
         https_key_path: Path | None = None,
         ui_remote_url: str | None = None,
         startup_rpc_file: Path | None = None,
+        manual_start_trigger: bool = False,
         verbose: bool = True,
     ):
         self.binary_path = binary_path
@@ -30,6 +31,7 @@ class HisuiServer:
         self.https_key_path = https_key_path
         self.ui_remote_url = ui_remote_url
         self.startup_rpc_file = startup_rpc_file
+        self.manual_start_trigger = manual_start_trigger
         self.verbose = verbose
 
         self.port: int | None = None
@@ -94,6 +96,8 @@ class HisuiServer:
 
         if self.startup_rpc_file:
             cmd.extend(["--startup-rpc-file", str(self.startup_rpc_file)])
+        if self.manual_start_trigger:
+            cmd.append("--manual-start-trigger")
 
         # バイナリ起動直前に予約ソケットを解放する
         sock.close()
@@ -159,6 +163,9 @@ class HisuiServer:
                 f"unexpected RPC HTTP status: {response.status_code}, body={response.text}"
             )
         return response.json()
+
+    def trigger_start(self, *, timeout: float | None = None) -> dict[str, Any]:
+        return self.rpc_call("triggerStart", timeout=timeout)
 
     def metrics(self, fmt: str = "text") -> httpx.Response:
         if fmt == "json":

@@ -258,7 +258,10 @@ async fn run_compose_pipeline(
         }
     };
 
-    pipeline_handle.complete_initial_processor_registration();
+    pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| Error::new("failed to trigger start: pipeline has terminated"))?;
 
     let start = Instant::now();
     let all_processor_tasks_succeeded = wait_processor_tasks(&mut setup.processor_tasks).await;
