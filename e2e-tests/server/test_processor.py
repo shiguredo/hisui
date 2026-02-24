@@ -30,6 +30,46 @@ def _find_metric_sample(
     return None
 
 
+def _metric_value(
+    metrics: list[dict[str, Any]],
+    metric_name: str,
+    required_labels: dict[str, str],
+) -> str:
+    sample = _find_metric_sample(metrics, metric_name, required_labels)
+    assert sample is not None, (
+        f"metric sample not found: metric_name={metric_name}, labels={required_labels}"
+    )
+    value = sample.get("value")
+    assert isinstance(value, str), (
+        f"metric value must be string: metric_name={metric_name}, labels={required_labels}"
+    )
+    return value
+
+
+class ProcessorMetrics:
+    """processor 固有のラベルを保持してメトリクス参照を簡略化する"""
+
+    def __init__(
+        self,
+        metrics: list[dict[str, Any]],
+        *,
+        processor_id: str,
+        processor_type: str,
+    ):
+        self._metrics = metrics
+        self._base_labels = {
+            "processor_id": processor_id,
+            "processor_type": processor_type,
+        }
+
+    def value(self, metric_name: str, **labels: str) -> str:
+        return _metric_value(
+            metric_name=metric_name,
+            metrics=self._metrics,
+            required_labels={**self._base_labels, **labels},
+        )
+
+
 def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
     """createMp4VideoReader で生成した processor の統計値を確認する"""
     input_path = Path("../testdata/archive-red-320x320-av1.mp4").resolve()
@@ -55,35 +95,14 @@ def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
         assert wait_response["result"]["processorId"] == processor_id
         assert wait_response["result"]["terminated"] is True
 
-        metrics = server.metrics_json()
-        base_labels = {
-            "processor_id": processor_id,
-            "processor_type": "mp4_video_reader",
-        }
-
-        total_sample_count = _find_metric_sample(
-            metrics,
-            "hisui_total_sample_count",
-            base_labels,
+        processor_metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="mp4_video_reader",
         )
-        assert total_sample_count is not None
-        assert total_sample_count.get("value") == "25"
 
-        total_track_seconds = _find_metric_sample(
-            metrics,
-            "hisui_total_track_seconds",
-            base_labels,
+        assert processor_metrics.value("hisui_total_sample_count") == "25"
+        assert float(processor_metrics.value("hisui_total_track_seconds")) == pytest.approx(
+            1.0
         )
-        assert total_track_seconds is not None
-        assert float(str(total_track_seconds.get("value"))) == pytest.approx(1.0)
-
-        codec_sample = _find_metric_sample(
-            metrics,
-            "hisui_codec",
-            {
-                **base_labels,
-                "value": "AV1",
-            },
-        )
-        assert codec_sample is not None
-        assert codec_sample.get("value") == "1"
+        assert processor_metrics.value("hisui_codec", value="AV1") == "1"
