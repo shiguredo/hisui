@@ -18,6 +18,8 @@ from processor_metrics import ProcessorMetrics
 def _run_ffmpeg_rtmp_publish(
     input_path: Path,
     publish_url: str,
+    *,
+    with_audio: bool,
 ) -> None:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
@@ -25,59 +27,23 @@ def _run_ffmpeg_rtmp_publish(
 
     deadline = time.time() + 10.0
     while time.time() < deadline:
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(input_path),
+        ]
+        if with_audio:
+            cmd.extend(["-c", "copy"])
+        else:
+            cmd.extend(["-an", "-c:v", "copy"])
+        cmd.extend(["-f", "flv", publish_url])
+
         result = subprocess.run(
-            [
-                ffmpeg_path,
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-nostdin",
-                "-i",
-                str(input_path),
-                "-an",
-                "-c:v",
-                "copy",
-                "-f",
-                "flv",
-                publish_url,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return
-        time.sleep(0.2)
-
-    raise AssertionError(
-        f"ffmpeg failed: returncode={result.returncode}, stderr={result.stderr}"
-    )
-
-
-def _run_ffmpeg_rtmp_publish_audio_video(
-    input_path: Path,
-    publish_url: str,
-) -> None:
-    ffmpeg_path = shutil.which("ffmpeg")
-    if ffmpeg_path is None:
-        pytest.skip("ffmpeg is required for RTMP inbound endpoint test")
-
-    deadline = time.time() + 10.0
-    while time.time() < deadline:
-        result = subprocess.run(
-            [
-                ffmpeg_path,
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-nostdin",
-                "-i",
-                str(input_path),
-                "-c",
-                "copy",
-                "-f",
-                "flv",
-                publish_url,
-            ],
+            cmd,
             capture_output=True,
             text=True,
         )
@@ -290,6 +256,7 @@ def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
         _run_ffmpeg_rtmp_publish(
             input_path,
             publish_url,
+            with_audio=False,
         )
         frame_count = _wait_for_video_frame_count(
             server,
@@ -336,9 +303,10 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         )
         assert create_response["result"]["processorId"] == processor_id
 
-        _run_ffmpeg_rtmp_publish_audio_video(
+        _run_ffmpeg_rtmp_publish(
             av_input_path,
             publish_url,
+            with_audio=True,
         )
         video_count = _wait_for_video_frame_count(
             server,
