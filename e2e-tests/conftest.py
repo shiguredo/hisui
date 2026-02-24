@@ -40,11 +40,10 @@ def binary_path() -> Path:
 
 
 @pytest.fixture(scope="module")
-def hisui_server(binary_path: Path) -> Generator[int, None, None]:
-    """hisui server を起動して HTTP ポート番号を yield する"""
+def hisui_server(binary_path: Path) -> Generator[HisuiServer, None, None]:
+    """hisui server を HTTP で起動して HisuiServer を yield する"""
     with HisuiServer(binary_path) as server:
-        assert server.port is not None
-        yield server.port
+        yield server
 
 
 @pytest.fixture(scope="session")
