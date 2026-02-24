@@ -22,6 +22,10 @@ fn is_client_disconnect(e: &io::Error) -> bool {
     )
 }
 
+fn request_path(uri: &str) -> &str {
+    uri.split_once('?').map_or(uri, |(path, _)| path)
+}
+
 /// upstream リバースプロキシ設定
 struct UpstreamConfig {
     host: String,
@@ -293,7 +297,7 @@ async fn handle_connection(
             let keep_alive = request.is_keep_alive();
 
             // ローカルエンドポイント
-            let local_response = match request.uri.as_str() {
+            let local_response = match request_path(request.uri.as_str()) {
                 "/.ok" => Some(Response::new(204, "No Content")),
                 "/bootstrap" => Some(bootstrap_endpoint.handle_request(&request).await),
                 "/rpc" => {
@@ -440,4 +444,21 @@ async fn proxy_to_upstream(
 
     // upstream がレスポンスなしで切断した場合
     Err("Upstream closed connection without sending a response".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::request_path;
+
+    #[test]
+    fn request_path_returns_path_without_query() {
+        assert_eq!(request_path("/metrics?format=json"), "/metrics");
+        assert_eq!(request_path("/rpc?id=1"), "/rpc");
+    }
+
+    #[test]
+    fn request_path_keeps_path_without_query() {
+        assert_eq!(request_path("/metrics"), "/metrics");
+        assert_eq!(request_path("/bootstrap"), "/bootstrap");
+    }
 }

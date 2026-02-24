@@ -6,22 +6,13 @@ use tokio::net::TcpListener;
 
 use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RtmpInboundEndpointOptions {
     /// TLS接続時の証明書ファイルパス（オプション）
     pub cert_path: Option<PathBuf>,
 
     /// TLS接続時の秘密鍵ファイルパス（オプション）
     pub key_path: Option<PathBuf>,
-}
-
-impl Default for RtmpInboundEndpointOptions {
-    fn default() -> Self {
-        Self {
-            cert_path: None,
-            key_path: None,
-        }
-    }
 }
 
 /// RTMP Inbound Endpoint

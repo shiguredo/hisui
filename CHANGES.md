@@ -75,6 +75,10 @@
     - JSON-RPC 通知（id なし）の場合は 204 No Content を返す
   - それ以外のパスには 404 Not Found を返す
   - @voluntas
+- [ADD] server サブコマンドの `/metrics` で統計値を JSON 形式でも取得できるようにする
+  - `GET /metrics?format=json` で `prom2json` 準拠の JSON を返す
+  - 既存の `GET /metrics` は従来どおり Prometheus text 形式を返す
+  - @sile
 - [ADD] 依存ライブラリに shiguredo_http11 を追加する
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_webrtc を追加する

@@ -144,6 +144,10 @@ impl Stats {
         Ok(text)
     }
 
+    pub fn to_prometheus_json_families(&self) -> crate::Result<nojson::RawJsonOwned> {
+        to_prometheus_json_families_from_entries(self.entries()?)
+    }
+
     pub fn entries(&self) -> crate::Result<Vec<StatsEntry>> {
         let entries = {
             let shared_entries = self
@@ -286,6 +290,13 @@ impl StatsValue {
             Self::Duration(_) => "gauge",
             Self::Flag(_) => "gauge",
             Self::StringValue(_) => "gauge",
+        }
+    }
+
+    fn prometheus_json_type_name(&self) -> &'static str {
+        match self.prometheus_type_name() {
+            "counter" => "COUNTER",
+            _ => "GAUGE",
         }
     }
 
@@ -499,11 +510,98 @@ impl StatsLabels {
     }
 }
 
+impl nojson::DisplayJson for StatsLabels {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            for (name, value) in self.iter() {
+                f.member(name, value)?;
+            }
+            Ok(())
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StatsEntry {
     pub metric_name: &'static str,
     pub labels: StatsLabels,
     pub value: StatsValue,
+}
+
+#[derive(Debug, Clone)]
+struct PrometheusMetricFamily {
+    name: String,
+    help: String,
+    metric_type: &'static str,
+    metrics: Vec<PrometheusMetricSample>,
+}
+
+impl nojson::DisplayJson for PrometheusMetricFamily {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("name", &self.name)?;
+            f.member("help", &self.help)?;
+            f.member("type", self.metric_type)?;
+            f.member("metrics", &self.metrics)?;
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PrometheusMetricSample {
+    labels: StatsLabels,
+    value: String,
+}
+
+impl nojson::DisplayJson for PrometheusMetricSample {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("labels", &self.labels)?;
+            f.member("value", &self.value)?;
+            Ok(())
+        })
+    }
+}
+
+pub(crate) fn to_prometheus_json_families_from_entries(
+    entries: Vec<StatsEntry>,
+) -> crate::Result<nojson::RawJsonOwned> {
+    let mut families = BTreeMap::<String, PrometheusMetricFamily>::new();
+
+    for entry in entries {
+        validate_prometheus_metric_name(entry.metric_name)?;
+        let metric_name = format!("{PROMETHEUS_METRIC_PREFIX}{}", entry.metric_name);
+        let metric_type = entry.value.prometheus_json_type_name();
+        let value_string = entry.value.prometheus_value_string();
+        let mut labels = entry.labels;
+
+        if let StatsValue::StringValue(string_value) = &entry.value {
+            labels.insert("value", string_value.get());
+        }
+
+        for (name, _) in labels.iter() {
+            validate_prometheus_label_name(name)?;
+        }
+
+        let family =
+            families
+                .entry(metric_name.clone())
+                .or_insert_with(|| PrometheusMetricFamily {
+                    name: metric_name,
+                    help: String::new(),
+                    metric_type,
+                    metrics: Vec::new(),
+                });
+        family.metrics.push(PrometheusMetricSample {
+            labels,
+            value: value_string,
+        });
+    }
+
+    let families = families.into_values().collect::<Vec<_>>();
+    let json = nojson::json(|f| f.value(&families));
+    Ok(nojson::RawJsonOwned::parse(json.to_string()).expect("infallible"))
 }
 
 fn escape_label_value(value: &str) -> String {
@@ -797,6 +895,65 @@ mod tests {
         let err = stats
             .to_prometheus_text()
             .expect_err("to_prometheus_text must fail");
+        assert!(err.display().contains("invalid Prometheus label name"));
+    }
+
+    #[test]
+    fn prometheus_json_outputs_metric_families() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        stats.counter("processed_frames_total").add(3);
+        stats.gauge("queue_depth").set(-1);
+
+        let json = stats
+            .to_prometheus_json_families()
+            .expect("to_prometheus_json_families must succeed");
+        let text = json.to_string();
+
+        assert!(text.contains("\"name\":\"hisui_processed_frames_total\""));
+        assert!(text.contains("\"type\":\"COUNTER\""));
+        assert!(text.contains("\"name\":\"hisui_queue_depth\""));
+        assert!(text.contains("\"type\":\"GAUGE\""));
+        assert!(text.contains("\"labels\":{\"processor_id\":\"p0\"}"));
+        assert!(text.contains("\"value\":\"3\""));
+        assert!(text.contains("\"value\":\"-1\""));
+    }
+
+    #[test]
+    fn prometheus_json_outputs_string_metric_like_prometheus_text() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        stats.string("state").set("running");
+
+        let json = stats
+            .to_prometheus_json_families()
+            .expect("to_prometheus_json_families must succeed");
+        let text = json.to_string();
+
+        assert!(text.contains("\"name\":\"hisui_state\""));
+        assert!(text.contains("\"type\":\"GAUGE\""));
+        assert!(text.contains("\"labels\":{\"processor_id\":\"p0\",\"value\":\"running\"}"));
+        assert!(text.contains("\"value\":\"1\""));
+    }
+
+    #[test]
+    fn prometheus_json_rejects_invalid_metric_name() {
+        let mut stats = Stats::new();
+        stats.counter("foo-bar").inc();
+        let err = stats
+            .to_prometheus_json_families()
+            .expect_err("to_prometheus_json_families must fail");
+        assert!(err.display().contains("invalid Prometheus metric name"));
+    }
+
+    #[test]
+    fn prometheus_json_rejects_invalid_label_name() {
+        let mut stats = Stats::new();
+        stats.set_default_label("bad-label", "x");
+        stats.counter("requests_total").inc();
+        let err = stats
+            .to_prometheus_json_families()
+            .expect_err("to_prometheus_json_families must fail");
         assert!(err.display().contains("invalid Prometheus label name"));
     }
 
