@@ -1,11 +1,11 @@
 """hisui server サブコマンドの e2e テスト"""
 
 import json
-import ssl
 import tempfile
 from pathlib import Path
 
 import httpx
+import pytest
 
 from hisui_server import HisuiServer
 
@@ -76,20 +76,37 @@ def test_unknown_endpoint(hisui_server: int):
     assert response.status_code == 404
 
 
-def test_https_ok_endpoint(hisui_https_server: tuple[int, Path]):
-    """HTTPS /.ok エンドポイントに証明書検証付きで接続し 204 を確認する"""
-    port, cert_path = hisui_https_server
-    ssl_ctx = ssl.create_default_context(cafile=str(cert_path))
-    with httpx.Client(verify=ssl_ctx) as client:
-        response = client.get(f"https://127.0.0.1:{port}/.ok")
+def test_https_ok_endpoint(hisui_https_server: HisuiServer):
+    """HTTPS でも HisuiServer.ok() が 204 を返す"""
+    response = hisui_https_server.ok()
     assert response.status_code == 204
 
 
-def test_https_ok_endpoint_no_verify(hisui_https_server: tuple[int, Path]):
-    """HTTPS /.ok エンドポイントに verify=False で接続し 204 を確認する"""
-    port, _cert_path = hisui_https_server
+def test_https_metrics_json_endpoint(hisui_https_server: HisuiServer):
+    """HTTPS でも HisuiServer.metrics() が JSON を返す"""
+    response = hisui_https_server.metrics(fmt="json")
+    assert response.status_code == 200
+    assert "application/json" in response.headers.get("content-type", "")
+    assert isinstance(response.json(), list)
+
+
+def test_https_rpc_call_endpoint(hisui_https_server: HisuiServer):
+    """HTTPS でも HisuiServer.rpc_call() で JSON-RPC が実行される"""
+    response = hisui_https_server.rpc_call("listProcessors")
+    assert response["result"] == []
+
+
+def test_https_request_verify_override_is_rejected(hisui_https_server: HisuiServer):
+    """request() への verify 上書き指定は明示的に拒否する"""
+    with pytest.raises(ValueError, match="verify override is not supported"):
+        hisui_https_server.request("GET", "/.ok", verify=False)
+
+
+def test_https_direct_no_verify_endpoint(hisui_https_server: HisuiServer):
+    """直接 httpx.Client(verify=False) を使うアクセスも 204 を返す"""
+    assert hisui_https_server.port is not None
     with httpx.Client(verify=False) as client:
-        response = client.get(f"https://127.0.0.1:{port}/.ok")
+        response = client.get(f"https://127.0.0.1:{hisui_https_server.port}/.ok")
     assert response.status_code == 204
 
 

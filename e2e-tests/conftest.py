@@ -98,16 +98,15 @@ def tls_certificate() -> Generator[tuple[Path, Path], None, None]:
 def hisui_https_server(
     binary_path: Path,
     tls_certificate: tuple[Path, Path],
-) -> Generator[tuple[int, Path], None, None]:
-    """hisui server を HTTPS で起動して (port, cert_path) を yield する"""
+) -> Generator[HisuiServer, None, None]:
+    """hisui server を HTTPS で起動して HisuiServer を yield する"""
     cert_path, key_path = tls_certificate
     with HisuiServer(
         binary_path,
         https_cert_path=cert_path,
         https_key_path=key_path,
     ) as server:
-        assert server.port is not None
-        yield server.port, cert_path
+        yield server
 
 
 async def _handle_root(request: web.Request) -> web.Response:

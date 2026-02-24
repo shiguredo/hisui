@@ -38,6 +38,7 @@ class HisuiServer:
         self._process: subprocess.Popen[bytes] | None = None
         self._log_handle = None
         self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
+        self._verify: ssl.SSLContext | bool = True
         self._next_rpc_request_id = 1
 
     def __enter__(self):
@@ -103,11 +104,11 @@ class HisuiServer:
             stderr=subprocess.STDOUT,
         )
 
-        verify: ssl.SSLContext | bool = True
+        self._verify = True
         if self.is_https and self.https_cert_path is not None:
-            verify = ssl.create_default_context(cafile=str(self.https_cert_path))
+            self._verify = ssl.create_default_context(cafile=str(self.https_cert_path))
 
-        if not wait_for_server(port, scheme=self.scheme, verify=verify):
+        if not wait_for_server(port, scheme=self.scheme, verify=self._verify):
             self._terminate_process()
             log_content = self._read_log_or_default()
             self._cleanup_temp_resources()
@@ -122,8 +123,10 @@ class HisuiServer:
         self._cleanup_temp_resources()
 
     def request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        if "verify" in kwargs:
+            raise ValueError("verify override is not supported")
         url = f"{self.base_url}{path}"
-        with httpx.Client() as client:
+        with httpx.Client(verify=self._verify) as client:
             return client.request(method, url, **kwargs)
 
     def ok(self) -> httpx.Response:
@@ -202,6 +205,8 @@ class HisuiServer:
         if self._tmp_dir is not None:
             self._tmp_dir.cleanup()
             self._tmp_dir = None
+
+        self._verify = True
 
     def _read_log_or_default(self) -> str:
         if self.log_file is None or not self.log_file.exists():
