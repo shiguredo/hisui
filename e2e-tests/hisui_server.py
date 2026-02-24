@@ -167,6 +167,25 @@ class HisuiServer:
     def trigger_start(self, *, timeout: float | None = None) -> dict[str, Any]:
         return self.rpc_call("triggerStart", timeout=timeout)
 
+    def wait_processor_terminated(
+        self,
+        processor_id: str,
+        *,
+        timeout: float | None = None,
+    ) -> str:
+        response = self.rpc_call(
+            "waitProcessorTerminated",
+            {"processorId": processor_id},
+            timeout=timeout,
+        )
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise RuntimeError(f"unexpected RPC result format: {response}")
+        terminated_processor_id = result.get("processorId")
+        if not isinstance(terminated_processor_id, str):
+            raise RuntimeError(f"unexpected RPC result.processorId format: {response}")
+        return terminated_processor_id
+
     def metrics(self, fmt: str = "text") -> httpx.Response:
         if fmt == "json":
             return self.request("GET", "/metrics?format=json")

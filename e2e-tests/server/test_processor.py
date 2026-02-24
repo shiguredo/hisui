@@ -242,14 +242,13 @@ def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
         )
         assert create_response["result"]["processorId"] == processor_id
 
-        wait_response = server.rpc_call(
-            "waitProcessorTerminated",
-            {
-                "processorId": processor_id,
-            },
-            timeout=10.0,
+        assert (
+            server.wait_processor_terminated(
+                processor_id,
+                timeout=10.0,
+            )
+            == processor_id
         )
-        assert wait_response["result"]["processorId"] == processor_id
 
         metrics = ProcessorMetrics(
             server.metrics_json(),
@@ -411,14 +410,13 @@ def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
-                wait_reader_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": reader_processor_id,
-                    },
-                    timeout=10.0,
+                assert (
+                    server.wait_processor_terminated(
+                        reader_processor_id,
+                        timeout=10.0,
+                    )
+                    == reader_processor_id
                 )
-                assert wait_reader_response["result"]["processorId"] == reader_processor_id
 
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
             finally:
@@ -505,38 +503,29 @@ def test_create_rtmp_outbound_endpoint_with_mp4_audio_video_readers_and_inspect_
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
-                wait_video_reader_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": video_reader_processor_id,
-                    },
-                    timeout=10.0,
-                )
                 assert (
-                    wait_video_reader_response["result"]["processorId"]
+                    server.wait_processor_terminated(
+                        video_reader_processor_id,
+                        timeout=10.0,
+                    )
                     == video_reader_processor_id
                 )
 
-                wait_audio_reader_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": audio_reader_processor_id,
-                    },
-                    timeout=10.0,
-                )
                 assert (
-                    wait_audio_reader_response["result"]["processorId"]
+                    server.wait_processor_terminated(
+                        audio_reader_processor_id,
+                        timeout=10.0,
+                    )
                     == audio_reader_processor_id
                 )
 
-                wait_outbound_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": outbound_processor_id,
-                    },
-                    timeout=10.0,
+                assert (
+                    server.wait_processor_terminated(
+                        outbound_processor_id,
+                        timeout=10.0,
+                    )
+                    == outbound_processor_id
                 )
-                assert wait_outbound_response["result"]["processorId"] == outbound_processor_id
 
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
             finally:
@@ -613,23 +602,21 @@ def test_create_rtmp_publisher_with_mp4_video_reader_and_inspect_output(
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
-                wait_reader_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": reader_processor_id,
-                    },
-                    timeout=10.0,
+                assert (
+                    server.wait_processor_terminated(
+                        reader_processor_id,
+                        timeout=10.0,
+                    )
+                    == reader_processor_id
                 )
-                assert wait_reader_response["result"]["processorId"] == reader_processor_id
 
-                wait_publisher_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": publisher_processor_id,
-                    },
-                    timeout=10.0,
+                assert (
+                    server.wait_processor_terminated(
+                        publisher_processor_id,
+                        timeout=10.0,
+                    )
+                    == publisher_processor_id
                 )
-                assert wait_publisher_response["result"]["processorId"] == publisher_processor_id
 
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
             finally:
@@ -721,38 +708,29 @@ def test_create_rtmp_publisher_with_mp4_audio_video_readers_and_inspect_output(
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
-                wait_video_reader_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": video_reader_processor_id,
-                    },
-                    timeout=10.0,
-                )
                 assert (
-                    wait_video_reader_response["result"]["processorId"]
+                    server.wait_processor_terminated(
+                        video_reader_processor_id,
+                        timeout=10.0,
+                    )
                     == video_reader_processor_id
                 )
 
-                wait_audio_reader_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": audio_reader_processor_id,
-                    },
-                    timeout=10.0,
-                )
                 assert (
-                    wait_audio_reader_response["result"]["processorId"]
+                    server.wait_processor_terminated(
+                        audio_reader_processor_id,
+                        timeout=10.0,
+                    )
                     == audio_reader_processor_id
                 )
 
-                wait_publisher_response = server.rpc_call(
-                    "waitProcessorTerminated",
-                    {
-                        "processorId": publisher_processor_id,
-                    },
-                    timeout=10.0,
+                assert (
+                    server.wait_processor_terminated(
+                        publisher_processor_id,
+                        timeout=10.0,
+                    )
+                    == publisher_processor_id
                 )
-                assert wait_publisher_response["result"]["processorId"] == publisher_processor_id
 
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
             finally:
