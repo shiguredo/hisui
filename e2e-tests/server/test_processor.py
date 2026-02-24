@@ -10,7 +10,11 @@ from processor_metrics import ProcessorMetrics
 
 def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
     """createMp4VideoReader で生成した processor の統計値を確認する"""
-    input_path = Path("../testdata/archive-red-320x320-av1.mp4").resolve()
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-av1.mp4"
+    )
     processor_id = "e2e-mp4-video-reader"
 
     with HisuiServer(binary_path) as server:
