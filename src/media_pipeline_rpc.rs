@@ -476,6 +476,8 @@ impl MediaPipelineHandle {
                     terminated: true,
                 });
             }
+            // 現状は e2e テスト用途を主眼にした簡易実装として、短い間隔でポーリングしている。
+            // これを汎用用途でも使う場合は media pipeline 側に終了待機コマンドを追加して待機する方が望ましい。
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
