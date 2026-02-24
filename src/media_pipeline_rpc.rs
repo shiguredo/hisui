@@ -464,15 +464,9 @@ impl MediaPipelineHandle {
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
     ) -> Result<RpcSuccessResult, RpcError> {
-        let (processor_id, timeout_ms): (ProcessorId, Option<u64>) =
-            parse_params(maybe_params, |params| {
-                let processor_id: ProcessorId =
-                    params.to_member("processorId")?.required()?.try_into()?;
-                let timeout_ms: Option<u64> = params.to_member("timeoutMs")?.try_into()?;
-                Ok((processor_id, timeout_ms))
-            })?;
-        let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(10_000));
-        let deadline = tokio::time::Instant::now() + timeout;
+        let processor_id: ProcessorId = parse_params(maybe_params, |params| {
+            params.to_member("processorId")?.required()?.try_into()
+        })?;
 
         loop {
             let processor_ids = self.list_processor_ids_for_rpc().await?;
@@ -480,12 +474,6 @@ impl MediaPipelineHandle {
                 return Ok(RpcSuccessResult::WaitProcessorTerminated {
                     processor_id,
                     terminated: true,
-                });
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Ok(RpcSuccessResult::WaitProcessorTerminated {
-                    processor_id,
-                    terminated: false,
                 });
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -2299,7 +2287,7 @@ mod tests {
     #[tokio::test]
     async fn wait_processor_terminated_returns_true_when_processor_absent() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"waitProcessorTerminated","params":{"processorId":"missing-processor","timeoutMs":1}}"#;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"waitProcessorTerminated","params":{"processorId":"missing-processor"}}"#;
 
         let response = handle
             .rpc(request.as_bytes())
@@ -2319,7 +2307,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_processor_terminated_returns_false_when_timeout() {
+    async fn wait_processor_terminated_waits_until_terminated() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let blocker = handle
             .register_processor(
@@ -2328,19 +2316,26 @@ mod tests {
             )
             .await
             .expect("register alive-processor");
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"waitProcessorTerminated","params":{"processorId":"alive-processor","timeoutMs":1}}"#;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"waitProcessorTerminated","params":{"processorId":"alive-processor"}}"#;
 
-        let response = handle
-            .rpc(request.as_bytes())
+        let wait_result =
+            tokio::time::timeout(Duration::from_millis(50), handle.rpc(request.as_bytes())).await;
+        assert!(
+            wait_result.is_err(),
+            "must keep waiting while processor is alive"
+        );
+
+        drop(blocker);
+
+        let response = tokio::time::timeout(Duration::from_secs(5), handle.rpc(request.as_bytes()))
             .await
+            .expect("rpc wait timed out")
             .expect("response must exist");
-
         let (processor_id, terminated) =
             result_wait_processor_terminated(&response).expect("parse result");
         assert_eq!(processor_id, "alive-processor");
-        assert!(!terminated);
+        assert!(terminated);
 
-        drop(blocker);
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
             .await

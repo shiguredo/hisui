@@ -49,8 +49,8 @@ def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
             "waitProcessorTerminated",
             {
                 "processorId": processor_id,
-                "timeoutMs": 10000,
             },
+            timeout=10.0,
         )
         assert wait_response["result"]["processorId"] == processor_id
         assert wait_response["result"]["terminated"] is True

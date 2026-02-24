@@ -129,13 +129,15 @@ class HisuiServer:
     def ok(self) -> httpx.Response:
         return self.request("GET", "/.ok")
 
-    def rpc(self, payload: dict[str, object]) -> httpx.Response:
-        return self.request("POST", "/rpc", json=payload)
+    def rpc(self, payload: dict[str, object], **kwargs) -> httpx.Response:
+        return self.request("POST", "/rpc", json=payload, **kwargs)
 
     def rpc_call(
         self,
         method: str,
         params: dict[str, object] | None = None,
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, object] = {
             "jsonrpc": "2.0",
@@ -145,7 +147,7 @@ class HisuiServer:
         self._next_rpc_request_id += 1
         if params is not None:
             payload["params"] = params
-        response = self.rpc(payload)
+        response = self.rpc(payload) if timeout is None else self.rpc(payload, timeout=timeout)
         if response.status_code != 200:
             raise RuntimeError(
                 f"unexpected RPC HTTP status: {response.status_code}, body={response.text}"
