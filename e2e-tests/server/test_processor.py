@@ -88,11 +88,16 @@ def _wait_for_video_frame_count(
 def _wait_for_tcp_listen(port: int, timeout: float = 10.0) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
+        # 接続プローブは listen モードの ffmpeg に副作用を与えるため、
+        # bind 可否で待受開始（ポート占有）を確認する。
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                return
+            probe.bind(("127.0.0.1", port))
         except OSError:
-            time.sleep(0.05)
+            probe.close()
+            return
+        probe.close()
+        time.sleep(0.05)
     raise AssertionError(f"RTMP listener did not start within timeout: port={port}")
 
 
@@ -543,8 +548,7 @@ def test_create_rtmp_publisher_with_mp4_video_reader_and_inspect_output(
                 timeout_seconds=20,
             )
             try:
-                # ffmpeg 側の待受準備待ち
-                time.sleep(0.5)
+                _wait_for_tcp_listen(port)
 
                 create_reader_response = server.rpc_call(
                     "createMp4VideoReader",
@@ -633,8 +637,7 @@ def test_create_rtmp_publisher_with_mp4_audio_video_readers_and_inspect_output(
                 timeout_seconds=20,
             )
             try:
-                # ffmpeg 側の待受準備待ち
-                time.sleep(0.5)
+                _wait_for_tcp_listen(port)
 
                 create_video_reader_response = server.rpc_call(
                     "createMp4VideoReader",
