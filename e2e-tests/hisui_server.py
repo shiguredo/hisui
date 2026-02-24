@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -130,12 +131,44 @@ class HisuiServer:
     def rpc(self, payload: dict[str, object]) -> httpx.Response:
         return self.request("POST", "/rpc", json=payload)
 
+    def rpc_call(
+        self,
+        method: str,
+        params: dict[str, object] | None = None,
+        *,
+        request_id: int = 1,
+    ) -> dict[str, Any]:
+        payload: dict[str, object] = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+        }
+        if params is not None:
+            payload["params"] = params
+        response = self.rpc(payload)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"unexpected RPC HTTP status: {response.status_code}, body={response.text}"
+            )
+        return response.json()
+
     def metrics(self, fmt: str = "text") -> httpx.Response:
         if fmt == "json":
             return self.request("GET", "/metrics?format=json")
         if fmt == "text":
             return self.request("GET", "/metrics")
         raise ValueError("unsupported format")
+
+    def metrics_json(self) -> list[dict[str, Any]]:
+        response = self.metrics(fmt="json")
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"unexpected metrics HTTP status: {response.status_code}, body={response.text}"
+            )
+        data = response.json()
+        if not isinstance(data, list):
+            raise RuntimeError("unexpected metrics JSON format")
+        return data
 
     def _terminate_process(self) -> None:
         process = self._process
