@@ -379,7 +379,10 @@ fn decode_video_frames_with_pipeline(
             collect_video_frames(sink_handle, TrackId::new(OUTPUT_TRACK_ID)).await
         });
 
-        pipeline_handle.complete_initial_processor_registration();
+        pipeline_handle
+            .trigger_start()
+            .await
+            .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
 
         match source_task.await {
             Ok(Ok(())) => {}

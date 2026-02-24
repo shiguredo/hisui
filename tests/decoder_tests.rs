@@ -209,7 +209,10 @@ fn decode_video_frames_with_pipeline(
             collect_video_frames(sink_handle, TrackId::new(VIDEO_OUTPUT_TRACK_ID)).await
         });
 
-        pipeline_handle.complete_initial_processor_registration();
+        pipeline_handle
+            .trigger_start()
+            .await
+            .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
 
         let output_frames = await_video_pipeline_tasks(
             source_task,
@@ -275,7 +278,10 @@ fn decode_audio_count_with_pipeline(input_samples: Vec<AudioData>) -> hisui::Res
             collect_audio_count(sink_handle, TrackId::new(AUDIO_OUTPUT_TRACK_ID)).await
         });
 
-        pipeline_handle.complete_initial_processor_registration();
+        pipeline_handle
+            .trigger_start()
+            .await
+            .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
 
         let output_count = await_audio_pipeline_tasks(
             source_task,

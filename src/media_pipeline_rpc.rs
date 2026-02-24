@@ -30,8 +30,35 @@ fn method_not_found() -> RpcError {
     )
 }
 
+fn invalid_request(message: impl Into<String>) -> RpcError {
+    (crate::jsonrpc::INVALID_REQUEST, message.into())
+}
+
 fn internal_error(message: impl Into<String>) -> RpcError {
     (crate::jsonrpc::INTERNAL_ERROR, message.into())
+}
+
+fn parse_required_mp4_path(
+    params: &nojson::RawJsonValue<'_, '_>,
+) -> Result<std::path::PathBuf, nojson::JsonParseError> {
+    let path: std::path::PathBuf = params.to_member("path")?.required()?.try_into()?;
+    if !path.exists() {
+        let error_value = params.to_member("path")?.required()?;
+        return Err(error_value.invalid(format!("input path does not exist: {}", path.display())));
+    }
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| ext.eq_ignore_ascii_case("mp4"))
+        .is_none()
+    {
+        let error_value = params.to_member("path")?.required()?;
+        return Err(error_value.invalid(format!(
+            "input path must be an mp4 file: {}",
+            path.display()
+        )));
+    }
+    Ok(path)
 }
 
 impl MediaPipelineHandle {
@@ -59,6 +86,7 @@ impl MediaPipelineHandle {
         let result = match method {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
             "createMp4VideoReader" => self.handle_create_mp4_video_reader_rpc(maybe_params).await,
+            "createMp4AudioReader" => self.handle_create_mp4_audio_reader_rpc(maybe_params).await,
             "createPngFileSource" => self.handle_create_png_file_source_rpc(maybe_params).await,
             "createVideoDeviceSource" => {
                 self.handle_create_video_device_source_rpc(maybe_params)
@@ -78,6 +106,7 @@ impl MediaPipelineHandle {
             "createWhepSubscriber" => self.handle_create_whep_subscriber_rpc(maybe_params).await,
             "listTracks" => self.handle_list_tracks_rpc().await,
             "listProcessors" => self.handle_list_processors_rpc().await,
+            "triggerStart" => self.handle_trigger_start_rpc().await,
             "waitProcessorTerminated" => {
                 self.handle_wait_processor_terminated_rpc(maybe_params)
                     .await
@@ -137,24 +166,7 @@ impl MediaPipelineHandle {
     ) -> Result<RpcSuccessResult, RpcError> {
         let (path, processor_id): (std::path::PathBuf, Option<ProcessorId>) =
             parse_params(maybe_params, |params| {
-                let path: std::path::PathBuf = params.to_member("path")?.required()?.try_into()?;
-                if !path.exists() {
-                    let error_value = params.to_member("path")?.required()?;
-                    return Err(error_value
-                        .invalid(format!("input path does not exist: {}", path.display())));
-                }
-                if path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .filter(|ext| ext.eq_ignore_ascii_case("mp4"))
-                    .is_none()
-                {
-                    let error_value = params.to_member("path")?.required()?;
-                    return Err(error_value.invalid(format!(
-                        "input path must be an mp4 file: {}",
-                        path.display()
-                    )));
-                }
+                let path = parse_required_mp4_path(&params)?;
                 let processor_id = params.to_member("processorId")?.try_into()?;
                 Ok((path, processor_id))
             })?;
@@ -185,6 +197,45 @@ impl MediaPipelineHandle {
         })?;
 
         Ok(RpcSuccessResult::CreateMp4VideoReader { processor_id })
+    }
+
+    async fn handle_create_mp4_audio_reader_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (path, processor_id): (std::path::PathBuf, Option<ProcessorId>) =
+            parse_params(maybe_params, |params| {
+                let path = parse_required_mp4_path(&params)?;
+                let processor_id = params.to_member("processorId")?.try_into()?;
+                Ok((path, processor_id))
+            })?;
+        let processor_id =
+            processor_id.unwrap_or_else(|| ProcessorId::new(path.display().to_string()));
+
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("mp4_audio_reader"),
+            move |handle| async move {
+                let reader = crate::sora_recording_reader::AudioReader::new(
+                    crate::types::ContainerFormat::Mp4,
+                    std::time::Duration::ZERO,
+                    vec![path],
+                    handle.stats(),
+                )?;
+                reader.run(handle).await
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
+
+        Ok(RpcSuccessResult::CreateMp4AudioReader { processor_id })
     }
 
     async fn handle_create_png_file_source_rpc(
@@ -460,6 +511,19 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::ListProcessors { processor_ids })
     }
 
+    async fn handle_trigger_start_rpc(&self) -> Result<RpcSuccessResult, RpcError> {
+        let started = self
+            .trigger_start()
+            .await
+            .map_err(|_| internal_error("Internal error: pipeline has terminated"))?;
+        if !started {
+            return Err(invalid_request(
+                "Invalid request: pipeline has already started",
+            ));
+        }
+        Ok(RpcSuccessResult::TriggerStart { started })
+    }
+
     async fn handle_wait_processor_terminated_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
@@ -494,6 +558,7 @@ impl MediaPipelineHandle {
 enum RpcSuccessResult {
     CreateMp4FileSource { processor_id: ProcessorId },
     CreateMp4VideoReader { processor_id: ProcessorId },
+    CreateMp4AudioReader { processor_id: ProcessorId },
     CreatePngFileSource { processor_id: ProcessorId },
     CreateVideoDeviceSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
@@ -504,6 +569,7 @@ enum RpcSuccessResult {
     CreateWhepSubscriber { processor_id: ProcessorId },
     ListTracks { track_ids: Vec<TrackId> },
     ListProcessors { processor_ids: Vec<ProcessorId> },
+    TriggerStart { started: bool },
     WaitProcessorTerminated { processor_id: ProcessorId },
 }
 
@@ -514,6 +580,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateMp4VideoReader { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateMp4AudioReader { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreatePngFileSource { processor_id } => {
@@ -550,6 +619,7 @@ impl nojson::DisplayJson for RpcSuccessResult {
                     nojson::json(move |f| f.object(|f| f.member("processorId", processor_id)))
                 }))
             }),
+            Self::TriggerStart { started } => f.object(|f| f.member("started", *started)),
             Self::WaitProcessorTerminated { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
@@ -566,6 +636,7 @@ mod tests {
     };
 
     const TEST_MP4_PATH: &str = "testdata/archive-red-320x320-av1.mp4";
+    const TEST_MP4_AUDIO_PATH: &str = "testdata/red-320x320-h264-aac.mp4";
 
     #[tokio::test]
     async fn notification_error_returns_no_response() {
@@ -766,6 +837,80 @@ mod tests {
         assert_eq!(
             result_processor_id(&first_response).expect("parse result.processorId"),
             "duplicate-mp4-video-reader"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_mp4_audio_reader_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createMp4AudioReader"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_mp4_audio_reader_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4AudioReader","params":{{"path":"{TEST_MP4_AUDIO_PATH}","processorId":"custom-mp4-audio-reader"}}}}"#
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-mp4-audio-reader"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_mp4_audio_reader_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createMp4AudioReader","params":{{"path":"{TEST_MP4_AUDIO_PATH}","processorId":"duplicate-mp4-audio-reader"}}}}"#
+        );
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-mp4-audio-reader"
         );
 
         let second_response = handle
@@ -2231,6 +2376,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn trigger_start_succeeds_first_call() {
+        let (handle, pipeline_task) = spawn_test_pipeline_without_start().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"triggerStart"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert!(
+            result_trigger_start_started(&response).expect("parse result.started"),
+            "triggerStart must start pipeline on first call"
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn trigger_start_rejects_when_pipeline_already_started() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"triggerStart"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_REQUEST
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn trigger_start_ignores_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline_without_start().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"triggerStart","params":{"dummy":1}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert!(
+            result_trigger_start_started(&response).expect("parse result.started"),
+            "triggerStart must ignore params"
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
     async fn wait_processor_terminated_requires_params() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"waitProcessorTerminated"}"#;
@@ -2308,10 +2519,21 @@ mod tests {
     }
 
     async fn spawn_test_pipeline() -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
+        let (handle, pipeline_task) = spawn_test_pipeline_without_start().await;
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
+        (handle, pipeline_task)
+    }
+
+    async fn spawn_test_pipeline_without_start()
+    -> (MediaPipelineHandle, tokio::task::JoinHandle<()>) {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
-        handle.complete_initial_processor_registration();
         (handle, pipeline_task)
     }
 
@@ -2366,6 +2588,13 @@ mod tests {
     ) -> Result<String, nojson::JsonParseError> {
         let result = response.value().to_member("result")?.required()?;
         result.to_member("processorId")?.required()?.try_into()
+    }
+
+    fn result_trigger_start_started(
+        response: &nojson::RawJsonOwned,
+    ) -> Result<bool, nojson::JsonParseError> {
+        let result = response.value().to_member("result")?.required()?;
+        result.to_member("started")?.required()?.try_into()
     }
 
     fn create_video_mixer_request(output_track_id: &str, processor_id: Option<&str>) -> String {

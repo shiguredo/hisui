@@ -107,8 +107,8 @@ impl MediaPipeline {
             MediaPipelineCommand::ListProcessors { reply_tx } => {
                 let _ = reply_tx.send(self.handle_list_processors());
             }
-            MediaPipelineCommand::CompleteInitialProcessorRegistration => {
-                self.handle_complete_initial_processor_registration();
+            MediaPipelineCommand::TriggerStart { reply_tx } => {
+                let _ = reply_tx.send(self.handle_complete_initial_processor_registration());
             }
             MediaPipelineCommand::NotifyReady { processor_id } => {
                 self.handle_notify_ready(processor_id);
@@ -122,9 +122,9 @@ impl MediaPipeline {
         }
     }
 
-    fn handle_complete_initial_processor_registration(&mut self) {
+    fn handle_complete_initial_processor_registration(&mut self) -> bool {
         if self.registration_closed {
-            return;
+            return false;
         }
         self.registration_closed = true;
 
@@ -135,6 +135,7 @@ impl MediaPipeline {
             }
         }
         self.try_open_initial_ready();
+        true
     }
 
     fn handle_notify_ready(&mut self, processor_id: ProcessorId) {
@@ -403,9 +404,15 @@ impl MediaPipelineHandle {
         }
     }
 
-    /// 初期 processor の登録が完了したことを通知する
-    pub fn complete_initial_processor_registration(&self) {
-        self.send(MediaPipelineCommand::CompleteInitialProcessorRegistration);
+    /// 初期 processor 登録を完了して開始処理をトリガーする
+    ///
+    /// 返り値:
+    /// - `Ok(true)`: 今回初めて開始処理が実行された
+    /// - `Ok(false)`: すでに開始済みだった
+    pub async fn trigger_start(&self) -> Result<bool, PipelineTerminated> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(MediaPipelineCommand::TriggerStart { reply_tx });
+        reply_rx.await.map_err(|_| PipelineTerminated)
     }
 
     pub fn stats(&self) -> crate::stats::Stats {
@@ -467,7 +474,9 @@ pub(crate) enum MediaPipelineCommand {
     ListProcessors {
         reply_tx: tokio::sync::oneshot::Sender<Vec<ProcessorId>>,
     },
-    CompleteInitialProcessorRegistration,
+    TriggerStart {
+        reply_tx: tokio::sync::oneshot::Sender<bool>,
+    },
     NotifyReady {
         processor_id: ProcessorId,
     },
@@ -840,7 +849,12 @@ mod tests {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
-        handle.complete_initial_processor_registration();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
 
         let (done_tx, done_rx) = tokio::sync::oneshot::channel::<usize>();
         handle
@@ -874,7 +888,12 @@ mod tests {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
-        handle.complete_initial_processor_registration();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
 
         let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
         handle
@@ -934,7 +953,12 @@ mod tests {
                 "wait_subscribers_ready must wait before registration close"
             );
 
-            handle.complete_initial_processor_registration();
+            assert!(
+                handle
+                    .trigger_start()
+                    .await
+                    .expect("trigger_start must succeed")
+            );
             assert!(
                 tokio::time::timeout(Duration::from_millis(50), &mut wait)
                     .await
@@ -979,7 +1003,12 @@ mod tests {
 
         sender.notify_ready();
         receiver.notify_ready();
-        handle.complete_initial_processor_registration();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
         sender
             .wait_subscribers_ready()
             .await
@@ -1025,7 +1054,12 @@ mod tests {
 
         sender.notify_ready();
         receiver.notify_ready();
-        handle.complete_initial_processor_registration();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
         sender
             .wait_subscribers_ready()
             .await
@@ -1061,7 +1095,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn complete_initial_processor_registration_is_idempotent() {
+    async fn trigger_start_is_idempotent() {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
@@ -1074,8 +1108,18 @@ mod tests {
             .expect("failed to register processor");
 
         processor.notify_ready();
-        handle.complete_initial_processor_registration();
-        handle.complete_initial_processor_registration();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
+        assert!(
+            !handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
         processor
             .wait_subscribers_ready()
             .await
@@ -1145,7 +1189,12 @@ mod tests {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
-        handle.complete_initial_processor_registration();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
 
         handle
             .spawn_processor(
@@ -1174,7 +1223,12 @@ mod tests {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
-        handle.complete_initial_processor_registration();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
 
         handle
             .spawn_local_processor(

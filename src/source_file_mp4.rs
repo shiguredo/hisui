@@ -147,7 +147,10 @@ impl Mp4FileSource {
             )
             .await?;
 
-        inner_handle.complete_initial_processor_registration();
+        inner_handle
+            .trigger_start()
+            .await
+            .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
 
         Ok(())
     }
@@ -212,7 +215,12 @@ mod tests {
                 .await?;
             let mut rx = subscriber.subscribe_track(video_track_id.clone());
             subscriber.notify_ready();
-            handle.complete_initial_processor_registration();
+            assert!(
+                handle
+                    .trigger_start()
+                    .await
+                    .expect("trigger_start must succeed")
+            );
 
             let source = Mp4FileSource {
                 path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),

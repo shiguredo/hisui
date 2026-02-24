@@ -114,3 +114,28 @@ def test_startup_rpc_file_is_executed(binary_path: Path):
         with HisuiServer(binary_path, startup_rpc_file=startup_rpc_file) as server:
             response = server.ok()
             assert response.status_code == 204
+
+
+def test_trigger_start_succeeds_in_manual_start_mode(binary_path: Path):
+    """--manual-start-trigger 指定時は triggerStart で開始できる"""
+    with HisuiServer(binary_path, manual_start_trigger=True) as server:
+        response = server.trigger_start()
+        assert response["result"]["started"] is True
+
+
+def test_trigger_start_returns_error_when_already_started_in_manual_mode(binary_path: Path):
+    """manual モードで 2 回目の triggerStart は INVALID_REQUEST を返す"""
+    with HisuiServer(binary_path, manual_start_trigger=True) as server:
+        first = server.trigger_start()
+        assert first["result"]["started"] is True
+
+        second = server.trigger_start()
+        assert second["error"]["code"] == -32600
+        assert "already started" in second["error"]["message"]
+
+
+def test_trigger_start_returns_error_when_already_started(hisui_server: HisuiServer):
+    """通常起動では triggerStart が開始済みエラーを返す"""
+    response = hisui_server.trigger_start()
+    assert response["error"]["code"] == -32600
+    assert "already started" in response["error"]["message"]

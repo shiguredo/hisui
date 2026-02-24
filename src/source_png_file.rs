@@ -395,7 +395,12 @@ mod tests {
             .await?;
         let mut rx = subscriber.subscribe_track(output_track_id.clone());
         subscriber.notify_ready();
-        pipeline_handle.complete_initial_processor_registration();
+        assert!(
+            pipeline_handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
 
         let source = PngFileSource {
             path: png_file.path().to_path_buf(),

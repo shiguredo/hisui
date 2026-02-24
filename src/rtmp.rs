@@ -202,7 +202,7 @@ impl RtmpIncomingFrameHandler {
     pub fn process_audio_frame(
         &mut self,
         frame: shiguredo_rtmp::AudioFrame,
-    ) -> crate::Result<AudioData> {
+    ) -> crate::Result<Option<AudioData>> {
         // シーケンスヘッダーの処理
         if frame.is_aac_sequence_header {
             // AAC シーケンスヘッダー（Audio Specific Config）をパース
@@ -224,6 +224,7 @@ impl RtmpIncomingFrameHandler {
                 sample_rate,
                 channels
             );
+            return Ok(None);
         }
 
         // タイムスタンプを調整
@@ -234,7 +235,7 @@ impl RtmpIncomingFrameHandler {
             .as_ref()
             .ok_or_else(|| Error::new("audio codec info is not initialized"))?;
 
-        Ok(AudioData {
+        Ok(Some(AudioData {
             timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
@@ -242,7 +243,7 @@ impl RtmpIncomingFrameHandler {
             stereo: codec_info.channels == 2,
             sample_entry: self.audio_sample_entry.clone(),
             data: frame.data,
-        })
+        }))
     }
 
     /// 受信した映像フレームを処理
@@ -265,6 +266,10 @@ impl RtmpIncomingFrameHandler {
             self.video_sample_entry = Some(sample_entry);
 
             tracing::debug!("Received H.264 sequence header: {}x{}", width, height);
+            return Ok(None);
+        }
+        if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::EndOfSequence) {
+            tracing::debug!("Received H.264 end of sequence");
             return Ok(None);
         }
 

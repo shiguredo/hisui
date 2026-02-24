@@ -171,7 +171,10 @@ async fn setup_pipeline(
         )
         .await?;
 
-    pipeline_handle.complete_initial_processor_registration();
+    pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
 
     Ok(())
 }
