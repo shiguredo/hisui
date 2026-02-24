@@ -152,6 +152,8 @@
 
 ### misc
 
+- [CHANGE] Slack 通知を rtCamp/action-slack-notify から shiguredo/github-actions の slack-notify に置き換える
+  - @voluntas
 - [ADD] 内部用に VideoDeviceSource 構造体を追加する
   - Video Device からの読み込みと I420 への変換を行い、映像トラックに出力する
   - @sile
