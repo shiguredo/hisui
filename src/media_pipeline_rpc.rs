@@ -87,8 +87,8 @@ impl MediaPipelineHandle {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
             "createMp4VideoReader" => self.handle_create_mp4_video_reader_rpc(maybe_params).await,
             "createMp4AudioReader" => self.handle_create_mp4_audio_reader_rpc(maybe_params).await,
-            "createAudioDecoder" => self.handle_create_audio_decoder_rpc(maybe_params).await,
             "createVideoDecoder" => self.handle_create_video_decoder_rpc(maybe_params).await,
+            "createAudioDecoder" => self.handle_create_audio_decoder_rpc(maybe_params).await,
             "createPngFileSource" => self.handle_create_png_file_source_rpc(maybe_params).await,
             "createVideoDeviceSource" => {
                 self.handle_create_video_device_source_rpc(maybe_params)
