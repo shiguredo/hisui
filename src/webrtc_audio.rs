@@ -5,6 +5,8 @@ use std::{
 
 use shiguredo_webrtc::AudioTransportRef;
 
+use crate::audio_converter::AudioConverterBuilder;
+
 const AUDIO_BYTES_PER_SAMPLE: usize = 2;
 const AUDIO_CHANNELS: usize = 2;
 const AUDIO_TIMESTAMP_DRIFT_WARN_THRESHOLD: Duration = Duration::from_millis(20);
@@ -30,6 +32,7 @@ fn check_and_update_timestamp_continuity(
 pub(crate) struct WebRtcAudioTransportSink {
     transport: Arc<Mutex<Option<AudioTransportRef>>>,
     timing: Arc<Mutex<AudioTimingState>>,
+    converter: Arc<Mutex<crate::audio_converter::AudioConverter>>,
 }
 
 impl WebRtcAudioTransportSink {
@@ -37,6 +40,13 @@ impl WebRtcAudioTransportSink {
         Self {
             transport: Arc::new(Mutex::new(None)),
             timing: Arc::new(Mutex::new(AudioTimingState::default())),
+            converter: Arc::new(Mutex::new(
+                AudioConverterBuilder::new()
+                    .format(crate::audio::AudioFormat::I16Be)
+                    .stereo(true)
+                    .sample_rate(crate::audio::SAMPLE_RATE)
+                    .build(),
+            )),
         }
     }
 
@@ -47,9 +57,20 @@ impl WebRtcAudioTransportSink {
         if let Ok(mut timing) = self.timing.lock() {
             *timing = AudioTimingState::default();
         }
+        if let Ok(mut converter) = self.converter.lock() {
+            converter.reset();
+        }
     }
 
     pub(crate) fn push_i16be_stereo_48khz(&self, frame: &crate::AudioFrame) -> crate::Result<()> {
+        let frame = {
+            let mut converter = self
+                .converter
+                .lock()
+                .map_err(|_| crate::Error::new("audio converter lock poisoned"))?;
+            converter.convert(frame)?
+        };
+
         if frame.format != crate::audio::AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
                 "unsupported audio format: expected I16Be, got {}",

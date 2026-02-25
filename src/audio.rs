@@ -7,10 +7,10 @@ use shiguredo_mp4::{
 
 use crate::types::CodecName;
 
-// 現時点では 48000 固定
+// 既定値として使うサンプルレート
 pub const SAMPLE_RATE: u16 = 48000;
 
-// 現時点ではステレオ固定
+// 既定値として使うチャンネル数（ステレオ）
 pub const CHANNELS: u16 = 2;
 
 // エンコードパラメーターのデフォルト値

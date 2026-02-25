@@ -910,6 +910,11 @@ impl SrtTsDemuxer {
                 crate::Error::new(format!("unsupported AAC sample rate: {sample_rate}"))
             })?;
             let channels = header.channel_configuration;
+            if channels == 0 || channels > 2 {
+                return Err(crate::Error::new(format!(
+                    "unsupported AAC channel count: {channels}"
+                )));
+            }
             let pts_ticks = frame_index
                 .saturating_mul(1024)
                 .saturating_mul(90_000)

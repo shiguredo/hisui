@@ -16,7 +16,8 @@ use crate::encoder_nvcodec::NvcodecEncoder;
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::AudioFrame,
+    audio::{AudioFormat, AudioFrame, SAMPLE_RATE},
+    audio_converter::{AudioConverter, AudioConverterBuilder},
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
@@ -31,6 +32,7 @@ pub struct AudioEncoder {
     _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<AudioFrame>,
     eos: bool,
+    converter: AudioConverter,
     inner: AudioEncoderInner,
 }
 
@@ -74,6 +76,7 @@ impl AudioEncoder {
             _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
+            converter: default_audio_converter(),
             inner: AudioEncoderInner::new_opus(bitrate)?,
         })
     }
@@ -95,6 +98,7 @@ impl AudioEncoder {
             _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
+            converter: default_audio_converter(),
             inner: AudioEncoderInner::new_fdk_aac(bitrate)?,
         })
     }
@@ -116,6 +120,7 @@ impl AudioEncoder {
             _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
+            converter: default_audio_converter(),
             inner: AudioEncoderInner::new_audio_toolbox_aac(bitrate)?,
         })
     }
@@ -201,7 +206,8 @@ impl AudioEncoder {
     fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         let encoded = if let Some(sample) = sample {
             let frame = sample.expect_audio()?;
-            self.inner.encode(&frame)?
+            let converted = self.converter.convert(&frame)?;
+            self.inner.encode(&converted)?
         } else {
             self.eos = true;
             self.inner.finish()?
@@ -223,6 +229,14 @@ impl AudioEncoder {
             Ok(EncoderRunOutput::Pending)
         }
     }
+}
+
+fn default_audio_converter() -> AudioConverter {
+    AudioConverterBuilder::new()
+        .format(AudioFormat::I16Be)
+        .stereo(true)
+        .sample_rate(SAMPLE_RATE)
+        .build()
 }
 
 fn drain_audio_encoder_output(

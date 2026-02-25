@@ -397,6 +397,12 @@ impl ReaderState {
         };
 
         self.audio_format = format;
+        if metadata.channelcount == 0 || metadata.channelcount > 2 {
+            return Err(Error::new(format!(
+                "unsupported audio channel count: {}",
+                metadata.channelcount
+            )));
+        }
         self.audio_stereo = metadata.channelcount != 1;
         self.audio_sample_rate = metadata.samplerate.integer;
 

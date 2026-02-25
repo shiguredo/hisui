@@ -3,15 +3,14 @@ use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE};
+use crate::audio::{AudioFormat, AudioFrame};
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
     inner: Option<shiguredo_audio_toolbox::Decoder>,
     sample_rate: u32,
-    original_samples: u64,
-    resampled_samples: u64,
-    prev_decoded_original_samples: Vec<i16>,
+    channels: u16,
+    total_output_samples: u64,
 }
 
 impl AudioToolboxDecoder {
@@ -20,9 +19,8 @@ impl AudioToolboxDecoder {
         Ok(Self {
             inner: None,
             sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
-            original_samples: 0,
-            resampled_samples: 0,
-            prev_decoded_original_samples: Vec::new(),
+            channels: 0,
+            total_output_samples: 0,
         })
     }
 
@@ -43,11 +41,18 @@ impl AudioToolboxDecoder {
             tracing::debug!(
                 "Audio Toolbox AAC decoder configuration: sample_rate={sample_rate}Hz, channels={channels}"
             );
+            if channels.get() > 2 {
+                return Err(crate::Error::new(format!(
+                    "unsupported AAC channel count: {}",
+                    channels.get()
+                )));
+            }
             self.inner = Some(shiguredo_audio_toolbox::Decoder::new(
                 sample_rate,
                 channels,
             )?);
             self.sample_rate = sample_rate;
+            self.channels = u16::from(channels.get());
         }
 
         let inner = self
@@ -56,7 +61,7 @@ impl AudioToolboxDecoder {
             .ok_or_else(|| crate::Error::new("audio toolbox decoder is not initialized"))?;
         inner.decode(&frame.data)?;
 
-        self.build_audio_data()
+        self.build_audio_frame()
     }
 
     pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
@@ -66,16 +71,16 @@ impl AudioToolboxDecoder {
 
         inner.finish()?;
 
-        let audio_data = self.build_audio_data()?;
-        if audio_data.data.is_empty() {
+        let frame = self.build_audio_frame()?;
+        if frame.data.is_empty() {
             return Ok(None);
         }
 
-        Ok(Some(audio_data))
+        Ok(Some(frame))
     }
 
-    /// デコード済みデータをAudioFrameに変換する共通処理
-    fn build_audio_data(&mut self) -> crate::Result<AudioFrame> {
+    /// デコード済みデータを AudioFrame に変換する共通処理
+    fn build_audio_frame(&mut self) -> crate::Result<AudioFrame> {
         let mut decoded_samples = Vec::new();
         let inner = self
             .inner
@@ -85,27 +90,27 @@ impl AudioToolboxDecoder {
             decoded_samples.extend(samples);
         }
 
-        let decoded_samples_len = decoded_samples.len() as u64;
-        if let Some(resampled) = crate::audio::resample(
-            &decoded_samples,
-            &self.prev_decoded_original_samples,
-            self.sample_rate,
-            self.original_samples,
-            self.resampled_samples,
-        ) {
-            self.prev_decoded_original_samples = decoded_samples;
-            decoded_samples = resampled;
-        } else {
-            self.prev_decoded_original_samples = decoded_samples.clone();
+        if self.sample_rate == 0 {
+            return Err(crate::Error::new("audio sample rate is not initialized"));
         }
-
-        self.original_samples += decoded_samples_len;
-        self.resampled_samples += decoded_samples.len() as u64;
-
-        let duration = Duration::from_secs(decoded_samples.len() as u64 / CHANNELS as u64)
-            / SAMPLE_RATE as u32;
+        if self.channels == 0 {
+            return Err(crate::Error::new("audio channel count is not initialized"));
+        }
+        let sample_rate = u16::try_from(self.sample_rate).map_err(|_| {
+            crate::Error::new(format!("unsupported AAC sample rate: {}", self.sample_rate))
+        })?;
+        if !decoded_samples
+            .len()
+            .is_multiple_of(usize::from(self.channels))
+        {
+            return Err(crate::Error::new("invalid decoded audio sample count"));
+        }
+        let samples_per_channel = decoded_samples.len() / usize::from(self.channels);
         let timestamp =
-            Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
+            Duration::from_secs_f64(self.total_output_samples as f64 / self.sample_rate as f64);
+        let duration =
+            Duration::from_secs_f64(samples_per_channel as f64 / self.sample_rate as f64);
+        self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {
             data: decoded_samples
@@ -113,8 +118,8 @@ impl AudioToolboxDecoder {
                 .flat_map(|v| v.to_be_bytes())
                 .collect(),
             format: AudioFormat::I16Be,
-            stereo: true,
-            sample_rate: SAMPLE_RATE,
+            stereo: self.channels == 2,
+            sample_rate,
             timestamp,
             duration,
             sample_entry: None,

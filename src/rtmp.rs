@@ -207,6 +207,11 @@ impl RtmpIncomingFrameHandler {
         if frame.is_aac_sequence_header {
             // AAC シーケンスヘッダー（Audio Specific Config）をパース
             let (sample_rate, channels) = parse_aac_audio_specific_config(&frame.data)?;
+            if channels > 2 {
+                return Err(Error::new(format!(
+                    "unsupported AAC channel count: {channels}"
+                )));
+            }
 
             // SampleEntry を生成
             let sample_entry = create_audio_sample_entry(&frame.data, sample_rate, channels)?;
@@ -234,12 +239,18 @@ impl RtmpIncomingFrameHandler {
             .audio_codec_info
             .as_ref()
             .ok_or_else(|| Error::new("audio codec info is not initialized"))?;
+        let sample_rate = u16::try_from(codec_info.sample_rate).map_err(|_| {
+            Error::new(format!(
+                "unsupported AAC sample rate: {}",
+                codec_info.sample_rate
+            ))
+        })?;
 
         Ok(Some(AudioFrame {
             timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
-            sample_rate: codec_info.sample_rate as u16,
+            sample_rate,
             stereo: codec_info.channels == 2,
             sample_entry: self.audio_sample_entry.clone(),
             data: frame.data,
@@ -430,12 +441,15 @@ fn create_audio_sample_entry(
         descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
     };
 
+    let sample_rate_u16 = u16::try_from(sample_rate)
+        .map_err(|_| Error::new(format!("unsupported AAC sample rate: {sample_rate}")))?;
+
     Ok(SampleEntry::Mp4a(Mp4aBox {
         audio: AudioSampleEntryFields {
             data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
             channelcount: channels as u16,
             samplesize: 16,
-            samplerate: FixedPointNumber::new(sample_rate as u16, 0),
+            samplerate: FixedPointNumber::new(sample_rate_u16, 0),
         },
         esds_box: EsdsBox {
             es: EsDescriptor {
