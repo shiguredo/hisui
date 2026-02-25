@@ -22,10 +22,14 @@ pub struct SrtInboundEndpoint {
     pub input_url: String,
     pub output_audio_track_id: Option<crate::TrackId>,
     pub output_video_track_id: Option<crate::TrackId>,
+    // SRT caller が送る streamid の期待値（省略時は検証しない）。
     pub stream_id: Option<String>,
+    // SRT 暗号化（KM ハンドシェイク）を有効化するパスフレーズ。
     pub passphrase: Option<String>,
+    // SRT 暗号化の鍵長（passphrase 指定時のみ有効）。
     pub key_length: Option<KeyLength>,
-    pub tsbpd_delay_ms: Option<u16>,
+    // TSBPD 遅延。JSON-RPC ではミリ秒の u16 で受け取り、内部では Duration で保持する。
+    pub tsbpd_delay_ms: Option<Duration>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,7 +134,14 @@ impl SrtInboundEndpoint {
 
         loop {
             while let Some(event) = conn.poll_event() {
-                self.handle_connection_event(event, &mut conn, &endpoint_config, &mut peer_addr)?;
+                let now = now_timestamp(base_time);
+                self.handle_connection_event(
+                    event,
+                    now,
+                    &mut conn,
+                    &endpoint_config,
+                    &mut peer_addr,
+                )?;
             }
 
             while let Some(output) = conn.poll_output() {
@@ -191,7 +202,14 @@ impl SrtInboundEndpoint {
                             }
                         }
 
-                        self.handle_connection_event(event, &mut conn, &endpoint_config, &mut peer_addr)?;
+                        let now = now_timestamp(base_time);
+                        self.handle_connection_event(
+                            event,
+                            now,
+                            &mut conn,
+                            &endpoint_config,
+                            &mut peer_addr,
+                        )?;
                     }
                 }
                 _ = tokio::time::sleep(timeout_duration), if next_timer.is_some() => {
@@ -216,19 +234,33 @@ impl SrtInboundEndpoint {
             stream_id: self.stream_id.clone(),
             passphrase: self.passphrase.clone(),
             key_length: self.key_length.unwrap_or(KeyLength::Aes128),
-            tsbpd_delay: self.tsbpd_delay_ms.unwrap_or(120),
+            tsbpd_delay: self
+                .tsbpd_delay_ms
+                .map(tsbpd_delay_duration_to_millis)
+                .transpose()?
+                .unwrap_or(120),
         })
     }
 
     fn handle_connection_event(
         &self,
         event: ConnectionEvent,
+        now: Timestamp,
         conn: &mut SrtConnection,
         endpoint_config: &SrtEndpointConfig,
         peer_addr: &mut Option<SocketAddr>,
     ) -> crate::Result<()> {
         match event {
             ConnectionEvent::Connected => {
+                if let Some(expected_stream_id) = &endpoint_config.stream_id {
+                    let actual_stream_id = conn.peer_stream_id();
+                    if actual_stream_id != Some(expected_stream_id.as_str()) {
+                        tracing::warn!(
+                            "SRT peer stream id mismatch: expected={expected_stream_id}, actual={actual_stream_id:?}"
+                        );
+                        conn.disconnect(now);
+                    }
+                }
                 tracing::debug!("SRT connection established");
             }
             ConnectionEvent::StateChanged(state) => {
@@ -274,7 +306,12 @@ impl nojson::DisplayJson for SrtInboundEndpoint {
             if let Some(key_length) = self.key_length {
                 f.member("keyLength", key_length_to_rpc_value(key_length))?;
             }
-            if let Some(tsbpd_delay_ms) = self.tsbpd_delay_ms {
+            if let Some(tsbpd_delay_ms) = self
+                .tsbpd_delay_ms
+                .map(tsbpd_delay_duration_to_millis)
+                .transpose()
+                .map_err(|_| std::fmt::Error)?
+            {
                 f.member("tsbpdDelayMs", tsbpd_delay_ms)?;
             }
             Ok(())
@@ -301,7 +338,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for SrtInboundEndpo
         let stream_id = parse_optional_non_empty_string(value, "streamId")?;
         let passphrase = parse_optional_non_empty_string(value, "passphrase")?;
         let key_length = parse_optional_key_length(value)?;
-        let tsbpd_delay_ms: Option<u16> = value.to_member("tsbpdDelayMs")?.try_into()?;
+        let tsbpd_delay_ms_raw: Option<u16> = value.to_member("tsbpdDelayMs")?.try_into()?;
+        let tsbpd_delay_ms = tsbpd_delay_ms_raw.map(|ms| Duration::from_millis(ms as u64));
 
         if passphrase.is_none() && key_length.is_some() {
             return Err(value
@@ -375,6 +413,12 @@ fn key_length_to_rpc_value(key_length: KeyLength) -> u16 {
     }
 }
 
+fn tsbpd_delay_duration_to_millis(duration: Duration) -> crate::Result<u16> {
+    let millis = duration.as_millis();
+    u16::try_from(millis)
+        .map_err(|_| crate::Error::new(format!("tsbpdDelayMs must be <= {}", u16::MAX)))
+}
+
 fn parse_srt_url(input_url: &str) -> std::result::Result<ParsedSrtUrl, String> {
     let uri = Uri::parse(input_url).map_err(|e| format!("failed to parse url: {e}"))?;
     if uri.scheme() != Some("srt") {
@@ -387,24 +431,8 @@ fn parse_srt_url(input_url: &str) -> std::result::Result<ParsedSrtUrl, String> {
         .to_owned();
     let port = uri.port().ok_or_else(|| "port is required".to_owned())?;
 
-    let mode = uri.query().and_then(|query| {
-        let params = parse_query_string(query);
-        params.get("mode").cloned()
-    });
-    if mode.as_deref() != Some("listener") {
-        return Err("mode must be listener".to_owned());
-    }
-
+    // Hisui は listener 固定実装のため、query の mode は検証しない。
     Ok(ParsedSrtUrl { host, port })
-}
-
-fn parse_query_string(query: &str) -> HashMap<String, String> {
-    let mut params = HashMap::new();
-    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
-        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-        params.insert(name.to_owned(), value.to_owned());
-    }
-    params
 }
 
 fn create_listener_connection(endpoint_config: &SrtEndpointConfig) -> SrtConnection {

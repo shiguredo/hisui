@@ -103,8 +103,9 @@ def _wait_for_video_frame_count(
     expected_count: int,
     *,
     processor_type: str = "rtmp_inbound_endpoint",
+    timeout: float = 10.0,
 ) -> int:
-    deadline = time.time() + 10.0
+    deadline = time.time() + timeout
     while time.time() < deadline:
         metrics = ProcessorMetrics(
             server.metrics_json(),
@@ -475,6 +476,149 @@ def test_create_srt_inbound_endpoint_with_audio_video_and_compare_stats(
         # ffmpeg の終了待機後でも、SRT / MPEG-TS の終端処理タイミング差で
         # 音声カウントが 43 - 45 付近で揺れることがあるため、下限チェックにしている。
         assert audio_count >= 43
+
+
+def test_create_srt_inbound_endpoint_with_stream_id_and_compare_stats(binary_path: Path):
+    """createSrtInboundEndpoint で streamId を照合して受信した映像の統計値を確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-stream-id"
+    output_video_track_id = "e2e-srt-video-track-stream-id"
+    stream_id = "e2e-stream-main"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller&streamid={stream_id}"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "streamId": stream_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        frame_count = _wait_for_video_frame_count(
+            server,
+            processor_id,
+            expected_count=25,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+        assert metrics.value("hisui_video_codec", value="H264") == "1"
+        assert frame_count == 25
+
+
+def test_create_srt_inbound_endpoint_rejects_mismatched_stream_id(binary_path: Path):
+    """createSrtInboundEndpoint で streamId が不一致の場合に接続を拒否する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-stream-id-mismatch"
+    output_video_track_id = "e2e-srt-video-track-stream-id-mismatch"
+    expected_stream_id = "e2e-stream-expected"
+    actual_stream_id = "e2e-stream-actual"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller&streamid={actual_stream_id}"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "streamId": expected_stream_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+
+        with pytest.raises(
+            AssertionError,
+            match="did not reach expected video frame count in time",
+        ):
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=25,
+                processor_type="srt_inbound_endpoint",
+                timeout=3.0,
+            )
+        _wait_for_server_log_contains(server, "SRT peer stream id mismatch", timeout=3.0)
+
+
+def test_create_srt_inbound_endpoint_rejects_missing_stream_id(binary_path: Path):
+    """createSrtInboundEndpoint で streamId が未設定の peer 接続を拒否する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-stream-id-missing"
+    output_video_track_id = "e2e-srt-video-track-stream-id-missing"
+    expected_stream_id = "e2e-stream-required"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "streamId": expected_stream_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+
+        with pytest.raises(
+            AssertionError,
+            match="did not reach expected video frame count in time",
+        ):
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=25,
+                processor_type="srt_inbound_endpoint",
+                timeout=3.0,
+            )
+        _wait_for_server_log_contains(server, "SRT peer stream id mismatch", timeout=3.0)
 
 
 def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(

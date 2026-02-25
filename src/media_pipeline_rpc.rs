@@ -1895,9 +1895,8 @@ mod tests {
     async fn create_srt_inbound_endpoint_validates_params() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let invalid_scheme_request = r#"{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{"inputUrl":"ws://example.com/live","outputVideoTrackId":"video-main"}}"#;
-        let invalid_mode_request = r#"{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{"inputUrl":"srt://127.0.0.1:10080?mode=caller","outputVideoTrackId":"video-main"}}"#;
-        let missing_output_track_request = r#"{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{"inputUrl":"srt://127.0.0.1:10080?mode=listener"}}"#;
-        let key_length_without_passphrase_request = r#"{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{"inputUrl":"srt://127.0.0.1:10080?mode=listener","outputVideoTrackId":"video-main","keyLength":16}}"#;
+        let missing_output_track_request = r#"{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{"inputUrl":"srt://127.0.0.1:10080"}}"#;
+        let key_length_without_passphrase_request = r#"{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{"inputUrl":"srt://127.0.0.1:10080","outputVideoTrackId":"video-main","keyLength":16}}"#;
 
         let invalid_scheme_response = handle
             .rpc(invalid_scheme_request.as_bytes())
@@ -1905,15 +1904,6 @@ mod tests {
             .expect("response must exist");
         assert_eq!(
             error_code(&invalid_scheme_response).expect("parse error.code"),
-            crate::jsonrpc::INVALID_PARAMS
-        );
-
-        let invalid_mode_response = handle
-            .rpc(invalid_mode_request.as_bytes())
-            .await
-            .expect("response must exist");
-        assert_eq!(
-            error_code(&invalid_mode_response).expect("parse error.code"),
             crate::jsonrpc::INVALID_PARAMS
         );
 
@@ -2909,7 +2899,7 @@ mod tests {
             .unwrap_or_default();
 
         format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{{"inputUrl":"srt://127.0.0.1:10080?mode=listener"{output_audio_track_id_part}{output_video_track_id_part}{processor_id_part}}}}}"#
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createSrtInboundEndpoint","params":{{"inputUrl":"srt://127.0.0.1:10080"{output_audio_track_id_part}{output_video_track_id_part}{processor_id_part}}}}}"#
         )
     }
 
