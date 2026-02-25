@@ -931,6 +931,7 @@ fn timestamp_90khz_to_duration(timestamp: u64) -> Duration {
 
 #[derive(Debug, Clone, Copy)]
 struct AdtsHeader {
+    protection_absent: bool,
     sampling_frequency_index: u8,
     channel_configuration: u16,
     frame_length: u16,
@@ -938,7 +939,7 @@ struct AdtsHeader {
 
 impl AdtsHeader {
     fn header_length(self) -> usize {
-        7
+        if self.protection_absent { 7 } else { 9 }
     }
 
     fn sample_rate(self) -> u32 {
@@ -970,12 +971,14 @@ fn parse_adts_header(data: &[u8]) -> crate::Result<AdtsHeader> {
         return Err(crate::Error::new("invalid ADTS sync word"));
     }
 
+    let protection_absent = (data[1] & 0x01) != 0;
     let sampling_frequency_index = (data[2] >> 2) & 0x0F;
     let channel_configuration = ((data[2] & 0x01) as u16) << 2 | ((data[3] >> 6) & 0x03) as u16;
     let frame_length =
         ((data[3] & 0x03) as u16) << 11 | (data[4] as u16) << 3 | ((data[5] >> 5) & 0x07) as u16;
 
     Ok(AdtsHeader {
+        protection_absent,
         sampling_frequency_index,
         channel_configuration,
         frame_length,
