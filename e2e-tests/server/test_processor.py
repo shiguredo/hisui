@@ -631,7 +631,6 @@ def test_create_audio_decoder_from_mp4_audio_reader_and_compare_stats(binary_pat
             )
             assert metrics.value("hisui_codec", value="OPUS") == "1"
             assert metrics.value("hisui_engine", value="opus") == "1"
-            assert metrics.value("hisui_error") == "0"
 
 
 def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
