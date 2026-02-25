@@ -99,6 +99,12 @@ struct SrtEndpointConfig {
     tsbpd_delay: u16,
 }
 
+struct SrtConnectionContext<'a> {
+    peer_addr: &'a mut Option<SocketAddr>,
+    demuxer: &'a mut SrtTsDemuxer,
+    connection_timestamp_offset: &'a mut Duration,
+}
+
 #[derive(Debug)]
 struct PendingPesPacket {
     header: PesHeader,
@@ -178,14 +184,17 @@ impl SrtInboundEndpoint {
                         );
                     }
                     let now = now_timestamp(base_time);
+                    let mut connection_ctx = SrtConnectionContext {
+                        peer_addr,
+                        demuxer: &mut demuxer,
+                        connection_timestamp_offset: &mut connection_timestamp_offset,
+                    };
                     self.handle_connection_event(
                         event,
                         now,
                         conn,
                         &endpoint_config,
-                        peer_addr,
-                        &mut demuxer,
-                        &mut connection_timestamp_offset,
+                        &mut connection_ctx,
                     )?;
                 }
                 Ok(())
@@ -265,13 +274,12 @@ impl SrtInboundEndpoint {
         now: Timestamp,
         conn: &mut SrtConnection,
         endpoint_config: &SrtEndpointConfig,
-        peer_addr: &mut Option<SocketAddr>,
-        demuxer: &mut SrtTsDemuxer,
-        connection_timestamp_offset: &mut Duration,
+        connection_ctx: &mut SrtConnectionContext<'_>,
     ) -> crate::Result<()> {
         match event {
             ConnectionEvent::Connected => {
-                *connection_timestamp_offset = Duration::from_micros(now.as_micros());
+                *connection_ctx.connection_timestamp_offset =
+                    Duration::from_micros(now.as_micros());
                 if let Some(expected_stream_id) = &endpoint_config.stream_id {
                     let actual_stream_id = conn.peer_stream_id();
                     if actual_stream_id != Some(expected_stream_id.as_str()) {
@@ -286,24 +294,12 @@ impl SrtInboundEndpoint {
             ConnectionEvent::StateChanged(state) => {
                 tracing::debug!("SRT state changed: {state:?}");
                 if state == ConnectionState::Disconnected {
-                    reset_connection_state(
-                        conn,
-                        endpoint_config,
-                        peer_addr,
-                        demuxer,
-                        connection_timestamp_offset,
-                    )?;
+                    reset_connection_state(conn, endpoint_config, connection_ctx)?;
                 }
             }
             ConnectionEvent::Disconnected { reason } => {
                 tracing::warn!("SRT disconnected: {reason}");
-                reset_connection_state(
-                    conn,
-                    endpoint_config,
-                    peer_addr,
-                    demuxer,
-                    connection_timestamp_offset,
-                )?;
+                reset_connection_state(conn, endpoint_config, connection_ctx)?;
             }
             ConnectionEvent::Error(reason) => {
                 tracing::warn!("SRT connection error: {reason}");
@@ -521,13 +517,11 @@ fn publish_samples(
 fn reset_connection_state(
     conn: &mut SrtConnection,
     endpoint_config: &SrtEndpointConfig,
-    peer_addr: &mut Option<SocketAddr>,
-    demuxer: &mut SrtTsDemuxer,
-    connection_timestamp_offset: &mut Duration,
+    connection_ctx: &mut SrtConnectionContext<'_>,
 ) -> crate::Result<()> {
-    *peer_addr = None;
-    *demuxer = SrtTsDemuxer::new();
-    *connection_timestamp_offset = Duration::ZERO;
+    *connection_ctx.peer_addr = None;
+    *connection_ctx.demuxer = SrtTsDemuxer::new();
+    *connection_ctx.connection_timestamp_offset = Duration::ZERO;
     *conn = create_listener_connection(endpoint_config)?;
     Ok(())
 }
