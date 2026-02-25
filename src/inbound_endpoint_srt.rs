@@ -626,7 +626,8 @@ impl SrtTsDemuxer {
                     expected_data_len,
                 };
 
-                if let Some(mut completed) = self.complete_pes_if_ready(pending)? {
+                if is_pes_ready(&pending) {
+                    let mut completed = self.complete_pes(pending)?;
                     samples.append(&mut completed);
                 } else {
                     self.pending_pes.insert(packet.header.pid, pending);
@@ -647,7 +648,8 @@ impl SrtTsDemuxer {
                     )));
                 }
 
-                if let Some(mut completed) = self.complete_pes_if_ready(pending)? {
+                if is_pes_ready(&pending) {
+                    let mut completed = self.complete_pes(pending)?;
                     samples.append(&mut completed);
                 } else {
                     self.pending_pes.insert(packet.header.pid, pending);
@@ -657,24 +659,6 @@ impl SrtTsDemuxer {
         }
 
         Ok(samples)
-    }
-
-    fn complete_pes_if_ready(
-        &mut self,
-        pending: PendingPesPacket,
-    ) -> crate::Result<Option<Vec<TsSample>>> {
-        match pending.expected_data_len {
-            Some(expected_data_len) if pending.data.len() < expected_data_len => {
-                return Ok(None);
-            }
-            None => {
-                // PES 長が不定（0）の場合は次の PES 開始まで継続して連結する。
-                return Ok(None);
-            }
-            _ => {}
-        }
-        let samples = self.complete_pes(pending)?;
-        Ok(Some(samples))
     }
 
     fn complete_pes(&mut self, pending: PendingPesPacket) -> crate::Result<Vec<TsSample>> {
@@ -789,6 +773,9 @@ impl SrtTsDemuxer {
             let raw_data = pending.data[offset + header_len..offset + frame_len].to_vec();
 
             let sample_rate = header.sample_rate();
+            let sample_rate_u16 = u16::try_from(sample_rate).map_err(|_| {
+                crate::Error::new(format!("unsupported AAC sample rate: {sample_rate}"))
+            })?;
             let channels = header.channel_configuration;
             let pts_ticks = frame_index
                 .saturating_mul(1024)
@@ -809,7 +796,7 @@ impl SrtTsDemuxer {
                 data: raw_data,
                 format: crate::audio::AudioFormat::Aac,
                 stereo: channels == 2,
-                sample_rate,
+                sample_rate: sample_rate_u16,
                 timestamp: relative_timestamp,
                 duration,
                 sample_entry: None,
@@ -838,6 +825,13 @@ fn pes_expected_data_len(pes_packet_len: u16, header: &PesHeader) -> crate::Resu
     Ok(Some((pes_packet_len - optional_header_len) as usize))
 }
 
+fn is_pes_ready(pending: &PendingPesPacket) -> bool {
+    match pending.expected_data_len {
+        Some(expected_data_len) => pending.data.len() >= expected_data_len,
+        None => false, // PES 長が不定（0）の場合は次の PES 開始まで継続して連結する
+    }
+}
+
 fn pes_optional_header_len(header: &PesHeader) -> u16 {
     3 + header.pts.map_or(0, |_| 5) + header.dts.map_or(0, |_| 5) + header.escr.map_or(0, |_| 6)
 }
@@ -858,7 +852,7 @@ impl AdtsHeader {
         7
     }
 
-    fn sample_rate(self) -> u16 {
+    fn sample_rate(self) -> u32 {
         match self.sampling_frequency_index {
             0 => 96_000,
             1 => 88_200,
