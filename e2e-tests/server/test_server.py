@@ -139,3 +139,31 @@ def test_trigger_start_returns_error_when_already_started(hisui_server: HisuiSer
     response = hisui_server.trigger_start()
     assert response["error"]["code"] == -32600
     assert "already started" in response["error"]["message"]
+
+
+def test_create_audio_decoder_rpc_succeeds(hisui_server: HisuiServer):
+    """createAudioDecoder RPC が processor を作成できる"""
+    processor_id = "e2e-audio-decoder-rpc"
+    response = hisui_server.rpc_call(
+        "createAudioDecoder",
+        {
+            "inputTrackId": "e2e-audio-input-track",
+            "outputTrackId": "e2e-audio-output-track",
+            "processorId": processor_id,
+        },
+    )
+    assert response["result"]["processorId"] == processor_id
+
+
+def test_create_video_decoder_rpc_succeeds(hisui_server: HisuiServer):
+    """createVideoDecoder RPC が processor を作成できる"""
+    processor_id = "e2e-video-decoder-rpc"
+    response = hisui_server.rpc_call(
+        "createVideoDecoder",
+        {
+            "inputTrackId": "e2e-video-input-track",
+            "outputTrackId": "e2e-video-output-track",
+            "processorId": processor_id,
+        },
+    )
+    assert response["result"]["processorId"] == processor_id
