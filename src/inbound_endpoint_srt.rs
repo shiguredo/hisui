@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::io::{self, Read};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mpeg2ts::es::{StreamId, StreamType};
@@ -17,8 +16,6 @@ use tokio::net::UdpSocket;
 use tokio::time::Instant;
 
 const TS_PACKET_SIZE: usize = 188;
-static PSEUDO_RANDOM_BASE_SEED: OnceLock<u64> = OnceLock::new();
-static PSEUDO_RANDOM_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// SRT Inbound Endpoint
 pub struct SrtInboundEndpoint {
@@ -112,7 +109,7 @@ impl SrtInboundEndpoint {
         let socket = UdpSocket::bind(bind_addr).await?;
         let mut recv_buf = vec![0u8; 64 * 1024];
 
-        let mut conn = create_listener_connection(&endpoint_config);
+        let mut conn = create_listener_connection(&endpoint_config)?;
         let mut peer_addr: Option<SocketAddr> = None;
         let mut timers: HashMap<TimerId, Instant> = HashMap::new();
         let base_time = Instant::now();
@@ -259,12 +256,12 @@ impl SrtInboundEndpoint {
             ConnectionEvent::StateChanged(state) => {
                 tracing::debug!("SRT state changed: {state:?}");
                 if state == ConnectionState::Disconnected {
-                    reset_connection_state(conn, endpoint_config, peer_addr, demuxer);
+                    reset_connection_state(conn, endpoint_config, peer_addr, demuxer)?;
                 }
             }
             ConnectionEvent::Disconnected { reason } => {
                 tracing::warn!("SRT disconnected: {reason}");
-                reset_connection_state(conn, endpoint_config, peer_addr, demuxer);
+                reset_connection_state(conn, endpoint_config, peer_addr, demuxer)?;
             }
             ConnectionEvent::Error(reason) => {
                 tracing::warn!("SRT connection error: {reason}");
@@ -426,37 +423,25 @@ fn parse_srt_url(input_url: &str) -> std::result::Result<ParsedSrtUrl, String> {
     Ok(ParsedSrtUrl { host, port })
 }
 
-fn create_listener_connection(endpoint_config: &SrtEndpointConfig) -> SrtConnection {
+fn create_listener_connection(endpoint_config: &SrtEndpointConfig) -> crate::Result<SrtConnection> {
     let options = ConnectionOptions {
-        socket_id: pseudo_random_u32() & 0x7FFF_FFFF,
-        initial_seq: Some(pseudo_random_u32() & 0x7FFF_FFFF),
-        syn_cookie: Some(pseudo_random_u32()),
+        socket_id: pseudo_random_u32()? & 0x7FFF_FFFF,
+        initial_seq: Some(pseudo_random_u32()? & 0x7FFF_FFFF),
+        syn_cookie: Some(pseudo_random_u32()?),
         passphrase: endpoint_config.passphrase.clone(),
         key_length: endpoint_config.key_length,
         tsbpd_delay: endpoint_config.tsbpd_delay,
         stream_id: endpoint_config.stream_id.clone(),
         ..Default::default()
     };
-    SrtConnection::new_listener(options)
+    Ok(SrtConnection::new_listener(options))
 }
 
-fn pseudo_random_u32() -> u32 {
-    let base_seed = *PSEUDO_RANDOM_BASE_SEED.get_or_init(|| {
-        let duration = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO);
-        (duration.as_nanos() as u64) ^ ((std::process::id() as u64) << 16)
-    });
-    let counter = PSEUDO_RANDOM_COUNTER.fetch_add(1, Ordering::Relaxed);
-
-    // 連続呼び出しで同一値にならないよう、状態（counter）を混ぜて SplitMix64 で拡散する。
-    let mut x = base_seed.wrapping_add(counter.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-    x ^= x >> 30;
-    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x ^= x >> 27;
-    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^= x >> 31;
-    x as u32
+fn pseudo_random_u32() -> crate::Result<u32> {
+    let mut bytes = [0u8; 4];
+    aws_lc_rs::rand::fill(&mut bytes)
+        .map_err(|_| crate::Error::new("failed to generate random bytes with aws-lc-rs"))?;
+    Ok(u32::from_le_bytes(bytes))
 }
 
 fn publish_samples(
@@ -490,10 +475,11 @@ fn reset_connection_state(
     endpoint_config: &SrtEndpointConfig,
     peer_addr: &mut Option<SocketAddr>,
     demuxer: &mut SrtTsDemuxer,
-) {
+) -> crate::Result<()> {
     *peer_addr = None;
     *demuxer = SrtTsDemuxer::new();
-    *conn = create_listener_connection(endpoint_config);
+    *conn = create_listener_connection(endpoint_config)?;
+    Ok(())
 }
 
 fn accept_peer_packet(
