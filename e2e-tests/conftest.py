@@ -169,12 +169,11 @@ def upstream_server() -> Generator[int, None, None]:
 def hisui_proxy_server(
     binary_path: Path,
     upstream_server: int,
-) -> Generator[tuple[int, Path], None, None]:
-    """--ui-remote-url 付きで hisui server を起動して (port, log_file) を yield する"""
+) -> Generator[int, None, None]:
+    """--ui-remote-url 付きで hisui server を起動して port を yield する"""
     with HisuiServer(
         binary_path,
         ui_remote_url=f"http://127.0.0.1:{upstream_server}",
     ) as server:
         assert server.port is not None
-        assert server.log_file is not None
-        yield server.port, server.log_file
+        yield server.port

@@ -134,6 +134,50 @@ impl SrtInboundEndpoint {
 
         loop {
             while let Some(event) = conn.poll_event() {
+                if let ConnectionEvent::DataReceived { payload, .. } = &event {
+                    let samples = demuxer
+                        .push_payload(payload)
+                        .map_err(|e| e.with_context("failed to parse MPEG-TS payload"))?;
+                    for sample in samples {
+                        match sample {
+                            TsSample::Audio(data) => {
+                                if let Some(tx) = &mut audio_track_tx {
+                                    tx.send_audio(data);
+                                }
+                                stats.set_audio_codec(crate::types::CodecName::Aac);
+                                stats.add_input_audio_data_count();
+                            }
+                            TsSample::Video(frame) => {
+                                if let Some(tx) = &mut video_track_tx {
+                                    tx.send_video(frame);
+                                }
+                                stats.set_video_codec(crate::types::CodecName::H264);
+                                stats.add_input_video_frame_count();
+                            }
+                        }
+                    }
+                }
+                if should_flush_pending_pes(&event) {
+                    let flushed_samples = demuxer.flush_pending()?;
+                    for sample in flushed_samples {
+                        match sample {
+                            TsSample::Audio(data) => {
+                                if let Some(tx) = &mut audio_track_tx {
+                                    tx.send_audio(data);
+                                }
+                                stats.set_audio_codec(crate::types::CodecName::Aac);
+                                stats.add_input_audio_data_count();
+                            }
+                            TsSample::Video(frame) => {
+                                if let Some(tx) = &mut video_track_tx {
+                                    tx.send_video(frame);
+                                }
+                                stats.set_video_codec(crate::types::CodecName::H264);
+                                stats.add_input_video_frame_count();
+                            }
+                        }
+                    }
+                }
                 let now = now_timestamp(base_time);
                 self.handle_connection_event(
                     event,
@@ -183,6 +227,27 @@ impl SrtInboundEndpoint {
                                 .push_payload(payload)
                                 .map_err(|e| e.with_context("failed to parse MPEG-TS payload"))?;
                             for sample in samples {
+                                match sample {
+                                    TsSample::Audio(data) => {
+                                        if let Some(tx) = &mut audio_track_tx {
+                                            tx.send_audio(data);
+                                        }
+                                        stats.set_audio_codec(crate::types::CodecName::Aac);
+                                        stats.add_input_audio_data_count();
+                                    }
+                                    TsSample::Video(frame) => {
+                                        if let Some(tx) = &mut video_track_tx {
+                                            tx.send_video(frame);
+                                        }
+                                        stats.set_video_codec(crate::types::CodecName::H264);
+                                        stats.add_input_video_frame_count();
+                                    }
+                                }
+                            }
+                        }
+                        if should_flush_pending_pes(&event) {
+                            let flushed_samples = demuxer.flush_pending()?;
+                            for sample in flushed_samples {
                                 match sample {
                                     TsSample::Audio(data) => {
                                         if let Some(tx) = &mut audio_track_tx {
@@ -472,6 +537,14 @@ fn accept_peer_packet(
     }
 }
 
+fn should_flush_pending_pes(event: &ConnectionEvent) -> bool {
+    matches!(
+        event,
+        ConnectionEvent::StateChanged(ConnectionState::Disconnected)
+            | ConnectionEvent::Disconnected { .. }
+    )
+}
+
 async fn handle_connection_output(
     output: ConnectionOutput,
     socket: &UdpSocket,
@@ -611,18 +684,41 @@ impl SrtTsDemuxer {
 
         let mut samples = Vec::new();
         while self.stream.available_bytes() >= TS_PACKET_SIZE {
-            let Some(packet) = self
-                .ts_reader
-                .read_ts_packet()
-                .map_err(|e| crate::Error::new(format!("failed to parse TS packet: {e}")))?
-            else {
-                break;
+            let packet = match self.ts_reader.read_ts_packet() {
+                Ok(Some(packet)) => packet,
+                Ok(None) => break,
+                Err(e) => {
+                    // SRT 受信中は PMT 未読や同期ずれが起こり得るため、
+                    // recover 可能なエラーはここで読み飛ばして継続する。
+                    let msg = e.to_string();
+                    if msg.contains("Unknown PID") || msg.contains("Expected sync byte 0x47") {
+                        continue;
+                    }
+                    return Err(crate::Error::new(format!(
+                        "failed to parse TS packet: {msg}"
+                    )));
+                }
             };
 
             let mut packet_samples = self.handle_ts_packet(packet)?;
             samples.append(&mut packet_samples);
         }
 
+        Ok(samples)
+    }
+
+    fn flush_pending(&mut self) -> crate::Result<Vec<TsSample>> {
+        let pending_pes = std::mem::take(&mut self.pending_pes);
+        let mut samples = Vec::new();
+        for (_, pending) in pending_pes {
+            if let Some(expected_data_len) = pending.expected_data_len
+                && pending.data.len() < expected_data_len
+            {
+                continue;
+            }
+            let mut completed = self.complete_pes(pending)?;
+            samples.append(&mut completed);
+        }
         Ok(samples)
     }
 
@@ -694,7 +790,16 @@ impl SrtTsDemuxer {
             .stream_id_to_pid
             .get(&pending.header.stream_id)
             .and_then(|pid| self.pid_to_stream_type.get(pid))
-            .copied();
+            .copied()
+            .or_else(|| {
+                if pending.header.stream_id.is_video() {
+                    Some(StreamType::H264)
+                } else if pending.header.stream_id.is_audio() {
+                    Some(StreamType::AdtsAac)
+                } else {
+                    None
+                }
+            });
 
         if pending.header.stream_id.is_video() {
             return self

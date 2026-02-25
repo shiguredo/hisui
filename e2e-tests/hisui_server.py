@@ -4,7 +4,6 @@ import signal
 import socket
 import ssl
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -35,11 +34,8 @@ class HisuiServer:
         self.verbose = verbose
 
         self.port: int | None = None
-        self.log_file: Path | None = None
 
         self._process: subprocess.Popen[None] | None = None
-        self._log_handle = None
-        self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
         self._verify: ssl.SSLContext | bool = True
         self._next_rpc_request_id = 1
 
@@ -73,11 +69,6 @@ class HisuiServer:
         port, sock = reserve_ephemeral_port()
         self.port = port
 
-        self._tmp_dir = tempfile.TemporaryDirectory()
-        tmp_path = Path(self._tmp_dir.name)
-        self.log_file = tmp_path / "hisui-server.log"
-        self._log_handle = open(self.log_file, "w")
-
         cmd = [str(self.binary_path)]
         if self.verbose:
             cmd.append("--verbose")
@@ -102,11 +93,7 @@ class HisuiServer:
         # バイナリ起動直前に予約ソケットを解放する
         sock.close()
 
-        self._process = subprocess.Popen(
-            cmd,
-            stdout=self._log_handle,
-            stderr=subprocess.STDOUT,
-        )
+        self._process = subprocess.Popen(cmd)
 
         self._verify = True
         if self.is_https:
@@ -117,17 +104,15 @@ class HisuiServer:
 
         if not wait_for_server(port, scheme=self.scheme, verify=self._verify):
             self._terminate_process()
-            log_content = self._read_log_or_default()
-            self._cleanup_temp_resources()
             raise RuntimeError(
-                f"hisui server failed to start on port {port}.\nlog: {log_content}"
+                f"hisui server failed to start on port {port}"
             )
 
         return self
 
     def stop(self) -> None:
         self._terminate_process()
-        self._cleanup_temp_resources()
+        self._verify = True
 
     def request(self, method: str, path: str, **kwargs) -> httpx.Response:
         if "verify" in kwargs:
@@ -225,22 +210,6 @@ class HisuiServer:
                     pass
 
         self._process = None
-
-    def _cleanup_temp_resources(self) -> None:
-        if self._log_handle is not None:
-            self._log_handle.close()
-            self._log_handle = None
-
-        if self._tmp_dir is not None:
-            self._tmp_dir.cleanup()
-            self._tmp_dir = None
-
-        self._verify = True
-
-    def _read_log_or_default(self) -> str:
-        if self.log_file is None or not self.log_file.exists():
-            return "(no log)"
-        return self.log_file.read_text()
 
 
 def reserve_ephemeral_port() -> tuple[int, socket.socket]:
