@@ -43,9 +43,12 @@ tokio-rustls = "=0.26.4"
 shiguredo_mp4 = "=2026.2.0-canary.1"
 shiguredo_http11 = "=2026.1.0-canary.5"
 shiguredo_rtmp = "=2026.1.0-canary.5"
+shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = "=0.145.1"
 shiguredo_video_device = "=2026.1.0-canary.0"
+mpeg2ts = "=0.6.0"
 png = "=0.17.16"
+aws-lc-rs = "=1.15.4"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }

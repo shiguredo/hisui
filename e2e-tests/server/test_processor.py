@@ -26,10 +26,13 @@ def _run_ffmpeg_rtmp_publish(
         pytest.skip("ffmpeg is required for RTMP inbound endpoint test")
 
     deadline = time.time() + 10.0
+    min_expected_elapsed = 0.8
+    last_error = "(no attempt)"
     while time.time() < deadline:
         cmd = [
             ffmpeg_path,
             "-hide_banner",
+            "-re",
             "-loglevel",
             "error",
             "-nostdin",
@@ -41,6 +44,60 @@ def _run_ffmpeg_rtmp_publish(
         else:
             cmd.extend(["-an", "-c:v", "copy"])
         cmd.extend(["-f", "flv", publish_url])
+
+        publish_started_at = time.time()
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+        )
+        elapsed = time.time() - publish_started_at
+        if result.returncode == 0:
+            # 速すぎる正常終了は、接続直後切断などで実データが流れていない可能性があるため再試行する。
+            if elapsed >= min_expected_elapsed:
+                return
+            last_error = (
+                f"ffmpeg exited too early: returncode=0, elapsed={elapsed:.3f}, stderr={result.stderr}"
+            )
+            time.sleep(0.2)
+            continue
+        last_error = (
+            f"returncode={result.returncode}, elapsed={elapsed:.3f}, stderr={result.stderr}"
+        )
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"ffmpeg failed: {last_error}"
+    )
+
+
+def _run_ffmpeg_srt_publish(
+    input_path: Path,
+    publish_url: str,
+    *,
+    with_audio: bool,
+) -> None:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for SRT inbound endpoint test")
+
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-re",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(input_path),
+        ]
+        if with_audio:
+            cmd.extend(["-c", "copy"])
+        else:
+            cmd.extend(["-an", "-c:v", "copy"])
+        cmd.extend(["-f", "mpegts", publish_url])
 
         result = subprocess.run(
             cmd,
@@ -56,17 +113,53 @@ def _run_ffmpeg_rtmp_publish(
     )
 
 
+def _run_ffmpeg_srt_publish_once(
+    input_path: Path,
+    publish_url: str,
+    *,
+    with_audio: bool,
+) -> subprocess.CompletedProcess[str]:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for SRT inbound endpoint test")
+
+    cmd = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-re",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-i",
+        str(input_path),
+    ]
+    if with_audio:
+        cmd.extend(["-c", "copy"])
+    else:
+        cmd.extend(["-an", "-c:v", "copy"])
+    cmd.extend(["-f", "mpegts", publish_url])
+
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _wait_for_video_frame_count(
     server: HisuiServer,
     processor_id: str,
     expected_count: int,
+    *,
+    processor_type: str,
+    timeout: float = 10.0,
 ) -> int:
-    deadline = time.time() + 10.0
+    deadline = time.time() + timeout
     while time.time() < deadline:
         metrics = ProcessorMetrics(
             server.metrics_json(),
             processor_id=processor_id,
-            processor_type="rtmp_inbound_endpoint",
+            processor_type=processor_type,
         )
         try:
             frame_count = int(metrics.value("hisui_total_input_video_frame_count"))
@@ -77,11 +170,11 @@ def _wait_for_video_frame_count(
             return frame_count
         if frame_count > expected_count:
             raise AssertionError(
-                f"RTMP inbound endpoint video frame count exceeded expected value: expected={expected_count}, actual={frame_count}"
+                f"{processor_type} video frame count exceeded expected value: expected={expected_count}, actual={frame_count}"
             )
         time.sleep(0.1)
     raise AssertionError(
-        f"RTMP inbound endpoint did not reach expected video frame count in time: expected={expected_count}"
+        f"{processor_type} did not reach expected video frame count in time: expected={expected_count}"
     )
 
 
@@ -109,6 +202,7 @@ def _start_ffmpeg_rtmp_receive(
     max_video_frames: int | None,
     listen: bool = False,
     timeout_seconds: int | None = None,
+    startup_timeout: float = 10.0,
 ) -> subprocess.Popen[str]:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
@@ -142,11 +236,32 @@ def _start_ffmpeg_rtmp_receive(
         str(output_path),
     ])
 
-    return subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    if listen:
+        return subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    deadline = time.time() + startup_timeout
+    last_stderr = ""
+    while time.time() < deadline:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(0.2)
+        if process.poll() is None:
+            return process
+        stdout, stderr = process.communicate(timeout=5)
+        last_stderr = f"stdout={stdout}, stderr={stderr}"
+        time.sleep(0.1)
+
+    raise AssertionError(
+        f"failed to start ffmpeg receiver within timeout: url={receive_url}, details={last_stderr}"
     )
 
 
@@ -165,19 +280,6 @@ def _wait_process_exit(process: subprocess.Popen[str], timeout: float) -> tuple[
         f"process exited with non-zero code: returncode={return_code}, stdout={stdout}, stderr={stderr}"
     )
     return stdout, stderr
-
-
-def _wait_for_server_log_contains(server: HisuiServer, pattern: str, timeout: float = 10.0) -> None:
-    if server.log_file is None:
-        raise AssertionError("server.log_file must exist")
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if server.log_file.exists() and pattern in server.log_file.read_text():
-            return
-        time.sleep(0.1)
-    log_content = server.log_file.read_text() if server.log_file.exists() else "(no log)"
-    raise AssertionError(f"pattern not found in server log: pattern={pattern}, log={log_content}")
 
 
 def _inspect_mp4(binary_path: Path, path: Path) -> dict[str, Any]:
@@ -267,6 +369,7 @@ def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
             server,
             processor_id,
             expected_count=25,
+            processor_type="rtmp_inbound_endpoint",
         )
 
         metrics = ProcessorMetrics(
@@ -317,6 +420,7 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
             server,
             processor_id,
             expected_count=25,
+            processor_type="rtmp_inbound_endpoint",
         )
 
         metrics = ProcessorMetrics(
@@ -331,6 +435,249 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         # ffmpeg の終了待機後でも、RTMP / FLV の終端処理タイミング差で
         # 音声カウントが 43 - 45 付近で揺れることがあるため、下限チェックにしている。
         assert audio_count >= 43
+
+
+def test_create_srt_inbound_endpoint_and_compare_stats(binary_path: Path):
+    """createSrtInboundEndpoint で受信した映像の統計値を確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint"
+    output_video_track_id = "e2e-srt-video-track"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}?mode=listener"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        frame_count = _wait_for_video_frame_count(
+            server,
+            processor_id,
+            expected_count=25,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+        assert metrics.value("hisui_video_codec", value="H264") == "1"
+        assert frame_count == 25
+
+
+def test_create_srt_inbound_endpoint_with_audio_video_and_compare_stats(
+    binary_path: Path,
+):
+    """createSrtInboundEndpoint で受信した映像 + 音声の統計値を確認する"""
+    av_input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "red-320x320-h264-aac.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-av"
+    output_video_track_id = "e2e-srt-video-track-av"
+    output_audio_track_id = "e2e-srt-audio-track-av"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}?mode=listener"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "outputAudioTrackId": output_audio_track_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            av_input_path,
+            publish_url,
+            with_audio=True,
+        )
+        video_count = _wait_for_video_frame_count(
+            server,
+            processor_id,
+            expected_count=25,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+        audio_count = int(metrics.value("hisui_total_input_audio_data_count"))
+        assert metrics.value("hisui_video_codec", value="H264") == "1"
+        assert metrics.value("hisui_audio_codec", value="AAC") == "1"
+        assert video_count == 25
+        # ffmpeg の終了待機後でも、SRT / MPEG-TS の終端処理タイミング差で
+        # 音声カウントが大きく揺れることがあるため、下限チェックにしている。
+        assert audio_count >= 20
+
+
+def test_create_srt_inbound_endpoint_with_stream_id_and_compare_stats(binary_path: Path):
+    """createSrtInboundEndpoint で streamId を照合して受信した映像の統計値を確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-stream-id"
+    output_video_track_id = "e2e-srt-video-track-stream-id"
+    stream_id = "e2e-stream-main"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller&streamid={stream_id}"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "streamId": stream_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        frame_count = _wait_for_video_frame_count(
+            server,
+            processor_id,
+            expected_count=25,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+        assert metrics.value("hisui_video_codec", value="H264") == "1"
+        assert frame_count == 25
+
+
+def test_create_srt_inbound_endpoint_rejects_mismatched_stream_id(binary_path: Path):
+    """createSrtInboundEndpoint で streamId が不一致の場合に接続を拒否する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-stream-id-mismatch"
+    output_video_track_id = "e2e-srt-video-track-stream-id-mismatch"
+    expected_stream_id = "e2e-stream-expected"
+    actual_stream_id = "e2e-stream-actual"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller&streamid={actual_stream_id}"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "streamId": expected_stream_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish_once(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+
+        with pytest.raises(
+            AssertionError,
+            match="did not reach expected video frame count in time",
+        ):
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=25,
+                processor_type="srt_inbound_endpoint",
+                timeout=3.0,
+            )
+
+
+def test_create_srt_inbound_endpoint_rejects_missing_stream_id(binary_path: Path):
+    """createSrtInboundEndpoint で streamId が未設定の peer 接続を拒否する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-stream-id-missing"
+    output_video_track_id = "e2e-srt-video-track-stream-id-missing"
+    expected_stream_id = "e2e-stream-required"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "streamId": expected_stream_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        result = _run_ffmpeg_srt_publish_once(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        assert result.returncode != 0
+
+        with pytest.raises(
+            AssertionError,
+            match="did not reach expected video frame count in time",
+        ):
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=25,
+                processor_type="srt_inbound_endpoint",
+                timeout=3.0,
+            )
 
 
 def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(
@@ -381,7 +728,6 @@ def test_create_rtmp_outbound_endpoint_with_mp4_video_reader_and_inspect_output(
                 max_video_frames=25,
             )
             try:
-                _wait_for_server_log_contains(server, "Client started playing stream")
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
@@ -474,7 +820,6 @@ def test_create_rtmp_outbound_endpoint_with_mp4_audio_video_readers_and_inspect_
                 max_video_frames=None,
             )
             try:
-                _wait_for_server_log_contains(server, "Client started playing stream")
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
@@ -572,7 +917,6 @@ def test_create_rtmp_publisher_with_mp4_video_reader_and_inspect_output(
                     create_publisher_response["result"]["processorId"]
                     == publisher_processor_id
                 )
-                _wait_for_server_log_contains(server, "StateChanged(Publishing)")
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
@@ -677,7 +1021,6 @@ def test_create_rtmp_publisher_with_mp4_audio_video_readers_and_inspect_output(
                     create_publisher_response["result"]["processorId"]
                     == publisher_processor_id
                 )
-                _wait_for_server_log_contains(server, "StateChanged(Publishing)")
                 start_response = server.trigger_start()
                 assert start_response["result"]["started"] is True
 
