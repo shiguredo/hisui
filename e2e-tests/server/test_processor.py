@@ -136,7 +136,7 @@ def _wait_for_video_frame_count(
     processor_id: str,
     expected_count: int,
     *,
-    processor_type: str = "rtmp_inbound_endpoint",
+    processor_type: str,
     timeout: float = 10.0,
 ) -> int:
     deadline = time.time() + timeout
@@ -354,6 +354,7 @@ def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
             server,
             processor_id,
             expected_count=25,
+            processor_type="rtmp_inbound_endpoint",
         )
 
         metrics = ProcessorMetrics(
@@ -404,6 +405,7 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
             server,
             processor_id,
             expected_count=25,
+            processor_type="rtmp_inbound_endpoint",
         )
 
         metrics = ProcessorMetrics(
