@@ -546,7 +546,17 @@ def test_create_audio_decoder_from_mp4_audio_reader_and_compare_stats(binary_pat
             processor_id=decoder_processor_id,
             processor_type="audio_decoder",
         )
-        assert int(metrics.value("hisui_total_audio_data_count")) > 0
+        reader_metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=reader_processor_id,
+            processor_type="mp4_audio_reader",
+        )
+        assert metrics.value("hisui_total_audio_data_count") == reader_metrics.value(
+            "hisui_total_sample_count"
+        )
+        assert metrics.value("hisui_codec", value="OPUS") == "1"
+        assert metrics.value("hisui_engine", value="opus") == "1"
+        assert metrics.value("hisui_error") == "0"
 
 
 def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
