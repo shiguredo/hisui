@@ -87,6 +87,8 @@ impl MediaPipelineHandle {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
             "createMp4VideoReader" => self.handle_create_mp4_video_reader_rpc(maybe_params).await,
             "createMp4AudioReader" => self.handle_create_mp4_audio_reader_rpc(maybe_params).await,
+            "createVideoDecoder" => self.handle_create_video_decoder_rpc(maybe_params).await,
+            "createAudioDecoder" => self.handle_create_audio_decoder_rpc(maybe_params).await,
             "createPngFileSource" => self.handle_create_png_file_source_rpc(maybe_params).await,
             "createVideoDeviceSource" => {
                 self.handle_create_video_device_source_rpc(maybe_params)
@@ -240,6 +242,88 @@ impl MediaPipelineHandle {
         })?;
 
         Ok(RpcSuccessResult::CreateMp4AudioReader { processor_id })
+    }
+
+    async fn handle_create_audio_decoder_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (input_track_id, output_track_id, processor_id): (
+            TrackId,
+            TrackId,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let input_track_id = params.to_member("inputTrackId")?.required()?.try_into()?;
+            let output_track_id = params.to_member("outputTrackId")?.required()?.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((input_track_id, output_track_id, processor_id))
+        })?;
+        let processor_id = processor_id
+            .unwrap_or_else(|| ProcessorId::new(format!("audioDecoder:{input_track_id}")));
+
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("audio_decoder"),
+            move |handle| async move {
+                let decoder = crate::decoder::AudioDecoder::new(handle.stats())?;
+                decoder.run(handle, input_track_id, output_track_id).await
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
+
+        Ok(RpcSuccessResult::CreateAudioDecoder { processor_id })
+    }
+
+    async fn handle_create_video_decoder_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (input_track_id, output_track_id, processor_id): (
+            TrackId,
+            TrackId,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let input_track_id = params.to_member("inputTrackId")?.required()?.try_into()?;
+            let output_track_id = params.to_member("outputTrackId")?.required()?.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((input_track_id, output_track_id, processor_id))
+        })?;
+        let processor_id = processor_id
+            .unwrap_or_else(|| ProcessorId::new(format!("videoDecoder:{input_track_id}")));
+
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("video_decoder"),
+            move |handle| async move {
+                // 現時点の RPC は最小構成として default のみを受け付ける。
+                // engines / decode_params は必要になった時点で RPC パラメーターを拡張する。
+                // openh264_lib は RPC ではなく、コマンドライン引数 / 環境変数で指定する想定。
+                let decoder = crate::decoder::VideoDecoder::new(
+                    crate::decoder::VideoDecoderOptions::default(),
+                    handle.stats(),
+                );
+                decoder.run(handle, input_track_id, output_track_id).await
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
+
+        Ok(RpcSuccessResult::CreateVideoDecoder { processor_id })
     }
 
     async fn handle_create_png_file_source_rpc(
@@ -595,6 +679,8 @@ enum RpcSuccessResult {
     CreateMp4FileSource { processor_id: ProcessorId },
     CreateMp4VideoReader { processor_id: ProcessorId },
     CreateMp4AudioReader { processor_id: ProcessorId },
+    CreateVideoDecoder { processor_id: ProcessorId },
+    CreateAudioDecoder { processor_id: ProcessorId },
     CreatePngFileSource { processor_id: ProcessorId },
     CreateVideoDeviceSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
@@ -620,6 +706,12 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateMp4AudioReader { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateVideoDecoder { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateAudioDecoder { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreatePngFileSource { processor_id } => {
@@ -951,6 +1043,230 @@ mod tests {
         assert_eq!(
             result_processor_id(&first_response).expect("parse result.processorId"),
             "duplicate-mp4-audio-reader"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_audio_decoder_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createAudioDecoder"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_audio_decoder_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createAudioDecoder","params":{"inputTrackId":"audio-input"}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_audio_decoder_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_audio_decoder_request(None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "audioDecoder:audio-input"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_audio_decoder_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_audio_decoder_request(Some("custom-audio-decoder"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-audio-decoder"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_audio_decoder_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_audio_decoder_request(Some("duplicate-audio-decoder"));
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-audio-decoder"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_video_decoder_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoDecoder"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_video_decoder_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoDecoder","params":{"inputTrackId":"video-input"}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_video_decoder_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_video_decoder_request(None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "videoDecoder:video-input"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_video_decoder_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_video_decoder_request(Some("custom-video-decoder"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-video-decoder"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_video_decoder_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_video_decoder_request(Some("duplicate-video-decoder"));
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-video-decoder"
         );
 
         let second_response = handle
@@ -2815,6 +3131,26 @@ mod tests {
     ) -> Result<bool, nojson::JsonParseError> {
         let result = response.value().to_member("result")?.required()?;
         result.to_member("started")?.required()?.try_into()
+    }
+
+    fn create_audio_decoder_request(processor_id: Option<&str>) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createAudioDecoder","params":{{"inputTrackId":"audio-input","outputTrackId":"audio-output"{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_video_decoder_request(processor_id: Option<&str>) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createVideoDecoder","params":{{"inputTrackId":"video-input","outputTrackId":"video-output"{processor_id_part}}}}}"#
+        )
     }
 
     fn create_video_mixer_request(output_track_id: &str, processor_id: Option<&str>) -> String {

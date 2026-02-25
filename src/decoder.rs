@@ -22,6 +22,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct AudioDecoder {
+    engine_metric: crate::stats::StatsString,
+    codec_metric: crate::stats::StatsString,
     total_audio_data_count_metric: crate::stats::StatsCounter,
     decoded: VecDeque<AudioData>,
     eos: bool,
@@ -36,13 +38,13 @@ enum DecoderRunOutput {
 
 impl AudioDecoder {
     pub fn new(mut compose_stats: crate::stats::Stats) -> crate::Result<Self> {
-        compose_stats
-            .string("engine")
-            .set(EngineName::Opus.as_str());
-        compose_stats.string("codec").set(CodecName::Opus.as_str());
+        let engine_metric = compose_stats.string("engine");
+        let codec_metric = compose_stats.string("codec");
         let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
         compose_stats.flag("error").set(false);
         Ok(Self {
+            engine_metric,
+            codec_metric,
             total_audio_data_count_metric,
             decoded: VecDeque::new(),
             eos: false,
@@ -99,7 +101,10 @@ impl AudioDecoder {
 
         // 遅延初期化
         if self.inner.is_none() {
-            self.inner = Some(AudioDecoderInner::new(&data)?);
+            let inner = AudioDecoderInner::new(&data)?;
+            self.engine_metric.set(inner.engine_name().as_str());
+            self.codec_metric.set(inner.codec_name().as_str());
+            self.inner = Some(inner);
         }
 
         let inner = self.inner.as_mut().expect("infallible");
@@ -207,6 +212,26 @@ impl AudioDecoderInner {
             Self::AudioToolbox(decoder) => decoder.finish(),
             #[cfg(feature = "fdk-aac")]
             Self::FdkAac(_decoder) => Ok(None),
+        }
+    }
+
+    fn engine_name(&self) -> EngineName {
+        match self {
+            Self::Opus(_) => EngineName::Opus,
+            #[cfg(target_os = "macos")]
+            Self::AudioToolbox(_) => EngineName::AudioToolbox,
+            #[cfg(feature = "fdk-aac")]
+            Self::FdkAac(_) => EngineName::FdkAac,
+        }
+    }
+
+    fn codec_name(&self) -> CodecName {
+        match self {
+            Self::Opus(_) => CodecName::Opus,
+            #[cfg(target_os = "macos")]
+            Self::AudioToolbox(_) => CodecName::Aac,
+            #[cfg(feature = "fdk-aac")]
+            Self::FdkAac(_) => CodecName::Aac,
         }
     }
 }

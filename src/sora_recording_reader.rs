@@ -8,7 +8,7 @@ use crate::{
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     sora_recording_layout::AggregatedSourceInfo,
-    types::{CodecName, ContainerFormat},
+    types::ContainerFormat,
     video::VideoFrame,
 };
 
@@ -104,13 +104,11 @@ impl AudioReader {
         let inner = match format {
             ContainerFormat::Mp4 => {
                 let mut reader = Mp4AudioReader::new(first_input_file.clone())?;
-                reader.codec = Some(CodecName::Opus);
                 reader.current_input_file = Some(first_input_file.clone());
                 AudioReaderInner::Mp4(Box::new(reader))
             }
             ContainerFormat::Webm => {
                 let mut reader = WebmAudioReader::new(first_input_file.clone())?;
-                reader.codec = Some(CodecName::Opus);
                 reader.current_input_file = Some(first_input_file.clone());
                 AudioReaderInner::Webm(Box::new(reader))
             }

@@ -269,6 +269,11 @@ impl Mp4AudioReader {
         // 統計値を更新する
         self.total_sample_count += 1;
         self.total_track_duration = timestamp + duration;
+        if self.codec.is_none()
+            && let Some(name) = self.format.codec_name()
+        {
+            self.codec = Some(name);
+        }
 
         Ok(Some(AudioData {
             data,
