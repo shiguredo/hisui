@@ -17,7 +17,7 @@ pub const CHANNELS: u16 = 2;
 pub const DEFAULT_BITRATE: usize = 65536;
 
 #[derive(Debug, Clone)]
-pub struct AudioData {
+pub struct AudioFrame {
     pub data: Vec<u8>,
     pub format: AudioFormat,
     pub stereo: bool,
@@ -27,7 +27,7 @@ pub struct AudioData {
     pub sample_entry: Option<SampleEntry>,
 }
 
-impl AudioData {
+impl AudioFrame {
     pub fn stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = (i16, i16)>> {
         if self.format != AudioFormat::I16Be {
             return Err(crate::Error::new(format!(

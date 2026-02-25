@@ -15,7 +15,7 @@ use crate::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::VideoEncoder,
     json::JsonObject,
-    media::MediaSample,
+    media::MediaFrame,
     sora_recording_layout::Layout,
     sora_recording_reader::VideoReader,
     sora_recording_video_mixer::{VideoMixer, VideoMixerSpec},
@@ -822,13 +822,13 @@ impl FrameCountLimiter {
             }
 
             match input_rx.recv().await {
-                Message::Media(MediaSample::Video(frame)) => {
+                Message::Media(MediaFrame::Video(frame)) => {
                     self.remaining_frame_count -= 1;
-                    if !output_tx.send_media(MediaSample::Video(frame)) {
+                    if !output_tx.send_media(MediaFrame::Video(frame)) {
                         break;
                     }
                 }
-                Message::Media(MediaSample::Audio(_)) => {
+                Message::Media(MediaFrame::Audio(_)) => {
                     return Err(Error::new(format!(
                         "expected a video sample on track {}, but got an audio sample",
                         input_track_id.get()
@@ -867,10 +867,10 @@ impl ProgressBar {
 
         loop {
             match input_rx.recv().await {
-                Message::Media(MediaSample::Video(_)) => {
+                Message::Media(MediaFrame::Video(_)) => {
                     self.bar.inc(1);
                 }
-                Message::Media(MediaSample::Audio(_)) => {
+                Message::Media(MediaFrame::Audio(_)) => {
                     return Err(Error::new(format!(
                         "expected a video sample on track {}, but got an audio sample",
                         input_track_id.get()

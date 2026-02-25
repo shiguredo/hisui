@@ -9,7 +9,7 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::audio::AudioFormat;
 use crate::video::VideoFormat;
-use crate::{Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame};
+use crate::{Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame};
 
 const MAX_NOACKED_COUNT: u64 = 100;
 
@@ -167,7 +167,7 @@ impl Mp4FileReader {
             tokio::time::sleep_until(target).await;
         }
 
-        let audio_data = AudioData {
+        let audio_data = AudioFrame {
             data,
             format: state.audio_format,
             stereo: state.audio_stereo,
@@ -308,7 +308,7 @@ impl TrackSender {
         }
     }
 
-    async fn send_audio(&mut self, data: AudioData) -> bool {
+    async fn send_audio(&mut self, data: AudioFrame) -> bool {
         self.prepare_send().await;
         let ok = self.sender.send_audio(data);
         if ok {

@@ -6,8 +6,8 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 use crate::{
-    Error, MediaSample, Message, ProcessorHandle, TrackId,
-    audio::{AudioData, AudioFormat},
+    Error, MediaFrame, Message, ProcessorHandle, TrackId,
+    audio::{AudioFormat, AudioFrame},
     video::{VideoFormat, VideoFrame},
 };
 
@@ -224,21 +224,21 @@ fn parse_rtmp_url(
 fn handle_audio_message(
     track_id: &Option<TrackId>,
     message: Message,
-    tx: &tokio::sync::mpsc::Sender<MediaSample>,
+    tx: &tokio::sync::mpsc::Sender<MediaFrame>,
 ) -> crate::Result<bool> {
     match message {
-        Message::Media(MediaSample::Audio(sample)) => {
+        Message::Media(MediaFrame::Audio(sample)) => {
             if sample.format != AudioFormat::Aac {
                 return Err(Error::new(format!(
                     "unsupported audio codec: {}",
                     sample.format
                 )));
             }
-            tx.try_send(MediaSample::Audio(sample))
+            tx.try_send(MediaFrame::Audio(sample))
                 .map_err(|e| Error::new(format!("failed to send audio frame: {e}")))?;
             Ok(false)
         }
-        Message::Media(MediaSample::Video(_)) => Err(Error::new(format!(
+        Message::Media(MediaFrame::Video(_)) => Err(Error::new(format!(
             "expected an audio sample on track {}, but got a video sample",
             track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
         ))),
@@ -250,21 +250,21 @@ fn handle_audio_message(
 fn handle_video_message(
     track_id: &Option<TrackId>,
     message: Message,
-    tx: &tokio::sync::mpsc::Sender<MediaSample>,
+    tx: &tokio::sync::mpsc::Sender<MediaFrame>,
 ) -> crate::Result<bool> {
     match message {
-        Message::Media(MediaSample::Video(sample)) => {
+        Message::Media(MediaFrame::Video(sample)) => {
             if !matches!(sample.format, VideoFormat::H264 | VideoFormat::H264AnnexB) {
                 return Err(Error::new(format!(
                     "unsupported video codec: {}",
                     sample.format
                 )));
             }
-            tx.try_send(MediaSample::Video(sample))
+            tx.try_send(MediaFrame::Video(sample))
                 .map_err(|e| Error::new(format!("failed to send video frame: {e}")))?;
             Ok(false)
         }
-        Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
+        Message::Media(MediaFrame::Audio(_)) => Err(Error::new(format!(
             "expected a video sample on track {}, but got an audio sample",
             track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
         ))),
@@ -276,7 +276,7 @@ fn handle_video_message(
 /// クライアント配信用の内部メディアフレーム表現
 #[derive(Debug, Clone)]
 enum ClientMediaFrame {
-    Audio(Arc<AudioData>),
+    Audio(Arc<AudioFrame>),
     Video(Arc<VideoFrame>),
 }
 
@@ -284,7 +284,7 @@ enum ClientMediaFrame {
 #[derive(Debug)]
 struct RtmpPlayServer {
     url: shiguredo_rtmp::RtmpUrl,
-    rx: tokio::sync::mpsc::Receiver<MediaSample>,
+    rx: tokio::sync::mpsc::Receiver<MediaFrame>,
     clients: Vec<tokio::sync::mpsc::Sender<ClientMediaFrame>>,
     options: RtmpOutboundEndpointOptions,
 }
@@ -383,10 +383,10 @@ impl RtmpPlayServer {
         Ok(())
     }
 
-    async fn handle_media_sample(&mut self, sample: MediaSample) -> crate::Result<()> {
+    async fn handle_media_sample(&mut self, sample: MediaFrame) -> crate::Result<()> {
         let frame = match sample {
-            MediaSample::Audio(audio) => ClientMediaFrame::Audio(audio),
-            MediaSample::Video(video) => ClientMediaFrame::Video(video),
+            MediaFrame::Audio(audio) => ClientMediaFrame::Audio(audio),
+            MediaFrame::Video(video) => ClientMediaFrame::Video(video),
         };
 
         // NOTE: RtmpClientHandler が閉じたら削除したいので retain を使っている

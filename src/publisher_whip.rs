@@ -10,7 +10,7 @@ use shiguredo_webrtc::{
 };
 use tokio::io::AsyncWriteExt;
 
-use crate::{Error, MediaSample, Message, ProcessorHandle, TrackId};
+use crate::{Error, MediaFrame, Message, ProcessorHandle, TrackId};
 
 #[derive(Debug, Clone)]
 pub struct WhipPublisher {
@@ -170,11 +170,11 @@ fn handle_video_message(
     message: Message,
 ) -> crate::Result<bool> {
     match message {
-        Message::Media(MediaSample::Video(frame)) => {
+        Message::Media(MediaFrame::Video(frame)) => {
             session.push_video_frame(&frame)?;
             Ok(false)
         }
-        Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
+        Message::Media(MediaFrame::Audio(_)) => Err(Error::new(format!(
             "expected a video sample on track {}, but got an audio sample",
             track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
         ))),
@@ -189,11 +189,11 @@ fn handle_audio_message(
     message: Message,
 ) -> crate::Result<bool> {
     match message {
-        Message::Media(MediaSample::Audio(frame)) => {
+        Message::Media(MediaFrame::Audio(frame)) => {
             session.push_audio_frame(&frame)?;
             Ok(false)
         }
-        Message::Media(MediaSample::Video(_)) => Err(Error::new(format!(
+        Message::Media(MediaFrame::Video(_)) => Err(Error::new(format!(
             "expected an audio sample on track {}, but got a video sample",
             track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
         ))),
@@ -350,7 +350,7 @@ impl WhipSession {
         crate::webrtc_video::push_i420_frame(source, frame)
     }
 
-    fn push_audio_frame(&mut self, frame: &crate::AudioData) -> crate::Result<()> {
+    fn push_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         match self.audio_sink.push_i16be_stereo_48khz(frame) {
             Ok(()) => Ok(()),
             Err(e) if e.reason == "audio transport is not ready" => Ok(()),

@@ -6,8 +6,8 @@ use std::{
 
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
-    media::MediaSample,
+    audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE},
+    media::MediaFrame,
     sora_recording_layout::TrimSpans,
 };
 
@@ -32,7 +32,7 @@ pub struct AudioMixer {
 
 #[derive(Debug)]
 pub enum AudioMixerOutput {
-    Processed(MediaSample),
+    Processed(MediaFrame),
     Pending(TrackId),
     Finished,
 }
@@ -210,7 +210,7 @@ impl AudioMixer {
         Duration::from_secs(self.stats.total_output_sample_count()) / SAMPLE_RATE as u32
     }
 
-    fn mix_next_audio_data(&mut self, now: Duration) -> crate::Result<AudioData> {
+    fn mix_next_audio_data(&mut self, now: Duration) -> crate::Result<AudioFrame> {
         let timestamp = self.next_output_timestamp();
 
         let bytes_per_sample = CHANNELS as usize * 2; // i16 で表現するので *2
@@ -250,7 +250,7 @@ impl AudioMixer {
                 .add_output_filled_sample_count(MIXED_AUDIO_DATA_SAMPLES as u64);
         }
 
-        Ok(AudioData {
+        Ok(AudioFrame {
             // 以下は固定値
             format: AudioFormat::I16Be,
             stereo: true, // Hisui では音声は常にステレオとして扱う
@@ -266,10 +266,10 @@ impl AudioMixer {
 
     fn handle_input_message(&mut self, track_id: &TrackId, message: Message) -> Result<()> {
         match message {
-            Message::Media(MediaSample::Audio(sample)) => {
-                self.handle_input_sample(track_id, Some(MediaSample::Audio(sample)))
+            Message::Media(MediaFrame::Audio(sample)) => {
+                self.handle_input_sample(track_id, Some(MediaFrame::Audio(sample)))
             }
-            Message::Media(MediaSample::Video(_)) => Err(Error::new(format!(
+            Message::Media(MediaFrame::Video(_)) => Err(Error::new(format!(
                 "expected an audio sample on track {}, but got a video sample",
                 track_id.get()
             ))),
@@ -281,7 +281,7 @@ impl AudioMixer {
     fn handle_input_sample(
         &mut self,
         track_id: &TrackId,
-        sample: Option<MediaSample>,
+        sample: Option<MediaFrame>,
     ) -> Result<()> {
         let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
             crate::Error::new(format!(
@@ -290,7 +290,7 @@ impl AudioMixer {
             ))
         })?;
         if let Some(sample) = sample {
-            let data = sample.expect_audio_data()?;
+            let frame = sample.expect_audio()?;
 
             if input_stream.start_timestamp.is_none() {
                 // 合成開始時刻の判断用に最初のタイムスタンプを覚えておく
@@ -303,20 +303,20 @@ impl AudioMixer {
                 // 下手に Hisui 側でハンドリングしてしまうと、ギャップが
                 // 極端に大きいためにあえて Sora がそのまま放置した区間を
                 // 埋めようとしてディスクやメモリを食いつぶしてしまう恐れがある。
-                input_stream.start_timestamp = Some(data.timestamp);
+                input_stream.start_timestamp = Some(frame.timestamp);
             }
 
             // サンプルキューに要素を追加する
             //
             // 想定外の入力が来ていないかを念のためにチェックする
             // (format と stereo については stereo_samples() の中でチェックしている)
-            if data.sample_rate != SAMPLE_RATE {
+            if frame.sample_rate != SAMPLE_RATE {
                 return Err(crate::Error::new(format!(
                     "expected sample rate {}Hz, got {}Hz",
-                    SAMPLE_RATE, data.sample_rate
+                    SAMPLE_RATE, frame.sample_rate
                 )));
             }
-            input_stream.sample_queue.extend(data.stereo_samples()?);
+            input_stream.sample_queue.extend(frame.stereo_samples()?);
 
             self.stats.add_input_audio_data_count();
         } else {
@@ -356,12 +356,10 @@ impl AudioMixer {
 
         // 合成
         let mixed_data = self.mix_next_audio_data(now)?;
-        Ok(AudioMixerOutput::Processed(MediaSample::audio_data(
-            mixed_data,
-        )))
+        Ok(AudioMixerOutput::Processed(MediaFrame::audio(mixed_data)))
     }
 
-    pub fn push_input(&mut self, track_id: TrackId, sample: Option<MediaSample>) -> Result<()> {
+    pub fn push_input(&mut self, track_id: TrackId, sample: Option<MediaFrame>) -> Result<()> {
         self.handle_input_sample(&track_id, sample)
     }
 

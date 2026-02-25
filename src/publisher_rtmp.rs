@@ -3,8 +3,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
-    Error, MediaSample, Message, ProcessorHandle, TrackId,
-    audio::{AudioData, AudioFormat},
+    Error, MediaFrame, Message, ProcessorHandle, TrackId,
+    audio::{AudioFormat, AudioFrame},
     video::{VideoFormat, VideoFrame},
 };
 
@@ -224,21 +224,21 @@ fn parse_rtmp_url(
 fn handle_audio_message(
     track_id: &Option<TrackId>,
     message: Message,
-    tx: &tokio::sync::mpsc::Sender<MediaSample>,
+    tx: &tokio::sync::mpsc::Sender<MediaFrame>,
 ) -> crate::Result<bool> {
     match message {
-        Message::Media(MediaSample::Audio(sample)) => {
+        Message::Media(MediaFrame::Audio(sample)) => {
             if sample.format != AudioFormat::Aac {
                 return Err(Error::new(format!(
                     "unsupported audio codec: {}",
                     sample.format
                 )));
             }
-            tx.try_send(MediaSample::Audio(sample))
+            tx.try_send(MediaFrame::Audio(sample))
                 .map_err(|e| Error::new(format!("failed to send audio frame: {e}")))?;
             Ok(false)
         }
-        Message::Media(MediaSample::Video(_)) => Err(Error::new(format!(
+        Message::Media(MediaFrame::Video(_)) => Err(Error::new(format!(
             "expected an audio sample on track {}, but got a video sample",
             track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
         ))),
@@ -250,21 +250,21 @@ fn handle_audio_message(
 fn handle_video_message(
     track_id: &Option<TrackId>,
     message: Message,
-    tx: &tokio::sync::mpsc::Sender<MediaSample>,
+    tx: &tokio::sync::mpsc::Sender<MediaFrame>,
 ) -> crate::Result<bool> {
     match message {
-        Message::Media(MediaSample::Video(sample)) => {
+        Message::Media(MediaFrame::Video(sample)) => {
             if !matches!(sample.format, VideoFormat::H264 | VideoFormat::H264AnnexB) {
                 return Err(Error::new(format!(
                     "unsupported video codec: {}",
                     sample.format
                 )));
             }
-            tx.try_send(MediaSample::Video(sample))
+            tx.try_send(MediaFrame::Video(sample))
                 .map_err(|e| Error::new(format!("failed to send video frame: {e}")))?;
             Ok(false)
         }
-        Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
+        Message::Media(MediaFrame::Audio(_)) => Err(Error::new(format!(
             "expected a video sample on track {}, but got an audio sample",
             track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
         ))),
@@ -276,7 +276,7 @@ fn handle_video_message(
 #[derive(Debug)]
 struct RtmpPublishRunner {
     url: shiguredo_rtmp::RtmpUrl,
-    rx: tokio::sync::mpsc::Receiver<MediaSample>,
+    rx: tokio::sync::mpsc::Receiver<MediaFrame>,
     recv_buf: Vec<u8>,
     connection: shiguredo_rtmp::RtmpPublishClientConnection,
     ready: bool,
@@ -349,14 +349,14 @@ impl RtmpPublishRunner {
         Ok(())
     }
 
-    fn handle_media_sample(&mut self, sample: MediaSample) -> crate::Result<()> {
+    fn handle_media_sample(&mut self, sample: MediaFrame) -> crate::Result<()> {
         match sample {
-            MediaSample::Audio(audio) => self.handle_audio_sample(audio),
-            MediaSample::Video(video) => self.handle_video_sample(video),
+            MediaFrame::Audio(audio) => self.handle_audio_sample(audio),
+            MediaFrame::Video(video) => self.handle_video_sample(video),
         }
     }
 
-    fn handle_audio_sample(&mut self, audio: Arc<AudioData>) -> crate::Result<()> {
+    fn handle_audio_sample(&mut self, audio: Arc<AudioFrame>) -> crate::Result<()> {
         let (seq_frame, audio_frame) = self
             .frame_handler
             .prepare_audio_frame(audio)

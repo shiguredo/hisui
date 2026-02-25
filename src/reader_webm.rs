@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    audio::{AudioData, AudioFormat, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, SAMPLE_RATE},
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -314,7 +314,7 @@ pub struct WebmAudioReader {
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
     last_duration: Duration,
-    prev_audio_data: Option<AudioData>,
+    prev_audio_data: Option<AudioFrame>,
 
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
@@ -367,7 +367,7 @@ impl WebmAudioReader {
         self.track_duration_offset = prev.track_duration_offset;
     }
 
-    fn read_simple_block(&mut self) -> crate::Result<Option<AudioData>> {
+    fn read_simple_block(&mut self) -> crate::Result<Option<AudioFrame>> {
         let mut reader = self.reader.read_master(ID_SIMPLE_BLOCK)?;
 
         let track_number = reader.read_raw_u8()?;
@@ -391,7 +391,7 @@ impl WebmAudioReader {
         self.total_simple_block_count += 1;
         self.total_track_duration = timestamp + self.last_duration;
 
-        Ok(Some(AudioData {
+        Ok(Some(AudioFrame {
             data,
             format: AudioFormat::Opus,
             timestamp,
@@ -407,7 +407,7 @@ impl WebmAudioReader {
         }))
     }
 
-    fn read_audio_data(&mut self) -> crate::Result<Option<AudioData>> {
+    fn read_audio_data(&mut self) -> crate::Result<Option<AudioFrame>> {
         loop {
             match self.reader.peek_id()? {
                 ID_CLUSTER => {
@@ -433,7 +433,7 @@ impl WebmAudioReader {
                 }
                 ID_CUES => {
                     // メディアデータ格納部分を抜けたのでここで終了
-                    // 最後の AudioData が残っている場合には、まずそれを返す
+                    // 最後の AudioFrame が残っている場合には、まずそれを返す
                     return Ok(self.prev_audio_data.take());
                 }
                 id => {
@@ -447,7 +447,7 @@ impl WebmAudioReader {
 }
 
 impl Iterator for WebmAudioReader {
-    type Item = crate::Result<AudioData>;
+    type Item = crate::Result<AudioFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.read_audio_data().transpose()

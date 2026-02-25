@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::{
-    audio::AudioData,
-    media::MediaSample,
+    audio::AudioFrame,
+    media::MediaFrame,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
     sora_recording_layout::AggregatedSourceInfo,
@@ -58,12 +58,12 @@ impl AudioReader {
                     self.error_flag.set(true);
                     return Err(e);
                 }
-                Some(Ok(mut data)) => {
-                    data.timestamp += self.timestamp_offset;
-                    self.next_timestamp_offset = data.timestamp + data.duration;
+                Some(Ok(mut frame)) => {
+                    frame.timestamp += self.timestamp_offset;
+                    self.next_timestamp_offset = frame.timestamp + frame.duration;
                     self.update_metrics_from_inner();
 
-                    if !track_handle.send_media(MediaSample::new_audio(data)) {
+                    if !track_handle.send_media(MediaFrame::new_audio(frame)) {
                         // パイプライン処理が中断された
                         break;
                     }
@@ -222,7 +222,7 @@ impl AudioReaderInner {
 }
 
 impl Iterator for AudioReaderInner {
-    type Item = crate::Result<AudioData>;
+    type Item = crate::Result<AudioFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -283,7 +283,7 @@ impl VideoReader {
                     self.next_timestamp_offset = frame.timestamp + frame.duration;
                     self.update_metrics_from_inner();
 
-                    if !track_handle.send_media(MediaSample::new_video(frame)) {
+                    if !track_handle.send_media(MediaFrame::new_video(frame)) {
                         // パイプライン処理が中断された
                         break;
                     }

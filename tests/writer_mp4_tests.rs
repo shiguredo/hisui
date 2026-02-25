@@ -2,7 +2,7 @@ use std::{path::Path, path::PathBuf, time::Duration};
 
 use hisui::{
     Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
-    audio::{AudioData, AudioFormat, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, SAMPLE_RATE},
     sora_recording_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     sora_recording_layout_region::{Grid, Region},
     sora_recording_metadata::{SourceId, SourceInfo},
@@ -179,7 +179,7 @@ fn no_video_and_audio_mp4() -> hisui::Result<()> {
 fn run_writer_with_pipeline(
     output_path: &Path,
     options: Option<Mp4WriterOptions>,
-    audio_samples: Option<Vec<AudioData>>,
+    audio_samples: Option<Vec<AudioFrame>>,
     video_frames: Option<Vec<VideoFrame>>,
 ) -> hisui::Result<Vec<hisui::stats::StatsEntry>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -303,7 +303,7 @@ async fn register_processor(
         })
 }
 
-async fn run_audio_source(handle: ProcessorHandle, samples: Vec<AudioData>) -> hisui::Result<()> {
+async fn run_audio_source(handle: ProcessorHandle, samples: Vec<AudioFrame>) -> hisui::Result<()> {
     let mut tx = handle.publish_track(TrackId::new(AUDIO_TRACK_ID)).await?;
     handle.notify_ready();
     handle.wait_subscribers_ready().await?;
@@ -333,7 +333,7 @@ async fn run_video_source(handle: ProcessorHandle, frames: Vec<VideoFrame>) -> h
 
 async fn run_audio_video_source(
     handle: ProcessorHandle,
-    audio_samples: Vec<AudioData>,
+    audio_samples: Vec<AudioFrame>,
     video_frames: Vec<VideoFrame>,
 ) -> hisui::Result<()> {
     let mut audio_tx = handle.publish_track(TrackId::new(AUDIO_TRACK_ID)).await?;
@@ -489,8 +489,8 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
     }
 }
 
-fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioData {
-    AudioData {
+fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioFrame {
+    AudioFrame {
         data: vec![0], // 中身はなんでもいい
         format: AudioFormat::I16Be,
         stereo: true,

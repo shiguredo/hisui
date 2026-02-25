@@ -470,7 +470,7 @@ async fn collect_video_frames(
     loop {
         match rx.recv().await {
             Message::Media(sample) => {
-                let frame = sample.expect_video_frame()?;
+                let frame = sample.expect_video()?;
                 frames.push((*frame).clone());
             }
             Message::Eos => break,

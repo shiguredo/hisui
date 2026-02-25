@@ -500,7 +500,7 @@ fn mix_with_trim() -> hisui::Result<()> {
     // 合成結果を取得する
     let mut frames = Vec::new();
     while let VideoMixerOutput::Processed { sample, .. } = mixer.process_output()? {
-        let frame = sample.expect_video_frame()?;
+        let frame = sample.expect_video()?;
         frames.push(frame);
     }
 
@@ -578,7 +578,7 @@ fn mix_without_trim() -> hisui::Result<()> {
     // 合成結果を取得する
     let mut frames = Vec::new();
     while let VideoMixerOutput::Processed { sample, .. } = mixer.process_output()? {
-        let frame = sample.expect_video_frame()?;
+        let frame = sample.expect_video()?;
         frames.push(frame);
     }
 
@@ -1272,5 +1272,5 @@ fn next_mixed_frame(mixer: &mut VideoMixer) -> hisui::Result<Arc<VideoFrame>> {
         .expect_processed()
         .ok_or_else(|| hisui::Error::new("value is missing"))?
         .1
-        .expect_video_frame()
+        .expect_video()
 }

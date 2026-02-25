@@ -11,11 +11,11 @@ use crate::decoder_nvcodec::NvcodecDecoder;
 use crate::decoder_video_toolbox::VideoToolboxDecoder;
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::AudioData,
+    audio::AudioFrame,
     decoder_dav1d::Dav1dDecoder,
     decoder_openh264::Openh264Decoder,
     decoder_opus::OpusDecoder,
-    media::MediaSample,
+    media::MediaFrame,
     types::{CodecName, EngineName},
     video::VideoFrame,
 };
@@ -25,13 +25,13 @@ pub struct AudioDecoder {
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_audio_data_count_metric: crate::stats::StatsCounter,
-    decoded: VecDeque<AudioData>,
+    decoded: VecDeque<AudioFrame>,
     eos: bool,
     inner: Option<AudioDecoderInner>,
 }
 
 enum DecoderRunOutput {
-    Processed(MediaSample),
+    Processed(MediaFrame),
     Pending,
     Finished,
 }
@@ -92,23 +92,23 @@ impl AudioDecoder {
         }
     }
 
-    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+    fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         let Some(sample) = sample else {
             self.eos = true;
             return Ok(());
         };
-        let data = sample.expect_audio_data()?;
+        let frame = sample.expect_audio()?;
 
         // 遅延初期化
         if self.inner.is_none() {
-            let inner = AudioDecoderInner::new(&data)?;
+            let inner = AudioDecoderInner::new(&frame)?;
             self.engine_metric.set(inner.engine_name().as_str());
             self.codec_metric.set(inner.codec_name().as_str());
             self.inner = Some(inner);
         }
 
         let inner = self.inner.as_mut().expect("infallible");
-        let decoded = inner.decode(&data)?;
+        let decoded = inner.decode(&frame)?;
         self.total_audio_data_count_metric.inc();
 
         self.decoded.push_back(decoded);
@@ -116,18 +116,18 @@ impl AudioDecoder {
     }
 
     fn poll_output(&mut self) -> Result<DecoderRunOutput> {
-        if let Some(data) = self.decoded.pop_front() {
-            Ok(DecoderRunOutput::Processed(MediaSample::audio_data(data)))
+        if let Some(frame) = self.decoded.pop_front() {
+            Ok(DecoderRunOutput::Processed(MediaFrame::audio(frame)))
         } else if self.eos {
             if let Some(inner) = self.inner.as_mut()
-                && let Some(remaining_data) = inner.finish()?
+                && let Some(remaining_frame) = inner.finish()?
             {
                 self.total_audio_data_count_metric.inc();
-                self.decoded.push_back(remaining_data);
+                self.decoded.push_back(remaining_frame);
                 let sample = self.decoded.pop_front().ok_or_else(|| {
                     crate::Error::new("decoded audio queue is unexpectedly empty")
                 })?;
-                return Ok(DecoderRunOutput::Processed(MediaSample::audio_data(sample)));
+                return Ok(DecoderRunOutput::Processed(MediaFrame::audio(sample)));
             }
             Ok(DecoderRunOutput::Finished)
         } else {
@@ -169,8 +169,8 @@ enum AudioDecoderInner {
 }
 
 impl AudioDecoderInner {
-    fn new(data: &AudioData) -> crate::Result<Self> {
-        match data.format {
+    fn new(frame: &AudioFrame) -> crate::Result<Self> {
+        match frame.format {
             AudioFormat::Opus => OpusDecoder::new().map(Self::Opus),
             AudioFormat::Aac => {
                 #[cfg(feature = "fdk-aac")]
@@ -190,22 +190,22 @@ impl AudioDecoderInner {
             }
             _ => Err(crate::Error::new(format!(
                 "Unsupported audio format: {:?}",
-                data.format
+                frame.format
             ))),
         }
     }
 
-    fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
+    fn decode(&mut self, frame: &AudioFrame) -> crate::Result<AudioFrame> {
         match self {
-            Self::Opus(decoder) => decoder.decode(data),
+            Self::Opus(decoder) => decoder.decode(frame),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(decoder) => decoder.decode(data),
+            Self::AudioToolbox(decoder) => decoder.decode(frame),
             #[cfg(feature = "fdk-aac")]
-            Self::FdkAac(decoder) => decoder.decode(data),
+            Self::FdkAac(decoder) => decoder.decode(frame),
         }
     }
 
-    fn finish(&mut self) -> crate::Result<Option<AudioData>> {
+    fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
         match self {
             Self::Opus(_decoder) => Ok(None),
             #[cfg(target_os = "macos")]
@@ -328,9 +328,9 @@ impl VideoDecoder {
         }
     }
 
-    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+    fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
-            let frame = sample.expect_video_frame()?;
+            let frame = sample.expect_video()?;
 
             self.total_input_video_frame_count_metric.inc();
 
@@ -351,7 +351,7 @@ impl VideoDecoder {
 
     fn poll_output(&mut self) -> Result<DecoderRunOutput> {
         if let Some(frame) = self.decoded.pop_front() {
-            Ok(DecoderRunOutput::Processed(MediaSample::video_frame(frame)))
+            Ok(DecoderRunOutput::Processed(MediaFrame::video(frame)))
         } else if self.eos {
             Ok(DecoderRunOutput::Finished)
         } else {

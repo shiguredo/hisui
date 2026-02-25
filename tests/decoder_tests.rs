@@ -5,7 +5,7 @@ use hisui::{
     video::VideoFrame,
 };
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-use hisui::{audio::AudioData, decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
+use hisui::{audio::AudioFrame, decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
 
@@ -227,7 +227,7 @@ fn decode_video_frames_with_pipeline(
 }
 
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-fn decode_audio_count_with_pipeline(input_samples: Vec<AudioData>) -> hisui::Result<usize> {
+fn decode_audio_count_with_pipeline(input_samples: Vec<AudioFrame>) -> hisui::Result<usize> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -334,7 +334,7 @@ async fn run_video_source(
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 async fn run_audio_source(
     handle: ProcessorHandle,
-    samples: Vec<AudioData>,
+    samples: Vec<AudioFrame>,
     track_id: TrackId,
 ) -> hisui::Result<()> {
     let mut tx = handle.publish_track(track_id).await?;
@@ -359,7 +359,7 @@ async fn collect_video_frames(
     loop {
         match rx.recv().await {
             Message::Media(sample) => {
-                let frame = sample.expect_video_frame()?;
+                let frame = sample.expect_video()?;
                 frames.push((*frame).clone());
             }
             Message::Eos => break,
@@ -377,7 +377,7 @@ async fn collect_audio_count(handle: ProcessorHandle, track_id: TrackId) -> hisu
     loop {
         match rx.recv().await {
             Message::Media(sample) => {
-                let _data = sample.expect_audio_data()?;
+                let _data = sample.expect_audio()?;
                 count += 1;
             }
             Message::Eos => break,

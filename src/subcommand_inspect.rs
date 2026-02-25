@@ -417,8 +417,8 @@ impl OutputPrinter {
         match message {
             crate::Message::Media(media_sample) => {
                 let audio_data = match media_sample {
-                    crate::MediaSample::Audio(sample) => sample,
-                    crate::MediaSample::Video(_) => {
+                    crate::MediaFrame::Audio(sample) => sample,
+                    crate::MediaFrame::Video(_) => {
                         return Err(Error::new(
                             "expected an audio sample, but got a video sample",
                         ));
@@ -447,8 +447,8 @@ impl OutputPrinter {
         match message {
             crate::Message::Media(media_sample) => {
                 let video_frame = match media_sample {
-                    crate::MediaSample::Video(sample) => sample,
-                    crate::MediaSample::Audio(_) => {
+                    crate::MediaFrame::Video(sample) => sample,
+                    crate::MediaFrame::Audio(_) => {
                         return Err(Error::new(
                             "expected a video sample, but got an audio sample",
                         ));
@@ -481,8 +481,8 @@ impl OutputPrinter {
         match message {
             crate::Message::Media(media_sample) => {
                 let audio_data = match media_sample {
-                    crate::MediaSample::Audio(sample) => sample,
-                    crate::MediaSample::Video(_) => {
+                    crate::MediaFrame::Audio(sample) => sample,
+                    crate::MediaFrame::Video(_) => {
                         return Err(Error::new(
                             "expected an audio sample, but got a video sample",
                         ));
@@ -504,8 +504,8 @@ impl OutputPrinter {
         match message {
             crate::Message::Media(media_sample) => {
                 let video_frame = match media_sample {
-                    crate::MediaSample::Video(sample) => sample,
-                    crate::MediaSample::Audio(_) => {
+                    crate::MediaFrame::Video(sample) => sample,
+                    crate::MediaFrame::Audio(_) => {
                         return Err(Error::new(
                             "expected a video sample, but got an audio sample",
                         ));

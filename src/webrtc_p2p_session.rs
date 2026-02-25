@@ -436,7 +436,7 @@ fn send_rpc_response(sess: &Session, response_bytes: &[u8], is_binary: bool) {
 fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: crate::Message) {
     match message {
         crate::Message::Media(sample) => match sample {
-            crate::MediaSample::Video(frame) => {
+            crate::MediaFrame::Video(frame) => {
                 if frame.format != crate::video::VideoFormat::I420 {
                     tracing::info!(
                         "Unsupported video format for track {track_id}: {}",
@@ -458,7 +458,7 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     }
                 }
             }
-            crate::MediaSample::Audio(_) => {
+            crate::MediaFrame::Audio(_) => {
                 if let Some(subscribed) = sess.subscribed_tracks.get_mut(track_id)
                     && !matches!(subscribed.state, TrackState::AudioUnsupported)
                 {

@@ -6,7 +6,7 @@ use shiguredo_mp4::{
     descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
 };
 
-use crate::audio::{self, AudioData, AudioFormat, SAMPLE_RATE};
+use crate::audio::{self, AudioFormat, AudioFrame, SAMPLE_RATE};
 
 #[derive(Debug)]
 pub struct AudioToolboxEncoder {
@@ -26,7 +26,7 @@ impl AudioToolboxEncoder {
         })
     }
 
-    pub fn finish(&mut self) -> crate::Result<Option<AudioData>> {
+    pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
         if let Some(encoded) = self.inner.finish()? {
             Ok(Some(self.handle_encoded_frame(encoded)))
         } else {
@@ -34,18 +34,18 @@ impl AudioToolboxEncoder {
         }
     }
 
-    pub fn encode(&mut self, data: &AudioData) -> crate::Result<Option<AudioData>> {
-        if data.format != AudioFormat::I16Be {
+    pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
+        if frame.format != AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
                 "expected I16Be format, got {}",
-                data.format
+                frame.format
             )));
         }
-        if !data.stereo {
+        if !frame.stereo {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
-        let input = data.interleaved_stereo_samples()?.collect::<Vec<_>>();
+        let input = frame.interleaved_stereo_samples()?.collect::<Vec<_>>();
         let Some(encoded) = self.inner.encode(&input)? else {
             return Ok(None);
         };
@@ -55,12 +55,12 @@ impl AudioToolboxEncoder {
     fn handle_encoded_frame(
         &mut self,
         encoded: shiguredo_audio_toolbox::EncodedFrame,
-    ) -> AudioData {
+    ) -> AudioFrame {
         let duration = Duration::from_secs(encoded.samples as u64) / SAMPLE_RATE as u32;
         let timestamp = Duration::from_secs(self.total_encoded_samples) / SAMPLE_RATE as u32;
         self.total_encoded_samples += encoded.samples as u64;
 
-        AudioData {
+        AudioFrame {
             // 固定値
             format: AudioFormat::Aac,
             stereo: true,

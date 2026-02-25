@@ -2,18 +2,18 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
-use crate::audio::AudioData;
+use crate::audio::AudioFrame;
 use crate::video::VideoFrame;
 
 #[derive(Debug, Clone)]
-pub enum MediaSample {
-    Audio(Arc<AudioData>),
+pub enum MediaFrame {
+    Audio(Arc<AudioFrame>),
     Video(Arc<VideoFrame>),
 }
 
-impl MediaSample {
-    pub fn new_audio(data: AudioData) -> Self {
-        Self::Audio(Arc::new(data))
+impl MediaFrame {
+    pub fn new_audio(frame: AudioFrame) -> Self {
+        Self::Audio(Arc::new(frame))
     }
 
     pub fn new_video(frame: VideoFrame) -> Self {
@@ -27,9 +27,9 @@ impl MediaSample {
         }
     }
 
-    pub fn expect_audio_data(self) -> crate::Result<Arc<AudioData>> {
-        if let Self::Audio(sample) = self {
-            Ok(sample)
+    pub fn expect_audio(self) -> crate::Result<Arc<AudioFrame>> {
+        if let Self::Audio(frame) = self {
+            Ok(frame)
         } else {
             Err(crate::Error::new(
                 "expected an audio sample, but got a video sample",
@@ -37,7 +37,7 @@ impl MediaSample {
         }
     }
 
-    pub fn expect_video_frame(self) -> crate::Result<Arc<VideoFrame>> {
+    pub fn expect_video(self) -> crate::Result<Arc<VideoFrame>> {
         if let Self::Video(frame) = self {
             Ok(frame)
         } else {
@@ -47,14 +47,14 @@ impl MediaSample {
         }
     }
 
-    pub fn audio_data(data: AudioData) -> Self {
-        Self::Audio(Arc::new(data))
+    pub fn audio(frame: AudioFrame) -> Self {
+        Self::Audio(Arc::new(frame))
     }
 
-    pub fn video_frame(frame: VideoFrame) -> Self {
+    pub fn video(frame: VideoFrame) -> Self {
         Self::Video(Arc::new(frame))
     }
 }
 
-pub type MediaStreamReceiver = Receiver<MediaSample>;
-pub type MediaStreamSyncSender = SyncSender<MediaSample>;
+pub type MediaStreamReceiver = Receiver<MediaFrame>;
+pub type MediaStreamSyncSender = SyncSender<MediaFrame>;

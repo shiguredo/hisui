@@ -695,7 +695,7 @@ impl std::future::Future for Ack {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Media(crate::MediaSample),
+    Media(crate::MediaFrame),
     Eos,
 
     /// 送信側がメッセージグラフの末端まで到達したか確認するための制御メッセージ。
@@ -725,16 +725,16 @@ impl MessageSender {
         true
     }
 
-    pub fn send_media(&mut self, sample: crate::MediaSample) -> bool {
+    pub fn send_media(&mut self, sample: crate::MediaFrame) -> bool {
         self.send(Message::Media(sample))
     }
 
-    pub fn send_audio(&mut self, data: crate::AudioData) -> bool {
-        self.send(Message::Media(crate::MediaSample::new_audio(data)))
+    pub fn send_audio(&mut self, frame: crate::AudioFrame) -> bool {
+        self.send(Message::Media(crate::MediaFrame::new_audio(frame)))
     }
 
     pub fn send_video(&mut self, frame: crate::VideoFrame) -> bool {
-        self.send(Message::Media(crate::MediaSample::new_video(frame)))
+        self.send(Message::Media(crate::MediaFrame::new_video(frame)))
     }
 
     pub fn send_eos(&mut self) -> bool {

@@ -1,4 +1,4 @@
-use crate::audio::{AudioData, AudioFormat, SAMPLE_RATE};
+use crate::audio::{AudioFormat, AudioFrame, SAMPLE_RATE};
 
 // 以下の理由で Opus デコーダーは常にステレオ扱いにする:
 // - 実際の入力に関わらず常にステレオを指定しても問題ない
@@ -18,16 +18,16 @@ impl OpusDecoder {
         })
     }
 
-    pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
-        if data.format != AudioFormat::Opus {
+    pub fn decode(&mut self, frame: &AudioFrame) -> crate::Result<AudioFrame> {
+        if frame.format != AudioFormat::Opus {
             return Err(crate::Error::new(format!(
                 "expected Opus format, got {}",
-                data.format
+                frame.format
             )));
         }
 
-        let decoded_samples = self.inner.decode(&data.data)?;
-        let decoded = AudioData {
+        let decoded_samples = self.inner.decode(&frame.data)?;
+        let decoded = AudioFrame {
             data: decoded_samples
                 .iter()
                 .flat_map(|v| v.to_be_bytes().into_iter())
@@ -35,8 +35,8 @@ impl OpusDecoder {
             format: AudioFormat::I16Be,
             stereo: true,
             sample_rate: SAMPLE_RATE,
-            timestamp: data.timestamp,
-            duration: data.duration,
+            timestamp: frame.timestamp,
+            duration: frame.duration,
 
             // 生データにはサンプルエントリーは存在しない
             sample_entry: None,

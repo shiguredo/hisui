@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    Error, MediaSample, Message, ProcessorHandle, Result, TrackId,
+    Error, MediaFrame, Message, ProcessorHandle, Result, TrackId,
     sora_recording_layout::{Layout, Resolution, TrimSpans},
     sora_recording_layout_region::Region,
     sora_recording_metadata::SourceId,
@@ -226,14 +226,14 @@ pub struct VideoMixer {
 #[derive(Debug)]
 pub struct VideoMixerInput {
     pub track_id: TrackId,
-    pub sample: Option<MediaSample>,
+    pub sample: Option<MediaFrame>,
 }
 
 impl VideoMixerInput {
     pub fn video_frame(track_id: TrackId, frame: VideoFrame) -> Self {
         Self {
             track_id,
-            sample: Some(MediaSample::video_frame(frame)),
+            sample: Some(MediaFrame::video(frame)),
         }
     }
 
@@ -249,7 +249,7 @@ impl VideoMixerInput {
 pub enum VideoMixerOutput {
     Processed {
         track_id: TrackId,
-        sample: MediaSample,
+        sample: MediaFrame,
     },
     Pending {
         awaiting_track_id: Option<TrackId>,
@@ -258,7 +258,7 @@ pub enum VideoMixerOutput {
 }
 
 impl VideoMixerOutput {
-    pub fn expect_processed(self) -> Option<(TrackId, MediaSample)> {
+    pub fn expect_processed(self) -> Option<(TrackId, MediaFrame)> {
         if let Self::Processed { track_id, sample } = self {
             Some((track_id, sample))
         } else {
@@ -269,7 +269,7 @@ impl VideoMixerOutput {
 
 #[derive(Debug)]
 enum VideoMixerRunOutput {
-    Processed(MediaSample),
+    Processed(MediaFrame),
     Pending(TrackId),
     Finished,
 }
@@ -569,10 +569,10 @@ impl VideoMixer {
 
     fn handle_input_message(&mut self, track_id: &TrackId, message: Message) -> Result<()> {
         match message {
-            Message::Media(MediaSample::Video(sample)) => {
-                self.handle_input_sample(track_id, Some(MediaSample::Video(sample)))
+            Message::Media(MediaFrame::Video(sample)) => {
+                self.handle_input_sample(track_id, Some(MediaFrame::Video(sample)))
             }
-            Message::Media(MediaSample::Audio(_)) => Err(Error::new(format!(
+            Message::Media(MediaFrame::Audio(_)) => Err(Error::new(format!(
                 "expected a video sample on track {}, but got an audio sample",
                 track_id.get()
             ))),
@@ -584,7 +584,7 @@ impl VideoMixer {
     fn handle_input_sample(
         &mut self,
         track_id: &TrackId,
-        sample: Option<MediaSample>,
+        sample: Option<MediaFrame>,
     ) -> Result<()> {
         let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
             crate::Error::new(format!(
@@ -594,7 +594,7 @@ impl VideoMixer {
         })?;
         if let Some(sample) = sample {
             // キューに要素を追加する
-            let frame = sample.expect_video_frame()?;
+            let frame = sample.expect_video()?;
             if frame.format != VideoFormat::I420 {
                 return Err(crate::Error::new(format!(
                     "expected I420 format, got {:?}",
@@ -641,9 +641,7 @@ impl VideoMixer {
             {
                 if let Some(frame) = self.last_mixed_frame.take() {
                     // バッファにフレームが残っていたらそれを返す
-                    return Ok(VideoMixerRunOutput::Processed(MediaSample::video_frame(
-                        frame,
-                    )));
+                    return Ok(VideoMixerRunOutput::Processed(MediaFrame::video(frame)));
                 }
                 return Ok(VideoMixerRunOutput::Finished);
             }
@@ -671,14 +669,12 @@ impl VideoMixer {
             let mixed_frame = self.mix(now)?;
 
             if let Some(frame) = self.last_mixed_frame.replace(mixed_frame) {
-                return Ok(VideoMixerRunOutput::Processed(MediaSample::video_frame(
-                    frame,
-                )));
+                return Ok(VideoMixerRunOutput::Processed(MediaFrame::video(frame)));
             }
         }
     }
 
-    pub fn push_input(&mut self, track_id: TrackId, sample: Option<MediaSample>) -> Result<()> {
+    pub fn push_input(&mut self, track_id: TrackId, sample: Option<MediaFrame>) -> Result<()> {
         self.handle_input_sample(&track_id, sample)
     }
 

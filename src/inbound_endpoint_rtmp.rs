@@ -383,7 +383,7 @@ impl RtmpPublisherHandler {
             self.stats.add_input_audio_data_count();
             self.stats
                 .set_last_input_audio_timestamp(audio_data.timestamp);
-            tx.send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
+            tx.send_media(crate::MediaFrame::Audio(std::sync::Arc::new(audio_data)));
         }
         Ok(())
     }
@@ -399,7 +399,7 @@ impl RtmpPublisherHandler {
             self.stats.add_input_video_frame_count();
             self.stats
                 .set_last_input_video_timestamp(video_frame.timestamp);
-            tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
+            tx.send_media(crate::MediaFrame::Video(std::sync::Arc::new(video_frame)));
         }
         Ok(())
     }

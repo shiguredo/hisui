@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, path::Path};
 
-use crate::{Error, MediaSample, Message, ProcessorHandle, Result, TrackId, video::VideoFormat};
+use crate::{Error, MediaFrame, Message, ProcessorHandle, Result, TrackId, video::VideoFormat};
 
 #[derive(Debug)]
 pub struct YuvWriter {
@@ -24,7 +24,7 @@ impl YuvWriter {
 
         loop {
             match input_rx.recv().await {
-                Message::Media(MediaSample::Video(frame)) => {
+                Message::Media(MediaFrame::Video(frame)) => {
                     if frame.format != VideoFormat::I420 {
                         return Err(Error::new(format!(
                             "expected I420 video sample on track {}, but got {}",
@@ -34,7 +34,7 @@ impl YuvWriter {
                     }
                     self.file.write_all(&frame.data)?;
                 }
-                Message::Media(MediaSample::Audio(_)) => {
+                Message::Media(MediaFrame::Audio(_)) => {
                     return Err(Error::new(format!(
                         "expected a video sample on track {}, but got an audio sample",
                         input_track_id.get()

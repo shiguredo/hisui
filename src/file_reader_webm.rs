@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    Ack, AudioData, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
+    Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
     reader_webm::{WebmAudioReader, WebmVideoReader},
 };
 
@@ -129,7 +129,7 @@ impl WebmFileReader {
 struct ReaderState {
     audio_reader: Option<WebmAudioReader>,
     video_reader: Option<WebmVideoReader>,
-    next_audio: Option<AudioData>,
+    next_audio: Option<AudioFrame>,
     next_video: Option<VideoFrame>,
 }
 
@@ -230,7 +230,7 @@ enum NextKind {
 
 #[derive(Debug)]
 enum PendingSample {
-    Audio(AudioData),
+    Audio(AudioFrame),
     Video(VideoFrame),
 }
 
@@ -261,9 +261,9 @@ impl TrackSender {
         }
     }
 
-    async fn send_audio(&mut self, data: AudioData) -> bool {
+    async fn send_audio(&mut self, frame: AudioFrame) -> bool {
         self.prepare_send().await;
-        let ok = self.sender.send_audio(data);
+        let ok = self.sender.send_audio(frame);
         if ok {
             self.noacked_sent += 1;
         }

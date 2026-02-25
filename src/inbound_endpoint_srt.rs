@@ -114,7 +114,7 @@ struct PendingPesPacket {
 
 #[derive(Debug)]
 enum TsSample {
-    Audio(crate::AudioData),
+    Audio(crate::AudioFrame),
     Video(crate::VideoFrame),
 }
 
@@ -490,11 +490,11 @@ fn publish_samples(
 ) {
     for sample in samples {
         match sample {
-            TsSample::Audio(mut data) => {
-                data.timestamp = data.timestamp.saturating_add(connection_timestamp_offset);
-                let timestamp = data.timestamp;
+            TsSample::Audio(mut frame) => {
+                frame.timestamp = frame.timestamp.saturating_add(connection_timestamp_offset);
+                let timestamp = frame.timestamp;
                 if let Some(tx) = audio_track_tx {
-                    tx.send_audio(data);
+                    tx.send_audio(frame);
                 }
                 stats.set_audio_codec(crate::types::CodecName::Aac);
                 stats.add_input_audio_data_count();
@@ -925,7 +925,7 @@ impl SrtTsDemuxer {
                     .unwrap_or(0),
             );
 
-            samples.push(TsSample::Audio(crate::AudioData {
+            samples.push(TsSample::Audio(crate::AudioFrame {
                 data: raw_data,
                 format: crate::audio::AudioFormat::Aac,
                 stereo: channels == 2,

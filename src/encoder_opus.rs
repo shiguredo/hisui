@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
 
-use crate::audio::{self, AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
+use crate::audio::{self, AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE};
 
 #[derive(Debug)]
 pub struct OpusEncoder {
@@ -15,7 +15,7 @@ impl OpusEncoder {
         let inner =
             shiguredo_opus::Encoder::new(SAMPLE_RATE, CHANNELS as u8, bitrate.get() as u32)?;
 
-        // 最初の AudioData に載せるサンプルエントリーを作っておく
+        // 最初の AudioFrame に載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;
         let sample_entry = sample_entry(pre_skip);
 
@@ -25,29 +25,29 @@ impl OpusEncoder {
         })
     }
 
-    pub fn encode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
-        if data.format != AudioFormat::I16Be {
+    pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<AudioFrame> {
+        if frame.format != AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
                 "expected I16Be format, got {}",
-                data.format
+                frame.format
             )));
         }
-        if !data.stereo {
+        if !frame.stereo {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
-        let input = data.interleaved_stereo_samples()?.collect::<Vec<_>>();
+        let input = frame.interleaved_stereo_samples()?.collect::<Vec<_>>();
         let encoded = self.inner.encode(&input)?;
 
-        Ok(AudioData {
+        Ok(AudioFrame {
             // 固定値
             format: AudioFormat::Opus,
             stereo: true,
             sample_rate: SAMPLE_RATE,
 
             // 入力の値をそのまま引きつぐ
-            timestamp: data.timestamp,
-            duration: data.duration,
+            timestamp: frame.timestamp,
+            duration: frame.duration,
 
             // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
             sample_entry: self.sample_entry.take(),

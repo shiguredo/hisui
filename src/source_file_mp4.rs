@@ -197,7 +197,7 @@ async fn start_bridge(
 mod tests {
     use super::*;
 
-    use crate::MediaSample;
+    use crate::MediaFrame;
 
     #[tokio::test]
     async fn mp4_file_source_decode_smoke() -> Result<()> {
@@ -240,7 +240,7 @@ mod tests {
             let mut decoded_count = 0;
             loop {
                 match rx.recv().await {
-                    crate::Message::Media(MediaSample::Video(_)) => {
+                    crate::Message::Media(MediaFrame::Video(_)) => {
                         decoded_count += 1;
                     }
                     crate::Message::Eos => {

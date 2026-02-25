@@ -421,7 +421,7 @@ mod tests {
             let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
                 .await
                 .map_err(|e| Error::new(e.to_string()))?;
-            if let Message::Media(crate::MediaSample::Video(frame)) = message {
+            if let Message::Media(crate::MediaFrame::Video(frame)) = message {
                 assert_eq!(frame.format, VideoFormat::I420A);
                 if video_count > 0 {
                     assert!(frame.timestamp >= last_timestamp);

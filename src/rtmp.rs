@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::{Error, audio::AudioData, video::VideoFrame};
+use crate::{Error, audio::AudioFrame, video::VideoFrame};
 
 /// RTMP フレーム処理の共通ロジック（送信側）
 #[derive(Debug)]
@@ -26,14 +26,14 @@ impl RtmpOutgoingFrameHandler {
     /// 音声フレームを処理
     pub fn prepare_audio_frame(
         &mut self,
-        audio: Arc<AudioData>,
+        frame: Arc<AudioFrame>,
     ) -> crate::Result<(
         Option<shiguredo_rtmp::AudioFrame>,
         shiguredo_rtmp::AudioFrame,
     )> {
         // シーケンスヘッダーが必要な場合は生成
         let seq_frame = if self.audio_sequence_header_data.is_none() {
-            if let Some(entry) = &audio.sample_entry {
+            if let Some(entry) = &frame.sample_entry {
                 let seq_header = create_audio_sequence_header(entry)?;
                 let frame = shiguredo_rtmp::AudioFrame {
                     timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
@@ -55,19 +55,19 @@ impl RtmpOutgoingFrameHandler {
         };
 
         // 実フレームデータ
-        let frame = shiguredo_rtmp::AudioFrame {
+        let rtmp_frame = shiguredo_rtmp::AudioFrame {
             timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(
-                audio.timestamp.as_millis() as u32
+                frame.timestamp.as_millis() as u32
             ),
             format: shiguredo_rtmp::AudioFormat::Aac,
             sample_rate: shiguredo_rtmp::AudioFrame::AAC_SAMPLE_RATE,
             is_stereo: shiguredo_rtmp::AudioFrame::AAC_STEREO,
             is_8bit_sample: false,
             is_aac_sequence_header: false,
-            data: audio.data.clone(),
+            data: frame.data.clone(),
         };
 
-        Ok((seq_frame, frame))
+        Ok((seq_frame, rtmp_frame))
     }
 
     /// 映像フレームを処理
@@ -202,7 +202,7 @@ impl RtmpIncomingFrameHandler {
     pub fn process_audio_frame(
         &mut self,
         frame: shiguredo_rtmp::AudioFrame,
-    ) -> crate::Result<Option<AudioData>> {
+    ) -> crate::Result<Option<AudioFrame>> {
         // シーケンスヘッダーの処理
         if frame.is_aac_sequence_header {
             // AAC シーケンスヘッダー（Audio Specific Config）をパース
@@ -235,7 +235,7 @@ impl RtmpIncomingFrameHandler {
             .as_ref()
             .ok_or_else(|| Error::new("audio codec info is not initialized"))?;
 
-        Ok(Some(AudioData {
+        Ok(Some(AudioFrame {
             timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,

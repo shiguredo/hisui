@@ -9,7 +9,7 @@ use std::{
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
-    audio::{AudioData, AudioFormat},
+    audio::{AudioFormat, AudioFrame},
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -221,7 +221,7 @@ impl Mp4AudioReader {
         self.track_duration_offset = prev.track_duration_offset;
     }
 
-    fn next_sample(&mut self) -> crate::Result<Option<AudioData>> {
+    fn next_sample(&mut self) -> crate::Result<Option<AudioFrame>> {
         let sample = 'next_sample: loop {
             match self
                 .demuxer
@@ -275,7 +275,7 @@ impl Mp4AudioReader {
             self.codec = Some(name);
         }
 
-        Ok(Some(AudioData {
+        Ok(Some(AudioFrame {
             data,
             format: self.format,
             sample_entry,
@@ -288,7 +288,7 @@ impl Mp4AudioReader {
 }
 
 impl Iterator for Mp4AudioReader {
-    type Item = crate::Result<AudioData>;
+    type Item = crate::Result<AudioFrame>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_sample().transpose()

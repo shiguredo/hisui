@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
+use crate::audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE};
 
 /// FDK AAC デコーダー
 #[derive(Debug)]
@@ -28,16 +28,16 @@ impl FdkAacDecoder {
     }
 
     /// AAC データをデコードする
-    pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
-        if data.format != AudioFormat::Aac {
+    pub fn decode(&mut self, frame: &AudioFrame) -> crate::Result<AudioFrame> {
+        if frame.format != AudioFormat::Aac {
             return Err(crate::Error::new(format!(
                 "expected AAC audio format, got {:?}",
-                data.format
+                frame.format
             )));
         }
 
         if self.inner.is_none() {
-            let sample_entry = data.sample_entry.as_ref().ok_or_else(|| {
+            let sample_entry = frame.sample_entry.as_ref().ok_or_else(|| {
                 crate::Error::new("AAC sample entry is required to initialize FDK AAC decoder")
             })?;
             let audio_specific_config = extract_audio_specific_config(sample_entry)?;
@@ -57,7 +57,7 @@ impl FdkAacDecoder {
             .as_mut()
             .ok_or_else(|| crate::Error::new("FDK AAC decoder is not initialized"))?;
         let decoded_frame = inner
-            .decode(&data.data)
+            .decode(&frame.data)
             .map_err(|e| crate::Error::from(e).with_context("Failed to decode AAC"))?;
 
         if let Some(frame) = decoded_frame {
@@ -79,7 +79,7 @@ impl FdkAacDecoder {
             // TODO: そもそも将来的には decoder.rs のインタフェースを見直して、このようなワークアラウンドを不要にする
             let timestamp =
                 Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
-            Ok(AudioData {
+            Ok(AudioFrame {
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
                 stereo: true,
@@ -91,8 +91,8 @@ impl FdkAacDecoder {
         }
     }
 
-    /// デコード済みデータを AudioData に変換する共通処理
-    fn build_audio_data(&mut self, decoded_samples: &[i16]) -> crate::Result<AudioData> {
+    /// デコード済みデータを AudioFrame に変換する共通処理
+    fn build_audio_data(&mut self, decoded_samples: &[i16]) -> crate::Result<AudioFrame> {
         let decoded_samples_len = decoded_samples.len() as u64;
 
         let resampled = if let Some(resampled) = crate::audio::resample(
@@ -117,7 +117,7 @@ impl FdkAacDecoder {
         let timestamp =
             Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
 
-        Ok(AudioData {
+        Ok(AudioFrame {
             data: resampled.iter().flat_map(|v| v.to_be_bytes()).collect(),
             format: AudioFormat::I16Be,
             stereo: true,

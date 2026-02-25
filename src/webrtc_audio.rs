@@ -49,30 +49,30 @@ impl WebRtcAudioTransportSink {
         }
     }
 
-    pub(crate) fn push_i16be_stereo_48khz(&self, audio: &crate::AudioData) -> crate::Result<()> {
-        if audio.format != crate::audio::AudioFormat::I16Be {
+    pub(crate) fn push_i16be_stereo_48khz(&self, frame: &crate::AudioFrame) -> crate::Result<()> {
+        if frame.format != crate::audio::AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
                 "unsupported audio format: expected I16Be, got {}",
-                audio.format
+                frame.format
             )));
         }
-        if !audio.stereo {
+        if !frame.stereo {
             return Err(crate::Error::new(
                 "unsupported audio channel layout: expected stereo",
             ));
         }
-        if audio.sample_rate != crate::audio::SAMPLE_RATE {
+        if frame.sample_rate != crate::audio::SAMPLE_RATE {
             return Err(crate::Error::new(format!(
                 "unsupported audio sample rate: expected {}, got {}",
                 crate::audio::SAMPLE_RATE,
-                audio.sample_rate
+                frame.sample_rate
             )));
         }
-        if !audio.data.len().is_multiple_of(AUDIO_BYTES_PER_SAMPLE) {
+        if !frame.data.len().is_multiple_of(AUDIO_BYTES_PER_SAMPLE) {
             return Err(crate::Error::new("invalid I16Be audio data length"));
         }
 
-        let sample_count_total = audio.data.len() / AUDIO_BYTES_PER_SAMPLE;
+        let sample_count_total = frame.data.len() / AUDIO_BYTES_PER_SAMPLE;
         if !sample_count_total.is_multiple_of(AUDIO_CHANNELS) {
             return Err(crate::Error::new("invalid stereo audio sample count"));
         }
@@ -81,22 +81,22 @@ impl WebRtcAudioTransportSink {
         if let Ok(mut timing) = self.timing.lock()
             && let Some((expected_timestamp, drift)) = check_and_update_timestamp_continuity(
                 &mut timing,
-                audio.timestamp,
+                frame.timestamp,
                 samples_per_channel,
             )
             && drift > AUDIO_TIMESTAMP_DRIFT_WARN_THRESHOLD
         {
             tracing::warn!(
                 expected_timestamp_us = expected_timestamp.as_micros(),
-                actual_timestamp_us = audio.timestamp.as_micros(),
+                actual_timestamp_us = frame.timestamp.as_micros(),
                 drift_us = drift.as_micros(),
                 samples_per_channel,
                 "audio timestamp drift detected while pushing frame to WebRTC AudioTransport",
             );
         }
 
-        let mut native_endian = Vec::with_capacity(audio.data.len());
-        for chunk in audio.data.chunks_exact(AUDIO_BYTES_PER_SAMPLE) {
+        let mut native_endian = Vec::with_capacity(frame.data.len());
+        for chunk in frame.data.chunks_exact(AUDIO_BYTES_PER_SAMPLE) {
             let sample = i16::from_be_bytes([chunk[0], chunk[1]]);
             native_endian.extend_from_slice(&sample.to_ne_bytes());
         }
@@ -109,11 +109,11 @@ impl WebRtcAudioTransportSink {
             .ok_or_else(|| crate::Error::new("audio transport is not ready"))?;
 
         let mut new_mic_level = 0u32;
-        let estimated_capture_time_ns = i64::try_from(audio.timestamp.as_nanos()).ok();
+        let estimated_capture_time_ns = i64::try_from(frame.timestamp.as_nanos()).ok();
         tracing::trace!(
-            timestamp_us = audio.timestamp.as_micros(),
+            timestamp_us = frame.timestamp.as_micros(),
             samples_per_channel,
-            sample_rate = audio.sample_rate,
+            sample_rate = frame.sample_rate,
             "pushing audio frame to WebRTC AudioTransport",
         );
 
@@ -125,7 +125,7 @@ impl WebRtcAudioTransportSink {
                 samples_per_channel,
                 AUDIO_BYTES_PER_SAMPLE,
                 AUDIO_CHANNELS,
-                u32::from(audio.sample_rate),
+                u32::from(frame.sample_rate),
                 0,
                 0,
                 0,

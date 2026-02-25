@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE};
+use crate::audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE};
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
@@ -26,16 +26,16 @@ impl AudioToolboxDecoder {
         })
     }
 
-    pub fn decode(&mut self, data: &AudioData) -> crate::Result<AudioData> {
-        if data.format != AudioFormat::Aac {
+    pub fn decode(&mut self, frame: &AudioFrame) -> crate::Result<AudioFrame> {
+        if frame.format != AudioFormat::Aac {
             return Err(crate::Error::new(format!(
                 "expected AAC format, got {}",
-                data.format
+                frame.format
             )));
         }
 
         if self.inner.is_none() {
-            let sample_entry = data
+            let sample_entry = frame
                 .sample_entry
                 .as_ref()
                 .ok_or_else(|| crate::Error::new("missing sample entry for AAC decoder"))?;
@@ -54,12 +54,12 @@ impl AudioToolboxDecoder {
             .inner
             .as_mut()
             .ok_or_else(|| crate::Error::new("audio toolbox decoder is not initialized"))?;
-        inner.decode(&data.data)?;
+        inner.decode(&frame.data)?;
 
         self.build_audio_data()
     }
 
-    pub fn finish(&mut self) -> crate::Result<Option<AudioData>> {
+    pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
         let Some(inner) = &mut self.inner else {
             return Ok(None);
         };
@@ -74,8 +74,8 @@ impl AudioToolboxDecoder {
         Ok(Some(audio_data))
     }
 
-    /// デコード済みデータをAudioDataに変換する共通処理
-    fn build_audio_data(&mut self) -> crate::Result<AudioData> {
+    /// デコード済みデータをAudioFrameに変換する共通処理
+    fn build_audio_data(&mut self) -> crate::Result<AudioFrame> {
         let mut decoded_samples = Vec::new();
         let inner = self
             .inner
@@ -107,7 +107,7 @@ impl AudioToolboxDecoder {
         let timestamp =
             Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
 
-        Ok(AudioData {
+        Ok(AudioFrame {
             data: decoded_samples
                 .iter()
                 .flat_map(|v| v.to_be_bytes())

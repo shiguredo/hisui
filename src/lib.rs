@@ -99,9 +99,9 @@ mod webrtc_video;
 pub mod writer_mp4;
 pub mod writer_yuv;
 
-pub use audio::AudioData;
+pub use audio::AudioFrame;
 pub use error::Error;
-pub use media::MediaSample;
+pub use media::MediaFrame;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineHandle, Message, MessageReceiver, MessageSender,
     PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata, PublishTrackError,

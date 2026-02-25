@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    Error, MediaSample, Message, ProcessorHandle, TrackId,
+    Error, MediaFrame, Message, ProcessorHandle, TrackId,
     types::EvenUsize,
     video::{FrameRate, VideoFormat, VideoFrame},
 };
@@ -381,14 +381,14 @@ fn spawn_input_receiver(
         loop {
             match input_rx.recv().await {
                 Message::Media(sample) => match sample {
-                    MediaSample::Video(frame) => {
+                    MediaFrame::Video(frame) => {
                         let _ = event_tx.send(TrackEvent::Video {
                             track_id: track_id.clone(),
                             frame,
                             received_at: mixer_start.elapsed(),
                         });
                     }
-                    MediaSample::Audio(_) => {
+                    MediaFrame::Audio(_) => {
                         let _ = event_tx.send(TrackEvent::Error {
                             track_id: track_id.clone(),
                             reason: "expected a video sample, but got an audio sample".to_owned(),
@@ -1058,7 +1058,7 @@ mod tests {
             let message = tokio::time::timeout(Duration::from_secs(2), mixed_rx.recv())
                 .await
                 .map_err(|e| Error::new(e.to_string()))?;
-            if matches!(message, Message::Media(MediaSample::Video(_))) {
+            if matches!(message, Message::Media(MediaFrame::Video(_))) {
                 received_video_frame_count += 1;
             }
         }

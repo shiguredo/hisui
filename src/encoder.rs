@@ -16,11 +16,11 @@ use crate::encoder_nvcodec::NvcodecEncoder;
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::AudioData,
+    audio::AudioFrame,
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
     encoder_svt_av1::SvtAv1Encoder,
-    media::MediaSample,
+    media::MediaFrame,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, VideoFrame},
 };
@@ -29,13 +29,13 @@ use crate::{
 pub struct AudioEncoder {
     total_audio_data_count_metric: crate::stats::StatsCounter,
     _error_flag: crate::stats::StatsFlag,
-    encoded: VecDeque<AudioData>,
+    encoded: VecDeque<AudioFrame>,
     eos: bool,
     inner: AudioEncoderInner,
 }
 
 enum EncoderRunOutput {
-    Processed(MediaSample),
+    Processed(MediaFrame),
     Pending,
     Finished,
 }
@@ -198,10 +198,10 @@ impl AudioEncoder {
         }
     }
 
-    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+    fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         let encoded = if let Some(sample) = sample {
-            let data = sample.expect_audio_data()?;
-            self.inner.encode(&data)?
+            let frame = sample.expect_audio()?;
+            self.inner.encode(&frame)?
         } else {
             self.eos = true;
             self.inner.finish()?
@@ -215,8 +215,8 @@ impl AudioEncoder {
     }
 
     fn poll_output(&mut self) -> Result<EncoderRunOutput> {
-        if let Some(data) = self.encoded.pop_front() {
-            Ok(EncoderRunOutput::Processed(MediaSample::audio_data(data)))
+        if let Some(frame) = self.encoded.pop_front() {
+            Ok(EncoderRunOutput::Processed(MediaFrame::audio(frame)))
         } else if self.eos {
             Ok(EncoderRunOutput::Finished)
         } else {
@@ -270,17 +270,17 @@ impl AudioEncoderInner {
         AudioToolboxEncoder::new(bitrate).map(Self::AudioToolbox)
     }
 
-    fn encode(&mut self, data: &AudioData) -> crate::Result<Option<AudioData>> {
+    fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
         match self {
             #[cfg(feature = "fdk-aac")]
-            Self::FdkAac(encoder) => encoder.encode(data),
+            Self::FdkAac(encoder) => encoder.encode(frame),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(encoder) => encoder.encode(data),
-            Self::Opus(encoder) => encoder.encode(data).map(Some),
+            Self::AudioToolbox(encoder) => encoder.encode(frame),
+            Self::Opus(encoder) => encoder.encode(frame).map(Some),
         }
     }
 
-    fn finish(&mut self) -> crate::Result<Option<AudioData>> {
+    fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
         match self {
             #[cfg(feature = "fdk-aac")]
             Self::FdkAac(encoder) => encoder.finish(),
@@ -552,9 +552,9 @@ impl VideoEncoder {
         }
     }
 
-    fn handle_input_sample(&mut self, sample: Option<MediaSample>) -> Result<()> {
+    fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
-            let frame = sample.expect_video_frame()?;
+            let frame = sample.expect_video()?;
 
             // 最初のフレームで、解像度を使って初期化する
             if self.inner.is_none() {
@@ -582,7 +582,7 @@ impl VideoEncoder {
 
     fn poll_output(&mut self) -> Result<EncoderRunOutput> {
         if let Some(frame) = self.encoded.pop_front() {
-            Ok(EncoderRunOutput::Processed(MediaSample::video_frame(frame)))
+            Ok(EncoderRunOutput::Processed(MediaFrame::video(frame)))
         } else if self.eos {
             Ok(EncoderRunOutput::Finished)
         } else {

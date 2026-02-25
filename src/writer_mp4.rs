@@ -14,8 +14,8 @@ use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
 
 use crate::{
     TrackId,
-    audio::AudioData,
-    media::MediaSample,
+    audio::AudioFrame,
+    media::MediaFrame,
     types::CodecName,
     video::{FrameRate, VideoFrame},
 };
@@ -197,7 +197,7 @@ pub struct Mp4Writer {
     next_position: u64,
     input_audio_track_id: Option<TrackId>,
     input_video_track_id: Option<TrackId>,
-    input_audio_queue: VecDeque<Arc<AudioData>>,
+    input_audio_queue: VecDeque<Arc<AudioFrame>>,
     input_video_queue: VecDeque<Arc<VideoFrame>>,
     appending_video_chunk: bool,
     stats: Mp4WriterStats,
@@ -429,16 +429,16 @@ impl Mp4Writer {
     fn handle_input_sample(
         &mut self,
         track_kind: InputTrackKind,
-        sample: Option<MediaSample>,
+        sample: Option<MediaFrame>,
     ) -> crate::Result<()> {
         match (track_kind, sample) {
-            (InputTrackKind::Audio, Some(MediaSample::Audio(sample))) => {
+            (InputTrackKind::Audio, Some(MediaFrame::Audio(sample))) => {
                 self.input_audio_queue.push_back(sample);
             }
             (InputTrackKind::Audio, None) => {
                 self.input_audio_track_id = None;
             }
-            (InputTrackKind::Video, Some(MediaSample::Video(sample))) => {
+            (InputTrackKind::Video, Some(MediaFrame::Video(sample))) => {
                 self.input_video_queue.push_back(sample);
             }
             (InputTrackKind::Video, None) => {
@@ -543,11 +543,11 @@ impl Mp4Writer {
         audio_rx: &mut Option<crate::MessageReceiver>,
     ) -> crate::Result<()> {
         match msg {
-            crate::Message::Media(crate::MediaSample::Audio(sample)) => {
+            crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 if self.input_audio_track_id.is_some() {
                     self.handle_input_sample(
                         InputTrackKind::Audio,
-                        Some(crate::MediaSample::Audio(sample)),
+                        Some(crate::MediaFrame::Audio(sample)),
                     )?;
                 }
             }
@@ -568,11 +568,11 @@ impl Mp4Writer {
         video_rx: &mut Option<crate::MessageReceiver>,
     ) -> crate::Result<()> {
         match msg {
-            crate::Message::Media(crate::MediaSample::Video(sample)) => {
+            crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 if self.input_video_track_id.is_some() {
                     self.handle_input_sample(
                         InputTrackKind::Video,
-                        Some(crate::MediaSample::Video(sample)),
+                        Some(crate::MediaFrame::Video(sample)),
                     )?;
                 }
             }

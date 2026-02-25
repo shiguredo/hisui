@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
     TrackId,
-    audio::{AudioData, AudioFormat, CHANNELS, SAMPLE_RATE},
-    media::MediaSample,
+    audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE},
+    media::MediaFrame,
     sora_recording_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     sora_recording_metadata::{SourceId, SourceInfo},
     sora_recording_mixer_audio::{AudioMixer, AudioMixerOutput},
@@ -48,7 +48,7 @@ fn mix_three_sources_without_trim() -> hisui::Result<()> {
         hisui::stats::Stats::new(),
     );
 
-    // ソースに AudioData を供給する
+    // ソースに AudioFrame を供給する
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
@@ -161,7 +161,7 @@ fn mix_three_sources_with_trim() -> hisui::Result<()> {
         hisui::stats::Stats::new(),
     );
 
-    // ソースに AudioData を供給する
+    // ソースに AudioFrame を供給する
     let duration = Duration::from_millis(20); // このテストでは尺は固定
     for i in 0..5 {
         let sample = 2; // 音声サンプル（ソースで固定）
@@ -240,7 +240,7 @@ fn mix_three_sources_with_trim() -> hisui::Result<()> {
     Ok(())
 }
 
-/// AudioData.duration がソース毎に異なる場合のテスト
+/// AudioFrame.duration がソース毎に異なる場合のテスト
 #[test]
 fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
     // 100 ms のソースを三つ用意する
@@ -259,7 +259,7 @@ fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
         hisui::stats::Stats::new(),
     );
 
-    // それぞれのソースに AudioData を供給する
+    // それぞれのソースに AudioFrame を供給する
     for i in 0..10 {
         let sample = 2;
         let duration = Duration::from_millis(10); // 尺は 10 ms
@@ -288,7 +288,7 @@ fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
     push_input(&mut mixer, eos(&input_stream_id1))?;
     push_input(&mut mixer, eos(&input_stream_id2))?;
 
-    // 合成結果を確認する (合成後の AudioData.duraiton は 20 ms に固定）
+    // 合成結果を確認する (合成後の AudioFrame.duraiton は 20 ms に固定）
     for _ in 0..5 {
         let audio_data = next_mixed_data(&mut mixer)?;
         for c in audio_data.data.chunks(2) {
@@ -330,10 +330,10 @@ fn non_pcm_audio_input_error() -> hisui::Result<()> {
         hisui::stats::Stats::new(),
     );
 
-    // 適当に不正なフォーマットを指定して AudioData を送る
+    // 適当に不正なフォーマットを指定して AudioFrame を送る
     let duration = Duration::from_millis(20);
     let mut input = audio_data(&source, &input_stream_id, 0, duration, 0);
-    if let Some(MediaSample::Audio(audio_data)) = &mut input.sample {
+    if let Some(MediaFrame::Audio(audio_data)) = &mut input.sample {
         let audio_data = Arc::make_mut(audio_data);
         audio_data.format = AudioFormat::Opus;
     }
@@ -419,7 +419,7 @@ fn source(id: usize, start_time_ms: u64, end_time_ms: u64) -> (SourceInfo, Track
 #[derive(Debug)]
 struct MixerInput {
     track_id: TrackId,
-    sample: Option<MediaSample>,
+    sample: Option<MediaFrame>,
 }
 
 fn audio_data(
@@ -432,7 +432,7 @@ fn audio_data(
     let sample_bytes = 2; // 一つのサンプルは i16 で表現されるので 2 バイト
     let sample_count =
         (SAMPLE_RATE as f64 * duration.as_secs_f64()) as usize * CHANNELS as usize * sample_bytes;
-    let data = AudioData {
+    let data = AudioFrame {
         data: vec![sample; sample_count],
         format: AudioFormat::I16Be,
         stereo: true,
@@ -443,7 +443,7 @@ fn audio_data(
     };
     MixerInput {
         track_id: track_id.clone(),
-        sample: Some(MediaSample::audio_data(data)),
+        sample: Some(MediaFrame::audio(data)),
     }
 }
 
@@ -462,9 +462,9 @@ fn push_input(mixer: &mut AudioMixer, input: MixerInput) -> hisui::Result<()> {
     mixer.push_input(input.track_id, input.sample)
 }
 
-fn next_mixed_data(mixer: &mut AudioMixer) -> hisui::Result<Arc<AudioData>> {
+fn next_mixed_data(mixer: &mut AudioMixer) -> hisui::Result<Arc<AudioFrame>> {
     match mixer.next_output()? {
-        AudioMixerOutput::Processed(sample) => sample.expect_audio_data(),
+        AudioMixerOutput::Processed(sample) => sample.expect_audio(),
         AudioMixerOutput::Pending(track_id) => Err(hisui::Error::new(format!(
             "audio mixer is unexpectedly pending on track {}",
             track_id
