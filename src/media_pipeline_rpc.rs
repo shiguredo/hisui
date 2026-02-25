@@ -679,8 +679,8 @@ enum RpcSuccessResult {
     CreateMp4FileSource { processor_id: ProcessorId },
     CreateMp4VideoReader { processor_id: ProcessorId },
     CreateMp4AudioReader { processor_id: ProcessorId },
-    CreateAudioDecoder { processor_id: ProcessorId },
     CreateVideoDecoder { processor_id: ProcessorId },
+    CreateAudioDecoder { processor_id: ProcessorId },
     CreatePngFileSource { processor_id: ProcessorId },
     CreateVideoDeviceSource { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
@@ -708,10 +708,10 @@ impl nojson::DisplayJson for RpcSuccessResult {
             Self::CreateMp4AudioReader { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
-            Self::CreateAudioDecoder { processor_id } => {
+            Self::CreateVideoDecoder { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
-            Self::CreateVideoDecoder { processor_id } => {
+            Self::CreateAudioDecoder { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreatePngFileSource { processor_id } => {
