@@ -381,13 +381,13 @@ fn parse_optional_key_length(
     };
 
     let key_length = match raw {
-        16 | 128 => KeyLength::Aes128,
-        32 | 256 => KeyLength::Aes256,
+        16 => KeyLength::Aes128,
+        32 => KeyLength::Aes256,
         _ => {
             return Err(value
                 .to_member("keyLength")?
                 .required()?
-                .invalid("keyLength must be one of 16, 32, 128 or 256"));
+                .invalid("keyLength must be one of 16 or 32"));
         }
     };
 
