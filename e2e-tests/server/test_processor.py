@@ -26,10 +26,13 @@ def _run_ffmpeg_rtmp_publish(
         pytest.skip("ffmpeg is required for RTMP inbound endpoint test")
 
     deadline = time.time() + 10.0
+    min_expected_elapsed = 0.8
+    last_error = "(no attempt)"
     while time.time() < deadline:
         cmd = [
             ffmpeg_path,
             "-hide_banner",
+            "-re",
             "-loglevel",
             "error",
             "-nostdin",
@@ -42,17 +45,29 @@ def _run_ffmpeg_rtmp_publish(
             cmd.extend(["-an", "-c:v", "copy"])
         cmd.extend(["-f", "flv", publish_url])
 
+        publish_started_at = time.time()
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
         )
+        elapsed = time.time() - publish_started_at
         if result.returncode == 0:
-            return
+            # 速すぎる正常終了は、接続直後切断などで実データが流れていない可能性があるため再試行する。
+            if elapsed >= min_expected_elapsed:
+                return
+            last_error = (
+                f"ffmpeg exited too early: returncode=0, elapsed={elapsed:.3f}, stderr={result.stderr}"
+            )
+            time.sleep(0.2)
+            continue
+        last_error = (
+            f"returncode={result.returncode}, elapsed={elapsed:.3f}, stderr={result.stderr}"
+        )
         time.sleep(0.2)
 
     raise AssertionError(
-        f"ffmpeg failed: returncode={result.returncode}, stderr={result.stderr}"
+        f"ffmpeg failed: {last_error}"
     )
 
 
