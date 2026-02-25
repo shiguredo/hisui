@@ -359,14 +359,13 @@ fn parse_optional_non_empty_string(
     let raw: Option<String> = value.to_member(member)?.try_into()?;
     match raw {
         Some(s) => {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
+            if s.is_empty() {
                 return Err(value
                     .to_member(member)?
                     .required()?
                     .invalid(format!("{member} must not be empty")));
             }
-            Ok(Some(trimmed.to_owned()))
+            Ok(Some(s))
         }
         None => Ok(None),
     }
