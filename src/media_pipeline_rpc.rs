@@ -303,6 +303,9 @@ impl MediaPipelineHandle {
             processor_id.clone(),
             ProcessorMetadata::new("video_decoder"),
             move |handle| async move {
+                // 現時点の RPC は最小構成として default のみを受け付ける。
+                // engines / decode_params は必要になった時点で RPC パラメーターを拡張する。
+                // openh264_lib は RPC ではなく、コマンドライン引数 / 環境変数で指定する想定。
                 let decoder = crate::decoder::VideoDecoder::new(
                     crate::decoder::VideoDecoderOptions::default(),
                     handle.stats(),
