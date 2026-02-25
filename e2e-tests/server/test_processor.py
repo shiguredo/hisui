@@ -14,6 +14,55 @@ import pytest
 from hisui_server import HisuiServer, reserve_ephemeral_port
 from processor_metrics import ProcessorMetrics
 
+_DEBUG_METRIC_NAMES = (
+    "hisui_total_input_video_frame_count",
+    "hisui_last_input_video_timestamp",
+    "hisui_is_listening",
+    "hisui_video_codec",
+    "hisui_total_input_audio_data_count",
+)
+
+
+def _collect_processor_debug_metrics(
+    metrics: list[dict[str, Any]],
+    *,
+    processor_id: str,
+    processor_type: str,
+) -> dict[str, list[dict[str, Any]]]:
+    target_labels = {
+        "processor_id": processor_id,
+        "processor_type": processor_type,
+    }
+    result: dict[str, list[dict[str, Any]]] = {}
+
+    for family in metrics:
+        name = family.get("name")
+        if name not in _DEBUG_METRIC_NAMES:
+            continue
+        samples = family.get("metrics")
+        if not isinstance(samples, list):
+            continue
+
+        matched_samples: list[dict[str, Any]] = []
+        for sample in samples:
+            if not isinstance(sample, dict):
+                continue
+            labels = sample.get("labels")
+            if not isinstance(labels, dict):
+                continue
+            if all(labels.get(k) == v for k, v in target_labels.items()):
+                matched_samples.append(
+                    {
+                        "labels": labels,
+                        "value": sample.get("value"),
+                    }
+                )
+
+        if matched_samples:
+            result[name] = matched_samples
+
+    return result
+
 
 def _run_ffmpeg_rtmp_publish(
     input_path: Path,
@@ -147,9 +196,16 @@ def _wait_for_video_frame_count(
     timeout: float = 10.0,
 ) -> int:
     deadline = time.time() + timeout
+    last_debug_metrics: dict[str, list[dict[str, Any]]] = {}
     while time.time() < deadline:
+        metrics_json = server.metrics_json()
+        last_debug_metrics = _collect_processor_debug_metrics(
+            metrics_json,
+            processor_id=processor_id,
+            processor_type=processor_type,
+        )
         metrics = ProcessorMetrics(
-            server.metrics_json(),
+            metrics_json,
             processor_id=processor_id,
             processor_type=processor_type,
         )
@@ -161,12 +217,20 @@ def _wait_for_video_frame_count(
         if frame_count == expected_count:
             return frame_count
         if frame_count > expected_count:
+            debug_json = json.dumps(last_debug_metrics, ensure_ascii=False, sort_keys=True)
+            print(
+                f"DEBUG rtmp/srt processor metrics: processor_id={processor_id}, processor_type={processor_type}, metrics={debug_json}"
+            )
             raise AssertionError(
-                f"{processor_type} video frame count exceeded expected value: expected={expected_count}, actual={frame_count}"
+                f"{processor_type} video frame count exceeded expected value: expected={expected_count}, actual={frame_count}, debug_metrics={debug_json}"
             )
         time.sleep(0.1)
+    debug_json = json.dumps(last_debug_metrics, ensure_ascii=False, sort_keys=True)
+    print(
+        f"DEBUG rtmp/srt processor metrics: processor_id={processor_id}, processor_type={processor_type}, metrics={debug_json}"
+    )
     raise AssertionError(
-        f"{processor_type} did not reach expected video frame count in time: expected={expected_count}"
+        f"{processor_type} did not reach expected video frame count in time: expected={expected_count}, debug_metrics={debug_json}"
     )
 
 
