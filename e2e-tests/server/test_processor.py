@@ -154,6 +154,39 @@ def _run_ffmpeg_srt_publish(
     )
 
 
+def _create_opus_mp4(input_path: Path, output_path: Path) -> None:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for Opus mp4 test input generation")
+
+    cmd = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(input_path),
+        "-vn",
+        "-c:a",
+        "libopus",
+        "-f",
+        "mp4",
+        str(output_path),
+    ]
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(
+            "ffmpeg with Opus-in-mp4 support is required: "
+            f"returncode={result.returncode}, stderr={result.stderr}"
+        )
+
+
 def _run_ffmpeg_srt_publish_once(
     input_path: Path,
     publish_url: str,
@@ -433,6 +466,43 @@ def test_create_mp4_video_reader_and_compare_stats(binary_path: Path):
         assert metrics.value("hisui_codec", value="AV1") == "1"
 
 
+def test_create_mp4_audio_reader_and_compare_stats(binary_path: Path):
+    """createMp4AudioReader で生成した processor の統計値を確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "red-320x320-h264-aac.mp4"
+    )
+    processor_id = "e2e-mp4-audio-reader"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createMp4AudioReader",
+            {
+                "path": str(input_path),
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        assert (
+            server.wait_processor_terminated(
+                processor_id,
+                timeout=10.0,
+            )
+            == processor_id
+        )
+
+        metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="mp4_audio_reader",
+        )
+        assert int(metrics.value("hisui_total_sample_count")) > 0
+        assert float(metrics.value("hisui_total_track_seconds")) > 0.0
+        assert metrics.value("hisui_codec", value="AAC") == "1"
+
+
 def test_create_video_decoder_from_mp4_video_reader_and_compare_stats(binary_path: Path):
     """Mp4VideoReader -> VideoDecoder の統計値を確認する"""
     input_path = (
@@ -494,7 +564,7 @@ def test_create_video_decoder_from_mp4_video_reader_and_compare_stats(binary_pat
 
 def test_create_audio_decoder_from_mp4_audio_reader_and_compare_stats(binary_path: Path):
     """Mp4AudioReader -> AudioDecoder の統計値を確認する"""
-    input_path = (
+    src_input_path = (
         Path(__file__).resolve().parents[2]
         / "testdata"
         / "red-320x320-h264-aac.mp4"
@@ -503,60 +573,65 @@ def test_create_audio_decoder_from_mp4_audio_reader_and_compare_stats(binary_pat
     decoder_processor_id = "e2e-audio-decoder"
     decoded_audio_track_id = "e2e-decoded-audio-track"
 
-    with HisuiServer(binary_path, manual_start_trigger=True) as server:
-        create_reader_response = server.rpc_call(
-            "createMp4AudioReader",
-            {
-                "path": str(input_path),
-                "processorId": reader_processor_id,
-            },
-        )
-        assert create_reader_response["result"]["processorId"] == reader_processor_id
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        input_path = Path(tmp_dir) / "audio-opus.mp4"
+        _create_opus_mp4(src_input_path, input_path)
 
-        create_decoder_response = server.rpc_call(
-            "createAudioDecoder",
-            {
-                "inputTrackId": reader_processor_id,
-                "outputTrackId": decoded_audio_track_id,
-                "processorId": decoder_processor_id,
-            },
-        )
-        assert create_decoder_response["result"]["processorId"] == decoder_processor_id
-
-        start_response = server.trigger_start()
-        assert start_response["result"]["started"] is True
-
-        assert (
-            server.wait_processor_terminated(
-                reader_processor_id,
-                timeout=10.0,
+        with HisuiServer(binary_path, manual_start_trigger=True) as server:
+            create_reader_response = server.rpc_call(
+                "createMp4AudioReader",
+                {
+                    "path": str(input_path),
+                    "processorId": reader_processor_id,
+                },
             )
-            == reader_processor_id
-        )
-        assert (
-            server.wait_processor_terminated(
-                decoder_processor_id,
-                timeout=10.0,
-            )
-            == decoder_processor_id
-        )
+            assert create_reader_response["result"]["processorId"] == reader_processor_id
 
-        metrics = ProcessorMetrics(
-            server.metrics_json(),
-            processor_id=decoder_processor_id,
-            processor_type="audio_decoder",
-        )
-        reader_metrics = ProcessorMetrics(
-            server.metrics_json(),
-            processor_id=reader_processor_id,
-            processor_type="mp4_audio_reader",
-        )
-        assert metrics.value("hisui_total_audio_data_count") == reader_metrics.value(
-            "hisui_total_sample_count"
-        )
-        assert metrics.value("hisui_codec", value="OPUS") == "1"
-        assert metrics.value("hisui_engine", value="opus") == "1"
-        assert metrics.value("hisui_error") == "0"
+            create_decoder_response = server.rpc_call(
+                "createAudioDecoder",
+                {
+                    "inputTrackId": reader_processor_id,
+                    "outputTrackId": decoded_audio_track_id,
+                    "processorId": decoder_processor_id,
+                },
+            )
+            assert create_decoder_response["result"]["processorId"] == decoder_processor_id
+
+            start_response = server.trigger_start()
+            assert start_response["result"]["started"] is True
+
+            assert (
+                server.wait_processor_terminated(
+                    reader_processor_id,
+                    timeout=10.0,
+                )
+                == reader_processor_id
+            )
+            assert (
+                server.wait_processor_terminated(
+                    decoder_processor_id,
+                    timeout=10.0,
+                )
+                == decoder_processor_id
+            )
+
+            metrics = ProcessorMetrics(
+                server.metrics_json(),
+                processor_id=decoder_processor_id,
+                processor_type="audio_decoder",
+            )
+            reader_metrics = ProcessorMetrics(
+                server.metrics_json(),
+                processor_id=reader_processor_id,
+                processor_type="mp4_audio_reader",
+            )
+            assert reader_metrics.value("hisui_codec", value="OPUS") == "1"
+            assert metrics.value("hisui_total_audio_data_count") == reader_metrics.value(
+                "hisui_total_sample_count"
+            )
+            assert metrics.value("hisui_codec", value="OPUS") == "1"
+            assert metrics.value("hisui_engine", value="opus") == "1"
+            assert metrics.value("hisui_error") == "0"
 
 
 def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
