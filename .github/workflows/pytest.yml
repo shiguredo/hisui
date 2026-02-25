@@ -62,3 +62,22 @@ jobs:
 
       - name: Run pytest
         run: uv run pytest
+
+  slack_notify:
+    needs:
+      - pytest
+    permissions:
+      actions: read
+    timeout-minutes: 20
+    runs-on: ubuntu-slim
+    if: always()
+    steps:
+      - name: Slack Notification
+        uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          slack_channel: hisui
+          notify_mode: failure_and_fixed
+        env:
+          GH_TOKEN: ${{ github.token }}
