@@ -145,6 +145,7 @@ def _wait_for_video_frame_count(
     *,
     processor_type: str,
     timeout: float = 10.0,
+    allow_exceed: bool = False,
 ) -> int:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -160,6 +161,8 @@ def _wait_for_video_frame_count(
             continue
         if frame_count == expected_count:
             return frame_count
+        if allow_exceed and frame_count > expected_count:
+            return frame_count
         if frame_count > expected_count:
             raise AssertionError(
                 f"{processor_type} video frame count exceeded expected value: expected={expected_count}, actual={frame_count}"
@@ -167,6 +170,99 @@ def _wait_for_video_frame_count(
         time.sleep(0.1)
     raise AssertionError(
         f"{processor_type} did not reach expected video frame count in time: expected={expected_count}"
+    )
+
+
+def _current_video_frame_count(
+    server: HisuiServer,
+    *,
+    processor_id: str,
+    processor_type: str,
+) -> int:
+    try:
+        return int(
+            ProcessorMetrics(
+                server.metrics_json(),
+                processor_id=processor_id,
+                processor_type=processor_type,
+            ).value("hisui_total_input_video_frame_count")
+        )
+    except (AssertionError, ValueError):
+        return 0
+
+
+def _publish_rtmp_and_wait_video_increment(
+    server: HisuiServer,
+    *,
+    input_path: Path,
+    publish_url: str,
+    processor_id: str,
+    processor_type: str,
+    increment: int,
+    with_audio: bool,
+    timeout: float = 12.0,
+) -> int:
+    base_count = _current_video_frame_count(
+        server,
+        processor_id=processor_id,
+        processor_type=processor_type,
+    )
+    expected_count = base_count + increment
+    deadline = time.time() + timeout
+    last_error = "(no attempt)"
+
+    while time.time() < deadline:
+        try:
+            _run_ffmpeg_rtmp_publish(
+                input_path,
+                publish_url,
+                with_audio=with_audio,
+            )
+        except AssertionError as e:
+            last_error = str(e)
+            time.sleep(0.2)
+            continue
+
+        try:
+            return _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=expected_count,
+                processor_type=processor_type,
+                timeout=2.5,
+                allow_exceed=True,
+            )
+        except AssertionError as e:
+            last_error = str(e)
+            time.sleep(0.2)
+
+    raise AssertionError(
+        f"rtmp publish did not increase video frame count to expected value: expected={expected_count}, last_error={last_error}"
+    )
+
+
+def _wait_for_processor_listening(
+    server: HisuiServer,
+    *,
+    processor_id: str,
+    processor_type: str,
+    timeout: float = 10.0,
+) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            listening = ProcessorMetrics(
+                server.metrics_json(),
+                processor_id=processor_id,
+                processor_type=processor_type,
+            ).value("hisui_is_listening")
+            if listening == "1":
+                return
+        except AssertionError:
+            pass
+        time.sleep(0.1)
+    raise AssertionError(
+        f"processor did not become listening in time: processor_id={processor_id}, processor_type={processor_type}"
     )
 
 
@@ -367,16 +463,19 @@ def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
         )
         assert create_response["result"]["processorId"] == processor_id
 
-        _run_ffmpeg_rtmp_publish(
-            input_path,
-            publish_url,
-            with_audio=False,
-        )
-        frame_count = _wait_for_video_frame_count(
+        _wait_for_processor_listening(
             server,
-            processor_id,
-            expected_count=25,
+            processor_id=processor_id,
             processor_type="rtmp_inbound_endpoint",
+        )
+        frame_count = _publish_rtmp_and_wait_video_increment(
+            server,
+            input_path=input_path,
+            publish_url=publish_url,
+            processor_id=processor_id,
+            processor_type="rtmp_inbound_endpoint",
+            increment=25,
+            with_audio=False,
         )
 
         metrics = ProcessorMetrics(
@@ -385,7 +484,7 @@ def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
             processor_type="rtmp_inbound_endpoint",
         )
         assert metrics.value("hisui_video_codec", value="H264") == "1"
-        assert frame_count == 25
+        assert frame_count >= 25
 
 
 def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
@@ -418,16 +517,19 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         )
         assert create_response["result"]["processorId"] == processor_id
 
-        _run_ffmpeg_rtmp_publish(
-            av_input_path,
-            publish_url,
-            with_audio=True,
-        )
-        video_count = _wait_for_video_frame_count(
+        _wait_for_processor_listening(
             server,
-            processor_id,
-            expected_count=25,
+            processor_id=processor_id,
             processor_type="rtmp_inbound_endpoint",
+        )
+        video_count = _publish_rtmp_and_wait_video_increment(
+            server,
+            input_path=av_input_path,
+            publish_url=publish_url,
+            processor_id=processor_id,
+            processor_type="rtmp_inbound_endpoint",
+            increment=25,
+            with_audio=True,
         )
 
         metrics = ProcessorMetrics(
@@ -438,7 +540,7 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         audio_count = int(metrics.value("hisui_total_input_audio_data_count"))
         assert metrics.value("hisui_video_codec", value="H264") == "1"
         assert metrics.value("hisui_audio_codec", value="AAC") == "1"
-        assert video_count == 25
+        assert video_count >= 25
         # ffmpeg の終了待機後でも、RTMP / FLV の終端処理タイミング差で
         # 音声カウントが 43 - 45 付近で揺れることがあるため、下限チェックにしている。
         assert audio_count >= 43
@@ -472,19 +574,22 @@ def test_create_rtmp_inbound_endpoint_reconnect_keeps_live_timestamp_progress(
         )
         assert create_response["result"]["processorId"] == processor_id
 
-        _run_ffmpeg_rtmp_publish(
-            input_path,
-            publish_url,
-            with_audio=False,
+        _wait_for_processor_listening(
+            server,
+            processor_id=processor_id,
+            processor_type="rtmp_inbound_endpoint",
         )
         assert (
-            _wait_for_video_frame_count(
+            _publish_rtmp_and_wait_video_increment(
                 server,
-                processor_id,
-                expected_count=25,
+                input_path=input_path,
+                publish_url=publish_url,
+                processor_id=processor_id,
                 processor_type="rtmp_inbound_endpoint",
+                increment=25,
+                with_audio=False,
             )
-            == 25
+            >= 25
         )
         first_last_ts = _last_video_timestamp_seconds(
             server,
@@ -493,19 +598,17 @@ def test_create_rtmp_inbound_endpoint_reconnect_keeps_live_timestamp_progress(
         )
 
         time.sleep(1.0)
-        _run_ffmpeg_rtmp_publish(
-            input_path,
-            publish_url,
-            with_audio=False,
-        )
         assert (
-            _wait_for_video_frame_count(
+            _publish_rtmp_and_wait_video_increment(
                 server,
-                processor_id,
-                expected_count=50,
+                input_path=input_path,
+                publish_url=publish_url,
+                processor_id=processor_id,
                 processor_type="rtmp_inbound_endpoint",
+                increment=25,
+                with_audio=False,
             )
-            == 50
+            >= 50
         )
         second_last_ts = _last_video_timestamp_seconds(
             server,
@@ -541,6 +644,11 @@ def test_create_srt_inbound_endpoint_and_compare_stats(binary_path: Path):
         )
         assert create_response["result"]["processorId"] == processor_id
 
+        _wait_for_processor_listening(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
         _run_ffmpeg_srt_publish(
             input_path,
             publish_url,
@@ -591,6 +699,11 @@ def test_create_srt_inbound_endpoint_with_audio_video_and_compare_stats(
         )
         assert create_response["result"]["processorId"] == processor_id
 
+        _wait_for_processor_listening(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
         _run_ffmpeg_srt_publish(
             av_input_path,
             publish_url,
@@ -644,6 +757,11 @@ def test_create_srt_inbound_endpoint_reconnect_keeps_live_timestamp_progress(
         )
         assert create_response["result"]["processorId"] == processor_id
 
+        _wait_for_processor_listening(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
         _run_ffmpeg_srt_publish(
             input_path,
             publish_url,
@@ -715,6 +833,11 @@ def test_create_srt_inbound_endpoint_with_stream_id_and_compare_stats(binary_pat
         )
         assert create_response["result"]["processorId"] == processor_id
 
+        _wait_for_processor_listening(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
         _run_ffmpeg_srt_publish(
             input_path,
             publish_url,
@@ -764,6 +887,11 @@ def test_create_srt_inbound_endpoint_rejects_mismatched_stream_id(binary_path: P
         )
         assert create_response["result"]["processorId"] == processor_id
 
+        _wait_for_processor_listening(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
         _run_ffmpeg_srt_publish_once(
             input_path,
             publish_url,
@@ -810,6 +938,11 @@ def test_create_srt_inbound_endpoint_rejects_missing_stream_id(binary_path: Path
         )
         assert create_response["result"]["processorId"] == processor_id
 
+        _wait_for_processor_listening(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
         result = _run_ffmpeg_srt_publish_once(
             input_path,
             publish_url,

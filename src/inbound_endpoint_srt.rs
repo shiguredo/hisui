@@ -34,6 +34,7 @@ pub struct SrtInboundEndpoint {
 
 #[derive(Debug, Clone)]
 struct SrtInboundEndpointStats {
+    is_listening_metric: crate::stats::StatsFlag,
     audio_codec_metric: crate::stats::StatsString,
     total_input_audio_data_count_metric: crate::stats::StatsCounter,
     last_input_audio_timestamp_metric: crate::stats::StatsDuration,
@@ -45,6 +46,7 @@ struct SrtInboundEndpointStats {
 impl SrtInboundEndpointStats {
     fn new(mut stats: crate::stats::Stats) -> Self {
         Self {
+            is_listening_metric: stats.flag("is_listening"),
             audio_codec_metric: stats.string("audio_codec"),
             total_input_audio_data_count_metric: stats.counter("total_input_audio_data_count"),
             last_input_audio_timestamp_metric: stats.duration("last_input_audio_timestamp"),
@@ -76,6 +78,10 @@ impl SrtInboundEndpointStats {
 
     fn set_last_input_video_timestamp(&self, timestamp: Duration) {
         self.last_input_video_timestamp_metric.set(timestamp);
+    }
+
+    fn set_listening(&self, value: bool) {
+        self.is_listening_metric.set(value);
     }
 }
 
@@ -141,6 +147,7 @@ impl SrtInboundEndpoint {
         };
 
         let stats = SrtInboundEndpointStats::new(handle.stats());
+        stats.set_listening(true);
 
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;

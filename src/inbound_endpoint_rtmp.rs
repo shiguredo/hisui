@@ -25,6 +25,7 @@ pub struct RtmpInboundEndpoint {
 
 #[derive(Debug, Clone)]
 struct RtmpInboundEndpointStats {
+    is_listening_metric: crate::stats::StatsFlag,
     audio_codec_metric: crate::stats::StatsString,
     total_input_audio_data_count_metric: crate::stats::StatsCounter,
     last_input_audio_timestamp_metric: crate::stats::StatsDuration,
@@ -36,6 +37,7 @@ struct RtmpInboundEndpointStats {
 impl RtmpInboundEndpointStats {
     fn new(mut stats: crate::stats::Stats) -> Self {
         Self {
+            is_listening_metric: stats.flag("is_listening"),
             audio_codec_metric: stats.string("audio_codec"),
             total_input_audio_data_count_metric: stats.counter("total_input_audio_data_count"),
             last_input_audio_timestamp_metric: stats.duration("last_input_audio_timestamp"),
@@ -68,6 +70,10 @@ impl RtmpInboundEndpointStats {
     fn set_last_input_video_timestamp(&self, timestamp: std::time::Duration) {
         self.last_input_video_timestamp_metric.set(timestamp);
     }
+
+    fn set_listening(&self, value: bool) {
+        self.is_listening_metric.set(value);
+    }
 }
 
 impl RtmpInboundEndpoint {
@@ -96,6 +102,7 @@ impl RtmpInboundEndpoint {
         let output_audio_track_id = self.output_audio_track_id.clone();
         let output_video_track_id = self.output_video_track_id.clone();
         let stats = RtmpInboundEndpointStats::new(handle.stats());
+        stats.set_listening(true);
         let server_started_at = tokio::time::Instant::now();
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
