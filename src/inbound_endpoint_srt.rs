@@ -36,8 +36,10 @@ pub struct SrtInboundEndpoint {
 struct SrtInboundEndpointStats {
     audio_codec_metric: crate::stats::StatsString,
     total_input_audio_data_count_metric: crate::stats::StatsCounter,
+    last_input_audio_timestamp_metric: crate::stats::StatsDuration,
     video_codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
+    last_input_video_timestamp_metric: crate::stats::StatsDuration,
 }
 
 impl SrtInboundEndpointStats {
@@ -45,8 +47,10 @@ impl SrtInboundEndpointStats {
         Self {
             audio_codec_metric: stats.string("audio_codec"),
             total_input_audio_data_count_metric: stats.counter("total_input_audio_data_count"),
+            last_input_audio_timestamp_metric: stats.duration("last_input_audio_timestamp"),
             video_codec_metric: stats.string("video_codec"),
             total_input_video_frame_count_metric: stats.counter("total_input_video_frame_count"),
+            last_input_video_timestamp_metric: stats.duration("last_input_video_timestamp"),
         }
     }
 
@@ -58,12 +62,20 @@ impl SrtInboundEndpointStats {
         self.total_input_audio_data_count_metric.inc();
     }
 
+    fn set_last_input_audio_timestamp(&self, timestamp: Duration) {
+        self.last_input_audio_timestamp_metric.set(timestamp);
+    }
+
     fn set_video_codec(&self, codec: crate::types::CodecName) {
         self.video_codec_metric.set(codec.as_str());
     }
 
     fn add_input_video_frame_count(&self) {
         self.total_input_video_frame_count_metric.inc();
+    }
+
+    fn set_last_input_video_timestamp(&self, timestamp: Duration) {
+        self.last_input_video_timestamp_metric.set(timestamp);
     }
 }
 
@@ -113,6 +125,7 @@ impl SrtInboundEndpoint {
         let mut peer_addr: Option<SocketAddr> = None;
         let mut timers: HashMap<TimerId, Instant> = HashMap::new();
         let base_time = Instant::now();
+        let mut connection_timestamp_offset = Duration::ZERO;
 
         let mut demuxer = SrtTsDemuxer::new();
 
@@ -139,7 +152,13 @@ impl SrtInboundEndpoint {
                         let samples = demuxer
                             .push_payload(payload)
                             .map_err(|e| e.with_context("failed to parse MPEG-TS payload"))?;
-                        publish_samples(samples, &mut audio_track_tx, &mut video_track_tx, &stats);
+                        publish_samples(
+                            samples,
+                            &mut audio_track_tx,
+                            &mut video_track_tx,
+                            &stats,
+                            connection_timestamp_offset,
+                        );
                     }
                     if should_flush_pending_pes(&event) {
                         let flushed_samples = demuxer.flush_pending()?;
@@ -148,6 +167,7 @@ impl SrtInboundEndpoint {
                             &mut audio_track_tx,
                             &mut video_track_tx,
                             &stats,
+                            connection_timestamp_offset,
                         );
                     }
                     let now = now_timestamp(base_time);
@@ -158,6 +178,7 @@ impl SrtInboundEndpoint {
                         &endpoint_config,
                         peer_addr,
                         &mut demuxer,
+                        &mut connection_timestamp_offset,
                     )?;
                 }
                 Ok(())
@@ -239,9 +260,11 @@ impl SrtInboundEndpoint {
         endpoint_config: &SrtEndpointConfig,
         peer_addr: &mut Option<SocketAddr>,
         demuxer: &mut SrtTsDemuxer,
+        connection_timestamp_offset: &mut Duration,
     ) -> crate::Result<()> {
         match event {
             ConnectionEvent::Connected => {
+                *connection_timestamp_offset = Duration::from_micros(now.as_micros());
                 if let Some(expected_stream_id) = &endpoint_config.stream_id {
                     let actual_stream_id = conn.peer_stream_id();
                     if actual_stream_id != Some(expected_stream_id.as_str()) {
@@ -256,12 +279,24 @@ impl SrtInboundEndpoint {
             ConnectionEvent::StateChanged(state) => {
                 tracing::debug!("SRT state changed: {state:?}");
                 if state == ConnectionState::Disconnected {
-                    reset_connection_state(conn, endpoint_config, peer_addr, demuxer)?;
+                    reset_connection_state(
+                        conn,
+                        endpoint_config,
+                        peer_addr,
+                        demuxer,
+                        connection_timestamp_offset,
+                    )?;
                 }
             }
             ConnectionEvent::Disconnected { reason } => {
                 tracing::warn!("SRT disconnected: {reason}");
-                reset_connection_state(conn, endpoint_config, peer_addr, demuxer)?;
+                reset_connection_state(
+                    conn,
+                    endpoint_config,
+                    peer_addr,
+                    demuxer,
+                    connection_timestamp_offset,
+                )?;
             }
             ConnectionEvent::Error(reason) => {
                 tracing::warn!("SRT connection error: {reason}");
@@ -448,22 +483,29 @@ fn publish_samples(
     audio_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
     video_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
     stats: &SrtInboundEndpointStats,
+    connection_timestamp_offset: Duration,
 ) {
     for sample in samples {
         match sample {
-            TsSample::Audio(data) => {
+            TsSample::Audio(mut data) => {
+                data.timestamp = data.timestamp.saturating_add(connection_timestamp_offset);
+                let timestamp = data.timestamp;
                 if let Some(tx) = audio_track_tx {
                     tx.send_audio(data);
                 }
                 stats.set_audio_codec(crate::types::CodecName::Aac);
                 stats.add_input_audio_data_count();
+                stats.set_last_input_audio_timestamp(timestamp);
             }
-            TsSample::Video(frame) => {
+            TsSample::Video(mut frame) => {
+                frame.timestamp = frame.timestamp.saturating_add(connection_timestamp_offset);
+                let timestamp = frame.timestamp;
                 if let Some(tx) = video_track_tx {
                     tx.send_video(frame);
                 }
                 stats.set_video_codec(crate::types::CodecName::H264);
                 stats.add_input_video_frame_count();
+                stats.set_last_input_video_timestamp(timestamp);
             }
         }
     }
@@ -474,9 +516,11 @@ fn reset_connection_state(
     endpoint_config: &SrtEndpointConfig,
     peer_addr: &mut Option<SocketAddr>,
     demuxer: &mut SrtTsDemuxer,
+    connection_timestamp_offset: &mut Duration,
 ) -> crate::Result<()> {
     *peer_addr = None;
     *demuxer = SrtTsDemuxer::new();
+    *connection_timestamp_offset = Duration::ZERO;
     *conn = create_listener_connection(endpoint_config)?;
     Ok(())
 }

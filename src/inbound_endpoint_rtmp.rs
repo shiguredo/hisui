@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -28,8 +27,10 @@ pub struct RtmpInboundEndpoint {
 struct RtmpInboundEndpointStats {
     audio_codec_metric: crate::stats::StatsString,
     total_input_audio_data_count_metric: crate::stats::StatsCounter,
+    last_input_audio_timestamp_metric: crate::stats::StatsDuration,
     video_codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
+    last_input_video_timestamp_metric: crate::stats::StatsDuration,
 }
 
 impl RtmpInboundEndpointStats {
@@ -37,8 +38,10 @@ impl RtmpInboundEndpointStats {
         Self {
             audio_codec_metric: stats.string("audio_codec"),
             total_input_audio_data_count_metric: stats.counter("total_input_audio_data_count"),
+            last_input_audio_timestamp_metric: stats.duration("last_input_audio_timestamp"),
             video_codec_metric: stats.string("video_codec"),
             total_input_video_frame_count_metric: stats.counter("total_input_video_frame_count"),
+            last_input_video_timestamp_metric: stats.duration("last_input_video_timestamp"),
         }
     }
 
@@ -50,12 +53,20 @@ impl RtmpInboundEndpointStats {
         self.total_input_audio_data_count_metric.inc();
     }
 
+    fn set_last_input_audio_timestamp(&self, timestamp: std::time::Duration) {
+        self.last_input_audio_timestamp_metric.set(timestamp);
+    }
+
     fn set_video_codec(&self, codec: crate::types::CodecName) {
         self.video_codec_metric.set(codec.as_str());
     }
 
     fn add_input_video_frame_count(&self) {
         self.total_input_video_frame_count_metric.inc();
+    }
+
+    fn set_last_input_video_timestamp(&self, timestamp: std::time::Duration) {
+        self.last_input_video_timestamp_metric.set(timestamp);
     }
 }
 
@@ -85,78 +96,61 @@ impl RtmpInboundEndpoint {
         let output_audio_track_id = self.output_audio_track_id.clone();
         let output_video_track_id = self.output_video_track_id.clone();
         let stats = RtmpInboundEndpointStats::new(handle.stats());
-        let client_slots = Arc::new(tokio::sync::Semaphore::new(1));
         let server_started_at = tokio::time::Instant::now();
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
+
+        let mut video_track_tx = if let Some(track_id) = &output_video_track_id {
+            Some(handle.publish_track(track_id.clone()).await?)
+        } else {
+            None
+        };
+
+        let mut audio_track_tx = if let Some(track_id) = &output_audio_track_id {
+            Some(handle.publish_track(track_id.clone()).await?)
+        } else {
+            None
+        };
 
         loop {
             match listener.accept().await {
                 Ok((stream, peer_addr)) => {
                     tracing::debug!("New RTMP client connection from: {peer_addr}");
-
-                    let permit = match client_slots.clone().try_acquire_owned() {
-                        Ok(permit) => permit,
-                        Err(_) => {
-                            tracing::warn!(
-                                "Another client is already connected, rejecting new connection from {peer_addr}"
-                            );
-                            drop(stream);
-                            continue;
-                        }
-                    };
-
                     let expected_app = url.app.clone();
                     let expected_stream_name = url.stream_name.clone();
                     let tls_acceptor = tls_acceptor.clone();
                     let timestamp_offset = server_started_at.elapsed();
                     let stats = stats.clone();
 
-                    let video_track_tx = if let Some(track_id) = &output_video_track_id {
-                        Some(handle.publish_track(track_id.clone()).await?)
-                    } else {
-                        None
-                    };
-
-                    let audio_track_tx = if let Some(track_id) = &output_audio_track_id {
-                        Some(handle.publish_track(track_id.clone()).await?)
-                    } else {
-                        None
-                    };
-
-                    tokio::spawn(async move {
-                        let _permit = permit;
-
-                        match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref())
-                            .await
-                        {
-                            Ok(tls_stream) => {
-                                if tls_acceptor.is_some() {
-                                    tracing::debug!("TLS handshake successful with {peer_addr}");
-                                }
-                                let mut handler = RtmpPublisherHandler::new(
-                                    tls_stream,
-                                    expected_app,
-                                    expected_stream_name,
-                                    timestamp_offset,
-                                    video_track_tx,
-                                    audio_track_tx,
-                                    stats,
-                                );
-
-                                if let Err(e) = handler.run().await {
-                                    tracing::error!(
-                                        "RTMP publisher handler error: {}",
-                                        e.display()
-                                    );
-                                }
-                                tracing::debug!("RTMP publisher disconnected: {peer_addr}");
+                    match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await
+                    {
+                        Ok(tls_stream) => {
+                            if tls_acceptor.is_some() {
+                                tracing::debug!("TLS handshake successful with {peer_addr}");
                             }
-                            Err(e) => {
-                                tracing::error!("Connection setup failed with {peer_addr}: {e}");
+                            let mut handler = RtmpPublisherHandler::new(
+                                tls_stream,
+                                expected_app,
+                                expected_stream_name,
+                                timestamp_offset,
+                                video_track_tx.take(),
+                                audio_track_tx.take(),
+                                stats,
+                            );
+
+                            if let Err(e) = handler.run().await {
+                                tracing::error!("RTMP publisher handler error: {}", e.display());
                             }
+                            let (restored_video_track_tx, restored_audio_track_tx) =
+                                handler.into_track_senders();
+                            video_track_tx = restored_video_track_tx;
+                            audio_track_tx = restored_audio_track_tx;
+                            tracing::debug!("RTMP publisher disconnected: {peer_addr}");
                         }
-                    });
+                        Err(e) => {
+                            tracing::error!("Connection setup failed with {peer_addr}: {e}");
+                        }
+                    }
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -315,15 +309,11 @@ impl RtmpPublisherHandler {
                 }
             }
         }
-
-        if let Some(tx) = &mut self.video_track_tx {
-            tx.send_eos();
-        }
-        if let Some(tx) = &mut self.audio_track_tx {
-            tx.send_eos();
-        }
-
         Ok(())
+    }
+
+    fn into_track_senders(self) -> (Option<crate::MessageSender>, Option<crate::MessageSender>) {
+        (self.video_track_tx, self.audio_track_tx)
     }
 
     /// RTMP イベントを処理する
@@ -384,6 +374,8 @@ impl RtmpPublisherHandler {
                 self.stats.set_audio_codec(codec);
             }
             self.stats.add_input_audio_data_count();
+            self.stats
+                .set_last_input_audio_timestamp(audio_data.timestamp);
             tx.send_media(crate::MediaSample::Audio(std::sync::Arc::new(audio_data)));
         }
         Ok(())
@@ -398,6 +390,8 @@ impl RtmpPublisherHandler {
                 self.stats.set_video_codec(codec);
             }
             self.stats.add_input_video_frame_count();
+            self.stats
+                .set_last_input_video_timestamp(video_frame.timestamp);
             tx.send_media(crate::MediaSample::Video(std::sync::Arc::new(video_frame)));
         }
         Ok(())

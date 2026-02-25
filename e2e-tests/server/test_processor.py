@@ -26,7 +26,6 @@ def _run_ffmpeg_rtmp_publish(
         pytest.skip("ffmpeg is required for RTMP inbound endpoint test")
 
     deadline = time.time() + 10.0
-    min_expected_elapsed = 0.8
     last_error = "(no attempt)"
     while time.time() < deadline:
         cmd = [
@@ -53,14 +52,7 @@ def _run_ffmpeg_rtmp_publish(
         )
         elapsed = time.time() - publish_started_at
         if result.returncode == 0:
-            # 速すぎる正常終了は、接続直後切断などで実データが流れていない可能性があるため再試行する。
-            if elapsed >= min_expected_elapsed:
-                return
-            last_error = (
-                f"ffmpeg exited too early: returncode=0, elapsed={elapsed:.3f}, stderr={result.stderr}"
-            )
-            time.sleep(0.2)
-            continue
+            return
         last_error = (
             f"returncode={result.returncode}, elapsed={elapsed:.3f}, stderr={result.stderr}"
         )
@@ -175,6 +167,21 @@ def _wait_for_video_frame_count(
         time.sleep(0.1)
     raise AssertionError(
         f"{processor_type} did not reach expected video frame count in time: expected={expected_count}"
+    )
+
+
+def _last_video_timestamp_seconds(
+    server: HisuiServer,
+    *,
+    processor_id: str,
+    processor_type: str,
+) -> float:
+    return float(
+        ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type=processor_type,
+        ).value("hisui_last_input_video_timestamp")
     )
 
 
@@ -437,6 +444,78 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         assert audio_count >= 43
 
 
+def test_create_rtmp_inbound_endpoint_reconnect_keeps_live_timestamp_progress(
+    binary_path: Path,
+):
+    """createRtmpInboundEndpoint で再接続後も timestamp が進み続けることを確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-rtmp-inbound-endpoint-reconnect"
+    output_video_track_id = "e2e-rtmp-video-track-reconnect"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"rtmp://127.0.0.1:{port}/live"
+    publish_url = f"{input_url}/stream-main"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createRtmpInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "streamName": "stream-main",
+                "outputVideoTrackId": output_video_track_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_rtmp_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        assert (
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=25,
+                processor_type="rtmp_inbound_endpoint",
+            )
+            == 25
+        )
+        first_last_ts = _last_video_timestamp_seconds(
+            server,
+            processor_id=processor_id,
+            processor_type="rtmp_inbound_endpoint",
+        )
+
+        time.sleep(1.0)
+        _run_ffmpeg_rtmp_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        assert (
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=50,
+                processor_type="rtmp_inbound_endpoint",
+            )
+            == 50
+        )
+        second_last_ts = _last_video_timestamp_seconds(
+            server,
+            processor_id=processor_id,
+            processor_type="rtmp_inbound_endpoint",
+        )
+
+        assert second_last_ts > first_last_ts + 0.5
+
+
 def test_create_srt_inbound_endpoint_and_compare_stats(binary_path: Path):
     """createSrtInboundEndpoint で受信した映像の統計値を確認する"""
     input_path = (
@@ -536,6 +615,77 @@ def test_create_srt_inbound_endpoint_with_audio_video_and_compare_stats(
         # ffmpeg の終了待機後でも、SRT / MPEG-TS の終端処理タイミング差で
         # 音声カウントが大きく揺れることがあるため、下限チェックにしている。
         assert audio_count >= 20
+
+
+def test_create_srt_inbound_endpoint_reconnect_keeps_live_timestamp_progress(
+    binary_path: Path,
+):
+    """createSrtInboundEndpoint で再接続後も timestamp が進み続けることを確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-reconnect"
+    output_video_track_id = "e2e-srt-video-track-reconnect"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        assert (
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=25,
+                processor_type="srt_inbound_endpoint",
+            )
+            == 25
+        )
+        first_last_ts = _last_video_timestamp_seconds(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        time.sleep(1.0)
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        assert (
+            _wait_for_video_frame_count(
+                server,
+                processor_id,
+                expected_count=50,
+                processor_type="srt_inbound_endpoint",
+            )
+            == 50
+        )
+        second_last_ts = _last_video_timestamp_seconds(
+            server,
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        assert second_last_ts > first_last_ts + 0.5
 
 
 def test_create_srt_inbound_endpoint_with_stream_id_and_compare_stats(binary_path: Path):
