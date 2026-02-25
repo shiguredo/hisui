@@ -36,6 +36,7 @@ pub mod file_reader_mp4;
 pub mod file_reader_webm;
 pub mod future;
 pub mod inbound_endpoint_rtmp;
+pub mod inbound_endpoint_srt;
 pub mod json;
 pub mod jsonrpc;
 pub mod logger;

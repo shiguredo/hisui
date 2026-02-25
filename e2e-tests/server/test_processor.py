@@ -56,17 +56,60 @@ def _run_ffmpeg_rtmp_publish(
     )
 
 
+def _run_ffmpeg_srt_publish(
+    input_path: Path,
+    publish_url: str,
+    *,
+    with_audio: bool,
+) -> None:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for SRT inbound endpoint test")
+
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(input_path),
+        ]
+        if with_audio:
+            cmd.extend(["-c", "copy"])
+        else:
+            cmd.extend(["-an", "-c:v", "copy"])
+        cmd.extend(["-f", "mpegts", publish_url])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"ffmpeg failed: returncode={result.returncode}, stderr={result.stderr}"
+    )
+
+
 def _wait_for_video_frame_count(
     server: HisuiServer,
     processor_id: str,
     expected_count: int,
+    *,
+    processor_type: str = "rtmp_inbound_endpoint",
 ) -> int:
     deadline = time.time() + 10.0
     while time.time() < deadline:
         metrics = ProcessorMetrics(
             server.metrics_json(),
             processor_id=processor_id,
-            processor_type="rtmp_inbound_endpoint",
+            processor_type=processor_type,
         )
         try:
             frame_count = int(metrics.value("hisui_total_input_video_frame_count"))
@@ -77,11 +120,11 @@ def _wait_for_video_frame_count(
             return frame_count
         if frame_count > expected_count:
             raise AssertionError(
-                f"RTMP inbound endpoint video frame count exceeded expected value: expected={expected_count}, actual={frame_count}"
+                f"{processor_type} video frame count exceeded expected value: expected={expected_count}, actual={frame_count}"
             )
         time.sleep(0.1)
     raise AssertionError(
-        f"RTMP inbound endpoint did not reach expected video frame count in time: expected={expected_count}"
+        f"{processor_type} did not reach expected video frame count in time: expected={expected_count}"
     )
 
 
@@ -329,6 +372,107 @@ def test_create_rtmp_inbound_endpoint_with_audio_video_and_compare_stats(
         assert metrics.value("hisui_audio_codec", value="AAC") == "1"
         assert video_count == 25
         # ffmpeg の終了待機後でも、RTMP / FLV の終端処理タイミング差で
+        # 音声カウントが 43 - 45 付近で揺れることがあるため、下限チェックにしている。
+        assert audio_count >= 43
+
+
+def test_create_srt_inbound_endpoint_and_compare_stats(binary_path: Path):
+    """createSrtInboundEndpoint で受信した映像の統計値を確認する"""
+    input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "archive-red-320x320-h264.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint"
+    output_video_track_id = "e2e-srt-video-track"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}?mode=listener"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            input_path,
+            publish_url,
+            with_audio=False,
+        )
+        frame_count = _wait_for_video_frame_count(
+            server,
+            processor_id,
+            expected_count=25,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+        assert metrics.value("hisui_video_codec", value="H264") == "1"
+        assert frame_count == 25
+
+
+def test_create_srt_inbound_endpoint_with_audio_video_and_compare_stats(
+    binary_path: Path,
+):
+    """createSrtInboundEndpoint で受信した映像 + 音声の統計値を確認する"""
+    av_input_path = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "red-320x320-h264-aac.mp4"
+    )
+    processor_id = "e2e-srt-inbound-endpoint-av"
+    output_video_track_id = "e2e-srt-video-track-av"
+    output_audio_track_id = "e2e-srt-audio-track-av"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_url = f"srt://127.0.0.1:{port}?mode=listener"
+    publish_url = f"srt://127.0.0.1:{port}?mode=caller"
+
+    with HisuiServer(binary_path) as server:
+        create_response = server.rpc_call(
+            "createSrtInboundEndpoint",
+            {
+                "inputUrl": input_url,
+                "outputVideoTrackId": output_video_track_id,
+                "outputAudioTrackId": output_audio_track_id,
+                "processorId": processor_id,
+            },
+        )
+        assert create_response["result"]["processorId"] == processor_id
+
+        _run_ffmpeg_srt_publish(
+            av_input_path,
+            publish_url,
+            with_audio=True,
+        )
+        video_count = _wait_for_video_frame_count(
+            server,
+            processor_id,
+            expected_count=25,
+            processor_type="srt_inbound_endpoint",
+        )
+
+        metrics = ProcessorMetrics(
+            server.metrics_json(),
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+        )
+        audio_count = int(metrics.value("hisui_total_input_audio_data_count"))
+        assert metrics.value("hisui_video_codec", value="H264") == "1"
+        assert metrics.value("hisui_audio_codec", value="AAC") == "1"
+        assert video_count == 25
+        # ffmpeg の終了待機後でも、SRT / MPEG-TS の終端処理タイミング差で
         # 音声カウントが 43 - 45 付近で揺れることがあるため、下限チェックにしている。
         assert audio_count >= 43
 

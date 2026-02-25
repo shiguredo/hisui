@@ -152,8 +152,6 @@
 
 ### misc
 
-- [CHANGE] Slack 通知を rtCamp/action-slack-notify から shiguredo/github-actions の slack-notify に置き換える
-  - @voluntas
 - [ADD] 内部用に VideoDeviceSource 構造体を追加する
   - Video Device からの読み込みと I420 への変換を行い、映像トラックに出力する
   - @sile
@@ -174,6 +172,13 @@
   - @sile
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
+- [ADD] server サブコマンドの JSON-RPC で SRT inbound endpoint を作成できるようにする
+  - JSON-RPC に `createSrtInboundEndpoint` メソッドを追加する
+  - `inputUrl` と `outputAudioTrackId` / `outputVideoTrackId` を指定して SRT （ MPEG-TS ）を受信し、指定トラックへ配信できる
+  - 現時点の対応コーデックは H264 / AAC のみ
+  - @sile
+- [CHANGE] Slack 通知を rtCamp/action-slack-notify から shiguredo/github-actions の slack-notify に置き換える
+  - @voluntas
 - [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
   - 内部的な PoC 目的の機能だったが、不要となったので削除する
   - @sile
