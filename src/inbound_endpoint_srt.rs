@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::io::{self, Read};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use mpeg2ts::es::{StreamId, StreamType};
@@ -16,6 +17,8 @@ use tokio::net::UdpSocket;
 use tokio::time::Instant;
 
 const TS_PACKET_SIZE: usize = 188;
+static PSEUDO_RANDOM_BASE_SEED: OnceLock<u64> = OnceLock::new();
+static PSEUDO_RANDOM_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// SRT Inbound Endpoint
 pub struct SrtInboundEndpoint {
@@ -132,61 +135,39 @@ impl SrtInboundEndpoint {
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
 
+        let mut process_polled_events =
+            |conn: &mut SrtConnection, peer_addr: &mut Option<SocketAddr>| -> crate::Result<()> {
+                while let Some(event) = conn.poll_event() {
+                    if let ConnectionEvent::DataReceived { payload, .. } = &event {
+                        let samples = demuxer
+                            .push_payload(payload)
+                            .map_err(|e| e.with_context("failed to parse MPEG-TS payload"))?;
+                        publish_samples(samples, &mut audio_track_tx, &mut video_track_tx, &stats);
+                    }
+                    if should_flush_pending_pes(&event) {
+                        let flushed_samples = demuxer.flush_pending()?;
+                        publish_samples(
+                            flushed_samples,
+                            &mut audio_track_tx,
+                            &mut video_track_tx,
+                            &stats,
+                        );
+                    }
+                    let now = now_timestamp(base_time);
+                    self.handle_connection_event(
+                        event,
+                        now,
+                        conn,
+                        &endpoint_config,
+                        peer_addr,
+                        &mut demuxer,
+                    )?;
+                }
+                Ok(())
+            };
+
         loop {
-            while let Some(event) = conn.poll_event() {
-                if let ConnectionEvent::DataReceived { payload, .. } = &event {
-                    let samples = demuxer
-                        .push_payload(payload)
-                        .map_err(|e| e.with_context("failed to parse MPEG-TS payload"))?;
-                    for sample in samples {
-                        match sample {
-                            TsSample::Audio(data) => {
-                                if let Some(tx) = &mut audio_track_tx {
-                                    tx.send_audio(data);
-                                }
-                                stats.set_audio_codec(crate::types::CodecName::Aac);
-                                stats.add_input_audio_data_count();
-                            }
-                            TsSample::Video(frame) => {
-                                if let Some(tx) = &mut video_track_tx {
-                                    tx.send_video(frame);
-                                }
-                                stats.set_video_codec(crate::types::CodecName::H264);
-                                stats.add_input_video_frame_count();
-                            }
-                        }
-                    }
-                }
-                if should_flush_pending_pes(&event) {
-                    let flushed_samples = demuxer.flush_pending()?;
-                    for sample in flushed_samples {
-                        match sample {
-                            TsSample::Audio(data) => {
-                                if let Some(tx) = &mut audio_track_tx {
-                                    tx.send_audio(data);
-                                }
-                                stats.set_audio_codec(crate::types::CodecName::Aac);
-                                stats.add_input_audio_data_count();
-                            }
-                            TsSample::Video(frame) => {
-                                if let Some(tx) = &mut video_track_tx {
-                                    tx.send_video(frame);
-                                }
-                                stats.set_video_codec(crate::types::CodecName::H264);
-                                stats.add_input_video_frame_count();
-                            }
-                        }
-                    }
-                }
-                let now = now_timestamp(base_time);
-                self.handle_connection_event(
-                    event,
-                    now,
-                    &mut conn,
-                    &endpoint_config,
-                    &mut peer_addr,
-                )?;
-            }
+            process_polled_events(&mut conn, &mut peer_addr)?;
 
             while let Some(output) = conn.poll_output() {
                 handle_connection_output(output, &socket, peer_addr, &mut timers).await?;
@@ -221,61 +202,7 @@ impl SrtInboundEndpoint {
                     conn.feed_recv_buf(&recv_buf[..len], now)
                         .map_err(|e| crate::Error::new(format!("failed to process SRT packet: {e}")))?;
 
-                    while let Some(event) = conn.poll_event() {
-                        if let ConnectionEvent::DataReceived { payload, .. } = &event {
-                            let samples = demuxer
-                                .push_payload(payload)
-                                .map_err(|e| e.with_context("failed to parse MPEG-TS payload"))?;
-                            for sample in samples {
-                                match sample {
-                                    TsSample::Audio(data) => {
-                                        if let Some(tx) = &mut audio_track_tx {
-                                            tx.send_audio(data);
-                                        }
-                                        stats.set_audio_codec(crate::types::CodecName::Aac);
-                                        stats.add_input_audio_data_count();
-                                    }
-                                    TsSample::Video(frame) => {
-                                        if let Some(tx) = &mut video_track_tx {
-                                            tx.send_video(frame);
-                                        }
-                                        stats.set_video_codec(crate::types::CodecName::H264);
-                                        stats.add_input_video_frame_count();
-                                    }
-                                }
-                            }
-                        }
-                        if should_flush_pending_pes(&event) {
-                            let flushed_samples = demuxer.flush_pending()?;
-                            for sample in flushed_samples {
-                                match sample {
-                                    TsSample::Audio(data) => {
-                                        if let Some(tx) = &mut audio_track_tx {
-                                            tx.send_audio(data);
-                                        }
-                                        stats.set_audio_codec(crate::types::CodecName::Aac);
-                                        stats.add_input_audio_data_count();
-                                    }
-                                    TsSample::Video(frame) => {
-                                        if let Some(tx) = &mut video_track_tx {
-                                            tx.send_video(frame);
-                                        }
-                                        stats.set_video_codec(crate::types::CodecName::H264);
-                                        stats.add_input_video_frame_count();
-                                    }
-                                }
-                            }
-                        }
-
-                        let now = now_timestamp(base_time);
-                        self.handle_connection_event(
-                            event,
-                            now,
-                            &mut conn,
-                            &endpoint_config,
-                            &mut peer_addr,
-                        )?;
-                    }
+                    process_polled_events(&mut conn, &mut peer_addr)?;
                 }
                 _ = tokio::time::sleep(timeout_duration), if next_timer.is_some() => {
                     let (timer_id, _) = next_timer.expect("infallible");
@@ -314,6 +241,7 @@ impl SrtInboundEndpoint {
         conn: &mut SrtConnection,
         endpoint_config: &SrtEndpointConfig,
         peer_addr: &mut Option<SocketAddr>,
+        demuxer: &mut SrtTsDemuxer,
     ) -> crate::Result<()> {
         match event {
             ConnectionEvent::Connected => {
@@ -331,14 +259,12 @@ impl SrtInboundEndpoint {
             ConnectionEvent::StateChanged(state) => {
                 tracing::debug!("SRT state changed: {state:?}");
                 if state == ConnectionState::Disconnected {
-                    *peer_addr = None;
-                    *conn = create_listener_connection(endpoint_config);
+                    reset_connection_state(conn, endpoint_config, peer_addr, demuxer);
                 }
             }
             ConnectionEvent::Disconnected { reason } => {
                 tracing::warn!("SRT disconnected: {reason}");
-                *peer_addr = None;
-                *conn = create_listener_connection(endpoint_config);
+                reset_connection_state(conn, endpoint_config, peer_addr, demuxer);
             }
             ConnectionEvent::Error(reason) => {
                 tracing::warn!("SRT connection error: {reason}");
@@ -515,15 +441,59 @@ fn create_listener_connection(endpoint_config: &SrtEndpointConfig) -> SrtConnect
 }
 
 fn pseudo_random_u32() -> u32 {
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO);
-    let mut x = duration.as_nanos() as u64;
-    x ^= (std::process::id() as u64) << 16;
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
+    let base_seed = *PSEUDO_RANDOM_BASE_SEED.get_or_init(|| {
+        let duration = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO);
+        (duration.as_nanos() as u64) ^ ((std::process::id() as u64) << 16)
+    });
+    let counter = PSEUDO_RANDOM_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    // 連続呼び出しで同一値にならないよう、状態（counter）を混ぜて SplitMix64 で拡散する。
+    let mut x = base_seed.wrapping_add(counter.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
     x as u32
+}
+
+fn publish_samples(
+    samples: Vec<TsSample>,
+    audio_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
+    video_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
+    stats: &SrtInboundEndpointStats,
+) {
+    for sample in samples {
+        match sample {
+            TsSample::Audio(data) => {
+                if let Some(tx) = audio_track_tx {
+                    tx.send_audio(data);
+                }
+                stats.set_audio_codec(crate::types::CodecName::Aac);
+                stats.add_input_audio_data_count();
+            }
+            TsSample::Video(frame) => {
+                if let Some(tx) = video_track_tx {
+                    tx.send_video(frame);
+                }
+                stats.set_video_codec(crate::types::CodecName::H264);
+                stats.add_input_video_frame_count();
+            }
+        }
+    }
+}
+
+fn reset_connection_state(
+    conn: &mut SrtConnection,
+    endpoint_config: &SrtEndpointConfig,
+    peer_addr: &mut Option<SocketAddr>,
+    demuxer: &mut SrtTsDemuxer,
+) {
+    *peer_addr = None;
+    *demuxer = SrtTsDemuxer::new();
+    *conn = create_listener_connection(endpoint_config);
 }
 
 fn accept_peer_packet(
