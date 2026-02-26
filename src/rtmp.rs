@@ -211,11 +211,6 @@ impl RtmpIncomingFrameHandler {
         if frame.is_aac_sequence_header {
             // AAC シーケンスヘッダー（Audio Specific Config）をパース
             let (sample_rate, channels) = parse_aac_audio_specific_config(&frame.data)?;
-            if channels > 2 {
-                return Err(Error::new(format!(
-                    "unsupported AAC channel count: {channels}"
-                )));
-            }
 
             // SampleEntry を生成
             let sample_entry = create_audio_sample_entry(&frame.data, sample_rate, channels)?;

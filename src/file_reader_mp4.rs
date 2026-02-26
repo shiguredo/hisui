@@ -397,12 +397,6 @@ impl ReaderState {
         };
 
         self.audio_format = format;
-        if metadata.channelcount == 0 || metadata.channelcount > 2 {
-            return Err(Error::new(format!(
-                "unsupported audio channel count: {}",
-                metadata.channelcount
-            )));
-        }
         self.audio_channels = Channels::from_u16(metadata.channelcount)?;
         self.audio_sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
 

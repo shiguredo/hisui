@@ -248,12 +248,6 @@ impl Mp4AudioReader {
             };
 
             self.format = format;
-            if metadata.channelcount == 0 || metadata.channelcount > 2 {
-                return Err(crate::Error::new(format!(
-                    "unsupported audio channel count: {}",
-                    metadata.channelcount
-                )));
-            }
             self.channels = Channels::from_u16(metadata.channelcount)?;
             self.sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
         }
