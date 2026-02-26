@@ -5,7 +5,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 use crate::{
     Error,
     audio::{AudioFrame, Channels, SampleRate},
-    video::{VideoFrame, VideoFrameSize},
+    video::VideoFrame,
 };
 
 /// RTMP フレーム処理の共通ロジック（送信側）
@@ -294,16 +294,14 @@ impl RtmpIncomingFrameHandler {
             .as_ref()
             .ok_or_else(|| Error::new("video sample entry is not initialized"))?;
 
-        // サンプルエントリーから解像度を取得
-        let (width, height) = crate::video_h264::extract_video_dimensions(sample_entry)
-            .map_err(|e| e.with_context("failed to extract video dimensions"))?;
-
         Ok(Some(VideoFrame {
             timestamp: current_timestamp,
             keyframe: frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame,
             sample_entry: Some(sample_entry.clone()),
             format: crate::video::VideoFormat::H264,
-            size: Some(VideoFrameSize::new(width as usize, height as usize)?),
+            // RTMP inbound では payload を解析せずに H.264 を受け渡すため、
+            // フレームサイズは常に未知扱いにする。
+            size: None,
             data: frame.data,
         }))
     }
