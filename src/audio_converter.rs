@@ -107,7 +107,7 @@ impl AudioConverter {
                 self.state.key = Some(key);
             }
 
-            let resampled = crate::audio::resample(
+            let resampled = resample(
                 &interleaved,
                 &self.state.prev_input_samples,
                 frame.sample_rate,
@@ -146,6 +146,56 @@ impl AudioConverter {
     pub fn reset(&mut self) {
         self.state = ResampleState::default();
     }
+}
+
+fn resample(
+    pcm_data: &[i16],               // 現在のフレームのオリジナルの音声データ（入力）
+    prev_pcm_data: &[i16],          // 前フレームの音声データ（フレーム境界での補間に使用）
+    input_sample_rate: SampleRate,  // 入力サンプルレート
+    target_sample_rate: SampleRate, // 出力サンプルレート
+    original_samples: u64,          // これまでに処理された pcm_data.len() の累計
+    resampled_samples: u64,         // これまでに出力されたリサンプリング後のサンプル数の累計
+) -> Option<Vec<i16>> {
+    if input_sample_rate == target_sample_rate {
+        return None;
+    }
+
+    let ratio = target_sample_rate.get() as f64 / input_sample_rate.get() as f64;
+    let total_original_samples = (original_samples + pcm_data.len() as u64) as f64;
+    let ideal_resampled_len = (total_original_samples * ratio).floor() as usize;
+    let output_len = ideal_resampled_len.saturating_sub(resampled_samples as usize);
+
+    let mut output = Vec::with_capacity(output_len);
+
+    for out_idx in 0..output_len {
+        let target_sample = resampled_samples as f64 + out_idx as f64;
+        let in_pos_global = target_sample / ratio;
+        let in_pos = in_pos_global - original_samples as f64;
+        let in_idx = in_pos.floor() as usize;
+
+        if in_idx >= pcm_data.len() {
+            // 通常はここに到達しないはずだが、念のためにスキップしておく
+            continue;
+        }
+
+        let frac = in_pos.fract();
+        let sample0 = pcm_data[in_idx] as f64;
+
+        // 補間サンプルを取得
+        let sample1 = if in_idx + 1 < pcm_data.len() {
+            pcm_data[in_idx + 1] as f64
+        } else if !prev_pcm_data.is_empty() {
+            // チャンク境界: 次サンプルが現在のチャンクにない場合、前チャンクの最後を使用
+            *prev_pcm_data.last().unwrap() as f64
+        } else {
+            sample0
+        };
+
+        let interpolated = sample0 * (1.0 - frac) + sample1 * frac;
+        output.push(interpolated.round() as i16);
+    }
+
+    Some(output)
 }
 
 fn parse_i16be_samples(frame: &AudioFrame) -> crate::Result<Vec<i16>> {
