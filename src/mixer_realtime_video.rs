@@ -539,10 +539,8 @@ impl RealtimeI420Canvas {
         y: isize,
         frame: &RawVideoFrame,
     ) -> crate::Result<()> {
+        let size = frame.size();
         let frame = frame.as_video_frame();
-        let size = frame
-            .size()
-            .ok_or_else(|| Error::new("video frame size is required"))?;
         let (src_y, src_u, src_v, src_a) = match frame.format {
             VideoFormat::I420 => {
                 let (src_y, src_u, src_v) = frame
