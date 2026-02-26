@@ -85,7 +85,7 @@
   - @sile
 - [ADD] 依存ライブラリに shiguredo_http11 を追加する
   - @voluntas
-- [ADD] 依存ライブラリに shiguredo_webrtc を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.145.2 を追加する
   - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
   - @sile
@@ -96,6 +96,12 @@
   - @sile
 - [UPDATE] noargs crate のバージョンを 0.4.2 に上げる
   - @sile
+- [UPDATE] rustls crate のバージョンを 0.23.37 に上げる
+  - @sile
+- [UPDATE] png crate のバージョンを 0.18.1 に上げる
+  - @sile
+- [UPDATE] aws-lc-rs crate のバージョンを 1.16.0 に上げる
+  - @sile
 - [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
   - @sile
@@ -105,7 +111,7 @@
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_openh264 crate のリポジトリが https://github.com/shiguredo/openh264-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_mp4 のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_mp4 のバージョンを 2026.2.0-canary.3 にあげる
   - @sile
 - [ADD] FDK-AAC を使った AAC デコードに対応する
   - @sile
