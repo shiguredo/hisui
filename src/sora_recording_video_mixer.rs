@@ -616,6 +616,10 @@ impl VideoMixer {
                 )));
             }
 
+            // 新規フレームの初期 duration は、比較対象がない場合のフォールバック値として
+            // 出力フレーム間隔 (next_output_duration) を使う。
+            // その後、次フレーム到着時には timestamp 差分で上書きされ、
+            // 最終フレームは EOS 時に stop_timestamp で補正されることがある。
             let mut duration = self.next_output_duration();
             let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
                 crate::Error::new(format!(
