@@ -121,7 +121,8 @@ impl AudioConverter {
             self.state.resampled_samples += resampled.len() as u64;
             self.state.prev_input_samples = interleaved;
             interleaved = resampled;
-        } else {
+        } else if self.state.key.is_some() {
+            // リサンプリング経路から非リサンプリング経路へ切り替わった時だけ状態を破棄する。
             self.reset();
         }
 
