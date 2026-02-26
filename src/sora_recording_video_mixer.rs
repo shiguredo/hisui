@@ -29,14 +29,20 @@ const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
     original: Arc<VideoFrame>,
+    duration: Duration,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
     resize_filter_mode: shiguredo_libyuv::FilterMode,
 }
 
 impl ResizeCachedVideoFrame {
-    fn new(original: Arc<VideoFrame>, resize_filter_mode: shiguredo_libyuv::FilterMode) -> Self {
+    fn new(
+        original: Arc<VideoFrame>,
+        duration: Duration,
+        resize_filter_mode: shiguredo_libyuv::FilterMode,
+    ) -> Self {
         Self {
             original,
+            duration,
             resized: Vec::new(),
             resize_filter_mode,
         }
@@ -47,7 +53,15 @@ impl ResizeCachedVideoFrame {
     }
 
     fn end_timestamp(&self) -> Duration {
-        self.original.end_timestamp()
+        self.original.timestamp.saturating_add(self.duration)
+    }
+
+    fn duration(&self) -> Duration {
+        self.duration
+    }
+
+    fn set_duration(&mut self, duration: Duration) {
+        self.duration = duration;
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> crate::Result<&VideoFrame> {
@@ -190,6 +204,7 @@ pub struct VideoMixerSpec {
     pub trim_spans: TrimSpans,
     pub resize_filter_mode: shiguredo_libyuv::FilterMode,
     pub input_track_source_ids: HashMap<TrackId, SourceId>,
+    pub source_stop_timestamps: HashMap<SourceId, Duration>,
 }
 
 impl VideoMixerSpec {
@@ -201,6 +216,11 @@ impl VideoMixerSpec {
             trim_spans: layout.trim_spans.clone(),
             resize_filter_mode: shiguredo_libyuv::FilterMode::Box,
             input_track_source_ids: HashMap::new(),
+            source_stop_timestamps: layout
+                .sources
+                .iter()
+                .map(|(source_id, source)| (source_id.clone(), source.stop_timestamp))
+                .collect(),
         }
     }
 
@@ -358,7 +378,8 @@ impl VideoMixer {
                     .get(&id)
                     .cloned()
                     .unwrap_or_else(|| SourceId::new(id.get()));
-                (id, InputStream::new(source_id))
+                let stop_timestamp = spec.source_stop_timestamps.get(&source_id).copied();
+                (id, InputStream::new(source_id, stop_timestamp))
             })
             .collect();
         stats
@@ -492,7 +513,6 @@ impl VideoMixer {
 
             // 可変値
             timestamp,
-            duration,
             width: self.spec.resolution.width().get(),
             height: self.spec.resolution.height().get(),
             data: canvas.data,
@@ -586,12 +606,14 @@ impl VideoMixer {
         track_id: &TrackId,
         sample: Option<MediaFrame>,
     ) -> Result<()> {
+        let next_output_duration = sample.as_ref().map(|_| self.next_output_duration());
         let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
             crate::Error::new(format!(
                 "unknown input track id for video mixer: {}",
                 track_id
             ))
         })?;
+
         if let Some(sample) = sample {
             // キューに要素を追加する
             let frame = sample.expect_video()?;
@@ -602,14 +624,39 @@ impl VideoMixer {
                 )));
             }
 
+            // 新規フレームの初期 duration は、比較対象がない場合のフォールバック値として
+            // 出力フレーム間隔 (next_output_duration) を使う。
+            // その後、次フレーム到着時には timestamp 差分で上書きされ、
+            // 最終フレームは EOS 時に stop_timestamp で補正されることがある。
+            let mut duration = next_output_duration.expect("infallible");
+            if let Some(prev) = input_stream.frame_queue.back_mut() {
+                let computed = frame.timestamp.saturating_sub(prev.start_timestamp());
+                if !computed.is_zero() {
+                    prev.set_duration(computed);
+                    duration = computed;
+                } else {
+                    duration = prev.duration();
+                }
+            }
+
             input_stream
                 .frame_queue
                 .push_back(ResizeCachedVideoFrame::new(
                     frame,
+                    duration,
                     self.spec.resize_filter_mode,
                 ));
             self.stats.add_input_video_frame_count();
         } else {
+            if let (Some(frame), Some(stop_timestamp)) = (
+                input_stream.frame_queue.back_mut(),
+                input_stream.stop_timestamp,
+            ) {
+                let duration = stop_timestamp.saturating_sub(frame.start_timestamp());
+                if !duration.is_zero() {
+                    frame.set_duration(duration);
+                }
+            }
             input_stream.eos = true;
         }
         Ok(())
@@ -654,12 +701,16 @@ impl VideoMixer {
                 }
 
                 // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
+                if self.last_mixed_frame.is_none() {
+                    // 先頭フレームがまだない場合には、まず一度だけ通常合成を行って基準フレームを作る。
+                    // (このとき output 系の統計値も mix() 内で更新される)
+                    self.last_mixed_frame = Some(self.mix(now)?);
+                    continue;
+                }
                 let duration = self.next_output_duration();
-                let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
-
-                last_frame.duration += duration;
                 self.stats.add_extended_video_frame_count();
                 // 出力フレーム数は増えないが、出力尺は伸びる。
+                // VideoFrame には duration フィールドがないため、尺の延長は統計値と次フレーム timestamp 差分で表現する。
                 self.stats.add_output_video_frame_duration(duration);
 
                 continue;
@@ -708,14 +759,16 @@ struct InputTrack {
 #[derive(Debug)]
 struct InputStream {
     source_id: SourceId,
+    stop_timestamp: Option<Duration>,
     eos: bool,
     frame_queue: VecDeque<ResizeCachedVideoFrame>,
 }
 
 impl InputStream {
-    fn new(source_id: SourceId) -> Self {
+    fn new(source_id: SourceId, stop_timestamp: Option<Duration>) -> Self {
         Self {
             source_id,
+            stop_timestamp,
             eos: false,
             frame_queue: VecDeque::new(),
         }

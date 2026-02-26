@@ -496,7 +496,6 @@ fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioFrame {
         channels: Channels::STEREO,
         sample_rate: SampleRate::HZ_48000,
         timestamp: source.start_timestamp + duration * i as u32,
-        duration,
         sample_entry: if i == 0 {
             // 中身はなんでもいい
             Some(SampleEntry::Unknown(UnknownBox {
@@ -518,7 +517,6 @@ fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame 
         width: EvenUsize::MIN_CELL_SIZE.get(),
         height: EvenUsize::MIN_CELL_SIZE.get(),
         timestamp: source.start_timestamp + duration * i as u32,
-        duration,
         sample_entry: if i == 0 {
             // 中身はなんでもいい
             Some(SampleEntry::Unknown(UnknownBox {

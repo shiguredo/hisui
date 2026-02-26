@@ -50,7 +50,6 @@ impl OpusEncoder {
 
             // 入力の値をそのまま引きつぐ
             timestamp: frame.timestamp,
-            duration: frame.duration,
 
             // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
             sample_entry: self.sample_entry.take(),

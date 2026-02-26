@@ -240,7 +240,7 @@ fn mix_three_sources_with_trim() -> hisui::Result<()> {
     Ok(())
 }
 
-/// AudioFrame.duration がソース毎に異なる場合のテスト
+/// 音声データ間隔がソース毎に異なる場合のテスト
 #[test]
 fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
     // 100 ms のソースを三つ用意する
@@ -439,7 +439,6 @@ fn audio_data(
         channels: Channels::STEREO,
         sample_rate: SampleRate::HZ_48000,
         timestamp: source.start_timestamp + duration * i as u32,
-        duration,
         sample_entry: None,
     };
     MixerInput {

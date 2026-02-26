@@ -313,8 +313,6 @@ impl VideoTrackHeader {
 pub struct WebmAudioReader {
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
-    last_duration: Duration,
-    prev_audio_data: Option<AudioFrame>,
 
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
@@ -340,8 +338,6 @@ impl WebmAudioReader {
         Ok(Self {
             reader,
             cluster_timestamp: Duration::ZERO,
-            last_duration: Duration::ZERO,
-            prev_audio_data: None,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_cluster_count: 0,
@@ -389,16 +385,15 @@ impl WebmAudioReader {
         let data = reader.read_raw_data()?;
 
         self.total_simple_block_count += 1;
-        self.total_track_duration = timestamp + self.last_duration;
+        // WebM は payload を解釈しないため、サンプル末尾の正確な duration はここでは求めない。
+        // そのため total_track_duration は「最終 SimpleBlock の開始時刻」を表す。
+        // (MP4 の total_track_duration とは意味が異なる)
+        self.total_track_duration = self.total_track_duration.max(timestamp);
 
         Ok(Some(AudioFrame {
             data,
             format: AudioFormat::Opus,
             timestamp,
-
-            // WebM には明示的な duration の情報は格納されていないので、
-            // 前後の音声データのタイムスタンプの差を設定する
-            duration: self.last_duration,
 
             // 以降のフィールドはデコーダーには参照されないのでダミー値を設定しておく
             sample_entry: None,
@@ -422,19 +417,12 @@ impl WebmAudioReader {
                 }
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block()? {
-                        let timestamp = current.timestamp;
-                        if let Some(mut prev) = self.prev_audio_data.replace(current) {
-                            // 尺を確定する
-                            prev.duration = timestamp.saturating_sub(prev.timestamp);
-                            self.last_duration = prev.duration;
-                            return Ok(Some(prev));
-                        }
+                        return Ok(Some(current));
                     }
                 }
                 ID_CUES => {
                     // メディアデータ格納部分を抜けたのでここで終了
-                    // 最後の AudioFrame が残っている場合には、まずそれを返す
-                    return Ok(self.prev_audio_data.take());
+                    return Ok(None);
                 }
                 id => {
                     return Err(crate::Error::new(format!(
@@ -459,8 +447,6 @@ pub struct WebmVideoReader {
     header: VideoTrackHeader,
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
-    last_duration: Duration,
-    prev_video_frame: Option<VideoFrame>,
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
     pub total_cluster_count: u64,
@@ -486,8 +472,6 @@ impl WebmVideoReader {
             header,
             reader,
             cluster_timestamp: Duration::ZERO,
-            last_duration: Duration::ZERO,
-            prev_video_frame: None,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_cluster_count: 0,
@@ -528,19 +512,12 @@ impl WebmVideoReader {
                 }
                 ID_SIMPLE_BLOCK => {
                     if let Some(current) = self.read_simple_block()? {
-                        let timestamp = current.timestamp;
-                        if let Some(mut prev) = self.prev_video_frame.replace(current) {
-                            // 尺を確定する
-                            prev.duration = timestamp.saturating_sub(prev.timestamp);
-                            self.last_duration = prev.duration;
-                            return Ok(Some(prev));
-                        }
+                        return Ok(Some(current));
                     }
                 }
                 ID_CUES => {
                     // メディアデータ格納部分を抜けたのでここで終了
-                    // 最後の VideoFrame が残っている場合には、まずそれを返す
-                    return Ok(self.prev_video_frame.take());
+                    return Ok(None);
                 }
                 id => {
                     return Err(crate::Error::new(format!(
@@ -574,7 +551,10 @@ impl WebmVideoReader {
         let data = reader.read_raw_data()?;
 
         self.total_simple_block_count += 1;
-        self.total_track_duration = timestamp + self.last_duration;
+        // WebM は payload を解釈しないため、サンプル末尾の正確な duration はここでは求めない。
+        // そのため total_track_duration は「最終 SimpleBlock の開始時刻」を表す。
+        // (MP4 の total_track_duration とは意味が異なる)
+        self.total_track_duration = self.total_track_duration.max(timestamp);
         if self.codec.is_none()
             && let Some(name) = self.header.codec.codec_name()
         {
@@ -586,10 +566,6 @@ impl WebmVideoReader {
             format: self.header.codec,
             keyframe,
             timestamp,
-
-            // WebM には明示的な duration の情報は格納されていないので、
-            // 前後のフレームのタイムスタンプの差を設定する
-            duration: self.last_duration,
 
             // 以降のフィールドはデコーダーには参照されないのでダミー値を設定しておく
             width: 0,

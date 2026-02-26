@@ -12,8 +12,6 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{Error, MessageSender, ProcessorHandle, TrackId};
 
-const DEFAULT_VIDEO_FRAME_DURATION: Duration = Duration::from_millis(33);
-
 #[derive(Debug, Clone)]
 pub struct WhepSubscriber {
     pub input_url: String,
@@ -145,34 +143,27 @@ impl WhepSession {
 
         let (frame_tx, frame_rx) = tokio::sync::mpsc::unbounded_channel::<crate::VideoFrame>();
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<WhepEvent>();
-        let last_video_timestamp = Arc::new(Mutex::new(None::<Duration>));
-        let last_video_timestamp_for_sink = last_video_timestamp.clone();
-        let sink = VideoSinkBuilder::new(move |frame| {
-            match convert_webrtc_video_frame_to_i420(
-                frame,
-                &last_video_timestamp_for_sink,
-                DEFAULT_VIDEO_FRAME_DURATION,
-            ) {
-                Ok(video_frame) => {
-                    let _ = frame_tx.send(video_frame);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "failed to convert incoming WHEP video frame: {}",
-                        e.display()
-                    );
-                }
-            }
-        })
-        .build();
+        let sink =
+            VideoSinkBuilder::new(
+                move |frame| match convert_webrtc_video_frame_to_i420(frame) {
+                    Ok(video_frame) => {
+                        let _ = frame_tx.send(video_frame);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "failed to convert incoming WHEP video frame: {}",
+                            e.display()
+                        );
+                    }
+                },
+            )
+            .build();
         let video_track_state = Arc::new(Mutex::new(AttachedVideoTrackState {
             sink,
             current_track: None,
         }));
         let video_track_state_for_track = video_track_state.clone();
         let video_track_state_for_remove = video_track_state.clone();
-        let last_video_timestamp_for_track = last_video_timestamp.clone();
-        let last_video_timestamp_for_remove = last_video_timestamp.clone();
         let event_tx_for_conn = event_tx.clone();
         let event_tx_for_remove = event_tx.clone();
         let observer = PeerConnectionObserverBuilder::new()
@@ -213,9 +204,6 @@ impl WhepSession {
                     let wants = VideoSinkWants::new();
                     video_track.add_or_update_sink(&state.sink, &wants);
                     state.current_track = Some(video_track);
-                    if let Ok(mut ts) = last_video_timestamp_for_track.lock() {
-                        *ts = None;
-                    }
                 }
             })
             .on_remove_track(move |receiver| {
@@ -234,9 +222,6 @@ impl WhepSession {
                 {
                     if let Some(track) = state.current_track.take() {
                         track.remove_sink(&state.sink);
-                    }
-                    if let Ok(mut ts) = last_video_timestamp_for_remove.lock() {
-                        *ts = None;
                     }
                     let _ = event_tx_for_remove.send(WhepEvent::VideoTrackRemoved);
                 }
@@ -511,8 +496,6 @@ fn validate_input_url(input_url: &str) -> Result<(), String> {
 
 fn convert_webrtc_video_frame_to_i420(
     frame: shiguredo_webrtc::VideoFrameRef<'_>,
-    last_video_timestamp: &Arc<Mutex<Option<Duration>>>,
-    default_duration: Duration,
 ) -> crate::Result<crate::VideoFrame> {
     let buffer = frame.buffer();
     let width = usize::try_from(buffer.width())
@@ -528,16 +511,6 @@ fn convert_webrtc_video_frame_to_i420(
     } else {
         Duration::from_micros(frame.timestamp_us() as u64)
     };
-    let duration = if let Ok(mut last) = last_video_timestamp.lock() {
-        let duration = match *last {
-            Some(prev) if timestamp > prev => timestamp.saturating_sub(prev),
-            _ => default_duration,
-        };
-        *last = Some(timestamp);
-        duration
-    } else {
-        default_duration
-    };
 
     let y_stride = usize::try_from(buffer.stride_y())
         .map_err(|_| Error::new("incoming video frame Y stride is negative"))?;
@@ -552,7 +525,6 @@ fn convert_webrtc_video_frame_to_i420(
         width,
         height,
         timestamp,
-        duration,
         sample_entry: None,
     };
     Ok(crate::VideoFrame::new_i420(

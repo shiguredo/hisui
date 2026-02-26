@@ -119,7 +119,6 @@ impl VideoDeviceSource {
             fps: self.fps.unwrap_or(default_config.fps),
         };
 
-        let default_duration = frame_duration_from_fps(config.fps);
         let (frame_tx, mut frame_rx) =
             tokio::sync::mpsc::unbounded_channel::<shiguredo_video_device::VideoFrameOwned>();
         let mut capture = shiguredo_video_device::VideoCapture::new(config, move |frame| {
@@ -130,13 +129,8 @@ impl VideoDeviceSource {
             .start()
             .map_err(|e| Error::new(format!("failed to start video capture session: {e}")))?;
 
-        let mut last_timestamp = None;
         while let Some(captured_frame) = frame_rx.recv().await {
-            let frame = convert_captured_frame_to_i420(
-                &captured_frame,
-                default_duration,
-                &mut last_timestamp,
-            )?;
+            let frame = convert_captured_frame_to_i420(&captured_frame)?;
             // TODO: send_syn() でペース調整に対応する
             if !output_video_sender.send_video(frame) {
                 break;
@@ -150,15 +144,8 @@ impl VideoDeviceSource {
     }
 }
 
-fn frame_duration_from_fps(fps: i32) -> Duration {
-    let fps = u64::try_from(fps).unwrap_or(1);
-    Duration::from_micros((1_000_000 / fps).max(1))
-}
-
 fn convert_captured_frame_to_i420(
     frame: &shiguredo_video_device::VideoFrameOwned,
-    default_duration: Duration,
-    last_timestamp: &mut Option<Duration>,
 ) -> Result<VideoFrame> {
     let width = usize::try_from(frame.width)
         .map_err(|_| Error::new(format!("invalid frame width: {}", frame.width)))?;
@@ -176,11 +163,6 @@ fn convert_captured_frame_to_i420(
     } else {
         Duration::from_micros(frame.timestamp_us as u64)
     };
-    let duration = match *last_timestamp {
-        Some(prev) if timestamp > prev => timestamp.saturating_sub(prev),
-        _ => default_duration,
-    };
-    *last_timestamp = Some(timestamp);
 
     match frame.pixel_format {
         shiguredo_video_device::PixelFormat::Nv12 => {
@@ -230,7 +212,6 @@ fn convert_captured_frame_to_i420(
                 width,
                 height,
                 timestamp,
-                duration,
                 sample_entry: None,
             };
             Ok(VideoFrame::new_i420(
@@ -270,7 +251,6 @@ fn convert_captured_frame_to_i420(
                 width,
                 height,
                 timestamp,
-                duration,
                 sample_entry: None,
             };
             Ok(VideoFrame::new_i420(
@@ -361,18 +341,13 @@ mod tests {
             timestamp_us: 1_000_000,
         };
 
-        let default_duration = Duration::from_millis(33);
-        let mut last_timestamp = None;
-        let frame =
-            convert_captured_frame_to_i420(&captured, default_duration, &mut last_timestamp)
-                .expect("convert");
+        let frame = convert_captured_frame_to_i420(&captured).expect("convert");
 
         assert_eq!(frame.format, crate::video::VideoFormat::I420);
         assert_eq!(frame.width, width);
         assert_eq!(frame.height, height);
         assert_eq!(frame.data, data);
         assert_eq!(frame.timestamp, Duration::from_secs(1));
-        assert_eq!(frame.duration, default_duration);
     }
 
     #[test]
@@ -396,11 +371,7 @@ mod tests {
             timestamp_us: 1_000_000,
         };
 
-        let default_duration = Duration::from_millis(33);
-        let mut last_timestamp = None;
-        let error =
-            convert_captured_frame_to_i420(&captured, default_duration, &mut last_timestamp)
-                .expect_err("must fail");
+        let error = convert_captured_frame_to_i420(&captured).expect_err("must fail");
 
         assert!(error.reason.contains("insufficient I420 data"));
     }

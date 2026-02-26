@@ -147,7 +147,6 @@ impl Mp4VideoReader {
             width: self.width,
             height: self.height,
             timestamp,
-            duration,
         }))
     }
 }
@@ -282,7 +281,6 @@ impl Mp4AudioReader {
             channels: self.channels,
             sample_rate: self.sample_rate,
             timestamp,
-            duration,
         }))
     }
 }

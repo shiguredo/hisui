@@ -162,7 +162,6 @@ pub struct RtmpIncomingFrameHandler {
     audio_sample_entry: Option<SampleEntry>,
     video_sample_entry: Option<SampleEntry>,
     received_video_keyframe: bool,
-    last_video_timestamp: Option<std::time::Duration>,
     rtmp_base_timestamp: Option<u32>,
     timestamp_offset: std::time::Duration,
 }
@@ -181,7 +180,6 @@ impl RtmpIncomingFrameHandler {
             audio_sample_entry: None,
             video_sample_entry: None,
             received_video_keyframe: false,
-            last_video_timestamp: None,
             rtmp_base_timestamp: None,
             timestamp_offset,
         }
@@ -240,7 +238,6 @@ impl RtmpIncomingFrameHandler {
             .ok_or_else(|| Error::new("audio codec info is not initialized"))?;
         Ok(Some(AudioFrame {
             timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
-            duration: std::time::Duration::ZERO,
             format: codec_info.format,
             sample_rate: codec_info.sample_rate,
             channels: codec_info.channels,
@@ -301,27 +298,8 @@ impl RtmpIncomingFrameHandler {
         let (width, height) = crate::video_h264::extract_video_dimensions(sample_entry)
             .map_err(|e| e.with_context("failed to extract video dimensions"))?;
 
-        // durationを計算
-        //
-        // TODO: 将来的には VideoFrame 側で「duration が不明」を表現できるようにする
-        let duration = if let Some(last_ts) = self.last_video_timestamp {
-            if current_timestamp > last_ts {
-                current_timestamp - last_ts
-            } else {
-                // タイムスタンプがリセットされた場合は20msのデフォルト値
-                std::time::Duration::from_millis(20)
-            }
-        } else {
-            // 最初のフレームは20msで決め打ち
-            std::time::Duration::from_millis(20)
-        };
-
-        // 次のフレーム処理用に現在のタイムスタンプを記録
-        self.last_video_timestamp = Some(current_timestamp);
-
         Ok(Some(VideoFrame {
             timestamp: current_timestamp,
-            duration,
             keyframe: frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame,
             sample_entry: Some(sample_entry.clone()),
             format: crate::video::VideoFormat::H264,

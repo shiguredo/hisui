@@ -84,7 +84,6 @@ pub struct AudioFrame {
     pub channels: Channels,
     pub sample_rate: SampleRate,
     pub timestamp: Duration,
-    pub duration: Duration,
     pub sample_entry: Option<SampleEntry>,
 }
 

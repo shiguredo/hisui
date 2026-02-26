@@ -182,7 +182,7 @@ async fn setup_pipeline(
 #[derive(Debug)]
 struct AudioSampleInfo {
     timestamp: Duration,
-    duration: Duration,
+    duration: Option<Duration>,
     data_size: usize,
     decoded_data_size: Option<usize>,
 }
@@ -192,7 +192,7 @@ impl nojson::DisplayJson for AudioSampleInfo {
         f.set_indent_size(0);
         f.object(|f| {
             f.member("timestamp_us", self.timestamp.as_micros())?;
-            f.member("duration_us", self.duration.as_micros())?;
+            f.member("duration_us", self.duration.map(|v| v.as_micros() as u64))?;
             f.member("data_size", self.data_size)?;
             if let Some(v) = self.decoded_data_size {
                 f.member("decoded_data_size", v)?;
@@ -207,7 +207,7 @@ impl nojson::DisplayJson for AudioSampleInfo {
 #[derive(Debug)]
 struct VideoSampleInfo {
     timestamp: Duration,
-    duration: Duration,
+    duration: Option<Duration>,
     data_size: usize,
     keyframe: bool,
     codec_specific_info: Option<VideoCodecSpecificInfo>,
@@ -223,7 +223,7 @@ impl nojson::DisplayJson for VideoSampleInfo {
         f.set_indent_size(0);
         f.object(|f| {
             f.member("timestamp_us", self.timestamp.as_micros())?;
-            f.member("duration_us", self.duration.as_micros())?;
+            f.member("duration_us", self.duration.map(|v| v.as_micros() as u64))?;
             f.member("data_size", self.data_size)?;
             f.member("keyframe", self.keyframe)?;
             match &self.codec_specific_info {
@@ -373,6 +373,14 @@ impl OutputPrinter {
         }
     }
 
+    fn estimate_duration(prev_timestamp: Duration, next_timestamp: Duration) -> Option<Duration> {
+        if next_timestamp > prev_timestamp {
+            Some(next_timestamp.saturating_sub(prev_timestamp))
+        } else {
+            None
+        }
+    }
+
     async fn run(mut self, handle: crate::ProcessorHandle) -> Result<()> {
         let audio_encoded_track_id = self.audio_encoded_track_id.clone();
         let mut audio_encoded_track = handle.subscribe_track(audio_encoded_track_id.clone());
@@ -427,9 +435,13 @@ impl OutputPrinter {
                 if self.audio_codec.is_none() {
                     self.audio_codec = audio_data.format.codec_name();
                 }
+                if let Some(prev) = self.audio_samples.last_mut() {
+                    let duration = Self::estimate_duration(prev.timestamp, audio_data.timestamp);
+                    prev.duration = duration;
+                }
                 self.audio_samples.push(AudioSampleInfo {
                     timestamp: audio_data.timestamp,
-                    duration: audio_data.duration,
+                    duration: None,
                     data_size: audio_data.data.len(),
                     decoded_data_size: None,
                 });
@@ -457,9 +469,13 @@ impl OutputPrinter {
                 if self.video_codec.is_none() {
                     self.video_codec = video_frame.format.codec_name();
                 }
+                if let Some(prev) = self.video_samples.last_mut() {
+                    let duration = Self::estimate_duration(prev.timestamp, video_frame.timestamp);
+                    prev.duration = duration;
+                }
                 self.video_samples.push(VideoSampleInfo {
                     timestamp: video_frame.timestamp,
-                    duration: video_frame.duration,
+                    duration: None,
                     data_size: video_frame.data.len(),
                     keyframe: video_frame.keyframe,
                     codec_specific_info: VideoCodecSpecificInfo::new(&video_frame),
@@ -567,11 +583,14 @@ impl nojson::DisplayJson for OutputPrinter {
             f.member("format", self.format)?;
             if let Some(c) = self.audio_codec {
                 f.member("audio_codec", c)?;
+                // 末尾サンプルの duration は次サンプルとの差分で算出できないため None のままにする。
+                // そのため合計 duration は filter_map で None を除外して集計する
+                // （最後のサンプル分は含まれない）。
                 f.member(
                     "audio_duration_us",
                     self.audio_samples
                         .iter()
-                        .map(|s| s.duration)
+                        .filter_map(|s| s.duration)
                         .sum::<Duration>()
                         .as_micros(),
                 )?;
@@ -580,11 +599,14 @@ impl nojson::DisplayJson for OutputPrinter {
             }
             if let Some(c) = self.video_codec {
                 f.member("video_codec", c)?;
+                // 末尾サンプルの duration は次サンプルとの差分で算出できないため None のままにする。
+                // そのため合計 duration は filter_map で None を除外して集計する
+                // （最後のサンプル分は含まれない）。
                 f.member(
                     "video_duration_us",
                     self.video_samples
                         .iter()
-                        .map(|s| s.duration)
+                        .filter_map(|s| s.duration)
                         .sum::<Duration>()
                         .as_micros(),
                 )?;

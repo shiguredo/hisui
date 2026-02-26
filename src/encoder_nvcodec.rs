@@ -231,7 +231,6 @@ impl NvcodecEncoder {
                 width: input_frame.width,
                 height: input_frame.height,
                 timestamp: input_frame.timestamp,
-                duration: input_frame.duration,
                 sample_entry: self.sample_entry.take(),
             });
         }

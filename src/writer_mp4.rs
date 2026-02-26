@@ -25,6 +25,8 @@ const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
 // 映像・音声混在時のチャンクの尺の最大値（映像か音声の片方だけの場合はチャンクは一つだけ）
 const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
+// 末尾サンプルなどで前後関係から duration を再計算できない場合に使う既定値
+const DEFAULT_SAMPLE_DURATION: Duration = Duration::from_millis(20);
 
 // 入力がリアルタイムではなくファイルで、
 // 映像・音声キューの件数差が大きい場合に、軽い音声側だけが先行して
@@ -199,6 +201,10 @@ pub struct Mp4Writer {
     input_video_track_id: Option<TrackId>,
     input_audio_queue: VecDeque<Arc<AudioFrame>>,
     input_video_queue: VecDeque<Arc<VideoFrame>>,
+    pending_audio_sample: Option<Arc<AudioFrame>>,
+    pending_video_frame: Option<Arc<VideoFrame>>,
+    last_audio_duration: Option<Duration>,
+    last_video_duration: Option<Duration>,
     appending_video_chunk: bool,
     stats: Mp4WriterStats,
 }
@@ -254,6 +260,10 @@ impl Mp4Writer {
             input_video_track_id,
             input_audio_queue: VecDeque::new(),
             input_video_queue: VecDeque::new(),
+            pending_audio_sample: None,
+            pending_video_frame: None,
+            last_audio_duration: None,
+            last_video_duration: None,
             appending_video_chunk: true,
             stats,
         })
@@ -270,13 +280,18 @@ impl Mp4Writer {
             .max(self.stats.total_video_track_duration())
     }
 
-    fn handle_next_audio_and_video(
-        &mut self,
-        audio_timestamp: Option<Duration>,
-        video_timestamp: Option<Duration>,
-    ) -> crate::Result<bool> {
+    fn handle_next_audio_and_video(&mut self) -> crate::Result<bool> {
+        self.flush_pending_audio_if_ready()?;
+        self.flush_pending_video_if_ready()?;
+
+        let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
+        let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
         match (audio_timestamp, video_timestamp) {
             (None, None) => {
+                if self.pending_audio_sample.is_some() || self.pending_video_frame.is_some() {
+                    // pending が残っている場合はフラッシュ後に再評価する
+                    return Ok(true);
+                }
                 // 全部の入力の処理が完了した
                 let finalized = self.muxer.finalize()?;
 
@@ -295,24 +310,24 @@ impl Mp4Writer {
             }
             (None, Some(_)) => {
                 // 残りは映像のみ
-                self.append_video_frame()?;
+                self.process_next_video_frame()?;
             }
             (Some(_), None) => {
                 // 残りは音声のみ
-                self.append_audio_data()?;
+                self.process_next_audio_sample()?;
             }
             (Some(audio_timestamp), Some(video_timestamp)) => {
                 if self.appending_video_chunk
                     && video_timestamp.saturating_sub(audio_timestamp) > MAX_CHUNK_DURATION
                 {
                     // 音声が一定以上遅れている場合は映像に追従する
-                    self.append_audio_data()?;
+                    self.process_next_audio_sample()?;
                 } else if !self.appending_video_chunk && video_timestamp > audio_timestamp {
                     // 一度音声追記モードに入った場合には、映像に追いつくまでは音声を追記し続ける
-                    self.append_audio_data()?;
+                    self.process_next_audio_sample()?;
                 } else {
                     // 音声との差が一定以内の場合は、映像の処理を進める
-                    self.append_video_frame()?;
+                    self.process_next_video_frame()?;
                 }
             }
         }
@@ -349,12 +364,23 @@ impl Mp4Writer {
         Ok(())
     }
 
-    fn append_video_frame(&mut self) -> crate::Result<()> {
-        // 次の入力を取り出す（これは常に成功する）
+    fn sample_duration_from_timestamps(
+        current_timestamp: Duration,
+        next_timestamp: Duration,
+        last_duration: Option<Duration>,
+    ) -> Duration {
+        if next_timestamp > current_timestamp {
+            next_timestamp.saturating_sub(current_timestamp)
+        } else {
+            last_duration.unwrap_or(DEFAULT_SAMPLE_DURATION)
+        }
+    }
+
+    fn append_pending_video_frame(&mut self, duration: Duration) -> crate::Result<()> {
         let frame = self
-            .input_video_queue
-            .pop_front()
-            .ok_or_else(|| crate::Error::new("video input queue is unexpectedly empty"))?;
+            .pending_video_frame
+            .take()
+            .ok_or_else(|| crate::Error::new("pending video frame is unexpectedly empty"))?;
 
         if self.stats.video_codec().is_none()
             && let Some(name) = frame.format.codec_name()
@@ -362,37 +388,29 @@ impl Mp4Writer {
             self.stats.set_video_codec(name);
         }
 
-        // ファイルへのデータ追記
         self.file.write_all(&frame.data)?;
         let data_offset = self.next_position;
-
-        // muxer へのサンプル登録
         let sample = shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Video,
             sample_entry: frame.sample_entry.clone(),
             keyframe: frame.keyframe,
             timescale: TIMESCALE,
-            duration: frame.duration.as_micros() as u32,
+            duration: duration.as_micros() as u32,
             data_offset,
             data_size: frame.data.len(),
         };
         self.muxer.append_sample(&sample)?;
-
-        // ポジションを更新
         self.next_position += frame.data.len() as u64;
-
-        self.stats
-            .add_video_sample(frame.data.len(), frame.duration);
-        self.appending_video_chunk = true;
+        self.stats.add_video_sample(frame.data.len(), duration);
+        self.last_video_duration = Some(duration);
         Ok(())
     }
 
-    fn append_audio_data(&mut self) -> crate::Result<()> {
-        // 次の入力を取り出す（これは常に成功する）
+    fn append_pending_audio_sample(&mut self, duration: Duration) -> crate::Result<()> {
         let data = self
-            .input_audio_queue
-            .pop_front()
-            .ok_or_else(|| crate::Error::new("audio input queue is unexpectedly empty"))?;
+            .pending_audio_sample
+            .take()
+            .ok_or_else(|| crate::Error::new("pending audio sample is unexpectedly empty"))?;
 
         if self.stats.audio_codec().is_none()
             && let Some(name) = data.format.codec_name()
@@ -400,27 +418,81 @@ impl Mp4Writer {
             self.stats.set_audio_codec(name);
         }
 
-        // ファイルへのデータ追記
         self.file.write_all(&data.data)?;
         let data_offset = self.next_position;
-
-        // muxer へのサンプル登録
         let sample = shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,
             sample_entry: data.sample_entry.clone(),
             keyframe: true,
             timescale: TIMESCALE,
-            duration: data.duration.as_micros() as u32,
+            duration: duration.as_micros() as u32,
             data_offset,
             data_size: data.data.len(),
         };
         self.muxer.append_sample(&sample)?;
-
-        // ポジションを更新
         self.next_position += data.data.len() as u64;
+        self.stats.add_audio_sample(data.data.len(), duration);
+        self.last_audio_duration = Some(duration);
+        Ok(())
+    }
 
-        self.stats.add_audio_sample(data.data.len(), data.duration);
+    fn process_next_video_frame(&mut self) -> crate::Result<()> {
+        let frame = self
+            .input_video_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("video input queue is unexpectedly empty"))?;
+
+        if let Some(pending) = self.pending_video_frame.as_ref() {
+            let duration = Self::sample_duration_from_timestamps(
+                pending.timestamp,
+                frame.timestamp,
+                self.last_video_duration,
+            );
+            self.append_pending_video_frame(duration)?;
+        }
+        self.pending_video_frame = Some(frame);
+        self.appending_video_chunk = true;
+        Ok(())
+    }
+
+    fn process_next_audio_sample(&mut self) -> crate::Result<()> {
+        let data = self
+            .input_audio_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("audio input queue is unexpectedly empty"))?;
+
+        if let Some(pending) = self.pending_audio_sample.as_ref() {
+            let duration = Self::sample_duration_from_timestamps(
+                pending.timestamp,
+                data.timestamp,
+                self.last_audio_duration,
+            );
+            self.append_pending_audio_sample(duration)?;
+        }
+        self.pending_audio_sample = Some(data);
         self.appending_video_chunk = false;
+        Ok(())
+    }
+
+    fn flush_pending_audio_if_ready(&mut self) -> crate::Result<()> {
+        if self.input_audio_track_id.is_none()
+            && self.input_audio_queue.is_empty()
+            && self.pending_audio_sample.is_some()
+        {
+            let duration = self.last_audio_duration.unwrap_or(DEFAULT_SAMPLE_DURATION);
+            self.append_pending_audio_sample(duration)?;
+        }
+        Ok(())
+    }
+
+    fn flush_pending_video_if_ready(&mut self) -> crate::Result<()> {
+        if self.input_video_track_id.is_none()
+            && self.input_video_queue.is_empty()
+            && self.pending_video_frame.is_some()
+        {
+            let duration = self.last_video_duration.unwrap_or(DEFAULT_SAMPLE_DURATION);
+            self.append_pending_video_frame(duration)?;
+        }
         Ok(())
     }
 }
@@ -464,10 +536,7 @@ impl Mp4Writer {
                 });
             }
 
-            let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
-            let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
-
-            let in_progress = self.handle_next_audio_and_video(audio_timestamp, video_timestamp)?;
+            let in_progress = self.handle_next_audio_and_video()?;
 
             if !in_progress {
                 return Ok(WriterRunOutput::Finished);

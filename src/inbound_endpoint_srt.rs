@@ -860,7 +860,6 @@ impl SrtTsDemuxer {
             width: 0,
             height: 0,
             timestamp: relative_timestamp,
-            duration: Duration::ZERO,
             sample_entry: None, // Annex-B 入力では sample_entry は付与しない
         })))
     }
@@ -916,20 +915,12 @@ impl SrtTsDemuxer {
             let timestamp = timestamp_90khz_to_duration(pts.as_u64().saturating_add(pts_ticks));
             let base_timestamp = *self.base_audio_timestamp.get_or_insert(timestamp);
             let relative_timestamp = timestamp.saturating_sub(base_timestamp);
-            let duration = Duration::from_micros(
-                (1_000_000u64)
-                    .saturating_mul(1024)
-                    .checked_div(sample_rate as u64)
-                    .unwrap_or(0),
-            );
-
             samples.push(TsSample::Audio(crate::AudioFrame {
                 data: raw_data,
                 format: crate::audio::AudioFormat::Aac,
                 channels: crate::audio::Channels::from_u16(channels)?,
                 sample_rate: sample_rate_value,
                 timestamp: relative_timestamp,
-                duration,
                 sample_entry: None,
             }));
 
