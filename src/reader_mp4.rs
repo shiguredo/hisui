@@ -9,7 +9,7 @@ use std::{
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
-    audio::{AudioFormat, AudioFrame},
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -166,8 +166,8 @@ pub struct Mp4AudioReader {
     demuxer: Mp4FileDemuxer,
     audio_track_id: Option<u32>,
     format: AudioFormat,
-    stereo: bool,
-    sample_rate: u16,
+    channels: Channels,
+    sample_rate: SampleRate,
 
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
@@ -194,10 +194,10 @@ impl Mp4AudioReader {
             file,
             demuxer,
             audio_track_id,
-            // 後で更新されるので適当な初期値を設定しておく
+            // ダミー初期値。実際の値はサンプルエントリー受信時に上書きされる。
             format: AudioFormat::Opus,
-            stereo: false,
-            sample_rate: 0,
+            channels: Channels::STEREO,
+            sample_rate: SampleRate::HZ_48000,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_sample_count: 0,
@@ -248,8 +248,8 @@ impl Mp4AudioReader {
             };
 
             self.format = format;
-            self.stereo = metadata.channelcount != 1;
-            self.sample_rate = metadata.samplerate.integer;
+            self.channels = Channels::from_u16(metadata.channelcount)?;
+            self.sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
         }
 
         // サンプルデータを読み込む
@@ -279,7 +279,7 @@ impl Mp4AudioReader {
             data,
             format: self.format,
             sample_entry,
-            stereo: self.stereo,
+            channels: self.channels,
             sample_rate: self.sample_rate,
             timestamp,
             duration,

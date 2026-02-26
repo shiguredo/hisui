@@ -6,7 +6,7 @@ use shiguredo_mp4::{
     descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
 };
 
-use crate::audio::{self, AudioFormat, AudioFrame, SAMPLE_RATE};
+use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
 
 #[derive(Debug)]
 pub struct AudioToolboxEncoder {
@@ -41,7 +41,7 @@ impl AudioToolboxEncoder {
                 frame.format
             )));
         }
-        if !frame.stereo {
+        if !frame.is_stereo() {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
@@ -56,15 +56,16 @@ impl AudioToolboxEncoder {
         &mut self,
         encoded: shiguredo_audio_toolbox::EncodedFrame,
     ) -> AudioFrame {
-        let duration = Duration::from_secs(encoded.samples as u64) / SAMPLE_RATE as u32;
-        let timestamp = Duration::from_secs(self.total_encoded_samples) / SAMPLE_RATE as u32;
+        let duration = Duration::from_secs(encoded.samples as u64) / SampleRate::HZ_48000.get();
+        let timestamp =
+            Duration::from_secs(self.total_encoded_samples) / SampleRate::HZ_48000.get();
         self.total_encoded_samples += encoded.samples as u64;
 
         AudioFrame {
             // 固定値
             format: AudioFormat::Aac,
-            stereo: true,
-            sample_rate: SAMPLE_RATE,
+            channels: Channels::STEREO,
+            sample_rate: SampleRate::HZ_48000,
 
             // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
             sample_entry: self.sample_entry.take(),

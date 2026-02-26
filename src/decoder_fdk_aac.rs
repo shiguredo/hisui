@@ -2,16 +2,15 @@ use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE};
+use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 
 /// FDK AAC デコーダー
 #[derive(Debug)]
 pub struct FdkAacDecoder {
     inner: Option<shiguredo_fdk_aac::Decoder>,
-    sample_rate: u32,
-    original_samples: u64,
-    resampled_samples: u64,
-    prev_decoded_original_samples: Vec<i16>,
+    sample_rate: Option<SampleRate>,
+    channels: Option<Channels>,
+    total_output_samples: u64,
 }
 
 impl FdkAacDecoder {
@@ -20,10 +19,9 @@ impl FdkAacDecoder {
         // サンプルレートなどの情報が実際にデータが届くまで不明なので遅延初期化している
         Ok(Self {
             inner: None,
-            sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
-            original_samples: 0,
-            resampled_samples: 0,
-            prev_decoded_original_samples: Vec::new(),
+            sample_rate: None,
+            channels: None,
+            total_output_samples: 0,
         })
     }
 
@@ -60,30 +58,24 @@ impl FdkAacDecoder {
             .decode(&frame.data)
             .map_err(|e| crate::Error::from(e).with_context("Failed to decode AAC"))?;
 
-        if let Some(frame) = decoded_frame {
-            let audio_data = match frame.channels {
-                1 => crate::audio::mono_to_stereo(&frame.data),
-                2 => frame.data,
-                _ => {
-                    return Err(crate::Error::new(format!(
-                        "Unsupported channel count: {}",
-                        frame.channels
-                    )));
-                }
-            };
-            self.sample_rate = frame.sample_rate;
-            self.build_audio_data(&audio_data)
+        if let Some(decoded) = decoded_frame {
+            self.sample_rate = Some(SampleRate::from_u32(decoded.sample_rate)?);
+            self.channels = Some(Channels::from_u8(decoded.channels)?);
+            self.build_audio_frame(&decoded.data)
         } else {
             // デコード可能なフレームがない場合は空のデータを返す
             //
             // TODO: そもそも将来的には decoder.rs のインタフェースを見直して、このようなワークアラウンドを不要にする
-            let timestamp =
-                Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
+            let timestamp = if let Some(sample_rate) = self.sample_rate {
+                sample_rate.duration_from_samples(self.total_output_samples)
+            } else {
+                Duration::ZERO
+            };
             Ok(AudioFrame {
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
-                stereo: true,
-                sample_rate: SAMPLE_RATE,
+                channels: self.channels.unwrap_or(frame.channels),
+                sample_rate: self.sample_rate.unwrap_or(frame.sample_rate),
                 timestamp,
                 duration: Duration::from_secs(0),
                 sample_entry: None,
@@ -92,36 +84,32 @@ impl FdkAacDecoder {
     }
 
     /// デコード済みデータを AudioFrame に変換する共通処理
-    fn build_audio_data(&mut self, decoded_samples: &[i16]) -> crate::Result<AudioFrame> {
-        let decoded_samples_len = decoded_samples.len() as u64;
-
-        let resampled = if let Some(resampled) = crate::audio::resample(
-            decoded_samples,
-            &self.prev_decoded_original_samples,
-            self.sample_rate,
-            self.original_samples,
-            self.resampled_samples,
-        ) {
-            self.prev_decoded_original_samples = decoded_samples.to_vec();
-            resampled
-        } else {
-            self.prev_decoded_original_samples = decoded_samples.to_vec();
-            decoded_samples.to_vec()
-        };
-
-        self.original_samples += decoded_samples_len;
-        self.resampled_samples += resampled.len() as u64;
-
-        let duration =
-            Duration::from_secs(resampled.len() as u64 / CHANNELS as u64) / SAMPLE_RATE as u32;
-        let timestamp =
-            Duration::from_secs(self.resampled_samples / CHANNELS as u64) / SAMPLE_RATE as u32;
+    fn build_audio_frame(&mut self, decoded_samples: &[i16]) -> crate::Result<AudioFrame> {
+        let sample_rate = self
+            .sample_rate
+            .ok_or_else(|| crate::Error::new("audio sample rate is not initialized"))?;
+        let channels = self
+            .channels
+            .ok_or_else(|| crate::Error::new("audio channel count is not initialized"))?;
+        if !decoded_samples
+            .len()
+            .is_multiple_of(usize::from(channels.get()))
+        {
+            return Err(crate::Error::new("invalid decoded audio sample count"));
+        }
+        let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
+        let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
+        let duration = sample_rate.duration_from_samples(samples_per_channel as u64);
+        self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {
-            data: resampled.iter().flat_map(|v| v.to_be_bytes()).collect(),
+            data: decoded_samples
+                .iter()
+                .flat_map(|v| v.to_be_bytes())
+                .collect(),
             format: AudioFormat::I16Be,
-            stereo: true,
-            sample_rate: SAMPLE_RATE,
+            channels,
+            sample_rate,
             timestamp,
             duration,
             sample_entry: None,

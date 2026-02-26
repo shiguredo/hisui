@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::{Error, audio::AudioFrame, video::VideoFrame};
+use crate::{
+    Error,
+    audio::{AudioFrame, Channels, SampleRate},
+    video::VideoFrame,
+};
 
 /// RTMP フレーム処理の共通ロジック（送信側）
 #[derive(Debug)]
@@ -166,8 +170,8 @@ pub struct RtmpIncomingFrameHandler {
 #[derive(Debug, Clone)]
 struct AudioCodecInfo {
     format: crate::audio::AudioFormat,
-    sample_rate: u32,
-    channels: u8,
+    sample_rate: SampleRate,
+    channels: Channels,
 }
 
 impl RtmpIncomingFrameHandler {
@@ -221,8 +225,8 @@ impl RtmpIncomingFrameHandler {
 
             tracing::debug!(
                 "Received AAC sequence header: {}Hz, {} channels",
-                sample_rate,
-                channels
+                sample_rate.get(),
+                channels.get()
             );
             return Ok(None);
         }
@@ -234,13 +238,12 @@ impl RtmpIncomingFrameHandler {
             .audio_codec_info
             .as_ref()
             .ok_or_else(|| Error::new("audio codec info is not initialized"))?;
-
         Ok(Some(AudioFrame {
             timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
-            sample_rate: codec_info.sample_rate as u16,
-            stereo: codec_info.channels == 2,
+            sample_rate: codec_info.sample_rate,
+            channels: codec_info.channels,
             sample_entry: self.audio_sample_entry.clone(),
             data: frame.data,
         }))
@@ -371,7 +374,7 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> crate::Result<Vec<u8
 }
 
 /// AAC Audio Specific Config をパースしてサンプルレートとチャンネル数を取得
-fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(u32, u8)> {
+fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(SampleRate, Channels)> {
     if data.len() < 2 {
         return Err(Error::new("AAC audio specific config is too short"));
     }
@@ -403,26 +406,16 @@ fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(u32, u8)> {
         _ => return Err(Error::new("Invalid AAC sample rate index")),
     };
 
-    let num_channels = match channels {
-        0 => return Err(Error::new("AAC channel configuration 0 is invalid")),
-        1 => 1,
-        2 => 2,
-        3 => 3,
-        4 => 4,
-        5 => 5,
-        6 => 6,
-        7 => 8,
-        _ => return Err(Error::new("Invalid AAC channel configuration")),
-    };
+    let channels = Channels::from_u8(channels)?;
 
-    Ok((sample_rate, num_channels as u8))
+    Ok((SampleRate::from_u32(sample_rate)?, channels))
 }
 
 /// AAC SampleEntry を生成
 fn create_audio_sample_entry(
     audio_specific_config: &[u8],
-    sample_rate: u32,
-    channels: u8,
+    sample_rate: SampleRate,
+    channels: Channels,
 ) -> crate::Result<SampleEntry> {
     use shiguredo_mp4::{
         FixedPointNumber, Uint,
@@ -430,12 +423,14 @@ fn create_audio_sample_entry(
         descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
     };
 
+    let sample_rate_u16 = sample_rate.as_u16()?;
+
     Ok(SampleEntry::Mp4a(Mp4aBox {
         audio: AudioSampleEntryFields {
             data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
-            channelcount: channels as u16,
+            channelcount: u16::from(channels.get()),
             samplesize: 16,
-            samplerate: FixedPointNumber::new(sample_rate as u16, 0),
+            samplerate: FixedPointNumber::new(sample_rate_u16, 0),
         },
         esds_box: EsdsBox {
             es: EsDescriptor {

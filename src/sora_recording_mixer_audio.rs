@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     media::MediaFrame,
     sora_recording_layout::TrimSpans,
 };
@@ -201,19 +201,19 @@ impl AudioMixer {
     }
 
     fn next_input_timestamp(&self) -> Duration {
-        Duration::from_secs(
+        SampleRate::HZ_48000.duration_from_samples(
             self.stats.total_output_sample_count() + self.stats.total_trimmed_sample_count(),
-        ) / SAMPLE_RATE as u32
+        )
     }
 
     fn next_output_timestamp(&self) -> Duration {
-        Duration::from_secs(self.stats.total_output_sample_count()) / SAMPLE_RATE as u32
+        SampleRate::HZ_48000.duration_from_samples(self.stats.total_output_sample_count())
     }
 
     fn mix_next_audio_data(&mut self, now: Duration) -> crate::Result<AudioFrame> {
         let timestamp = self.next_output_timestamp();
 
-        let bytes_per_sample = CHANNELS as usize * 2; // i16 で表現するので *2
+        let bytes_per_sample = usize::from(Channels::STEREO.get()) * 2; // i16 で表現するので *2
         let mut mixed_samples = Vec::with_capacity(MIXED_AUDIO_DATA_SAMPLES * bytes_per_sample);
 
         let mut filled = true; // 無音補完されたかどうか
@@ -253,8 +253,8 @@ impl AudioMixer {
         Ok(AudioFrame {
             // 以下は固定値
             format: AudioFormat::I16Be,
-            stereo: true, // Hisui では音声は常にステレオとして扱う
-            sample_rate: SAMPLE_RATE,
+            channels: Channels::STEREO, // Hisui では音声は常にステレオとして扱う
+            sample_rate: SampleRate::HZ_48000,
             duration: MIXED_AUDIO_DATA_DURATION,
             sample_entry: None, // 生データにはサンプルエントリーはない
 
@@ -309,11 +309,12 @@ impl AudioMixer {
             // サンプルキューに要素を追加する
             //
             // 想定外の入力が来ていないかを念のためにチェックする
-            // (format と stereo については stereo_samples() の中でチェックしている)
-            if frame.sample_rate != SAMPLE_RATE {
+            // (format と channels については stereo_samples() の中でチェックしている)
+            if frame.sample_rate != SampleRate::HZ_48000 {
                 return Err(crate::Error::new(format!(
                     "expected sample rate {}Hz, got {}Hz",
-                    SAMPLE_RATE, frame.sample_rate
+                    SampleRate::HZ_48000.get(),
+                    frame.sample_rate.get()
                 )));
             }
             input_stream.sample_queue.extend(frame.stereo_samples()?);

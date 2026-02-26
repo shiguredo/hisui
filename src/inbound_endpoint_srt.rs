@@ -906,9 +906,7 @@ impl SrtTsDemuxer {
             let raw_data = pending.data[offset + header_len..offset + frame_len].to_vec();
 
             let sample_rate = header.sample_rate();
-            let sample_rate_u16 = u16::try_from(sample_rate).map_err(|_| {
-                crate::Error::new(format!("unsupported AAC sample rate: {sample_rate}"))
-            })?;
+            let sample_rate_value = crate::audio::SampleRate::from_u32(sample_rate)?;
             let channels = header.channel_configuration;
             let pts_ticks = frame_index
                 .saturating_mul(1024)
@@ -928,8 +926,8 @@ impl SrtTsDemuxer {
             samples.push(TsSample::Audio(crate::AudioFrame {
                 data: raw_data,
                 format: crate::audio::AudioFormat::Aac,
-                stereo: channels == 2,
-                sample_rate: sample_rate_u16,
+                channels: crate::audio::Channels::from_u16(channels)?,
+                sample_rate: sample_rate_value,
                 timestamp: relative_timestamp,
                 duration,
                 sample_entry: None,

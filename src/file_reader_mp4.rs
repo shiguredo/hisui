@@ -7,7 +7,7 @@ use std::{
 
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
-use crate::audio::AudioFormat;
+use crate::audio::{AudioFormat, Channels, SampleRate};
 use crate::video::VideoFormat;
 use crate::{Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame};
 
@@ -170,7 +170,7 @@ impl Mp4FileReader {
         let audio_data = AudioFrame {
             data,
             format: state.audio_format,
-            stereo: state.audio_stereo,
+            channels: state.audio_channels,
             sample_rate: state.audio_sample_rate,
             timestamp: effective_timestamp,
             duration,
@@ -339,8 +339,8 @@ struct ReaderState {
     audio_track_id: Option<u32>,
     video_track_id: Option<u32>,
     audio_format: AudioFormat,
-    audio_stereo: bool,
-    audio_sample_rate: u16,
+    audio_channels: Channels,
+    audio_sample_rate: SampleRate,
     video_format: VideoFormat,
     video_width: usize,
     video_height: usize,
@@ -370,9 +370,10 @@ impl ReaderState {
             demuxer,
             audio_track_id,
             video_track_id,
+            // ダミー初期値。実際の値はサンプルエントリー受信時に上書きされる。
             audio_format: AudioFormat::Opus,
-            audio_stereo: false,
-            audio_sample_rate: 0,
+            audio_channels: Channels::STEREO,
+            audio_sample_rate: SampleRate::HZ_48000,
             video_format: VideoFormat::Vp8,
             video_width: 0,
             video_height: 0,
@@ -397,8 +398,8 @@ impl ReaderState {
         };
 
         self.audio_format = format;
-        self.audio_stereo = metadata.channelcount != 1;
-        self.audio_sample_rate = metadata.samplerate.integer;
+        self.audio_channels = Channels::from_u16(metadata.channelcount)?;
+        self.audio_sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
 
         Ok(())
     }

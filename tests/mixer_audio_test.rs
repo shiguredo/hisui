@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use hisui::{
     TrackId,
-    audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     media::MediaFrame,
     sora_recording_layout::{AggregatedSourceInfo, Layout, Resolution, TrimSpans},
     sora_recording_metadata::{SourceId, SourceInfo},
@@ -122,11 +122,11 @@ fn mix_three_sources_without_trim() -> hisui::Result<()> {
     assert_eq!(stats.total_output_audio_data_duration(), ms(300));
     assert_eq!(
         stats.total_output_sample_count(),
-        (SAMPLE_RATE as f64 * 0.3) as u64
+        (SampleRate::HZ_48000.get() as f64 * 0.3) as u64
     );
     assert_eq!(
         stats.total_output_filled_sample_count(),
-        (SAMPLE_RATE as f64 * 0.04) as u64
+        (SampleRate::HZ_48000.get() as f64 * 0.04) as u64
     );
 
     // trim=false なのでトリム期間はなし
@@ -227,14 +227,14 @@ fn mix_three_sources_with_trim() -> hisui::Result<()> {
     assert_eq!(stats.total_output_audio_data_duration(), ms(260));
     assert_eq!(
         stats.total_output_sample_count(),
-        (SAMPLE_RATE as f64 * 0.26) as u64
+        (SampleRate::HZ_48000.get() as f64 * 0.26) as u64
     );
     assert_eq!(stats.total_output_filled_sample_count(), 0);
 
     // 40 ms 分がトリムされた
     assert_eq!(
         stats.total_trimmed_sample_count(),
-        (SAMPLE_RATE as f64 * 0.04) as u64
+        (SampleRate::HZ_48000.get() as f64 * 0.04) as u64
     );
 
     Ok(())
@@ -309,7 +309,7 @@ fn mix_three_sources_with_mixed_duration() -> hisui::Result<()> {
     assert_eq!(stats.total_output_audio_data_duration(), ms(100));
     assert_eq!(
         stats.total_output_sample_count(),
-        (SAMPLE_RATE as f64 * 0.1) as u64
+        (SampleRate::HZ_48000.get() as f64 * 0.1) as u64
     );
 
     // 空白期間はないので無音補完やトリムは発生しない
@@ -430,13 +430,14 @@ fn audio_data(
     sample: u8,
 ) -> MixerInput {
     let sample_bytes = 2; // 一つのサンプルは i16 で表現されるので 2 バイト
-    let sample_count =
-        (SAMPLE_RATE as f64 * duration.as_secs_f64()) as usize * CHANNELS as usize * sample_bytes;
+    let sample_count = (SampleRate::HZ_48000.get() as f64 * duration.as_secs_f64()) as usize
+        * usize::from(Channels::STEREO.get())
+        * sample_bytes;
     let data = AudioFrame {
         data: vec![sample; sample_count],
         format: AudioFormat::I16Be,
-        stereo: true,
-        sample_rate: SAMPLE_RATE,
+        channels: Channels::STEREO,
+        sample_rate: SampleRate::HZ_48000,
         timestamp: source.start_timestamp + duration * i as u32,
         duration,
         sample_entry: None,
