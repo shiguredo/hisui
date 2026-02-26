@@ -660,6 +660,7 @@ struct SrtTsDemuxer {
     pending_pes: HashMap<Pid, PendingPesPacket>,
     base_video_timestamp: Option<Duration>,
     base_audio_timestamp: Option<Duration>,
+    last_aac_config_key: Option<AacConfigKey>,
     received_video_keyframe: bool,
 }
 
@@ -675,6 +676,7 @@ impl SrtTsDemuxer {
             pending_pes: HashMap::new(),
             base_video_timestamp: None,
             base_audio_timestamp: None,
+            last_aac_config_key: None,
             received_video_keyframe: false,
         }
     }
@@ -906,6 +908,20 @@ impl SrtTsDemuxer {
             let sample_rate = header.sample_rate();
             let sample_rate_value = crate::audio::SampleRate::from_u32(sample_rate)?;
             let channels = header.channel_configuration;
+            let channels_value = crate::audio::Channels::from_u16(channels)?;
+            let aac_config_key = header.config_key();
+            let sample_entry = if self.last_aac_config_key != Some(aac_config_key) {
+                let audio_specific_config = header.audio_specific_config();
+                let entry = create_aac_sample_entry(
+                    &audio_specific_config,
+                    sample_rate_value,
+                    channels_value,
+                )?;
+                self.last_aac_config_key = Some(aac_config_key);
+                Some(entry)
+            } else {
+                None
+            };
             let pts_ticks = frame_index
                 .saturating_mul(1024)
                 .saturating_mul(90_000)
@@ -917,10 +933,10 @@ impl SrtTsDemuxer {
             samples.push(TsSample::Audio(crate::AudioFrame {
                 data: raw_data,
                 format: crate::audio::AudioFormat::Aac,
-                channels: crate::audio::Channels::from_u16(channels)?,
+                channels: channels_value,
                 sample_rate: sample_rate_value,
                 timestamp: relative_timestamp,
-                sample_entry: None,
+                sample_entry,
             }));
 
             offset += frame_len;
@@ -964,6 +980,7 @@ fn timestamp_90khz_to_duration(timestamp: u64) -> Duration {
 #[derive(Debug, Clone, Copy)]
 struct AdtsHeader {
     protection_absent: bool,
+    audio_object_type: u8,
     sampling_frequency_index: u8,
     channel_configuration: u16,
     frame_length: u16,
@@ -992,6 +1009,28 @@ impl AdtsHeader {
             _ => 48_000,
         }
     }
+
+    fn config_key(self) -> AacConfigKey {
+        AacConfigKey {
+            audio_object_type: self.audio_object_type,
+            sampling_frequency_index: self.sampling_frequency_index,
+            channel_configuration: self.channel_configuration,
+        }
+    }
+
+    fn audio_specific_config(self) -> Vec<u8> {
+        let byte0 = (self.audio_object_type << 3) | ((self.sampling_frequency_index >> 1) & 0x07);
+        let byte1 = ((self.sampling_frequency_index & 0x01) << 7)
+            | ((self.channel_configuration as u8 & 0x0F) << 3);
+        vec![byte0, byte1]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AacConfigKey {
+    audio_object_type: u8,
+    sampling_frequency_index: u8,
+    channel_configuration: u16,
 }
 
 fn parse_adts_header(data: &[u8]) -> crate::Result<AdtsHeader> {
@@ -1004,6 +1043,7 @@ fn parse_adts_header(data: &[u8]) -> crate::Result<AdtsHeader> {
     }
 
     let protection_absent = (data[1] & 0x01) != 0;
+    let audio_object_type = ((data[2] >> 6) & 0x03) + 1;
     let sampling_frequency_index = (data[2] >> 2) & 0x0F;
     let channel_configuration = ((data[2] & 0x01) as u16) << 2 | ((data[3] >> 6) & 0x03) as u16;
     let frame_length =
@@ -1011,8 +1051,101 @@ fn parse_adts_header(data: &[u8]) -> crate::Result<AdtsHeader> {
 
     Ok(AdtsHeader {
         protection_absent,
+        audio_object_type,
         sampling_frequency_index,
         channel_configuration,
         frame_length,
     })
+}
+
+fn create_aac_sample_entry(
+    audio_specific_config: &[u8],
+    sample_rate: crate::audio::SampleRate,
+    channels: crate::audio::Channels,
+) -> crate::Result<shiguredo_mp4::boxes::SampleEntry> {
+    use shiguredo_mp4::{
+        FixedPointNumber, Uint,
+        boxes::{AudioSampleEntryFields, EsdsBox, Mp4aBox, SampleEntry},
+        descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
+    };
+
+    let sample_rate_u16 = sample_rate.as_u16()?;
+
+    Ok(SampleEntry::Mp4a(Mp4aBox {
+        audio: AudioSampleEntryFields {
+            data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
+            channelcount: u16::from(channels.get()),
+            samplesize: 16,
+            samplerate: FixedPointNumber::new(sample_rate_u16, 0),
+        },
+        esds_box: EsdsBox {
+            es: EsDescriptor {
+                es_id: EsDescriptor::MIN_ES_ID,
+                stream_priority: EsDescriptor::LOWEST_STREAM_PRIORITY,
+                depends_on_es_id: None,
+                url_string: None,
+                ocr_es_id: None,
+                dec_config_descr: DecoderConfigDescriptor {
+                    object_type_indication:
+                        DecoderConfigDescriptor::OBJECT_TYPE_INDICATION_AUDIO_ISO_IEC_14496_3,
+                    stream_type: DecoderConfigDescriptor::STREAM_TYPE_AUDIO,
+                    up_stream: DecoderConfigDescriptor::UP_STREAM_FALSE,
+                    dec_specific_info: Some(DecoderSpecificInfo {
+                        payload: audio_specific_config.to_vec(),
+                    }),
+                    buffer_size_db: Uint::new(65536),
+                    max_bitrate: 256000,
+                    avg_bitrate: 128000,
+                },
+                sl_config_descr: shiguredo_mp4::descriptors::SlConfigDescriptor,
+            },
+        },
+        unknown_boxes: Vec::new(),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_adts_header_extracts_aac_config() {
+        let adts = [
+            0xFF, 0xF1, 0x50, 0x80, 0x02, 0x7F, 0xFC, // ADTS header
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, // payload
+        ];
+        let header = parse_adts_header(&adts).expect("must parse ADTS header");
+
+        assert_eq!(header.audio_object_type, 2);
+        assert_eq!(header.sampling_frequency_index, 4);
+        assert_eq!(header.channel_configuration, 2);
+        assert_eq!(header.frame_length, 19);
+        assert_eq!(header.audio_specific_config(), vec![0x12, 0x10]);
+    }
+
+    #[test]
+    fn create_aac_sample_entry_keeps_config_in_esds() {
+        let sample_entry = create_aac_sample_entry(
+            &[0x12, 0x10],
+            crate::audio::SampleRate::from_u32(44_100).expect("must create sample rate"),
+            crate::audio::Channels::STEREO,
+        )
+        .expect("must create AAC sample entry");
+
+        let shiguredo_mp4::boxes::SampleEntry::Mp4a(mp4a) = sample_entry else {
+            panic!("expected Mp4a sample entry");
+        };
+
+        assert_eq!(mp4a.audio.channelcount, 2);
+        assert_eq!(mp4a.audio.samplerate.integer, 44_100);
+
+        let dec_specific_info = mp4a
+            .esds_box
+            .es
+            .dec_config_descr
+            .dec_specific_info
+            .as_ref()
+            .expect("AudioSpecificConfig must exist");
+        assert_eq!(dec_specific_info.payload, vec![0x12, 0x10]);
+    }
 }
