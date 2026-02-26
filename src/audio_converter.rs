@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 
 #[derive(Debug, Clone, Default)]
@@ -235,6 +233,8 @@ fn parse_i16be_samples(frame: &AudioFrame) -> crate::Result<Vec<i16>> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     fn i16be(samples: &[i16]) -> Vec<u8> {

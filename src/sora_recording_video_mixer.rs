@@ -599,12 +599,6 @@ impl VideoMixer {
         track_id: &TrackId,
         sample: Option<MediaFrame>,
     ) -> Result<()> {
-        let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
-            crate::Error::new(format!(
-                "unknown input track id for video mixer: {}",
-                track_id
-            ))
-        })?;
         if let Some(sample) = sample {
             // キューに要素を追加する
             let frame = sample.expect_video()?;
@@ -616,6 +610,12 @@ impl VideoMixer {
             }
 
             let mut duration = self.next_output_duration();
+            let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "unknown input track id for video mixer: {}",
+                    track_id
+                ))
+            })?;
             if let Some(prev) = input_stream.frame_queue.back_mut() {
                 let computed = frame.timestamp.saturating_sub(prev.start_timestamp());
                 if !computed.is_zero() {
@@ -635,6 +635,12 @@ impl VideoMixer {
                 ));
             self.stats.add_input_video_frame_count();
         } else {
+            let input_stream = self.input_streams.get_mut(track_id).ok_or_else(|| {
+                crate::Error::new(format!(
+                    "unknown input track id for video mixer: {}",
+                    track_id
+                ))
+            })?;
             input_stream.eos = true;
         }
         Ok(())
