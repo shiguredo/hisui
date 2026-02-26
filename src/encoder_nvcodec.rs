@@ -129,7 +129,7 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn encode(&mut self, frame: &RawVideoFrame) -> crate::Result<()> {
+    pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let video_frame = frame.as_video_frame();
 
         // I420 から NV12 への変換

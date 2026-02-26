@@ -701,7 +701,7 @@ impl VideoEncoderInner {
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.encode(frame),
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(encoder) => encoder.encode(&frame),
+            Self::Nvcodec(encoder) => encoder.encode(frame),
         }
     }
 
