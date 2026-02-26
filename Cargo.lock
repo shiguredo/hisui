@@ -1099,9 +1099,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_http11"
-version = "2026.1.0-canary.5"
+version = "2026.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b48daa3ba978fc33bd28958e63038f59bf67b0508478e940b8f3571595999ad7"
+checksum = "84628cbdeb6a6a46e1134587ecc4ff6a2013837bcc4894d06818dcdc311998ea"
 
 [[package]]
 name = "shiguredo_libvpx"
