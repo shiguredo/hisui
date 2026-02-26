@@ -76,7 +76,7 @@ impl FdkAacDecoder {
             Ok(AudioFrame {
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
-                channels: self.channels.unwrap_or(Channels::STEREO),
+                channels: self.channels.unwrap_or(frame.channels),
                 sample_rate: if self.sample_rate.is_none() {
                     frame.sample_rate
                 } else {
