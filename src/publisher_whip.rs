@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use shiguredo_http11::{Request, Response, uri::Uri};
 use shiguredo_webrtc::{
@@ -87,6 +87,8 @@ impl WhipPublisher {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         handle.notify_ready();
 
+        tracing::info!("WHIP session connecting: output_url={}", self.output_url);
+        let connect_started_at = Instant::now();
         let mut session = WhipSession::connect(
             &self.output_url,
             self.bearer_token.as_deref(),
@@ -94,6 +96,10 @@ impl WhipPublisher {
             &self.video_codec_preferences,
         )
         .await?;
+        tracing::info!(
+            "WHIP session connected: elapsed_ms={}",
+            connect_started_at.elapsed().as_millis()
+        );
 
         let mut video_rx = self
             .input_video_track_id
@@ -103,8 +109,20 @@ impl WhipPublisher {
             .input_audio_track_id
             .clone()
             .map(|track_id| handle.subscribe_track(track_id));
+        tracing::info!(
+            "WHIP input tracks configured: video_track={}, audio_track={}",
+            self.input_video_track_id
+                .as_ref()
+                .map(|id| id.get())
+                .unwrap_or("<none>"),
+            self.input_audio_track_id
+                .as_ref()
+                .map(|id| id.get())
+                .unwrap_or("<none>")
+        );
 
         if video_rx.is_none() && audio_rx.is_none() {
+            tracing::warn!("WHIP publisher has no input tracks; waiting indefinitely");
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
