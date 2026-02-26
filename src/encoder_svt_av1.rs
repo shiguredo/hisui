@@ -88,7 +88,6 @@ impl SvtAv1Encoder {
                 width: self.width.get(),
                 height: self.height.get(),
                 timestamp: input_frame.timestamp,
-                duration: input_frame.duration,
                 sample_entry: self.sample_entry.take(),
             });
         }

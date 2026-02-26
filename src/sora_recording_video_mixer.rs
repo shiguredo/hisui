@@ -29,14 +29,20 @@ const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
     original: Arc<VideoFrame>,
+    duration: Duration,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
     resize_filter_mode: shiguredo_libyuv::FilterMode,
 }
 
 impl ResizeCachedVideoFrame {
-    fn new(original: Arc<VideoFrame>, resize_filter_mode: shiguredo_libyuv::FilterMode) -> Self {
+    fn new(
+        original: Arc<VideoFrame>,
+        duration: Duration,
+        resize_filter_mode: shiguredo_libyuv::FilterMode,
+    ) -> Self {
         Self {
             original,
+            duration,
             resized: Vec::new(),
             resize_filter_mode,
         }
@@ -47,7 +53,15 @@ impl ResizeCachedVideoFrame {
     }
 
     fn end_timestamp(&self) -> Duration {
-        self.original.end_timestamp()
+        self.original.timestamp.saturating_add(self.duration)
+    }
+
+    fn duration(&self) -> Duration {
+        self.duration
+    }
+
+    fn set_duration(&mut self, duration: Duration) {
+        self.duration = duration;
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> crate::Result<&VideoFrame> {
@@ -492,7 +506,6 @@ impl VideoMixer {
 
             // 可変値
             timestamp,
-            duration,
             width: self.spec.resolution.width().get(),
             height: self.spec.resolution.height().get(),
             data: canvas.data,
@@ -602,10 +615,22 @@ impl VideoMixer {
                 )));
             }
 
+            let mut duration = self.next_output_duration();
+            if let Some(prev) = input_stream.frame_queue.back_mut() {
+                let computed = frame.timestamp.saturating_sub(prev.start_timestamp());
+                if !computed.is_zero() {
+                    prev.set_duration(computed);
+                    duration = computed;
+                } else {
+                    duration = prev.duration();
+                }
+            }
+
             input_stream
                 .frame_queue
                 .push_back(ResizeCachedVideoFrame::new(
                     frame,
+                    duration,
                     self.spec.resize_filter_mode,
                 ));
             self.stats.add_input_video_frame_count();
@@ -655,9 +680,9 @@ impl VideoMixer {
 
                 // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
                 let duration = self.next_output_duration();
-                let last_frame = self.last_mixed_frame.as_mut().expect("infallible");
-
-                last_frame.duration += duration;
+                if self.last_mixed_frame.is_none() {
+                    continue;
+                }
                 self.stats.add_extended_video_frame_count();
                 // 出力フレーム数は増えないが、出力尺は伸びる。
                 self.stats.add_output_video_frame_duration(duration);

@@ -60,7 +60,8 @@ impl AudioReader {
                 }
                 Some(Ok(mut frame)) => {
                     frame.timestamp += self.timestamp_offset;
-                    self.next_timestamp_offset = frame.timestamp + frame.duration;
+                    self.next_timestamp_offset =
+                        self.timestamp_offset + self.inner.total_track_duration();
                     self.update_metrics_from_inner();
 
                     if !track_handle.send_media(MediaFrame::new_audio(frame)) {
@@ -219,6 +220,13 @@ impl AudioReaderInner {
             Self::Webm(r) => r.stats_mut().track_duration_offset = offset,
         }
     }
+
+    fn total_track_duration(&self) -> Duration {
+        match self {
+            Self::Mp4(r) => r.stats().total_track_duration,
+            Self::Webm(r) => r.stats().total_track_duration,
+        }
+    }
 }
 
 impl Iterator for AudioReaderInner {
@@ -280,7 +288,8 @@ impl VideoReader {
                 }
                 Some(Ok(mut frame)) => {
                     frame.timestamp += self.timestamp_offset;
-                    self.next_timestamp_offset = frame.timestamp + frame.duration;
+                    self.next_timestamp_offset =
+                        self.timestamp_offset + self.inner.total_track_duration();
                     self.update_metrics_from_inner();
 
                     if !track_handle.send_media(MediaFrame::new_video(frame)) {
@@ -436,6 +445,13 @@ impl VideoReaderInner {
         match self {
             Self::Mp4(r) => r.stats_mut().track_duration_offset = offset,
             Self::Webm(r) => r.stats_mut().track_duration_offset = offset,
+        }
+    }
+
+    fn total_track_duration(&self) -> Duration {
+        match self {
+            Self::Mp4(r) => r.stats().total_track_duration,
+            Self::Webm(r) => r.stats().total_track_duration,
         }
     }
 }

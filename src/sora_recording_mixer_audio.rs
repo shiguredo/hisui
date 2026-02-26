@@ -255,7 +255,6 @@ impl AudioMixer {
             format: AudioFormat::I16Be,
             channels: Channels::STEREO, // Hisui では音声は常にステレオとして扱う
             sample_rate: SampleRate::HZ_48000,
-            duration: MIXED_AUDIO_DATA_DURATION,
             sample_entry: None, // 生データにはサンプルエントリーはない
 
             // 以下は合成結果に応じた値

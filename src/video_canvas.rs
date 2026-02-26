@@ -178,7 +178,6 @@ mod tests {
         frame.data[y_size..][..uv_size].fill(64);
         frame.data[y_size + uv_size..][..uv_size].fill(192);
         frame.timestamp = Duration::from_millis(10);
-        frame.duration = Duration::from_millis(40);
         frame
     }
 }

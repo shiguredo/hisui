@@ -93,7 +93,6 @@ fn mix_single_source() {
         assert_eq!(frame.width, size.width);
         assert_eq!(frame.height, size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
-        assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
         if i < 3 {
             // ここまでは最初の入力フレームのデータが使われる
@@ -172,7 +171,6 @@ fn mix_single_source_with_offset() {
         assert_eq!(frame.width, output_size.width);
         assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
-        assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
         if i < 3 {
             // ここまでは最初の入力フレームのデータが使われる
@@ -299,7 +297,6 @@ fn single_source_multiple_regions() {
         assert_eq!(frame.width, output_size.width);
         assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
-        assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
         if i < 3 {
             // ここまでは最初の入力フレームのデータが使われる
@@ -425,7 +422,6 @@ fn single_source_multiple_regions_with_resize() {
         assert_eq!(frame.width, output_size.width);
         assert_eq!(frame.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
-        assert_eq!(frame.duration, OUTPUT_FRAME_DURATION);
 
         // 共有ソースのリサイズによって想定外の影響で合成結果が変わっていないかを確認
         assert_eq!(frame.data, first_frame.data);
@@ -1223,7 +1219,7 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
     }
 }
 
-fn video_frame(size: Size, timestamp: Duration, duration: Duration, grayscale: u8) -> VideoFrame {
+fn video_frame(size: Size, timestamp: Duration, _duration: Duration, grayscale: u8) -> VideoFrame {
     let y_size = size.width * size.height;
     let uv_size = (size.width * size.height) / 4 * 2;
     VideoFrame {
@@ -1235,7 +1231,6 @@ fn video_frame(size: Size, timestamp: Duration, duration: Duration, grayscale: u
         width: size.width,
         height: size.height,
         timestamp,
-        duration,
         sample_entry: None,
     }
 }

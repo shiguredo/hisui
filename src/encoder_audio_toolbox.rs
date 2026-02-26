@@ -56,7 +56,6 @@ impl AudioToolboxEncoder {
         &mut self,
         encoded: shiguredo_audio_toolbox::EncodedFrame,
     ) -> AudioFrame {
-        let duration = Duration::from_secs(encoded.samples as u64) / SampleRate::HZ_48000.get();
         let timestamp =
             Duration::from_secs(self.total_encoded_samples) / SampleRate::HZ_48000.get();
         self.total_encoded_samples += encoded.samples as u64;
@@ -73,7 +72,6 @@ impl AudioToolboxEncoder {
             // エンコード結果を反映する
             data: encoded.data,
             timestamp,
-            duration,
         }
     }
 }

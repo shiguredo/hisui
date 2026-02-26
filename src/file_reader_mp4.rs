@@ -173,7 +173,6 @@ impl Mp4FileReader {
             channels: state.audio_channels,
             sample_rate: state.audio_sample_rate,
             timestamp: effective_timestamp,
-            duration,
             sample_entry: context.sample_entry,
         };
 
@@ -221,7 +220,6 @@ impl Mp4FileReader {
             width: state.video_width,
             height: state.video_height,
             timestamp: effective_timestamp,
-            duration,
             sample_entry: context.sample_entry,
         };
 

@@ -77,7 +77,6 @@ impl FdkAacDecoder {
                 channels: self.channels.unwrap_or(frame.channels),
                 sample_rate: self.sample_rate.unwrap_or(frame.sample_rate),
                 timestamp,
-                duration: Duration::from_secs(0),
                 sample_entry: None,
             })
         }
@@ -99,7 +98,6 @@ impl FdkAacDecoder {
         }
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
         let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
-        let duration = sample_rate.duration_from_samples(samples_per_channel as u64);
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {
@@ -111,7 +109,6 @@ impl FdkAacDecoder {
             channels,
             sample_rate,
             timestamp,
-            duration,
             sample_entry: None,
         })
     }

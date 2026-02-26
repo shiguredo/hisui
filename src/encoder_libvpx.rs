@@ -127,7 +127,6 @@ impl LibvpxEncoder {
                 width: frame.width() as usize,
                 height: frame.height() as usize,
                 timestamp: input_frame.timestamp,
-                duration: input_frame.duration,
             });
         }
 

@@ -238,16 +238,12 @@ impl VideoRealtimeMixerRunner {
         }
 
         let timestamp = frames_to_timestamp(self.frame_rate, self.output_frame_index);
-        let duration =
-            frames_to_timestamp(self.frame_rate, self.output_frame_index.saturating_add(1))
-                .saturating_sub(timestamp);
         self.output_frame_index = self.output_frame_index.saturating_add(1);
 
         let frame = compose_frame(
             self.canvas_width,
             self.canvas_height,
             timestamp,
-            duration,
             &self.draw_order,
             &self.states,
         )?;
@@ -453,7 +449,6 @@ fn compose_frame(
     canvas_width: usize,
     canvas_height: usize,
     timestamp: Duration,
-    duration: Duration,
     draw_order: &[DrawOrder],
     states: &HashMap<TrackId, InputTrackState>,
 ) -> crate::Result<VideoFrame> {
@@ -509,7 +504,6 @@ fn compose_frame(
         keyframe: true,
         format: VideoFormat::I420,
         timestamp,
-        duration,
         width: canvas_width,
         height: canvas_height,
         data: canvas.into_data(),
@@ -1256,14 +1250,7 @@ mod tests {
         let mut states = HashMap::new();
         states.insert(track_id, state);
 
-        let frame = compose_frame(
-            2,
-            2,
-            Duration::ZERO,
-            Duration::from_millis(40),
-            &draw_order,
-            &states,
-        )?;
+        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states)?;
 
         assert_eq!(frame.format, VideoFormat::I420);
         assert_eq!(frame.data[0], 100);
@@ -1279,7 +1266,6 @@ mod tests {
         let mut frame =
             VideoFrame::black(EvenUsize::truncating_new(64), EvenUsize::truncating_new(64));
         frame.timestamp = timestamp;
-        frame.duration = Duration::from_millis(40);
         frame
     }
 
@@ -1291,7 +1277,6 @@ mod tests {
             width: 2,
             height: 2,
             timestamp,
-            duration: Duration::from_millis(40),
             data: vec![y, y, y, y, 200, 200, alpha],
         }
     }

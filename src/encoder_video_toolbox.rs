@@ -154,7 +154,6 @@ impl VideoToolboxEncoder {
                 width: self.width.get(),
                 height: self.height.get(),
                 timestamp: input_frame.timestamp,
-                duration: input_frame.duration,
                 sample_entry,
             });
         }

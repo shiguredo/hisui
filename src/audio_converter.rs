@@ -128,8 +128,6 @@ impl AudioConverter {
             self.reset();
         }
 
-        let duration =
-            duration_from_samples(interleaved.len(), target_channels, target_sample_rate)?;
         let preserve_sample_entry = target_format == frame.format
             && target_sample_rate == frame.sample_rate
             && target_channels == frame.channels;
@@ -140,7 +138,6 @@ impl AudioConverter {
             channels: target_channels,
             sample_rate: target_sample_rate,
             timestamp: frame.timestamp,
-            duration,
             sample_entry: if preserve_sample_entry {
                 frame.sample_entry.clone()
             } else {
@@ -236,23 +233,6 @@ fn parse_i16be_samples(frame: &AudioFrame) -> crate::Result<Vec<i16>> {
         .collect())
 }
 
-fn duration_from_samples(
-    sample_count: usize,
-    channels: Channels,
-    sample_rate: SampleRate,
-) -> crate::Result<Duration> {
-    let samples_per_channel = if channels.is_stereo() {
-        if !sample_count.is_multiple_of(2) {
-            return Err(crate::Error::new("invalid stereo audio sample count"));
-        }
-        sample_count / 2
-    } else {
-        sample_count
-    };
-
-    Ok(sample_rate.duration_from_samples(samples_per_channel as u64))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,7 +254,6 @@ mod tests {
             channels,
             sample_rate,
             timestamp: Duration::from_millis(100),
-            duration: Duration::from_millis(20),
             sample_entry: None,
         }
     }
@@ -337,7 +316,6 @@ mod tests {
 
         assert_eq!(output.sample_rate.get(), 48_000);
         assert!(!output.data.is_empty());
-        assert_ne!(output.duration, input.duration);
     }
 
     #[test]
@@ -357,7 +335,6 @@ mod tests {
 
         assert_eq!(output.sample_rate.get(), 32_000);
         assert!(!output.data.is_empty());
-        assert_ne!(output.duration, input.duration);
     }
 
     #[test]

@@ -26,7 +26,6 @@ pub struct VideoFrame {
     pub width: usize,
     pub height: usize,
     pub timestamp: Duration,
-    pub duration: Duration,
     pub sample_entry: Option<SampleEntry>,
 }
 
@@ -62,7 +61,6 @@ impl VideoFrame {
         width: EvenUsize,
         height: EvenUsize,
         timestamp: Duration,
-        duration: Duration,
     ) -> crate::Result<Self> {
         let width_val = width.get();
         let height_val = height.get();
@@ -113,7 +111,6 @@ impl VideoFrame {
             width: width.get(),
             height: height.get(),
             timestamp,
-            duration,
             sample_entry: None,
         })
     }
@@ -126,7 +123,6 @@ impl VideoFrame {
             width: self.width,
             height: self.height,
             timestamp: self.timestamp,
-            duration: self.duration,
             sample_entry: None,
         }
     }
@@ -185,7 +181,6 @@ impl VideoFrame {
             width,
             height,
             timestamp: input_frame.timestamp,
-            duration: input_frame.duration,
         }
     }
 
@@ -327,7 +322,6 @@ impl VideoFrame {
             width,
             height,
             timestamp: input_frame.timestamp,
-            duration: input_frame.duration,
         })
     }
 
@@ -363,7 +357,6 @@ impl VideoFrame {
             width: actual_width,
             height: actual_height,
             timestamp: Duration::ZERO,
-            duration: Duration::ZERO,
             sample_entry: None,
         }
     }
@@ -386,7 +379,6 @@ impl VideoFrame {
             width: actual_width,
             height: actual_height,
             timestamp: Duration::ZERO,
-            duration: Duration::ZERO,
             sample_entry: None,
         }
     }
@@ -432,10 +424,6 @@ impl VideoFrame {
         let a_plane = &self.data[y_size + uv_size * 2..][..uv_size];
 
         Some((y_plane, u_plane, v_plane, a_plane))
-    }
-
-    pub fn end_timestamp(&self) -> Duration {
-        self.timestamp + self.duration
     }
 
     /// libyuv を使った YUV(I420) 画像リサイズ
@@ -549,7 +537,6 @@ impl VideoFrame {
             width: new_width.get(),
             height: new_height.get(),
             timestamp: self.timestamp,
-            duration: self.duration,
             sample_entry: self.sample_entry.clone(),
         };
         Ok(Some(resized))
@@ -868,7 +855,6 @@ mod tests {
             width: 4,
             height: 4,
             timestamp: Duration::ZERO,
-            duration: Duration::from_millis(40),
             data: vec![
                 // Y (4x4)
                 16, 16, 16, 16, 32, 32, 32, 32, 64, 64, 64, 64, 128, 128, 128, 128,

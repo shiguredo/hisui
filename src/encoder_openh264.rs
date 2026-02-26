@@ -83,7 +83,6 @@ impl Openh264Encoder {
             width: frame.width,
             height: frame.height,
             timestamp: frame.timestamp,
-            duration: frame.duration,
             sample_entry,
         });
 

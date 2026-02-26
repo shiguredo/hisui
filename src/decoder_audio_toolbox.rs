@@ -98,7 +98,6 @@ impl AudioToolboxDecoder {
         }
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
         let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
-        let duration = sample_rate.duration_from_samples(samples_per_channel as u64);
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {
@@ -110,7 +109,6 @@ impl AudioToolboxDecoder {
             channels,
             sample_rate,
             timestamp,
-            duration,
             sample_entry: None,
         })
     }

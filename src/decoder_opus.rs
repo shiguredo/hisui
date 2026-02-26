@@ -36,7 +36,6 @@ impl OpusDecoder {
             channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
             timestamp: frame.timestamp,
-            duration: frame.duration,
 
             // 生データにはサンプルエントリーは存在しない
             sample_entry: None,
