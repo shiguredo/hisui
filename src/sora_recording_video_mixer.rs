@@ -625,13 +625,7 @@ impl VideoMixer {
         if let Some(sample) = sample {
             // キューに要素を追加する
             let frame = sample.expect_video()?;
-            if frame.format != VideoFormat::I420 {
-                return Err(crate::Error::new(format!(
-                    "expected I420 format, got {:?}",
-                    frame.format
-                )));
-            }
-            let frame = RawVideoFrame::from_video_frame(frame)?;
+            let frame = RawVideoFrame::from_i420_video_frame(frame)?;
 
             // 新規フレームの初期 duration は、比較対象がない場合のフォールバック値として
             // 出力フレーム間隔 (next_output_duration) を使う。

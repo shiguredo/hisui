@@ -62,6 +62,17 @@ impl RawVideoFrame {
         Ok(Self(inner))
     }
 
+    pub fn from_i420_video_frame(inner: Arc<VideoFrame>) -> crate::Result<Self> {
+        let frame = Self::from_video_frame(inner)?;
+        if frame.as_video_frame().format != VideoFormat::I420 {
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.as_video_frame().format
+            )));
+        }
+        Ok(frame)
+    }
+
     pub fn as_video_frame(&self) -> &Arc<VideoFrame> {
         &self.0
     }
