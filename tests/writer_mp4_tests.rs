@@ -2,7 +2,7 @@ use std::{path::Path, path::PathBuf, time::Duration};
 
 use hisui::{
     Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
-    audio::{AudioFormat, AudioFrame, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     sora_recording_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     sora_recording_layout_region::{Grid, Region},
     sora_recording_metadata::{SourceId, SourceInfo},
@@ -493,8 +493,8 @@ fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioFrame {
     AudioFrame {
         data: vec![0], // 中身はなんでもいい
         format: AudioFormat::I16Be,
-        stereo: true,
-        sample_rate: SAMPLE_RATE,
+        channels: Channels::STEREO,
+        sample_rate: SampleRate::HZ_48000,
         timestamp: source.start_timestamp + duration * i as u32,
         duration,
         sample_entry: if i == 0 {
