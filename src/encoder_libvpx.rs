@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use shiguredo_mp4::{
     Uint,
@@ -28,7 +27,7 @@ pub struct LibvpxEncoder {
     inner: shiguredo_libvpx::Encoder,
     format: VideoFormat,
     sample_entry: Option<SampleEntry>,
-    input_queue: VecDeque<Arc<RawVideoFrame>>,
+    input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
 }
 
@@ -89,7 +88,7 @@ impl LibvpxEncoder {
         }
     }
 
-    pub fn encode(&mut self, frame: Arc<RawVideoFrame>) -> crate::Result<()> {
+    pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let video_frame = frame.as_video_frame();
         if video_frame.format != VideoFormat::I420 {
             return Err(crate::Error::new(format!(

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     encoder::VideoEncoderOptions,
     video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
@@ -36,7 +34,7 @@ impl Openh264Encoder {
         })
     }
 
-    pub fn encode(&mut self, frame: Arc<RawVideoFrame>) -> crate::Result<()> {
+    pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let video_frame = frame.as_video_frame();
         if video_frame.format != VideoFormat::I420 {
             return Err(crate::Error::new(format!(

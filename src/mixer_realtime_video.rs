@@ -272,7 +272,7 @@ impl VideoRealtimeMixerRunner {
 #[derive(Debug)]
 struct PendingVideoFrame {
     timestamp: Duration,
-    frame: Arc<RawVideoFrame>,
+    frame: RawVideoFrame,
 }
 
 #[derive(Debug)]
@@ -305,7 +305,7 @@ impl InputTrackState {
     }
 
     fn handle_video(&mut self, frame: Arc<VideoFrame>, received_at: Duration) -> crate::Result<()> {
-        let frame = Arc::new(RawVideoFrame::from_video_frame(frame)?);
+        let frame = RawVideoFrame::from_video_frame(frame)?;
         let video_frame = frame.as_video_frame();
 
         let first_sample_timestamp = *self
@@ -494,7 +494,7 @@ fn compose_frame(
             )?
             .ok_or_else(|| Error::new("failed to resize input frame"))?;
 
-        let resized = Arc::new(RawVideoFrame::from_video_frame(Arc::new(resized))?);
+        let resized = RawVideoFrame::from_video_frame(Arc::new(resized))?;
         canvas.draw_frame_clipped(x, y, &resized)?;
     }
 
@@ -1249,14 +1249,12 @@ mod tests {
         let mut state = InputTrackState::new(input_track)?;
         state.current_frame = Some(PendingVideoFrame {
             timestamp: Duration::ZERO,
-            frame: Arc::new(
-                RawVideoFrame::from_video_frame(Arc::new(dummy_i420a_frame(
-                    Duration::ZERO,
-                    200,
-                    128,
-                )))
-                .expect("infallible"),
-            ),
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_i420a_frame(
+                Duration::ZERO,
+                200,
+                128,
+            )))
+            .expect("infallible"),
         });
 
         let draw_order = vec![DrawOrder {
