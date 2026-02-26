@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioFormat, AudioFrame};
+use crate::audio::{AudioFormat, AudioFrame, Channels};
 
 /// FDK AAC デコーダー
 #[derive(Debug)]
 pub struct FdkAacDecoder {
     inner: Option<shiguredo_fdk_aac::Decoder>,
     sample_rate: u32,
-    channels: u16,
+    channels: Option<Channels>,
     total_output_samples: u64,
 }
 
@@ -20,7 +20,7 @@ impl FdkAacDecoder {
         Ok(Self {
             inner: None,
             sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
-            channels: 0,
+            channels: None,
             total_output_samples: 0,
         })
     }
@@ -59,14 +59,8 @@ impl FdkAacDecoder {
             .map_err(|e| crate::Error::from(e).with_context("Failed to decode AAC"))?;
 
         if let Some(decoded) = decoded_frame {
-            if decoded.channels == 0 || decoded.channels > 2 {
-                return Err(crate::Error::new(format!(
-                    "unsupported AAC channel count: {}",
-                    decoded.channels
-                )));
-            }
             self.sample_rate = decoded.sample_rate;
-            self.channels = u16::from(decoded.channels);
+            self.channels = Some(Channels::from_u8(decoded.channels)?);
             self.build_audio_frame(&decoded.data)
         } else {
             // デコード可能なフレームがない場合は空のデータを返す
@@ -80,7 +74,7 @@ impl FdkAacDecoder {
             Ok(AudioFrame {
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
-                stereo: self.channels == 2,
+                channels: self.channels.unwrap_or(Channels::STEREO),
                 sample_rate: if self.sample_rate == 0 {
                     frame.sample_rate
                 } else {
@@ -103,19 +97,19 @@ impl FdkAacDecoder {
         if self.sample_rate == 0 {
             return Err(crate::Error::new("audio sample rate is not initialized"));
         }
-        if self.channels == 0 {
-            return Err(crate::Error::new("audio channel count is not initialized"));
-        }
+        let channels = self
+            .channels
+            .ok_or_else(|| crate::Error::new("audio channel count is not initialized"))?;
         if !decoded_samples
             .len()
-            .is_multiple_of(usize::from(self.channels))
+            .is_multiple_of(usize::from(channels.get()))
         {
             return Err(crate::Error::new("invalid decoded audio sample count"));
         }
         let sample_rate = u16::try_from(self.sample_rate).map_err(|_| {
             crate::Error::new(format!("unsupported AAC sample rate: {}", self.sample_rate))
         })?;
-        let samples_per_channel = decoded_samples.len() / usize::from(self.channels);
+        let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
         let timestamp =
             Duration::from_secs_f64(self.total_output_samples as f64 / self.sample_rate as f64);
         let duration =
@@ -128,7 +122,7 @@ impl FdkAacDecoder {
                 .flat_map(|v| v.to_be_bytes())
                 .collect(),
             format: AudioFormat::I16Be,
-            stereo: self.channels == 2,
+            channels,
             sample_rate,
             timestamp,
             duration,

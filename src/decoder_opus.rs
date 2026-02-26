@@ -1,4 +1,4 @@
-use crate::audio::{AudioFormat, AudioFrame, SAMPLE_RATE};
+use crate::audio::{AudioFormat, AudioFrame, Channels, SAMPLE_RATE};
 
 // 以下の理由で Opus デコーダーは常にステレオ扱いにする:
 // - 実際の入力に関わらず常にステレオを指定しても問題ない
@@ -33,7 +33,7 @@ impl OpusDecoder {
                 .flat_map(|v| v.to_be_bytes().into_iter())
                 .collect(),
             format: AudioFormat::I16Be,
-            stereo: true,
+            channels: Channels::STEREO,
             sample_rate: SAMPLE_RATE,
             timestamp: frame.timestamp,
             duration: frame.duration,

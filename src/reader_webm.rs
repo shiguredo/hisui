@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    audio::{AudioFormat, AudioFrame, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, Channels, SAMPLE_RATE},
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -402,8 +402,8 @@ impl WebmAudioReader {
 
             // 以降のフィールドはデコーダーには参照されないのでダミー値を設定しておく
             sample_entry: None,
-            stereo: true,             // Hisui では常に固定値
-            sample_rate: SAMPLE_RATE, // Hisui では常に固定値
+            channels: Channels::STEREO, // Hisui では常に固定値
+            sample_rate: SAMPLE_RATE,   // Hisui では常に固定値
         }))
     }
 

@@ -16,11 +16,47 @@ pub const CHANNELS: u16 = 2;
 // エンコードパラメーターのデフォルト値
 pub const DEFAULT_BITRATE: usize = 65536;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Channels(u8);
+
+impl Channels {
+    pub const MONO: Self = Self(1);
+    pub const STEREO: Self = Self(2);
+
+    pub fn from_u8(value: u8) -> crate::Result<Self> {
+        match value {
+            1 => Ok(Self::MONO),
+            2 => Ok(Self::STEREO),
+            _ => Err(crate::Error::new(format!(
+                "unsupported audio channel count: {value}"
+            ))),
+        }
+    }
+
+    pub fn from_u16(value: u16) -> crate::Result<Self> {
+        let value = u8::try_from(value)
+            .map_err(|_| crate::Error::new(format!("unsupported audio channel count: {value}")))?;
+        Self::from_u8(value)
+    }
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    pub const fn is_mono(self) -> bool {
+        self.0 == Self::MONO.0
+    }
+
+    pub const fn is_stereo(self) -> bool {
+        self.0 == Self::STEREO.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AudioFrame {
     pub data: Vec<u8>,
     pub format: AudioFormat,
-    pub stereo: bool,
+    pub channels: Channels,
     pub sample_rate: u16,
     pub timestamp: Duration,
     pub duration: Duration,
@@ -28,6 +64,14 @@ pub struct AudioFrame {
 }
 
 impl AudioFrame {
+    pub fn is_stereo(&self) -> bool {
+        self.channels.is_stereo()
+    }
+
+    pub fn is_mono(&self) -> bool {
+        self.channels.is_mono()
+    }
+
     pub fn stereo_samples(&self) -> crate::Result<impl '_ + Iterator<Item = (i16, i16)>> {
         if self.format != AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
@@ -35,7 +79,7 @@ impl AudioFrame {
                 self.format
             )));
         }
-        if !self.stereo {
+        if !self.channels.is_stereo() {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
@@ -55,7 +99,7 @@ impl AudioFrame {
                 self.format
             )));
         }
-        if !self.stereo {
+        if !self.channels.is_stereo() {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
@@ -159,4 +203,43 @@ pub fn mono_to_stereo(mono_samples: &[i16]) -> Vec<i16> {
         .iter()
         .flat_map(|&sample| [sample, sample])
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Channels;
+
+    #[test]
+    fn channels_constants_are_valid() {
+        assert!(Channels::MONO.is_mono());
+        assert!(Channels::STEREO.is_stereo());
+        assert_eq!(Channels::MONO.get(), 1);
+        assert_eq!(Channels::STEREO.get(), 2);
+    }
+
+    #[test]
+    fn channels_from_u8_accepts_mono_and_stereo() {
+        assert_eq!(Channels::from_u8(1).expect("must be mono"), Channels::MONO);
+        assert_eq!(
+            Channels::from_u8(2).expect("must be stereo"),
+            Channels::STEREO
+        );
+    }
+
+    #[test]
+    fn channels_from_u16_accepts_mono_and_stereo() {
+        assert_eq!(Channels::from_u16(1).expect("must be mono"), Channels::MONO);
+        assert_eq!(
+            Channels::from_u16(2).expect("must be stereo"),
+            Channels::STEREO
+        );
+    }
+
+    #[test]
+    fn channels_rejects_unsupported_values() {
+        assert!(Channels::from_u8(0).is_err());
+        assert!(Channels::from_u8(3).is_err());
+        assert!(Channels::from_u16(0).is_err());
+        assert!(Channels::from_u16(3).is_err());
+    }
 }

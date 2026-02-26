@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::{Error, audio::AudioFrame, video::VideoFrame};
+use crate::{
+    Error,
+    audio::{AudioFrame, Channels},
+    video::VideoFrame,
+};
 
 /// RTMP フレーム処理の共通ロジック（送信側）
 #[derive(Debug)]
@@ -167,7 +171,7 @@ pub struct RtmpIncomingFrameHandler {
 struct AudioCodecInfo {
     format: crate::audio::AudioFormat,
     sample_rate: u32,
-    channels: u8,
+    channels: Channels,
 }
 
 impl RtmpIncomingFrameHandler {
@@ -219,7 +223,7 @@ impl RtmpIncomingFrameHandler {
             self.audio_codec_info = Some(AudioCodecInfo {
                 format: crate::audio::AudioFormat::Aac,
                 sample_rate,
-                channels,
+                channels: Channels::from_u8(channels)?,
             });
 
             self.audio_sample_entry = Some(sample_entry);
@@ -251,7 +255,7 @@ impl RtmpIncomingFrameHandler {
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
             sample_rate,
-            stereo: codec_info.channels == 2,
+            channels: codec_info.channels,
             sample_entry: self.audio_sample_entry.clone(),
             data: frame.data,
         }))

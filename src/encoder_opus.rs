@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
 
-use crate::audio::{self, AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE};
+use crate::audio::{self, AudioFormat, AudioFrame, Channels, SAMPLE_RATE};
 
 #[derive(Debug)]
 pub struct OpusEncoder {
@@ -12,8 +12,11 @@ pub struct OpusEncoder {
 
 impl OpusEncoder {
     pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
-        let inner =
-            shiguredo_opus::Encoder::new(SAMPLE_RATE, CHANNELS as u8, bitrate.get() as u32)?;
+        let inner = shiguredo_opus::Encoder::new(
+            SAMPLE_RATE,
+            Channels::STEREO.get(),
+            bitrate.get() as u32,
+        )?;
 
         // 最初の AudioFrame に載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;
@@ -32,7 +35,7 @@ impl OpusEncoder {
                 frame.format
             )));
         }
-        if !frame.stereo {
+        if !frame.is_stereo() {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
@@ -42,7 +45,7 @@ impl OpusEncoder {
         Ok(AudioFrame {
             // 固定値
             format: AudioFormat::Opus,
-            stereo: true,
+            channels: Channels::STEREO,
             sample_rate: SAMPLE_RATE,
 
             // 入力の値をそのまま引きつぐ
@@ -62,7 +65,7 @@ fn sample_entry(pre_skip: u16) -> SampleEntry {
     SampleEntry::Opus(OpusBox {
         audio: audio::sample_entry_audio_fields(),
         dops_box: DopsBox {
-            output_channel_count: CHANNELS as u8,
+            output_channel_count: Channels::STEREO.get(),
             pre_skip,
             input_sample_rate: SAMPLE_RATE as u32,
             output_gain: 0,

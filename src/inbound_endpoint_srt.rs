@@ -933,7 +933,7 @@ impl SrtTsDemuxer {
             samples.push(TsSample::Audio(crate::AudioFrame {
                 data: raw_data,
                 format: crate::audio::AudioFormat::Aac,
-                stereo: channels == 2,
+                channels: crate::audio::Channels::from_u16(channels)?,
                 sample_rate: sample_rate_u16,
                 timestamp: relative_timestamp,
                 duration,

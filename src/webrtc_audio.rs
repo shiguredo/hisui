@@ -5,6 +5,7 @@ use std::{
 
 use shiguredo_webrtc::AudioTransportRef;
 
+use crate::audio::Channels;
 use crate::audio_converter::AudioConverterBuilder;
 
 const AUDIO_BYTES_PER_SAMPLE: usize = 2;
@@ -43,7 +44,7 @@ impl WebRtcAudioTransportSink {
             converter: Arc::new(Mutex::new(
                 AudioConverterBuilder::new()
                     .format(crate::audio::AudioFormat::I16Be)
-                    .stereo(true)
+                    .channels(Channels::STEREO)
                     .sample_rate(crate::audio::SAMPLE_RATE)
                     .build(),
             )),
@@ -77,7 +78,7 @@ impl WebRtcAudioTransportSink {
                 frame.format
             )));
         }
-        if !frame.stereo {
+        if !frame.is_stereo() {
             return Err(crate::Error::new(
                 "unsupported audio channel layout: expected stereo",
             ));

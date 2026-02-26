@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::{AudioFormat, AudioFrame, CHANNELS, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, CHANNELS, Channels, SAMPLE_RATE},
     media::MediaFrame,
     sora_recording_layout::TrimSpans,
 };
@@ -253,7 +253,7 @@ impl AudioMixer {
         Ok(AudioFrame {
             // 以下は固定値
             format: AudioFormat::I16Be,
-            stereo: true, // Hisui では音声は常にステレオとして扱う
+            channels: Channels::STEREO, // Hisui では音声は常にステレオとして扱う
             sample_rate: SAMPLE_RATE,
             duration: MIXED_AUDIO_DATA_DURATION,
             sample_entry: None, // 生データにはサンプルエントリーはない
@@ -309,7 +309,7 @@ impl AudioMixer {
             // サンプルキューに要素を追加する
             //
             // 想定外の入力が来ていないかを念のためにチェックする
-            // (format と stereo については stereo_samples() の中でチェックしている)
+            // (format と channels については stereo_samples() の中でチェックしている)
             if frame.sample_rate != SAMPLE_RATE {
                 return Err(crate::Error::new(format!(
                     "expected sample rate {}Hz, got {}Hz",
