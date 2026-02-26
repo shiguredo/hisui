@@ -85,6 +85,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhipPublisher {
 
 impl WhipPublisher {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
+        handle.notify_ready();
+
         let mut session = WhipSession::connect(
             &self.output_url,
             self.bearer_token.as_deref(),
