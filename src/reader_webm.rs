@@ -385,6 +385,9 @@ impl WebmAudioReader {
         let data = reader.read_raw_data()?;
 
         self.total_simple_block_count += 1;
+        // WebM は payload を解釈しないため、サンプル末尾の正確な duration はここでは求めない。
+        // そのため total_track_duration は「最終 SimpleBlock の開始時刻」を表す。
+        // (MP4 の total_track_duration とは意味が異なる)
         self.total_track_duration = self.total_track_duration.max(timestamp);
 
         Ok(Some(AudioFrame {
@@ -548,6 +551,9 @@ impl WebmVideoReader {
         let data = reader.read_raw_data()?;
 
         self.total_simple_block_count += 1;
+        // WebM は payload を解釈しないため、サンプル末尾の正確な duration はここでは求めない。
+        // そのため total_track_duration は「最終 SimpleBlock の開始時刻」を表す。
+        // (MP4 の total_track_duration とは意味が異なる)
         self.total_track_duration = self.total_track_duration.max(timestamp);
         if self.codec.is_none()
             && let Some(name) = self.header.codec.codec_name()

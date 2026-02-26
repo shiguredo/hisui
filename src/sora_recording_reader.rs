@@ -60,6 +60,9 @@ impl AudioReader {
                 }
                 Some(Ok(mut frame)) => {
                     frame.timestamp += self.timestamp_offset;
+                    // WebM では total_track_duration が「最終 SimpleBlock の開始時刻」基準なので、
+                    // ここで計算する次ファイルのオフセットは末尾 duration 分だけ短くなることがある。
+                    // (Sora 録画用途としては許容する)
                     self.next_timestamp_offset =
                         self.timestamp_offset + self.inner.total_track_duration();
                     self.update_metrics_from_inner();
@@ -288,6 +291,9 @@ impl VideoReader {
                 }
                 Some(Ok(mut frame)) => {
                     frame.timestamp += self.timestamp_offset;
+                    // WebM では total_track_duration が「最終 SimpleBlock の開始時刻」基準なので、
+                    // ここで計算する次ファイルのオフセットは末尾 duration 分だけ短くなることがある。
+                    // (Sora 録画用途としては許容する)
                     self.next_timestamp_offset =
                         self.timestamp_offset + self.inner.total_track_duration();
                     self.update_metrics_from_inner();
