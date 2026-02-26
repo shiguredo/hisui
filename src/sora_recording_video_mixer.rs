@@ -1,7 +1,6 @@
 // Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
     time::Duration,
 };
 
@@ -11,7 +10,7 @@ use crate::{
     sora_recording_layout_region::Region,
     sora_recording_metadata::SourceId,
     types::{EvenUsize, PixelPosition},
-    video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize},
+    video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
 // 入力がこの期間更新されなかった場合には、以後は合成ではなく
@@ -28,7 +27,7 @@ const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60
 
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
-    original: Arc<VideoFrame>,
+    original: RawVideoFrame,
     duration: Duration,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
     resize_filter_mode: shiguredo_libyuv::FilterMode,
@@ -36,7 +35,7 @@ struct ResizeCachedVideoFrame {
 
 impl ResizeCachedVideoFrame {
     fn new(
-        original: Arc<VideoFrame>,
+        original: RawVideoFrame,
         duration: Duration,
         resize_filter_mode: shiguredo_libyuv::FilterMode,
     ) -> Self {
@@ -49,11 +48,14 @@ impl ResizeCachedVideoFrame {
     }
 
     fn start_timestamp(&self) -> Duration {
-        self.original.timestamp
+        self.original.as_video_frame().timestamp
     }
 
     fn end_timestamp(&self) -> Duration {
-        self.original.timestamp.saturating_add(self.duration)
+        self.original
+            .as_video_frame()
+            .timestamp
+            .saturating_add(self.duration)
     }
 
     fn duration(&self) -> Duration {
@@ -65,19 +67,20 @@ impl ResizeCachedVideoFrame {
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> crate::Result<&VideoFrame> {
-        let original_size = self.original.require_size()?;
+        let original_size = self.original.size();
         if original_size.width == width.get() && original_size.height == height.get() {
             // リサイズ不要
-            return Ok(&self.original);
+            return Ok(self.original.as_video_frame());
         }
 
         // [NOTE]
         // resized の要素数は、通常は 1 で多くても 2~3 である想定なので線形探索で十分
         if !self.resized.iter().any(|x| x.0 == (width, height)) {
             // キャッシュにないので新規リサイズが必要
-            if let Some(resized) = self
-                .original
-                .resize(width, height, self.resize_filter_mode)?
+            if let Some(resized) =
+                self.original
+                    .as_video_frame()
+                    .resize(width, height, self.resize_filter_mode)?
             {
                 self.resized.push(((width, height), resized));
             }
@@ -557,7 +560,8 @@ impl VideoMixer {
 
         for (source, frame) in frames {
             let mut position = region.cell_position(source.cell_index);
-            let (frame_width, frame_height) = region.decide_frame_size(&frame.original)?;
+            let (frame_width, frame_height) =
+                region.decide_frame_size(frame.original.as_video_frame())?;
             position.x +=
                 EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
             position.y +=
@@ -627,7 +631,7 @@ impl VideoMixer {
                     frame.format
                 )));
             }
-            frame.require_size()?;
+            let frame = RawVideoFrame::from_video_frame(frame)?;
 
             // 新規フレームの初期 duration は、比較対象がない場合のフォールバック値として
             // 出力フレーム間隔 (next_output_duration) を使う。
@@ -635,7 +639,10 @@ impl VideoMixer {
             // 最終フレームは EOS 時に stop_timestamp で補正されることがある。
             let mut duration = next_output_duration.expect("infallible");
             if let Some(prev) = input_stream.frame_queue.back_mut() {
-                let computed = frame.timestamp.saturating_sub(prev.start_timestamp());
+                let computed = frame
+                    .as_video_frame()
+                    .timestamp
+                    .saturating_sub(prev.start_timestamp());
                 if !computed.is_zero() {
                     prev.set_duration(computed);
                     duration = computed;
