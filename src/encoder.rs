@@ -23,7 +23,7 @@ use crate::{
     encoder_svt_av1::SvtAv1Encoder,
     media::MediaFrame,
     types::{CodecName, EngineName, EvenUsize},
-    video::{FrameRate, VideoFrame},
+    video::{FrameRate, RawVideoFrame, VideoFrame},
 };
 
 #[derive(Debug)]
@@ -569,10 +569,12 @@ impl VideoEncoder {
     fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
+            let frame = Arc::new(RawVideoFrame::from_video_frame(frame)?);
+            let size = frame.size();
 
             // 最初のフレームで、解像度を使って初期化する
             if self.inner.is_none() {
-                self.initialize_inner(frame.width, frame.height)?;
+                self.initialize_inner(size.width, size.height)?;
             }
 
             self.total_input_video_frame_count_metric.inc();
@@ -691,7 +693,7 @@ impl VideoEncoderInner {
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
-    fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
+    fn encode(&mut self, frame: Arc<RawVideoFrame>) -> crate::Result<()> {
         match self {
             #[cfg(feature = "libvpx")]
             Self::Libvpx(encoder) => encoder.encode(frame),

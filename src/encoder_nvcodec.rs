@@ -5,7 +5,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 use crate::{
     encoder::VideoEncoderOptions,
     types::CodecName,
-    video::{VideoFormat, VideoFrame},
+    video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
     video_av1, video_h264, video_h265,
 };
 
@@ -129,18 +129,20 @@ impl NvcodecEncoder {
         })
     }
 
-    pub fn encode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
-        if frame.format != VideoFormat::I420 {
+    pub fn encode(&mut self, frame: &RawVideoFrame) -> crate::Result<()> {
+        let video_frame = frame.as_video_frame();
+        if video_frame.format != VideoFormat::I420 {
             return Err(crate::Error::new(format!(
                 "expected I420 format, got {:?}",
-                frame.format
+                video_frame.format
             )));
         }
 
         // I420 から NV12 への変換
-        let width = frame.width;
-        let height = frame.height;
-        let (y_plane, u_plane, v_plane) = frame
+        let size = frame.size();
+        let width = size.width;
+        let height = size.height;
+        let (y_plane, u_plane, v_plane) = video_frame
             .as_yuv_planes()
             .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
 
@@ -176,7 +178,7 @@ impl NvcodecEncoder {
 
         // エンコード実行
         self.inner.encode(&nv12_data)?;
-        self.input_queue.push_back(frame.to_stripped());
+        self.input_queue.push_back(video_frame.to_stripped());
         self.handle_encoded_frames()?;
         Ok(())
     }
@@ -228,8 +230,7 @@ impl NvcodecEncoder {
                 data: frame_data,
                 format: self.encoded_format,
                 keyframe,
-                width: input_frame.width,
-                height: input_frame.height,
+                size: input_frame.size,
                 timestamp: input_frame.timestamp,
                 sample_entry: self.sample_entry.take(),
             });

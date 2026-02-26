@@ -32,9 +32,12 @@ pub struct Region {
 }
 
 impl Region {
-    pub fn decide_frame_size(&self, frame: &VideoFrame) -> (EvenUsize, EvenUsize) {
-        let width_ratio = self.grid.cell_width.get() as f64 / frame.width as f64;
-        let height_ratio = self.grid.cell_height.get() as f64 / frame.height as f64;
+    pub fn decide_frame_size(&self, frame: &VideoFrame) -> crate::Result<(EvenUsize, EvenUsize)> {
+        let size = frame
+            .size()
+            .ok_or_else(|| crate::Error::new("video frame size is required"))?;
+        let width_ratio = self.grid.cell_width.get() as f64 / size.width as f64;
+        let height_ratio = self.grid.cell_height.get() as f64 / size.height as f64;
         let ratio = if width_ratio < height_ratio {
             // 横に合わせて上下に黒帯を入れる
             width_ratio
@@ -42,10 +45,10 @@ impl Region {
             // 縦に合わせて左右に黒帯を入れる
             height_ratio
         };
-        (
-            EvenUsize::truncating_new((frame.width as f64 * ratio).floor() as usize),
-            EvenUsize::truncating_new((frame.height as f64 * ratio).floor() as usize),
-        )
+        Ok((
+            EvenUsize::truncating_new((size.width as f64 * ratio).floor() as usize),
+            EvenUsize::truncating_new((size.height as f64 * ratio).floor() as usize),
+        ))
     }
 
     pub fn cell_position(&self, cell_index: usize) -> PixelPosition {

@@ -28,10 +28,13 @@ impl I420Canvas {
         if frame.format != VideoFormat::I420 {
             return Err(Error::new("unsupported video format: expected I420"));
         }
+        let size = frame
+            .size()
+            .ok_or_else(|| Error::new("video frame size is required"))?;
 
-        let src_y_size = frame.width.saturating_mul(frame.height);
-        let src_uv_width = frame.width.div_ceil(2);
-        let src_uv_height = frame.height.div_ceil(2);
+        let src_y_size = size.width.saturating_mul(size.height);
+        let src_uv_width = size.width.div_ceil(2);
+        let src_uv_height = size.height.div_ceil(2);
         let src_uv_size = src_uv_width.saturating_mul(src_uv_height);
 
         if frame.data.len() < src_y_size.saturating_add(src_uv_size.saturating_mul(2)) {
@@ -42,15 +45,15 @@ impl I420Canvas {
         let src_u = &frame.data[src_y_size..][..src_uv_size];
         let src_v = &frame.data[src_y_size + src_uv_size..][..src_uv_size];
 
-        let (src_x0, dst_x0, copy_width) = clipped_span(frame.width, self.width, x);
-        let (src_y0, dst_y0, copy_height) = clipped_span(frame.height, self.height, y);
+        let (src_x0, dst_x0, copy_width) = clipped_span(size.width, self.width, x);
+        let (src_y0, dst_y0, copy_height) = clipped_span(size.height, self.height, y);
 
         if copy_width == 0 || copy_height == 0 {
             return Ok(());
         }
 
         for row in 0..copy_height {
-            let src_offset = (src_y0 + row) * frame.width + src_x0;
+            let src_offset = (src_y0 + row) * size.width + src_x0;
             let dst_offset = (dst_y0 + row) * self.width + dst_x0;
             self.data[dst_offset..][..copy_width]
                 .copy_from_slice(&src_y[src_offset..][..copy_width]);
@@ -171,8 +174,9 @@ mod tests {
             EvenUsize::new(4).expect("infallible"),
             EvenUsize::new(4).expect("infallible"),
         );
-        let y_size = frame.width * frame.height;
-        let uv_size = frame.width.div_ceil(2) * frame.height.div_ceil(2);
+        let size = frame.size().expect("infallible");
+        let y_size = size.width * size.height;
+        let uv_size = size.width.div_ceil(2) * size.height.div_ceil(2);
 
         frame.data[..y_size].fill(200);
         frame.data[y_size..][..uv_size].fill(64);

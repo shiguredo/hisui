@@ -857,8 +857,7 @@ impl SrtTsDemuxer {
             data: pending.data,
             format: crate::video::VideoFormat::H264AnnexB,
             keyframe,
-            width: 0,
-            height: 0,
+            size: None,
             timestamp: relative_timestamp,
             sample_entry: None, // Annex-B 入力では sample_entry は付与しない
         })))

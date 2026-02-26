@@ -9,7 +9,7 @@ use shiguredo_mp4::{
 use crate::{
     encoder::VideoEncoderOptions,
     types::{CodecName, EvenUsize},
-    video::{self, FrameRate, VideoFormat, VideoFrame},
+    video::{self, FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
     video_h264::{H264_LEVEL_3_1, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH},
     video_h265,
 };
@@ -17,7 +17,7 @@ use crate::{
 #[derive(Debug)]
 pub struct VideoToolboxEncoder {
     inner: shiguredo_video_toolbox::Encoder,
-    input_queue: VecDeque<Arc<VideoFrame>>,
+    input_queue: VecDeque<Arc<RawVideoFrame>>,
     output_queue: VecDeque<VideoFrame>,
     is_first: bool,
     width: EvenUsize,
@@ -83,15 +83,16 @@ impl VideoToolboxEncoder {
         }
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
-        if frame.format != VideoFormat::I420 {
+    pub fn encode(&mut self, frame: Arc<RawVideoFrame>) -> crate::Result<()> {
+        let video_frame = frame.as_video_frame();
+        if video_frame.format != VideoFormat::I420 {
             return Err(crate::Error::new(format!(
                 "expected I420 format, got {:?}",
-                frame.format
+                video_frame.format
             )));
         }
 
-        let (y_plane, u_plane, v_plane) = frame
+        let (y_plane, u_plane, v_plane) = video_frame
             .as_yuv_planes()
             .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
         self.inner.encode(y_plane, u_plane, v_plane)?;
@@ -151,9 +152,11 @@ impl VideoToolboxEncoder {
                 data: frame.data,
                 format: self.format,
                 keyframe: frame.keyframe,
-                width: self.width.get(),
-                height: self.height.get(),
-                timestamp: input_frame.timestamp,
+                size: Some(VideoFrameSize {
+                    width: self.width.get(),
+                    height: self.height.get(),
+                }),
+                timestamp: input_frame.as_video_frame().timestamp,
                 sample_entry,
             });
         }

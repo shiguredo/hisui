@@ -11,7 +11,7 @@ use crate::{
     sora_recording_layout_region::Region,
     sora_recording_metadata::SourceId,
     types::{EvenUsize, PixelPosition},
-    video::{FrameRate, VideoFormat, VideoFrame},
+    video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
 // 入力がこの期間更新されなかった場合には、以後は合成ではなく
@@ -65,7 +65,8 @@ impl ResizeCachedVideoFrame {
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> crate::Result<&VideoFrame> {
-        if self.original.width == width.get() && self.original.height == height.get() {
+        let original_size = self.original.require_size()?;
+        if original_size.width == width.get() && original_size.height == height.get() {
             // リサイズ不要
             return Ok(&self.original);
         }
@@ -115,61 +116,62 @@ impl Canvas {
                 frame.format
             )));
         }
-        if frame.width > self.width.get() {
+        let frame_size = frame.require_size()?;
+        if frame_size.width > self.width.get() {
             return Err(crate::Error::new(format!(
                 "frame width {} exceeds canvas width {}",
-                frame.width,
+                frame_size.width,
                 self.width.get()
             )));
         }
-        if frame.height > self.height.get() {
+        if frame_size.height > self.height.get() {
             return Err(crate::Error::new(format!(
                 "frame height {} exceeds canvas height {}",
-                frame.height,
+                frame_size.height,
                 self.height.get()
             )));
         }
 
         // セルの解像度は偶数前提なので、奇数になることはない
         // (入力が奇数の場合でもリサイズによって常に偶数解像度になる）
-        if !frame.width.is_multiple_of(2) {
+        if !frame_size.width.is_multiple_of(2) {
             return Err(crate::Error::new(format!(
                 "frame width must be even, got {}",
-                frame.width
+                frame_size.width
             )));
         }
-        if !frame.height.is_multiple_of(2) {
+        if !frame_size.height.is_multiple_of(2) {
             return Err(crate::Error::new(format!(
                 "frame height must be even, got {}",
-                frame.height
+                frame_size.height
             )));
         }
 
         // Y成分の描画
         let offset_x = position.x.get();
         let offset_y = position.y.get();
-        let y_size = frame.width * frame.height;
+        let y_size = frame_size.width * frame_size.height;
         let y_data = &frame.data[..y_size];
-        for y in 0..frame.height {
-            let i = y * frame.width;
-            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame.width]);
+        for y in 0..frame_size.height {
+            let i = y * frame_size.width;
+            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame_size.width]);
         }
 
         // U成分の描画
         let offset_x = position.x.get() / 2;
         let offset_y = position.y.get() / 2;
-        let u_size = (frame.width / 2) * (frame.height / 2);
+        let u_size = (frame_size.width / 2) * (frame_size.height / 2);
         let u_data = &frame.data[y_size..][..u_size];
-        for y in 0..frame.height / 2 {
-            let i = y * (frame.width / 2);
-            self.draw_u_line(offset_x, offset_y + y, &u_data[i..][..frame.width / 2]);
+        for y in 0..frame_size.height / 2 {
+            let i = y * (frame_size.width / 2);
+            self.draw_u_line(offset_x, offset_y + y, &u_data[i..][..frame_size.width / 2]);
         }
 
         // V成分の描画
         let v_data = &frame.data[y_size + u_size..][..u_size];
-        for y in 0..frame.height / 2 {
-            let i = y * (frame.width / 2);
-            self.draw_v_line(offset_x, offset_y + y, &v_data[i..][..frame.width / 2]);
+        for y in 0..frame_size.height / 2 {
+            let i = y * (frame_size.width / 2);
+            self.draw_v_line(offset_x, offset_y + y, &v_data[i..][..frame_size.width / 2]);
         }
 
         Ok(())
@@ -513,8 +515,10 @@ impl VideoMixer {
 
             // 可変値
             timestamp,
-            width: self.spec.resolution.width().get(),
-            height: self.spec.resolution.height().get(),
+            size: Some(VideoFrameSize {
+                width: self.spec.resolution.width().get(),
+                height: self.spec.resolution.height().get(),
+            }),
             data: canvas.data,
         })
     }
@@ -553,7 +557,7 @@ impl VideoMixer {
 
         for (source, frame) in frames {
             let mut position = region.cell_position(source.cell_index);
-            let (frame_width, frame_height) = region.decide_frame_size(&frame.original);
+            let (frame_width, frame_height) = region.decide_frame_size(&frame.original)?;
             position.x +=
                 EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
             position.y +=
@@ -623,6 +627,7 @@ impl VideoMixer {
                     frame.format
                 )));
             }
+            frame.require_size()?;
 
             // 新規フレームの初期 duration は、比較対象がない場合のフォールバック値として
             // 出力フレーム間隔 (next_output_duration) を使う。

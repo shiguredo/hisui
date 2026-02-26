@@ -522,8 +522,7 @@ fn convert_webrtc_video_frame_to_i420(
         data: Vec::new(),
         format: crate::video::VideoFormat::I420,
         keyframe: true,
-        width,
-        height,
+        size: Some(crate::video::VideoFrameSize { width, height }),
         timestamp,
         sample_entry: None,
     };

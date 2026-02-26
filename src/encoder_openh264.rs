@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     encoder::VideoEncoderOptions,
-    video::{VideoFormat, VideoFrame},
+    video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
     video_h264::{self, H264_NALU_TYPE_SEI, H264AnnexBNalUnits},
 };
 
@@ -36,15 +36,16 @@ impl Openh264Encoder {
         })
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
-        if frame.format != VideoFormat::I420 {
+    pub fn encode(&mut self, frame: Arc<RawVideoFrame>) -> crate::Result<()> {
+        let video_frame = frame.as_video_frame();
+        if video_frame.format != VideoFormat::I420 {
             return Err(crate::Error::new(format!(
                 "expected I420 format, got {:?}",
-                frame.format
+                video_frame.format
             )));
         }
 
-        let (y_plane, u_plane, v_plane) = frame
+        let (y_plane, u_plane, v_plane) = video_frame
             .as_yuv_planes()
             .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
         let encoded = self.inner.encode(y_plane, u_plane, v_plane)?;
@@ -54,9 +55,10 @@ impl Openh264Encoder {
 
         let sample_entry = if self.is_first {
             self.is_first = false;
+            let size = frame.size();
             Some(video_h264::h264_sample_entry_from_annexb(
-                frame.width,
-                frame.height,
+                size.width,
+                size.height,
                 &encoded.data,
             )?)
         } else {
@@ -80,9 +82,11 @@ impl Openh264Encoder {
             data,
             format: VideoFormat::H264,
             keyframe: encoded.keyframe,
-            width: frame.width,
-            height: frame.height,
-            timestamp: frame.timestamp,
+            size: Some(VideoFrameSize {
+                width: frame.size().width,
+                height: frame.size().height,
+            }),
+            timestamp: video_frame.timestamp,
             sample_entry,
         });
 

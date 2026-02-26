@@ -5,7 +5,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 use crate::{
     Error,
     audio::{AudioFrame, Channels, SampleRate},
-    video::VideoFrame,
+    video::{VideoFrame, VideoFrameSize},
 };
 
 /// RTMP フレーム処理の共通ロジック（送信側）
@@ -303,8 +303,7 @@ impl RtmpIncomingFrameHandler {
             keyframe: frame.frame_type == shiguredo_rtmp::VideoFrameType::KeyFrame,
             sample_entry: Some(sample_entry.clone()),
             format: crate::video::VideoFormat::H264,
-            width: width as usize,
-            height: height as usize,
+            size: Some(VideoFrameSize::new(width as usize, height as usize)?),
             data: frame.data,
         }))
     }

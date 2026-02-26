@@ -11,7 +11,7 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 use crate::{
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     types::CodecName,
-    video::{VideoFormat, VideoFrame},
+    video::{VideoFormat, VideoFrame, VideoFrameSize},
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -144,8 +144,10 @@ impl Mp4VideoReader {
             data,
             format: self.format,
             keyframe: sample.keyframe,
-            width: self.width,
-            height: self.height,
+            size: Some(VideoFrameSize {
+                width: self.width,
+                height: self.height,
+            }),
             timestamp,
         }))
     }

@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     Error, ProcessorHandle, Result, TrackId,
-    video::{FrameRate, VideoFormat, VideoFrame, rgb_to_yuv_bt601_int},
+    video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize, rgb_to_yuv_bt601_int},
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -92,8 +92,10 @@ impl PngFileSource {
                 data: decoded.data.clone(),
                 format: VideoFormat::I420A,
                 keyframe: true,
-                width: decoded.width,
-                height: decoded.height,
+                size: Some(VideoFrameSize {
+                    width: decoded.width,
+                    height: decoded.height,
+                }),
                 timestamp,
                 sample_entry: None,
             };
