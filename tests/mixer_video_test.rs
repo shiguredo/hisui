@@ -69,8 +69,8 @@ fn mix_single_source() {
     );
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
-    let input_frame0 = video_frame(size, ms(0), ms(500), 2);
-    let input_frame1 = video_frame(size, ms(500), ms(500), 4);
+    let input_frame0 = video_frame(size, ms(0), 2);
+    let input_frame1 = video_frame(size, ms(500), 4);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id.clone(),
@@ -147,8 +147,8 @@ fn mix_single_source_with_offset() {
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
     // フレームのサイズは cell_size よりも大きいので合成時にリサイズされる
-    let input_frame0 = video_frame(output_size, ms(0), ms(500), 2);
-    let input_frame1 = video_frame(output_size, ms(500), ms(500), 4);
+    let input_frame0 = video_frame(output_size, ms(0), 2);
+    let input_frame1 = video_frame(output_size, ms(500), 4);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id.clone(),
@@ -273,8 +273,8 @@ fn single_source_multiple_regions() {
 
     // 入力映像フレームを送信する: 500 ms のフレームを二つ
     // リサイズを防ぐために cell_size を指定する
-    let input_frame0 = video_frame(cell_size, ms(0), ms(500), 2);
-    let input_frame1 = video_frame(cell_size, ms(500), ms(500), 4);
+    let input_frame0 = video_frame(cell_size, ms(0), 2);
+    let input_frame1 = video_frame(cell_size, ms(500), 4);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id.clone(),
@@ -402,7 +402,7 @@ fn single_source_multiple_regions_with_resize() {
 
     // 入力映像フレームを送信する
     // サイズは cell_size0 に合わせているので region1 での合成の際にはリサイズが発生する
-    let input_frame = video_frame(cell_size0, ms(0), ms(1000), 2);
+    let input_frame = video_frame(cell_size0, ms(0), 2);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id.clone(),
@@ -472,8 +472,8 @@ fn mix_with_trim() -> hisui::Result<()> {
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
-    let input_frame0 = video_frame(size, ms(0), ms(400), 2);
-    let input_frame1 = video_frame(size, ms(800), ms(200), 4);
+    let input_frame0 = video_frame(size, ms(0), 2);
+    let input_frame1 = video_frame(size, ms(800), 4);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id0.clone(),
@@ -550,8 +550,8 @@ fn mix_without_trim() -> hisui::Result<()> {
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
-    let input_frame0 = video_frame(size, ms(0), ms(400), 2);
-    let input_frame1 = video_frame(size, ms(800), ms(200), 4);
+    let input_frame0 = video_frame(size, ms(0), 2);
+    let input_frame1 = video_frame(size, ms(800), 4);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id0.clone(),
@@ -677,10 +677,10 @@ fn mix_multiple_cells() -> hisui::Result<()> {
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
-    let input_frame0 = video_frame(region_size, ms(0), ms(1000), 1);
-    let input_frame1 = video_frame(region_size, ms(400), ms(400), 2);
-    let input_frame2 = video_frame(region_size, ms(200), ms(800), 3);
-    let input_frame3 = video_frame(region_size, ms(0), ms(600), 4);
+    let input_frame0 = video_frame(region_size, ms(0), 1);
+    let input_frame1 = video_frame(region_size, ms(400), 2);
+    let input_frame2 = video_frame(region_size, ms(200), 3);
+    let input_frame3 = video_frame(region_size, ms(0), 4);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id0.clone(),
@@ -901,10 +901,10 @@ fn mix_multiple_cells_with_no_borders() -> hisui::Result<()> {
     );
 
     // それぞれのソースで一つずつ入力映像フレームを送信する
-    let input_frame0 = video_frame(region_size, ms(0), ms(1000), 1);
-    let input_frame1 = video_frame(region_size, ms(400), ms(400), 2);
-    let input_frame2 = video_frame(region_size, ms(200), ms(800), 3);
-    let input_frame3 = video_frame(region_size, ms(0), ms(600), 4);
+    let input_frame0 = video_frame(region_size, ms(0), 1);
+    let input_frame1 = video_frame(region_size, ms(400), 2);
+    let input_frame2 = video_frame(region_size, ms(200), 3);
+    let input_frame3 = video_frame(region_size, ms(0), 4);
     mixer
         .process_input(VideoMixerInput::video_frame(
             input_stream_id0.clone(),
@@ -1093,7 +1093,7 @@ fn non_yuv_video_input_error() -> hisui::Result<()> {
 
     // 適当に不正なフォーマットを指定して VideoFrame を送る
     // 入力映像フレームを送信する: 500 ms のフレームをひとつ
-    let mut input_frame = video_frame(size, ms(0), ms(500), 2);
+    let mut input_frame = video_frame(size, ms(0), 2);
     input_frame.format = VideoFormat::Av1;
     assert!(
         mixer
@@ -1219,7 +1219,7 @@ fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> Sou
     }
 }
 
-fn video_frame(size: Size, timestamp: Duration, _duration: Duration, grayscale: u8) -> VideoFrame {
+fn video_frame(size: Size, timestamp: Duration, grayscale: u8) -> VideoFrame {
     let y_size = size.width * size.height;
     let uv_size = (size.width * size.height) / 4 * 2;
     VideoFrame {
