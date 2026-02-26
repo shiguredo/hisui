@@ -66,23 +66,16 @@ impl FdkAacDecoder {
             // デコード可能なフレームがない場合は空のデータを返す
             //
             // TODO: そもそも将来的には decoder.rs のインタフェースを見直して、このようなワークアラウンドを不要にする
-            let timestamp = if self.sample_rate.is_none() {
-                Duration::ZERO
+            let timestamp = if let Some(sample_rate) = self.sample_rate {
+                sample_rate.duration_from_samples(self.total_output_samples)
             } else {
-                self.sample_rate
-                    .expect("sample rate is checked as initialized")
-                    .duration_from_samples(self.total_output_samples)
+                Duration::ZERO
             };
             Ok(AudioFrame {
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
                 channels: self.channels.unwrap_or(frame.channels),
-                sample_rate: if self.sample_rate.is_none() {
-                    frame.sample_rate
-                } else {
-                    self.sample_rate
-                        .expect("sample rate is checked as initialized")
-                },
+                sample_rate: self.sample_rate.unwrap_or(frame.sample_rate),
                 timestamp,
                 duration: Duration::from_secs(0),
                 sample_entry: None,
