@@ -16,7 +16,7 @@ use crate::encoder_nvcodec::NvcodecEncoder;
 use crate::encoder_video_toolbox::VideoToolboxEncoder;
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::{AudioFormat, AudioFrame, Channels, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     audio_converter::{AudioConverter, AudioConverterBuilder},
     encoder_openh264::Openh264Encoder,
     encoder_opus::OpusEncoder,
@@ -235,7 +235,7 @@ fn default_audio_converter() -> AudioConverter {
     AudioConverterBuilder::new()
         .format(AudioFormat::I16Be)
         .channels(Channels::STEREO)
-        .sample_rate(SAMPLE_RATE)
+        .sample_rate(SampleRate::HZ_48000)
         .build()
 }
 

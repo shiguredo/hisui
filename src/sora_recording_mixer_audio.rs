@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::{AudioFormat, AudioFrame, CHANNELS, Channels, SAMPLE_RATE},
+    audio::{AudioFormat, AudioFrame, CHANNELS, Channels, SampleRate},
     media::MediaFrame,
     sora_recording_layout::TrimSpans,
 };
@@ -201,13 +201,13 @@ impl AudioMixer {
     }
 
     fn next_input_timestamp(&self) -> Duration {
-        Duration::from_secs(
+        SampleRate::HZ_48000.duration_from_samples(
             self.stats.total_output_sample_count() + self.stats.total_trimmed_sample_count(),
-        ) / SAMPLE_RATE as u32
+        )
     }
 
     fn next_output_timestamp(&self) -> Duration {
-        Duration::from_secs(self.stats.total_output_sample_count()) / SAMPLE_RATE as u32
+        SampleRate::HZ_48000.duration_from_samples(self.stats.total_output_sample_count())
     }
 
     fn mix_next_audio_data(&mut self, now: Duration) -> crate::Result<AudioFrame> {
@@ -254,7 +254,7 @@ impl AudioMixer {
             // 以下は固定値
             format: AudioFormat::I16Be,
             channels: Channels::STEREO, // Hisui では音声は常にステレオとして扱う
-            sample_rate: SAMPLE_RATE,
+            sample_rate: SampleRate::HZ_48000,
             duration: MIXED_AUDIO_DATA_DURATION,
             sample_entry: None, // 生データにはサンプルエントリーはない
 
@@ -310,10 +310,11 @@ impl AudioMixer {
             //
             // 想定外の入力が来ていないかを念のためにチェックする
             // (format と channels については stereo_samples() の中でチェックしている)
-            if frame.sample_rate != SAMPLE_RATE {
+            if frame.sample_rate != SampleRate::HZ_48000 {
                 return Err(crate::Error::new(format!(
                     "expected sample rate {}Hz, got {}Hz",
-                    SAMPLE_RATE, frame.sample_rate
+                    SampleRate::HZ_48000.get(),
+                    frame.sample_rate.get()
                 )));
             }
             input_stream.sample_queue.extend(frame.stereo_samples()?);

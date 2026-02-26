@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
 
-use crate::audio::{self, AudioFormat, AudioFrame, Channels, SAMPLE_RATE};
+use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
 
 #[derive(Debug)]
 pub struct OpusEncoder {
@@ -13,7 +13,7 @@ pub struct OpusEncoder {
 impl OpusEncoder {
     pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
         let inner = shiguredo_opus::Encoder::new(
-            SAMPLE_RATE,
+            SampleRate::HZ_48000.as_u16()?,
             Channels::STEREO.get(),
             bitrate.get() as u32,
         )?;
@@ -46,7 +46,7 @@ impl OpusEncoder {
             // 固定値
             format: AudioFormat::Opus,
             channels: Channels::STEREO,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: SampleRate::HZ_48000,
 
             // 入力の値をそのまま引きつぐ
             timestamp: frame.timestamp,
@@ -67,7 +67,7 @@ fn sample_entry(pre_skip: u16) -> SampleEntry {
         dops_box: DopsBox {
             output_channel_count: Channels::STEREO.get(),
             pre_skip,
-            input_sample_rate: SAMPLE_RATE as u32,
+            input_sample_rate: SampleRate::HZ_48000.get(),
             output_gain: 0,
         },
         unknown_boxes: Vec::new(),

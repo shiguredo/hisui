@@ -1,4 +1,4 @@
-use crate::audio::{AudioFormat, AudioFrame, Channels, SAMPLE_RATE};
+use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 
 // 以下の理由で Opus デコーダーは常にステレオ扱いにする:
 // - 実際の入力に関わらず常にステレオを指定しても問題ない
@@ -14,7 +14,7 @@ pub struct OpusDecoder {
 impl OpusDecoder {
     pub fn new() -> crate::Result<Self> {
         Ok(Self {
-            inner: shiguredo_opus::Decoder::new(SAMPLE_RATE, DECODED_CHANNELS)?,
+            inner: shiguredo_opus::Decoder::new(SampleRate::HZ_48000.as_u16()?, DECODED_CHANNELS)?,
         })
     }
 
@@ -34,7 +34,7 @@ impl OpusDecoder {
                 .collect(),
             format: AudioFormat::I16Be,
             channels: Channels::STEREO,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: SampleRate::HZ_48000,
             timestamp: frame.timestamp,
             duration: frame.duration,
 

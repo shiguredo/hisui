@@ -5,7 +5,7 @@ use std::{
 
 use shiguredo_webrtc::AudioTransportRef;
 
-use crate::audio::Channels;
+use crate::audio::{Channels, SampleRate};
 use crate::audio_converter::AudioConverterBuilder;
 
 const AUDIO_BYTES_PER_SAMPLE: usize = 2;
@@ -23,8 +23,7 @@ fn check_and_update_timestamp_continuity(
     samples_per_channel: usize,
 ) -> Option<(Duration, Duration)> {
     let expected_timestamp = state.expected_next_timestamp;
-    let frame_duration =
-        Duration::from_secs(samples_per_channel as u64) / u32::from(crate::audio::SAMPLE_RATE);
+    let frame_duration = SampleRate::HZ_48000.duration_from_samples(samples_per_channel as u64);
     state.expected_next_timestamp = Some(timestamp.saturating_add(frame_duration));
     expected_timestamp.map(|expected| (expected, timestamp.abs_diff(expected)))
 }
@@ -45,7 +44,7 @@ impl WebRtcAudioTransportSink {
                 AudioConverterBuilder::new()
                     .format(crate::audio::AudioFormat::I16Be)
                     .channels(Channels::STEREO)
-                    .sample_rate(crate::audio::SAMPLE_RATE)
+                    .sample_rate(SampleRate::HZ_48000)
                     .build(),
             )),
         }
@@ -83,11 +82,11 @@ impl WebRtcAudioTransportSink {
                 "unsupported audio channel layout: expected stereo",
             ));
         }
-        if frame.sample_rate != crate::audio::SAMPLE_RATE {
+        if frame.sample_rate != SampleRate::HZ_48000 {
             return Err(crate::Error::new(format!(
                 "unsupported audio sample rate: expected {}, got {}",
-                crate::audio::SAMPLE_RATE,
-                frame.sample_rate
+                SampleRate::HZ_48000.get(),
+                frame.sample_rate.get()
             )));
         }
         if !frame.data.len().is_multiple_of(AUDIO_BYTES_PER_SAMPLE) {
@@ -135,7 +134,7 @@ impl WebRtcAudioTransportSink {
         tracing::trace!(
             timestamp_us = frame.timestamp.as_micros(),
             samples_per_channel,
-            sample_rate = frame.sample_rate,
+            sample_rate = frame.sample_rate.get(),
             "pushing audio frame to WebRTC AudioTransport",
         );
 
@@ -147,7 +146,7 @@ impl WebRtcAudioTransportSink {
                 samples_per_channel,
                 AUDIO_BYTES_PER_SAMPLE,
                 AUDIO_CHANNELS,
-                u32::from(frame.sample_rate),
+                frame.sample_rate.get(),
                 0,
                 0,
                 0,
@@ -177,7 +176,7 @@ mod tests {
             check_and_update_timestamp_continuity(&mut state, Duration::ZERO, 960),
             None
         );
-        let second_timestamp = Duration::from_secs(960) / u32::from(crate::audio::SAMPLE_RATE);
+        let second_timestamp = SampleRate::HZ_48000.duration_from_samples(960);
         let result = check_and_update_timestamp_continuity(&mut state, second_timestamp, 1024);
         assert_eq!(result, Some((second_timestamp, Duration::ZERO)));
     }
@@ -195,7 +194,7 @@ mod tests {
 
         assert_eq!(
             expected_timestamp,
-            Duration::from_secs(960) / u32::from(crate::audio::SAMPLE_RATE)
+            SampleRate::HZ_48000.duration_from_samples(960)
         );
         assert_eq!(drift, Duration::from_millis(30));
         assert!(drift > AUDIO_TIMESTAMP_DRIFT_WARN_THRESHOLD);

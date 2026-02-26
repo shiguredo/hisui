@@ -1,11 +1,11 @@
 use std::time::Duration;
 
-use crate::audio::{AudioFormat, AudioFrame, Channels};
+use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 
 #[derive(Debug, Clone, Default)]
 pub struct AudioConverterBuilder {
     target_format: Option<AudioFormat>,
-    target_sample_rate: Option<u16>,
+    target_sample_rate: Option<SampleRate>,
     target_channels: Option<Channels>,
 }
 
@@ -19,7 +19,7 @@ impl AudioConverterBuilder {
         self
     }
 
-    pub fn sample_rate(mut self, sample_rate: u16) -> Self {
+    pub fn sample_rate(mut self, sample_rate: SampleRate) -> Self {
         self.target_sample_rate = Some(sample_rate);
         self
     }
@@ -41,8 +41,8 @@ impl AudioConverterBuilder {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ResampleStateKey {
-    input_sample_rate: u16,
-    target_sample_rate: u16,
+    input_sample_rate: SampleRate,
+    target_sample_rate: SampleRate,
     channels: Channels,
 }
 
@@ -58,7 +58,7 @@ struct ResampleState {
 #[derive(Debug)]
 pub struct AudioConverter {
     target_format: Option<AudioFormat>,
-    target_sample_rate: Option<u16>,
+    target_sample_rate: Option<SampleRate>,
     target_channels: Option<Channels>,
     state: ResampleState,
 }
@@ -69,9 +69,6 @@ impl AudioConverter {
         let target_sample_rate = self.target_sample_rate.unwrap_or(frame.sample_rate);
         let target_channels = self.target_channels.unwrap_or(frame.channels);
 
-        if target_sample_rate == 0 {
-            return Err(crate::Error::new("invalid target sample rate: 0"));
-        }
         if target_format != AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
                 "unsupported target audio format: {}",
@@ -113,7 +110,7 @@ impl AudioConverter {
             let resampled = crate::audio::resample(
                 &interleaved,
                 &self.state.prev_input_samples,
-                u32::from(frame.sample_rate),
+                frame.sample_rate,
                 self.state.original_samples,
                 self.state.resampled_samples,
             )
@@ -170,12 +167,8 @@ fn parse_i16be_samples(frame: &AudioFrame) -> crate::Result<Vec<i16>> {
 fn duration_from_samples(
     sample_count: usize,
     channels: Channels,
-    sample_rate: u16,
+    sample_rate: SampleRate,
 ) -> crate::Result<Duration> {
-    if sample_rate == 0 {
-        return Err(crate::Error::new("invalid sample rate: 0"));
-    }
-
     let samples_per_channel = if channels.is_stereo() {
         if !sample_count.is_multiple_of(2) {
             return Err(crate::Error::new("invalid stereo audio sample count"));
@@ -185,9 +178,7 @@ fn duration_from_samples(
         sample_count
     };
 
-    Ok(Duration::from_secs_f64(
-        samples_per_channel as f64 / sample_rate as f64,
-    ))
+    Ok(sample_rate.duration_from_samples(samples_per_channel as u64))
 }
 
 #[cfg(test)]
@@ -198,7 +189,7 @@ mod tests {
         samples.iter().flat_map(|v| v.to_be_bytes()).collect()
     }
 
-    fn frame(samples: &[i16], channels: Channels, sample_rate: u16) -> AudioFrame {
+    fn frame(samples: &[i16], channels: Channels, sample_rate: SampleRate) -> AudioFrame {
         AudioFrame {
             data: i16be(samples),
             format: AudioFormat::I16Be,
@@ -215,15 +206,19 @@ mod tests {
         let mut converter = AudioConverterBuilder::new()
             .format(AudioFormat::I16Be)
             .channels(Channels::STEREO)
-            .sample_rate(48_000)
+            .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
             .build();
-        let input = frame(&[1, 2, 3, 4], Channels::STEREO, 48_000);
+        let input = frame(
+            &[1, 2, 3, 4],
+            Channels::STEREO,
+            SampleRate::from_u32(48_000).expect("must be valid"),
+        );
 
         let output = converter.convert(&input).expect("infallible");
 
         assert_eq!(output.format, AudioFormat::I16Be);
         assert!(output.channels.is_stereo());
-        assert_eq!(output.sample_rate, 48_000);
+        assert_eq!(output.sample_rate.get(), 48_000);
         assert_eq!(output.data, input.data);
     }
 
@@ -232,9 +227,13 @@ mod tests {
         let mut converter = AudioConverterBuilder::new()
             .format(AudioFormat::I16Be)
             .channels(Channels::STEREO)
-            .sample_rate(48_000)
+            .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
             .build();
-        let input = frame(&[1, 2, 3], Channels::MONO, 48_000);
+        let input = frame(
+            &[1, 2, 3],
+            Channels::MONO,
+            SampleRate::from_u32(48_000).expect("must be valid"),
+        );
 
         let output = converter.convert(&input).expect("infallible");
         let expected = i16be(&[1, 1, 2, 2, 3, 3]);
@@ -248,13 +247,17 @@ mod tests {
         let mut converter = AudioConverterBuilder::new()
             .format(AudioFormat::I16Be)
             .channels(Channels::STEREO)
-            .sample_rate(48_000)
+            .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
             .build();
-        let input = frame(&[1, 2, 3, 4], Channels::STEREO, 44_100);
+        let input = frame(
+            &[1, 2, 3, 4],
+            Channels::STEREO,
+            SampleRate::from_u32(44_100).expect("must be valid"),
+        );
 
         let output = converter.convert(&input).expect("infallible");
 
-        assert_eq!(output.sample_rate, 48_000);
+        assert_eq!(output.sample_rate.get(), 48_000);
         assert!(!output.data.is_empty());
         assert_ne!(output.duration, input.duration);
     }
@@ -264,9 +267,13 @@ mod tests {
         let mut converter = AudioConverterBuilder::new()
             .format(AudioFormat::I16Be)
             .channels(Channels::STEREO)
-            .sample_rate(48_000)
+            .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
             .build();
-        let input = frame(&[1, 2, 3, 4], Channels::STEREO, 44_100);
+        let input = frame(
+            &[1, 2, 3, 4],
+            Channels::STEREO,
+            SampleRate::from_u32(44_100).expect("must be valid"),
+        );
 
         let first = converter.convert(&input).expect("infallible");
         let second = converter.convert(&input).expect("infallible");
@@ -282,9 +289,13 @@ mod tests {
         let mut converter = AudioConverterBuilder::new()
             .format(AudioFormat::I16Be)
             .channels(Channels::MONO)
-            .sample_rate(48_000)
+            .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
             .build();
-        let input = frame(&[1, 2, 3, 4], Channels::STEREO, 48_000);
+        let input = frame(
+            &[1, 2, 3, 4],
+            Channels::STEREO,
+            SampleRate::from_u32(48_000).expect("must be valid"),
+        );
 
         let err = converter.convert(&input).expect_err("must fail");
         assert!(err.display().contains("stereo to mono"));

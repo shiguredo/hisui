@@ -6,7 +6,7 @@ use shiguredo_mp4::{
     descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
 };
 
-use crate::audio::{self, AudioFormat, AudioFrame, Channels, SAMPLE_RATE};
+use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
 
 #[derive(Debug)]
 pub struct FdkAacEncoder {
@@ -57,15 +57,16 @@ impl FdkAacEncoder {
     }
 
     fn handle_encoded_frame(&mut self, encoded: shiguredo_fdk_aac::EncodedFrame) -> AudioFrame {
-        let duration = Duration::from_secs(encoded.samples as u64) / SAMPLE_RATE as u32;
-        let timestamp = Duration::from_secs(self.total_encoded_samples) / SAMPLE_RATE as u32;
+        let duration = Duration::from_secs(encoded.samples as u64) / SampleRate::HZ_48000.get();
+        let timestamp =
+            Duration::from_secs(self.total_encoded_samples) / SampleRate::HZ_48000.get();
         self.total_encoded_samples += encoded.samples as u64;
 
         AudioFrame {
             // 固定値
             format: AudioFormat::Aac,
             channels: Channels::STEREO,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: SampleRate::HZ_48000,
 
             // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
             sample_entry: self.sample_entry.take(),

@@ -1,14 +1,13 @@
 use std::num::NonZeroU8;
-use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioFormat, AudioFrame, Channels};
+use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
     inner: Option<shiguredo_audio_toolbox::Decoder>,
-    sample_rate: u32,
+    sample_rate: Option<SampleRate>,
     channels: Option<Channels>,
     total_output_samples: u64,
 }
@@ -18,7 +17,7 @@ impl AudioToolboxDecoder {
         // サンプルレートなどの情報が実際にデータが届くまで不明なので遅延初期化している
         Ok(Self {
             inner: None,
-            sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
+            sample_rate: None,
             channels: None,
             total_output_samples: 0,
         })
@@ -46,7 +45,7 @@ impl AudioToolboxDecoder {
                 sample_rate,
                 channels,
             )?);
-            self.sample_rate = sample_rate;
+            self.sample_rate = Some(SampleRate::from_u32(sample_rate)?);
             self.channels = Some(channel_layout);
         }
 
@@ -85,15 +84,12 @@ impl AudioToolboxDecoder {
             decoded_samples.extend(samples);
         }
 
-        if self.sample_rate == 0 {
-            return Err(crate::Error::new("audio sample rate is not initialized"));
-        }
+        let sample_rate = self
+            .sample_rate
+            .ok_or_else(|| crate::Error::new("audio sample rate is not initialized"))?;
         let channels = self
             .channels
             .ok_or_else(|| crate::Error::new("audio channel count is not initialized"))?;
-        let sample_rate = u16::try_from(self.sample_rate).map_err(|_| {
-            crate::Error::new(format!("unsupported AAC sample rate: {}", self.sample_rate))
-        })?;
         if !decoded_samples
             .len()
             .is_multiple_of(usize::from(channels.get()))
@@ -101,10 +97,8 @@ impl AudioToolboxDecoder {
             return Err(crate::Error::new("invalid decoded audio sample count"));
         }
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
-        let timestamp =
-            Duration::from_secs_f64(self.total_output_samples as f64 / self.sample_rate as f64);
-        let duration =
-            Duration::from_secs_f64(samples_per_channel as f64 / self.sample_rate as f64);
+        let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
+        let duration = sample_rate.duration_from_samples(samples_per_channel as u64);
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {

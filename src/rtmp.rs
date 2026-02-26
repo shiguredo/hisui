@@ -4,7 +4,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     Error,
-    audio::{AudioFrame, Channels},
+    audio::{AudioFrame, Channels, SampleRate},
     video::VideoFrame,
 };
 
@@ -170,7 +170,7 @@ pub struct RtmpIncomingFrameHandler {
 #[derive(Debug, Clone)]
 struct AudioCodecInfo {
     format: crate::audio::AudioFormat,
-    sample_rate: u32,
+    sample_rate: SampleRate,
     channels: Channels,
 }
 
@@ -222,7 +222,7 @@ impl RtmpIncomingFrameHandler {
 
             self.audio_codec_info = Some(AudioCodecInfo {
                 format: crate::audio::AudioFormat::Aac,
-                sample_rate,
+                sample_rate: SampleRate::from_u32(sample_rate)?,
                 channels: Channels::from_u8(channels)?,
             });
 
@@ -243,18 +243,11 @@ impl RtmpIncomingFrameHandler {
             .audio_codec_info
             .as_ref()
             .ok_or_else(|| Error::new("audio codec info is not initialized"))?;
-        let sample_rate = u16::try_from(codec_info.sample_rate).map_err(|_| {
-            Error::new(format!(
-                "unsupported AAC sample rate: {}",
-                codec_info.sample_rate
-            ))
-        })?;
-
         Ok(Some(AudioFrame {
             timestamp: std::time::Duration::from_millis(adjusted_timestamp_ms),
             duration: std::time::Duration::ZERO,
             format: codec_info.format,
-            sample_rate,
+            sample_rate: codec_info.sample_rate,
             channels: codec_info.channels,
             sample_entry: self.audio_sample_entry.clone(),
             data: frame.data,

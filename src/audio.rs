@@ -7,9 +7,6 @@ use shiguredo_mp4::{
 
 use crate::types::CodecName;
 
-// 既定値として使うサンプルレート
-pub const SAMPLE_RATE: u16 = 48000;
-
 // 既定値として使うチャンネル数（ステレオ）
 pub const CHANNELS: u16 = 2;
 
@@ -52,12 +49,43 @@ impl Channels {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SampleRate(u32);
+
+impl SampleRate {
+    pub const HZ_48000: Self = Self(48_000);
+
+    pub fn from_u16(value: u16) -> crate::Result<Self> {
+        Self::from_u32(u32::from(value))
+    }
+
+    pub fn from_u32(value: u32) -> crate::Result<Self> {
+        if value == 0 {
+            return Err(crate::Error::new("unsupported audio sample rate: 0"));
+        }
+        Ok(Self(value))
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    pub fn as_u16(self) -> crate::Result<u16> {
+        u16::try_from(self.0)
+            .map_err(|_| crate::Error::new(format!("unsupported audio sample rate: {}", self.0)))
+    }
+
+    pub fn duration_from_samples(self, samples_per_channel: u64) -> Duration {
+        Duration::from_secs(samples_per_channel) / self.get()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AudioFrame {
     pub data: Vec<u8>,
     pub format: AudioFormat,
     pub channels: Channels,
-    pub sample_rate: u16,
+    pub sample_rate: SampleRate,
     pub timestamp: Duration,
     pub duration: Duration,
     pub sample_entry: Option<SampleEntry>,
@@ -143,22 +171,27 @@ pub fn sample_entry_audio_fields() -> AudioSampleEntryFields {
         data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
         channelcount: CHANNELS,
         samplesize: 16,
-        samplerate: FixedPointNumber::new(SAMPLE_RATE, 0),
+        samplerate: FixedPointNumber::new(
+            SampleRate::HZ_48000
+                .as_u16()
+                .expect("default sample rate must fit into u16"),
+            0,
+        ),
     }
 }
 
 pub fn resample(
-    pcm_data: &[i16],       // 現在のフレームのオリジナルの音声データ（入力）
-    prev_pcm_data: &[i16],  // 前フレームの音声データ（フレーム境界での補間に使用）
-    input_sample_rate: u32, // 入力サンプルレート。出力は SAMPLE_RATE 固定
-    original_samples: u64,  // これまでに処理された pcm_data.len() の累計
-    resampled_samples: u64, // これまでに出力されたリサンプリング後のサンプル数の累計
+    pcm_data: &[i16],              // 現在のフレームのオリジナルの音声データ（入力）
+    prev_pcm_data: &[i16],         // 前フレームの音声データ（フレーム境界での補間に使用）
+    input_sample_rate: SampleRate, // 入力サンプルレート。出力は SampleRate::HZ_48000 固定
+    original_samples: u64,         // これまでに処理された pcm_data.len() の累計
+    resampled_samples: u64,        // これまでに出力されたリサンプリング後のサンプル数の累計
 ) -> Option<Vec<i16>> {
-    if input_sample_rate == SAMPLE_RATE as u32 {
+    if input_sample_rate == SampleRate::HZ_48000 {
         return None;
     }
 
-    let ratio = SAMPLE_RATE as f64 / input_sample_rate as f64;
+    let ratio = SampleRate::HZ_48000.get() as f64 / input_sample_rate.get() as f64;
     let total_original_samples = (original_samples + pcm_data.len() as u64) as f64;
     let ideal_resampled_len = (total_original_samples * ratio).floor() as usize;
     let output_len = ideal_resampled_len.saturating_sub(resampled_samples as usize);
@@ -207,7 +240,7 @@ pub fn mono_to_stereo(mono_samples: &[i16]) -> Vec<i16> {
 
 #[cfg(test)]
 mod tests {
-    use super::Channels;
+    use super::{Channels, SampleRate};
 
     #[test]
     fn channels_constants_are_valid() {
@@ -241,5 +274,44 @@ mod tests {
         assert!(Channels::from_u8(3).is_err());
         assert!(Channels::from_u16(0).is_err());
         assert!(Channels::from_u16(3).is_err());
+    }
+
+    #[test]
+    fn sample_rate_from_u16_accepts_non_zero_values() {
+        assert_eq!(
+            SampleRate::from_u16(48_000).expect("must be valid").get(),
+            48_000
+        );
+    }
+
+    #[test]
+    fn sample_rate_from_u32_accepts_non_zero_values() {
+        assert_eq!(
+            SampleRate::from_u32(96_000).expect("must be valid").get(),
+            96_000
+        );
+    }
+
+    #[test]
+    fn sample_rate_rejects_zero() {
+        assert!(SampleRate::from_u16(0).is_err());
+        assert!(SampleRate::from_u32(0).is_err());
+    }
+
+    #[test]
+    fn sample_rate_as_u16_rejects_large_values() {
+        assert_eq!(
+            SampleRate::from_u32(48_000)
+                .expect("must be valid")
+                .as_u16()
+                .expect("must fit"),
+            48_000
+        );
+        assert!(
+            SampleRate::from_u32(96_000)
+                .expect("must be valid")
+                .as_u16()
+                .is_err()
+        );
     }
 }

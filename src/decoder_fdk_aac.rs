@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
-use crate::audio::{AudioFormat, AudioFrame, Channels};
+use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 
 /// FDK AAC デコーダー
 #[derive(Debug)]
 pub struct FdkAacDecoder {
     inner: Option<shiguredo_fdk_aac::Decoder>,
-    sample_rate: u32,
+    sample_rate: Option<SampleRate>,
     channels: Option<Channels>,
     total_output_samples: u64,
 }
@@ -19,7 +19,7 @@ impl FdkAacDecoder {
         // サンプルレートなどの情報が実際にデータが届くまで不明なので遅延初期化している
         Ok(Self {
             inner: None,
-            sample_rate: 0, // ダミー値。後でちゃんとした値に更新される
+            sample_rate: None,
             channels: None,
             total_output_samples: 0,
         })
@@ -59,31 +59,29 @@ impl FdkAacDecoder {
             .map_err(|e| crate::Error::from(e).with_context("Failed to decode AAC"))?;
 
         if let Some(decoded) = decoded_frame {
-            self.sample_rate = decoded.sample_rate;
+            self.sample_rate = Some(SampleRate::from_u32(decoded.sample_rate)?);
             self.channels = Some(Channels::from_u8(decoded.channels)?);
             self.build_audio_frame(&decoded.data)
         } else {
             // デコード可能なフレームがない場合は空のデータを返す
             //
             // TODO: そもそも将来的には decoder.rs のインタフェースを見直して、このようなワークアラウンドを不要にする
-            let timestamp = if self.sample_rate == 0 {
+            let timestamp = if self.sample_rate.is_none() {
                 Duration::ZERO
             } else {
-                Duration::from_secs_f64(self.total_output_samples as f64 / self.sample_rate as f64)
+                self.sample_rate
+                    .expect("sample rate is checked as initialized")
+                    .duration_from_samples(self.total_output_samples)
             };
             Ok(AudioFrame {
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
                 channels: self.channels.unwrap_or(Channels::STEREO),
-                sample_rate: if self.sample_rate == 0 {
+                sample_rate: if self.sample_rate.is_none() {
                     frame.sample_rate
                 } else {
-                    u16::try_from(self.sample_rate).map_err(|_| {
-                        crate::Error::new(format!(
-                            "unsupported AAC sample rate: {}",
-                            self.sample_rate
-                        ))
-                    })?
+                    self.sample_rate
+                        .expect("sample rate is checked as initialized")
                 },
                 timestamp,
                 duration: Duration::from_secs(0),
@@ -94,9 +92,9 @@ impl FdkAacDecoder {
 
     /// デコード済みデータを AudioFrame に変換する共通処理
     fn build_audio_frame(&mut self, decoded_samples: &[i16]) -> crate::Result<AudioFrame> {
-        if self.sample_rate == 0 {
-            return Err(crate::Error::new("audio sample rate is not initialized"));
-        }
+        let sample_rate = self
+            .sample_rate
+            .ok_or_else(|| crate::Error::new("audio sample rate is not initialized"))?;
         let channels = self
             .channels
             .ok_or_else(|| crate::Error::new("audio channel count is not initialized"))?;
@@ -106,14 +104,9 @@ impl FdkAacDecoder {
         {
             return Err(crate::Error::new("invalid decoded audio sample count"));
         }
-        let sample_rate = u16::try_from(self.sample_rate).map_err(|_| {
-            crate::Error::new(format!("unsupported AAC sample rate: {}", self.sample_rate))
-        })?;
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
-        let timestamp =
-            Duration::from_secs_f64(self.total_output_samples as f64 / self.sample_rate as f64);
-        let duration =
-            Duration::from_secs_f64(samples_per_channel as f64 / self.sample_rate as f64);
+        let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
+        let duration = sample_rate.duration_from_samples(samples_per_channel as u64);
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {
