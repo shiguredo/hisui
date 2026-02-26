@@ -370,8 +370,9 @@ impl ReaderState {
             demuxer,
             audio_track_id,
             video_track_id,
+            // ダミー初期値。実際の値はサンプルエントリー受信時に上書きされる。
             audio_format: AudioFormat::Opus,
-            audio_channels: Channels::MONO,
+            audio_channels: Channels::STEREO,
             audio_sample_rate: SampleRate::HZ_48000,
             video_format: VideoFormat::Vp8,
             video_width: 0,

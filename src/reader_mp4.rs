@@ -194,9 +194,9 @@ impl Mp4AudioReader {
             file,
             demuxer,
             audio_track_id,
-            // 後で更新されるので適当な初期値を設定しておく
+            // ダミー初期値。実際の値はサンプルエントリー受信時に上書きされる。
             format: AudioFormat::Opus,
-            channels: Channels::MONO,
+            channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
