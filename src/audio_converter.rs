@@ -128,6 +128,9 @@ impl AudioConverter {
 
         let duration =
             duration_from_samples(interleaved.len(), target_channels, target_sample_rate)?;
+        let preserve_sample_entry = target_format == frame.format
+            && target_sample_rate == frame.sample_rate
+            && target_channels == frame.channels;
 
         Ok(AudioFrame {
             data: interleaved.iter().flat_map(|v| v.to_be_bytes()).collect(),
@@ -136,7 +139,7 @@ impl AudioConverter {
             sample_rate: target_sample_rate,
             timestamp: frame.timestamp,
             duration,
-            sample_entry: if target_format == frame.format {
+            sample_entry: if preserve_sample_entry {
                 frame.sample_entry.clone()
             } else {
                 None
