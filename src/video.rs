@@ -73,6 +73,19 @@ impl RawVideoFrame {
     pub fn size(&self) -> VideoFrameSize {
         self.0.size.expect("infallible: validated in constructor")
     }
+
+    pub fn as_i420_planes(&self) -> crate::Result<I420Planes<'_>> {
+        let frame = self.as_video_frame();
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.format
+            )));
+        }
+        frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))
+    }
 }
 
 impl VideoFrame {

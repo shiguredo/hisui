@@ -45,17 +45,7 @@ impl SvtAv1Encoder {
     }
 
     pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
-        let video_frame = frame.as_video_frame();
-        if video_frame.format != VideoFormat::I420 {
-            return Err(crate::Error::new(format!(
-                "expected I420 format, got {:?}",
-                video_frame.format
-            )));
-        }
-
-        let (y_plane, u_plane, v_plane) = video_frame
-            .as_yuv_planes()
-            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
+        let (y_plane, u_plane, v_plane) = frame.as_i420_planes()?;
         self.inner.encode(y_plane, u_plane, v_plane)?;
         self.input_queue.push_back(frame);
         self.handle_encoded_frames()?;
