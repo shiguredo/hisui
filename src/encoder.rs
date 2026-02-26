@@ -568,7 +568,7 @@ impl VideoEncoder {
     fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
-            let frame = RawVideoFrame::from_video_frame(frame)?;
+            let frame = RawVideoFrame::from_i420_video_frame(frame)?;
             let size = frame.size();
 
             // 最初のフレームで、解像度を使って初期化する
