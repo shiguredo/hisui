@@ -567,9 +567,9 @@ impl WebmVideoReader {
             keyframe,
             timestamp,
 
-            // 以降のフィールドはデコーダーには参照されないのでダミー値を設定しておく
-            width: 0,
-            height: 0,
+            // WebM では payload を解析しないためサイズ情報は保持しない。
+            // 利用側で必要な場合は後段で補完する。
+            size: None,
             sample_entry: None,
         }))
     }

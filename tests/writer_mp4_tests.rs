@@ -514,8 +514,10 @@ fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame 
         data: vec![0], // 中身はなんでもいい
         format: VideoFormat::I420,
         keyframe: i.is_multiple_of(2),
-        width: EvenUsize::MIN_CELL_SIZE.get(),
-        height: EvenUsize::MIN_CELL_SIZE.get(),
+        size: Some(hisui::video::VideoFrameSize {
+            width: EvenUsize::MIN_CELL_SIZE.get(),
+            height: EvenUsize::MIN_CELL_SIZE.get(),
+        }),
         timestamp: source.start_timestamp + duration * i as u32,
         sample_entry: if i == 0 {
             // 中身はなんでもいい

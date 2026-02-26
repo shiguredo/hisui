@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, str::FromStr, time::Duration};
+use std::{num::NonZeroUsize, str::FromStr, sync::Arc, time::Duration};
 
 use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields};
 
@@ -6,6 +6,23 @@ use crate::types::{CodecName, EvenUsize};
 
 pub type I420Planes<'a> = (&'a [u8], &'a [u8], &'a [u8]);
 pub type I420APlanes<'a> = (&'a [u8], &'a [u8], &'a [u8], &'a [u8]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoFrameSize {
+    pub width: usize,
+    pub height: usize,
+}
+
+impl VideoFrameSize {
+    pub fn new(width: usize, height: usize) -> crate::Result<Self> {
+        if width == 0 || height == 0 {
+            return Err(crate::Error::new(format!(
+                "video frame size must be positive: width={width}, height={height}"
+            )));
+        }
+        Ok(Self { width, height })
+    }
+}
 
 pub(crate) fn rgb_to_yuv_bt601_int(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     let r = i32::from(r);
@@ -23,13 +40,89 @@ pub struct VideoFrame {
     pub data: Vec<u8>,
     pub format: VideoFormat,
     pub keyframe: bool,
-    pub width: usize,
-    pub height: usize,
+    pub size: Option<VideoFrameSize>,
     pub timestamp: Duration,
     pub sample_entry: Option<SampleEntry>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RawVideoFrame(Arc<VideoFrame>);
+
+impl RawVideoFrame {
+    pub fn from_video_frame(inner: Arc<VideoFrame>) -> crate::Result<Self> {
+        if inner.size.is_none() {
+            return Err(crate::Error::new("video frame size is required"));
+        }
+        if !matches!(inner.format, VideoFormat::I420 | VideoFormat::I420A) {
+            return Err(crate::Error::new(format!(
+                "unsupported video format for raw video frame: {:?}",
+                inner.format
+            )));
+        }
+        Ok(Self(inner))
+    }
+
+    pub fn from_i420_video_frame(inner: Arc<VideoFrame>) -> crate::Result<Self> {
+        let frame = Self::from_video_frame(inner)?;
+        if frame.as_video_frame().format != VideoFormat::I420 {
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.as_video_frame().format
+            )));
+        }
+        Ok(frame)
+    }
+
+    pub fn as_video_frame(&self) -> &Arc<VideoFrame> {
+        &self.0
+    }
+
+    pub fn into_video_frame(self) -> Arc<VideoFrame> {
+        self.0
+    }
+
+    pub fn size(&self) -> VideoFrameSize {
+        self.0.size.expect("infallible: validated in constructor")
+    }
+
+    pub fn as_i420_planes(&self) -> crate::Result<I420Planes<'_>> {
+        let frame = self.as_video_frame();
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new(format!(
+                "expected I420 format, got {:?}",
+                frame.format
+            )));
+        }
+        frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))
+    }
+}
+
 impl VideoFrame {
+    fn optional_size(width: usize, height: usize) -> Option<VideoFrameSize> {
+        if width == 0 || height == 0 {
+            None
+        } else {
+            Some(VideoFrameSize { width, height })
+        }
+    }
+
+    pub fn size(&self) -> Option<VideoFrameSize> {
+        self.size
+    }
+
+    pub fn require_size(&self) -> crate::Result<VideoFrameSize> {
+        self.size
+            .ok_or_else(|| crate::Error::new("video frame size is required"))
+    }
+
+    pub fn set_size_if_none(&mut self, size: VideoFrameSize) {
+        if self.size.is_none() {
+            self.size = Some(size);
+        }
+    }
+
     /// I420 形式の各プレーンサイズを計算
     fn i420_plane_sizes(width: usize, height: usize) -> (usize, usize, usize) {
         let y_size = width * height;
@@ -108,8 +201,10 @@ impl VideoFrame {
             data: yuv_data,
             format: VideoFormat::I420,
             keyframe: true,
-            width: width.get(),
-            height: height.get(),
+            size: Some(VideoFrameSize {
+                width: width.get(),
+                height: height.get(),
+            }),
             timestamp,
             sample_entry: None,
         })
@@ -120,8 +215,7 @@ impl VideoFrame {
             data: Vec::new(),
             format: self.format,
             keyframe: self.keyframe,
-            width: self.width,
-            height: self.height,
+            size: self.size,
             timestamp: self.timestamp,
             sample_entry: None,
         }
@@ -178,8 +272,7 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true, // 生データは全てキーフレーム扱い
-            width,
-            height,
+            size: Self::optional_size(width, height),
             timestamp: input_frame.timestamp,
         }
     }
@@ -319,8 +412,7 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true, // 生データは全てキーフレーム扱い
-            width,
-            height,
+            size: Self::optional_size(width, height),
             timestamp: input_frame.timestamp,
         })
     }
@@ -354,8 +446,10 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width: actual_width,
-            height: actual_height,
+            size: Some(VideoFrameSize {
+                width: actual_width,
+                height: actual_height,
+            }),
             timestamp: Duration::ZERO,
             sample_entry: None,
         }
@@ -376,28 +470,33 @@ impl VideoFrame {
             data,
             format: VideoFormat::I420,
             keyframe: true,
-            width: actual_width,
-            height: actual_height,
+            size: Some(VideoFrameSize {
+                width: actual_width,
+                height: actual_height,
+            }),
             timestamp: Duration::ZERO,
             sample_entry: None,
         }
     }
 
-    pub fn ceiling_width(&self) -> EvenUsize {
-        EvenUsize::ceiling_new(self.width)
+    pub fn ceiling_width(&self) -> Option<EvenUsize> {
+        self.size.map(|size| EvenUsize::ceiling_new(size.width))
     }
 
-    pub fn ceiling_height(&self) -> EvenUsize {
-        EvenUsize::ceiling_new(self.height)
+    pub fn ceiling_height(&self) -> Option<EvenUsize> {
+        self.size.map(|size| EvenUsize::ceiling_new(size.height))
     }
 
     pub fn as_yuv_planes(&self) -> Option<I420Planes<'_>> {
         if self.format != VideoFormat::I420 {
             return None;
         }
+        let size = self.size?;
+        let width = size.width;
+        let height = size.height;
 
-        let (y_size, uv_size, _) = Self::i420_plane_sizes(self.width, self.height);
-        if self.data.len() < Self::i420_total_size(self.width, self.height) {
+        let (y_size, uv_size, _) = Self::i420_plane_sizes(width, height);
+        if self.data.len() < Self::i420_total_size(width, height) {
             return None;
         }
 
@@ -412,9 +511,12 @@ impl VideoFrame {
         if self.format != VideoFormat::I420A {
             return None;
         }
+        let size = self.size?;
+        let width = size.width;
+        let height = size.height;
 
-        let (y_size, uv_size, _) = Self::i420_plane_sizes(self.width, self.height);
-        if self.data.len() < Self::i420a_total_size(self.width, self.height) {
+        let (y_size, uv_size, _) = Self::i420_plane_sizes(width, height);
+        if self.data.len() < Self::i420a_total_size(width, height) {
             return None;
         }
 
@@ -440,8 +542,9 @@ impl VideoFrame {
             )));
         }
 
-        let width = self.width;
-        let height = self.height;
+        let size = self.require_size()?;
+        let width = size.width;
+        let height = size.height;
         if width == new_width.get() && height == new_height.get() {
             // リサイズ不要
             return Ok(None);
@@ -470,8 +573,8 @@ impl VideoFrame {
         let mut resized_yuv = vec![0; Self::i420_total_size(new_width.get(), new_height.get())];
 
         // ストライド計算（元画像） - 実際の幅を使用
-        let src_width = self.width;
-        let (src_uv_width, _) = Self::i420_uv_dimensions(self.width, self.height);
+        let src_width = size.width;
+        let (src_uv_width, _) = Self::i420_uv_dimensions(size.width, size.height);
 
         // ストライド計算（出力画像）
         let dst_width = new_width.get();
@@ -534,8 +637,10 @@ impl VideoFrame {
             data,
             format: self.format,
             keyframe: self.keyframe,
-            width: new_width.get(),
-            height: new_height.get(),
+            size: Some(VideoFrameSize {
+                width: new_width.get(),
+                height: new_height.get(),
+            }),
             timestamp: self.timestamp,
             sample_entry: self.sample_entry.clone(),
         };
@@ -589,8 +694,9 @@ impl VideoFrame {
         }
 
         // 実際の解像度（出力に使用）
-        let actual_width = self.width;
-        let actual_height = self.height;
+        let size = self.require_size()?;
+        let actual_width = size.width;
+        let actual_height = size.height;
 
         // YUV プレーンを取得
         let (y_plane, u_plane, v_plane) = self
@@ -852,8 +958,10 @@ mod tests {
             sample_entry: None,
             keyframe: true,
             format: VideoFormat::I420A,
-            width: 4,
-            height: 4,
+            size: Some(VideoFrameSize {
+                width: 4,
+                height: 4,
+            }),
             timestamp: Duration::ZERO,
             data: vec![
                 // Y (4x4)
@@ -874,8 +982,9 @@ mod tests {
             .expect("resized frame");
 
         assert_eq!(resized.format, VideoFormat::I420A);
-        assert_eq!(resized.width, 2);
-        assert_eq!(resized.height, 2);
+        let size = resized.size().expect("infallible");
+        assert_eq!(size.width, 2);
+        assert_eq!(size.height, 2);
         assert_eq!(resized.data.len(), 7);
         Ok(())
     }

@@ -334,8 +334,8 @@ pub struct OutputPrinter {
 #[derive(Debug)]
 struct DecodedVideoInfo {
     decoded_data_size: usize,
-    width: usize,
-    height: usize,
+    width: Option<usize>,
+    height: Option<usize>,
 }
 
 impl OutputPrinter {
@@ -530,8 +530,8 @@ impl OutputPrinter {
                 self.pending_video_decoded_infos
                     .push_back(DecodedVideoInfo {
                         decoded_data_size: video_frame.data.len(),
-                        width: video_frame.width,
-                        height: video_frame.height,
+                        width: video_frame.size().map(|size| size.width),
+                        height: video_frame.size().map(|size| size.height),
                     });
                 self.try_apply_pending_video_decoded_infos();
             }
@@ -570,8 +570,8 @@ impl OutputPrinter {
             };
 
             info.decoded_data_size = Some(decoded_info.decoded_data_size);
-            info.width = Some(decoded_info.width);
-            info.height = Some(decoded_info.height);
+            info.width = decoded_info.width;
+            info.height = decoded_info.height;
         }
     }
 }

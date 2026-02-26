@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use shiguredo_mp4::{
     Uint,
@@ -9,7 +8,7 @@ use shiguredo_mp4::{
 use crate::{
     encoder::VideoEncoderOptions,
     types::CodecName,
-    video::{self, VideoFormat, VideoFrame},
+    video::{self, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
 // エンコードパラメーターのデフォルト値
@@ -28,7 +27,7 @@ pub struct LibvpxEncoder {
     inner: shiguredo_libvpx::Encoder,
     format: VideoFormat,
     sample_entry: Option<SampleEntry>,
-    input_queue: VecDeque<Arc<VideoFrame>>,
+    input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
 }
 
@@ -89,17 +88,8 @@ impl LibvpxEncoder {
         }
     }
 
-    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
-        if frame.format != VideoFormat::I420 {
-            return Err(crate::Error::new(format!(
-                "expected I420 format, got {:?}",
-                frame.format
-            )));
-        }
-
-        let (y_plane, u_plane, v_plane) = frame
-            .as_yuv_planes()
-            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))?;
+    pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
+        let (y_plane, u_plane, v_plane) = frame.as_i420_planes()?;
         self.inner.encode(y_plane, u_plane, v_plane)?;
         self.input_queue.push_back(frame);
         self.handle_encoded_frames()?;
@@ -124,9 +114,11 @@ impl LibvpxEncoder {
                 data: frame.data().to_vec(),
                 format: self.format,
                 keyframe: frame.is_keyframe(),
-                width: frame.width() as usize,
-                height: frame.height() as usize,
-                timestamp: input_frame.timestamp,
+                size: Some(VideoFrameSize {
+                    width: frame.width() as usize,
+                    height: frame.height() as usize,
+                }),
+                timestamp: input_frame.as_video_frame().timestamp,
             });
         }
 

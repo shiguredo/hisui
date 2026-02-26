@@ -90,8 +90,9 @@ fn mix_single_source() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width, size.width);
-        assert_eq!(frame.height, size.height);
+        let frame_size = frame.size().expect("infallible");
+        assert_eq!(frame_size.width, size.width);
+        assert_eq!(frame_size.height, size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
 
         if i < 3 {
@@ -168,8 +169,9 @@ fn mix_single_source_with_offset() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width, output_size.width);
-        assert_eq!(frame.height, output_size.height);
+        let frame_size = frame.size().expect("infallible");
+        assert_eq!(frame_size.width, output_size.width);
+        assert_eq!(frame_size.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
 
         if i < 3 {
@@ -294,8 +296,9 @@ fn single_source_multiple_regions() {
     // 合成結果を取得する
     for i in 0..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width, output_size.width);
-        assert_eq!(frame.height, output_size.height);
+        let frame_size = frame.size().expect("infallible");
+        assert_eq!(frame_size.width, output_size.width);
+        assert_eq!(frame_size.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
 
         if i < 3 {
@@ -419,8 +422,9 @@ fn single_source_multiple_regions_with_resize() {
     // 残りの合成結果を取得する
     for i in 1..total_duration.as_millis() / OUTPUT_FRAME_DURATION.as_millis() {
         let frame = next_mixed_frame(&mut mixer).expect("failed to receive output frame");
-        assert_eq!(frame.width, output_size.width);
-        assert_eq!(frame.height, output_size.height);
+        let frame_size = frame.size().expect("infallible");
+        assert_eq!(frame_size.width, output_size.width);
+        assert_eq!(frame_size.height, output_size.height);
         assert_eq!(frame.timestamp, OUTPUT_FRAME_DURATION * i as u32);
 
         // 共有ソースのリサイズによって想定外の影響で合成結果が変わっていないかを確認
@@ -1228,8 +1232,10 @@ fn video_frame(size: Size, timestamp: Duration, grayscale: u8) -> VideoFrame {
             .collect(),
         format: VideoFormat::I420,
         keyframe: true,
-        width: size.width,
-        height: size.height,
+        size: Some(hisui::video::VideoFrameSize {
+            width: size.width,
+            height: size.height,
+        }),
         timestamp,
         sample_entry: None,
     }

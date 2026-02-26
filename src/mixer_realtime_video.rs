@@ -7,7 +7,7 @@ use std::{
 use crate::{
     Error, MediaFrame, Message, ProcessorHandle, TrackId,
     types::EvenUsize,
-    video::{FrameRate, VideoFormat, VideoFrame},
+    video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -272,7 +272,7 @@ impl VideoRealtimeMixerRunner {
 #[derive(Debug)]
 struct PendingVideoFrame {
     timestamp: Duration,
-    frame: Arc<VideoFrame>,
+    frame: RawVideoFrame,
 }
 
 #[derive(Debug)]
@@ -305,19 +305,15 @@ impl InputTrackState {
     }
 
     fn handle_video(&mut self, frame: Arc<VideoFrame>, received_at: Duration) -> crate::Result<()> {
-        if !matches!(frame.format, VideoFormat::I420 | VideoFormat::I420A) {
-            return Err(Error::new(format!(
-                "unsupported video format: expected I420 or I420A, got {}",
-                frame.format
-            )));
-        }
+        let frame = RawVideoFrame::from_video_frame(frame)?;
+        let video_frame = frame.as_video_frame();
 
         let first_sample_timestamp = *self
             .first_input_sample_timestamp
-            .get_or_insert(frame.timestamp);
+            .get_or_insert(video_frame.timestamp);
         let first_input_elapsed = *self.first_input_elapsed.get_or_insert(received_at);
 
-        let adjusted_timestamp = frame
+        let adjusted_timestamp = video_frame
             .timestamp
             .saturating_sub(first_sample_timestamp)
             .saturating_add(first_input_elapsed);
@@ -467,13 +463,14 @@ fn compose_frame(
         let target_width = state
             .target_width
             .map(EvenUsize::get)
-            .unwrap_or(current.frame.width);
+            .unwrap_or(current.frame.size().width);
         let target_height = state
             .target_height
             .map(EvenUsize::get)
-            .unwrap_or(current.frame.height);
+            .unwrap_or(current.frame.size().height);
 
-        if current.frame.width == target_width && current.frame.height == target_height {
+        let size = current.frame.size();
+        if size.width == target_width && size.height == target_height {
             canvas.draw_frame_clipped(x, y, &current.frame)?;
             continue;
         }
@@ -489,6 +486,7 @@ fn compose_frame(
 
         let resized = current
             .frame
+            .as_video_frame()
             .resize(
                 resize_width,
                 resize_height,
@@ -496,6 +494,7 @@ fn compose_frame(
             )?
             .ok_or_else(|| Error::new("failed to resize input frame"))?;
 
+        let resized = RawVideoFrame::from_video_frame(Arc::new(resized))?;
         canvas.draw_frame_clipped(x, y, &resized)?;
     }
 
@@ -504,8 +503,10 @@ fn compose_frame(
         keyframe: true,
         format: VideoFormat::I420,
         timestamp,
-        width: canvas_width,
-        height: canvas_height,
+        size: Some(VideoFrameSize {
+            width: canvas_width,
+            height: canvas_height,
+        }),
         data: canvas.into_data(),
     })
 }
@@ -532,7 +533,14 @@ impl RealtimeI420Canvas {
         }
     }
 
-    fn draw_frame_clipped(&mut self, x: isize, y: isize, frame: &VideoFrame) -> crate::Result<()> {
+    fn draw_frame_clipped(
+        &mut self,
+        x: isize,
+        y: isize,
+        frame: &RawVideoFrame,
+    ) -> crate::Result<()> {
+        let size = frame.size();
+        let frame = frame.as_video_frame();
         let (src_y, src_u, src_v, src_a) = match frame.format {
             VideoFormat::I420 => {
                 let (src_y, src_u, src_v) = frame
@@ -554,8 +562,8 @@ impl RealtimeI420Canvas {
             }
         };
 
-        let (src_x0, dst_x0, copy_width) = clipped_span(frame.width, self.width, x);
-        let (src_y0, dst_y0, copy_height) = clipped_span(frame.height, self.height, y);
+        let (src_x0, dst_x0, copy_width) = clipped_span(size.width, self.width, x);
+        let (src_y0, dst_y0, copy_height) = clipped_span(size.height, self.height, y);
         if copy_width == 0 || copy_height == 0 {
             return Ok(());
         }
@@ -566,15 +574,15 @@ impl RealtimeI420Canvas {
                 let src_y_pos = src_y0 + row;
                 let dst_x = dst_x0 + col;
                 let dst_y_pos = dst_y0 + row;
-                let src_index = src_y_pos * frame.width + src_x;
+                let src_index = src_y_pos * size.width + src_x;
                 let dst_index = dst_y_pos * self.width + dst_x;
-                let alpha = alpha_for_luma(src_a, frame.width, src_x, src_y_pos);
+                let alpha = alpha_for_luma(src_a, size.width, src_x, src_y_pos);
                 self.y_plane[dst_index] =
                     blend_component(src_y[src_index], self.y_plane[dst_index], alpha);
             }
         }
 
-        let src_uv_width = frame.width.div_ceil(2);
+        let src_uv_width = size.width.div_ceil(2);
         let dst_uv_width = self.width.div_ceil(2);
         let src_uv_x0 = src_x0 / 2;
         let src_uv_y0 = src_y0 / 2;
@@ -1239,7 +1247,12 @@ mod tests {
         let mut state = InputTrackState::new(input_track)?;
         state.current_frame = Some(PendingVideoFrame {
             timestamp: Duration::ZERO,
-            frame: Arc::new(dummy_i420a_frame(Duration::ZERO, 200, 128)),
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_i420a_frame(
+                Duration::ZERO,
+                200,
+                128,
+            )))
+            .expect("infallible"),
         });
 
         let draw_order = vec![DrawOrder {
@@ -1274,8 +1287,10 @@ mod tests {
             sample_entry: None,
             keyframe: true,
             format: VideoFormat::I420A,
-            width: 2,
-            height: 2,
+            size: Some(VideoFrameSize {
+                width: 2,
+                height: 2,
+            }),
             timestamp,
             data: vec![y, y, y, y, 200, 200, alpha],
         }

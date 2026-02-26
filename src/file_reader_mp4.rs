@@ -8,7 +8,7 @@ use std::{
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::audio::{AudioFormat, Channels, SampleRate};
-use crate::video::VideoFormat;
+use crate::video::{VideoFormat, VideoFrameSize};
 use crate::{Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame};
 
 const MAX_NOACKED_COUNT: u64 = 100;
@@ -217,8 +217,10 @@ impl Mp4FileReader {
             data,
             format: state.video_format,
             keyframe: context.keyframe,
-            width: state.video_width,
-            height: state.video_height,
+            size: Some(VideoFrameSize {
+                width: state.video_width,
+                height: state.video_height,
+            }),
             timestamp: effective_timestamp,
             sample_entry: context.sample_entry,
         };

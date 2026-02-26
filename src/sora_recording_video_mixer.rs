@@ -1,7 +1,6 @@
 // Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
     time::Duration,
 };
 
@@ -11,7 +10,7 @@ use crate::{
     sora_recording_layout_region::Region,
     sora_recording_metadata::SourceId,
     types::{EvenUsize, PixelPosition},
-    video::{FrameRate, VideoFormat, VideoFrame},
+    video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
 // 入力がこの期間更新されなかった場合には、以後は合成ではなく
@@ -28,7 +27,7 @@ const TIMESTAMP_GAP_ERROR_THRESHOLD: Duration = Duration::from_secs(24 * 60 * 60
 
 #[derive(Debug)]
 struct ResizeCachedVideoFrame {
-    original: Arc<VideoFrame>,
+    original: RawVideoFrame,
     duration: Duration,
     resized: Vec<((EvenUsize, EvenUsize), VideoFrame)>, // (width, height) => resized frame
     resize_filter_mode: shiguredo_libyuv::FilterMode,
@@ -36,7 +35,7 @@ struct ResizeCachedVideoFrame {
 
 impl ResizeCachedVideoFrame {
     fn new(
-        original: Arc<VideoFrame>,
+        original: RawVideoFrame,
         duration: Duration,
         resize_filter_mode: shiguredo_libyuv::FilterMode,
     ) -> Self {
@@ -49,11 +48,14 @@ impl ResizeCachedVideoFrame {
     }
 
     fn start_timestamp(&self) -> Duration {
-        self.original.timestamp
+        self.original.as_video_frame().timestamp
     }
 
     fn end_timestamp(&self) -> Duration {
-        self.original.timestamp.saturating_add(self.duration)
+        self.original
+            .as_video_frame()
+            .timestamp
+            .saturating_add(self.duration)
     }
 
     fn duration(&self) -> Duration {
@@ -65,18 +67,20 @@ impl ResizeCachedVideoFrame {
     }
 
     fn resize(&mut self, width: EvenUsize, height: EvenUsize) -> crate::Result<&VideoFrame> {
-        if self.original.width == width.get() && self.original.height == height.get() {
+        let original_size = self.original.size();
+        if original_size.width == width.get() && original_size.height == height.get() {
             // リサイズ不要
-            return Ok(&self.original);
+            return Ok(self.original.as_video_frame());
         }
 
         // [NOTE]
         // resized の要素数は、通常は 1 で多くても 2~3 である想定なので線形探索で十分
         if !self.resized.iter().any(|x| x.0 == (width, height)) {
             // キャッシュにないので新規リサイズが必要
-            if let Some(resized) = self
-                .original
-                .resize(width, height, self.resize_filter_mode)?
+            if let Some(resized) =
+                self.original
+                    .as_video_frame()
+                    .resize(width, height, self.resize_filter_mode)?
             {
                 self.resized.push(((width, height), resized));
             }
@@ -115,61 +119,62 @@ impl Canvas {
                 frame.format
             )));
         }
-        if frame.width > self.width.get() {
+        let frame_size = frame.require_size()?;
+        if frame_size.width > self.width.get() {
             return Err(crate::Error::new(format!(
                 "frame width {} exceeds canvas width {}",
-                frame.width,
+                frame_size.width,
                 self.width.get()
             )));
         }
-        if frame.height > self.height.get() {
+        if frame_size.height > self.height.get() {
             return Err(crate::Error::new(format!(
                 "frame height {} exceeds canvas height {}",
-                frame.height,
+                frame_size.height,
                 self.height.get()
             )));
         }
 
         // セルの解像度は偶数前提なので、奇数になることはない
         // (入力が奇数の場合でもリサイズによって常に偶数解像度になる）
-        if !frame.width.is_multiple_of(2) {
+        if !frame_size.width.is_multiple_of(2) {
             return Err(crate::Error::new(format!(
                 "frame width must be even, got {}",
-                frame.width
+                frame_size.width
             )));
         }
-        if !frame.height.is_multiple_of(2) {
+        if !frame_size.height.is_multiple_of(2) {
             return Err(crate::Error::new(format!(
                 "frame height must be even, got {}",
-                frame.height
+                frame_size.height
             )));
         }
 
         // Y成分の描画
         let offset_x = position.x.get();
         let offset_y = position.y.get();
-        let y_size = frame.width * frame.height;
+        let y_size = frame_size.width * frame_size.height;
         let y_data = &frame.data[..y_size];
-        for y in 0..frame.height {
-            let i = y * frame.width;
-            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame.width]);
+        for y in 0..frame_size.height {
+            let i = y * frame_size.width;
+            self.draw_y_line(offset_x, offset_y + y, &y_data[i..][..frame_size.width]);
         }
 
         // U成分の描画
         let offset_x = position.x.get() / 2;
         let offset_y = position.y.get() / 2;
-        let u_size = (frame.width / 2) * (frame.height / 2);
+        let u_size = (frame_size.width / 2) * (frame_size.height / 2);
         let u_data = &frame.data[y_size..][..u_size];
-        for y in 0..frame.height / 2 {
-            let i = y * (frame.width / 2);
-            self.draw_u_line(offset_x, offset_y + y, &u_data[i..][..frame.width / 2]);
+        for y in 0..frame_size.height / 2 {
+            let i = y * (frame_size.width / 2);
+            self.draw_u_line(offset_x, offset_y + y, &u_data[i..][..frame_size.width / 2]);
         }
 
         // V成分の描画
         let v_data = &frame.data[y_size + u_size..][..u_size];
-        for y in 0..frame.height / 2 {
-            let i = y * (frame.width / 2);
-            self.draw_v_line(offset_x, offset_y + y, &v_data[i..][..frame.width / 2]);
+        for y in 0..frame_size.height / 2 {
+            let i = y * (frame_size.width / 2);
+            self.draw_v_line(offset_x, offset_y + y, &v_data[i..][..frame_size.width / 2]);
         }
 
         Ok(())
@@ -513,8 +518,10 @@ impl VideoMixer {
 
             // 可変値
             timestamp,
-            width: self.spec.resolution.width().get(),
-            height: self.spec.resolution.height().get(),
+            size: Some(VideoFrameSize {
+                width: self.spec.resolution.width().get(),
+                height: self.spec.resolution.height().get(),
+            }),
             data: canvas.data,
         })
     }
@@ -553,7 +560,8 @@ impl VideoMixer {
 
         for (source, frame) in frames {
             let mut position = region.cell_position(source.cell_index);
-            let (frame_width, frame_height) = region.decide_frame_size(&frame.original);
+            let (frame_width, frame_height) =
+                region.decide_frame_size(frame.original.as_video_frame())?;
             position.x +=
                 EvenUsize::truncating_new((region.grid.cell_width - frame_width).get() / 2);
             position.y +=
@@ -617,12 +625,7 @@ impl VideoMixer {
         if let Some(sample) = sample {
             // キューに要素を追加する
             let frame = sample.expect_video()?;
-            if frame.format != VideoFormat::I420 {
-                return Err(crate::Error::new(format!(
-                    "expected I420 format, got {:?}",
-                    frame.format
-                )));
-            }
+            let frame = RawVideoFrame::from_i420_video_frame(frame)?;
 
             // 新規フレームの初期 duration は、比較対象がない場合のフォールバック値として
             // 出力フレーム間隔 (next_output_duration) を使う。
@@ -630,7 +633,10 @@ impl VideoMixer {
             // 最終フレームは EOS 時に stop_timestamp で補正されることがある。
             let mut duration = next_output_duration.expect("infallible");
             if let Some(prev) = input_stream.frame_queue.back_mut() {
-                let computed = frame.timestamp.saturating_sub(prev.start_timestamp());
+                let computed = frame
+                    .as_video_frame()
+                    .timestamp
+                    .saturating_sub(prev.start_timestamp());
                 if !computed.is_zero() {
                     prev.set_duration(computed);
                     duration = computed;

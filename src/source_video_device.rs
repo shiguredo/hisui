@@ -209,8 +209,7 @@ fn convert_captured_frame_to_i420(
                 data: Vec::new(),
                 format: crate::video::VideoFormat::I420,
                 keyframe: true,
-                width,
-                height,
+                size: Some(crate::video::VideoFrameSize { width, height }),
                 timestamp,
                 sample_entry: None,
             };
@@ -248,8 +247,7 @@ fn convert_captured_frame_to_i420(
                 data: Vec::new(),
                 format: crate::video::VideoFormat::I420,
                 keyframe: true,
-                width,
-                height,
+                size: Some(crate::video::VideoFrameSize { width, height }),
                 timestamp,
                 sample_entry: None,
             };
@@ -344,8 +342,9 @@ mod tests {
         let frame = convert_captured_frame_to_i420(&captured).expect("convert");
 
         assert_eq!(frame.format, crate::video::VideoFormat::I420);
-        assert_eq!(frame.width, width);
-        assert_eq!(frame.height, height);
+        let size = frame.size().expect("infallible");
+        assert_eq!(size.width, width);
+        assert_eq!(size.height, height);
         assert_eq!(frame.data, data);
         assert_eq!(frame.timestamp, Duration::from_secs(1));
     }

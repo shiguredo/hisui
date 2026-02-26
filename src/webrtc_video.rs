@@ -11,11 +11,11 @@ pub(crate) fn push_i420_frame(
         )));
     }
 
-    let width = frame.width;
-    let height = frame.height;
-    if width == 0 || height == 0 {
-        return Err(crate::Error::new("invalid frame size"));
-    }
+    let size = frame
+        .size()
+        .ok_or_else(|| crate::Error::new("video frame size is required"))?;
+    let width = size.width;
+    let height = size.height;
 
     let uv_width = width.div_ceil(2);
     let uv_height = height.div_ceil(2);
