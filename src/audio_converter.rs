@@ -111,6 +111,7 @@ impl AudioConverter {
                 &interleaved,
                 &self.state.prev_input_samples,
                 frame.sample_rate,
+                target_sample_rate,
                 self.state.original_samples,
                 self.state.resampled_samples,
             )
@@ -258,6 +259,26 @@ mod tests {
         let output = converter.convert(&input).expect("infallible");
 
         assert_eq!(output.sample_rate.get(), 48_000);
+        assert!(!output.data.is_empty());
+        assert_ne!(output.duration, input.duration);
+    }
+
+    #[test]
+    fn convert_sample_rate_44100_to_32000() {
+        let mut converter = AudioConverterBuilder::new()
+            .format(AudioFormat::I16Be)
+            .channels(Channels::STEREO)
+            .sample_rate(SampleRate::from_u32(32_000).expect("must be valid"))
+            .build();
+        let input = frame(
+            &[1, 2, 3, 4],
+            Channels::STEREO,
+            SampleRate::from_u32(44_100).expect("must be valid"),
+        );
+
+        let output = converter.convert(&input).expect("infallible");
+
+        assert_eq!(output.sample_rate.get(), 32_000);
         assert!(!output.data.is_empty());
         assert_ne!(output.duration, input.duration);
     }

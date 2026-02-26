@@ -178,17 +178,18 @@ pub fn sample_entry_audio_fields() -> AudioSampleEntryFields {
 }
 
 pub fn resample(
-    pcm_data: &[i16],              // 現在のフレームのオリジナルの音声データ（入力）
-    prev_pcm_data: &[i16],         // 前フレームの音声データ（フレーム境界での補間に使用）
-    input_sample_rate: SampleRate, // 入力サンプルレート。出力は SampleRate::HZ_48000 固定
-    original_samples: u64,         // これまでに処理された pcm_data.len() の累計
-    resampled_samples: u64,        // これまでに出力されたリサンプリング後のサンプル数の累計
+    pcm_data: &[i16],               // 現在のフレームのオリジナルの音声データ（入力）
+    prev_pcm_data: &[i16],          // 前フレームの音声データ（フレーム境界での補間に使用）
+    input_sample_rate: SampleRate,  // 入力サンプルレート
+    target_sample_rate: SampleRate, // 出力サンプルレート
+    original_samples: u64,          // これまでに処理された pcm_data.len() の累計
+    resampled_samples: u64,         // これまでに出力されたリサンプリング後のサンプル数の累計
 ) -> Option<Vec<i16>> {
-    if input_sample_rate == SampleRate::HZ_48000 {
+    if input_sample_rate == target_sample_rate {
         return None;
     }
 
-    let ratio = SampleRate::HZ_48000.get() as f64 / input_sample_rate.get() as f64;
+    let ratio = target_sample_rate.get() as f64 / input_sample_rate.get() as f64;
     let total_original_samples = (original_samples + pcm_data.len() as u64) as f64;
     let ideal_resampled_len = (total_original_samples * ratio).floor() as usize;
     let output_len = ideal_resampled_len.saturating_sub(resampled_samples as usize);
