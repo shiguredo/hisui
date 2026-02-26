@@ -15,6 +15,8 @@ const MAX_NOACKED_COUNT: u64 = 100;
 
 #[derive(Debug, Clone, Default)]
 pub struct Mp4FileReaderOptions {
+    // true の場合は実時間再生を行う。
+    // 出力 timestamp は実時刻ベースで単調増加するように補正する。
     pub realtime: bool,
     pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
@@ -30,6 +32,7 @@ pub struct Mp4FileReader {
     base_offset: Duration,
     last_emitted_end: Duration,
     start_instant: tokio::time::Instant,
+    last_realtime_timestamp: Option<Duration>,
     emitted_in_loop: bool,
 }
 
@@ -43,6 +46,7 @@ impl Mp4FileReader {
             base_offset: Duration::ZERO,
             last_emitted_end: Duration::ZERO,
             start_instant: tokio::time::Instant::now(),
+            last_realtime_timestamp: None,
             emitted_in_loop: false,
         })
     }
@@ -58,6 +62,7 @@ impl Mp4FileReader {
         handle.wait_subscribers_ready().await?;
 
         self.start_instant = tokio::time::Instant::now();
+        self.last_realtime_timestamp = None;
 
         let should_stop = self.run_loop(loop_enabled).await?;
         if should_stop {
@@ -166,13 +171,14 @@ impl Mp4FileReader {
             let target = self.start_instant + effective_timestamp;
             tokio::time::sleep_until(target).await;
         }
+        let output_timestamp = self.output_timestamp(effective_timestamp);
 
         let audio_data = AudioFrame {
             data,
             format: state.audio_format,
             channels: state.audio_channels,
             sample_rate: state.audio_sample_rate,
-            timestamp: effective_timestamp,
+            timestamp: output_timestamp,
             sample_entry: context.sample_entry,
         };
 
@@ -212,6 +218,7 @@ impl Mp4FileReader {
             let target = self.start_instant + effective_timestamp;
             tokio::time::sleep_until(target).await;
         }
+        let output_timestamp = self.output_timestamp(effective_timestamp);
 
         let video_frame = VideoFrame {
             data,
@@ -221,7 +228,7 @@ impl Mp4FileReader {
                 width: state.video_width,
                 height: state.video_height,
             }),
-            timestamp: effective_timestamp,
+            timestamp: output_timestamp,
             sample_entry: context.sample_entry,
         };
 
@@ -237,6 +244,22 @@ impl Mp4FileReader {
         }
 
         Ok(false)
+    }
+
+    fn output_timestamp(&mut self, effective_timestamp: Duration) -> Duration {
+        if !self.options.realtime {
+            return effective_timestamp;
+        }
+
+        let mut timestamp = self.start_instant.elapsed().max(effective_timestamp);
+        if let Some(last) = self.last_realtime_timestamp {
+            let min_next = last.saturating_add(Duration::from_micros(1));
+            if timestamp < min_next {
+                timestamp = min_next;
+            }
+        }
+        self.last_realtime_timestamp = Some(timestamp);
+        timestamp
     }
 
     async fn send_eos(

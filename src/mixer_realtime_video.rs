@@ -313,6 +313,8 @@ impl InputTrackState {
             .get_or_insert(video_frame.timestamp);
         let first_input_elapsed = *self.first_input_elapsed.get_or_insert(received_at);
 
+        // TODO: 入力 source 側で実時刻補正を担保する方針に統一できたら、
+        //       mixer 側の補正ロジックは削除する。
         let adjusted_timestamp = video_frame
             .timestamp
             .saturating_sub(first_sample_timestamp)

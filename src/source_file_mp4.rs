@@ -10,6 +10,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Mp4FileSource {
     pub path: PathBuf,
+    // true の場合は実時間再生を行う。
+    // 具体的には、フレーム送出時刻を実時間に合わせて待機しつつ、
+    // 出力 timestamp は実時刻ベースに補正した単調増加値として扱う。
     pub realtime: bool,
     pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
