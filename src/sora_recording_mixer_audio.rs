@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::{AudioFormat, AudioFrame, CHANNELS, Channels, SampleRate},
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     media::MediaFrame,
     sora_recording_layout::TrimSpans,
 };
@@ -213,7 +213,7 @@ impl AudioMixer {
     fn mix_next_audio_data(&mut self, now: Duration) -> crate::Result<AudioFrame> {
         let timestamp = self.next_output_timestamp();
 
-        let bytes_per_sample = CHANNELS as usize * 2; // i16 で表現するので *2
+        let bytes_per_sample = usize::from(Channels::STEREO.get()) * 2; // i16 で表現するので *2
         let mut mixed_samples = Vec::with_capacity(MIXED_AUDIO_DATA_SAMPLES * bytes_per_sample);
 
         let mut filled = true; // 無音補完されたかどうか

@@ -7,9 +7,6 @@ use shiguredo_mp4::{
 
 use crate::types::CodecName;
 
-// 既定値として使うチャンネル数（ステレオ）
-pub const CHANNELS: u16 = 2;
-
 // エンコードパラメーターのデフォルト値
 pub const DEFAULT_BITRATE: usize = 65536;
 
@@ -169,7 +166,7 @@ impl std::fmt::Display for AudioFormat {
 pub fn sample_entry_audio_fields() -> AudioSampleEntryFields {
     AudioSampleEntryFields {
         data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
-        channelcount: CHANNELS,
+        channelcount: u16::from(Channels::STEREO.get()),
         samplesize: 16,
         samplerate: FixedPointNumber::new(
             SampleRate::HZ_48000
