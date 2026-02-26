@@ -406,22 +406,9 @@ fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(SampleRate, Ch
         _ => return Err(Error::new("Invalid AAC sample rate index")),
     };
 
-    let num_channels = match channels {
-        0 => return Err(Error::new("AAC channel configuration 0 is invalid")),
-        1 => 1,
-        2 => 2,
-        3 => 3,
-        4 => 4,
-        5 => 5,
-        6 => 6,
-        7 => 8,
-        _ => return Err(Error::new("Invalid AAC channel configuration")),
-    };
+    let channels = Channels::from_u8(channels)?;
 
-    Ok((
-        SampleRate::from_u32(sample_rate)?,
-        Channels::from_u8(num_channels as u8)?,
-    ))
+    Ok((SampleRate::from_u32(sample_rate)?, channels))
 }
 
 /// AAC SampleEntry を生成
