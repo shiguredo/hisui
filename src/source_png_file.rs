@@ -132,7 +132,13 @@ fn decode_png_to_i420a(path: &Path) -> Result<DecodedPngI420A> {
         ))
     })?;
 
-    let mut output_buf = vec![0; reader.output_buffer_size()];
+    let output_buffer_size = reader.output_buffer_size().ok_or_else(|| {
+        Error::new(format!(
+            "failed to determine PNG output buffer size from {}",
+            path.display()
+        ))
+    })?;
+    let mut output_buf = vec![0; output_buffer_size];
     let info = reader.next_frame(&mut output_buf).map_err(|e| {
         Error::new(format!(
             "failed to decode PNG image from {}: {e}",

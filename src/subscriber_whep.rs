@@ -191,14 +191,14 @@ impl WhepSession {
                     return;
                 }
 
-                let video_track = track.cast_to_video_track();
+                let mut video_track = track.cast_to_video_track();
                 if let Ok(mut state) = video_track_state_for_track.lock() {
                     if let Some(current) = state.current_track.as_ref()
                         && current.as_ptr() == video_track.as_ptr()
                     {
                         return;
                     }
-                    if let Some(track) = state.current_track.take() {
+                    if let Some(mut track) = state.current_track.take() {
                         track.remove_sink(&state.sink);
                     }
                     let wants = VideoSinkWants::new();
@@ -220,7 +220,7 @@ impl WhepSession {
                     && let Some(current) = state.current_track.as_ref()
                     && current.as_ptr() == removed_track.as_ptr()
                 {
-                    if let Some(track) = state.current_track.take() {
+                    if let Some(mut track) = state.current_track.take() {
                         track.remove_sink(&state.sink);
                     }
                     let _ = event_tx_for_remove.send(WhepEvent::VideoTrackRemoved);
@@ -230,13 +230,13 @@ impl WhepSession {
 
         let mut deps = PeerConnectionDependencies::new(&observer);
         let mut pc_config = PeerConnectionRtcConfiguration::new();
-        let pc = PeerConnection::create(factory.as_ref(), &mut pc_config, &mut deps)
+        let mut pc = PeerConnection::create(factory.as_ref(), &mut pc_config, &mut deps)
             .map_err(|e| Error::new(format!("failed to create PeerConnection: {e}")))?;
 
         add_recv_transceiver(&pc, MediaType::Audio)?;
         add_recv_transceiver(&pc, MediaType::Video)?;
 
-        let resource_url = exchange_offer_answer(&pc, input_url, bearer_token).await?;
+        let resource_url = exchange_offer_answer(&mut pc, input_url, bearer_token).await?;
 
         Ok(Self {
             _factory_bundle: factory_bundle,
@@ -315,7 +315,7 @@ fn add_recv_transceiver(pc: &PeerConnection, media_type: MediaType) -> crate::Re
 }
 
 async fn exchange_offer_answer(
-    pc: &PeerConnection,
+    pc: &mut PeerConnection,
     input_url: &str,
     bearer_token: Option<&str>,
 ) -> crate::Result<Option<String>> {
@@ -363,7 +363,7 @@ async fn exchange_offer_answer(
 }
 
 fn apply_ice_servers_from_link_header(
-    pc: &PeerConnection,
+    pc: &mut PeerConnection,
     response: &Response,
 ) -> crate::Result<()> {
     let Some(link_header) = response.get_header("Link") else {
