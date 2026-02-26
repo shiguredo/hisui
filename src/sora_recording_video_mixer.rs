@@ -701,12 +701,16 @@ impl VideoMixer {
                 }
 
                 // 一定期間、入力の更新がない場合には、合成ではなく一つ前のフレームの尺を調整することで対応する
-                let duration = self.next_output_duration();
                 if self.last_mixed_frame.is_none() {
+                    // 先頭フレームがまだない場合には、まず一度だけ通常合成を行って基準フレームを作る。
+                    // (このとき output 系の統計値も mix() 内で更新される)
+                    self.last_mixed_frame = Some(self.mix(now)?);
                     continue;
                 }
+                let duration = self.next_output_duration();
                 self.stats.add_extended_video_frame_count();
                 // 出力フレーム数は増えないが、出力尺は伸びる。
+                // VideoFrame には duration フィールドがないため、尺の延長は統計値と次フレーム timestamp 差分で表現する。
                 self.stats.add_output_video_frame_duration(duration);
 
                 continue;
