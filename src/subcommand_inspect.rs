@@ -584,6 +584,9 @@ impl nojson::DisplayJson for OutputPrinter {
             f.member("format", self.format)?;
             if let Some(c) = self.audio_codec {
                 f.member("audio_codec", c)?;
+                // 末尾サンプルの duration は次サンプルとの差分で算出できないため None のままにする。
+                // そのため合計 duration は filter_map で None を除外して集計する
+                // （最後のサンプル分は含まれない）。
                 f.member(
                     "audio_duration_us",
                     self.audio_samples
@@ -597,6 +600,9 @@ impl nojson::DisplayJson for OutputPrinter {
             }
             if let Some(c) = self.video_codec {
                 f.member("video_codec", c)?;
+                // 末尾サンプルの duration は次サンプルとの差分で算出できないため None のままにする。
+                // そのため合計 duration は filter_map で None を除外して集計する
+                // （最後のサンプル分は含まれない）。
                 f.member(
                     "video_duration_us",
                     self.video_samples
