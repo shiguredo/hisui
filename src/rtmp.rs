@@ -217,16 +217,16 @@ impl RtmpIncomingFrameHandler {
 
             self.audio_codec_info = Some(AudioCodecInfo {
                 format: crate::audio::AudioFormat::Aac,
-                sample_rate: SampleRate::from_u32(sample_rate)?,
-                channels: Channels::from_u8(channels)?,
+                sample_rate,
+                channels,
             });
 
             self.audio_sample_entry = Some(sample_entry);
 
             tracing::debug!(
                 "Received AAC sequence header: {}Hz, {} channels",
-                sample_rate,
-                channels
+                sample_rate.get(),
+                channels.get()
             );
             return Ok(None);
         }
@@ -374,7 +374,7 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> crate::Result<Vec<u8
 }
 
 /// AAC Audio Specific Config をパースしてサンプルレートとチャンネル数を取得
-fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(u32, u8)> {
+fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(SampleRate, Channels)> {
     if data.len() < 2 {
         return Err(Error::new("AAC audio specific config is too short"));
     }
@@ -418,14 +418,17 @@ fn parse_aac_audio_specific_config(data: &[u8]) -> crate::Result<(u32, u8)> {
         _ => return Err(Error::new("Invalid AAC channel configuration")),
     };
 
-    Ok((sample_rate, num_channels as u8))
+    Ok((
+        SampleRate::from_u32(sample_rate)?,
+        Channels::from_u8(num_channels as u8)?,
+    ))
 }
 
 /// AAC SampleEntry を生成
 fn create_audio_sample_entry(
     audio_specific_config: &[u8],
-    sample_rate: u32,
-    channels: u8,
+    sample_rate: SampleRate,
+    channels: Channels,
 ) -> crate::Result<SampleEntry> {
     use shiguredo_mp4::{
         FixedPointNumber, Uint,
@@ -433,13 +436,12 @@ fn create_audio_sample_entry(
         descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
     };
 
-    let sample_rate_u16 = u16::try_from(sample_rate)
-        .map_err(|_| Error::new(format!("unsupported AAC sample rate: {sample_rate}")))?;
+    let sample_rate_u16 = sample_rate.as_u16()?;
 
     Ok(SampleEntry::Mp4a(Mp4aBox {
         audio: AudioSampleEntryFields {
             data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
-            channelcount: channels as u16,
+            channelcount: u16::from(channels.get()),
             samplesize: 16,
             samplerate: FixedPointNumber::new(sample_rate_u16, 0),
         },
