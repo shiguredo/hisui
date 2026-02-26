@@ -204,6 +204,7 @@ pub struct VideoMixerSpec {
     pub trim_spans: TrimSpans,
     pub resize_filter_mode: shiguredo_libyuv::FilterMode,
     pub input_track_source_ids: HashMap<TrackId, SourceId>,
+    pub source_stop_timestamps: HashMap<SourceId, Duration>,
 }
 
 impl VideoMixerSpec {
@@ -215,6 +216,11 @@ impl VideoMixerSpec {
             trim_spans: layout.trim_spans.clone(),
             resize_filter_mode: shiguredo_libyuv::FilterMode::Box,
             input_track_source_ids: HashMap::new(),
+            source_stop_timestamps: layout
+                .sources
+                .iter()
+                .map(|(source_id, source)| (source_id.clone(), source.stop_timestamp))
+                .collect(),
         }
     }
 
@@ -372,7 +378,8 @@ impl VideoMixer {
                     .get(&id)
                     .cloned()
                     .unwrap_or_else(|| SourceId::new(id.get()));
-                (id, InputStream::new(source_id))
+                let stop_timestamp = spec.source_stop_timestamps.get(&source_id).copied();
+                (id, InputStream::new(source_id, stop_timestamp))
             })
             .collect();
         stats
@@ -641,6 +648,15 @@ impl VideoMixer {
                     track_id
                 ))
             })?;
+            if let (Some(frame), Some(stop_timestamp)) = (
+                input_stream.frame_queue.back_mut(),
+                input_stream.stop_timestamp,
+            ) {
+                let duration = stop_timestamp.saturating_sub(frame.start_timestamp());
+                if !duration.is_zero() {
+                    frame.set_duration(duration);
+                }
+            }
             input_stream.eos = true;
         }
         Ok(())
@@ -739,14 +755,16 @@ struct InputTrack {
 #[derive(Debug)]
 struct InputStream {
     source_id: SourceId,
+    stop_timestamp: Option<Duration>,
     eos: bool,
     frame_queue: VecDeque<ResizeCachedVideoFrame>,
 }
 
 impl InputStream {
-    fn new(source_id: SourceId) -> Self {
+    fn new(source_id: SourceId, stop_timestamp: Option<Duration>) -> Self {
         Self {
             source_id,
+            stop_timestamp,
             eos: false,
             frame_queue: VecDeque::new(),
         }
