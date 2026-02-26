@@ -110,6 +110,7 @@ impl AudioConverter {
             let resampled = resample(
                 &interleaved,
                 &self.state.prev_input_samples,
+                channels,
                 frame.sample_rate,
                 target_sample_rate,
                 self.state.original_samples,
@@ -117,8 +118,9 @@ impl AudioConverter {
             )
             .ok_or_else(|| crate::Error::new("audio resample unexpectedly returned none"))?;
 
-            self.state.original_samples += interleaved.len() as u64;
-            self.state.resampled_samples += resampled.len() as u64;
+            let channel_count = usize::from(channels.get());
+            self.state.original_samples += (interleaved.len() / channel_count) as u64;
+            self.state.resampled_samples += (resampled.len() / channel_count) as u64;
             self.state.prev_input_samples = interleaved;
             interleaved = resampled;
         } else if self.state.key.is_some() {
@@ -155,48 +157,63 @@ impl AudioConverter {
 fn resample(
     pcm_data: &[i16],               // 現在のフレームのオリジナルの音声データ（入力）
     prev_pcm_data: &[i16],          // 前フレームの音声データ（フレーム境界での補間に使用）
+    channels: Channels,             // チャンネル数（モノラル / ステレオ）
     input_sample_rate: SampleRate,  // 入力サンプルレート
     target_sample_rate: SampleRate, // 出力サンプルレート
-    original_samples: u64,          // これまでに処理された pcm_data.len() の累計
-    resampled_samples: u64,         // これまでに出力されたリサンプリング後のサンプル数の累計
+    original_samples: u64,          // これまでに処理された「チャンネル毎サンプル数」の累計
+    resampled_samples: u64,         // これまでに出力された「チャンネル毎サンプル数」の累計
 ) -> Option<Vec<i16>> {
     if input_sample_rate == target_sample_rate {
         return None;
     }
 
+    let channel_count = usize::from(channels.get());
+    if !pcm_data.len().is_multiple_of(channel_count) {
+        return None;
+    }
+    if !prev_pcm_data.is_empty() && !prev_pcm_data.len().is_multiple_of(channel_count) {
+        return None;
+    }
+
     let ratio = target_sample_rate.get() as f64 / input_sample_rate.get() as f64;
-    let total_original_samples = (original_samples + pcm_data.len() as u64) as f64;
-    let ideal_resampled_len = (total_original_samples * ratio).floor() as usize;
-    let output_len = ideal_resampled_len.saturating_sub(resampled_samples as usize);
+    let current_samples_per_channel = pcm_data.len() / channel_count;
+    let total_original_samples = (original_samples + current_samples_per_channel as u64) as f64;
+    let ideal_resampled_per_channel = (total_original_samples * ratio).floor() as usize;
+    let output_samples_per_channel =
+        ideal_resampled_per_channel.saturating_sub(resampled_samples as usize);
+    let output_len = output_samples_per_channel * channel_count;
 
     let mut output = Vec::with_capacity(output_len);
 
-    for out_idx in 0..output_len {
+    for out_idx in 0..output_samples_per_channel {
         let target_sample = resampled_samples as f64 + out_idx as f64;
         let in_pos_global = target_sample / ratio;
         let in_pos = in_pos_global - original_samples as f64;
         let in_idx = in_pos.floor() as usize;
 
-        if in_idx >= pcm_data.len() {
+        if in_idx >= current_samples_per_channel {
             // 通常はここに到達しないはずだが、念のためにスキップしておく
             continue;
         }
 
         let frac = in_pos.fract();
-        let sample0 = pcm_data[in_idx] as f64;
+        for ch in 0..channel_count {
+            let current_idx = in_idx * channel_count + ch;
+            let sample0 = pcm_data[current_idx] as f64;
 
-        // 補間サンプルを取得
-        let sample1 = if in_idx + 1 < pcm_data.len() {
-            pcm_data[in_idx + 1] as f64
-        } else if !prev_pcm_data.is_empty() {
-            // チャンク境界: 次サンプルが現在のチャンクにない場合、前チャンクの最後を使用
-            *prev_pcm_data.last().unwrap() as f64
-        } else {
-            sample0
-        };
+            // 補間サンプルを取得（チャンネル境界を跨がない）
+            let sample1 = if in_idx + 1 < current_samples_per_channel {
+                pcm_data[(in_idx + 1) * channel_count + ch] as f64
+            } else if prev_pcm_data.len() >= channel_count {
+                // チャンク境界: 次サンプルが現在のチャンクにない場合、前チャンクの同一チャンネル末尾を使用
+                prev_pcm_data[prev_pcm_data.len() - channel_count + ch] as f64
+            } else {
+                sample0
+            };
 
-        let interpolated = sample0 * (1.0 - frac) + sample1 * frac;
-        output.push(interpolated.round() as i16);
+            let interpolated = sample0 * (1.0 - frac) + sample1 * frac;
+            output.push(interpolated.round() as i16);
+        }
     }
 
     Some(output)
@@ -242,6 +259,12 @@ mod tests {
 
     fn i16be(samples: &[i16]) -> Vec<u8> {
         samples.iter().flat_map(|v| v.to_be_bytes()).collect()
+    }
+
+    fn from_i16be(data: &[u8]) -> Vec<i16> {
+        data.chunks_exact(2)
+            .map(|chunk| i16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect()
     }
 
     fn frame(samples: &[i16], channels: Channels, sample_rate: SampleRate) -> AudioFrame {
@@ -338,8 +361,41 @@ mod tests {
     }
 
     #[test]
+    fn convert_stereo_resample_keeps_channel_separation() {
+        let mut converter = AudioConverterBuilder::new()
+            .format(AudioFormat::I16Be)
+            .channels(Channels::STEREO)
+            .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
+            .build();
+
+        let mut samples = Vec::new();
+        for _ in 0..16 {
+            samples.push(0);
+            samples.push(1000);
+        }
+        let input = frame(
+            &samples,
+            Channels::STEREO,
+            SampleRate::from_u32(44_100).expect("must be valid"),
+        );
+
+        let output = converter.convert(&input).expect("infallible");
+        let interleaved = from_i16be(&output.data);
+
+        for pair in interleaved.chunks_exact(2) {
+            assert_eq!(pair[0], 0);
+            assert_eq!(pair[1], 1000);
+        }
+    }
+
+    #[test]
     fn reset_clears_resample_state() {
         let mut converter = AudioConverterBuilder::new()
+            .format(AudioFormat::I16Be)
+            .channels(Channels::STEREO)
+            .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
+            .build();
+        let mut fresh_converter = AudioConverterBuilder::new()
             .format(AudioFormat::I16Be)
             .channels(Channels::STEREO)
             .sample_rate(SampleRate::from_u32(48_000).expect("must be valid"))
@@ -351,12 +407,13 @@ mod tests {
         );
 
         let first = converter.convert(&input).expect("infallible");
-        let second = converter.convert(&input).expect("infallible");
+        let _second = converter.convert(&input).expect("infallible");
         converter.reset();
         let third = converter.convert(&input).expect("infallible");
+        let fresh = fresh_converter.convert(&input).expect("infallible");
 
-        assert_ne!(first.data, second.data);
         assert_eq!(first.data, third.data);
+        assert_eq!(third.data, fresh.data);
     }
 
     #[test]
