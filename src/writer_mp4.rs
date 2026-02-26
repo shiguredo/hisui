@@ -25,6 +25,7 @@ const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
 // 映像・音声混在時のチャンクの尺の最大値（映像か音声の片方だけの場合はチャンクは一つだけ）
 const MAX_CHUNK_DURATION: Duration = Duration::from_secs(10);
+// 末尾サンプルなどで前後関係から duration を再計算できない場合に使う既定値
 const DEFAULT_SAMPLE_DURATION: Duration = Duration::from_millis(20);
 
 // 入力がリアルタイムではなくファイルで、

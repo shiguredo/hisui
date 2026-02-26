@@ -19,7 +19,6 @@ const AUDIO_ENCODED_TRACK_ID: &str = "audio_encoded";
 const VIDEO_ENCODED_TRACK_ID: &str = "video_encoded";
 const AUDIO_DECODED_TRACK_ID: &str = "audio_decoded";
 const VIDEO_DECODED_TRACK_ID: &str = "video_decoded";
-const DEFAULT_SAMPLE_DURATION: Duration = Duration::from_millis(20);
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
@@ -374,11 +373,11 @@ impl OutputPrinter {
         }
     }
 
-    fn estimate_duration(prev_timestamp: Duration, next_timestamp: Duration) -> Duration {
+    fn estimate_duration(prev_timestamp: Duration, next_timestamp: Duration) -> Option<Duration> {
         if next_timestamp > prev_timestamp {
-            next_timestamp.saturating_sub(prev_timestamp)
+            Some(next_timestamp.saturating_sub(prev_timestamp))
         } else {
-            DEFAULT_SAMPLE_DURATION
+            None
         }
     }
 
@@ -438,7 +437,7 @@ impl OutputPrinter {
                 }
                 if let Some(prev) = self.audio_samples.last_mut() {
                     let duration = Self::estimate_duration(prev.timestamp, audio_data.timestamp);
-                    prev.duration = Some(duration);
+                    prev.duration = duration;
                 }
                 self.audio_samples.push(AudioSampleInfo {
                     timestamp: audio_data.timestamp,
@@ -472,7 +471,7 @@ impl OutputPrinter {
                 }
                 if let Some(prev) = self.video_samples.last_mut() {
                     let duration = Self::estimate_duration(prev.timestamp, video_frame.timestamp);
-                    prev.duration = Some(duration);
+                    prev.duration = duration;
                 }
                 self.video_samples.push(VideoSampleInfo {
                     timestamp: video_frame.timestamp,
