@@ -91,6 +91,8 @@
   - @sile
 - [ADD] 依存ライブラリに shiguredo_http11 を追加する
   - @voluntas
+- [ADD] 依存ライブラリに shiguredo_rtsp を追加する
+  - @sile
 - [ADD] 依存ライブラリに shiguredo_webrtc 0.145.2 を追加する
   - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
