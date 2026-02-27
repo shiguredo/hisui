@@ -123,7 +123,7 @@ impl WebRtcP2pSessionManager {
                             *guard = None;
                         }
                     }
-                    PcEvent::DataChannel(dc) => {
+                    PcEvent::DataChannel(mut dc) => {
                         let label = dc.label().unwrap_or_default();
                         tracing::info!("DataChannel received: label={label}");
                         if label == "signaling" {
@@ -238,14 +238,14 @@ fn bootstrap_internal(
     let mut dc_init = DataChannelInit::new();
     dc_init.set_ordered(true);
     dc_init.set_protocol("signaling");
-    let signaling_dc = pc
+    let mut signaling_dc = pc
         .create_data_channel("signaling", &mut dc_init)
         .map_err(|e| crate::Error::new(format!("Failed to create signaling DataChannel: {e}")))?;
 
     let mut rpc_dc_init = DataChannelInit::new();
     rpc_dc_init.set_ordered(true);
     rpc_dc_init.set_protocol("rpc");
-    let rpc_dc = pc
+    let mut rpc_dc = pc
         .create_data_channel("rpc", &mut rpc_dc_init)
         .map_err(|e| crate::Error::new(format!("Failed to create rpc DataChannel: {e}")))?;
 

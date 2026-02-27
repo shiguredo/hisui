@@ -288,7 +288,7 @@ impl WhipSession {
             .build();
         let mut deps = PeerConnectionDependencies::new(&observer);
         let mut pc_config = PeerConnectionRtcConfiguration::new();
-        let pc = PeerConnection::create(factory.as_ref(), &mut pc_config, &mut deps)
+        let mut pc = PeerConnection::create(factory.as_ref(), &mut pc_config, &mut deps)
             .map_err(|e| Error::new(format!("failed to create PeerConnection: {e}")))?;
 
         add_audio_transceiver(&pc, factory.as_ref())?;
@@ -307,7 +307,7 @@ impl WhipSession {
             let stream_id = CxxString::from_str(&shiguredo_webrtc::random_string(16));
             stream_ids.push(&stream_id);
 
-            let transceiver = pc
+            let mut transceiver = pc
                 .add_transceiver_with_track(&video_track, &mut init)
                 .map_err(|e| Error::new(format!("failed to add video transceiver: {e}")))?;
             let codecs = select_video_codecs(factory.as_ref(), video_codec_preferences)?;
@@ -318,7 +318,7 @@ impl WhipSession {
         } else {
             let mut init = RtpTransceiverInit::new();
             init.set_direction(RtpTransceiverDirection::SendOnly);
-            let transceiver = pc
+            let mut transceiver = pc
                 .add_transceiver(MediaType::Video, &mut init)
                 .map_err(|e| Error::new(format!("failed to add video transceiver: {e}")))?;
             let codecs = select_video_codecs(factory.as_ref(), video_codec_preferences)?;
@@ -328,7 +328,7 @@ impl WhipSession {
             (None, None)
         };
 
-        let resource_url = exchange_offer_answer(&pc, output_url, bearer_token).await?;
+        let resource_url = exchange_offer_answer(&mut pc, output_url, bearer_token).await?;
 
         Ok(Self {
             _factory_bundle: factory_bundle,
@@ -425,7 +425,7 @@ fn add_audio_transceiver(
 ) -> crate::Result<()> {
     let mut init = RtpTransceiverInit::new();
     init.set_direction(RtpTransceiverDirection::SendOnly);
-    let transceiver = pc
+    let mut transceiver = pc
         .add_transceiver(MediaType::Audio, &mut init)
         .map_err(|e| Error::new(format!("failed to add audio transceiver: {e}")))?;
 
@@ -511,7 +511,7 @@ fn select_video_codecs(
 }
 
 async fn exchange_offer_answer(
-    pc: &PeerConnection,
+    pc: &mut PeerConnection,
     output_url: &str,
     bearer_token: Option<&str>,
 ) -> crate::Result<Option<String>> {
@@ -558,7 +558,7 @@ async fn exchange_offer_answer(
 }
 
 fn apply_ice_servers_from_link_header(
-    pc: &PeerConnection,
+    pc: &mut PeerConnection,
     response: &Response,
 ) -> crate::Result<()> {
     let Some(link_header) = response.get_header("Link") else {
