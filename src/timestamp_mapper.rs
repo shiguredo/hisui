@@ -90,6 +90,9 @@ impl TimestampMapper {
 }
 
 fn ticks_to_duration(ticks: u64, tick_hz: NonZeroU64) -> Duration {
+    // `ticks * 1_000_000` が `u64` を超える場合は `saturating_mul` で上限に張り付く。
+    // その場合、真値より小さい値へ丸め込まれるが、想定運用では到達しにくい。
+    // 参考: SRT (33 bit / 90 kHz) はおよそ 6.5 年、RTMP (32 bit / 1 kHz) はおよそ 584 年。
     Duration::from_micros(ticks.saturating_mul(1_000_000) / tick_hz.get())
 }
 
