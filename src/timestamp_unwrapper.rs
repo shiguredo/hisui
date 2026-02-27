@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+/// 周回する生 timestamp を単調増加する整数列へ正規化する。
 #[derive(Debug, Clone)]
-pub struct TimestampUnwrapper {
+pub struct WrappingTimestampNormalizer {
     mask: u64,
     modulus: u64,
     half_modulus: u64,
@@ -10,7 +11,7 @@ pub struct TimestampUnwrapper {
     last_unwrapped: u64,
 }
 
-impl TimestampUnwrapper {
+impl WrappingTimestampNormalizer {
     pub fn new(bits: u8) -> Self {
         assert!(
             (1..64).contains(&bits),
@@ -27,7 +28,8 @@ impl TimestampUnwrapper {
         }
     }
 
-    pub fn unwrap(&mut self, raw: u64) -> u64 {
+    /// 周回と小さな逆行を吸収し、単調増加値へ正規化する。
+    pub fn normalize(&mut self, raw: u64) -> u64 {
         let raw = raw & self.mask;
 
         if let Some(last_raw) = self.last_raw
@@ -50,9 +52,18 @@ impl TimestampUnwrapper {
     }
 }
 
+/// 生 timestamp を `Duration` へ変換する補助構造体。
+///
+/// 内部で次を行う。
+/// - bit 幅に応じた周回補正
+/// - 初回値を基準とした相対化
+/// - `tick_hz` を使った `Duration` 変換
+/// - `offset` の加算
+///
+/// 入力が小さく逆行するケースでも、進行が戻らないように補正する。
 #[derive(Debug, Clone)]
 pub struct TimestampMapper {
-    unwrapper: TimestampUnwrapper,
+    normalizer: WrappingTimestampNormalizer,
     tick_hz: u64,
     offset: Duration,
     base: Option<u64>,
@@ -62,7 +73,7 @@ impl TimestampMapper {
     pub fn new(bits: u8, tick_hz: u64, offset: Duration) -> Self {
         assert!(tick_hz > 0, "tick_hz must be greater than 0");
         Self {
-            unwrapper: TimestampUnwrapper::new(bits),
+            normalizer: WrappingTimestampNormalizer::new(bits),
             tick_hz,
             offset,
             base: None,
@@ -70,7 +81,7 @@ impl TimestampMapper {
     }
 
     pub fn map(&mut self, raw: u64) -> Duration {
-        let unwrapped = self.unwrapper.unwrap(raw);
+        let unwrapped = self.normalizer.normalize(raw);
         let base = *self.base.get_or_insert(unwrapped);
         let relative = unwrapped.saturating_sub(base);
         ticks_to_duration(relative, self.tick_hz).saturating_add(self.offset)
@@ -83,47 +94,50 @@ fn ticks_to_duration(ticks: u64, tick_hz: u64) -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{TimestampMapper, TimestampUnwrapper};
+    use super::{TimestampMapper, WrappingTimestampNormalizer};
     use std::time::Duration;
 
     #[test]
-    fn unwrap_keeps_monotonic_without_wrap() {
-        let mut unwrapper = TimestampUnwrapper::new(32);
-        assert_eq!(unwrapper.unwrap(100), 100);
-        assert_eq!(unwrapper.unwrap(120), 120);
-        assert_eq!(unwrapper.unwrap(121), 121);
+    fn normalizer_keeps_sequence_without_wrap() {
+        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        assert_eq!(normalizer.normalize(100), 100);
+        assert_eq!(normalizer.normalize(120), 120);
+        assert_eq!(normalizer.normalize(121), 121);
     }
 
     #[test]
-    fn unwrap_handles_32bit_wrap() {
-        let mut unwrapper = TimestampUnwrapper::new(32);
-        assert_eq!(unwrapper.unwrap(u32::MAX as u64 - 5), u32::MAX as u64 - 5);
-        assert_eq!(unwrapper.unwrap(10), (1u64 << 32) + 10);
+    fn normalizer_handles_32bit_wrap() {
+        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        assert_eq!(
+            normalizer.normalize(u32::MAX as u64 - 5),
+            u32::MAX as u64 - 5
+        );
+        assert_eq!(normalizer.normalize(10), (1u64 << 32) + 10);
     }
 
     #[test]
-    fn unwrap_handles_33bit_wrap() {
-        let mut unwrapper = TimestampUnwrapper::new(33);
-        assert_eq!(unwrapper.unwrap((1u64 << 33) - 2), (1u64 << 33) - 2);
-        assert_eq!(unwrapper.unwrap(3), (1u64 << 33) + 3);
+    fn normalizer_handles_33bit_wrap() {
+        let mut normalizer = WrappingTimestampNormalizer::new(33);
+        assert_eq!(normalizer.normalize((1u64 << 33) - 2), (1u64 << 33) - 2);
+        assert_eq!(normalizer.normalize(3), (1u64 << 33) + 3);
     }
 
     #[test]
-    fn unwrap_clamps_out_of_order_input() {
-        let mut unwrapper = TimestampUnwrapper::new(32);
-        assert_eq!(unwrapper.unwrap(100), 100);
-        assert_eq!(unwrapper.unwrap(90), 100);
+    fn normalizer_clamps_out_of_order_input() {
+        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        assert_eq!(normalizer.normalize(100), 100);
+        assert_eq!(normalizer.normalize(90), 100);
     }
 
     #[test]
-    fn mapper_uses_first_value_as_base_and_applies_offset() {
+    fn mapper_applies_base_and_offset() {
         let mut mapper = TimestampMapper::new(32, 1_000, Duration::from_secs(5));
         assert_eq!(mapper.map(100), Duration::from_secs(5));
         assert_eq!(mapper.map(130), Duration::from_millis(5030));
     }
 
     #[test]
-    fn mapper_keeps_monotonic_across_wrap() {
+    fn mapper_keeps_progress_across_wrap() {
         let mut mapper = TimestampMapper::new(32, 1_000, Duration::ZERO);
         let _ = mapper.map(u32::MAX as u64 - 2);
         let mapped = mapper.map(1);
