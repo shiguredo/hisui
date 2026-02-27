@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn normalizer_keeps_sequence_without_wrap() {
-        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        let mut normalizer = WrappingTimestampNormalizer::new(32).expect("infallible");
         assert_eq!(normalizer.normalize(100), 100);
         assert_eq!(normalizer.normalize(120), 120);
         assert_eq!(normalizer.normalize(121), 121);
@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn normalizer_handles_32bit_wrap() {
-        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        let mut normalizer = WrappingTimestampNormalizer::new(32).expect("infallible");
         assert_eq!(
             normalizer.normalize(u32::MAX as u64 - 5),
             u32::MAX as u64 - 5
@@ -118,14 +118,14 @@ mod tests {
 
     #[test]
     fn normalizer_handles_33bit_wrap() {
-        let mut normalizer = WrappingTimestampNormalizer::new(33);
+        let mut normalizer = WrappingTimestampNormalizer::new(33).expect("infallible");
         assert_eq!(normalizer.normalize((1u64 << 33) - 2), (1u64 << 33) - 2);
         assert_eq!(normalizer.normalize(3), (1u64 << 33) + 3);
     }
 
     #[test]
     fn normalizer_keeps_small_backward_input() {
-        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        let mut normalizer = WrappingTimestampNormalizer::new(32).expect("infallible");
         assert_eq!(normalizer.normalize(100), 100);
         assert_eq!(normalizer.normalize(90), 90);
         assert_eq!(normalizer.normalize(110), 110);
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn normalizer_detects_wrap_after_small_backward_step() {
-        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        let mut normalizer = WrappingTimestampNormalizer::new(32).expect("infallible");
         let half = 1u64 << 31;
         assert_eq!(normalizer.normalize(half + 1), half + 1);
         assert_eq!(normalizer.normalize(half - 1), half - 1);
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn normalizer_does_not_wrap_when_diff_equals_half_modulus() {
-        let mut normalizer = WrappingTimestampNormalizer::new(4);
+        let mut normalizer = WrappingTimestampNormalizer::new(4).expect("infallible");
         assert_eq!(normalizer.normalize(12), 12);
         // 12 -> 4 は差分が 8 (= half_modulus) のため wrap 判定しない。
         assert_eq!(normalizer.normalize(4), 4);

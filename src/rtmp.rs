@@ -162,6 +162,8 @@ pub struct RtmpIncomingFrameHandler {
     audio_sample_entry: Option<SampleEntry>,
     video_sample_entry: Option<SampleEntry>,
     received_video_keyframe: bool,
+    // RTMP の A/V は同一の u32 ミリ秒 timestamp 空間を共有するため、
+    // wrap 補正も 1 つの mapper で統一して扱う。
     timestamp_mapper: crate::timestamp_mapper::TimestampMapper,
 }
 
