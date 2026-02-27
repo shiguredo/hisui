@@ -27,10 +27,10 @@ impl SampleBasedTimestampAligner {
     }
 
     pub(crate) fn align_input_timestamp(&mut self, input_timestamp: Duration, output_samples: u64) {
-        let Some(_) = self.base_input_timestamp else {
+        if self.base_input_timestamp.is_none() {
             self.set_alignment_base(input_timestamp, output_samples);
             return;
-        };
+        }
 
         let predicted_timestamp = self.estimate_timestamp_from_output_samples(output_samples);
         if predicted_timestamp.abs_diff(input_timestamp) > self.rebase_threshold {
