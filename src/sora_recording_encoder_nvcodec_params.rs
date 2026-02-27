@@ -4,7 +4,7 @@ use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 pub fn parse_h264_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::EncoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::EncoderConfig::default();
+    let mut config = default_h264_encoder_config();
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -26,7 +26,7 @@ pub fn parse_h264_encode_params(
 pub fn parse_h265_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::EncoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::EncoderConfig::default();
+    let mut config = default_h265_encoder_config();
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -48,7 +48,7 @@ pub fn parse_h265_encode_params(
 pub fn parse_av1_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::EncoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::EncoderConfig::default();
+    let mut config = default_av1_encoder_config();
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -74,24 +74,29 @@ fn update_h264_encode_params(
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
     // - width
     // - height
-    // - fps_numerator
-    // - fps_denominator
-    // - target_bitrate
+    // - framerate_num
+    // - framerate_den
+    // - average_bitrate
 
     update_common_encode_params(&params, config)?;
 
-    // H.264固有のプロファイル設定
-    config.profile = params
-        .get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
-            "baseline" => Ok(shiguredo_nvcodec::Profile::H264_BASELINE),
-            "main" => Ok(shiguredo_nvcodec::Profile::H264_MAIN),
-            "high" => Ok(shiguredo_nvcodec::Profile::H264_HIGH),
-            "high_10" => Ok(shiguredo_nvcodec::Profile::H264_HIGH_10),
-            "high_422" => Ok(shiguredo_nvcodec::Profile::H264_HIGH_422),
-            "high_444" => Ok(shiguredo_nvcodec::Profile::H264_HIGH_444),
-            _ => Err(v.invalid("unknown 'profile' value for H.264")),
-        })?
-        .or(config.profile);
+    // H.264 固有の設定
+    let profile = params.get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
+        "baseline" => Ok(shiguredo_nvcodec::H264Profile::Baseline),
+        "main" => Ok(shiguredo_nvcodec::H264Profile::Main),
+        "high" => Ok(shiguredo_nvcodec::H264Profile::High),
+        "high_10" => Ok(shiguredo_nvcodec::H264Profile::High10),
+        "high_422" => Ok(shiguredo_nvcodec::H264Profile::High422),
+        "high_444" => Ok(shiguredo_nvcodec::H264Profile::High444),
+        _ => Err(v.invalid("unknown 'profile' value for H.264")),
+    })?;
+    let idr_period = params.get("idr_period")?;
+
+    let shiguredo_nvcodec::CodecConfig::H264(codec) = &mut config.codec else {
+        unreachable!();
+    };
+    codec.profile = profile.or(codec.profile);
+    codec.idr_period = idr_period.or(codec.idr_period);
 
     Ok(())
 }
@@ -103,21 +108,26 @@ fn update_h265_encode_params(
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
     // - width
     // - height
-    // - fps_numerator
-    // - fps_denominator
-    // - target_bitrate
+    // - framerate_num
+    // - framerate_den
+    // - average_bitrate
 
     update_common_encode_params(&params, config)?;
 
-    // H.265固有のプロファイル設定
-    config.profile = params
-        .get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
-            "main" => Ok(shiguredo_nvcodec::Profile::HEVC_MAIN),
-            "main10" => Ok(shiguredo_nvcodec::Profile::HEVC_MAIN10),
-            "frext" => Ok(shiguredo_nvcodec::Profile::HEVC_FREXT),
-            _ => Err(v.invalid("unknown 'profile' value for H.265")),
-        })?
-        .or(config.profile);
+    // H.265 固有の設定
+    let profile = params.get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
+        "main" => Ok(shiguredo_nvcodec::HevcProfile::Main),
+        "main10" => Ok(shiguredo_nvcodec::HevcProfile::Main10),
+        "frext" => Ok(shiguredo_nvcodec::HevcProfile::Frext),
+        _ => Err(v.invalid("unknown 'profile' value for H.265")),
+    })?;
+    let idr_period = params.get("idr_period")?;
+
+    let shiguredo_nvcodec::CodecConfig::Hevc(codec) = &mut config.codec else {
+        unreachable!();
+    };
+    codec.profile = profile.or(codec.profile);
+    codec.idr_period = idr_period.or(codec.idr_period);
 
     Ok(())
 }
@@ -129,19 +139,24 @@ fn update_av1_encode_params(
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
     // - width
     // - height
-    // - fps_numerator
-    // - fps_denominator
-    // - target_bitrate
+    // - framerate_num
+    // - framerate_den
+    // - average_bitrate
 
     update_common_encode_params(&params, config)?;
 
-    // AV1固有のプロファイル設定
-    config.profile = params
-        .get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
-            "main" => Ok(shiguredo_nvcodec::Profile::AV1_MAIN),
-            _ => Err(v.invalid("unknown 'profile' value for AV1")),
-        })?
-        .or(config.profile);
+    // AV1 固有の設定
+    let profile = params.get_with("profile", |v| match v.to_unquoted_string_str()?.as_ref() {
+        "main" => Ok(shiguredo_nvcodec::Av1Profile::Main),
+        _ => Err(v.invalid("unknown 'profile' value for AV1")),
+    })?;
+    let idr_period = params.get("idr_period")?;
+
+    let shiguredo_nvcodec::CodecConfig::Av1(codec) = &mut config.codec else {
+        unreachable!();
+    };
+    codec.profile = profile.or(codec.profile);
+    codec.idr_period = idr_period.or(codec.idr_period);
 
     Ok(())
 }
@@ -191,10 +206,58 @@ fn update_common_encode_params(
 
     // GOP設定
     config.gop_length = params.get("gop_length")?.or(config.gop_length);
-    config.idr_period = params.get("idr_period")?.or(config.idr_period);
 
     // デバイスID
     config.device_id = params.get("device_id")?.unwrap_or(config.device_id);
 
     Ok(())
+}
+
+fn default_h264_encoder_config() -> shiguredo_nvcodec::EncoderConfig {
+    default_encoder_config(shiguredo_nvcodec::CodecConfig::H264(
+        shiguredo_nvcodec::H264EncoderConfig {
+            profile: None,
+            idr_period: None,
+        },
+    ))
+}
+
+fn default_h265_encoder_config() -> shiguredo_nvcodec::EncoderConfig {
+    default_encoder_config(shiguredo_nvcodec::CodecConfig::Hevc(
+        shiguredo_nvcodec::HevcEncoderConfig {
+            profile: None,
+            idr_period: None,
+        },
+    ))
+}
+
+fn default_av1_encoder_config() -> shiguredo_nvcodec::EncoderConfig {
+    default_encoder_config(shiguredo_nvcodec::CodecConfig::Av1(
+        shiguredo_nvcodec::Av1EncoderConfig {
+            profile: None,
+            idr_period: None,
+        },
+    ))
+}
+
+fn default_encoder_config(
+    codec: shiguredo_nvcodec::CodecConfig,
+) -> shiguredo_nvcodec::EncoderConfig {
+    shiguredo_nvcodec::EncoderConfig {
+        codec,
+        width: 640,
+        height: 480,
+        max_encode_width: None,
+        max_encode_height: None,
+        framerate_num: 30,
+        framerate_den: 1,
+        average_bitrate: Some(5_000_000),
+        preset: shiguredo_nvcodec::Preset::P4,
+        tuning_info: shiguredo_nvcodec::TuningInfo::LOW_LATENCY,
+        rate_control_mode: shiguredo_nvcodec::RateControlMode::Vbr,
+        gop_length: None,
+        frame_interval_p: 1,
+        buffer_format: shiguredo_nvcodec::BufferFormat::Nv12,
+        device_id: 0,
+    }
 }

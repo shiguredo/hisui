@@ -111,6 +111,8 @@
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_openh264 crate のリポジトリが https://github.com/shiguredo/openh264-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
+- [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.1 にあげる
+  - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.2.0-canary.3 にあげる
   - @sile
 - [ADD] FDK-AAC を使った AAC デコードに対応する
@@ -191,6 +193,8 @@
 - [CHANGE] shiguredo_libyuv の CMake 呼び出しを cmake crate に置き換える
   - @voluntas
 - [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
+  - @voluntas
+- [CHANGE] shiguredo_nvcodec crate を hisui のワークスペースから削除して外部リポジトリに移行する
   - @voluntas
 
 ## 2025.3.1

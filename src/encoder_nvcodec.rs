@@ -25,17 +25,24 @@ impl NvcodecEncoder {
         let height = options.height.get();
         tracing::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
 
-        let config = shiguredo_nvcodec::EncoderConfig {
-            width: width as u32,
-            height: height as u32,
-            fps_numerator: options.frame_rate.numerator.get() as u32,
-            fps_denominator: options.frame_rate.denumerator.get() as u32,
-            target_bitrate: Some(options.bitrate as u32),
-            ..options.encode_params.nvcodec_h264.clone()
+        let mut config = options.encode_params.nvcodec_h264.clone();
+        config.codec = match config.codec {
+            shiguredo_nvcodec::CodecConfig::H264(config) => {
+                shiguredo_nvcodec::CodecConfig::H264(config)
+            }
+            _ => shiguredo_nvcodec::CodecConfig::H264(shiguredo_nvcodec::H264EncoderConfig {
+                profile: None,
+                idr_period: None,
+            }),
         };
+        config.width = width as u32;
+        config.height = height as u32;
+        config.framerate_num = options.frame_rate.numerator.get() as u32;
+        config.framerate_den = options.frame_rate.denumerator.get() as u32;
+        config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h264 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new_h264(config)?;
+        let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
         let seq_params = inner.get_sequence_params()?;
         let sample_entry = video_h264::h264_sample_entry_from_annexb(width, height, &seq_params)?;
 
@@ -54,17 +61,24 @@ impl NvcodecEncoder {
         let height = options.height.get();
         tracing::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
 
-        let config = shiguredo_nvcodec::EncoderConfig {
-            width: width as u32,
-            height: height as u32,
-            fps_numerator: options.frame_rate.numerator.get() as u32,
-            fps_denominator: options.frame_rate.denumerator.get() as u32,
-            target_bitrate: Some(options.bitrate as u32),
-            ..options.encode_params.nvcodec_h265.clone()
+        let mut config = options.encode_params.nvcodec_h265.clone();
+        config.codec = match config.codec {
+            shiguredo_nvcodec::CodecConfig::Hevc(config) => {
+                shiguredo_nvcodec::CodecConfig::Hevc(config)
+            }
+            _ => shiguredo_nvcodec::CodecConfig::Hevc(shiguredo_nvcodec::HevcEncoderConfig {
+                profile: None,
+                idr_period: None,
+            }),
         };
+        config.width = width as u32;
+        config.height = height as u32;
+        config.framerate_num = options.frame_rate.numerator.get() as u32;
+        config.framerate_den = options.frame_rate.denumerator.get() as u32;
+        config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h265 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new_h265(config)?;
+        let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
         let seq_params = inner.get_sequence_params()?;
         let sample_entry = video_h265::h265_sample_entry_from_annexb(
             width,
@@ -92,17 +106,24 @@ impl NvcodecEncoder {
             height.get()
         );
 
-        let config = shiguredo_nvcodec::EncoderConfig {
-            width: width.get() as u32,
-            height: height.get() as u32,
-            fps_numerator: options.frame_rate.numerator.get() as u32,
-            fps_denominator: options.frame_rate.denumerator.get() as u32,
-            target_bitrate: Some(options.bitrate as u32),
-            ..options.encode_params.nvcodec_av1.clone()
+        let mut config = options.encode_params.nvcodec_av1.clone();
+        config.codec = match config.codec {
+            shiguredo_nvcodec::CodecConfig::Av1(config) => {
+                shiguredo_nvcodec::CodecConfig::Av1(config)
+            }
+            _ => shiguredo_nvcodec::CodecConfig::Av1(shiguredo_nvcodec::Av1EncoderConfig {
+                profile: None,
+                idr_period: None,
+            }),
         };
+        config.width = width.get() as u32;
+        config.height = height.get() as u32;
+        config.framerate_num = options.frame_rate.numerator.get() as u32;
+        config.framerate_den = options.frame_rate.denumerator.get() as u32;
+        config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec av1 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new_av1(config)?;
+        let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
 
         // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
         // には以下の記載がある:
@@ -169,7 +190,12 @@ impl NvcodecEncoder {
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
         // エンコード実行
-        self.inner.encode(&nv12_data)?;
+        let encode_options = shiguredo_nvcodec::EncodeOptions {
+            force_intra: false,
+            force_idr: false,
+            output_spspps: false,
+        };
+        self.inner.encode(&nv12_data, &encode_options)?;
         self.input_queue.push_back(video_frame.to_stripped());
         self.handle_encoded_frames()?;
         Ok(())
