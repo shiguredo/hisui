@@ -139,7 +139,7 @@ impl SrtInboundEndpoint {
         let base_time = Instant::now();
         let mut connection_timestamp_offset = Duration::ZERO;
 
-        let mut demuxer = SrtTsDemuxer::new();
+        let mut demuxer = SrtTsDemuxer::new()?;
 
         let mut video_track_tx = if let Some(track_id) = &self.output_video_track_id {
             Some(handle.publish_track(track_id.clone()).await?)
@@ -520,7 +520,7 @@ fn reset_connection_state(
     connection_ctx: &mut SrtConnectionContext<'_>,
 ) -> crate::Result<()> {
     *connection_ctx.peer_addr = None;
-    *connection_ctx.demuxer = SrtTsDemuxer::new();
+    *connection_ctx.demuxer = SrtTsDemuxer::new()?;
     *connection_ctx.connection_timestamp_offset = Duration::ZERO;
     *conn = create_listener_connection(endpoint_config)?;
     Ok(())
@@ -665,10 +665,10 @@ struct SrtTsDemuxer {
 }
 
 impl SrtTsDemuxer {
-    fn new() -> Self {
+    fn new() -> crate::Result<Self> {
         let stream = SharedReadBuffer::new();
         let ts_reader = TsPacketReader::new(stream.clone());
-        Self {
+        Ok(Self {
             stream,
             ts_reader,
             pid_to_stream_type: HashMap::new(),
@@ -678,15 +678,15 @@ impl SrtTsDemuxer {
                 33,
                 90_000,
                 Duration::ZERO,
-            ),
+            )?,
             audio_timestamp_mapper: crate::timestamp_mapper::TimestampMapper::new(
                 33,
                 90_000,
                 Duration::ZERO,
-            ),
+            )?,
             last_aac_config_key: None,
             received_video_keyframe: false,
-        }
+        })
     }
 
     fn push_payload(&mut self, payload: &[u8]) -> crate::Result<Vec<TsSample>> {

@@ -135,7 +135,7 @@ impl RtmpInboundEndpoint {
                             if tls_acceptor.is_some() {
                                 tracing::debug!("TLS handshake successful with {peer_addr}");
                             }
-                            let mut handler = RtmpPublisherHandler::new(
+                            let mut handler = match RtmpPublisherHandler::new(
                                 tls_stream,
                                 expected_app,
                                 expected_stream_name,
@@ -143,7 +143,16 @@ impl RtmpInboundEndpoint {
                                 video_track_tx.take(),
                                 audio_track_tx.take(),
                                 stats,
-                            );
+                            ) {
+                                Ok(handler) => handler,
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to initialize RTMP publisher handler: {}",
+                                        e.display()
+                                    );
+                                    continue;
+                                }
+                            };
 
                             if let Err(e) = handler.run().await {
                                 tracing::error!("RTMP publisher handler error: {}", e.display());
@@ -278,18 +287,18 @@ impl RtmpPublisherHandler {
         video_track_tx: Option<crate::MessageSender>,
         audio_track_tx: Option<crate::MessageSender>,
         stats: RtmpInboundEndpointStats,
-    ) -> Self {
-        Self {
+    ) -> crate::Result<Self> {
+        Ok(Self {
             stream,
             connection: shiguredo_rtmp::RtmpServerConnection::new(),
             recv_buf: vec![0u8; 4096],
             expected_app,
             expected_stream_name,
-            frame_handler: crate::rtmp::RtmpIncomingFrameHandler::new(timestamp_offset),
+            frame_handler: crate::rtmp::RtmpIncomingFrameHandler::new(timestamp_offset)?,
             video_track_tx,
             audio_track_tx,
             stats,
-        }
+        })
     }
 
     async fn run(&mut self) -> crate::Result<()> {

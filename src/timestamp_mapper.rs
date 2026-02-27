@@ -1,3 +1,4 @@
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 /// 周回する生 timestamp を展開し、連続する整数 timestamp として扱う。
@@ -11,19 +12,20 @@ struct WrappingTimestampNormalizer {
 }
 
 impl WrappingTimestampNormalizer {
-    fn new(bits: u8) -> Self {
-        assert!(
-            (1..64).contains(&bits),
-            "timestamp bits must be in range 1..64"
-        );
+    fn new(bits: u8) -> crate::Result<Self> {
+        // wrap 判定で `half_modulus` を閾値として使うため、
+        // `bits=1` だと差分が常に `> half_modulus` を満たせず実用的な判定ができない。
+        if !(2..64).contains(&bits) {
+            return Err(crate::Error::new("timestamp bits must be in range 2..64"));
+        }
         let modulus = 1u64 << bits;
-        Self {
+        Ok(Self {
             mask: modulus - 1,
             modulus,
             half_modulus: modulus / 2,
             wrap_count: 0,
             wrap_detection_high_water_raw: None,
-        }
+        })
     }
 
     /// 周回のみを補正して timestamp を展開する。
@@ -62,20 +64,21 @@ impl WrappingTimestampNormalizer {
 #[derive(Debug, Clone)]
 pub struct TimestampMapper {
     normalizer: WrappingTimestampNormalizer,
-    tick_hz: u64,
+    tick_hz: NonZeroU64,
     offset: Duration,
     base: Option<u64>,
 }
 
 impl TimestampMapper {
-    pub fn new(bits: u8, tick_hz: u64, offset: Duration) -> Self {
-        assert!(tick_hz > 0, "tick_hz must be greater than 0");
-        Self {
-            normalizer: WrappingTimestampNormalizer::new(bits),
+    pub fn new(bits: u8, tick_hz: u64, offset: Duration) -> crate::Result<Self> {
+        let tick_hz = NonZeroU64::new(tick_hz)
+            .ok_or_else(|| crate::Error::new("tick_hz must be greater than 0"))?;
+        Ok(Self {
+            normalizer: WrappingTimestampNormalizer::new(bits)?,
             tick_hz,
             offset,
             base: None,
-        }
+        })
     }
 
     pub fn map(&mut self, raw: u64) -> Duration {
@@ -86,8 +89,8 @@ impl TimestampMapper {
     }
 }
 
-fn ticks_to_duration(ticks: u64, tick_hz: u64) -> Duration {
-    Duration::from_micros(ticks.saturating_mul(1_000_000) / tick_hz)
+fn ticks_to_duration(ticks: u64, tick_hz: NonZeroU64) -> Duration {
+    Duration::from_micros(ticks.saturating_mul(1_000_000) / tick_hz.get())
 }
 
 #[cfg(test)]
@@ -147,14 +150,15 @@ mod tests {
 
     #[test]
     fn mapper_applies_base_and_offset() {
-        let mut mapper = TimestampMapper::new(32, 1_000, Duration::from_secs(5));
+        let mut mapper =
+            TimestampMapper::new(32, 1_000, Duration::from_secs(5)).expect("infallible");
         assert_eq!(mapper.map(100), Duration::from_secs(5));
         assert_eq!(mapper.map(130), Duration::from_millis(5030));
     }
 
     #[test]
     fn mapper_keeps_progress_across_wrap() {
-        let mut mapper = TimestampMapper::new(32, 1_000, Duration::ZERO);
+        let mut mapper = TimestampMapper::new(32, 1_000, Duration::ZERO).expect("infallible");
         let _ = mapper.map(u32::MAX as u64 - 2);
         let mapped = mapper.map(1);
         assert_eq!(mapped, Duration::from_millis(4));
@@ -163,7 +167,7 @@ mod tests {
     #[test]
     fn mapper_handles_multiple_wraps() {
         // bits=3 のため modulus は 8、half_modulus は 4。
-        let mut mapper = TimestampMapper::new(3, 1, Duration::ZERO);
+        let mut mapper = TimestampMapper::new(3, 1, Duration::ZERO).expect("infallible");
 
         // base は初回値 6。
         assert_eq!(mapper.map(6), Duration::ZERO);
@@ -173,5 +177,17 @@ mod tests {
         assert_eq!(mapper.map(7), Duration::from_secs(9));
         // 7 -> 0 は差分 7 (> 4) なので 2 回目の wrap。
         assert_eq!(mapper.map(0), Duration::from_secs(10));
+    }
+
+    #[test]
+    fn mapper_rejects_zero_tick_hz() {
+        let err = TimestampMapper::new(32, 0, Duration::ZERO).expect_err("must fail");
+        assert_eq!(err.reason, "tick_hz must be greater than 0");
+    }
+
+    #[test]
+    fn mapper_rejects_bits_one() {
+        let err = TimestampMapper::new(1, 1_000, Duration::ZERO).expect_err("must fail");
+        assert_eq!(err.reason, "timestamp bits must be in range 2..64");
     }
 }

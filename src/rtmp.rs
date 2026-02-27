@@ -173,8 +173,8 @@ struct AudioCodecInfo {
 }
 
 impl RtmpIncomingFrameHandler {
-    pub fn new(timestamp_offset: std::time::Duration) -> Self {
-        Self {
+    pub fn new(timestamp_offset: std::time::Duration) -> crate::Result<Self> {
+        Ok(Self {
             audio_codec_info: None,
             audio_sample_entry: None,
             video_sample_entry: None,
@@ -183,8 +183,8 @@ impl RtmpIncomingFrameHandler {
                 32,
                 1_000,
                 timestamp_offset,
-            ),
-        }
+            )?,
+        })
     }
 
     /// 受信した音声フレームを処理
