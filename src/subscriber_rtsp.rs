@@ -327,9 +327,8 @@ async fn run_rtsp_session(
     runner
         .play_loop(audio_track_tx, video_track_tx, stats)
         .await
-        .map_err(|e| {
+        .inspect_err(|_| {
             stats.set_connected(false);
-            e
         })
 }
 
@@ -577,12 +576,12 @@ impl RtspSessionRunner {
                     timestamp,
                     sample_entry: None,
                 };
-                if let Some(tx) = video_track_tx.as_mut() {
-                    if !tx.send_video(video_frame) {
-                        return Err(SessionError::Retryable(Error::new(
-                            "video track sender is closed",
-                        )));
-                    }
+                if let Some(tx) = video_track_tx.as_mut()
+                    && !tx.send_video(video_frame)
+                {
+                    return Err(SessionError::Retryable(Error::new(
+                        "video track sender is closed",
+                    )));
                 }
                 stats.add_input_video_frame_count();
                 stats.set_last_input_video_timestamp(timestamp);
@@ -616,12 +615,12 @@ impl RtspSessionRunner {
                     timestamp,
                     sample_entry,
                 };
-                if let Some(tx) = audio_track_tx.as_mut() {
-                    if !tx.send_audio(audio_frame) {
-                        return Err(SessionError::Retryable(Error::new(
-                            "audio track sender is closed",
-                        )));
-                    }
+                if let Some(tx) = audio_track_tx.as_mut()
+                    && !tx.send_audio(audio_frame)
+                {
+                    return Err(SessionError::Retryable(Error::new(
+                        "audio track sender is closed",
+                    )));
                 }
                 stats.add_input_audio_data_count();
                 stats.set_last_input_audio_timestamp(timestamp);
@@ -651,10 +650,11 @@ impl RtspSessionRunner {
             self.flush_send_buffer().await?;
 
             let response = self.wait_for_response().await?;
-            if response.status_code == 401 && attempt == 0 {
-                if self.try_update_auth_header(&response, &method, uri)? {
-                    continue;
-                }
+            if response.status_code == 401
+                && attempt == 0
+                && self.try_update_auth_header(&response, &method, uri)?
+            {
+                continue;
             }
 
             if response.is_success() {
@@ -1283,7 +1283,7 @@ fn parse_fmtp_parameters(parameters: &str) -> HashMap<String, String> {
 
 fn parse_hex(hex: &str) -> crate::Result<Vec<u8>> {
     let mut normalized = hex.trim().to_owned();
-    if normalized.len() % 2 != 0 {
+    if !normalized.len().is_multiple_of(2) {
         normalized.insert(0, '0');
     }
     let mut out = Vec::with_capacity(normalized.len() / 2);
