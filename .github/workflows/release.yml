@@ -151,12 +151,12 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download Ubuntu x86_64 binary
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hisui-binary-ubuntu-24.04_x86_64
 
       - name: Download Ubuntu arm64 binary
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hisui-binary-ubuntu-24.04_arm64
 
