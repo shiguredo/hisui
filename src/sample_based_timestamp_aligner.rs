@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use crate::audio::SampleRate;
 
+pub(crate) const DEFAULT_REBASE_THRESHOLD: Duration = Duration::from_millis(100);
+
 #[derive(Debug, Clone)]
 pub(crate) struct SampleBasedTimestampAligner {
     sample_rate: SampleRate,
@@ -58,12 +60,12 @@ fn duration_abs_diff(lhs: Duration, rhs: Duration) -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::SampleBasedTimestampAligner;
+    use super::{DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner};
     use crate::audio::SampleRate;
     use std::time::Duration;
 
     fn new_aligner() -> SampleBasedTimestampAligner {
-        SampleBasedTimestampAligner::new(SampleRate::HZ_48000, Duration::from_millis(100))
+        SampleBasedTimestampAligner::new(SampleRate::HZ_48000, DEFAULT_REBASE_THRESHOLD)
     }
 
     #[test]
@@ -87,7 +89,7 @@ mod tests {
         // 48 kHz なので 4_800 sample は 100 ms。
         assert_eq!(
             aligner.estimate_timestamp_from_output_samples(4_800),
-            Duration::from_millis(100)
+            DEFAULT_REBASE_THRESHOLD
         );
     }
 

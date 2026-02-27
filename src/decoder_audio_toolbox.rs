@@ -1,12 +1,11 @@
 use std::num::NonZeroU8;
-use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
-use crate::sample_based_timestamp_aligner::SampleBasedTimestampAligner;
-
-const TIMESTAMP_REBASE_THRESHOLD: Duration = Duration::from_millis(100);
+use crate::sample_based_timestamp_aligner::{
+    DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner,
+};
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
@@ -59,7 +58,7 @@ impl AudioToolboxDecoder {
         if self.timestamp_aligner.is_none() {
             self.timestamp_aligner = Some(SampleBasedTimestampAligner::new(
                 sample_rate_for_tracking,
-                TIMESTAMP_REBASE_THRESHOLD,
+                DEFAULT_REBASE_THRESHOLD,
             ));
         }
         if let Some(aligner) = self.timestamp_aligner.as_mut() {
