@@ -1,0 +1,10 @@
+# shiguredo_webrtc と shiguredo_opus が同じ opus シンボルを含むため、
+# rust-lld をデフォルトで使う Linux ターゲットでリンクエラーが発生する。
+# GNU ld はアーカイブから参照されるオブジェクトのみを取り出すので問題にならないが、
+# LLD は全オブジェクトを処理するため重複シンボルがエラーになる。
+# --allow-multiple-definition で最初の定義を採用し重複を許容する。
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]

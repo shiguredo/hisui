@@ -66,13 +66,10 @@ fn main() {
         panic!("[autoreconf] failed to build {LIB_NAME}");
     }
 
-    // shiguredo_webrtc も内部に opus を含んでいるため、シンボルが重複してリンクエラーになる。
-    // -fvisibility=hidden でシンボルを非公開にし、後で objcopy でローカル化する。
     let success = Command::new("./configure")
         .arg("--disable-shared")
         .arg("--prefix")
         .arg(src_dir.display().to_string())
-        .env("CFLAGS", "-fvisibility=hidden")
         .current_dir(&src_dir)
         .status()
         .is_ok_and(|status| status.success());
@@ -95,19 +92,6 @@ fn main() {
         .is_ok_and(|status| status.success());
     if !success {
         panic!("[make] failed to build {LIB_NAME}");
-    }
-
-    // Linux では objcopy でシンボルをローカル化して shiguredo_webrtc との重複を防ぐ
-    if cfg!(target_os = "linux") {
-        let lib_path = output_lib_dir.join("libopus.a");
-        let success = Command::new("objcopy")
-            .arg("--localize-hidden")
-            .arg(lib_path.to_str().expect("invalid lib path"))
-            .status()
-            .is_ok_and(|status| status.success());
-        if !success {
-            panic!("[objcopy] failed to localize symbols in libopus.a");
-        }
     }
 
     // バインディングを生成する
