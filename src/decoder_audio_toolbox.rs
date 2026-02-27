@@ -115,10 +115,8 @@ impl AudioToolboxDecoder {
         let timestamp = self
             .timestamp_aligner
             .as_ref()
-            .map(|aligner| {
-                aligner.estimate_timestamp_from_output_samples(self.total_output_samples)
-            })
-            .unwrap_or_else(|| sample_rate.duration_from_samples(self.total_output_samples));
+            .expect("timestamp aligner must be initialized before decoding")
+            .estimate_timestamp_from_output_samples(self.total_output_samples);
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {
