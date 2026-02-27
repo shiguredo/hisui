@@ -85,6 +85,7 @@ pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
 pub mod subcommand_server;
+pub mod subscriber_rtsp;
 pub mod subscriber_whep;
 pub mod tcp;
 pub mod timestamp_mapper;

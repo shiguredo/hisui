@@ -40,6 +40,12 @@
   - `processorId` 未指定時は `inputUrl` を既定値として利用する
   - 現時点では音声受信 (`outputAudioTrackId`) は未対応
   - @sile
+- [ADD] server サブコマンドの JSON-RPC で RTSP subscriber を作成できるようにする
+  - JSON-RPC に `createRtspSubscriber` メソッドを追加する
+  - `inputUrl` を指定して RTSP （ RTP over RTSP/TCP ）の受信データを `outputAudioTrackId` / `outputVideoTrackId` に配信できる
+  - 現時点の対応コーデックは H264 / AAC のみ
+  - `processorId` 未指定時は `inputUrl` を既定値として利用する
+  - @sile
 - [ADD] server サブコマンドの JSON-RPC で PNG file source を作成できるようにする
   - JSON-RPC に `createPngFileSource` メソッドを追加する
   - `path` で指定した PNG を `outputVideoTrackId` に固定 FPS で繰り返し配信できる

@@ -110,6 +110,7 @@ impl MediaPipelineHandle {
             }
             "createWhipPublisher" => self.handle_create_whip_publisher_rpc(maybe_params).await,
             "createWhepSubscriber" => self.handle_create_whep_subscriber_rpc(maybe_params).await,
+            "createRtspSubscriber" => self.handle_create_rtsp_subscriber_rpc(maybe_params).await,
             "listTracks" => self.handle_list_tracks_rpc().await,
             "listProcessors" => self.handle_list_processors_rpc().await,
             "triggerStart" => self.handle_trigger_start_rpc().await,
@@ -518,6 +519,39 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::CreateWhepSubscriber { processor_id })
     }
 
+    async fn handle_create_rtsp_subscriber_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (subscriber, processor_id): (
+            crate::subscriber_rtsp::RtspSubscriber,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let subscriber = params.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((subscriber, processor_id))
+        })?;
+        let processor_id =
+            processor_id.unwrap_or_else(|| ProcessorId::new(subscriber.input_url.clone()));
+
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("rtsp_subscriber"),
+            move |handle| subscriber.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
+
+        Ok(RpcSuccessResult::CreateRtspSubscriber { processor_id })
+    }
+
     async fn handle_create_rtmp_inbound_endpoint_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
@@ -690,6 +724,7 @@ enum RpcSuccessResult {
     CreateRtmpOutboundEndpoint { processor_id: ProcessorId },
     CreateWhipPublisher { processor_id: ProcessorId },
     CreateWhepSubscriber { processor_id: ProcessorId },
+    CreateRtspSubscriber { processor_id: ProcessorId },
     ListTracks { track_ids: Vec<TrackId> },
     ListProcessors { processor_ids: Vec<ProcessorId> },
     TriggerStart { started: bool },
@@ -739,6 +774,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateWhepSubscriber { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateRtspSubscriber { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::ListTracks { track_ids } => f.array(|f| {
@@ -2765,6 +2803,137 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_rtsp_subscriber_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtspSubscriber"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_rtsp_subscriber_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let invalid_scheme_request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtspSubscriber","params":{"inputUrl":"ws://example.com/live","outputVideoTrackId":"video-main"}}"#;
+        let missing_output_track_request = r#"{"jsonrpc":"2.0","id":1,"method":"createRtspSubscriber","params":{"inputUrl":"rtsp://example.com/live"}}"#;
+
+        let invalid_scheme_response = handle
+            .rpc(invalid_scheme_request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&invalid_scheme_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        let missing_output_track_response = handle
+            .rpc(missing_output_track_request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&missing_output_track_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_rtsp_subscriber_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtsp_subscriber_request(None, None, Some("video-main"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "rtsp://example.com/live"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_rtsp_subscriber_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_rtsp_subscriber_request(
+            Some("custom-rtsp-subscriber"),
+            Some("audio-main"),
+            Some("video-main"),
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-rtsp-subscriber"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_rtsp_subscriber_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let blocker = handle
+            .register_processor(
+                ProcessorId::new("duplicate-rtsp-subscriber"),
+                ProcessorMetadata::new("test_processor"),
+            )
+            .await
+            .expect("register duplicate-rtsp-subscriber");
+        let request = create_rtsp_subscriber_request(
+            Some("duplicate-rtsp-subscriber"),
+            None,
+            Some("video-main"),
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
     async fn list_processors_returns_empty_array_when_no_processors() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"listProcessors"}"#;
@@ -3312,6 +3481,26 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createWhepSubscriber","params":{{"inputUrl":"https://example.com/whep/live"{output_video_track_id_part}{output_audio_track_id_part}{bearer_token_part}{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_rtsp_subscriber_request(
+        processor_id: Option<&str>,
+        output_audio_track_id: Option<&str>,
+        output_video_track_id: Option<&str>,
+    ) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+        let output_audio_track_id_part = output_audio_track_id
+            .map(|id| format!(r#","outputAudioTrackId":"{id}""#))
+            .unwrap_or_default();
+        let output_video_track_id_part = output_video_track_id
+            .map(|id| format!(r#","outputVideoTrackId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createRtspSubscriber","params":{{"inputUrl":"rtsp://example.com/live"{output_audio_track_id_part}{output_video_track_id_part}{processor_id_part}}}}}"#
         )
     }
 
