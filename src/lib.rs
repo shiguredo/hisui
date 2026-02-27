@@ -2,7 +2,6 @@ pub mod arg_utils;
 pub mod audio;
 pub mod audio_aac;
 pub mod audio_converter;
-mod audio_timestamp_tracker;
 pub mod decoder;
 #[cfg(target_os = "macos")]
 pub mod decoder_audio_toolbox;
@@ -56,6 +55,7 @@ pub mod reader_mp4;
 pub mod reader_webm;
 mod rpc_request_file;
 pub mod rtmp;
+mod sample_based_timestamp_aligner;
 mod sora_recording_compose_stats_json;
 #[cfg(feature = "nvcodec")]
 pub mod sora_recording_decoder_nvcodec_params;

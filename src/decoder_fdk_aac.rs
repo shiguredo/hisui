@@ -3,7 +3,7 @@ use std::time::Duration;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
-use crate::audio_timestamp_tracker::AudioTimestampTracker;
+use crate::sample_based_timestamp_aligner::SampleBasedTimestampAligner;
 
 const TIMESTAMP_REBASE_THRESHOLD: Duration = Duration::from_millis(100);
 
@@ -14,7 +14,7 @@ pub struct FdkAacDecoder {
     sample_rate: Option<SampleRate>,
     channels: Option<Channels>,
     total_output_samples: u64,
-    timestamp_tracker: Option<AudioTimestampTracker>,
+    timestamp_aligner: Option<SampleBasedTimestampAligner>,
 }
 
 impl FdkAacDecoder {
@@ -26,7 +26,7 @@ impl FdkAacDecoder {
             sample_rate: None,
             channels: None,
             total_output_samples: 0,
-            timestamp_tracker: None,
+            timestamp_aligner: None,
         })
     }
 
@@ -56,17 +56,17 @@ impl FdkAacDecoder {
         }
 
         let sample_rate_for_tracking = self.sample_rate.unwrap_or(frame.sample_rate);
-        if self.timestamp_tracker.is_none() {
-            self.timestamp_tracker = Some(AudioTimestampTracker::new(
+        if self.timestamp_aligner.is_none() {
+            self.timestamp_aligner = Some(SampleBasedTimestampAligner::new(
                 sample_rate_for_tracking,
                 TIMESTAMP_REBASE_THRESHOLD,
             ));
         }
-        if let Some(tracker) = self.timestamp_tracker.as_mut() {
-            tracker.set_sample_rate(sample_rate_for_tracking);
+        if let Some(aligner) = self.timestamp_aligner.as_mut() {
+            aligner.set_sample_rate(sample_rate_for_tracking);
             // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
             // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。
-            tracker.observe_input_timestamp(frame.timestamp, self.total_output_samples);
+            aligner.align_input_timestamp(frame.timestamp, self.total_output_samples);
         }
 
         let inner = self
@@ -81,8 +81,8 @@ impl FdkAacDecoder {
             let sample_rate = SampleRate::from_u32(decoded.sample_rate)?;
             self.sample_rate = Some(sample_rate);
             self.channels = Some(Channels::from_u8(decoded.channels)?);
-            if let Some(tracker) = self.timestamp_tracker.as_mut() {
-                tracker.set_sample_rate(sample_rate);
+            if let Some(aligner) = self.timestamp_aligner.as_mut() {
+                aligner.set_sample_rate(sample_rate);
             }
             self.build_audio_frame(&decoded.data)
         } else {
@@ -91,9 +91,11 @@ impl FdkAacDecoder {
             // TODO: そもそも将来的には decoder.rs のインタフェースを見直して、このようなワークアラウンドを不要にする
             // AAC の内部バッファリング中でも timestamp は sample 数基準で連続化する。
             let timestamp = self
-                .timestamp_tracker
+                .timestamp_aligner
                 .as_ref()
-                .map(|tracker| tracker.timestamp_from_output_samples(self.total_output_samples))
+                .map(|aligner| {
+                    aligner.estimate_timestamp_from_output_samples(self.total_output_samples)
+                })
                 .unwrap_or(frame.timestamp);
             Ok(AudioFrame {
                 data: Vec::new(),
@@ -122,9 +124,11 @@ impl FdkAacDecoder {
         }
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
         let timestamp = self
-            .timestamp_tracker
+            .timestamp_aligner
             .as_ref()
-            .map(|tracker| tracker.timestamp_from_output_samples(self.total_output_samples))
+            .map(|aligner| {
+                aligner.estimate_timestamp_from_output_samples(self.total_output_samples)
+            })
             .unwrap_or_else(|| sample_rate.duration_from_samples(self.total_output_samples));
         self.total_output_samples += samples_per_channel as u64;
 
