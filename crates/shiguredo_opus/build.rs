@@ -223,11 +223,11 @@ fn add_link_name_prefix(bindings_path: &Path, prefix: &str) {
 
     for line in content.lines() {
         let trimmed = line.trim_start();
-        if let Some(after_pub_fn) = trimmed.strip_prefix("pub fn ") {
-            if let Some(name) = after_pub_fn.split('(').next() {
-                let indent = &line[..line.len() - trimmed.len()];
-                result.push_str(&format!("{indent}#[link_name = \"{prefix}{name}\"]\n"));
-            }
+        if let Some(after_pub_fn) = trimmed.strip_prefix("pub fn ")
+            && let Some(name) = after_pub_fn.split('(').next()
+        {
+            let indent = &line[..line.len() - trimmed.len()];
+            result.push_str(&format!("{indent}#[link_name = \"{prefix}{name}\"]\n"));
         }
         result.push_str(line);
         result.push('\n');
