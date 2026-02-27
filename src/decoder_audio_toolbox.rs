@@ -1,8 +1,12 @@
 use std::num::NonZeroU8;
+use std::time::Duration;
 
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
+use crate::audio_timestamp_tracker::AudioTimestampTracker;
+
+const TIMESTAMP_REBASE_THRESHOLD: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
@@ -10,6 +14,7 @@ pub struct AudioToolboxDecoder {
     sample_rate: Option<SampleRate>,
     channels: Option<Channels>,
     total_output_samples: u64,
+    timestamp_tracker: Option<AudioTimestampTracker>,
 }
 
 impl AudioToolboxDecoder {
@@ -20,6 +25,7 @@ impl AudioToolboxDecoder {
             sample_rate: None,
             channels: None,
             total_output_samples: 0,
+            timestamp_tracker: None,
         })
     }
 
@@ -47,6 +53,20 @@ impl AudioToolboxDecoder {
             )?);
             self.sample_rate = Some(SampleRate::from_u32(sample_rate)?);
             self.channels = Some(channel_layout);
+        }
+
+        let sample_rate_for_tracking = self.sample_rate.unwrap_or(frame.sample_rate);
+        if self.timestamp_tracker.is_none() {
+            self.timestamp_tracker = Some(AudioTimestampTracker::new(
+                sample_rate_for_tracking,
+                TIMESTAMP_REBASE_THRESHOLD,
+            ));
+        }
+        if let Some(tracker) = self.timestamp_tracker.as_mut() {
+            tracker.set_sample_rate(sample_rate_for_tracking);
+            // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
+            // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。
+            tracker.observe_input_timestamp(frame.timestamp, self.total_output_samples);
         }
 
         let inner = self
@@ -97,7 +117,12 @@ impl AudioToolboxDecoder {
             return Err(crate::Error::new("invalid decoded audio sample count"));
         }
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
-        let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
+        // AAC は内部バッファリングで出力タイミングが揺れるので、timestamp は sample 数基準で生成する。
+        let timestamp = self
+            .timestamp_tracker
+            .as_ref()
+            .map(|tracker| tracker.timestamp_from_output_samples(self.total_output_samples))
+            .unwrap_or_else(|| sample_rate.duration_from_samples(self.total_output_samples));
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {

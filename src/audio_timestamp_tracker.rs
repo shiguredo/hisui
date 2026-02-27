@@ -1,0 +1,127 @@
+use std::time::Duration;
+
+use crate::audio::SampleRate;
+
+#[derive(Debug, Clone)]
+pub(crate) struct AudioTimestampTracker {
+    sample_rate: SampleRate,
+    rebase_threshold: Duration,
+    base_input_timestamp: Option<Duration>,
+    base_output_samples: u64,
+}
+
+impl AudioTimestampTracker {
+    pub(crate) fn new(sample_rate: SampleRate, rebase_threshold: Duration) -> Self {
+        Self {
+            sample_rate,
+            rebase_threshold,
+            base_input_timestamp: None,
+            base_output_samples: 0,
+        }
+    }
+
+    pub(crate) fn set_sample_rate(&mut self, sample_rate: SampleRate) {
+        self.sample_rate = sample_rate;
+    }
+
+    pub(crate) fn observe_input_timestamp(
+        &mut self,
+        input_timestamp: Duration,
+        output_samples: u64,
+    ) {
+        let Some(_) = self.base_input_timestamp else {
+            self.set_base(input_timestamp, output_samples);
+            return;
+        };
+
+        let predicted_timestamp = self.timestamp_from_output_samples(output_samples);
+        if duration_abs_diff(predicted_timestamp, input_timestamp) > self.rebase_threshold {
+            self.set_base(input_timestamp, output_samples);
+        }
+    }
+
+    pub(crate) fn timestamp_from_output_samples(&self, output_samples: u64) -> Duration {
+        let Some(base_input_timestamp) = self.base_input_timestamp else {
+            return Duration::ZERO;
+        };
+
+        let relative_samples = output_samples.saturating_sub(self.base_output_samples);
+        base_input_timestamp
+            .saturating_add(self.sample_rate.duration_from_samples(relative_samples))
+    }
+
+    fn set_base(&mut self, input_timestamp: Duration, output_samples: u64) {
+        self.base_input_timestamp = Some(input_timestamp);
+        self.base_output_samples = output_samples;
+    }
+}
+
+fn duration_abs_diff(lhs: Duration, rhs: Duration) -> Duration {
+    if lhs >= rhs { lhs - rhs } else { rhs - lhs }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AudioTimestampTracker;
+    use crate::audio::SampleRate;
+    use std::time::Duration;
+
+    fn new_tracker() -> AudioTimestampTracker {
+        AudioTimestampTracker::new(SampleRate::HZ_48000, Duration::from_millis(100))
+    }
+
+    #[test]
+    fn tracker_adopts_first_input_timestamp_as_base() {
+        let mut tracker = new_tracker();
+        let input_timestamp = Duration::from_millis(500);
+
+        tracker.observe_input_timestamp(input_timestamp, 0);
+
+        assert_eq!(tracker.timestamp_from_output_samples(0), input_timestamp);
+    }
+
+    #[test]
+    fn tracker_advances_timestamp_by_output_samples() {
+        let mut tracker = new_tracker();
+        tracker.observe_input_timestamp(Duration::from_millis(0), 0);
+
+        // 48 kHz なので 4_800 sample は 100 ms。
+        assert_eq!(
+            tracker.timestamp_from_output_samples(4_800),
+            Duration::from_millis(100)
+        );
+    }
+
+    #[test]
+    fn tracker_rebases_when_input_timestamp_drift_is_large() {
+        let mut tracker = new_tracker();
+        tracker.observe_input_timestamp(Duration::from_millis(0), 0);
+
+        // 予測値は 20 ms だが、入力は 250 ms なので 100 ms を超えて乖離している。
+        tracker.observe_input_timestamp(Duration::from_millis(250), 960);
+
+        assert_eq!(
+            tracker.timestamp_from_output_samples(960),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            tracker.timestamp_from_output_samples(1_920),
+            Duration::from_millis(270)
+        );
+    }
+
+    #[test]
+    fn tracker_does_not_rebase_on_threshold_boundary() {
+        let mut tracker = new_tracker();
+        tracker.observe_input_timestamp(Duration::from_millis(0), 0);
+
+        // 予測値は 20 ms。入力を 120 ms にして差分をちょうど 100 ms にする。
+        tracker.observe_input_timestamp(Duration::from_millis(120), 960);
+
+        // 差分が閾値ちょうどの場合はリベースしない。
+        assert_eq!(
+            tracker.timestamp_from_output_samples(960),
+            Duration::from_millis(20)
+        );
+    }
+}

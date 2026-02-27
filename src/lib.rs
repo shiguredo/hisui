@@ -2,6 +2,7 @@ pub mod arg_utils;
 pub mod audio;
 pub mod audio_aac;
 pub mod audio_converter;
+mod audio_timestamp_tracker;
 pub mod decoder;
 #[cfg(target_os = "macos")]
 pub mod decoder_audio_toolbox;
