@@ -47,8 +47,7 @@ impl WrappingTimestampNormalizer {
             self.wrap_detection_high_water_raw = Some(raw);
         }
 
-        let unwrapped = raw.saturating_add(self.wrap_count.saturating_mul(self.modulus));
-        unwrapped
+        raw.saturating_add(self.wrap_count.saturating_mul(self.modulus))
     }
 }
 
