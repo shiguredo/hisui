@@ -55,18 +55,13 @@ impl AudioToolboxDecoder {
         }
 
         let sample_rate_for_tracking = self.sample_rate.unwrap_or(frame.sample_rate);
-        if self.timestamp_aligner.is_none() {
-            self.timestamp_aligner = Some(SampleBasedTimestampAligner::new(
-                sample_rate_for_tracking,
-                DEFAULT_REBASE_THRESHOLD,
-            ));
-        }
-        if let Some(aligner) = self.timestamp_aligner.as_mut() {
-            aligner.set_sample_rate(sample_rate_for_tracking);
-            // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
-            // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。
-            aligner.align_input_timestamp(frame.timestamp, self.total_output_samples);
-        }
+        let aligner = self.timestamp_aligner.get_or_insert_with(|| {
+            SampleBasedTimestampAligner::new(sample_rate_for_tracking, DEFAULT_REBASE_THRESHOLD)
+        });
+        aligner.set_sample_rate(sample_rate_for_tracking);
+        // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
+        // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。
+        aligner.align_input_timestamp(frame.timestamp, self.total_output_samples);
 
         let inner = self
             .inner
