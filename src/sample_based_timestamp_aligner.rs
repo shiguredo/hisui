@@ -33,7 +33,7 @@ impl SampleBasedTimestampAligner {
         };
 
         let predicted_timestamp = self.estimate_timestamp_from_output_samples(output_samples);
-        if duration_abs_diff(predicted_timestamp, input_timestamp) > self.rebase_threshold {
+        if predicted_timestamp.abs_diff(input_timestamp) > self.rebase_threshold {
             self.set_alignment_base(input_timestamp, output_samples);
         }
     }
@@ -52,10 +52,6 @@ impl SampleBasedTimestampAligner {
         self.base_input_timestamp = Some(input_timestamp);
         self.base_output_samples = output_samples;
     }
-}
-
-fn duration_abs_diff(lhs: Duration, rhs: Duration) -> Duration {
-    lhs.abs_diff(rhs)
 }
 
 #[cfg(test)]
