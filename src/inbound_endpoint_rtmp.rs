@@ -135,7 +135,7 @@ impl RtmpInboundEndpoint {
                             if tls_acceptor.is_some() {
                                 tracing::debug!("TLS handshake successful with {peer_addr}");
                             }
-                            let mut handler = match RtmpPublisherHandler::new(
+                            let Ok(mut handler) = RtmpPublisherHandler::new(
                                 tls_stream,
                                 expected_app,
                                 expected_stream_name,
@@ -143,15 +143,14 @@ impl RtmpInboundEndpoint {
                                 video_track_tx.take(),
                                 audio_track_tx.take(),
                                 stats,
-                            ) {
-                                Ok(handler) => handler,
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failed to initialize RTMP publisher handler: {}",
-                                        e.display()
-                                    );
-                                    continue;
-                                }
+                            )
+                            .inspect_err(|e| {
+                                tracing::error!(
+                                    "Failed to initialize RTMP publisher handler: {}",
+                                    e.display()
+                                );
+                            }) else {
+                                continue;
                             };
 
                             if let Err(e) = handler.run().await {
