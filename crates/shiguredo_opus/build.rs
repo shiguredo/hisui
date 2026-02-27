@@ -6,6 +6,11 @@ use std::{
 // 依存ライブラリの名前
 const LIB_NAME: &str = "opus";
 
+// シンボルプレフィックス
+// shiguredo_webrtc の libwebrtc_c.a にも opus が含まれているため、
+// シンボル名にプレフィックスを付けて衝突を防ぐ。
+const SYMBOL_PREFIX: &str = "shiguredo_";
+
 fn main() {
     // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
     println!("cargo::rerun-if-changed=Cargo.toml");
@@ -94,13 +99,26 @@ fn main() {
         panic!("[make] failed to build {LIB_NAME}");
     }
 
+    // Linux では ld -r で部分リンクし、objcopy でシンボルにプレフィックスを付ける。
+    // shiguredo_webrtc の libwebrtc_c.a にも opus が含まれているため、
+    // シンボル名を変えて衝突を防ぐ。
+    if cfg!(target_os = "linux") {
+        prefix_symbols(&output_lib_dir);
+    }
+
     // バインディングを生成する
     bindgen::Builder::default()
         .header(input_header_path.to_str().expect("invalid header path"))
         .generate()
         .expect("failed to generate bindings")
-        .write_to_file(output_bindings_path)
+        .write_to_file(&output_bindings_path)
         .expect("failed to write bindings");
+
+    // Linux ではシンボルにプレフィックスを付けているので、
+    // バインディングの extern 関数にも #[link_name] 属性を追加する
+    if cfg!(target_os = "linux") {
+        add_link_name_prefix(&output_bindings_path, SYMBOL_PREFIX);
+    }
 
     println!("cargo::rustc-link-search={}", output_lib_dir.display());
     println!("cargo::rustc-link-lib=static={LIB_NAME}");
@@ -122,6 +140,100 @@ fn git_clone_external_lib(build_dir: &Path) {
     if !success {
         panic!("failed to clone {LIB_NAME} repository");
     }
+}
+
+// 定義済みグローバルシンボルにプレフィックスを付ける
+//
+// 1. ld -r --whole-archive で全オブジェクトを1つに結合し、内部参照を解決する
+// 2. nm で定義済みグローバルシンボルの一覧を取得する
+// 3. objcopy --redefine-syms でシンボル名にプレフィックスを付ける
+//    (--prefix-symbols だと未定義シンボル(libc 等)まで変わるため使えない)
+// 4. ar で新しいアーカイブを作成する
+fn prefix_symbols(lib_dir: &Path) {
+    let lib_path = lib_dir.join("libopus.a");
+    let merged_obj = lib_dir.join("opus_merged.o");
+    let redefine_syms_path = lib_dir.join("redefine_syms.txt");
+
+    // 全オブジェクトを1つに結合して内部参照を解決する
+    let success = Command::new("ld")
+        .arg("-r")
+        .arg("--whole-archive")
+        .arg(&lib_path)
+        .arg("-o")
+        .arg(&merged_obj)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !success {
+        panic!("[ld -r] failed to merge objects in libopus.a");
+    }
+
+    // 定義済みグローバルシンボルの一覧を取得し、リネームマップを作成する
+    let nm_output = Command::new("nm")
+        .arg("--defined-only")
+        .arg("-g")
+        .arg(&merged_obj)
+        .output()
+        .expect("[nm] failed to execute");
+    assert!(nm_output.status.success(), "[nm] failed to list symbols");
+
+    let nm_stdout = String::from_utf8_lossy(&nm_output.stdout);
+    let mut redefine_content = String::new();
+    for line in nm_stdout.lines() {
+        // nm の出力形式: "address type name"
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 && !parts[2].is_empty() {
+            let name = parts[2];
+            redefine_content.push_str(&format!("{name} {SYMBOL_PREFIX}{name}\n"));
+        }
+    }
+    std::fs::write(&redefine_syms_path, &redefine_content)
+        .expect("failed to write redefine_syms.txt");
+
+    // 定義済みグローバルシンボルだけをリネームする
+    let success = Command::new("objcopy")
+        .arg(format!("--redefine-syms={}", redefine_syms_path.display()))
+        .arg(&merged_obj)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !success {
+        panic!("[objcopy] failed to rename symbols");
+    }
+
+    // 新しいアーカイブを作成する
+    let _ = std::fs::remove_file(&lib_path);
+    let success = Command::new("ar")
+        .arg("rcs")
+        .arg(&lib_path)
+        .arg(&merged_obj)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !success {
+        panic!("[ar] failed to create new libopus.a");
+    }
+}
+
+// バインディングの extern 関数に #[link_name] 属性を追加する
+//
+// bindgen が生成するバインディングは元のシンボル名（例: opus_encode）を使うが、
+// libopus.a 内のシンボルはプレフィックス済み（例: shiguredo_opus_encode）なので、
+// #[link_name] 属性でリンカに正しいシンボル名を伝える。
+fn add_link_name_prefix(bindings_path: &Path, prefix: &str) {
+    let content = std::fs::read_to_string(bindings_path).expect("failed to read bindings file");
+    let mut result = String::with_capacity(content.len() * 2);
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(after_pub_fn) = trimmed.strip_prefix("pub fn ") {
+            if let Some(name) = after_pub_fn.split('(').next() {
+                let indent = &line[..line.len() - trimmed.len()];
+                result.push_str(&format!("{indent}#[link_name = \"{prefix}{name}\"]\n"));
+            }
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    std::fs::write(bindings_path, result).expect("failed to write modified bindings file");
 }
 
 // Cargo.toml から依存ライブラリの Git URL とバージョンタグを取得する
