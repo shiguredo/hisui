@@ -55,6 +55,7 @@ pub mod reader_mp4;
 pub mod reader_webm;
 mod rpc_request_file;
 pub mod rtmp;
+#[cfg(any(feature = "fdk-aac", target_os = "macos"))]
 mod sample_based_timestamp_aligner;
 mod sora_recording_compose_stats_json;
 #[cfg(feature = "nvcodec")]
