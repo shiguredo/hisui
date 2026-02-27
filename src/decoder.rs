@@ -250,6 +250,13 @@ pub struct DecodeConfig {
     pub nvcodec_vp9: shiguredo_nvcodec::DecoderConfig,
 }
 
+#[cfg_attr(
+    not(feature = "nvcodec"),
+    expect(
+        clippy::derivable_impls,
+        reason = "nvcodec feature 無効時は導出可能だが、有効時は shiguredo_nvcodec::DecoderConfig に Default がないため手動実装を共用している"
+    )
+)]
 impl Default for DecodeConfig {
     fn default() -> Self {
         Self {
