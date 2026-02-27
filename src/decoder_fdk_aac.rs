@@ -74,9 +74,10 @@ impl FdkAacDecoder {
             let sample_rate = SampleRate::from_u32(decoded.sample_rate)?;
             self.sample_rate = Some(sample_rate);
             self.channels = Some(Channels::from_u8(decoded.channels)?);
-            if let Some(aligner) = self.timestamp_aligner.as_mut() {
-                aligner.set_sample_rate(sample_rate);
-            }
+            self.timestamp_aligner
+                .as_mut()
+                .expect("timestamp aligner must be initialized before decoding")
+                .set_sample_rate(sample_rate);
             self.build_audio_frame(&decoded.data)
         } else {
             // デコード可能なフレームがない場合は空のデータを返す
