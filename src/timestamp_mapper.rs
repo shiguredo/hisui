@@ -7,7 +7,7 @@ pub struct WrappingTimestampNormalizer {
     modulus: u64,
     half_modulus: u64,
     wrap_count: u64,
-    last_raw: Option<u64>,
+    wrap_detection_high_water_raw: Option<u64>,
 }
 
 impl WrappingTimestampNormalizer {
@@ -22,26 +22,32 @@ impl WrappingTimestampNormalizer {
             modulus,
             half_modulus: modulus / 2,
             wrap_count: 0,
-            last_raw: None,
+            wrap_detection_high_water_raw: None,
         }
     }
 
     /// 周回のみを補正して timestamp を展開する。
     ///
     /// 小さな逆行入力はそのまま反映する。
+    ///
+    /// wrap 判定は `high-water mark` 方式で行う。
+    /// 一時的な逆行で判定基準が下がると wrap を見逃すため、
+    /// 判定基準は同一 epoch 内で最大の生 timestamp を保持する。
     pub fn normalize(&mut self, raw: u64) -> u64 {
         let raw = raw & self.mask;
 
-        if let Some(last_raw) = self.last_raw
-            && raw < last_raw
-            && last_raw - raw > self.half_modulus
-        {
-            self.wrap_count = self.wrap_count.saturating_add(1);
+        if let Some(high_water_raw) = self.wrap_detection_high_water_raw {
+            if raw < high_water_raw && high_water_raw - raw > self.half_modulus {
+                self.wrap_count = self.wrap_count.saturating_add(1);
+                self.wrap_detection_high_water_raw = Some(raw);
+            } else if raw > high_water_raw {
+                self.wrap_detection_high_water_raw = Some(raw);
+            }
+        } else {
+            self.wrap_detection_high_water_raw = Some(raw);
         }
 
         let unwrapped = raw.saturating_add(self.wrap_count.saturating_mul(self.modulus));
-
-        self.last_raw = Some(raw);
         unwrapped
     }
 }
@@ -121,6 +127,15 @@ mod tests {
         assert_eq!(normalizer.normalize(100), 100);
         assert_eq!(normalizer.normalize(90), 90);
         assert_eq!(normalizer.normalize(110), 110);
+    }
+
+    #[test]
+    fn normalizer_detects_wrap_after_small_backward_step() {
+        let mut normalizer = WrappingTimestampNormalizer::new(32);
+        let half = 1u64 << 31;
+        assert_eq!(normalizer.normalize(half + 1), half + 1);
+        assert_eq!(normalizer.normalize(half - 1), half - 1);
+        assert_eq!(normalizer.normalize(0), 1u64 << 32);
     }
 
     #[test]
