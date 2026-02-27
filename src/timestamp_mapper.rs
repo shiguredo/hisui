@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-/// 周回する生 timestamp を単調増加する整数列へ正規化する。
+/// 周回する生 timestamp を展開し、連続する整数 timestamp として扱う。
 #[derive(Debug, Clone)]
 pub struct WrappingTimestampNormalizer {
     mask: u64,
@@ -8,7 +8,6 @@ pub struct WrappingTimestampNormalizer {
     half_modulus: u64,
     wrap_count: u64,
     last_raw: Option<u64>,
-    last_unwrapped: u64,
 }
 
 impl WrappingTimestampNormalizer {
@@ -24,11 +23,12 @@ impl WrappingTimestampNormalizer {
             half_modulus: modulus / 2,
             wrap_count: 0,
             last_raw: None,
-            last_unwrapped: 0,
         }
     }
 
-    /// 周回と小さな逆行を吸収し、単調増加値へ正規化する。
+    /// 周回のみを補正して timestamp を展開する。
+    ///
+    /// 小さな逆行入力はそのまま反映する。
     pub fn normalize(&mut self, raw: u64) -> u64 {
         let raw = raw & self.mask;
 
@@ -39,15 +39,9 @@ impl WrappingTimestampNormalizer {
             self.wrap_count = self.wrap_count.saturating_add(1);
         }
 
-        let candidate = raw.saturating_add(self.wrap_count.saturating_mul(self.modulus));
-        let unwrapped = if self.last_raw.is_none() {
-            candidate
-        } else {
-            candidate.max(self.last_unwrapped)
-        };
+        let unwrapped = raw.saturating_add(self.wrap_count.saturating_mul(self.modulus));
 
         self.last_raw = Some(raw);
-        self.last_unwrapped = unwrapped;
         unwrapped
     }
 }
@@ -60,7 +54,6 @@ impl WrappingTimestampNormalizer {
 /// - `tick_hz` を使った `Duration` 変換
 /// - `offset` の加算
 ///
-/// 入力が小さく逆行するケースでも、進行が戻らないように補正する。
 #[derive(Debug, Clone)]
 pub struct TimestampMapper {
     normalizer: WrappingTimestampNormalizer,
@@ -123,10 +116,10 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_clamps_out_of_order_input() {
+    fn normalizer_keeps_small_backward_input() {
         let mut normalizer = WrappingTimestampNormalizer::new(32);
         assert_eq!(normalizer.normalize(100), 100);
-        assert_eq!(normalizer.normalize(90), 100);
+        assert_eq!(normalizer.normalize(90), 90);
     }
 
     #[test]
