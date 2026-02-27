@@ -2,7 +2,7 @@ use std::time::Duration;
 
 /// 周回する生 timestamp を展開し、連続する整数 timestamp として扱う。
 #[derive(Debug, Clone)]
-pub struct WrappingTimestampNormalizer {
+struct WrappingTimestampNormalizer {
     mask: u64,
     modulus: u64,
     half_modulus: u64,
@@ -11,7 +11,7 @@ pub struct WrappingTimestampNormalizer {
 }
 
 impl WrappingTimestampNormalizer {
-    pub fn new(bits: u8) -> Self {
+    fn new(bits: u8) -> Self {
         assert!(
             (1..64).contains(&bits),
             "timestamp bits must be in range 1..64"
@@ -33,7 +33,7 @@ impl WrappingTimestampNormalizer {
     /// wrap 判定は `high-water mark` 方式で行う。
     /// 一時的な逆行で判定基準が下がると wrap を見逃すため、
     /// 判定基準は同一 epoch 内で最大の生 timestamp を保持する。
-    pub fn normalize(&mut self, raw: u64) -> u64 {
+    fn normalize(&mut self, raw: u64) -> u64 {
         let raw = raw & self.mask;
 
         if let Some(high_water_raw) = self.wrap_detection_high_water_raw {
