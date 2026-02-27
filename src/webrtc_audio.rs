@@ -11,6 +11,8 @@ use crate::audio_converter::AudioConverterBuilder;
 const AUDIO_BYTES_PER_SAMPLE: usize = 2;
 const AUDIO_CHANNELS: usize = 2;
 const AUDIO_TIMESTAMP_DRIFT_WARN_THRESHOLD: Duration = Duration::from_millis(20);
+const AUDIO_SAMPLES_PER_CHANNEL_PER_CHUNK: usize = 480; // 48 kHz の 10 ms
+const AUDIO_SAMPLES_PER_CHUNK: usize = AUDIO_SAMPLES_PER_CHANNEL_PER_CHUNK * AUDIO_CHANNELS;
 
 #[derive(Debug, Default)]
 struct AudioTimingState {
@@ -33,6 +35,7 @@ pub(crate) struct WebRtcAudioTransportSink {
     transport: Arc<Mutex<Option<AudioTransportRef>>>,
     timing: Arc<Mutex<AudioTimingState>>,
     converter: Arc<Mutex<crate::audio_converter::AudioConverter>>,
+    pending_samples: Arc<Mutex<Vec<i16>>>,
 }
 
 impl WebRtcAudioTransportSink {
@@ -47,6 +50,7 @@ impl WebRtcAudioTransportSink {
                     .sample_rate(SampleRate::HZ_48000)
                     .build(),
             )),
+            pending_samples: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -59,6 +63,9 @@ impl WebRtcAudioTransportSink {
         }
         if let Ok(mut converter) = self.converter.lock() {
             converter.reset();
+        }
+        if let Ok(mut pending_samples) = self.pending_samples.lock() {
+            pending_samples.clear();
         }
     }
 
@@ -116,52 +123,81 @@ impl WebRtcAudioTransportSink {
             );
         }
 
-        let mut native_endian = Vec::with_capacity(frame.data.len());
-        for chunk in frame.data.chunks_exact(AUDIO_BYTES_PER_SAMPLE) {
-            let sample = i16::from_be_bytes([chunk[0], chunk[1]]);
-            native_endian.extend_from_slice(&sample.to_ne_bytes());
-        }
-
         let transport = self
             .transport
             .lock()
             .ok()
             .and_then(|guard| *guard)
-            .ok_or_else(|| crate::Error::new("audio transport is not ready"))?;
+            .ok_or_else(|| {
+                if let Ok(mut pending_samples) = self.pending_samples.lock() {
+                    // 未接続中の古い音声は後送しない。
+                    pending_samples.clear();
+                }
+                crate::Error::new("audio transport is not ready")
+            })?;
 
         let mut new_mic_level = 0u32;
-        let estimated_capture_time_ns = i64::try_from(frame.timestamp.as_nanos()).ok();
+        let mut pending_samples = self
+            .pending_samples
+            .lock()
+            .map_err(|_| crate::Error::new("audio pending buffer lock poisoned"))?;
+        append_i16be_samples(&mut pending_samples, &frame.data);
+
+        let sent_chunks = drain_ready_chunks(&mut pending_samples, |chunk| {
+            let result = unsafe {
+                transport.recorded_data_is_available(
+                    chunk.as_ptr().cast::<u8>(),
+                    AUDIO_SAMPLES_PER_CHANNEL_PER_CHUNK,
+                    AUDIO_BYTES_PER_SAMPLE,
+                    AUDIO_CHANNELS,
+                    frame.sample_rate.get(),
+                    0,
+                    0,
+                    0,
+                    false,
+                    &mut new_mic_level,
+                    // Rust 側と libwebrtc 側の時刻基準の差異を避けるため、capture 時刻は渡さない。
+                    None,
+                )
+            };
+            if result != 0 {
+                return Err(crate::Error::new(format!(
+                    "recorded_data_is_available failed: {result}"
+                )));
+            }
+            Ok(())
+        })?;
+
         tracing::trace!(
             timestamp_us = frame.timestamp.as_micros(),
             samples_per_channel,
             sample_rate = frame.sample_rate.get(),
-            "pushing audio frame to WebRTC AudioTransport",
+            sent_chunks,
+            pending_samples_per_channel = pending_samples.len() / AUDIO_CHANNELS,
+            "pushed audio frame chunks to WebRTC AudioTransport",
         );
-
-        // AudioTransport はネイティブ実装が期待する生バッファを参照するため、
-        // ここでは引数の整合を確認したうえで FFI 呼び出しを行う。
-        let result = unsafe {
-            transport.recorded_data_is_available(
-                native_endian.as_ptr(),
-                samples_per_channel,
-                AUDIO_BYTES_PER_SAMPLE,
-                AUDIO_CHANNELS,
-                frame.sample_rate.get(),
-                0,
-                0,
-                0,
-                false,
-                &mut new_mic_level,
-                estimated_capture_time_ns,
-            )
-        };
-        if result != 0 {
-            return Err(crate::Error::new(format!(
-                "recorded_data_is_available failed: {result}"
-            )));
-        }
         Ok(())
     }
+}
+
+fn append_i16be_samples(pending_samples: &mut Vec<i16>, data: &[u8]) {
+    pending_samples.extend(
+        data.chunks_exact(AUDIO_BYTES_PER_SAMPLE)
+            .map(|chunk| i16::from_be_bytes([chunk[0], chunk[1]])),
+    );
+}
+
+fn drain_ready_chunks(
+    pending_samples: &mut Vec<i16>,
+    mut on_chunk: impl FnMut(&[i16]) -> crate::Result<()>,
+) -> crate::Result<usize> {
+    let mut sent_chunks = 0usize;
+    while pending_samples.len() >= AUDIO_SAMPLES_PER_CHUNK {
+        on_chunk(&pending_samples[..AUDIO_SAMPLES_PER_CHUNK])?;
+        pending_samples.drain(..AUDIO_SAMPLES_PER_CHUNK);
+        sent_chunks += 1;
+    }
+    Ok(sent_chunks)
 }
 
 #[cfg(test)]
@@ -198,5 +234,34 @@ mod tests {
         );
         assert_eq!(drift, Duration::from_millis(30));
         assert!(drift > AUDIO_TIMESTAMP_DRIFT_WARN_THRESHOLD);
+    }
+
+    #[test]
+    fn drain_ready_chunks_splits_samples_by_10ms() {
+        let mut pending = vec![0; AUDIO_SAMPLES_PER_CHUNK * 2 + AUDIO_CHANNELS * 100];
+        let mut chunks = Vec::new();
+
+        let sent = drain_ready_chunks(&mut pending, |chunk| {
+            chunks.push(chunk.len());
+            Ok(())
+        })
+        .expect("drain_ready_chunks must succeed");
+
+        assert_eq!(sent, 2);
+        assert_eq!(
+            chunks,
+            vec![AUDIO_SAMPLES_PER_CHUNK, AUDIO_SAMPLES_PER_CHUNK]
+        );
+        assert_eq!(pending.len(), AUDIO_CHANNELS * 100);
+    }
+
+    #[test]
+    fn drain_ready_chunks_keeps_partial_samples() {
+        let mut pending = vec![0; AUDIO_SAMPLES_PER_CHUNK - 1];
+        let sent =
+            drain_ready_chunks(&mut pending, |_chunk| Ok(())).expect("drain_ready_chunks failed");
+
+        assert_eq!(sent, 0);
+        assert_eq!(pending.len(), AUDIO_SAMPLES_PER_CHUNK - 1);
     }
 }

@@ -269,6 +269,7 @@ struct WhipSession {
     _video_track: Option<shiguredo_webrtc::VideoTrack>,
     resource_url: Option<String>,
     bearer_token: Option<String>,
+    audio_transport_not_ready_count: u64,
 }
 
 impl WhipSession {
@@ -359,6 +360,7 @@ impl WhipSession {
             _video_track: video_track,
             resource_url,
             bearer_token: bearer_token.map(str::to_owned),
+            audio_transport_not_ready_count: 0,
         })
     }
 
@@ -372,13 +374,40 @@ impl WhipSession {
 
     fn push_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         match self.audio_sink.push_i16be_stereo_48khz(frame) {
-            Ok(()) => Ok(()),
-            Err(e) if e.reason == "audio transport is not ready" => Ok(()),
+            Ok(()) => {
+                if self.audio_transport_not_ready_count > 0 {
+                    tracing::info!(
+                        dropped_audio_frames = self.audio_transport_not_ready_count,
+                        "WHIP audio transport is ready; recovered from startup drops",
+                    );
+                    self.audio_transport_not_ready_count = 0;
+                }
+                Ok(())
+            }
+            Err(e) if e.reason == "audio transport is not ready" => {
+                self.audio_transport_not_ready_count =
+                    self.audio_transport_not_ready_count.saturating_add(1);
+                if self.audio_transport_not_ready_count <= 5
+                    || self.audio_transport_not_ready_count.is_power_of_two()
+                {
+                    tracing::info!(
+                        dropped_audio_frames = self.audio_transport_not_ready_count,
+                        "WHIP audio frame dropped: audio transport is not ready",
+                    );
+                }
+                Ok(())
+            }
             Err(e) => Err(e),
         }
     }
 
     async fn disconnect(&mut self) {
+        if self.audio_transport_not_ready_count > 0 {
+            tracing::info!(
+                dropped_audio_frames = self.audio_transport_not_ready_count,
+                "WHIP session ended while audio transport was not ready",
+            );
+        }
         self.pc = None;
         if let Some(resource_url) = self.resource_url.take() {
             match crate::webrtc_http::send_delete_resource(
