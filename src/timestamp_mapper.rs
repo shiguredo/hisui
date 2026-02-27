@@ -120,6 +120,15 @@ mod tests {
         let mut normalizer = WrappingTimestampNormalizer::new(32);
         assert_eq!(normalizer.normalize(100), 100);
         assert_eq!(normalizer.normalize(90), 90);
+        assert_eq!(normalizer.normalize(110), 110);
+    }
+
+    #[test]
+    fn normalizer_does_not_wrap_when_diff_equals_half_modulus() {
+        let mut normalizer = WrappingTimestampNormalizer::new(4);
+        assert_eq!(normalizer.normalize(12), 12);
+        // 12 -> 4 は差分が 8 (= half_modulus) のため wrap 判定しない。
+        assert_eq!(normalizer.normalize(4), 4);
     }
 
     #[test]
@@ -135,5 +144,20 @@ mod tests {
         let _ = mapper.map(u32::MAX as u64 - 2);
         let mapped = mapper.map(1);
         assert_eq!(mapped, Duration::from_millis(4));
+    }
+
+    #[test]
+    fn mapper_handles_multiple_wraps() {
+        // bits=3 のため modulus は 8、half_modulus は 4。
+        let mut mapper = TimestampMapper::new(3, 1, Duration::ZERO);
+
+        // base は初回値 6。
+        assert_eq!(mapper.map(6), Duration::ZERO);
+        // 6 -> 1 は差分 5 (> 4) なので 1 回目の wrap。
+        assert_eq!(mapper.map(1), Duration::from_secs(3));
+        // 1 -> 7 は通常前進。
+        assert_eq!(mapper.map(7), Duration::from_secs(9));
+        // 7 -> 0 は差分 7 (> 4) なので 2 回目の wrap。
+        assert_eq!(mapper.map(0), Duration::from_secs(10));
     }
 }
