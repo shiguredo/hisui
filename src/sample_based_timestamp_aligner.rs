@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use crate::audio::SampleRate;
 
-pub(crate) const DEFAULT_REBASE_THRESHOLD: Duration = Duration::from_millis(100);
+pub const DEFAULT_REBASE_THRESHOLD: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone)]
-pub(crate) struct SampleBasedTimestampAligner {
+pub struct SampleBasedTimestampAligner {
     sample_rate: SampleRate,
     rebase_threshold: Duration,
     base_input_timestamp: Option<Duration>,
@@ -13,7 +13,7 @@ pub(crate) struct SampleBasedTimestampAligner {
 }
 
 impl SampleBasedTimestampAligner {
-    pub(crate) fn new(sample_rate: SampleRate, rebase_threshold: Duration) -> Self {
+    pub fn new(sample_rate: SampleRate, rebase_threshold: Duration) -> Self {
         Self {
             sample_rate,
             rebase_threshold,
@@ -22,11 +22,11 @@ impl SampleBasedTimestampAligner {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: SampleRate) {
+    pub fn set_sample_rate(&mut self, sample_rate: SampleRate) {
         self.sample_rate = sample_rate;
     }
 
-    pub(crate) fn align_input_timestamp(&mut self, input_timestamp: Duration, output_samples: u64) {
+    pub fn align_input_timestamp(&mut self, input_timestamp: Duration, output_samples: u64) {
         if self.base_input_timestamp.is_none() {
             self.set_alignment_base(input_timestamp, output_samples);
             return;
@@ -38,7 +38,7 @@ impl SampleBasedTimestampAligner {
         }
     }
 
-    pub(crate) fn estimate_timestamp_from_output_samples(&self, output_samples: u64) -> Duration {
+    pub fn estimate_timestamp_from_output_samples(&self, output_samples: u64) -> Duration {
         let Some(base_input_timestamp) = self.base_input_timestamp else {
             return Duration::ZERO;
         };
