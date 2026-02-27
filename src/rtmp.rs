@@ -162,7 +162,7 @@ pub struct RtmpIncomingFrameHandler {
     audio_sample_entry: Option<SampleEntry>,
     video_sample_entry: Option<SampleEntry>,
     received_video_keyframe: bool,
-    timestamp_mapper: crate::timestamp_unwrapper::TimestampMapper,
+    timestamp_mapper: crate::timestamp_mapper::TimestampMapper,
 }
 
 #[derive(Debug, Clone)]
@@ -179,7 +179,7 @@ impl RtmpIncomingFrameHandler {
             audio_sample_entry: None,
             video_sample_entry: None,
             received_video_keyframe: false,
-            timestamp_mapper: crate::timestamp_unwrapper::TimestampMapper::new(
+            timestamp_mapper: crate::timestamp_mapper::TimestampMapper::new(
                 32,
                 1_000,
                 timestamp_offset,

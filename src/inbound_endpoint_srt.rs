@@ -658,8 +658,8 @@ struct SrtTsDemuxer {
     pid_to_stream_type: HashMap<Pid, StreamType>,
     stream_id_to_pid: HashMap<StreamId, Pid>,
     pending_pes: HashMap<Pid, PendingPesPacket>,
-    video_timestamp_mapper: crate::timestamp_unwrapper::TimestampMapper,
-    audio_timestamp_mapper: crate::timestamp_unwrapper::TimestampMapper,
+    video_timestamp_mapper: crate::timestamp_mapper::TimestampMapper,
+    audio_timestamp_mapper: crate::timestamp_mapper::TimestampMapper,
     last_aac_config_key: Option<AacConfigKey>,
     received_video_keyframe: bool,
 }
@@ -674,12 +674,12 @@ impl SrtTsDemuxer {
             pid_to_stream_type: HashMap::new(),
             stream_id_to_pid: HashMap::new(),
             pending_pes: HashMap::new(),
-            video_timestamp_mapper: crate::timestamp_unwrapper::TimestampMapper::new(
+            video_timestamp_mapper: crate::timestamp_mapper::TimestampMapper::new(
                 33,
                 90_000,
                 Duration::ZERO,
             ),
-            audio_timestamp_mapper: crate::timestamp_unwrapper::TimestampMapper::new(
+            audio_timestamp_mapper: crate::timestamp_mapper::TimestampMapper::new(
                 33,
                 90_000,
                 Duration::ZERO,
