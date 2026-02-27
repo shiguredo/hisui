@@ -139,7 +139,7 @@ impl SrtInboundEndpoint {
         let base_time = Instant::now();
         let mut connection_timestamp_offset = Duration::ZERO;
 
-        let mut demuxer = SrtTsDemuxer::new();
+        let mut demuxer = SrtTsDemuxer::new()?;
 
         let mut video_track_tx = if let Some(track_id) = &self.output_video_track_id {
             Some(handle.publish_track(track_id.clone()).await?)
@@ -520,7 +520,7 @@ fn reset_connection_state(
     connection_ctx: &mut SrtConnectionContext<'_>,
 ) -> crate::Result<()> {
     *connection_ctx.peer_addr = None;
-    *connection_ctx.demuxer = SrtTsDemuxer::new();
+    *connection_ctx.demuxer = SrtTsDemuxer::new()?;
     *connection_ctx.connection_timestamp_offset = Duration::ZERO;
     *conn = create_listener_connection(endpoint_config)?;
     Ok(())
@@ -658,27 +658,35 @@ struct SrtTsDemuxer {
     pid_to_stream_type: HashMap<Pid, StreamType>,
     stream_id_to_pid: HashMap<StreamId, Pid>,
     pending_pes: HashMap<Pid, PendingPesPacket>,
-    base_video_timestamp: Option<Duration>,
-    base_audio_timestamp: Option<Duration>,
+    video_timestamp_mapper: crate::timestamp_mapper::TimestampMapper,
+    audio_timestamp_mapper: crate::timestamp_mapper::TimestampMapper,
     last_aac_config_key: Option<AacConfigKey>,
     received_video_keyframe: bool,
 }
 
 impl SrtTsDemuxer {
-    fn new() -> Self {
+    fn new() -> crate::Result<Self> {
         let stream = SharedReadBuffer::new();
         let ts_reader = TsPacketReader::new(stream.clone());
-        Self {
+        Ok(Self {
             stream,
             ts_reader,
             pid_to_stream_type: HashMap::new(),
             stream_id_to_pid: HashMap::new(),
             pending_pes: HashMap::new(),
-            base_video_timestamp: None,
-            base_audio_timestamp: None,
+            video_timestamp_mapper: crate::timestamp_mapper::TimestampMapper::new(
+                33,
+                90_000,
+                Duration::ZERO,
+            )?,
+            audio_timestamp_mapper: crate::timestamp_mapper::TimestampMapper::new(
+                33,
+                90_000,
+                Duration::ZERO,
+            )?,
             last_aac_config_key: None,
             received_video_keyframe: false,
-        }
+        })
     }
 
     fn push_payload(&mut self, payload: &[u8]) -> crate::Result<Vec<TsSample>> {
@@ -851,16 +859,14 @@ impl SrtTsDemuxer {
             self.received_video_keyframe = true;
         }
 
-        let timestamp = timestamp_90khz_to_duration(dts.as_u64());
-        let base_timestamp = *self.base_video_timestamp.get_or_insert(timestamp);
-        let relative_timestamp = timestamp.saturating_sub(base_timestamp);
+        let timestamp = self.video_timestamp_mapper.map(dts.as_u64());
 
         Ok(Some(TsSample::Video(crate::VideoFrame {
             data: pending.data,
             format: crate::video::VideoFormat::H264AnnexB,
             keyframe,
             size: None,
-            timestamp: relative_timestamp,
+            timestamp,
             sample_entry: None, // Annex-B 入力では sample_entry は付与しない
         })))
     }
@@ -927,15 +933,15 @@ impl SrtTsDemuxer {
                 .saturating_mul(90_000)
                 .checked_div(sample_rate.get() as u64)
                 .unwrap_or(0);
-            let timestamp = timestamp_90khz_to_duration(pts.as_u64().saturating_add(pts_ticks));
-            let base_timestamp = *self.base_audio_timestamp.get_or_insert(timestamp);
-            let relative_timestamp = timestamp.saturating_sub(base_timestamp);
+            let timestamp = self
+                .audio_timestamp_mapper
+                .map(pts.as_u64().saturating_add(pts_ticks));
             samples.push(TsSample::Audio(crate::AudioFrame {
                 data: raw_data,
                 format: crate::audio::AudioFormat::Aac,
                 channels: channels_value,
                 sample_rate,
-                timestamp: relative_timestamp,
+                timestamp,
                 sample_entry,
             }));
 
@@ -971,10 +977,6 @@ fn is_pes_ready(pending: &PendingPesPacket) -> bool {
 
 fn pes_optional_header_len(header: &PesHeader) -> u16 {
     3 + header.pts.map_or(0, |_| 5) + header.dts.map_or(0, |_| 5) + header.escr.map_or(0, |_| 6)
-}
-
-fn timestamp_90khz_to_duration(timestamp: u64) -> Duration {
-    Duration::from_micros(timestamp.saturating_mul(1_000_000) / 90_000)
 }
 
 #[derive(Debug, Clone, Copy)]
