@@ -5,6 +5,18 @@ use crate::audio::SampleRate;
 pub const DEFAULT_REBASE_THRESHOLD: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone)]
+/// 音声デコード後の timestamp を、入力 timestamp と出力 sample 数の両方を使って安定生成するための補助構造体。
+///
+/// AAC のようにデコーダー内部でバッファリングが発生する形式では、入力 packet と出力 frame が 1 対 1 に対応しない。
+/// そのため入力 timestamp を単純に引き継ぐだけでは、長時間動作時に徐々にずれが見えやすい。
+///
+/// この構造体は次の方針で timestamp を決める。
+/// - 最初の入力 timestamp を基準オフセットとして採用する
+/// - 以降は出力 sample 数を積算して連続した timestamp を推定する
+/// - 入力 timestamp と推定値の乖離が閾値を超えた場合のみ基準を再設定する
+///
+/// この設計により、通常時は sample 数基準で誤差蓄積を抑えつつ、入力側のフレーム欠落や飛びが発生した場合にも
+/// timestamp を速やかに追従させられる。
 pub struct SampleBasedTimestampAligner {
     sample_rate: SampleRate,
     rebase_threshold: Duration,
