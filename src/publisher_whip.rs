@@ -12,8 +12,6 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{Error, MediaFrame, Message, ProcessorHandle, TrackId};
 
-const AV_SYNC_LOG_INTERVAL: Duration = Duration::from_secs(1);
-
 #[derive(Debug, Clone)]
 pub struct WhipPublisher {
     pub output_url: String,
@@ -271,8 +269,6 @@ struct WhipSession {
     _video_track: Option<shiguredo_webrtc::VideoTrack>,
     resource_url: Option<String>,
     bearer_token: Option<String>,
-    negotiated_video_codecs: Vec<String>,
-    av_sync_metrics: AvSyncMetrics,
 }
 
 impl WhipSession {
@@ -352,8 +348,7 @@ impl WhipSession {
             (None, None)
         };
 
-        let (resource_url, negotiated_video_codecs) =
-            exchange_offer_answer(&mut pc, output_url, bearer_token).await?;
+        let resource_url = exchange_offer_answer(&mut pc, output_url, bearer_token).await?;
 
         Ok(Self {
             _factory_bundle: factory_bundle,
@@ -364,16 +359,10 @@ impl WhipSession {
             _video_track: video_track,
             resource_url,
             bearer_token: bearer_token.map(str::to_owned),
-            negotiated_video_codecs,
-            av_sync_metrics: AvSyncMetrics::default(),
         })
     }
 
     fn push_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
-        self.av_sync_metrics.observe_video_frame(
-            frame.timestamp,
-            self.negotiated_video_codecs.first().map(String::as_str),
-        );
         let source = self
             .video_source
             .as_mut()
@@ -382,10 +371,6 @@ impl WhipSession {
     }
 
     fn push_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
-        self.av_sync_metrics.observe_audio_frame(
-            frame.timestamp,
-            self.negotiated_video_codecs.first().map(String::as_str),
-        );
         match self.audio_sink.push_i16be_stereo_48khz(frame) {
             Ok(()) => Ok(()),
             Err(e) if e.reason == "audio transport is not ready" => Ok(()),
@@ -411,101 +396,6 @@ impl WhipSession {
             }
         }
     }
-}
-
-#[derive(Debug, Default)]
-struct AvSyncMetrics {
-    first_audio_timestamp: Option<Duration>,
-    first_video_timestamp: Option<Duration>,
-    last_audio_timestamp: Option<Duration>,
-    last_video_timestamp: Option<Duration>,
-    last_audio_arrival: Option<Instant>,
-    last_video_arrival: Option<Instant>,
-    min_av_diff_us: Option<i128>,
-    max_av_diff_us: Option<i128>,
-    last_log_at: Option<Instant>,
-}
-
-impl AvSyncMetrics {
-    fn observe_audio_frame(&mut self, timestamp: Duration, negotiated_video_codec: Option<&str>) {
-        let now = Instant::now();
-        if self.first_audio_timestamp.is_none() {
-            self.first_audio_timestamp = Some(timestamp);
-        }
-        self.last_audio_timestamp = Some(timestamp);
-        self.last_audio_arrival = Some(now);
-        self.maybe_log(now, negotiated_video_codec);
-    }
-
-    fn observe_video_frame(&mut self, timestamp: Duration, negotiated_video_codec: Option<&str>) {
-        let now = Instant::now();
-        if self.first_video_timestamp.is_none() {
-            self.first_video_timestamp = Some(timestamp);
-        }
-        self.last_video_timestamp = Some(timestamp);
-        self.last_video_arrival = Some(now);
-        self.maybe_log(now, negotiated_video_codec);
-    }
-
-    fn maybe_log(&mut self, now: Instant, negotiated_video_codec: Option<&str>) {
-        let Some(audio_timestamp) = self.last_audio_timestamp else {
-            return;
-        };
-        let Some(video_timestamp) = self.last_video_timestamp else {
-            return;
-        };
-
-        let audio_timestamp_us = duration_to_i128_micros(audio_timestamp);
-        let video_timestamp_us = duration_to_i128_micros(video_timestamp);
-        let av_diff_us = audio_timestamp_us - video_timestamp_us;
-        self.min_av_diff_us = Some(
-            self.min_av_diff_us
-                .map_or(av_diff_us, |v| v.min(av_diff_us)),
-        );
-        self.max_av_diff_us = Some(
-            self.max_av_diff_us
-                .map_or(av_diff_us, |v| v.max(av_diff_us)),
-        );
-
-        if let Some(last_log_at) = self.last_log_at
-            && now.duration_since(last_log_at) < AV_SYNC_LOG_INTERVAL
-        {
-            return;
-        }
-        self.last_log_at = Some(now);
-
-        let arrival_diff_us = match (self.last_audio_arrival, self.last_video_arrival) {
-            (Some(audio_arrival), Some(video_arrival)) => {
-                Some(signed_duration_diff_micros(audio_arrival, video_arrival))
-            }
-            _ => None,
-        };
-
-        tracing::debug!(
-            "WHIP AV sync metrics: first_audio_timestamp_us={:?}, first_video_timestamp_us={:?}, audio_timestamp_us={}, video_timestamp_us={}, av_diff_us={}, arrival_diff_us={:?}, min_av_diff_us={:?}, max_av_diff_us={:?}, negotiated_video_codec={}",
-            self.first_audio_timestamp.map(|v| v.as_micros()),
-            self.first_video_timestamp.map(|v| v.as_micros()),
-            audio_timestamp_us,
-            video_timestamp_us,
-            av_diff_us,
-            arrival_diff_us,
-            self.min_av_diff_us,
-            self.max_av_diff_us,
-            negotiated_video_codec.unwrap_or("<unknown>")
-        );
-    }
-}
-
-fn signed_duration_diff_micros(lhs: Instant, rhs: Instant) -> i128 {
-    if lhs >= rhs {
-        duration_to_i128_micros(lhs.duration_since(rhs))
-    } else {
-        -duration_to_i128_micros(rhs.duration_since(lhs))
-    }
-}
-
-fn duration_to_i128_micros(duration: Duration) -> i128 {
-    i128::try_from(duration.as_micros()).unwrap_or(i128::MAX)
 }
 
 fn validate_output_url(output_url: &str) -> Result<(), String> {
@@ -644,7 +534,7 @@ async fn exchange_offer_answer(
     pc: &mut PeerConnection,
     output_url: &str,
     bearer_token: Option<&str>,
-) -> crate::Result<(Option<String>, Vec<String>)> {
+) -> crate::Result<Option<String>> {
     let offer_sdp = crate::webrtc_sdp::create_offer_sdp(pc)?;
     log_sdp_candidates("WHIP offer", &offer_sdp);
 
@@ -668,7 +558,6 @@ async fn exchange_offer_answer(
         return Err(Error::new("WHIP endpoint returned empty answer SDP"));
     }
     log_sdp_candidates("WHIP answer", &answer_sdp);
-    let answer_video_codecs = audit_offer_and_answer_sdp(&offer_sdp, &answer_sdp);
     crate::webrtc_sdp::set_remote_answer(pc, &answer_sdp)?;
 
     let resource_url = match location.as_deref() {
@@ -688,7 +577,7 @@ async fn exchange_offer_answer(
         }
     };
 
-    Ok((resource_url, answer_video_codecs))
+    Ok(resource_url)
 }
 
 fn apply_ice_servers_from_link_header(
@@ -758,260 +647,6 @@ fn log_sdp_candidates(label: &str, sdp: &str) {
             candidates.len() - 10
         );
     }
-}
-
-#[derive(Debug, Clone)]
-struct SdpMediaSection {
-    kind: String,
-    port: Option<u16>,
-    payload_types: Vec<String>,
-    mid: Option<String>,
-    direction: Option<String>,
-    msid_present: bool,
-    codecs: Vec<String>,
-}
-
-#[derive(Debug, Default, Clone)]
-struct SdpSummary {
-    bundle_mids: Vec<String>,
-    media_sections: Vec<SdpMediaSection>,
-}
-
-fn parse_sdp_summary(sdp: &str) -> SdpSummary {
-    let mut summary = SdpSummary::default();
-    let mut current_section: Option<SdpMediaSection> = None;
-
-    for raw_line in sdp.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if let Some(rest) = line.strip_prefix("a=group:BUNDLE") {
-            summary.bundle_mids = rest
-                .split_whitespace()
-                .map(ToOwned::to_owned)
-                .collect::<Vec<_>>();
-            continue;
-        }
-
-        if let Some(rest) = line.strip_prefix("m=") {
-            if let Some(section) = current_section.take() {
-                summary.media_sections.push(section);
-            }
-
-            let mut fields = rest.split_whitespace();
-            let kind = fields.next().unwrap_or_default().to_owned();
-            let port = fields.next().and_then(|v| v.parse::<u16>().ok());
-            let _proto = fields.next();
-            let payload_types = fields.map(ToOwned::to_owned).collect::<Vec<_>>();
-
-            current_section = Some(SdpMediaSection {
-                kind,
-                port,
-                payload_types,
-                mid: None,
-                direction: None,
-                msid_present: false,
-                codecs: Vec::new(),
-            });
-            continue;
-        }
-
-        let Some(section) = current_section.as_mut() else {
-            continue;
-        };
-
-        if let Some(mid) = line.strip_prefix("a=mid:") {
-            section.mid = Some(mid.to_owned());
-            continue;
-        }
-        if let Some(msid) = line.strip_prefix("a=msid:")
-            && !msid.is_empty()
-        {
-            section.msid_present = true;
-            continue;
-        }
-        if matches!(
-            line,
-            "a=sendrecv" | "a=sendonly" | "a=recvonly" | "a=inactive"
-        ) {
-            section.direction = Some(line["a=".len()..].to_owned());
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("a=rtpmap:")
-            && let Some((payload_type, format)) = rest.split_once(' ')
-        {
-            let codec = format
-                .split('/')
-                .next()
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if !codec.is_empty()
-                && section.payload_types.iter().any(|v| v == payload_type)
-                && !section.codecs.iter().any(|v| v == &codec)
-            {
-                section.codecs.push(codec);
-            }
-        }
-    }
-
-    if let Some(section) = current_section.take() {
-        summary.media_sections.push(section);
-    }
-
-    summary
-}
-
-fn audit_offer_and_answer_sdp(offer_sdp: &str, answer_sdp: &str) -> Vec<String> {
-    let offer = parse_sdp_summary(offer_sdp);
-    let answer = parse_sdp_summary(answer_sdp);
-
-    log_sdp_summary("WHIP offer", &offer);
-    log_sdp_summary("WHIP answer", &answer);
-
-    for issue in validate_sdp_summary("offer", &offer) {
-        tracing::warn!("WHIP SDP audit issue: {issue}");
-    }
-    for issue in validate_sdp_summary("answer", &answer) {
-        tracing::warn!("WHIP SDP audit issue: {issue}");
-    }
-    for issue in validate_offer_answer_compatibility(&offer, &answer) {
-        tracing::warn!("WHIP SDP audit issue: {issue}");
-    }
-
-    answer
-        .media_sections
-        .iter()
-        .find(|section| section.kind == "video")
-        .map(|section| section.codecs.clone())
-        .unwrap_or_default()
-}
-
-fn log_sdp_summary(label: &str, summary: &SdpSummary) {
-    tracing::debug!(
-        "{label} SDP media summary: media_count={}, bundle_mids={:?}",
-        summary.media_sections.len(),
-        summary.bundle_mids
-    );
-    for section in &summary.media_sections {
-        tracing::debug!(
-            "{label} SDP media: kind={}, mid={}, port={:?}, direction={}, msid_present={}, payload_types={:?}, codecs={:?}",
-            section.kind,
-            section.mid.as_deref().unwrap_or("<missing>"),
-            section.port,
-            section.direction.as_deref().unwrap_or("<missing>"),
-            section.msid_present,
-            section.payload_types,
-            section.codecs
-        );
-    }
-}
-
-fn validate_sdp_summary(label: &str, summary: &SdpSummary) -> Vec<String> {
-    let mut issues = Vec::new();
-    let has_audio = summary
-        .media_sections
-        .iter()
-        .any(|section| section.kind == "audio");
-    let has_video = summary
-        .media_sections
-        .iter()
-        .any(|section| section.kind == "video");
-    if !has_audio {
-        issues.push(format!("{label}: audio m-line is missing"));
-    }
-    if !has_video {
-        issues.push(format!("{label}: video m-line is missing"));
-    }
-
-    if summary.bundle_mids.is_empty() {
-        issues.push(format!("{label}: a=group:BUNDLE is missing or empty"));
-    }
-
-    let mut mids = std::collections::BTreeSet::new();
-    for section in &summary.media_sections {
-        let Some(mid) = section.mid.as_deref() else {
-            issues.push(format!("{label}: {} m-line is missing a=mid", section.kind));
-            continue;
-        };
-        if !mids.insert(mid.to_owned()) {
-            issues.push(format!("{label}: duplicate mid detected: {mid}"));
-        }
-        if !summary
-            .bundle_mids
-            .iter()
-            .any(|bundle_mid| bundle_mid == mid)
-        {
-            issues.push(format!(
-                "{label}: mid {mid} is not listed in a=group:BUNDLE"
-            ));
-        }
-        if section.direction.is_none() {
-            issues.push(format!(
-                "{label}: {} m-line (mid={mid}) is missing direction attribute",
-                section.kind
-            ));
-        }
-        if matches!(
-            section.direction.as_deref(),
-            Some("sendrecv") | Some("sendonly")
-        ) && !section.msid_present
-        {
-            issues.push(format!(
-                "{label}: {} m-line (mid={mid}) is missing a=msid",
-                section.kind
-            ));
-        }
-    }
-
-    issues
-}
-
-fn validate_offer_answer_compatibility(offer: &SdpSummary, answer: &SdpSummary) -> Vec<String> {
-    let mut issues = Vec::new();
-    let answer_by_mid = answer
-        .media_sections
-        .iter()
-        .filter_map(|section| section.mid.as_deref().map(|mid| (mid, section)))
-        .collect::<std::collections::BTreeMap<_, _>>();
-
-    for offer_section in &offer.media_sections {
-        let Some(mid) = offer_section.mid.as_deref() else {
-            continue;
-        };
-
-        let Some(answer_section) = answer_by_mid.get(mid) else {
-            issues.push(format!("answer: m-line for mid {mid} is missing"));
-            continue;
-        };
-
-        if answer_section.kind != offer_section.kind {
-            issues.push(format!(
-                "answer: mid {mid} media kind mismatch: offer={}, answer={}",
-                offer_section.kind, answer_section.kind
-            ));
-        }
-
-        if answer_section.port == Some(0) {
-            issues.push(format!("answer: mid {mid} is rejected (port=0)"));
-        }
-
-        if offer_section.direction.as_deref() != Some("sendonly") {
-            issues.push(format!(
-                "offer: mid {mid} direction is not sendonly: {}",
-                offer_section.direction.as_deref().unwrap_or("<missing>")
-            ));
-        }
-
-        if matches!(answer_section.direction.as_deref(), Some("sendonly")) {
-            issues.push(format!(
-                "answer: mid {mid} direction is sendonly, expected recvonly or inactive"
-            ));
-        }
-    }
-
-    issues
 }
 
 async fn send_offer(
@@ -1140,81 +775,5 @@ mod tests {
         let publisher: WhipPublisher = crate::json::parse_str(json).expect("parse");
         assert!(publisher.input_video_track_id.is_none());
         assert!(publisher.input_audio_track_id.is_none());
-    }
-
-    #[test]
-    fn parse_sdp_summary_extracts_bundle_and_media() {
-        let sdp = "\
-v=0
-o=- 1 1 IN IP4 127.0.0.1
-s=-
-t=0 0
-a=group:BUNDLE 0 1
-m=audio 9 UDP/TLS/RTP/SAVPF 111
-a=mid:0
-a=sendonly
-a=msid:stream-a track-a
-a=rtpmap:111 opus/48000/2
-m=video 9 UDP/TLS/RTP/SAVPF 39
-a=mid:1
-a=sendonly
-a=msid:stream-v track-v
-a=rtpmap:39 AV1/90000
-";
-        let summary = parse_sdp_summary(sdp);
-
-        assert_eq!(summary.bundle_mids, vec!["0".to_owned(), "1".to_owned()]);
-        assert_eq!(summary.media_sections.len(), 2);
-        assert_eq!(summary.media_sections[0].kind, "audio");
-        assert_eq!(summary.media_sections[1].kind, "video");
-        assert_eq!(summary.media_sections[1].codecs, vec!["av1".to_owned()]);
-    }
-
-    #[test]
-    fn validate_offer_answer_compatibility_accepts_sendonly_recvonly_pair() {
-        let offer = parse_sdp_summary(
-            "\
-v=0
-o=- 1 1 IN IP4 127.0.0.1
-s=-
-t=0 0
-a=group:BUNDLE 0 1
-m=audio 9 UDP/TLS/RTP/SAVPF 111
-a=mid:0
-a=sendonly
-a=msid:stream-a track-a
-a=rtpmap:111 opus/48000/2
-m=video 9 UDP/TLS/RTP/SAVPF 39
-a=mid:1
-a=sendonly
-a=msid:stream-v track-v
-a=rtpmap:39 AV1/90000
-",
-        );
-        let answer = parse_sdp_summary(
-            "\
-v=0
-o=- 1 1 IN IP4 127.0.0.1
-s=-
-t=0 0
-a=group:BUNDLE 0 1
-m=audio 9 UDP/TLS/RTP/SAVPF 111
-a=mid:0
-a=recvonly
-a=rtpmap:111 opus/48000/2
-m=video 9 UDP/TLS/RTP/SAVPF 39
-a=mid:1
-a=recvonly
-a=rtpmap:39 AV1/90000
-",
-        );
-
-        let offer_issues = validate_sdp_summary("offer", &offer);
-        let answer_issues = validate_sdp_summary("answer", &answer);
-        let compatibility_issues = validate_offer_answer_compatibility(&offer, &answer);
-
-        assert!(offer_issues.is_empty(), "{offer_issues:?}");
-        assert!(answer_issues.is_empty(), "{answer_issues:?}");
-        assert!(compatibility_issues.is_empty(), "{compatibility_issues:?}");
     }
 }
