@@ -99,10 +99,10 @@ fn main() {
         panic!("[make] failed to build {LIB_NAME}");
     }
 
-    // Linux では ld -r で部分リンクし、objcopy でシンボルにプレフィックスを付ける。
+    // ld -r で部分リンクし、objcopy でシンボルにプレフィックスを付ける。
     // shiguredo_webrtc の libwebrtc_c.a にも opus が含まれているため、
     // シンボル名を変えて衝突を防ぐ。
-    if cfg!(target_os = "linux") {
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
         prefix_symbols(&output_lib_dir);
     }
 
@@ -114,9 +114,9 @@ fn main() {
         .write_to_file(&output_bindings_path)
         .expect("failed to write bindings");
 
-    // Linux ではシンボルにプレフィックスを付けているので、
+    // シンボルにプレフィックスを付けているので、
     // バインディングの extern 関数にも #[link_name] 属性を追加する
-    if cfg!(target_os = "linux") {
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
         add_link_name_prefix(&output_bindings_path, SYMBOL_PREFIX);
     }
 
@@ -223,11 +223,11 @@ fn add_link_name_prefix(bindings_path: &Path, prefix: &str) {
 
     for line in content.lines() {
         let trimmed = line.trim_start();
-        if let Some(after_pub_fn) = trimmed.strip_prefix("pub fn ") {
-            if let Some(name) = after_pub_fn.split('(').next() {
-                let indent = &line[..line.len() - trimmed.len()];
-                result.push_str(&format!("{indent}#[link_name = \"{prefix}{name}\"]\n"));
-            }
+        if let Some(after_pub_fn) = trimmed.strip_prefix("pub fn ")
+            && let Some(name) = after_pub_fn.split('(').next()
+        {
+            let indent = &line[..line.len() - trimmed.len()];
+            result.push_str(&format!("{indent}#[link_name = \"{prefix}{name}\"]\n"));
         }
         result.push_str(line);
         result.push('\n');
