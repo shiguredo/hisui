@@ -58,6 +58,7 @@ impl AudioToolboxDecoder {
         let aligner = self.timestamp_aligner.get_or_insert_with(|| {
             SampleBasedTimestampAligner::new(sample_rate_for_tracking, DEFAULT_REBASE_THRESHOLD)
         });
+        // AudioToolbox AAC は初期化時点で sample rate が確定しているため、ここで 1 回だけ設定すればよい。
         aligner.set_sample_rate(sample_rate_for_tracking);
         // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
         // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。

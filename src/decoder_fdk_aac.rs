@@ -57,7 +57,6 @@ impl FdkAacDecoder {
         let aligner = self.timestamp_aligner.get_or_insert_with(|| {
             SampleBasedTimestampAligner::new(sample_rate_for_tracking, DEFAULT_REBASE_THRESHOLD)
         });
-        aligner.set_sample_rate(sample_rate_for_tracking);
         // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
         // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。
         aligner.align_input_timestamp(frame.timestamp, self.total_output_samples);
@@ -77,6 +76,7 @@ impl FdkAacDecoder {
             self.timestamp_aligner
                 .as_mut()
                 .expect("timestamp aligner must be initialized before decoding")
+                // decode 成功後に得られる sample rate が最終的な実値なので、ここで再設定する。
                 .set_sample_rate(sample_rate);
             self.build_audio_frame(&decoded.data)
         } else {
