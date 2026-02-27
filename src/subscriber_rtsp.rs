@@ -1336,6 +1336,13 @@ fn resolve_rtsp_url(base_url: &str, control: &str) -> crate::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::io;
+    use std::time::Duration;
+
+    use shiguredo_rtsp::{RtpPacket, rtp::RtpHeader, rtsp_connection::encode_interleaved_frame};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
 
     #[test]
     fn parse_rtsp_input_url_with_credentials() {
@@ -1420,5 +1427,485 @@ mod tests {
         assert_eq!(aus[0].data, vec![0xaa, 0xbb, 0xcc, 0xdd]);
         assert_eq!(aus[1].rtp_timestamp, 10024);
         assert_eq!(aus[1].data, vec![0x11, 0x22]);
+    }
+
+    #[tokio::test]
+    async fn run_rtsp_session_receives_h264_and_aac() {
+        let server = TestRtspServer::spawn(TestRtspServerOptions {
+            require_basic_auth: false,
+            with_audio: true,
+            unsupported_video_codec: false,
+        })
+        .await
+        .expect("must start test RTSP server");
+        let parsed_url = parse_rtsp_input_url(&server.input_url).expect("must parse input URL");
+        let mut root_stats = crate::stats::Stats::new();
+        let stats = RtspSubscriberStats::new(root_stats.clone());
+        let mut audio_track_tx = None;
+        let mut video_track_tx = None;
+
+        let result = run_rtsp_session(
+            &parsed_url,
+            true,
+            true,
+            Duration::from_secs(3),
+            &stats,
+            &mut audio_track_tx,
+            &mut video_track_tx,
+        )
+        .await;
+
+        assert!(matches!(result, Err(SessionError::Retryable(_))));
+        server.wait().await.expect("server must finish cleanly");
+
+        let entries = root_stats.entries().expect("stats entries");
+        assert_eq!(metric_counter(&entries, "total_input_video_frame_count"), 1);
+        assert_eq!(metric_counter(&entries, "total_input_audio_data_count"), 1);
+        assert_eq!(
+            metric_string(&entries, "video_codec"),
+            Some("H264".to_owned())
+        );
+        assert_eq!(
+            metric_string(&entries, "audio_codec"),
+            Some("AAC".to_owned())
+        );
+        assert!(metric_duration(&entries, "last_input_video_timestamp") >= Duration::from_secs(3));
+        assert!(metric_duration(&entries, "last_input_audio_timestamp") >= Duration::from_secs(3));
+        assert!(!metric_flag(&entries, "is_connected"));
+    }
+
+    #[tokio::test]
+    async fn run_rtsp_session_handles_basic_auth_challenge() {
+        let server = TestRtspServer::spawn(TestRtspServerOptions {
+            require_basic_auth: true,
+            with_audio: false,
+            unsupported_video_codec: false,
+        })
+        .await
+        .expect("must start test RTSP server");
+        let parsed_url = parse_rtsp_input_url(&server.input_url).expect("must parse input URL");
+        let mut root_stats = crate::stats::Stats::new();
+        let stats = RtspSubscriberStats::new(root_stats.clone());
+        let mut audio_track_tx = None;
+        let mut video_track_tx = None;
+
+        let result = run_rtsp_session(
+            &parsed_url,
+            false,
+            true,
+            Duration::from_secs(1),
+            &stats,
+            &mut audio_track_tx,
+            &mut video_track_tx,
+        )
+        .await;
+
+        assert!(matches!(result, Err(SessionError::Retryable(_))));
+        server.wait().await.expect("server must finish cleanly");
+
+        let entries = root_stats.entries().expect("stats entries");
+        assert_eq!(metric_counter(&entries, "total_input_video_frame_count"), 1);
+        assert_eq!(
+            metric_string(&entries, "video_codec"),
+            Some("H264".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn run_rtsp_session_fails_with_unsupported_video_codec() {
+        let server = TestRtspServer::spawn(TestRtspServerOptions {
+            require_basic_auth: false,
+            with_audio: false,
+            unsupported_video_codec: true,
+        })
+        .await
+        .expect("must start test RTSP server");
+        let parsed_url = parse_rtsp_input_url(&server.input_url).expect("must parse input URL");
+        let mut root_stats = crate::stats::Stats::new();
+        let stats = RtspSubscriberStats::new(root_stats.clone());
+        let mut audio_track_tx = None;
+        let mut video_track_tx = None;
+
+        let result = run_rtsp_session(
+            &parsed_url,
+            false,
+            true,
+            Duration::ZERO,
+            &stats,
+            &mut audio_track_tx,
+            &mut video_track_tx,
+        )
+        .await;
+
+        assert!(matches!(result, Err(SessionError::Fatal(_))));
+        server.wait().await.expect("server must finish cleanly");
+    }
+
+    fn metric_counter(entries: &[crate::stats::StatsEntry], name: &str) -> u64 {
+        entries
+            .iter()
+            .find(|e| e.metric_name == name)
+            .and_then(|e| e.value.as_counter())
+            .expect("counter metric must exist")
+    }
+
+    fn metric_duration(entries: &[crate::stats::StatsEntry], name: &str) -> Duration {
+        entries
+            .iter()
+            .find(|e| e.metric_name == name)
+            .and_then(|e| e.value.as_duration())
+            .expect("duration metric must exist")
+    }
+
+    fn metric_string(entries: &[crate::stats::StatsEntry], name: &str) -> Option<String> {
+        entries
+            .iter()
+            .find(|e| e.metric_name == name)
+            .and_then(|e| e.value.as_string())
+    }
+
+    fn metric_flag(entries: &[crate::stats::StatsEntry], name: &str) -> bool {
+        entries
+            .iter()
+            .find(|e| e.metric_name == name)
+            .and_then(|e| e.value.as_flag())
+            .expect("flag metric must exist")
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TestRtspServerOptions {
+        require_basic_auth: bool,
+        with_audio: bool,
+        unsupported_video_codec: bool,
+    }
+
+    struct TestRtspServer {
+        input_url: String,
+        join_handle: tokio::task::JoinHandle<io::Result<()>>,
+    }
+
+    impl TestRtspServer {
+        async fn spawn(options: TestRtspServerOptions) -> io::Result<Self> {
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let local_addr = listener.local_addr()?;
+            let input_url = if options.require_basic_auth {
+                format!("rtsp://user:pass@127.0.0.1:{}/live", local_addr.port())
+            } else {
+                format!("rtsp://127.0.0.1:{}/live", local_addr.port())
+            };
+            let join_handle = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await?;
+                run_test_rtsp_server(stream, options).await
+            });
+            Ok(Self {
+                input_url,
+                join_handle,
+            })
+        }
+
+        async fn wait(self) -> io::Result<()> {
+            self.join_handle
+                .await
+                .map_err(|e| io::Error::other(format!("join error: {e}")))?
+        }
+    }
+
+    async fn run_test_rtsp_server(
+        mut stream: TcpStream,
+        options: TestRtspServerOptions,
+    ) -> io::Result<()> {
+        let mut read_buf = Vec::new();
+        let mut auth_challenged = false;
+        let mut video_rtp_channel = None;
+        let mut audio_rtp_channel = None;
+        let session_id = "test-session";
+
+        loop {
+            let request = read_rtsp_request(&mut stream, &mut read_buf).await?;
+            match request.method.as_str() {
+                "OPTIONS" => {
+                    write_rtsp_response(
+                        &mut stream,
+                        request.cseq,
+                        200,
+                        "OK",
+                        &[("Public", "OPTIONS, DESCRIBE, SETUP, PLAY, GET_PARAMETER")],
+                        None,
+                    )
+                    .await?;
+                }
+                "DESCRIBE" => {
+                    if options.require_basic_auth
+                        && !auth_challenged
+                        && request
+                            .headers
+                            .get("authorization")
+                            .is_none_or(|value| !value.starts_with("Basic "))
+                    {
+                        write_rtsp_response(
+                            &mut stream,
+                            request.cseq,
+                            401,
+                            "Unauthorized",
+                            &[("WWW-Authenticate", "Basic realm=\"test\"")],
+                            None,
+                        )
+                        .await?;
+                        auth_challenged = true;
+                        continue;
+                    }
+
+                    let sdp = build_test_sdp(options.with_audio, options.unsupported_video_codec);
+                    write_rtsp_response(
+                        &mut stream,
+                        request.cseq,
+                        200,
+                        "OK",
+                        &[
+                            ("Content-Type", "application/sdp"),
+                            ("Content-Base", "rtsp://127.0.0.1/live/"),
+                        ],
+                        Some(&sdp),
+                    )
+                    .await?;
+                    if options.unsupported_video_codec {
+                        return Ok(());
+                    }
+                }
+                "SETUP" => {
+                    let transport = request.headers.get("transport").ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "missing transport header")
+                    })?;
+                    let (rtp_channel, rtcp_channel) = parse_interleaved_channels(transport)
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "invalid interleaved channel",
+                            )
+                        })?;
+                    if request.uri.contains("trackID=0") {
+                        video_rtp_channel = Some(rtp_channel);
+                    } else if request.uri.contains("trackID=1") {
+                        audio_rtp_channel = Some(rtp_channel);
+                    }
+
+                    let transport_response =
+                        format!("RTP/AVP/TCP;unicast;interleaved={rtp_channel}-{rtcp_channel}");
+                    write_rtsp_response(
+                        &mut stream,
+                        request.cseq,
+                        200,
+                        "OK",
+                        &[("Transport", &transport_response), ("Session", session_id)],
+                        None,
+                    )
+                    .await?;
+                }
+                "PLAY" => {
+                    write_rtsp_response(
+                        &mut stream,
+                        request.cseq,
+                        200,
+                        "OK",
+                        &[("Session", session_id)],
+                        None,
+                    )
+                    .await?;
+
+                    if let Some(channel) = video_rtp_channel {
+                        send_test_video_rtp(&mut stream, channel, 90_000).await?;
+                    }
+                    if options.with_audio
+                        && let Some(channel) = audio_rtp_channel
+                    {
+                        send_test_aac_rtp(&mut stream, channel, 48_000).await?;
+                    }
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    return Ok(());
+                }
+                "GET_PARAMETER" => {
+                    write_rtsp_response(
+                        &mut stream,
+                        request.cseq,
+                        200,
+                        "OK",
+                        &[("Session", session_id)],
+                        None,
+                    )
+                    .await?;
+                }
+                _ => {
+                    write_rtsp_response(&mut stream, request.cseq, 400, "Bad Request", &[], None)
+                        .await?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    struct TestRtspRequest {
+        method: String,
+        uri: String,
+        cseq: u32,
+        headers: HashMap<String, String>,
+    }
+
+    async fn read_rtsp_request(
+        stream: &mut TcpStream,
+        read_buf: &mut Vec<u8>,
+    ) -> io::Result<TestRtspRequest> {
+        loop {
+            if let Some(pos) = find_header_end(read_buf) {
+                let header_bytes = read_buf.drain(..pos + 4).collect::<Vec<_>>();
+                let header_text = std::str::from_utf8(&header_bytes).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("invalid request header: {e}"),
+                    )
+                })?;
+                let mut lines = header_text.split("\r\n");
+                let request_line = lines.next().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "missing request line")
+                })?;
+                let mut request_parts = request_line.split_whitespace();
+                let method = request_parts
+                    .next()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing method"))?
+                    .to_owned();
+                let uri = request_parts
+                    .next()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing uri"))?
+                    .to_owned();
+
+                let mut headers = HashMap::new();
+                for line in lines {
+                    if line.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_owned());
+                    }
+                }
+                let cseq = headers
+                    .get("cseq")
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing cseq"))?
+                    .parse::<u32>()
+                    .map_err(|e| {
+                        io::Error::new(io::ErrorKind::InvalidData, format!("invalid cseq: {e}"))
+                    })?;
+                return Ok(TestRtspRequest {
+                    method,
+                    uri,
+                    cseq,
+                    headers,
+                });
+            }
+
+            let mut temp = [0u8; 4096];
+            let n = stream.read(&mut temp).await?;
+            if n == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "client closed connection",
+                ));
+            }
+            read_buf.extend_from_slice(&temp[..n]);
+        }
+    }
+
+    fn find_header_end(buf: &[u8]) -> Option<usize> {
+        buf.windows(4).position(|w| w == b"\r\n\r\n")
+    }
+
+    async fn write_rtsp_response(
+        stream: &mut TcpStream,
+        cseq: u32,
+        status_code: u16,
+        reason: &str,
+        headers: &[(&str, &str)],
+        body: Option<&str>,
+    ) -> io::Result<()> {
+        let body = body.unwrap_or("");
+        let mut text = format!(
+            "RTSP/1.0 {status_code} {reason}\r\nCSeq: {cseq}\r\nContent-Length: {}\r\n",
+            body.len()
+        );
+        for (name, value) in headers {
+            text.push_str(name);
+            text.push_str(": ");
+            text.push_str(value);
+            text.push_str("\r\n");
+        }
+        text.push_str("\r\n");
+        stream.write_all(text.as_bytes()).await?;
+        if !body.is_empty() {
+            stream.write_all(body.as_bytes()).await?;
+        }
+        stream.flush().await
+    }
+
+    fn parse_interleaved_channels(transport: &str) -> Option<(u8, u8)> {
+        for part in transport.split(';') {
+            let part = part.trim();
+            if let Some(value) = part.strip_prefix("interleaved=") {
+                let (a, b) = value.split_once('-')?;
+                let rtp = a.parse::<u8>().ok()?;
+                let rtcp = b.parse::<u8>().ok()?;
+                return Some((rtp, rtcp));
+            }
+        }
+        None
+    }
+
+    fn build_test_sdp(with_audio: bool, unsupported_video_codec: bool) -> String {
+        let video_encoding = if unsupported_video_codec {
+            "VP8"
+        } else {
+            "H264"
+        };
+        let mut sdp = format!(
+            "v=0\r\n\
+             o=- 0 0 IN IP4 127.0.0.1\r\n\
+             s=hisui-test\r\n\
+             t=0 0\r\n\
+             a=control:*\r\n\
+             m=video 0 RTP/AVP 96\r\n\
+             a=rtpmap:96 {video_encoding}/90000\r\n\
+             a=control:trackID=0\r\n"
+        );
+        if with_audio {
+            sdp.push_str(
+                "m=audio 0 RTP/AVP 97\r\n\
+                 a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
+                 a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1190\r\n\
+                 a=control:trackID=1\r\n",
+            );
+        }
+        sdp
+    }
+
+    async fn send_test_video_rtp(
+        stream: &mut TcpStream,
+        channel: u8,
+        timestamp: u32,
+    ) -> io::Result<()> {
+        let mut header = RtpHeader::new(96, 1, timestamp, 0x01020304);
+        header.marker = true;
+        let packet = RtpPacket::new(header, vec![0x65, 0x88, 0x84]);
+        let bytes = encode_interleaved_frame(channel, &packet.build());
+        stream.write_all(&bytes).await
+    }
+
+    async fn send_test_aac_rtp(
+        stream: &mut TcpStream,
+        channel: u8,
+        timestamp: u32,
+    ) -> io::Result<()> {
+        let mut header = RtpHeader::new(97, 1, timestamp, 0x0A0B0C0D);
+        header.marker = true;
+        let payload = vec![0x00, 0x10, 0x00, 0x20, 0x11, 0x22];
+        let packet = RtpPacket::new(header, payload);
+        let bytes = encode_interleaved_frame(channel, &packet.build());
+        stream.write_all(&bytes).await
     }
 }
