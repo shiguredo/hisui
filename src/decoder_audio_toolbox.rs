@@ -3,6 +3,9 @@ use std::num::NonZeroU8;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
+use crate::sample_based_timestamp_aligner::{
+    DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner,
+};
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {
@@ -10,6 +13,7 @@ pub struct AudioToolboxDecoder {
     sample_rate: Option<SampleRate>,
     channels: Option<Channels>,
     total_output_samples: u64,
+    timestamp_aligner: Option<SampleBasedTimestampAligner>,
 }
 
 impl AudioToolboxDecoder {
@@ -20,6 +24,7 @@ impl AudioToolboxDecoder {
             sample_rate: None,
             channels: None,
             total_output_samples: 0,
+            timestamp_aligner: None,
         })
     }
 
@@ -48,6 +53,16 @@ impl AudioToolboxDecoder {
             self.sample_rate = Some(SampleRate::from_u32(sample_rate)?);
             self.channels = Some(channel_layout);
         }
+
+        let sample_rate_for_tracking = self.sample_rate.unwrap_or(frame.sample_rate);
+        let aligner = self.timestamp_aligner.get_or_insert_with(|| {
+            SampleBasedTimestampAligner::new(sample_rate_for_tracking, DEFAULT_REBASE_THRESHOLD)
+        });
+        // AudioToolbox AAC は初期化時点で sample rate が確定しているため、ここで 1 回だけ設定すればよい。
+        aligner.set_sample_rate(sample_rate_for_tracking);
+        // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
+        // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。
+        aligner.align_input_timestamp(frame.timestamp, self.total_output_samples);
 
         let inner = self
             .inner
@@ -97,7 +112,12 @@ impl AudioToolboxDecoder {
             return Err(crate::Error::new("invalid decoded audio sample count"));
         }
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
-        let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
+        // AAC は内部バッファリングで出力タイミングが揺れるので、timestamp は sample 数基準で生成する。
+        let timestamp = self
+            .timestamp_aligner
+            .as_ref()
+            .expect("timestamp aligner must be initialized before decoding")
+            .estimate_timestamp_from_output_samples(self.total_output_samples);
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {

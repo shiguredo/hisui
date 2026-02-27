@@ -1,8 +1,9 @@
-use std::time::Duration;
-
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
+use crate::sample_based_timestamp_aligner::{
+    DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner,
+};
 
 /// FDK AAC デコーダー
 #[derive(Debug)]
@@ -11,6 +12,7 @@ pub struct FdkAacDecoder {
     sample_rate: Option<SampleRate>,
     channels: Option<Channels>,
     total_output_samples: u64,
+    timestamp_aligner: Option<SampleBasedTimestampAligner>,
 }
 
 impl FdkAacDecoder {
@@ -22,6 +24,7 @@ impl FdkAacDecoder {
             sample_rate: None,
             channels: None,
             total_output_samples: 0,
+            timestamp_aligner: None,
         })
     }
 
@@ -50,6 +53,14 @@ impl FdkAacDecoder {
             );
         }
 
+        let sample_rate_for_tracking = self.sample_rate.unwrap_or(frame.sample_rate);
+        let aligner = self.timestamp_aligner.get_or_insert_with(|| {
+            SampleBasedTimestampAligner::new(sample_rate_for_tracking, DEFAULT_REBASE_THRESHOLD)
+        });
+        // AAC は入力と出力が 1 対 1 に対応しないことがあるので、
+        // 入力 timestamp は基準オフセットとして扱い、乖離が大きい場合のみ再基準化する。
+        aligner.align_input_timestamp(frame.timestamp, self.total_output_samples);
+
         let inner = self
             .inner
             .as_mut()
@@ -59,18 +70,25 @@ impl FdkAacDecoder {
             .map_err(|e| crate::Error::from(e).with_context("Failed to decode AAC"))?;
 
         if let Some(decoded) = decoded_frame {
-            self.sample_rate = Some(SampleRate::from_u32(decoded.sample_rate)?);
+            let sample_rate = SampleRate::from_u32(decoded.sample_rate)?;
+            self.sample_rate = Some(sample_rate);
             self.channels = Some(Channels::from_u8(decoded.channels)?);
+            self.timestamp_aligner
+                .as_mut()
+                .expect("timestamp aligner must be initialized before decoding")
+                // decode 成功後に得られる sample rate が最終的な実値なので、ここで再設定する。
+                .set_sample_rate(sample_rate);
             self.build_audio_frame(&decoded.data)
         } else {
             // デコード可能なフレームがない場合は空のデータを返す
             //
             // TODO: そもそも将来的には decoder.rs のインタフェースを見直して、このようなワークアラウンドを不要にする
-            let timestamp = if let Some(sample_rate) = self.sample_rate {
-                sample_rate.duration_from_samples(self.total_output_samples)
-            } else {
-                Duration::ZERO
-            };
+            // AAC の内部バッファリング中でも timestamp は sample 数基準で連続化する。
+            let timestamp = self
+                .timestamp_aligner
+                .as_ref()
+                .expect("timestamp aligner must be initialized before decoding")
+                .estimate_timestamp_from_output_samples(self.total_output_samples);
             Ok(AudioFrame {
                 data: Vec::new(),
                 format: AudioFormat::I16Be,
@@ -97,7 +115,11 @@ impl FdkAacDecoder {
             return Err(crate::Error::new("invalid decoded audio sample count"));
         }
         let samples_per_channel = decoded_samples.len() / usize::from(channels.get());
-        let timestamp = sample_rate.duration_from_samples(self.total_output_samples);
+        let timestamp = self
+            .timestamp_aligner
+            .as_ref()
+            .expect("timestamp aligner must be initialized before decoding")
+            .estimate_timestamp_from_output_samples(self.total_output_samples);
         self.total_output_samples += samples_per_channel as u64;
 
         Ok(AudioFrame {

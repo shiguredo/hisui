@@ -55,6 +55,7 @@ pub mod reader_mp4;
 pub mod reader_webm;
 mod rpc_request_file;
 pub mod rtmp;
+pub mod sample_based_timestamp_aligner;
 mod sora_recording_compose_stats_json;
 #[cfg(feature = "nvcodec")]
 pub mod sora_recording_decoder_nvcodec_params;

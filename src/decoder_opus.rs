@@ -35,6 +35,9 @@ impl OpusDecoder {
             format: AudioFormat::I16Be,
             channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
+
+            // Opus は通常 1 packet -> 1 frame で出力されるため、入力 timestamp をそのまま使う。
+            // AAC は内部バッファリングで入出力が 1 対 1 にならない場合があるため、別方式で補正している。
             timestamp: frame.timestamp,
 
             // 生データにはサンプルエントリーは存在しない
