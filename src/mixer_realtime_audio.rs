@@ -509,10 +509,10 @@ impl AudioRealtimeMixerRunner<'_> {
                         break;
                     }
                 }
-                event = recv_track_event_or_pending(&mut self.track_event_rx) => {
+                event = recv_or_pending(&mut self.track_event_rx) => {
                     self.handle_track_event(event)?;
                 }
-                rpc_message = recv_rpc_message_or_pending(&mut self.rpc_rx) => {
+                rpc_message = recv_or_pending(&mut self.rpc_rx) => {
                     self.handle_rpc_message(rpc_message)?;
                 }
             }
@@ -788,20 +788,8 @@ fn spawn_input_receiver(
     }
 }
 
-async fn recv_track_event_or_pending(
-    track_event_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
-) -> Option<TrackEvent> {
-    if let Some(rx) = track_event_rx {
-        rx.recv().await
-    } else {
-        std::future::pending().await
-    }
-}
-
-async fn recv_rpc_message_or_pending(
-    rpc_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<AudioRealtimeMixerRpcMessage>>,
-) -> Option<AudioRealtimeMixerRpcMessage> {
-    if let Some(rx) = rpc_rx {
+async fn recv_or_pending<T>(rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<T>>) -> Option<T> {
+    if let Some(rx) = rx {
         rx.recv().await
     } else {
         std::future::pending().await
