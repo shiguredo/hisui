@@ -97,6 +97,10 @@ impl MediaPipelineHandle {
                     .await
             }
             "createAudioMixer" => self.handle_create_audio_mixer_rpc(maybe_params).await,
+            "updateAudioMixerInputs" => {
+                self.handle_update_audio_mixer_inputs_rpc(maybe_params)
+                    .await
+            }
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
             "createRtmpPublisher" => self.handle_create_rtmp_publisher_rpc(maybe_params).await,
             "createRtmpInboundEndpoint" => {
@@ -573,6 +577,71 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::CreateAudioMixer { processor_id })
     }
 
+    async fn handle_update_audio_mixer_inputs_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (processor_id, input_tracks): (
+            ProcessorId,
+            Vec<crate::mixer_realtime_audio::AudioRealtimeInputTrack>,
+        ) = parse_params(maybe_params, |params| {
+            let processor_id = params.to_member("processorId")?.required()?.try_into()?;
+            let input_tracks = params.to_member("inputTracks")?.required()?.try_into()?;
+            Ok((processor_id, input_tracks))
+        })?;
+
+        let sender = self
+            .get_rpc_sender::<
+                tokio::sync::mpsc::UnboundedSender<
+                    crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage,
+                >,
+            >(&processor_id)
+            .await
+            .map_err(|e| match e {
+                crate::media_pipeline::GetProcessorRpcSenderError::PipelineTerminated => {
+                    internal_error("Internal error: pipeline has terminated".to_owned())
+                }
+                crate::media_pipeline::GetProcessorRpcSenderError::ProcessorNotFound => {
+                    invalid_params(format!(
+                        "Invalid params: processorId not found: {processor_id}"
+                    ))
+                }
+                crate::media_pipeline::GetProcessorRpcSenderError::SenderNotRegistered => {
+                    invalid_params(format!(
+                        "Invalid params: processor RPC sender is not registered yet: {processor_id}"
+                    ))
+                }
+                crate::media_pipeline::GetProcessorRpcSenderError::TypeMismatch => invalid_params(
+                    format!(
+                        "Invalid params: processor does not support audio mixer input updates: {processor_id}"
+                    ),
+                ),
+            })?;
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        sender
+            .send(
+                crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage::UpdateInputs {
+                    input_tracks,
+                    reply_tx,
+                },
+            )
+            .map_err(|_| {
+                internal_error(
+                    "Internal error: audio mixer RPC sender channel is closed".to_owned(),
+                )
+            })?;
+        let result = reply_rx.await.map_err(|_| {
+            internal_error("Internal error: audio mixer RPC response channel is closed".to_owned())
+        })?;
+        let result =
+            result.map_err(|e| invalid_params(format!("Invalid params: {}", e.display())))?;
+
+        Ok(RpcSuccessResult::UpdateAudioMixerInputs {
+            previous_input_tracks: result.previous_input_tracks,
+        })
+    }
+
     async fn handle_create_video_mixer_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
@@ -889,28 +958,75 @@ impl MediaPipelineHandle {
 }
 
 enum RpcSuccessResult {
-    CreateMp4FileSource { processor_id: ProcessorId },
-    CreateMp4VideoReader { processor_id: ProcessorId },
-    CreateMp4AudioReader { processor_id: ProcessorId },
-    CreateMp4Writer { processor_id: ProcessorId },
-    CreateVideoDecoder { processor_id: ProcessorId },
-    CreateAudioDecoder { processor_id: ProcessorId },
-    CreateAudioEncoder { processor_id: ProcessorId },
-    CreatePngFileSource { processor_id: ProcessorId },
-    CreateVideoDeviceSource { processor_id: ProcessorId },
-    CreateAudioMixer { processor_id: ProcessorId },
-    CreateVideoMixer { processor_id: ProcessorId },
-    CreateRtmpPublisher { processor_id: ProcessorId },
-    CreateRtmpInboundEndpoint { processor_id: ProcessorId },
-    CreateSrtInboundEndpoint { processor_id: ProcessorId },
-    CreateRtmpOutboundEndpoint { processor_id: ProcessorId },
-    CreateWhipPublisher { processor_id: ProcessorId },
-    CreateWhepSubscriber { processor_id: ProcessorId },
-    CreateRtspSubscriber { processor_id: ProcessorId },
-    ListTracks { track_ids: Vec<TrackId> },
-    ListProcessors { processor_ids: Vec<ProcessorId> },
-    TriggerStart { started: bool },
-    WaitProcessorTerminated { processor_id: ProcessorId },
+    CreateMp4FileSource {
+        processor_id: ProcessorId,
+    },
+    CreateMp4VideoReader {
+        processor_id: ProcessorId,
+    },
+    CreateMp4AudioReader {
+        processor_id: ProcessorId,
+    },
+    CreateMp4Writer {
+        processor_id: ProcessorId,
+    },
+    CreateVideoDecoder {
+        processor_id: ProcessorId,
+    },
+    CreateAudioDecoder {
+        processor_id: ProcessorId,
+    },
+    CreateAudioEncoder {
+        processor_id: ProcessorId,
+    },
+    CreatePngFileSource {
+        processor_id: ProcessorId,
+    },
+    CreateVideoDeviceSource {
+        processor_id: ProcessorId,
+    },
+    CreateAudioMixer {
+        processor_id: ProcessorId,
+    },
+    UpdateAudioMixerInputs {
+        previous_input_tracks: Vec<crate::mixer_realtime_audio::AudioRealtimeInputTrack>,
+    },
+    CreateVideoMixer {
+        processor_id: ProcessorId,
+    },
+    CreateRtmpPublisher {
+        processor_id: ProcessorId,
+    },
+    CreateRtmpInboundEndpoint {
+        processor_id: ProcessorId,
+    },
+    CreateSrtInboundEndpoint {
+        processor_id: ProcessorId,
+    },
+    CreateRtmpOutboundEndpoint {
+        processor_id: ProcessorId,
+    },
+    CreateWhipPublisher {
+        processor_id: ProcessorId,
+    },
+    CreateWhepSubscriber {
+        processor_id: ProcessorId,
+    },
+    CreateRtspSubscriber {
+        processor_id: ProcessorId,
+    },
+    ListTracks {
+        track_ids: Vec<TrackId>,
+    },
+    ListProcessors {
+        processor_ids: Vec<ProcessorId>,
+    },
+    TriggerStart {
+        started: bool,
+    },
+    WaitProcessorTerminated {
+        processor_id: ProcessorId,
+    },
 }
 
 impl nojson::DisplayJson for RpcSuccessResult {
@@ -946,6 +1062,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
             Self::CreateAudioMixer { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
+            Self::UpdateAudioMixerInputs {
+                previous_input_tracks,
+            } => f.object(|f| f.member("previousInputTracks", previous_input_tracks)),
             Self::CreateVideoMixer { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
@@ -2284,6 +2403,82 @@ mod tests {
             .await
             .expect("pipeline task timed out")
             .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn update_audio_mixer_inputs_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"updateAudioMixerInputs"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn update_audio_mixer_inputs_rejects_unknown_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = update_audio_mixer_inputs_request("unknown-audio-mixer", &["audio-a"]);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn update_audio_mixer_inputs_returns_previous_input_tracks() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let processor_id = "updatable-audio-mixer";
+        let create_request =
+            create_audio_mixer_request("audio-mixer-update-output", Some(processor_id));
+        let create_response = handle
+            .rpc(create_request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&create_response).expect("parse result.processorId"),
+            processor_id
+        );
+
+        let update_request =
+            update_audio_mixer_inputs_request(processor_id, &["audio-input-a", "audio-input-b"]);
+        let update_response = handle
+            .rpc(update_request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_previous_input_track_ids(&update_response).expect("parse previousInputTracks"),
+            vec!["audio-input-track".to_owned()]
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
     }
 
     #[tokio::test]
@@ -4003,6 +4198,20 @@ mod tests {
         result.to_member("started")?.required()?.try_into()
     }
 
+    fn result_previous_input_track_ids(
+        response: &nojson::RawJsonOwned,
+    ) -> Result<Vec<String>, nojson::JsonParseError> {
+        response
+            .value()
+            .to_member("result")?
+            .required()?
+            .to_member("previousInputTracks")?
+            .required()?
+            .to_array()?
+            .map(|v| v.to_member("trackId")?.required()?.try_into())
+            .collect()
+    }
+
     fn create_audio_decoder_request(processor_id: Option<&str>) -> String {
         let processor_id_part = processor_id
             .map(|id| format!(r#","processorId":"{id}""#))
@@ -4050,6 +4259,17 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createAudioMixer","params":{{"sampleRate":48000,"channels":2,"frameDurationMs":20,"timestampRebaseThresholdMs":100,"inputTracks":[{{"trackId":"audio-input-track"}}],"outputTrackId":"{output_track_id}"{processor_id_part}}}}}"#
+        )
+    }
+
+    fn update_audio_mixer_inputs_request(processor_id: &str, input_track_ids: &[&str]) -> String {
+        let input_tracks_json = input_track_ids
+            .iter()
+            .map(|track_id| format!(r#"{{"trackId":"{track_id}"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"updateAudioMixerInputs","params":{{"processorId":"{processor_id}","inputTracks":[{input_tracks_json}]}}}}"#
         )
     }
 

@@ -13,6 +13,7 @@ use crate::{
 
 const DEFAULT_FRAME_DURATION: Duration = Duration::from_millis(20);
 const DEFAULT_TIMESTAMP_REBASE_THRESHOLD: Duration = DEFAULT_REBASE_THRESHOLD;
+const DEFAULT_TERMINATE_ON_INPUT_EOS: bool = false;
 
 #[derive(Debug, Clone)]
 pub struct AudioRealtimeMixer {
@@ -24,6 +25,8 @@ pub struct AudioRealtimeMixer {
     pub frame_duration: Duration,
     /// 入力タイムスタンプとサンプル数ベース推定値の乖離がこの閾値を超えたときに、基準タイムスタンプを再設定する
     pub timestamp_rebase_threshold: Duration,
+    /// すべての入力が EOS かつ内部キューが空になった時点で出力を EOS で終了する
+    pub terminate_on_input_eos: bool,
     /// 合成対象の入力トラック一覧
     pub input_tracks: Vec<AudioRealtimeInputTrack>,
     /// 合成後の音声を書き出す出力トラック ID
@@ -40,6 +43,7 @@ impl nojson::DisplayJson for AudioRealtimeMixer {
                 "timestampRebaseThresholdMs",
                 self.timestamp_rebase_threshold.as_millis(),
             )?;
+            f.member("terminateOnInputEos", self.terminate_on_input_eos)?;
             f.member("inputTracks", &self.input_tracks)?;
             f.member("outputTrackId", &self.output_track_id)
         })
@@ -57,6 +61,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AudioRealtimeMi
         let frame_duration_ms: Option<u64> = value.to_member("frameDurationMs")?.try_into()?;
         let timestamp_rebase_threshold_ms: Option<u64> =
             value.to_member("timestampRebaseThresholdMs")?.try_into()?;
+        let terminate_on_input_eos: Option<bool> =
+            value.to_member("terminateOnInputEos")?.try_into()?;
         let input_tracks: Vec<AudioRealtimeInputTrack> =
             value.to_member("inputTracks")?.required()?.try_into()?;
         let output_track_id = value.to_member("outputTrackId")?.required()?.try_into()?;
@@ -105,6 +111,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AudioRealtimeMi
             channels,
             frame_duration,
             timestamp_rebase_threshold,
+            terminate_on_input_eos: terminate_on_input_eos
+                .unwrap_or(DEFAULT_TERMINATE_ON_INPUT_EOS),
             input_tracks,
             output_track_id,
         })
@@ -113,18 +121,30 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AudioRealtimeMi
 
 impl AudioRealtimeMixer {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
+        let AudioRealtimeMixer {
+            sample_rate,
+            channels,
+            frame_duration,
+            timestamp_rebase_threshold,
+            terminate_on_input_eos,
+            input_tracks,
+            output_track_id,
+        } = self;
         let config = AudioRealtimeMixerConfig::new(
-            self.sample_rate,
-            self.channels,
-            self.frame_duration,
-            self.timestamp_rebase_threshold,
+            sample_rate,
+            channels,
+            frame_duration,
+            timestamp_rebase_threshold,
+            terminate_on_input_eos,
         )?;
 
-        let mut output_tx = handle.publish_track(self.output_track_id).await?;
-        let mut states = HashMap::with_capacity(self.input_tracks.len());
+        let mut output_tx = handle.publish_track(output_track_id).await?;
+        let mut states = HashMap::with_capacity(input_tracks.len());
+        let mut input_track_ids = Vec::with_capacity(input_tracks.len());
+        let mut input_receivers = HashMap::with_capacity(input_tracks.len());
 
-        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
-        for input_track in self.input_tracks {
+        let (track_event_tx, track_event_rx) = tokio::sync::mpsc::unbounded_channel();
+        for input_track in input_tracks {
             states.insert(
                 input_track.track_id.clone(),
                 InputTrackState::new(
@@ -133,22 +153,36 @@ impl AudioRealtimeMixer {
                     config.timestamp_rebase_threshold,
                 ),
             );
+            input_track_ids.push(input_track.track_id.clone());
             let input_rx = handle.subscribe_track(input_track.track_id.clone());
-            spawn_input_receiver(input_track.track_id, input_rx, event_tx.clone());
+            let receiver =
+                spawn_input_receiver(input_track.track_id, input_rx, track_event_tx.clone());
+            input_receivers.insert(receiver.track_id.clone(), receiver);
         }
-        drop(event_tx);
+
+        let (rpc_tx, rpc_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle
+            .register_rpc_sender(rpc_tx)
+            .await
+            .map_err(|e| Error::new(format!("failed to register audio mixer RPC sender: {e}")))?;
 
         let mut stats_root = handle.stats();
         let stats = AudioRealtimeMixerStats::new(&mut stats_root);
+        stats.set_current_input_track_count(input_track_ids.len());
 
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
 
         AudioRealtimeMixerRunner {
             config,
+            processor_handle: handle,
             output_tx: &mut output_tx,
             states,
-            event_rx: Some(event_rx),
+            input_track_ids,
+            input_receivers,
+            track_event_tx,
+            track_event_rx: Some(track_event_rx),
+            rpc_rx: Some(rpc_rx),
             next_output_timestamp: None,
             stats,
         }
@@ -179,6 +213,19 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AudioRealtimeIn
     }
 }
 
+#[derive(Debug)]
+pub enum AudioRealtimeMixerRpcMessage {
+    UpdateInputs {
+        input_tracks: Vec<AudioRealtimeInputTrack>,
+        reply_tx: tokio::sync::oneshot::Sender<crate::Result<AudioRealtimeMixerUpdateInputsResult>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioRealtimeMixerUpdateInputsResult {
+    pub previous_input_tracks: Vec<AudioRealtimeInputTrack>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AudioRealtimeMixerConfig {
     sample_rate: SampleRate,
@@ -187,6 +234,7 @@ struct AudioRealtimeMixerConfig {
     frame_samples_per_channel: usize,
     frame_samples_total: usize,
     timestamp_rebase_threshold: Duration,
+    terminate_on_input_eos: bool,
 }
 
 impl AudioRealtimeMixerConfig {
@@ -195,6 +243,7 @@ impl AudioRealtimeMixerConfig {
         channels: Channels,
         frame_duration: Duration,
         timestamp_rebase_threshold: Duration,
+        terminate_on_input_eos: bool,
     ) -> crate::Result<Self> {
         let frame_samples_per_channel: usize =
             samples_from_duration_exact(frame_duration, sample_rate)?
@@ -214,6 +263,7 @@ impl AudioRealtimeMixerConfig {
             frame_samples_per_channel,
             frame_samples_total,
             timestamp_rebase_threshold,
+            terminate_on_input_eos,
         })
     }
 }
@@ -224,6 +274,7 @@ struct AudioRealtimeMixerStats {
     total_output_audio_frame_count: crate::stats::StatsCounter,
     total_output_audio_duration: crate::stats::StatsDuration,
     total_output_sample_count: crate::stats::StatsCounter,
+    current_input_track_count: crate::stats::StatsGauge,
     total_gap_filled_sample_count: crate::stats::StatsCounter,
     total_late_dropped_sample_count: crate::stats::StatsCounter,
     total_timestamp_rebase_count: crate::stats::StatsCounter,
@@ -235,6 +286,7 @@ impl AudioRealtimeMixerStats {
         let total_output_audio_frame_count = stats.counter("total_output_audio_frame_count");
         let total_output_audio_duration = stats.duration("total_output_audio_duration_seconds");
         let total_output_sample_count = stats.counter("total_output_sample_count");
+        let current_input_track_count = stats.gauge("current_input_track_count");
         let total_gap_filled_sample_count = stats.counter("total_gap_filled_sample_count");
         let total_late_dropped_sample_count = stats.counter("total_late_dropped_sample_count");
         let total_timestamp_rebase_count = stats.counter("total_timestamp_rebase_count");
@@ -244,6 +296,7 @@ impl AudioRealtimeMixerStats {
             total_output_audio_frame_count,
             total_output_audio_duration,
             total_output_sample_count,
+            current_input_track_count,
             total_gap_filled_sample_count,
             total_late_dropped_sample_count,
             total_timestamp_rebase_count,
@@ -264,6 +317,10 @@ impl AudioRealtimeMixerStats {
 
     fn add_output_sample_count(&self, value: u64) {
         self.total_output_sample_count.add(value);
+    }
+
+    fn set_current_input_track_count(&self, value: usize) {
+        self.current_input_track_count.set(value as i64);
     }
 
     fn add_gap_filled_sample_count(&self, value: u64) {
@@ -428,9 +485,14 @@ impl InputTrackState {
 #[derive(Debug)]
 struct AudioRealtimeMixerRunner<'a> {
     config: AudioRealtimeMixerConfig,
+    processor_handle: ProcessorHandle,
     output_tx: &'a mut crate::MessageSender,
     states: HashMap<TrackId, InputTrackState>,
-    event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
+    input_track_ids: Vec<TrackId>,
+    input_receivers: HashMap<TrackId, InputReceiverHandle>,
+    track_event_tx: tokio::sync::mpsc::UnboundedSender<TrackEvent>,
+    track_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
+    rpc_rx: Option<tokio::sync::mpsc::UnboundedReceiver<AudioRealtimeMixerRpcMessage>>,
     next_output_timestamp: Option<Duration>,
     stats: AudioRealtimeMixerStats,
 }
@@ -447,8 +509,11 @@ impl AudioRealtimeMixerRunner<'_> {
                         break;
                     }
                 }
-                event = recv_track_event_or_pending(&mut self.event_rx) => {
-                    self.handle_event(event)?;
+                event = recv_track_event_or_pending(&mut self.track_event_rx) => {
+                    self.handle_track_event(event)?;
+                }
+                rpc_message = recv_rpc_message_or_pending(&mut self.rpc_rx) => {
+                    self.handle_rpc_message(rpc_message)?;
                 }
             }
         }
@@ -456,36 +521,123 @@ impl AudioRealtimeMixerRunner<'_> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: Option<TrackEvent>) -> crate::Result<()> {
+    fn handle_track_event(&mut self, event: Option<TrackEvent>) -> crate::Result<()> {
         let Some(event) = event else {
-            self.event_rx = None;
+            self.track_event_rx = None;
             return Ok(());
         };
 
         match event {
             TrackEvent::Audio { track_id, frame } => {
-                let state = self
-                    .states
-                    .get_mut(&track_id)
-                    .ok_or_else(|| Error::new(format!("unknown input track id: {track_id}")))?;
+                let Some(state) = self.states.get_mut(&track_id) else {
+                    return Ok(());
+                };
                 state.handle_audio_frame(frame, self.config, &self.stats)?;
             }
             TrackEvent::Eos { track_id } => {
-                let state = self
-                    .states
-                    .get_mut(&track_id)
-                    .ok_or_else(|| Error::new(format!("unknown input track id: {track_id}")))?;
-                state.eos = true;
+                if let Some(state) = self.states.get_mut(&track_id) {
+                    state.eos = true;
+                }
             }
             TrackEvent::Syn(_syn) => {}
             TrackEvent::Error { track_id, message } => {
-                return Err(Error::new(format!(
-                    "audio mixer input track {track_id} error: {message}"
-                )));
+                if self.states.contains_key(&track_id) {
+                    return Err(Error::new(format!(
+                        "audio mixer input track {track_id} error: {message}"
+                    )));
+                }
             }
         }
 
         Ok(())
+    }
+
+    fn handle_rpc_message(
+        &mut self,
+        rpc_message: Option<AudioRealtimeMixerRpcMessage>,
+    ) -> crate::Result<()> {
+        let Some(rpc_message) = rpc_message else {
+            self.rpc_rx = None;
+            return Ok(());
+        };
+
+        match rpc_message {
+            AudioRealtimeMixerRpcMessage::UpdateInputs {
+                input_tracks,
+                reply_tx,
+            } => {
+                let result = self.update_inputs(input_tracks);
+                let _ = reply_tx.send(result);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn update_inputs(
+        &mut self,
+        input_tracks: Vec<AudioRealtimeInputTrack>,
+    ) -> crate::Result<AudioRealtimeMixerUpdateInputsResult> {
+        validate_unique_input_tracks(&input_tracks)?;
+
+        let previous_input_tracks = self
+            .input_track_ids
+            .iter()
+            .cloned()
+            .map(|track_id| AudioRealtimeInputTrack { track_id })
+            .collect();
+
+        let requested_track_ids: HashSet<TrackId> = input_tracks
+            .iter()
+            .map(|input_track| input_track.track_id.clone())
+            .collect();
+        let removed_track_ids = self
+            .input_track_ids
+            .iter()
+            .filter(|track_id| !requested_track_ids.contains(*track_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for track_id in removed_track_ids {
+            self.states.remove(&track_id);
+            if let Some(receiver) = self.input_receivers.remove(&track_id) {
+                receiver.shutdown();
+            }
+        }
+
+        for input_track in &input_tracks {
+            if self.states.contains_key(&input_track.track_id) {
+                continue;
+            }
+            self.states.insert(
+                input_track.track_id.clone(),
+                InputTrackState::new(
+                    self.config.sample_rate,
+                    self.config.channels,
+                    self.config.timestamp_rebase_threshold,
+                ),
+            );
+            let input_rx = self
+                .processor_handle
+                .subscribe_track(input_track.track_id.clone());
+            let receiver = spawn_input_receiver(
+                input_track.track_id.clone(),
+                input_rx,
+                self.track_event_tx.clone(),
+            );
+            self.input_receivers
+                .insert(receiver.track_id.clone(), receiver);
+        }
+
+        self.input_track_ids = input_tracks
+            .into_iter()
+            .map(|input_track| input_track.track_id)
+            .collect();
+        self.stats
+            .set_current_input_track_count(self.input_track_ids.len());
+
+        Ok(AudioRealtimeMixerUpdateInputsResult {
+            previous_input_tracks,
+        })
     }
 
     fn handle_output_tick(&mut self) -> crate::Result<bool> {
@@ -551,6 +703,9 @@ impl AudioRealtimeMixerRunner<'_> {
     }
 
     fn should_finish(&self) -> bool {
+        if !self.config.terminate_on_input_eos {
+            return false;
+        }
         self.states
             .values()
             .all(|state| state.eos && state.is_empty())
@@ -573,30 +728,52 @@ enum TrackEvent {
     },
 }
 
+#[derive(Debug)]
+struct InputReceiverHandle {
+    track_id: TrackId,
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl InputReceiverHandle {
+    fn shutdown(mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+    }
+}
+
 fn spawn_input_receiver(
     track_id: TrackId,
     mut input_rx: crate::MessageReceiver,
     event_tx: tokio::sync::mpsc::UnboundedSender<TrackEvent>,
-) {
+) -> InputReceiverHandle {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let task_track_id = track_id.clone();
     tokio::spawn(async move {
         loop {
-            let message = input_rx.recv().await;
-            let event = match message {
-                Message::Media(MediaFrame::Audio(frame)) => TrackEvent::Audio {
-                    track_id: track_id.clone(),
-                    frame,
-                },
-                Message::Media(MediaFrame::Video(_)) => TrackEvent::Error {
-                    track_id: track_id.clone(),
-                    message: "expected audio sample, got video sample".to_owned(),
-                },
-                Message::Eos => {
-                    let _ = event_tx.send(TrackEvent::Eos {
-                        track_id: track_id.clone(),
-                    });
+            let event = tokio::select! {
+                _ = &mut shutdown_rx => {
                     break;
                 }
-                Message::Syn(syn) => TrackEvent::Syn(syn),
+                message = input_rx.recv() => {
+                    match message {
+                        Message::Media(MediaFrame::Audio(frame)) => TrackEvent::Audio {
+                            track_id: task_track_id.clone(),
+                            frame,
+                        },
+                        Message::Media(MediaFrame::Video(_)) => TrackEvent::Error {
+                            track_id: task_track_id.clone(),
+                            message: "expected audio sample, got video sample".to_owned(),
+                        },
+                        Message::Eos => {
+                            let _ = event_tx.send(TrackEvent::Eos {
+                                track_id: task_track_id.clone(),
+                            });
+                            break;
+                        }
+                        Message::Syn(syn) => TrackEvent::Syn(syn),
+                    }
+                }
             };
 
             if event_tx.send(event).is_err() {
@@ -604,16 +781,44 @@ fn spawn_input_receiver(
             }
         }
     });
+
+    InputReceiverHandle {
+        track_id,
+        shutdown_tx: Some(shutdown_tx),
+    }
 }
 
 async fn recv_track_event_or_pending(
-    event_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
+    track_event_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
 ) -> Option<TrackEvent> {
-    if let Some(rx) = event_rx {
+    if let Some(rx) = track_event_rx {
         rx.recv().await
     } else {
         std::future::pending().await
     }
+}
+
+async fn recv_rpc_message_or_pending(
+    rpc_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<AudioRealtimeMixerRpcMessage>>,
+) -> Option<AudioRealtimeMixerRpcMessage> {
+    if let Some(rx) = rpc_rx {
+        rx.recv().await
+    } else {
+        std::future::pending().await
+    }
+}
+
+fn validate_unique_input_tracks(input_tracks: &[AudioRealtimeInputTrack]) -> crate::Result<()> {
+    let mut seen_track_ids = HashSet::new();
+    for input_track in input_tracks {
+        if !seen_track_ids.insert(input_track.track_id.clone()) {
+            return Err(Error::new(format!(
+                "duplicate input track ID: {}",
+                input_track.track_id
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_frame_duration(frame_duration: Duration, sample_rate: SampleRate) -> crate::Result<()> {
@@ -728,6 +933,7 @@ mod tests {
             Channels::STEREO,
             Duration::from_millis(20),
             Duration::from_millis(100),
+            false,
         )
         .expect("valid config")
     }
@@ -748,6 +954,7 @@ mod tests {
         assert_eq!(mixer.channels, Channels::STEREO);
         assert_eq!(mixer.frame_duration, Duration::from_millis(20));
         assert_eq!(mixer.timestamp_rebase_threshold, Duration::from_millis(100));
+        assert!(!mixer.terminate_on_input_eos);
         assert_eq!(mixer.input_tracks.len(), 1);
     }
 
