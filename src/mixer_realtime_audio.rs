@@ -35,15 +35,10 @@ impl nojson::DisplayJson for AudioRealtimeMixer {
         f.object(|f| {
             f.member("sampleRate", self.sample_rate.get())?;
             f.member("channels", self.channels.get())?;
-            f.member(
-                "frameDurationMs",
-                self.frame_duration.as_millis().min(u128::from(u64::MAX)) as u64,
-            )?;
+            f.member("frameDurationMs", self.frame_duration.as_millis())?;
             f.member(
                 "timestampRebaseThresholdMs",
-                self.timestamp_rebase_threshold
-                    .as_millis()
-                    .min(u128::from(u64::MAX)) as u64,
+                self.timestamp_rebase_threshold.as_millis(),
             )?;
             f.member("inputTracks", &self.input_tracks)?;
             f.member("outputTrackId", &self.output_track_id)
