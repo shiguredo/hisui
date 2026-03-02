@@ -171,6 +171,13 @@ impl From<shiguredo_rtmp::Error> for Error {
     }
 }
 
+impl From<shiguredo_rtsp::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_rtsp::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
 impl From<shiguredo_dav1d::Error> for Error {
     #[track_caller]
     fn from(e: shiguredo_dav1d::Error) -> Self {
