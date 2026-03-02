@@ -2451,6 +2451,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_audio_mixer_inputs_returns_previous_input_tracks() {
+        // spawn_test_pipeline() は内部で trigger_start() を実行済み。
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let processor_id = "updatable-audio-mixer";
         let create_request =
