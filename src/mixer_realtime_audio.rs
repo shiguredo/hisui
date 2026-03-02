@@ -411,10 +411,8 @@ impl InputTrackState {
             .frame_samples_per_channel
             .min(self.sample_queue.len() / channels);
         let take_total = take_samples_per_channel * channels;
-        for slot in mixed.iter_mut().take(take_total) {
-            if let Some(sample) = self.sample_queue.pop_front() {
-                *slot = sample;
-            }
+        for (slot, sample) in mixed.iter_mut().zip(self.sample_queue.drain(..take_total)) {
+            *slot = sample;
         }
 
         queue_head_timestamp = queue_head_timestamp.saturating_add(config.frame_duration);
