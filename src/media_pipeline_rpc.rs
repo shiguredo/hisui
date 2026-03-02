@@ -94,6 +94,7 @@ impl MediaPipelineHandle {
                 self.handle_create_video_device_source_rpc(maybe_params)
                     .await
             }
+            "createAudioMixer" => self.handle_create_audio_mixer_rpc(maybe_params).await,
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
             "createRtmpPublisher" => self.handle_create_rtmp_publisher_rpc(maybe_params).await,
             "createRtmpInboundEndpoint" => {
@@ -392,6 +393,38 @@ impl MediaPipelineHandle {
         })?;
 
         Ok(RpcSuccessResult::CreateVideoDeviceSource { processor_id })
+    }
+
+    async fn handle_create_audio_mixer_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (mixer, processor_id): (
+            crate::mixer_realtime_audio::AudioRealtimeMixer,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let mixer = params.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((mixer, processor_id))
+        })?;
+        let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("audioMixer"));
+
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("audio_mixer"),
+            move |handle| mixer.run(handle),
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
+
+        Ok(RpcSuccessResult::CreateAudioMixer { processor_id })
     }
 
     async fn handle_create_video_mixer_rpc(
@@ -717,6 +750,7 @@ enum RpcSuccessResult {
     CreateAudioDecoder { processor_id: ProcessorId },
     CreatePngFileSource { processor_id: ProcessorId },
     CreateVideoDeviceSource { processor_id: ProcessorId },
+    CreateAudioMixer { processor_id: ProcessorId },
     CreateVideoMixer { processor_id: ProcessorId },
     CreateRtmpPublisher { processor_id: ProcessorId },
     CreateRtmpInboundEndpoint { processor_id: ProcessorId },
@@ -753,6 +787,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateVideoDeviceSource { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateAudioMixer { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateVideoMixer { processor_id } => {
@@ -1583,6 +1620,164 @@ mod tests {
         drop(handle);
         pipeline_task.abort();
         let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_audio_mixer_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createAudioMixer"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_audio_mixer_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createAudioMixer","params":{"outputTrackId":"audio-output"}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_audio_mixer_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let blocker = handle
+            .register_processor(
+                ProcessorId::new("audio-mixer-blocker"),
+                ProcessorMetadata::new("test_processor"),
+            )
+            .await
+            .expect("register audio-mixer-blocker");
+        let occupied_sender = blocker
+            .publish_track(TrackId::new("audio-mixer-output"))
+            .await
+            .expect("publish audio-mixer-output");
+        let request = create_audio_mixer_request("audio-mixer-output", None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "audioMixer"
+        );
+
+        drop(occupied_sender);
+        drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_audio_mixer_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let blocker = handle
+            .register_processor(
+                ProcessorId::new("audio-mixer-blocker"),
+                ProcessorMetadata::new("test_processor"),
+            )
+            .await
+            .expect("register audio-mixer-blocker");
+        let occupied_sender = blocker
+            .publish_track(TrackId::new("audio-mixer-output"))
+            .await
+            .expect("publish audio-mixer-output");
+        let request = create_audio_mixer_request("audio-mixer-output", Some("custom-audio-mixer"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-audio-mixer"
+        );
+
+        drop(occupied_sender);
+        drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_audio_mixer_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let blocker = handle
+            .register_processor(
+                ProcessorId::new("audio-mixer-blocker"),
+                ProcessorMetadata::new("test_processor"),
+            )
+            .await
+            .expect("register audio-mixer-blocker");
+        let occupied_sender = blocker
+            .publish_track(TrackId::new("audio-mixer-output-dup"))
+            .await
+            .expect("publish audio-mixer-output-dup");
+        let request =
+            create_audio_mixer_request("audio-mixer-output-dup", Some("duplicate-audio-mixer"));
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-audio-mixer"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(occupied_sender);
+        drop(blocker);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
     }
 
     #[tokio::test]
@@ -3329,6 +3524,16 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createVideoMixer","params":{{"canvasWidth":640,"canvasHeight":480,"frameRate":30,"inputTracks":[{{"trackId":"video-input-track","x":0,"y":0,"z":0}}],"outputTrackId":"{output_track_id}"{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_audio_mixer_request(output_track_id: &str, processor_id: Option<&str>) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createAudioMixer","params":{{"sampleRate":48000,"channels":2,"frameDurationMs":20,"timestampRebaseThresholdMs":100,"inputTracks":[{{"trackId":"audio-input-track"}}],"outputTrackId":"{output_track_id}"{processor_id_part}}}}}"#
         )
     }
 
