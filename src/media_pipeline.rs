@@ -1,4 +1,6 @@
 type LocalProcessorTask = Box<dyn FnOnce() + Send + 'static>;
+type PendingRpcSenderWaiter =
+    tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>;
 
 #[derive(Debug)]
 pub struct MediaPipeline {
@@ -131,8 +133,7 @@ impl MediaPipeline {
                 processor_id,
                 reply_tx,
             } => {
-                let result = self.handle_get_processor_rpc_sender(processor_id);
-                let _ = reply_tx.send(result);
+                self.handle_get_processor_rpc_sender(processor_id, reply_tx);
             }
         }
     }
@@ -159,6 +160,13 @@ impl MediaPipeline {
             return;
         };
         state.notified_ready = true;
+        let rpc_sender_result = state
+            .rpc_sender
+            .clone()
+            .ok_or(GetProcessorRpcSenderError::SenderNotRegistered);
+        for waiter in state.pending_rpc_sender_waiters.drain(..) {
+            let _ = waiter.send(rpc_sender_result.clone());
+        }
         if state.is_initial_member {
             self.pending_initial_processors.remove(&processor_id);
         }
@@ -305,11 +313,13 @@ impl MediaPipeline {
     fn handle_deregister_processor(&mut self, processor_id: ProcessorId) {
         // TODO: トラックが残っている間は deregister 扱いにしない
         tracing::debug!("deregister processor: {processor_id}");
-        if let Some(state) = self.processors.remove(&processor_id)
-            && state.is_initial_member
-            && !state.notified_ready
-        {
-            self.pending_initial_processors.remove(&processor_id);
+        if let Some(mut state) = self.processors.remove(&processor_id) {
+            for waiter in state.pending_rpc_sender_waiters.drain(..) {
+                let _ = waiter.send(Err(GetProcessorRpcSenderError::ProcessorNotFound));
+            }
+            if state.is_initial_member && !state.notified_ready {
+                self.pending_initial_processors.remove(&processor_id);
+            }
         }
         self.try_open_initial_ready();
     }
@@ -342,16 +352,25 @@ impl MediaPipeline {
     }
 
     fn handle_get_processor_rpc_sender(
-        &self,
+        &mut self,
         processor_id: ProcessorId,
-    ) -> Result<ErasedRpcSender, GetProcessorRpcSenderError> {
-        let Some(state) = self.processors.get(&processor_id) else {
-            return Err(GetProcessorRpcSenderError::ProcessorNotFound);
+        reply_tx: PendingRpcSenderWaiter,
+    ) {
+        let Some(state) = self.processors.get_mut(&processor_id) else {
+            let _ = reply_tx.send(Err(GetProcessorRpcSenderError::ProcessorNotFound));
+            return;
         };
-        state
-            .rpc_sender
-            .clone()
-            .ok_or(GetProcessorRpcSenderError::SenderNotRegistered)
+        if state.notified_ready {
+            let _ = reply_tx.send(
+                state
+                    .rpc_sender
+                    .clone()
+                    .ok_or(GetProcessorRpcSenderError::SenderNotRegistered),
+            );
+            return;
+        }
+
+        state.pending_rpc_sender_waiters.push(reply_tx);
     }
 }
 
@@ -691,6 +710,7 @@ struct ProcessorState {
     notified_ready: bool,
     is_initial_member: bool,
     rpc_sender: Option<ErasedRpcSender>,
+    pending_rpc_sender_waiters: Vec<PendingRpcSenderWaiter>,
 }
 
 #[derive(Debug)]
@@ -1330,19 +1350,33 @@ mod tests {
             .await
             .expect("failed to register processor");
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let processor_id = processor.processor_id().clone();
 
         processor
             .register_rpc_sender(tx.clone())
             .await
             .expect("failed to register rpc sender");
-        let rpc_tx = handle
-            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(processor.processor_id())
-            .await
-            .expect("failed to get rpc sender");
+        {
+            let rpc_handle = handle.clone();
+            let get_fut = rpc_handle
+                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(&processor_id);
+            tokio::pin!(get_fut);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), &mut get_fut)
+                    .await
+                    .is_err()
+            );
+            processor.notify_ready();
+            let rpc_tx = tokio::time::timeout(Duration::from_secs(2), &mut get_fut)
+                .await
+                .expect("timed out waiting rpc sender")
+                .expect("failed to get rpc sender");
 
-        rpc_tx
-            .send("hello".to_owned())
-            .expect("failed to send message via rpc sender");
+            rpc_tx
+                .send("hello".to_owned())
+                .expect("failed to send message via rpc sender");
+        }
+
         let received = tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .expect("timed out waiting rpc message")
@@ -1370,10 +1404,23 @@ mod tests {
             )
             .await
             .expect("failed to register processor");
+        let processor_id = processor.processor_id().clone();
 
-        let result = handle
-            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(processor.processor_id())
-            .await;
+        let result = {
+            let rpc_handle = handle.clone();
+            let get_fut = rpc_handle
+                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(&processor_id);
+            tokio::pin!(get_fut);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), &mut get_fut)
+                    .await
+                    .is_err()
+            );
+            processor.notify_ready();
+            tokio::time::timeout(Duration::from_secs(2), &mut get_fut)
+                .await
+                .expect("timed out waiting sender-not-registered result")
+        };
         assert!(matches!(
             result,
             Err(GetProcessorRpcSenderError::SenderNotRegistered)
@@ -1434,14 +1481,16 @@ mod tests {
             )
             .await
             .expect("failed to register processor");
+        let processor_id = processor.processor_id().clone();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         processor
             .register_rpc_sender(tx)
             .await
             .expect("failed to register rpc sender");
+        processor.notify_ready();
 
         let result = handle
-            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<u64>>(processor.processor_id())
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<u64>>(&processor_id)
             .await;
         assert!(matches!(
             result,
@@ -1532,6 +1581,7 @@ mod tests {
             )
             .await
             .expect("failed to register processor");
+        let processor_id = processor.processor_id().clone();
 
         pipeline_task.abort();
         let _ = pipeline_task.await;
@@ -1543,7 +1593,7 @@ mod tests {
             Err(RegisterProcessorRpcSenderError::PipelineTerminated)
         );
         let get_result = handle
-            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(processor.processor_id())
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(&processor_id)
             .await;
         assert!(matches!(
             get_result,
