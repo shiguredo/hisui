@@ -242,11 +242,17 @@ struct RtspSessionRunner {
     recv_buf: Vec<u8>,
     pending_responses: VecDeque<RtspResponse>,
     parsed_url: ParsedRtspUrl,
-    auth_header: Option<String>,
+    auth: Option<RtspAuthorization>,
     session_id: Option<String>,
     video_receiver: Option<VideoRtpReceiver>,
     audio_receiver: Option<AudioRtpReceiver>,
     keepalive_uri: String,
+}
+
+#[derive(Debug)]
+enum RtspAuthorization {
+    Basic(String),
+    Digest(DigestChallenge),
 }
 
 #[derive(Debug)]
@@ -315,7 +321,7 @@ async fn run_rtsp_session(
         recv_buf: vec![0u8; 64 * 1024],
         pending_responses: VecDeque::new(),
         parsed_url: parsed_url.clone(),
-        auth_header: None,
+        auth: None,
         session_id: None,
         video_receiver: None,
         audio_receiver: None,
@@ -487,10 +493,12 @@ impl RtspSessionRunner {
     }
 
     async fn send_keepalive(&mut self) -> Result<(), SessionError> {
-        let request = self.apply_common_headers(RtspRequest::new(
-            RtspMethod::GetParameter,
+        let method = RtspMethod::GetParameter;
+        let request = self.apply_common_headers(
+            RtspRequest::new(method.clone(), &self.keepalive_uri),
+            &method,
             &self.keepalive_uri,
-        ));
+        )?;
         self.connection.send_request(request).map_err(|e| {
             SessionError::Retryable(Error::new(format!("failed to send keepalive request: {e}")))
         })?;
@@ -654,8 +662,11 @@ impl RtspSessionRunner {
         F: Fn(RtspRequest) -> RtspRequest,
     {
         for attempt in 0..2 {
-            let request =
-                self.apply_common_headers(build_request(RtspRequest::new(method.clone(), uri)));
+            let request = self.apply_common_headers(
+                build_request(RtspRequest::new(method.clone(), uri)),
+                &method,
+                uri,
+            )?;
             self.connection.send_request(request).map_err(|e| {
                 SessionError::Retryable(Error::new(format!("failed to send RTSP request: {e}")))
             })?;
@@ -664,7 +675,7 @@ impl RtspSessionRunner {
             let response = self.wait_for_response().await?;
             if response.status_code == 401
                 && attempt == 0
-                && self.try_update_auth_header(&response, &method, uri)?
+                && self.try_update_auth_header(&response)?
             {
                 continue;
             }
@@ -691,12 +702,7 @@ impl RtspSessionRunner {
         ))))
     }
 
-    fn try_update_auth_header(
-        &mut self,
-        response: &RtspResponse,
-        method: &RtspMethod,
-        uri: &str,
-    ) -> Result<bool, SessionError> {
+    fn try_update_auth_header(&mut self, response: &RtspResponse) -> Result<bool, SessionError> {
         let Some(credentials) = self.parsed_url.credentials.as_ref() else {
             return Ok(false);
         };
@@ -712,7 +718,7 @@ impl RtspSessionRunner {
                         "failed to build Basic auth header: {e}"
                     )))
                 })?;
-            self.auth_header = Some(basic.to_header_value());
+            self.auth = Some(RtspAuthorization::Basic(basic.to_header_value()));
             return Ok(true);
         }
 
@@ -720,30 +726,47 @@ impl RtspSessionRunner {
             let challenge = DigestChallenge::parse(challenge_value).map_err(|e| {
                 SessionError::Fatal(Error::new(format!("failed to parse Digest challenge: {e}")))
             })?;
-            let auth = shiguredo_rtsp::auth::build_authorization(
-                &DigestCredentials {
-                    username: credentials.username.clone(),
-                    password: credentials.password.clone(),
-                },
-                &challenge,
-                method.as_str(),
-                uri,
-            );
-            self.auth_header = Some(auth);
+            self.auth = Some(RtspAuthorization::Digest(challenge));
             return Ok(true);
         }
 
         Ok(false)
     }
 
-    fn apply_common_headers(&self, mut request: RtspRequest) -> RtspRequest {
-        if let Some(value) = self.auth_header.as_deref() {
-            request = request.header("Authorization", value);
+    fn apply_common_headers(
+        &self,
+        mut request: RtspRequest,
+        method: &RtspMethod,
+        uri: &str,
+    ) -> Result<RtspRequest, SessionError> {
+        if let Some(auth) = self.auth.as_ref() {
+            match auth {
+                RtspAuthorization::Basic(value) => {
+                    request = request.header("Authorization", value);
+                }
+                RtspAuthorization::Digest(challenge) => {
+                    let credentials = self.parsed_url.credentials.as_ref().ok_or_else(|| {
+                        SessionError::Fatal(Error::new(
+                            "Digest auth requires credentials in inputUrl",
+                        ))
+                    })?;
+                    let value = shiguredo_rtsp::auth::build_authorization(
+                        &DigestCredentials {
+                            username: credentials.username.clone(),
+                            password: credentials.password.clone(),
+                        },
+                        challenge,
+                        method.as_str(),
+                        uri,
+                    );
+                    request = request.header("Authorization", value.as_str());
+                }
+            }
         }
         if let Some(value) = self.session_id.as_deref() {
             request = request.header("Session", value);
         }
-        request
+        Ok(request)
     }
 
     fn update_session_id(&mut self, response: &RtspResponse) -> Result<(), SessionError> {
