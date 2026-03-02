@@ -5,7 +5,7 @@ use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 pub fn parse_h264_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+    let mut config = default_decoder_config(shiguredo_nvcodec::DecoderCodec::H264);
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -27,7 +27,7 @@ pub fn parse_h264_decode_params(
 pub fn parse_h265_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+    let mut config = default_decoder_config(shiguredo_nvcodec::DecoderCodec::Hevc);
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -49,7 +49,7 @@ pub fn parse_h265_decode_params(
 pub fn parse_av1_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+    let mut config = default_decoder_config(shiguredo_nvcodec::DecoderCodec::Av1);
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -71,7 +71,7 @@ pub fn parse_av1_decode_params(
 pub fn parse_vp8_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+    let mut config = default_decoder_config(shiguredo_nvcodec::DecoderCodec::Vp8);
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -93,7 +93,7 @@ pub fn parse_vp8_decode_params(
 pub fn parse_vp9_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+    let mut config = default_decoder_config(shiguredo_nvcodec::DecoderCodec::Vp9);
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -130,4 +130,16 @@ fn update_decode_params(
         .unwrap_or(config.max_display_delay);
 
     Ok(())
+}
+
+fn default_decoder_config(
+    codec: shiguredo_nvcodec::DecoderCodec,
+) -> shiguredo_nvcodec::DecoderConfig {
+    shiguredo_nvcodec::DecoderConfig {
+        codec,
+        device_id: 0,
+        max_num_decode_surfaces: 20,
+        max_display_delay: 0,
+        surface_format: shiguredo_nvcodec::SurfaceFormat::Nv12,
+    }
 }

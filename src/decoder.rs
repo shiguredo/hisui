@@ -236,7 +236,7 @@ impl AudioDecoderInner {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DecodeConfig {
     #[cfg(feature = "nvcodec")]
     pub nvcodec_h264: shiguredo_nvcodec::DecoderConfig,
@@ -248,6 +248,43 @@ pub struct DecodeConfig {
     pub nvcodec_vp8: shiguredo_nvcodec::DecoderConfig,
     #[cfg(feature = "nvcodec")]
     pub nvcodec_vp9: shiguredo_nvcodec::DecoderConfig,
+}
+
+#[cfg_attr(
+    not(feature = "nvcodec"),
+    expect(
+        clippy::derivable_impls,
+        reason = "nvcodec feature 無効時は導出可能だが、有効時は shiguredo_nvcodec::DecoderConfig に Default がないため手動実装を共用している"
+    )
+)]
+impl Default for DecodeConfig {
+    fn default() -> Self {
+        Self {
+            #[cfg(feature = "nvcodec")]
+            nvcodec_h264: default_nvcodec_decoder_config(shiguredo_nvcodec::DecoderCodec::H264),
+            #[cfg(feature = "nvcodec")]
+            nvcodec_h265: default_nvcodec_decoder_config(shiguredo_nvcodec::DecoderCodec::Hevc),
+            #[cfg(feature = "nvcodec")]
+            nvcodec_av1: default_nvcodec_decoder_config(shiguredo_nvcodec::DecoderCodec::Av1),
+            #[cfg(feature = "nvcodec")]
+            nvcodec_vp8: default_nvcodec_decoder_config(shiguredo_nvcodec::DecoderCodec::Vp8),
+            #[cfg(feature = "nvcodec")]
+            nvcodec_vp9: default_nvcodec_decoder_config(shiguredo_nvcodec::DecoderCodec::Vp9),
+        }
+    }
+}
+
+#[cfg(feature = "nvcodec")]
+fn default_nvcodec_decoder_config(
+    codec: shiguredo_nvcodec::DecoderCodec,
+) -> shiguredo_nvcodec::DecoderConfig {
+    shiguredo_nvcodec::DecoderConfig {
+        codec,
+        device_id: 0,
+        max_num_decode_surfaces: 20,
+        max_display_delay: 0,
+        surface_format: shiguredo_nvcodec::SurfaceFormat::Nv12,
+    }
 }
 
 #[derive(Debug, Default, Clone)]

@@ -19,9 +19,10 @@ pub struct NvcodecDecoder {
 impl NvcodecDecoder {
     pub fn new_h264(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H264) decoder");
-        let config = params.nvcodec_h264.clone();
+        let mut config = params.nvcodec_h264.clone();
+        config.codec = shiguredo_nvcodec::DecoderCodec::H264;
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h264(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -30,9 +31,10 @@ impl NvcodecDecoder {
 
     pub fn new_h265(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H265) decoder");
-        let config = params.nvcodec_h265.clone();
+        let mut config = params.nvcodec_h265.clone();
+        config.codec = shiguredo_nvcodec::DecoderCodec::Hevc;
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h265(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -41,9 +43,10 @@ impl NvcodecDecoder {
 
     pub fn new_av1(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(AV1) decoder");
-        let config = params.nvcodec_av1.clone();
+        let mut config = params.nvcodec_av1.clone();
+        config.codec = shiguredo_nvcodec::DecoderCodec::Av1;
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_av1(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -52,9 +55,10 @@ impl NvcodecDecoder {
 
     pub fn new_vp8(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP8) decoder");
-        let config = params.nvcodec_vp8.clone();
+        let mut config = params.nvcodec_vp8.clone();
+        config.codec = shiguredo_nvcodec::DecoderCodec::Vp8;
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp8(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -63,9 +67,10 @@ impl NvcodecDecoder {
 
     pub fn new_vp9(params: &DecodeConfig) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP9) decoder");
-        let config = params.nvcodec_vp9.clone();
+        let mut config = params.nvcodec_vp9.clone();
+        config.codec = shiguredo_nvcodec::DecoderCodec::Vp9;
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp9(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
