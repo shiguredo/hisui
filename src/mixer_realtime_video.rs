@@ -66,6 +66,8 @@ impl VideoRealtimeMixer {
             output_track_id,
         } = self;
 
+        let mut stats = handle.stats();
+        let stats = VideoRealtimeMixerStats::new(&mut stats);
         let output_tx = handle.publish_track(output_track_id).await?;
         let draw_order = build_draw_order(&input_tracks);
         let mut states = HashMap::with_capacity(input_tracks.len());
@@ -94,6 +96,7 @@ impl VideoRealtimeMixer {
         }
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
+        stats.set_current_input_track_count(input_tracks.len());
 
         let mut output_tx = output_tx;
         let ack = Some(output_tx.send_syn());
@@ -114,6 +117,7 @@ impl VideoRealtimeMixer {
             output_frame_index: 0,
             noacked_sent: 0,
             ack,
+            stats,
         }
         .run()
         .await
@@ -210,6 +214,24 @@ struct VideoRealtimeMixerRunner {
     output_frame_index: u64,
     noacked_sent: u64,
     ack: Option<crate::Ack>,
+    stats: VideoRealtimeMixerStats,
+}
+
+#[derive(Debug)]
+struct VideoRealtimeMixerStats {
+    current_input_track_count: crate::stats::StatsGauge,
+}
+
+impl VideoRealtimeMixerStats {
+    fn new(stats: &mut crate::stats::Stats) -> Self {
+        Self {
+            current_input_track_count: stats.gauge("current_input_track_count"),
+        }
+    }
+
+    fn set_current_input_track_count(&self, value: usize) {
+        self.current_input_track_count.set(value as i64);
+    }
 }
 
 impl VideoRealtimeMixerRunner {
@@ -361,6 +383,8 @@ impl VideoRealtimeMixerRunner {
 
         self.draw_order = build_draw_order(&input_tracks);
         self.input_tracks = input_tracks;
+        self.stats
+            .set_current_input_track_count(self.input_tracks.len());
 
         Ok(VideoRealtimeMixerUpdateInputsResult {
             previous_input_tracks,

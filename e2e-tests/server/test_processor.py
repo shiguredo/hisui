@@ -871,6 +871,77 @@ def test_update_audio_mixer_inputs_updates_current_input_track_count_metric(
         )
 
 
+def test_update_video_mixer_inputs_updates_current_input_track_count_metric(
+    binary_path: Path,
+):
+    """updateVideoMixerInputs で入力トラック数メトリクスが更新されることを確認する"""
+    mixer_processor_id = "e2e-video-mixer-update-inputs"
+    input_track_id_a = "e2e-video-mixer-input-a"
+    input_track_id_b = "e2e-video-mixer-input-b"
+    output_track_id = "e2e-video-mixer-update-output"
+
+    with HisuiServer(binary_path, manual_start_trigger=True) as server:
+        create_mixer_response = server.rpc_call(
+            "createVideoMixer",
+            {
+                "canvasWidth": 640,
+                "canvasHeight": 360,
+                "inputTracks": [{"trackId": input_track_id_a}],
+                "outputTrackId": output_track_id,
+                "processorId": mixer_processor_id,
+            },
+        )
+        assert create_mixer_response["result"]["processorId"] == mixer_processor_id
+
+        start_response = server.trigger_start()
+        assert start_response["result"]["started"] is True
+
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=1,
+        )
+
+        update_response = server.rpc_call(
+            "updateVideoMixerInputs",
+            {
+                "processorId": mixer_processor_id,
+                "inputTracks": [
+                    {"trackId": input_track_id_a},
+                    {"trackId": input_track_id_b},
+                ],
+            },
+        )
+        assert update_response["result"]["previousInputTracks"] == [
+            {"trackId": input_track_id_a, "x": 0, "y": 0, "z": 0}
+        ]
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=2,
+        )
+
+        empty_update_response = server.rpc_call(
+            "updateVideoMixerInputs",
+            {
+                "processorId": mixer_processor_id,
+                "inputTracks": [],
+            },
+        )
+        assert empty_update_response["result"]["previousInputTracks"] == [
+            {"trackId": input_track_id_a, "x": 0, "y": 0, "z": 0},
+            {"trackId": input_track_id_b, "x": 0, "y": 0, "z": 0},
+        ]
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=0,
+        )
+
+
 def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
     """createRtmpInboundEndpoint で受信した映像の統計値を確認する"""
     input_path = (
