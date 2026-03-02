@@ -372,7 +372,6 @@ impl InputTrackState {
         self.total_input_samples_per_channel = self
             .total_input_samples_per_channel
             .saturating_add(samples_per_channel as u64);
-        self.queue_head_timestamp = Some(queue_head_timestamp);
 
         stats.add_input_audio_frame_count();
         Ok(())
