@@ -31,7 +31,7 @@ impl Error {
     }
 
     fn reason(&self) -> Option<&CStr> {
-        let reason = unsafe { sys::opus_strerror(self.code) };
+        let reason = unsafe { sys::shiguredo_opus_opus_strerror(self.code) };
         if reason.is_null() {
             None
         } else {
@@ -70,8 +70,13 @@ impl Decoder {
     /// デコーダーインスタンスを生成する
     pub fn new(sample_rate: u16, channels: u8) -> Result<Self, Error> {
         let mut error: c_int = 0;
-        let inner =
-            unsafe { sys::opus_decoder_create(sample_rate as i32, channels as c_int, &mut error) };
+        let inner = unsafe {
+            sys::shiguredo_opus_opus_decoder_create(
+                sample_rate as i32,
+                channels as c_int,
+                &mut error,
+            )
+        };
         Error::check(error, "opus_decoder_create")?;
         Ok(Self {
             inner,
@@ -88,7 +93,7 @@ impl Decoder {
 
         // デコードする
         unsafe {
-            let code = sys::opus_decode(
+            let code = sys::shiguredo_opus_opus_decode(
                 self.inner,
                 data.as_ptr(),
                 data.len() as c_int,
@@ -104,7 +109,7 @@ impl Decoder {
 
     fn get_nb_samples(&self, packet: &[u8]) -> Result<usize, Error> {
         unsafe {
-            let samples = sys::opus_decoder_get_nb_samples(
+            let samples = sys::shiguredo_opus_opus_decoder_get_nb_samples(
                 self.inner,
                 packet.as_ptr(),
                 packet.len() as c_int,
@@ -120,7 +125,7 @@ unsafe impl Send for Decoder {}
 impl Drop for Decoder {
     fn drop(&mut self) {
         unsafe {
-            sys::opus_decoder_destroy(self.inner);
+            sys::shiguredo_opus_opus_decoder_destroy(self.inner);
         }
     }
 }
@@ -138,7 +143,7 @@ impl Encoder {
     pub fn new(sample_rate: u16, channels: u8, bitrate: u32) -> Result<Self, Error> {
         let mut error = 0;
         let inner = unsafe {
-            sys::opus_encoder_create(
+            sys::shiguredo_opus_opus_encoder_create(
                 sample_rate as i32,
                 channels as c_int,
                 sys::OPUS_APPLICATION_AUDIO as i32,
@@ -149,13 +154,13 @@ impl Encoder {
 
         // エンコードビットレートを指定する
         unsafe {
-            let code = sys::opus_encoder_ctl(
+            let code = sys::shiguredo_opus_opus_encoder_ctl(
                 inner,
                 sys::OPUS_SET_BITRATE_REQUEST as i32,
                 bitrate as c_int,
             );
             Error::check(code, "opus_encoder_ctl").inspect_err(|_| {
-                sys::opus_encoder_destroy(inner);
+                sys::shiguredo_opus_opus_encoder_destroy(inner);
             })?;
         }
 
@@ -170,7 +175,7 @@ impl Encoder {
     pub fn get_lookahead(&self) -> Result<u16, Error> {
         let mut value = 0;
         unsafe {
-            let code = sys::opus_encoder_ctl(
+            let code = sys::shiguredo_opus_opus_encoder_ctl(
                 self.inner,
                 sys::OPUS_GET_LOOKAHEAD_REQUEST as i32,
                 &mut value,
@@ -190,7 +195,7 @@ impl Encoder {
         self.encode_buf.resize(buf_size, 0);
 
         unsafe {
-            let size = sys::opus_encode(
+            let size = sys::shiguredo_opus_opus_encode(
                 self.inner,
                 pcm.as_ptr(),
                 pcm.len() as c_int / self.channels as c_int,
@@ -208,7 +213,7 @@ unsafe impl Send for Encoder {}
 impl Drop for Encoder {
     fn drop(&mut self) {
         unsafe {
-            sys::opus_encoder_destroy(self.inner);
+            sys::shiguredo_opus_opus_encoder_destroy(self.inner);
         }
     }
 }
