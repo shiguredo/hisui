@@ -295,35 +295,6 @@ def _wait_for_processor_listening(
     )
 
 
-def _wait_for_processor_metric_int(
-    server: HisuiServer,
-    *,
-    processor_id: str,
-    processor_type: str,
-    metric_name: str,
-    expected_value: int,
-    timeout: float = 10.0,
-) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            value = int(
-                ProcessorMetrics(
-                    server.metrics_json(),
-                    processor_id=processor_id,
-                    processor_type=processor_type,
-                ).value(metric_name)
-            )
-            if value == expected_value:
-                return
-        except (AssertionError, ValueError):
-            pass
-        time.sleep(0.1)
-    raise AssertionError(
-        f"processor metric did not reach expected value: processor_id={processor_id}, processor_type={processor_type}, metric_name={metric_name}, expected_value={expected_value}"
-    )
-
-
 def _last_video_timestamp_seconds(
     server: HisuiServer,
     *,
@@ -854,8 +825,7 @@ def test_update_audio_mixer_inputs_updates_current_input_track_count_metric(
         start_response = server.trigger_start()
         assert start_response["result"]["started"] is True
 
-        _wait_for_processor_metric_int(
-            server,
+        server.wait_processor_metric_int(
             processor_id=mixer_processor_id,
             processor_type="audio_mixer",
             metric_name="hisui_current_input_track_count",
@@ -875,8 +845,7 @@ def test_update_audio_mixer_inputs_updates_current_input_track_count_metric(
         assert update_response["result"]["previousInputTracks"] == [
             {"trackId": input_track_id_a}
         ]
-        _wait_for_processor_metric_int(
-            server,
+        server.wait_processor_metric_int(
             processor_id=mixer_processor_id,
             processor_type="audio_mixer",
             metric_name="hisui_current_input_track_count",
@@ -894,8 +863,7 @@ def test_update_audio_mixer_inputs_updates_current_input_track_count_metric(
             {"trackId": input_track_id_a},
             {"trackId": input_track_id_b},
         ]
-        _wait_for_processor_metric_int(
-            server,
+        server.wait_processor_metric_int(
             processor_id=mixer_processor_id,
             processor_type="audio_mixer",
             metric_name="hisui_current_input_track_count",
