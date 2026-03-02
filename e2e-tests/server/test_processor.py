@@ -1226,7 +1226,13 @@ def test_create_srt_inbound_endpoint_reconnect_keeps_live_timestamp_progress(
             processor_type="srt_inbound_endpoint",
         )
 
-        time.sleep(1.0)
+        server.wait_processor_metric_int(
+            processor_id=processor_id,
+            processor_type="srt_inbound_endpoint",
+            metric_name="hisui_is_connected",
+            expected_value=0,
+            timeout=10.0,
+        )
         _run_ffmpeg_srt_publish(
             input_path,
             publish_url,

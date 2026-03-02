@@ -35,6 +35,7 @@ pub struct SrtInboundEndpoint {
 #[derive(Debug, Clone)]
 struct SrtInboundEndpointStats {
     is_listening_metric: crate::stats::StatsFlag,
+    is_connected_metric: crate::stats::StatsFlag,
     audio_codec_metric: crate::stats::StatsString,
     total_input_audio_data_count_metric: crate::stats::StatsCounter,
     last_input_audio_timestamp_metric: crate::stats::StatsDuration,
@@ -47,6 +48,7 @@ impl SrtInboundEndpointStats {
     fn new(mut stats: crate::stats::Stats) -> Self {
         Self {
             is_listening_metric: stats.flag("is_listening"),
+            is_connected_metric: stats.flag("is_connected"),
             audio_codec_metric: stats.string("audio_codec"),
             total_input_audio_data_count_metric: stats.counter("total_input_audio_data_count"),
             last_input_audio_timestamp_metric: stats.duration("last_input_audio_timestamp"),
@@ -82,6 +84,10 @@ impl SrtInboundEndpointStats {
 
     fn set_listening(&self, value: bool) {
         self.is_listening_metric.set(value);
+    }
+
+    fn set_connected(&self, value: bool) {
+        self.is_connected_metric.set(value);
     }
 }
 
@@ -154,6 +160,7 @@ impl SrtInboundEndpoint {
 
         let stats = SrtInboundEndpointStats::new(handle.stats());
         stats.set_listening(true);
+        stats.set_connected(false);
 
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
@@ -195,6 +202,7 @@ impl SrtInboundEndpoint {
                         conn,
                         &endpoint_config,
                         &mut connection_ctx,
+                        &stats,
                     )?;
                 }
                 Ok(())
@@ -275,11 +283,13 @@ impl SrtInboundEndpoint {
         conn: &mut SrtConnection,
         endpoint_config: &SrtEndpointConfig,
         connection_ctx: &mut SrtConnectionContext<'_>,
+        stats: &SrtInboundEndpointStats,
     ) -> crate::Result<()> {
         match event {
             ConnectionEvent::Connected => {
                 *connection_ctx.connection_timestamp_offset =
                     Duration::from_micros(now.as_micros());
+                stats.set_connected(true);
                 if let Some(expected_stream_id) = &endpoint_config.stream_id {
                     let actual_stream_id = conn.peer_stream_id();
                     if actual_stream_id != Some(expected_stream_id.as_str()) {
@@ -294,11 +304,13 @@ impl SrtInboundEndpoint {
             ConnectionEvent::StateChanged(state) => {
                 tracing::debug!("SRT state changed: {state:?}");
                 if state == ConnectionState::Disconnected {
+                    stats.set_connected(false);
                     reset_connection_state(conn, endpoint_config, connection_ctx)?;
                 }
             }
             ConnectionEvent::Disconnected { reason } => {
                 tracing::warn!("SRT disconnected: {reason}");
+                stats.set_connected(false);
                 reset_connection_state(conn, endpoint_config, connection_ctx)?;
             }
             ConnectionEvent::Error(reason) => {
