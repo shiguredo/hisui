@@ -96,7 +96,12 @@ impl VideoRealtimeMixer {
         }
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
-        stats.set_current_input_track_count(input_tracks.len());
+        stats.set_runtime_config(
+            canvas_width.get(),
+            canvas_height.get(),
+            frame_rate,
+            input_tracks.len(),
+        );
 
         let mut output_tx = output_tx;
         let ack = Some(output_tx.send_syn());
@@ -178,10 +183,53 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
 
 #[derive(Debug)]
 pub enum VideoRealtimeMixerRpcMessage {
+    UpdateConfig {
+        request: VideoRealtimeMixerUpdateConfigRequest,
+        reply_tx: tokio::sync::oneshot::Sender<crate::Result<VideoRealtimeMixerUpdateConfigResult>>,
+    },
     UpdateInputs {
         input_tracks: Vec<InputTrack>,
         reply_tx: tokio::sync::oneshot::Sender<crate::Result<VideoRealtimeMixerUpdateInputsResult>>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct VideoRealtimeMixerUpdateConfigRequest {
+    pub canvas_width: EvenUsize,
+    pub canvas_height: EvenUsize,
+    pub frame_rate: FrameRate,
+    pub input_tracks: Vec<InputTrack>,
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>>
+    for VideoRealtimeMixerUpdateConfigRequest
+{
+    type Error = nojson::JsonParseError;
+
+    fn try_from(
+        value: nojson::RawJsonValue<'text, 'raw>,
+    ) -> std::result::Result<Self, Self::Error> {
+        let canvas_width = value.to_member("canvasWidth")?.required()?.try_into()?;
+        let canvas_height = value.to_member("canvasHeight")?.required()?.try_into()?;
+        let frame_rate = value.to_member("frameRate")?.required()?.try_into()?;
+        let input_tracks: Vec<InputTrack> =
+            value.to_member("inputTracks")?.required()?.try_into()?;
+        validate_unique_input_tracks_for_json(&input_tracks, value)?;
+        Ok(Self {
+            canvas_width,
+            canvas_height,
+            frame_rate,
+            input_tracks,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VideoRealtimeMixerUpdateConfigResult {
+    pub previous_canvas_width: usize,
+    pub previous_canvas_height: usize,
+    pub previous_frame_rate: FrameRate,
+    pub previous_input_tracks: Vec<InputTrack>,
 }
 
 #[derive(Debug, Clone)]
@@ -220,17 +268,37 @@ struct VideoRealtimeMixerRunner {
 #[derive(Debug)]
 struct VideoRealtimeMixerStats {
     current_input_track_count: crate::stats::StatsGauge,
+    current_canvas_width: crate::stats::StatsGauge,
+    current_canvas_height: crate::stats::StatsGauge,
+    current_frame_rate_numerator: crate::stats::StatsGauge,
+    current_frame_rate_denumerator: crate::stats::StatsGauge,
 }
 
 impl VideoRealtimeMixerStats {
     fn new(stats: &mut crate::stats::Stats) -> Self {
         Self {
             current_input_track_count: stats.gauge("current_input_track_count"),
+            current_canvas_width: stats.gauge("current_canvas_width"),
+            current_canvas_height: stats.gauge("current_canvas_height"),
+            current_frame_rate_numerator: stats.gauge("current_frame_rate_numerator"),
+            current_frame_rate_denumerator: stats.gauge("current_frame_rate_denumerator"),
         }
     }
 
-    fn set_current_input_track_count(&self, value: usize) {
-        self.current_input_track_count.set(value as i64);
+    fn set_runtime_config(
+        &self,
+        canvas_width: usize,
+        canvas_height: usize,
+        frame_rate: FrameRate,
+        input_track_count: usize,
+    ) {
+        self.current_canvas_width.set(canvas_width as i64);
+        self.current_canvas_height.set(canvas_height as i64);
+        self.current_frame_rate_numerator
+            .set(frame_rate.numerator.get() as i64);
+        self.current_frame_rate_denumerator
+            .set(frame_rate.denumerator.get() as i64);
+        self.current_input_track_count.set(input_track_count as i64);
     }
 }
 
@@ -321,6 +389,10 @@ impl VideoRealtimeMixerRunner {
         };
 
         match rpc_message {
+            VideoRealtimeMixerRpcMessage::UpdateConfig { request, reply_tx } => {
+                let result = self.update_config(request);
+                let _ = reply_tx.send(result);
+            }
             VideoRealtimeMixerRpcMessage::UpdateInputs {
                 input_tracks,
                 reply_tx,
@@ -337,10 +409,31 @@ impl VideoRealtimeMixerRunner {
         &mut self,
         input_tracks: Vec<InputTrack>,
     ) -> crate::Result<VideoRealtimeMixerUpdateInputsResult> {
-        validate_unique_input_tracks(&input_tracks)?;
+        let result = self.update_config(VideoRealtimeMixerUpdateConfigRequest {
+            canvas_width: EvenUsize::new(self.canvas_width)
+                .expect("BUG: current canvas width must remain even"),
+            canvas_height: EvenUsize::new(self.canvas_height)
+                .expect("BUG: current canvas height must remain even"),
+            frame_rate: self.frame_rate,
+            input_tracks,
+        })?;
+        Ok(VideoRealtimeMixerUpdateInputsResult {
+            previous_input_tracks: result.previous_input_tracks,
+        })
+    }
 
+    fn update_config(
+        &mut self,
+        request: VideoRealtimeMixerUpdateConfigRequest,
+    ) -> crate::Result<VideoRealtimeMixerUpdateConfigResult> {
+        validate_unique_input_tracks(&request.input_tracks)?;
+
+        let previous_canvas_width = self.canvas_width;
+        let previous_canvas_height = self.canvas_height;
+        let previous_frame_rate = self.frame_rate;
         let previous_input_tracks = self.input_tracks.clone();
-        let requested_track_ids: HashSet<TrackId> = input_tracks
+        let requested_track_ids: HashSet<TrackId> = request
+            .input_tracks
             .iter()
             .map(|input_track| input_track.track_id.clone())
             .collect();
@@ -358,7 +451,7 @@ impl VideoRealtimeMixerRunner {
             }
         }
 
-        for input_track in &input_tracks {
+        for input_track in &request.input_tracks {
             if let Some(state) = self.states.get_mut(&input_track.track_id) {
                 state.update_input_track(input_track.clone());
                 continue;
@@ -381,12 +474,22 @@ impl VideoRealtimeMixerRunner {
                 .insert(receiver.track_id.clone(), receiver);
         }
 
-        self.draw_order = build_draw_order(&input_tracks);
-        self.input_tracks = input_tracks;
-        self.stats
-            .set_current_input_track_count(self.input_tracks.len());
+        self.draw_order = build_draw_order(&request.input_tracks);
+        self.input_tracks = request.input_tracks;
+        self.canvas_width = request.canvas_width.get();
+        self.canvas_height = request.canvas_height.get();
+        self.frame_rate = request.frame_rate;
+        self.stats.set_runtime_config(
+            self.canvas_width,
+            self.canvas_height,
+            self.frame_rate,
+            self.input_tracks.len(),
+        );
 
-        Ok(VideoRealtimeMixerUpdateInputsResult {
+        Ok(VideoRealtimeMixerUpdateConfigResult {
+            previous_canvas_width,
+            previous_canvas_height,
+            previous_frame_rate,
             previous_input_tracks,
         })
     }
