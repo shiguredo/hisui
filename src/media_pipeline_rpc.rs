@@ -608,7 +608,7 @@ impl MediaPipelineHandle {
                 }
                 crate::media_pipeline::GetProcessorRpcSenderError::SenderNotRegistered => {
                     invalid_params(format!(
-                        "Invalid params: processor RPC sender is not registered yet: {processor_id}"
+                        "Invalid params: processor does not support audio mixer input updates: {processor_id}"
                     ))
                 }
                 crate::media_pipeline::GetProcessorRpcSenderError::TypeMismatch => invalid_params(
