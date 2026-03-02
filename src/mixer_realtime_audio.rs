@@ -706,6 +706,9 @@ impl AudioRealtimeMixerRunner<'_> {
         if !self.config.terminate_on_input_eos {
             return false;
         }
+        // terminate_on_input_eos が true の場合は、入力トラックが 0 件になった状態も
+        // 「すべての入力が終了した」とみなして EOS で終了する。
+        // updateAudioMixerInputs([]) 直後の終了は意図した挙動。
         self.states
             .values()
             .all(|state| state.eos && state.is_empty())
