@@ -27,7 +27,8 @@
 - [ADD] server サブコマンドの JSON-RPC で Audio mixer を作成できるようにする
   - JSON-RPC に `createAudioMixer` メソッドを追加する
   - `inputTracks` の音声をリアルタイムに合成して `outputTrackId` へ配信できる
-  - `sampleRate` / `channels` / `frameDurationMs` / `timestampRebaseThresholdMs` を指定できる
+  - `sampleRate` / `channels` / `frameDurationMs` / `timestampRebaseThresholdMs` / `terminateOnInputEos` を指定できる
+  - `terminateOnInputEos` の既定値は `false`
   - `processorId` 未指定時は `audioMixer` を既定値として利用する
   - @sile
 - [ADD] server サブコマンドの JSON-RPC で Audio mixer の入力トラック構成を実行中に更新できるようにする
