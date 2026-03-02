@@ -1430,7 +1430,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_rtsp_session_receives_h264_and_aac() {
+    async fn run_rtsp_session_disconnects_after_requesting_audio_and_video() {
         let server = TestRtspServer::spawn(TestRtspServerOptions {
             require_basic_auth: false,
             with_audio: true,
