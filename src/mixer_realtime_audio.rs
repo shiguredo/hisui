@@ -766,6 +766,21 @@ mod tests {
     }
 
     #[test]
+    fn mixer_json_parse_rejects_non_integral_samples_per_frame_duration() {
+        let result = crate::json::parse_str::<AudioRealtimeMixer>(
+            r#"
+{
+  "sampleRate": 44100,
+  "frameDurationMs": 1,
+  "inputTracks": [{"trackId": "audio-input"}],
+  "outputTrackId": "audio-output"
+}
+        "#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn mixer_json_parse_rejects_duplicate_track_ids() {
         let result = crate::json::parse_str::<AudioRealtimeMixer>(
             r#"

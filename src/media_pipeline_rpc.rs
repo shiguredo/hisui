@@ -1333,6 +1333,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_mp4_writer_rejects_non_mp4_output_path() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_mp4_writer_request("out.webm", Some("audio-input-track"), None, None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_mp4_writer_rejects_missing_output_parent_directory() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let missing_output_path = temp_dir.path().join("missing").join("out.mp4");
+        let request = create_mp4_writer_request(
+            missing_output_path.to_string_lossy().as_ref(),
+            Some("audio-input-track"),
+            None,
+            None,
+        );
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
     async fn create_mp4_writer_uses_default_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let output_path = tempfile::Builder::new()
