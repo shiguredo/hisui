@@ -1540,7 +1540,7 @@ mod tests {
 
         let err = depacketizer.depacketize(&packet).expect_err("must reject");
         assert_eq!(
-            err.to_string(),
+            err.display(),
             "invalid AAC RTP payload: AU header length must be greater than 0"
         );
     }
