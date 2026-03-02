@@ -633,6 +633,174 @@ def test_create_audio_decoder_from_mp4_audio_reader_and_compare_stats(binary_pat
             assert metrics.value("hisui_engine", value="opus") == "1"
 
 
+def test_create_audio_mixer_with_mp4_writer_and_inspect_output(binary_path: Path):
+    """Mp4AudioReader x2 -> AudioDecoder x2 -> AudioMixer -> AudioEncoder -> Mp4Writer を確認する"""
+    input_path_a = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "e2e"
+        / "simple_multi_sources"
+        / "archive-red-noise.mp4"
+    )
+    input_path_b = (
+        Path(__file__).resolve().parents[2]
+        / "testdata"
+        / "e2e"
+        / "simple_multi_sources"
+        / "archive-blue-noise.mp4"
+    )
+    reader_processor_id_a = "e2e-mp4-audio-reader-mixer-a"
+    reader_processor_id_b = "e2e-mp4-audio-reader-mixer-b"
+    decoder_processor_id_a = "e2e-audio-decoder-mixer-a"
+    decoder_processor_id_b = "e2e-audio-decoder-mixer-b"
+    decoded_audio_track_id_a = "e2e-decoded-audio-track-mixer-a"
+    decoded_audio_track_id_b = "e2e-decoded-audio-track-mixer-b"
+    mixer_processor_id = "e2e-audio-mixer"
+    mixed_audio_track_id = "e2e-mixed-audio-track"
+    encoder_processor_id = "e2e-audio-encoder-mixer"
+    encoded_audio_track_id = "e2e-encoded-audio-track-mixer"
+    writer_processor_id = "e2e-mp4-writer-mixer"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        output_path = Path(tmp_dir) / "mixed-audio.mp4"
+
+        with HisuiServer(binary_path, manual_start_trigger=True) as server:
+            create_reader_response_a = server.rpc_call(
+                "createMp4AudioReader",
+                {
+                    "path": str(input_path_a),
+                    "processorId": reader_processor_id_a,
+                },
+            )
+            assert create_reader_response_a["result"]["processorId"] == reader_processor_id_a
+
+            create_reader_response_b = server.rpc_call(
+                "createMp4AudioReader",
+                {
+                    "path": str(input_path_b),
+                    "processorId": reader_processor_id_b,
+                },
+            )
+            assert create_reader_response_b["result"]["processorId"] == reader_processor_id_b
+
+            create_decoder_response_a = server.rpc_call(
+                "createAudioDecoder",
+                {
+                    "inputTrackId": reader_processor_id_a,
+                    "outputTrackId": decoded_audio_track_id_a,
+                    "processorId": decoder_processor_id_a,
+                },
+            )
+            assert create_decoder_response_a["result"]["processorId"] == decoder_processor_id_a
+
+            create_decoder_response_b = server.rpc_call(
+                "createAudioDecoder",
+                {
+                    "inputTrackId": reader_processor_id_b,
+                    "outputTrackId": decoded_audio_track_id_b,
+                    "processorId": decoder_processor_id_b,
+                },
+            )
+            assert create_decoder_response_b["result"]["processorId"] == decoder_processor_id_b
+
+            create_mixer_response = server.rpc_call(
+                "createAudioMixer",
+                {
+                    "inputTracks": [
+                        {"trackId": decoded_audio_track_id_a},
+                        {"trackId": decoded_audio_track_id_b},
+                    ],
+                    "outputTrackId": mixed_audio_track_id,
+                    "processorId": mixer_processor_id,
+                },
+            )
+            assert create_mixer_response["result"]["processorId"] == mixer_processor_id
+
+            create_encoder_response = server.rpc_call(
+                "createAudioEncoder",
+                {
+                    "inputTrackId": mixed_audio_track_id,
+                    "outputTrackId": encoded_audio_track_id,
+                    "codec": "OPUS",
+                    "bitrateBps": 64000,
+                    "processorId": encoder_processor_id,
+                },
+            )
+            assert create_encoder_response["result"]["processorId"] == encoder_processor_id
+
+            create_writer_response = server.rpc_call(
+                "createMp4Writer",
+                {
+                    "outputPath": str(output_path),
+                    "inputAudioTrackId": encoded_audio_track_id,
+                    "processorId": writer_processor_id,
+                },
+            )
+            assert create_writer_response["result"]["processorId"] == writer_processor_id
+
+            start_response = server.trigger_start()
+            assert start_response["result"]["started"] is True
+
+            assert (
+                server.wait_processor_terminated(
+                    reader_processor_id_a,
+                    timeout=10.0,
+                )
+                == reader_processor_id_a
+            )
+            assert (
+                server.wait_processor_terminated(
+                    reader_processor_id_b,
+                    timeout=10.0,
+                )
+                == reader_processor_id_b
+            )
+            assert (
+                server.wait_processor_terminated(
+                    decoder_processor_id_a,
+                    timeout=10.0,
+                )
+                == decoder_processor_id_a
+            )
+            assert (
+                server.wait_processor_terminated(
+                    decoder_processor_id_b,
+                    timeout=10.0,
+                )
+                == decoder_processor_id_b
+            )
+            assert (
+                server.wait_processor_terminated(
+                    mixer_processor_id,
+                    timeout=10.0,
+                )
+                == mixer_processor_id
+            )
+            assert (
+                server.wait_processor_terminated(
+                    encoder_processor_id,
+                    timeout=10.0,
+                )
+                == encoder_processor_id
+            )
+            assert (
+                server.wait_processor_terminated(
+                    writer_processor_id,
+                    timeout=10.0,
+                )
+                == writer_processor_id
+            )
+
+        assert output_path.exists(), "mixed output file must exist"
+        assert output_path.stat().st_size > 0, "mixed output file must not be empty"
+
+        inspect_output = _inspect_mp4(binary_path, output_path)
+        assert inspect_output["format"] == "mp4"
+        assert inspect_output["audio_codec"] == "OPUS"
+        assert inspect_output["audio_sample_count"] > 0
+        assert "video_sample_count" not in inspect_output
+
+
 def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
     """createRtmpInboundEndpoint で受信した映像の統計値を確認する"""
     input_path = (

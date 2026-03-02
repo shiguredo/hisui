@@ -45,6 +45,7 @@ pub mod logger;
 pub mod media;
 pub mod media_pipeline;
 mod media_pipeline_rpc;
+pub mod mixer_realtime_audio;
 pub mod mixer_realtime_video;
 pub mod optuna;
 pub mod outbound_endpoint_rtmp;
