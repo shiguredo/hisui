@@ -317,6 +317,8 @@ async fn run_rtsp_session(
         auth_header: None,
         video_receiver: None,
         audio_receiver: None,
+        // setup_session 完了後に selected.play_url で上書きされる。
+        // ここでは初期化要件を満たすために request_url を入れておく。
         keepalive_uri: parsed_url.request_url.clone(),
     };
 
@@ -369,6 +371,7 @@ impl RtspSessionRunner {
             .map_err(|e| SessionError::Fatal(Error::new(format!("failed to parse SDP: {e}"))))?;
         let selected = select_tracks(&sdp, &sdp_base_url, want_audio, want_video)
             .map_err(SessionError::Fatal)?;
+        // keepalive は PLAY 対象 URI に対して送る。
         self.keepalive_uri = selected.play_url.clone();
 
         let mut next_channel = 0u8;
