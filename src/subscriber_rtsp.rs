@@ -996,6 +996,11 @@ impl AacRtpDepacketizer {
 
         let au_headers_length_bits =
             u16::from_be_bytes([packet.payload[0], packet.payload[1]]) as usize;
+        if au_headers_length_bits == 0 {
+            return Err(Error::new(
+                "invalid AAC RTP payload: AU header length must be greater than 0",
+            ));
+        }
         let au_headers_length_bytes = au_headers_length_bits.div_ceil(8);
         if packet.payload.len() < 2 + au_headers_length_bytes {
             return Err(Error::new(
@@ -1519,6 +1524,25 @@ mod tests {
         assert_eq!(aus[0].data, vec![0xaa, 0xbb, 0xcc, 0xdd]);
         assert_eq!(aus[1].rtp_timestamp, 10024);
         assert_eq!(aus[1].data, vec![0x11, 0x22]);
+    }
+
+    #[test]
+    fn depacketize_aac_rejects_zero_au_header_length() {
+        let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
+        let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
+        header.marker = true;
+        let packet = shiguredo_rtsp::RtpPacket {
+            header,
+            extension: None,
+            payload: vec![0x00, 0x00],
+            padding_size: 0,
+        };
+
+        let err = depacketizer.depacketize(&packet).expect_err("must reject");
+        assert_eq!(
+            err.to_string(),
+            "invalid AAC RTP payload: AU header length must be greater than 0"
+        );
     }
 
     #[tokio::test]
