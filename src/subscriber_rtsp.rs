@@ -1841,13 +1841,13 @@ mod tests {
              s=hisui-test\r\n\
              t=0 0\r\n\
              a=control:*\r\n\
-             m=video 0 RTP/AVP 96\r\n\
+             m=video 9000 RTP/AVP 96\r\n\
              a=rtpmap:96 {video_encoding}/90000\r\n\
              a=control:trackID=0\r\n"
         );
         if with_audio {
             sdp.push_str(
-                "m=audio 0 RTP/AVP 97\r\n\
+                "m=audio 9002 RTP/AVP 97\r\n\
                  a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
                  a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1190\r\n\
                  a=control:trackID=1\r\n",
