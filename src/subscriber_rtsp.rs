@@ -386,8 +386,12 @@ impl RtspSessionRunner {
 
         if let Some(video) = selected.video {
             let rtp_channel = next_channel;
-            let rtcp_channel = next_channel.saturating_add(1);
-            next_channel = next_channel.saturating_add(2);
+            let rtcp_channel = next_channel
+                .checked_add(1)
+                .expect("BUG: RTSP interleaved channel overflow");
+            next_channel = next_channel
+                .checked_add(2)
+                .expect("BUG: RTSP interleaved channel overflow");
 
             let transport = format!(
                 "RTP/AVP/TCP;unicast;interleaved={}-{}",
@@ -419,7 +423,9 @@ impl RtspSessionRunner {
 
         if let Some(audio) = selected.audio {
             let rtp_channel = next_channel;
-            let rtcp_channel = next_channel.saturating_add(1);
+            let rtcp_channel = next_channel
+                .checked_add(1)
+                .expect("BUG: RTSP interleaved channel overflow");
 
             let transport = format!(
                 "RTP/AVP/TCP;unicast;interleaved={}-{}",
