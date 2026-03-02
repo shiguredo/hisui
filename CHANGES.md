@@ -154,6 +154,9 @@
 - [CHANGE] orfail crate を依存から削除する
   - これにより、エラー発生時に標準エラー出力に表示されるメッセージの細部のフォーマットに非互換な変更が入ることになる
   - @sile
+- [CHANGE] Video Toolbox encode params から `use_parallelization` を削除する
+  - `shiguredo_video_toolbox` 2026.1.0-canary.0 では `use_parallelization` 設定が廃止されたため、Hisui 側でも受け付けない
+  - @sile
 - [CHANGE] indicatif の依存を削除して自前のプログレスバー実装に置き換える
   - @sile
 - [CHANGE] 実験的な `pipeline` サブコマンドを削除する
