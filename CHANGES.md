@@ -36,6 +36,11 @@
   - `processorId` と `inputTracks` を指定して入力トラックの構成を全置換できる
   - レスポンスの `previousInputTracks` で更新前の入力トラック一覧を取得できる
   - @sile
+- [ADD] server サブコマンドの JSON-RPC で Video mixer の入力トラック構成を実行中に更新できるようにする
+  - JSON-RPC に `updateVideoMixerInputs` メソッドを追加する
+  - `processorId` と `inputTracks` を指定して入力トラックとレイアウトを全置換できる
+  - レスポンスの `previousInputTracks` で更新前の入力トラック一覧を取得できる
+  - @sile
 - [ADD] server サブコマンドの JSON-RPC で Audio encoder を作成できるようにする
   - JSON-RPC に `createAudioEncoder` メソッドを追加する
   - `inputTrackId` / `outputTrackId` を指定して音声トラックをエンコードできる
