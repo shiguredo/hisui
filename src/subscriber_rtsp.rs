@@ -2031,6 +2031,8 @@ mod tests {
     ) -> io::Result<()> {
         let mut header = RtpHeader::new(96, 1, timestamp, 0x01020304);
         header.marker = true;
+        // このテストは RTSP セッション経路の疎通確認が目的なので、最小の単一 NAL だけ送る。
+        // FU-A/STAP-A の分割・集約ロジック自体は depacketize_h264_fu_a などの単体テストで検証する。
         let packet = RtpPacket::new(header, vec![0x65, 0x88, 0x84]);
         let bytes = encode_interleaved_frame(channel, &packet.build());
         stream.write_all(&bytes).await
