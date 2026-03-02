@@ -119,6 +119,21 @@ impl MediaPipeline {
             } => {
                 self.handle_wait_subscribers_ready(processor_id, reply_tx);
             }
+            MediaPipelineCommand::RegisterProcessorRpcSender {
+                processor_id,
+                sender,
+                reply_tx,
+            } => {
+                let result = self.handle_register_processor_rpc_sender(processor_id, sender);
+                let _ = reply_tx.send(result);
+            }
+            MediaPipelineCommand::GetProcessorRpcSender {
+                processor_id,
+                reply_tx,
+            } => {
+                let result = self.handle_get_processor_rpc_sender(processor_id);
+                let _ = reply_tx.send(result);
+            }
         }
     }
 
@@ -306,6 +321,38 @@ impl MediaPipeline {
     fn handle_list_processors(&self) -> Vec<ProcessorId> {
         self.processors.keys().cloned().collect()
     }
+
+    fn handle_register_processor_rpc_sender(
+        &mut self,
+        processor_id: ProcessorId,
+        sender: ErasedRpcSender,
+    ) -> Result<(), RegisterProcessorRpcSenderError> {
+        let Some(state) = self.processors.get_mut(&processor_id) else {
+            tracing::warn!(
+                "attempt to register RPC sender from unregistered processor: {processor_id}"
+            );
+            return Err(RegisterProcessorRpcSenderError::UnregisteredProcessor);
+        };
+        if state.rpc_sender.is_some() {
+            tracing::warn!("RPC sender already registered for processor: {processor_id}");
+            return Err(RegisterProcessorRpcSenderError::AlreadyRegistered);
+        }
+        state.rpc_sender = Some(sender);
+        Ok(())
+    }
+
+    fn handle_get_processor_rpc_sender(
+        &self,
+        processor_id: ProcessorId,
+    ) -> Result<ErasedRpcSender, GetProcessorRpcSenderError> {
+        let Some(state) = self.processors.get(&processor_id) else {
+            return Err(GetProcessorRpcSenderError::ProcessorNotFound);
+        };
+        state
+            .rpc_sender
+            .clone()
+            .ok_or(GetProcessorRpcSenderError::SenderNotRegistered)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -404,6 +451,26 @@ impl MediaPipelineHandle {
         }
     }
 
+    pub async fn get_rpc_sender<S>(
+        &self,
+        processor_id: &ProcessorId,
+    ) -> Result<S, GetProcessorRpcSenderError>
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(MediaPipelineCommand::GetProcessorRpcSender {
+            processor_id: processor_id.clone(),
+            reply_tx,
+        });
+        let erased_sender = reply_rx
+            .await
+            .map_err(|_| GetProcessorRpcSenderError::PipelineTerminated)??;
+        erased_sender
+            .downcast_clone::<S>()
+            .ok_or(GetProcessorRpcSenderError::TypeMismatch)
+    }
+
     /// 初期 processor 登録を完了して開始処理をトリガーする
     ///
     /// 返り値:
@@ -483,6 +550,15 @@ pub(crate) enum MediaPipelineCommand {
     WaitSubscribersReady {
         processor_id: ProcessorId,
         reply_tx: tokio::sync::oneshot::Sender<()>,
+    },
+    RegisterProcessorRpcSender {
+        processor_id: ProcessorId,
+        sender: ErasedRpcSender,
+        reply_tx: tokio::sync::oneshot::Sender<Result<(), RegisterProcessorRpcSenderError>>,
+    },
+    GetProcessorRpcSender {
+        processor_id: ProcessorId,
+        reply_tx: tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>,
     },
 }
 
@@ -581,10 +657,40 @@ struct TrackState {
     pending_subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone)]
+pub(crate) struct ErasedRpcSender {
+    inner: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+}
+
+impl ErasedRpcSender {
+    fn new<S>(sender: S) -> Self
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        Self {
+            inner: std::sync::Arc::new(sender),
+        }
+    }
+
+    fn downcast_clone<S>(&self) -> Option<S>
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        self.inner.downcast_ref::<S>().cloned()
+    }
+}
+
+impl std::fmt::Debug for ErasedRpcSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ErasedRpcSender(..)")
+    }
+}
+
+#[derive(Debug, Default)]
 struct ProcessorState {
     notified_ready: bool,
     is_initial_member: bool,
+    rpc_sender: Option<ErasedRpcSender>,
 }
 
 #[derive(Debug)]
@@ -654,15 +760,25 @@ impl ProcessorHandle {
         reply_rx.await.map_err(|_| PipelineTerminated)
     }
 
-    // TODO: これは実際に必要になったタイミングで実装する
-    // （publish / subscribe と同様に RPC 用のチャネルの作成を MediaPipeline に依頼するのが良さそう）
-    //
-    // pub async fn recv_rpc_request(&mut self) -> JsonRpcRequest {
-    //    match self.rpc_rx.recv().await {
-    //        Some(request) => request,
-    //        None => std::future::pending().await,
-    //    }
-    // }
+    /// Processor 固有の RPC sender を登録する
+    pub async fn register_rpc_sender<S>(
+        &self,
+        sender: S,
+    ) -> Result<(), RegisterProcessorRpcSenderError>
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.pipeline_handle
+            .send(MediaPipelineCommand::RegisterProcessorRpcSender {
+                processor_id: self.processor_id.clone(),
+                sender: ErasedRpcSender::new(sender),
+                reply_tx,
+            });
+        reply_rx
+            .await
+            .map_err(|_| RegisterProcessorRpcSenderError::PipelineTerminated)?
+    }
 }
 
 impl Drop for ProcessorHandle {
@@ -799,6 +915,53 @@ impl std::fmt::Display for RegisterProcessorError {
 }
 
 impl std::error::Error for RegisterProcessorError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterProcessorRpcSenderError {
+    /// パイプラインが終了している
+    PipelineTerminated,
+    /// プロセッサーが未登録
+    UnregisteredProcessor,
+    /// RPC sender がすでに登録済み
+    AlreadyRegistered,
+}
+
+impl std::fmt::Display for RegisterProcessorRpcSenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
+            Self::UnregisteredProcessor => write!(f, "Processor is not registered"),
+            Self::AlreadyRegistered => write!(f, "RPC sender already registered"),
+        }
+    }
+}
+
+impl std::error::Error for RegisterProcessorRpcSenderError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetProcessorRpcSenderError {
+    /// パイプラインが終了している
+    PipelineTerminated,
+    /// プロセッサーが未登録
+    ProcessorNotFound,
+    /// RPC sender が未登録
+    SenderNotRegistered,
+    /// 期待型と登録型が一致しない
+    TypeMismatch,
+}
+
+impl std::fmt::Display for GetProcessorRpcSenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
+            Self::ProcessorNotFound => write!(f, "Processor not found"),
+            Self::SenderNotRegistered => write!(f, "RPC sender is not registered"),
+            Self::TypeMismatch => write!(f, "RPC sender type mismatch"),
+        }
+    }
+}
+
+impl std::error::Error for GetProcessorRpcSenderError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PipelineTerminated;
@@ -1151,6 +1314,241 @@ mod tests {
 
         let result = processor.wait_subscribers_ready().await;
         assert_eq!(result, Err(PipelineTerminated));
+    }
+
+    #[tokio::test]
+    async fn register_and_get_rpc_sender_succeeds() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let processor = handle
+            .register_processor(
+                ProcessorId::new("rpc_processor"),
+                metadata("test_rpc_processor"),
+            )
+            .await
+            .expect("failed to register processor");
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        processor
+            .register_rpc_sender(tx.clone())
+            .await
+            .expect("failed to register rpc sender");
+        let rpc_tx = handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(processor.processor_id())
+            .await
+            .expect("failed to get rpc sender");
+
+        rpc_tx
+            .send("hello".to_owned())
+            .expect("failed to send message via rpc sender");
+        let received = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting rpc message")
+            .expect("rpc receiver closed unexpectedly");
+        assert_eq!(received, "hello");
+
+        drop(processor);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn get_rpc_sender_returns_sender_not_registered_before_registration() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let processor = handle
+            .register_processor(
+                ProcessorId::new("rpc_sender_missing"),
+                metadata("test_rpc_processor"),
+            )
+            .await
+            .expect("failed to register processor");
+
+        let result = handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(processor.processor_id())
+            .await;
+        assert!(matches!(
+            result,
+            Err(GetProcessorRpcSenderError::SenderNotRegistered)
+        ));
+
+        drop(processor);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn register_rpc_sender_rejects_duplicate_registration() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let processor = handle
+            .register_processor(
+                ProcessorId::new("rpc_sender_duplicate"),
+                metadata("test_rpc_processor"),
+            )
+            .await
+            .expect("failed to register processor");
+
+        let (tx1, _rx1) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (tx2, _rx2) = tokio::sync::mpsc::unbounded_channel::<String>();
+        processor
+            .register_rpc_sender(tx1)
+            .await
+            .expect("first rpc sender registration must succeed");
+        let result = processor.register_rpc_sender(tx2).await;
+        assert_eq!(
+            result,
+            Err(RegisterProcessorRpcSenderError::AlreadyRegistered)
+        );
+
+        drop(processor);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn get_rpc_sender_returns_type_mismatch_for_wrong_type() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let processor = handle
+            .register_processor(
+                ProcessorId::new("rpc_type_mismatch"),
+                metadata("test_rpc_processor"),
+            )
+            .await
+            .expect("failed to register processor");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        processor
+            .register_rpc_sender(tx)
+            .await
+            .expect("failed to register rpc sender");
+
+        let result = handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<u64>>(processor.processor_id())
+            .await;
+        assert!(matches!(
+            result,
+            Err(GetProcessorRpcSenderError::TypeMismatch)
+        ));
+
+        drop(processor);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn get_rpc_sender_returns_processor_not_found() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let result = handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(&ProcessorId::new(
+                "unknown_processor",
+            ))
+            .await;
+        assert!(matches!(
+            result,
+            Err(GetProcessorRpcSenderError::ProcessorNotFound)
+        ));
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn rpc_sender_is_removed_on_processor_drop() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let processor_id = ProcessorId::new("rpc_drop_target");
+        {
+            let processor = handle
+                .register_processor(processor_id.clone(), metadata("test_rpc_processor"))
+                .await
+                .expect("failed to register processor");
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            processor
+                .register_rpc_sender(tx)
+                .await
+                .expect("failed to register rpc sender");
+        }
+
+        let mut removed = false;
+        for _ in 0..200 {
+            match handle
+                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(&processor_id)
+                .await
+            {
+                Err(GetProcessorRpcSenderError::ProcessorNotFound) => {
+                    removed = true;
+                    break;
+                }
+                _ => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        }
+        assert!(removed, "processor entry was not removed after drop");
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn register_and_get_rpc_sender_return_error_after_pipeline_terminated() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+        let processor = handle
+            .register_processor(
+                ProcessorId::new("rpc_after_terminated"),
+                metadata("test_rpc_processor"),
+            )
+            .await
+            .expect("failed to register processor");
+
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let register_result = processor.register_rpc_sender(tx).await;
+        assert_eq!(
+            register_result,
+            Err(RegisterProcessorRpcSenderError::PipelineTerminated)
+        );
+        let get_result = handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<String>>(processor.processor_id())
+            .await;
+        assert!(matches!(
+            get_result,
+            Err(GetProcessorRpcSenderError::PipelineTerminated)
+        ));
     }
 
     #[tokio::test]
