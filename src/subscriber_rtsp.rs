@@ -1875,7 +1875,7 @@ mod tests {
     ) -> io::Result<()> {
         let mut header = RtpHeader::new(97, 1, timestamp, 0x0A0B0C0D);
         header.marker = true;
-        let payload = vec![0x00, 0x10, 0x00, 0x20, 0x11, 0x22];
+        let payload = vec![0x00, 0x10, 0x00, 0x10, 0x11, 0x22];
         let packet = RtpPacket::new(header, payload);
         let bytes = encode_interleaved_frame(channel, &packet.build());
         stream.write_all(&bytes).await
