@@ -243,6 +243,7 @@ struct RtspSessionRunner {
     pending_responses: VecDeque<RtspResponse>,
     parsed_url: ParsedRtspUrl,
     auth_header: Option<String>,
+    session_id: Option<String>,
     video_receiver: Option<VideoRtpReceiver>,
     audio_receiver: Option<AudioRtpReceiver>,
     keepalive_uri: String,
@@ -315,6 +316,7 @@ async fn run_rtsp_session(
         pending_responses: VecDeque::new(),
         parsed_url: parsed_url.clone(),
         auth_header: None,
+        session_id: None,
         video_receiver: None,
         audio_receiver: None,
         // setup_session 完了後に selected.play_url で上書きされる。
@@ -390,6 +392,7 @@ impl RtspSessionRunner {
                     req.transport(&transport)
                 })
                 .await?;
+            self.update_session_id(&setup_response)?;
             let accepted_channel = setup_response
                 .get_header("Transport")
                 .and_then(|value| parse_interleaved_channel(value).ok())
@@ -421,6 +424,7 @@ impl RtspSessionRunner {
                     req.transport(&transport)
                 })
                 .await?;
+            self.update_session_id(&setup_response)?;
             let accepted_channel = setup_response
                 .get_header("Transport")
                 .and_then(|value| parse_interleaved_channel(value).ok())
@@ -483,10 +487,10 @@ impl RtspSessionRunner {
     }
 
     async fn send_keepalive(&mut self) -> Result<(), SessionError> {
-        let mut request = RtspRequest::new(RtspMethod::GetParameter, &self.keepalive_uri);
-        if let Some(value) = self.auth_header.as_deref() {
-            request = request.header("Authorization", value);
-        }
+        let request = self.apply_common_headers(RtspRequest::new(
+            RtspMethod::GetParameter,
+            &self.keepalive_uri,
+        ));
         self.connection.send_request(request).map_err(|e| {
             SessionError::Retryable(Error::new(format!("failed to send keepalive request: {e}")))
         })?;
@@ -650,10 +654,8 @@ impl RtspSessionRunner {
         F: Fn(RtspRequest) -> RtspRequest,
     {
         for attempt in 0..2 {
-            let mut request = build_request(RtspRequest::new(method.clone(), uri));
-            if let Some(value) = self.auth_header.as_deref() {
-                request = request.header("Authorization", value);
-            }
+            let request =
+                self.apply_common_headers(build_request(RtspRequest::new(method.clone(), uri)));
             self.connection.send_request(request).map_err(|e| {
                 SessionError::Retryable(Error::new(format!("failed to send RTSP request: {e}")))
             })?;
@@ -732,6 +734,38 @@ impl RtspSessionRunner {
         }
 
         Ok(false)
+    }
+
+    fn apply_common_headers(&self, mut request: RtspRequest) -> RtspRequest {
+        if let Some(value) = self.auth_header.as_deref() {
+            request = request.header("Authorization", value);
+        }
+        if let Some(value) = self.session_id.as_deref() {
+            request = request.header("Session", value);
+        }
+        request
+    }
+
+    fn update_session_id(&mut self, response: &RtspResponse) -> Result<(), SessionError> {
+        let Some(raw_value) = response.get_header("Session") else {
+            return Ok(());
+        };
+        let Some(parsed_value) = parse_rtsp_session_id(raw_value) else {
+            return Err(SessionError::Fatal(Error::new(format!(
+                "invalid RTSP Session header: {raw_value}",
+            ))));
+        };
+
+        match self.session_id.as_deref() {
+            Some(current) if current != parsed_value => Err(SessionError::Fatal(Error::new(
+                format!("conflicting RTSP Session header: current={current} new={parsed_value}",),
+            ))),
+            Some(_) => Ok(()),
+            None => {
+                self.session_id = Some(parsed_value.to_owned());
+                Ok(())
+            }
+        }
     }
 
     async fn wait_for_response(&mut self) -> Result<RtspResponse, SessionError> {
@@ -1237,6 +1271,16 @@ fn parse_interleaved_channel(transport_header: &str) -> crate::Result<u8> {
     ))
 }
 
+fn parse_rtsp_session_id(session_header: &str) -> Option<&str> {
+    let trimmed = session_header.trim();
+    let (session_id, _) = trimmed.split_once(';').unwrap_or((trimmed, ""));
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some(session_id)
+}
+
 fn extract_control(attributes: &[SdpAttribute]) -> Option<&str> {
     attributes.iter().find_map(|attr| {
         if let SdpAttribute::Control(value) = attr {
@@ -1376,6 +1420,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_rtsp_session_id_extracts_id_before_parameters() {
+        assert_eq!(parse_rtsp_session_id("abc123;timeout=60"), Some("abc123"));
+        assert_eq!(parse_rtsp_session_id(" abc123 "), Some("abc123"));
+        assert_eq!(parse_rtsp_session_id(" ;timeout=60"), None);
+    }
+
+    #[test]
     fn parse_hex_supports_odd_length() {
         let bytes = parse_hex("121").expect("must parse");
         assert_eq!(bytes, vec![0x01, 0x21]);
@@ -1447,6 +1498,7 @@ mod tests {
             require_basic_auth: false,
             with_audio: true,
             unsupported_video_codec: false,
+            require_session_header: true,
         })
         .await
         .expect("must start test RTSP server");
@@ -1480,6 +1532,7 @@ mod tests {
             require_basic_auth: true,
             with_audio: false,
             unsupported_video_codec: false,
+            require_session_header: true,
         })
         .await
         .expect("must start test RTSP server");
@@ -1510,6 +1563,7 @@ mod tests {
             require_basic_auth: false,
             with_audio: false,
             unsupported_video_codec: true,
+            require_session_header: false,
         })
         .await
         .expect("must start test RTSP server");
@@ -1547,6 +1601,7 @@ mod tests {
         require_basic_auth: bool,
         with_audio: bool,
         unsupported_video_codec: bool,
+        require_session_header: bool,
     }
 
     struct TestRtspServer {
@@ -1588,6 +1643,7 @@ mod tests {
         let mut auth_challenged = false;
         let mut video_rtp_channel = None;
         let mut audio_rtp_channel = None;
+        let mut setup_count = 0usize;
         let session_id = "test-session";
 
         loop {
@@ -1654,6 +1710,22 @@ mod tests {
                     }
                 }
                 "SETUP" => {
+                    if options.require_session_header
+                        && setup_count > 0
+                        && request.headers.get("session").map(String::as_str) != Some(session_id)
+                    {
+                        write_rtsp_response(
+                            &mut stream,
+                            request.cseq,
+                            454,
+                            "Session Not Found",
+                            &[],
+                            None,
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+
                     let transport = request.headers.get("transport").ok_or_else(|| {
                         io::Error::new(io::ErrorKind::InvalidData, "missing transport header")
                     })?;
@@ -1681,8 +1753,24 @@ mod tests {
                         None,
                     )
                     .await?;
+                    setup_count += 1;
                 }
                 "PLAY" => {
+                    if options.require_session_header
+                        && request.headers.get("session").map(String::as_str) != Some(session_id)
+                    {
+                        write_rtsp_response(
+                            &mut stream,
+                            request.cseq,
+                            454,
+                            "Session Not Found",
+                            &[],
+                            None,
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+
                     write_rtsp_response(
                         &mut stream,
                         request.cseq,
@@ -1708,6 +1796,21 @@ mod tests {
                     return Ok(());
                 }
                 "GET_PARAMETER" => {
+                    if options.require_session_header
+                        && request.headers.get("session").map(String::as_str) != Some(session_id)
+                    {
+                        write_rtsp_response(
+                            &mut stream,
+                            request.cseq,
+                            454,
+                            "Session Not Found",
+                            &[],
+                            None,
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+
                     write_rtsp_response(
                         &mut stream,
                         request.cseq,
