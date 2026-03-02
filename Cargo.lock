@@ -1206,7 +1206,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_video_toolbox"
-version = "2025.1.0"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d060086e75d13b11bd67893b5f72f99d3c227c4b94b1953b1b55590e3c49ae5e"
 dependencies = [
  "bindgen",
  "log",

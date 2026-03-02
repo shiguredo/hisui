@@ -29,15 +29,20 @@ impl VideoToolboxEncoder {
     pub fn new_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
-        let config = shiguredo_video_toolbox::EncoderConfig {
-            width: width.get(),
-            height: height.get(),
-            target_bitrate: options.bitrate,
-            fps_numerator: options.frame_rate.numerator.get(),
-            fps_denominator: options.frame_rate.denumerator.get(),
-            ..options.encode_params.video_toolbox_h264.clone()
-        };
-        let inner = shiguredo_video_toolbox::Encoder::new_h264(&config)?;
+        let mut config = options.encode_params.video_toolbox_h264.clone();
+        config.width = u32::try_from(width.get())
+            .map_err(|_| crate::Error::new("video width is too large for VideoToolbox"))?;
+        config.height = u32::try_from(height.get())
+            .map_err(|_| crate::Error::new("video height is too large for VideoToolbox"))?;
+        config.average_bitrate = Some(options.bitrate as u64);
+        config.fps_numerator = options.frame_rate.numerator.get() as u32;
+        config.fps_denominator = options.frame_rate.denumerator.get() as u32;
+        if !matches!(config.codec, shiguredo_video_toolbox::CodecConfig::H264(_)) {
+            return Err(crate::Error::new(
+                "BUG: VideoToolbox H.264 config must use H264 codec settings",
+            ));
+        }
+        let inner = shiguredo_video_toolbox::Encoder::new(config)?;
         Ok(Self {
             inner,
             input_queue: VecDeque::new(),
@@ -53,15 +58,20 @@ impl VideoToolboxEncoder {
     pub fn new_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
-        let config = shiguredo_video_toolbox::EncoderConfig {
-            width: width.get(),
-            height: height.get(),
-            target_bitrate: options.bitrate,
-            fps_numerator: options.frame_rate.numerator.get(),
-            fps_denominator: options.frame_rate.denumerator.get(),
-            ..options.encode_params.video_toolbox_h265.clone()
-        };
-        let inner = shiguredo_video_toolbox::Encoder::new_h265(&config)?;
+        let mut config = options.encode_params.video_toolbox_h265.clone();
+        config.width = u32::try_from(width.get())
+            .map_err(|_| crate::Error::new("video width is too large for VideoToolbox"))?;
+        config.height = u32::try_from(height.get())
+            .map_err(|_| crate::Error::new("video height is too large for VideoToolbox"))?;
+        config.average_bitrate = Some(options.bitrate as u64);
+        config.fps_numerator = options.frame_rate.numerator.get() as u32;
+        config.fps_denominator = options.frame_rate.denumerator.get() as u32;
+        if !matches!(config.codec, shiguredo_video_toolbox::CodecConfig::Hevc(_)) {
+            return Err(crate::Error::new(
+                "BUG: VideoToolbox H.265 config must use HEVC codec settings",
+            ));
+        }
+        let inner = shiguredo_video_toolbox::Encoder::new(config)?;
         Ok(Self {
             inner,
             input_queue: VecDeque::new(),
@@ -84,7 +94,14 @@ impl VideoToolboxEncoder {
 
     pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let (y_plane, u_plane, v_plane) = frame.as_i420_planes()?;
-        self.inner.encode(y_plane, u_plane, v_plane)?;
+        self.inner.encode(
+            &shiguredo_video_toolbox::FrameData::I420 {
+                y: y_plane,
+                u: u_plane,
+                v: v_plane,
+            },
+            &shiguredo_video_toolbox::EncodeOptions::default(),
+        )?;
 
         // Video Toolbox のエンコーダーは非同期で動作し、
         // エンコードが終わるまでは入力バッファへの参照を保持する必要があるので、

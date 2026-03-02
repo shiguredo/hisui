@@ -22,7 +22,15 @@ impl VideoToolboxDecoder {
         let (sps, pps) = get_h264_sps_pps(frame)?;
         tracing::debug!("Initialize H.264 decoder: sps={sps:?}, pps={pps:?}");
 
-        let inner = shiguredo_video_toolbox::Decoder::new_h264(&sps, &pps, NALU_HEADER_LENGTH)?;
+        let inner =
+            shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
+                codec: shiguredo_video_toolbox::DecoderCodec::H264 {
+                    sps: &sps,
+                    pps: &pps,
+                    nalu_len_bytes: NALU_HEADER_LENGTH as u32,
+                },
+                pixel_format: shiguredo_video_toolbox::PixelFormat::I420,
+            })?;
         Ok(Self {
             inner,
             decoded: None,
@@ -34,9 +42,18 @@ impl VideoToolboxDecoder {
 
     pub fn new_h265(frame: &VideoFrame) -> crate::Result<Self> {
         let (vps, sps, pps) = get_h265_vps_sps_pps(frame)?;
-        tracing::debug!("Initialize H.264 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
+        tracing::debug!("Initialize H.265 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
 
-        let inner = shiguredo_video_toolbox::Decoder::new_h265(vps, sps, pps, NALU_HEADER_LENGTH)?;
+        let inner =
+            shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
+                codec: shiguredo_video_toolbox::DecoderCodec::Hevc {
+                    vps,
+                    sps,
+                    pps,
+                    nalu_len_bytes: NALU_HEADER_LENGTH as u32,
+                },
+                pixel_format: shiguredo_video_toolbox::PixelFormat::I420,
+            })?;
         Ok(Self {
             inner,
             decoded: None,
@@ -119,6 +136,12 @@ impl VideoToolboxDecoder {
         };
         let Some(decoded) = decoded else {
             return Ok(());
+        };
+
+        let shiguredo_video_toolbox::DecodedFrame::I420(decoded) = decoded else {
+            return Err(crate::Error::new(
+                "VideoToolbox decoder returned unsupported pixel format",
+            ));
         };
 
         self.decoded = Some(VideoFrame::new_i420(
