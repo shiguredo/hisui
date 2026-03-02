@@ -351,8 +351,7 @@ impl InputTrackState {
 
         if aligned_timestamp > queue_tail_timestamp {
             let gap_duration = aligned_timestamp.saturating_sub(queue_tail_timestamp);
-            let gap_samples =
-                samples_from_duration_rounded(gap_duration, config.sample_rate).min(u64::MAX);
+            let gap_samples = samples_from_duration_rounded(gap_duration, config.sample_rate);
             if gap_samples > 0 {
                 self.sample_queue
                     .extend(std::iter::repeat_n(0, gap_samples as usize * channels));
