@@ -33,7 +33,7 @@
 - [ADD] server サブコマンドの JSON-RPC で Audio encoder を作成できるようにする
   - JSON-RPC に `createAudioEncoder` メソッドを追加する
   - `inputTrackId` / `outputTrackId` を指定して音声トラックをエンコードできる
-  - `codec` / `bitrateBps` を指定できる（既定値は `OPUS` / `64000`）
+  - `codec` / `bitrateBps` を指定できる（既定値は `OPUS` / `65536`）
   - `processorId` 未指定時は `audioEncoder:<inputTrackId>` を既定値として利用する
   - @sile
 - [ADD] server サブコマンドの JSON-RPC で MP4 writer を作成できるようにする
