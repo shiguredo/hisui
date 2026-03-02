@@ -510,6 +510,9 @@ impl AudioRealtimeMixerRunner<'_> {
                     }
                 }
                 event = recv_or_pending(&mut self.track_event_rx) => {
+                    let event = event.ok_or_else(|| {
+                        Error::new("BUG: audio mixer track event channel closed unexpectedly")
+                    })?;
                     self.handle_track_event(event)?;
                 }
                 rpc_message = recv_or_pending(&mut self.rpc_rx) => {
@@ -521,12 +524,7 @@ impl AudioRealtimeMixerRunner<'_> {
         Ok(())
     }
 
-    fn handle_track_event(&mut self, event: Option<TrackEvent>) -> crate::Result<()> {
-        let Some(event) = event else {
-            self.track_event_rx = None;
-            return Ok(());
-        };
-
+    fn handle_track_event(&mut self, event: TrackEvent) -> crate::Result<()> {
         match event {
             TrackEvent::Audio { track_id, frame } => {
                 let Some(state) = self.states.get_mut(&track_id) else {
