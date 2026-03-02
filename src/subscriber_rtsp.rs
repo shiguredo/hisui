@@ -54,6 +54,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtspSubscriber 
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
         let input_url: String = value.to_member("inputUrl")?.required()?.try_into()?;
+        // TryFrom では nojson のエラー位置情報を維持したまま invalid(...) を返すため、
+        // ここでは URL の妥当性チェックだけ行う。
         if let Err(e) = validate_input_url(&input_url) {
             return Err(value.to_member("inputUrl")?.required()?.invalid(e));
         }
@@ -1013,6 +1015,8 @@ impl<'a> BitReader<'a> {
 }
 
 fn validate_input_url(input_url: &str) -> Result<(), String> {
+    // 実行時の run では ParsedRtspUrl を接続に使うため再度 parse するが、
+    // パラメータ検証では nojson 向けに文字列エラーへ変換する用途に限定する。
     parse_rtsp_input_url(input_url).map(|_| ())
 }
 
