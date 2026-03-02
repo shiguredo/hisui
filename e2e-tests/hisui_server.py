@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from processor_metrics import ProcessorMetrics
 
 
 class HisuiServer:
@@ -188,6 +189,35 @@ class HisuiServer:
         if not isinstance(data, list):
             raise RuntimeError("unexpected metrics JSON format")
         return data
+
+    def wait_processor_metric_int(
+        self,
+        *,
+        processor_id: str,
+        processor_type: str,
+        metric_name: str,
+        expected_value: int,
+        timeout: float = 10.0,
+        interval: float = 0.1,
+    ) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                value = int(
+                    ProcessorMetrics(
+                        self.metrics_json(),
+                        processor_id=processor_id,
+                        processor_type=processor_type,
+                    ).value(metric_name)
+                )
+                if value == expected_value:
+                    return
+            except (AssertionError, ValueError):
+                pass
+            time.sleep(interval)
+        raise AssertionError(
+            f"processor metric did not reach expected value: processor_id={processor_id}, processor_type={processor_type}, metric_name={metric_name}, expected_value={expected_value}"
+        )
 
     def _terminate_process(self) -> None:
         process = self._process

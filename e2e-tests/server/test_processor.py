@@ -710,6 +710,7 @@ def test_create_audio_mixer_with_mp4_writer_and_inspect_output(binary_path: Path
                         {"trackId": decoded_audio_track_id_a},
                         {"trackId": decoded_audio_track_id_b},
                     ],
+                    "terminateOnInputEos": True,
                     "outputTrackId": mixed_audio_track_id,
                     "processorId": mixer_processor_id,
                 },
@@ -799,6 +800,75 @@ def test_create_audio_mixer_with_mp4_writer_and_inspect_output(binary_path: Path
         assert inspect_output["audio_codec"] == "OPUS"
         assert inspect_output["audio_sample_count"] > 0
         assert "video_sample_count" not in inspect_output
+
+
+def test_update_audio_mixer_inputs_updates_current_input_track_count_metric(
+    binary_path: Path,
+):
+    """updateAudioMixerInputs で入力トラック数メトリクスが更新されることを確認する"""
+    mixer_processor_id = "e2e-audio-mixer-update-inputs"
+    input_track_id_a = "e2e-audio-mixer-input-a"
+    input_track_id_b = "e2e-audio-mixer-input-b"
+    output_track_id = "e2e-audio-mixer-update-output"
+
+    with HisuiServer(binary_path, manual_start_trigger=True) as server:
+        create_mixer_response = server.rpc_call(
+            "createAudioMixer",
+            {
+                "inputTracks": [{"trackId": input_track_id_a}],
+                "outputTrackId": output_track_id,
+                "processorId": mixer_processor_id,
+            },
+        )
+        assert create_mixer_response["result"]["processorId"] == mixer_processor_id
+
+        start_response = server.trigger_start()
+        assert start_response["result"]["started"] is True
+
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="audio_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=1,
+        )
+
+        update_response = server.rpc_call(
+            "updateAudioMixerInputs",
+            {
+                "processorId": mixer_processor_id,
+                "inputTracks": [
+                    {"trackId": input_track_id_a},
+                    {"trackId": input_track_id_b},
+                ],
+            },
+        )
+        assert update_response["result"]["previousInputTracks"] == [
+            {"trackId": input_track_id_a}
+        ]
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="audio_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=2,
+        )
+
+        empty_update_response = server.rpc_call(
+            "updateAudioMixerInputs",
+            {
+                "processorId": mixer_processor_id,
+                "inputTracks": [],
+            },
+        )
+        assert empty_update_response["result"]["previousInputTracks"] == [
+            {"trackId": input_track_id_a},
+            {"trackId": input_track_id_b},
+        ]
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="audio_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=0,
+        )
 
 
 def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
