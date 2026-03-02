@@ -1278,6 +1278,8 @@ mod tests {
 
     const TEST_MP4_PATH: &str = "testdata/archive-red-320x320-av1.mp4";
     const TEST_MP4_AUDIO_PATH: &str = "testdata/red-320x320-h264-aac.mp4";
+    type VideoMixerInputTrackSpec<'a> =
+        (&'a str, isize, isize, isize, Option<usize>, Option<usize>);
 
     #[tokio::test]
     async fn notification_error_returns_no_response() {
@@ -4667,7 +4669,7 @@ mod tests {
 
     fn update_video_mixer_inputs_request(
         processor_id: &str,
-        input_tracks: &[(&str, isize, isize, isize, Option<usize>, Option<usize>)],
+        input_tracks: &[VideoMixerInputTrackSpec<'_>],
     ) -> String {
         let input_tracks_json = input_tracks
             .iter()
@@ -4694,7 +4696,7 @@ mod tests {
         canvas_width: usize,
         canvas_height: usize,
         frame_rate: &str,
-        input_tracks: &[(&str, isize, isize, isize, Option<usize>, Option<usize>)],
+        input_tracks: &[VideoMixerInputTrackSpec<'_>],
     ) -> String {
         let input_tracks_json = input_tracks
             .iter()
