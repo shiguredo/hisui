@@ -264,14 +264,14 @@ impl NvcodecEncoder {
         }
 
         // 先頭の OBU Header を解析
-        // obu_header のビット構成:
-        //   - bit 0: obu_forbidden_bit (常に0)
-        //   - bit 1-4: obu_type
-        //   - bit 5: obu_extension_flag
-        //   - bit 6: obu_has_size_field
-        //   - bit 7: obu_reserved_1bit
+        // obu_header のビット構成（LSB 基準）:
+        //   - bit 7: obu_forbidden_bit (常に0)
+        //   - bit 6-3: obu_type
+        //   - bit 2: obu_extension_flag
+        //   - bit 1: obu_has_size_field
+        //   - bit 0: obu_reserved_1bit
         let obu_header = data[0];
-        let obu_has_extension = (obu_header & 0b0010_0000) != 0;
+        let obu_has_extension = (obu_header & 0b0000_0100) != 0;
 
         // OBU Extension が存在する場合は 2 バイト目も必要
         if obu_has_extension && data.len() < 2 {
