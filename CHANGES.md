@@ -30,6 +30,17 @@
   - `sampleRate` / `channels` / `frameDurationMs` / `timestampRebaseThresholdMs` を指定できる
   - `processorId` 未指定時は `audioMixer` を既定値として利用する
   - @sile
+- [ADD] server サブコマンドの JSON-RPC で Audio encoder を作成できるようにする
+  - JSON-RPC に `createAudioEncoder` メソッドを追加する
+  - `inputTrackId` / `outputTrackId` を指定して音声トラックをエンコードできる
+  - `codec` / `bitrateBps` を指定できる（既定値は `OPUS` / `64000`）
+  - `processorId` 未指定時は `audioEncoder:<inputTrackId>` を既定値として利用する
+  - @sile
+- [ADD] server サブコマンドの JSON-RPC で MP4 writer を作成できるようにする
+  - JSON-RPC に `createMp4Writer` メソッドを追加する
+  - `outputPath` と `inputAudioTrackId` / `inputVideoTrackId` を指定して MP4 ファイルへ書き出しできる
+  - `processorId` 未指定時は `mp4Writer` を既定値として利用する
+  - @sile
 - [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
   - 未指定の場合は従来通り 404 を返す
