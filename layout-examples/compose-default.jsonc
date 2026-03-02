@@ -118,7 +118,6 @@
     "prioritize_speed_over_quality": true,
     "profile_level": "baseline",
     "real_time": false,
-    "use_parallelization": false,
   },
   "video_toolbox_h265_encode_params": {
     "allow_frame_reordering": false,
@@ -129,7 +128,6 @@
     "maximize_power_efficiency": false,
     "profile_level": "main",
     "real_time": false,
-    "use_parallelization": true,
   },
   "nvcodec_h264_encode_params": {
     "preset": "p4",

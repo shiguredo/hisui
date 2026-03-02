@@ -122,6 +122,9 @@
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.1 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが https://github.com/shiguredo/nvcodec-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
+- [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.0-canary.0 にあげる
+  - このバージョンから shiguredo_video_toolbox crate のリポジトリが https://github.com/shiguredo/video-toolbox-rs に独立したので、hisui のワークスペースからは削除されている
+  - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.2.0-canary.3 にあげる
   - @sile
 - [ADD] FDK-AAC を使った AAC デコードに対応する
@@ -150,6 +153,9 @@
   - @sile
 - [CHANGE] orfail crate を依存から削除する
   - これにより、エラー発生時に標準エラー出力に表示されるメッセージの細部のフォーマットに非互換な変更が入ることになる
+  - @sile
+- [CHANGE] Video Toolbox encode params から `use_parallelization` を削除する
+  - `shiguredo_video_toolbox` 2026.1.0-canary.0 では `use_parallelization` 設定が廃止されたため、Hisui 側でも受け付けない
   - @sile
 - [CHANGE] indicatif の依存を削除して自前のプログレスバー実装に置き換える
   - @sile

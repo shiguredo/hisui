@@ -35,9 +35,9 @@ jobs:
           os: ubuntu-24.04
           toolchain: stable
       - run: cargo fmt --all --check
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
-      - run: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox -- --deny warnings
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox
+      - run: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox -- --deny warnings
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox
 
   test-nvidia-video-codec:
     runs-on:
@@ -164,7 +164,7 @@ jobs:
         env:
           VALGRINDFLAGS: --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
         # NOTE: SVT-AV1 の v3.1.2 では hisui 側では対処不可能そうなエラーが出ているので、いったん抑制している（TODO: 新バージョンが出たらまた対象に含めること）
-        run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_svt_av1 -- --skip simple_single_source_av1
+        run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_svt_av1 -- --skip simple_single_source_av1
 
   ubuntu-binary:
     name: "Upload Binary for Ubuntu"

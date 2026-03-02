@@ -19,7 +19,6 @@
     "allow_temporal_compression": null,
     "profile_level": null,
     "h264_entropy_mode": null,
-    "max_frame_delay_count": null,
-    "use_parallelization": null
+    "max_frame_delay_count": null
   }
 }
