@@ -228,7 +228,7 @@ jobs:
           tar -czf hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
             hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hisui-binary-${{ matrix.platform.name }}
           path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
@@ -273,7 +273,7 @@ jobs:
           tar -czf hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz \
             hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hisui-binary-${{ matrix.platform.name }}
           path: hisui-${{ steps.get_version.outputs.version }}_${{ matrix.platform.name }}.tar.gz
