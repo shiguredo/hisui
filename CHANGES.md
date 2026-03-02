@@ -30,6 +30,11 @@
   - `sampleRate` / `channels` / `frameDurationMs` / `timestampRebaseThresholdMs` を指定できる
   - `processorId` 未指定時は `audioMixer` を既定値として利用する
   - @sile
+- [ADD] server サブコマンドの JSON-RPC で Audio mixer の入力トラック構成を実行中に更新できるようにする
+  - JSON-RPC に `updateAudioMixerInputs` メソッドを追加する
+  - `processorId` と `inputTracks` を指定して入力トラックの構成を全置換できる
+  - レスポンスの `previousInputTracks` で更新前の入力トラック一覧を取得できる
+  - @sile
 - [ADD] server サブコマンドの JSON-RPC で Audio encoder を作成できるようにする
   - JSON-RPC に `createAudioEncoder` メソッドを追加する
   - `inputTrackId` / `outputTrackId` を指定して音声トラックをエンコードできる
