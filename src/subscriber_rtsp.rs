@@ -116,6 +116,7 @@ impl RtspSubscriber {
             match session_result {
                 Ok(()) => {
                     stats.set_connected(false);
+                    reconnect_backoff.reset();
                     tracing::warn!("RTSP session closed; reconnecting");
                 }
                 Err(SessionError::Fatal(e)) => return Err(e),
@@ -273,6 +274,10 @@ struct ReconnectBackoff {
 impl ReconnectBackoff {
     fn new() -> Self {
         Self::default()
+    }
+
+    fn reset(&mut self) {
+        self.current = None;
     }
 
     fn next_delay(&mut self) -> Duration {
