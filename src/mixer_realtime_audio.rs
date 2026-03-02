@@ -398,9 +398,8 @@ impl InputTrackState {
             let drop_samples = samples_from_duration_rounded(lag_duration, config.sample_rate)
                 .min((self.sample_queue.len() / channels) as u64);
             if drop_samples > 0 {
-                for _ in 0..(drop_samples as usize * channels) {
-                    let _ = self.sample_queue.pop_front();
-                }
+                let drop_total_samples = drop_samples as usize * channels;
+                self.sample_queue.drain(..drop_total_samples);
                 stats.add_late_dropped_sample_count(drop_samples);
                 queue_head_timestamp = queue_head_timestamp
                     .saturating_add(config.sample_rate.duration_from_samples(drop_samples));
