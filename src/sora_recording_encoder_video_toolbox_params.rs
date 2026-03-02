@@ -128,6 +128,7 @@ fn update_h265_encode_params(
     // - fps_denominator
     // - average_bitrate
 
+    // H.265 ではこれが false だとエラーになるため、常に true を指定する
     config.prioritize_encoding_speed_over_quality = true;
     config.real_time = params.get("real_time")?.unwrap_or(config.real_time);
 
