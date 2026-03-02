@@ -16,11 +16,17 @@ const DEFAULT_TIMESTAMP_REBASE_THRESHOLD: Duration = DEFAULT_REBASE_THRESHOLD;
 
 #[derive(Debug, Clone)]
 pub struct AudioRealtimeMixer {
+    /// 出力音声のサンプルレート
     pub sample_rate: SampleRate,
+    /// 出力音声のチャンネル数
     pub channels: Channels,
+    /// ミキサーが 1 回の出力で生成するフレーム長
     pub frame_duration: Duration,
+    /// 入力タイムスタンプとサンプル数ベース推定値の乖離がこの閾値を超えたときに、基準タイムスタンプを再設定する
     pub timestamp_rebase_threshold: Duration,
+    /// 合成対象の入力トラック一覧
     pub input_tracks: Vec<AudioRealtimeInputTrack>,
+    /// 合成後の音声を書き出す出力トラック ID
     pub output_track_id: TrackId,
 }
 
