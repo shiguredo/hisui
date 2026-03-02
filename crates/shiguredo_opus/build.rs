@@ -9,6 +9,8 @@ const LIB_NAME: &str = "opus";
 const SHIGUREDO_OPUS_SYMBOL_PREFIX: &str = "shiguredo_opus_";
 const RENAME_TARGET_PREFIXES: &[&str] = &["opus_", "celt_", "clt_", "silk_"];
 const TARGET_SOURCE_EXTENSIONS: &[&str] = &["c", "h", "inc", "inl", "s", "S"];
+const TARGET_SOURCE_DIRECTORIES: &[&str] = &["src", "celt", "silk", "dnn"];
+const EXCLUDED_SYMBOLS: &[&str] = &["main"];
 
 fn main() {
     // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
@@ -170,7 +172,11 @@ fn get_git_url_and_version() -> (String, String) {
 // ソースファイル群から抽出する
 fn collect_target_identifiers_from_source_tree(src_dir: &Path) -> BTreeSet<String> {
     let mut symbols = BTreeSet::new();
-    let mut directories = vec![src_dir.to_path_buf()];
+    let mut directories: Vec<PathBuf> = TARGET_SOURCE_DIRECTORIES
+        .iter()
+        .map(|d| src_dir.join(d))
+        .filter(|d| d.is_dir())
+        .collect();
     while let Some(directory) = directories.pop() {
         for entry in std::fs::read_dir(&directory).expect("failed to read source directory") {
             let entry = entry.expect("failed to read source entry");
@@ -187,8 +193,17 @@ fn collect_target_identifiers_from_source_tree(src_dir: &Path) -> BTreeSet<Strin
                 continue;
             }
             let source_text = std::fs::read_to_string(&path).expect("failed to read source file");
-            for symbol in extract_target_identifiers_from_source(&source_text) {
+            for symbol in extract_prefixed_target_identifiers_from_source(&source_text) {
                 symbols.insert(symbol);
+            }
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == "c")
+            {
+                for symbol in extract_global_symbols_from_c_source(&source_text) {
+                    symbols.insert(symbol);
+                }
             }
         }
     }
@@ -214,7 +229,7 @@ fn is_target_source_file(path: &Path) -> bool {
 //
 // コメントと文字列を空白化してから識別子を走査することで、
 // 不要な誤検出を減らしている
-fn extract_target_identifiers_from_source(source_text: &str) -> Vec<String> {
+fn extract_prefixed_target_identifiers_from_source(source_text: &str) -> Vec<String> {
     let normalized = normalize_c_source(source_text);
     let mut symbols = BTreeSet::new();
     let mut token = String::new();
@@ -224,16 +239,212 @@ fn extract_target_identifiers_from_source(source_text: &str) -> Vec<String> {
             token.push(ch);
             continue;
         }
-        if is_target_symbol(&token) {
+        if is_prefixed_target_symbol(&token) {
             symbols.insert(token.clone());
         }
         token.clear();
     }
-    if is_target_symbol(&token) {
+    if is_prefixed_target_symbol(&token) {
         symbols.insert(token);
     }
 
     symbols.into_iter().collect()
+}
+
+// C ソースから、外部リンケージを持つトップレベルシンボルを抽出する
+//
+// 対象:
+// - `static` ではない関数定義
+// - `static` ではないグローバル変数定義
+fn extract_global_symbols_from_c_source(source_text: &str) -> Vec<String> {
+    let normalized = normalize_c_source(source_text);
+    let mut symbols = BTreeSet::new();
+    let mut statement = String::new();
+    let mut brace_depth = 0usize;
+
+    for ch in normalized.chars() {
+        if brace_depth == 0 {
+            match ch {
+                '{' => {
+                    collect_symbols_from_open_brace_statement(&statement, &mut symbols);
+                    statement.clear();
+                    brace_depth = 1;
+                }
+                ';' => {
+                    collect_symbols_from_semicolon_statement(&statement, &mut symbols);
+                    statement.clear();
+                }
+                _ => statement.push(ch),
+            }
+            continue;
+        }
+
+        if ch == '{' {
+            brace_depth += 1;
+        } else if ch == '}' {
+            brace_depth = brace_depth.saturating_sub(1);
+        }
+    }
+
+    symbols.into_iter().collect()
+}
+
+fn collect_symbols_from_open_brace_statement(statement: &str, symbols: &mut BTreeSet<String>) {
+    let statement = statement.trim();
+    if statement.is_empty() || starts_with_keyword(statement, "typedef") {
+        return;
+    }
+    if statement.contains('(') {
+        if let Some((name, name_start)) = extract_function_name_from_declaration(statement)
+            && !has_static_storage(statement, name_start)
+            && !is_excluded_symbol(name)
+        {
+            symbols.insert(name.to_string());
+        }
+        return;
+    }
+    if statement.contains('=')
+        && let Some((name, name_start)) = extract_variable_name_from_declaration(statement)
+        && !has_static_storage(statement, name_start)
+        && !is_excluded_symbol(name)
+    {
+        symbols.insert(name.to_string());
+    }
+}
+
+fn collect_symbols_from_semicolon_statement(statement: &str, symbols: &mut BTreeSet<String>) {
+    let statement = statement.trim();
+    if statement.is_empty() || starts_with_keyword(statement, "typedef") {
+        return;
+    }
+    if statement.contains('(') || !statement.contains('=') {
+        return;
+    }
+    if let Some((name, name_start)) = extract_variable_name_from_declaration(statement)
+        && !has_static_storage(statement, name_start)
+        && !is_excluded_symbol(name)
+    {
+        symbols.insert(name.to_string());
+    }
+}
+
+fn extract_function_name_from_declaration(declaration: &str) -> Option<(&str, usize)> {
+    let mut candidate: Option<(&str, usize)> = None;
+    for (identifier, start, end) in iterate_identifiers(declaration) {
+        let rest = &declaration[end..];
+        if !rest.trim_start().starts_with('(') {
+            continue;
+        }
+        if is_c_keyword(identifier) {
+            continue;
+        }
+        candidate = Some((identifier, start));
+    }
+    candidate
+}
+
+fn extract_variable_name_from_declaration(declaration: &str) -> Option<(&str, usize)> {
+    let lhs = declaration.split('=').next().unwrap_or(declaration);
+    let mut candidate: Option<(&str, usize)> = None;
+    for (identifier, start, _end) in iterate_identifiers(lhs) {
+        if is_c_keyword(identifier) {
+            continue;
+        }
+        candidate = Some((identifier, start));
+    }
+    candidate
+}
+
+fn has_static_storage(declaration: &str, symbol_start: usize) -> bool {
+    let prefix = &declaration[..symbol_start];
+    iterate_identifiers(prefix).any(|(identifier, _, _)| identifier == "static")
+}
+
+fn starts_with_keyword(text: &str, keyword: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with(keyword)
+        && trimmed
+            .chars()
+            .nth(keyword.len())
+            .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_')
+}
+
+fn is_c_keyword(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        "auto"
+            | "break"
+            | "case"
+            | "char"
+            | "const"
+            | "continue"
+            | "default"
+            | "do"
+            | "double"
+            | "else"
+            | "enum"
+            | "extern"
+            | "float"
+            | "for"
+            | "goto"
+            | "if"
+            | "inline"
+            | "int"
+            | "long"
+            | "register"
+            | "restrict"
+            | "return"
+            | "short"
+            | "signed"
+            | "sizeof"
+            | "static"
+            | "struct"
+            | "switch"
+            | "typedef"
+            | "union"
+            | "unsigned"
+            | "void"
+            | "volatile"
+            | "while"
+            | "_Alignas"
+            | "_Alignof"
+            | "_Atomic"
+            | "_Bool"
+            | "_Complex"
+            | "_Generic"
+            | "_Imaginary"
+            | "_Noreturn"
+            | "_Static_assert"
+            | "_Thread_local"
+    )
+}
+
+fn is_excluded_symbol(symbol: &str) -> bool {
+    EXCLUDED_SYMBOLS.contains(&symbol)
+}
+
+fn iterate_identifiers(text: &str) -> impl Iterator<Item = (&str, usize, usize)> {
+    let mut identifiers = Vec::new();
+    let mut start: Option<usize> = None;
+    for (index, ch) in text.char_indices() {
+        let is_ident = ch.is_ascii_alphanumeric() || ch == '_';
+        match (start, is_ident) {
+            (None, true) => {
+                if ch.is_ascii_alphabetic() || ch == '_' {
+                    start = Some(index);
+                }
+            }
+            (Some(s), false) => {
+                identifiers.push((&text[s..index], s, index));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        identifiers.push((&text[s..], s, text.len()));
+    }
+    identifiers.into_iter()
 }
 
 // C ソースからコメント・文字列・プリプロセッサ行を除去する
@@ -361,7 +572,7 @@ fn normalize_c_source(source_text: &str) -> String {
 }
 
 // 対象プレフィックスを持つ C 識別子かどうかを判定する
-fn is_target_symbol(symbol: &str) -> bool {
+fn is_prefixed_target_symbol(symbol: &str) -> bool {
     if symbol.is_empty() {
         return false;
     }
