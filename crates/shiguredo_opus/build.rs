@@ -7,16 +7,18 @@ use std::{
 // 依存ライブラリの名前
 const LIB_NAME: &str = "opus";
 const SHIGUREDO_OPUS_SYMBOL_PREFIX: &str = "shiguredo_opus_";
-const RENAME_TARGET_PREFIXES: &[&str] = &["opus_", "celt_", "clt_", "silk_"];
-const TARGET_SOURCE_EXTENSIONS: &[&str] = &["c", "h", "inc", "inl", "s", "S"];
-const TARGET_SOURCE_DIRECTORIES: &[&str] = &["src", "celt", "silk", "dnn"];
-const EXCLUDED_SYMBOLS: &[&str] = &["main"];
+const SYMBOL_RENAME_HEADER_PATH: &str = "generated/opus_symbol_renames.h";
+const SYMBOL_RENAME_INCLUDE_GUARD: &str = "SHIGUREDO_OPUS_SYMBOL_RENAMES_H";
+const SYMBOL_REGENERATE_ENV: &str = "SHIGUREDO_OPUS_REGENERATE_SYMBOL_HEADER";
+const SYMBOL_SOURCE_DESCRIPTION: &str = "nm -g --defined-only --format=just-symbols libopus.a";
 
 fn main() {
     // Cargo.toml か build.rs が更新されたら、依存ライブラリを再ビルドする
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed={SYMBOL_RENAME_HEADER_PATH}");
     println!("cargo::rerun-if-env-changed=CPPFLAGS");
+    println!("cargo::rerun-if-env-changed={SYMBOL_REGENERATE_ENV}");
 
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("infallible"));
@@ -26,7 +28,8 @@ fn main() {
     let output_lib_dir = src_dir.join("lib/");
     let output_metadata_path = out_dir.join("metadata.rs");
     let output_bindings_path = out_dir.join("bindings.rs");
-    let output_symbol_renames_header_path = out_dir.join("opus_symbol_renames.h");
+    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("infallible"));
+    let managed_symbol_renames_header_path = manifest_dir.join(SYMBOL_RENAME_HEADER_PATH);
     let _ = std::fs::remove_dir_all(&out_build_dir);
     std::fs::create_dir(&out_build_dir).expect("failed to create build directory");
 
@@ -72,48 +75,26 @@ fn main() {
         panic!("[autoreconf] failed to build {LIB_NAME}");
     }
 
-    // ソースツリーから衝突しうるシンボルを収集し、
-    // 衝突回避用のリネームヘッダーを生成する
-    let symbols = collect_target_identifiers_from_source_tree(&src_dir);
-    write_symbol_rename_header(&output_symbol_renames_header_path, &symbols);
-    let cppflags = compose_cppflags(&output_symbol_renames_header_path);
+    if std::env::var_os(SYMBOL_REGENERATE_ENV).is_some() {
+        // 再生成モードでは未リネームの libopus.a を一度ビルドし、
+        // 実シンボルから管理ヘッダーを書き出しす
+        let cppflags = read_cppflags();
+        build_and_install(&src_dir, &cppflags);
+        let archive_path = src_dir.join("lib/libopus.a");
+        let symbols = collect_symbols_from_archive(&archive_path);
+        write_symbol_rename_header(&managed_symbol_renames_header_path, &version, &symbols);
+    }
+
+    validate_managed_symbol_rename_header(&managed_symbol_renames_header_path, &version);
+    let cppflags = compose_cppflags(read_cppflags(), &managed_symbol_renames_header_path);
 
     // リネームヘッダーを適用した状態でビルドを行う
-    let success = Command::new("./configure")
-        .arg("--disable-shared")
-        .arg("--prefix")
-        .arg(src_dir.display().to_string())
-        .env("CPPFLAGS", &cppflags)
-        .current_dir(&src_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[configure] failed to build {LIB_NAME}");
-    }
-
-    let success = Command::new("make")
-        .env("CPPFLAGS", &cppflags)
-        .current_dir(&src_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[make] failed to build {LIB_NAME}");
-    }
-
-    let success = Command::new("make")
-        .arg("install")
-        .env("CPPFLAGS", &cppflags)
-        .current_dir(&src_dir)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !success {
-        panic!("[make] failed to build {LIB_NAME}");
-    }
+    build_and_install(&src_dir, &cppflags);
 
     // バインディングを生成する
     bindgen::Builder::default()
         .clang_arg("-include")
-        .clang_arg(output_symbol_renames_header_path.display().to_string())
+        .clang_arg(managed_symbol_renames_header_path.display().to_string())
         .header(input_header_path.to_str().expect("invalid header path"))
         .generate()
         .expect("failed to generate bindings")
@@ -166,413 +147,95 @@ fn get_git_url_and_version() -> (String, String) {
     }
 }
 
-// Opus のソースツリー全体を走査し、対象プレフィックスの識別子を収集する
-//
-// リネーム対象プレフィックスに一致する識別子を
-// ソースファイル群から抽出する
-fn collect_target_identifiers_from_source_tree(src_dir: &Path) -> BTreeSet<String> {
+// 管理ヘッダーを生成し、Opus バージョンとシンボル取得方法を先頭コメントに埋め込む
+fn write_symbol_rename_header(path: &Path, opus_version: &str, symbols: &BTreeSet<String>) {
+    if symbols.is_empty() {
+        panic!("symbol rename header requires at least one symbol");
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("failed to create symbol rename header directory");
+    }
+
+    let mut header = String::new();
+    header.push_str("/* Auto-generated by shiguredo_opus build.rs */\n");
+    header.push_str(&format!("/* Opus-Version: {opus_version} */\n"));
+    header.push_str(&format!(
+        "/* Symbol-Source: {SYMBOL_SOURCE_DESCRIPTION} */\n\n"
+    ));
+    header.push_str(&format!("#ifndef {SYMBOL_RENAME_INCLUDE_GUARD}\n"));
+    header.push_str(&format!("#define {SYMBOL_RENAME_INCLUDE_GUARD}\n\n"));
+    for symbol in symbols {
+        let renamed_symbol = format!("{SHIGUREDO_OPUS_SYMBOL_PREFIX}{symbol}");
+        header.push_str(&format!("#define {symbol} {renamed_symbol}\n"));
+    }
+    header.push_str("\n#endif\n");
+    std::fs::write(path, header).expect("failed to write symbol rename header");
+}
+
+// 管理ヘッダーの Opus-Version コメントを確認し、期待バージョンと一致しなければ失敗する
+fn validate_managed_symbol_rename_header(path: &Path, expected_version: &str) {
+    let actual_version = read_managed_header_version(path);
+    if actual_version.as_deref() == Some(expected_version) {
+        return;
+    }
+    let actual_version = actual_version.unwrap_or_else(|| "(missing or unknown)".to_string());
+    panic!(
+        concat!(
+            "管理ヘッダーが見つからないか、Opus-Version が一致しません。\n",
+            "期待する Opus-Version: {expected}\n",
+            "実際の Opus-Version: {actual}\n",
+            "ヘッダーパス: {path}\n",
+            "再生成コマンド:\n",
+            "  SHIGUREDO_OPUS_REGENERATE_SYMBOL_HEADER=1 cargo build -p shiguredo_opus"
+        ),
+        expected = expected_version,
+        actual = actual_version,
+        path = path.display(),
+    );
+}
+
+// 管理ヘッダーの先頭コメントから Opus-Version を読み取る
+fn read_managed_header_version(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("/* Opus-Version: ") {
+            return rest.strip_suffix(" */").map(ToString::to_string);
+        }
+    }
+    None
+}
+
+// `nm` 出力から定義済みグローバルシンボルを抽出する
+fn collect_symbols_from_archive(archive_path: &Path) -> BTreeSet<String> {
+    let output = Command::new("nm")
+        .arg("-g")
+        .arg("--defined-only")
+        .arg("--format=just-symbols")
+        .arg(archive_path)
+        .output()
+        .expect("failed to run nm");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        panic!("nm failed for {}: {stderr}", archive_path.display());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut symbols = BTreeSet::new();
-    let mut directories: Vec<PathBuf> = TARGET_SOURCE_DIRECTORIES
-        .iter()
-        .map(|d| src_dir.join(d))
-        .filter(|d| d.is_dir())
-        .collect();
-    while let Some(directory) = directories.pop() {
-        for entry in std::fs::read_dir(&directory).expect("failed to read source directory") {
-            let entry = entry.expect("failed to read source entry");
-            let path = entry.path();
-            if entry
-                .file_type()
-                .expect("failed to read source file type")
-                .is_dir()
-            {
-                directories.push(path);
-                continue;
-            }
-            if !is_target_source_file(&path) {
-                continue;
-            }
-            let source_text = std::fs::read_to_string(&path).expect("failed to read source file");
-            for symbol in extract_prefixed_target_identifiers_from_source(&source_text) {
-                symbols.insert(symbol);
-            }
-            if path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| ext == "c")
-            {
-                for symbol in extract_global_symbols_from_c_source(&source_text) {
-                    symbols.insert(symbol);
-                }
-            }
+    for line in stdout.lines() {
+        let symbol = line.trim();
+        if is_c_identifier(symbol) && !symbol.starts_with(SHIGUREDO_OPUS_SYMBOL_PREFIX) {
+            symbols.insert(symbol.to_string());
         }
     }
     if symbols.is_empty() {
-        panic!(
-            "failed to collect target symbols from {}",
-            src_dir.display()
-        );
+        panic!("no symbols were collected from {}", archive_path.display());
     }
     symbols
 }
 
-// 対象ソースファイルかどうかを判定する
-//
-// 拡張子で判定している
-fn is_target_source_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| TARGET_SOURCE_EXTENSIONS.contains(&ext))
-}
-
-// C ソースを簡易的に正規化し、対象プレフィックス識別子を抽出する
-//
-// コメントと文字列を空白化してから識別子を走査することで、
-// 不要な誤検出を減らしている
-fn extract_prefixed_target_identifiers_from_source(source_text: &str) -> Vec<String> {
-    let normalized = normalize_c_source(source_text);
-    let mut symbols = BTreeSet::new();
-    let mut token = String::new();
-
-    for ch in normalized.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            token.push(ch);
-            continue;
-        }
-        if is_prefixed_target_symbol(&token) {
-            symbols.insert(token.clone());
-        }
-        token.clear();
-    }
-    if is_prefixed_target_symbol(&token) {
-        symbols.insert(token);
-    }
-
-    symbols.into_iter().collect()
-}
-
-// C ソースから、外部リンケージを持つトップレベルシンボルを抽出する
-//
-// 対象:
-// - `static` ではない関数定義
-// - `static` ではないグローバル変数定義
-fn extract_global_symbols_from_c_source(source_text: &str) -> Vec<String> {
-    let normalized = normalize_c_source(source_text);
-    let mut symbols = BTreeSet::new();
-    let mut statement = String::new();
-    let mut brace_depth = 0usize;
-
-    for ch in normalized.chars() {
-        if brace_depth == 0 {
-            match ch {
-                '{' => {
-                    collect_symbols_from_open_brace_statement(&statement, &mut symbols);
-                    statement.clear();
-                    brace_depth = 1;
-                }
-                ';' => {
-                    collect_symbols_from_semicolon_statement(&statement, &mut symbols);
-                    statement.clear();
-                }
-                _ => statement.push(ch),
-            }
-            continue;
-        }
-
-        if ch == '{' {
-            brace_depth += 1;
-        } else if ch == '}' {
-            brace_depth = brace_depth.saturating_sub(1);
-        }
-    }
-
-    symbols.into_iter().collect()
-}
-
-fn collect_symbols_from_open_brace_statement(statement: &str, symbols: &mut BTreeSet<String>) {
-    let statement = statement.trim();
-    if statement.is_empty() || starts_with_keyword(statement, "typedef") {
-        return;
-    }
-    if statement.contains('(') {
-        if let Some((name, name_start)) = extract_function_name_from_declaration(statement)
-            && !has_static_storage(statement, name_start)
-            && !is_excluded_symbol(name)
-        {
-            symbols.insert(name.to_string());
-        }
-        return;
-    }
-    if statement.contains('=')
-        && let Some((name, name_start)) = extract_variable_name_from_declaration(statement)
-        && !has_static_storage(statement, name_start)
-        && !is_excluded_symbol(name)
-    {
-        symbols.insert(name.to_string());
-    }
-}
-
-fn collect_symbols_from_semicolon_statement(statement: &str, symbols: &mut BTreeSet<String>) {
-    let statement = statement.trim();
-    if statement.is_empty() || starts_with_keyword(statement, "typedef") {
-        return;
-    }
-    if statement.contains('(') || !statement.contains('=') {
-        return;
-    }
-    if let Some((name, name_start)) = extract_variable_name_from_declaration(statement)
-        && !has_static_storage(statement, name_start)
-        && !is_excluded_symbol(name)
-    {
-        symbols.insert(name.to_string());
-    }
-}
-
-fn extract_function_name_from_declaration(declaration: &str) -> Option<(&str, usize)> {
-    let mut candidate: Option<(&str, usize)> = None;
-    for (identifier, start, end) in iterate_identifiers(declaration) {
-        let rest = &declaration[end..];
-        if !rest.trim_start().starts_with('(') {
-            continue;
-        }
-        if is_c_keyword(identifier) {
-            continue;
-        }
-        candidate = Some((identifier, start));
-    }
-    candidate
-}
-
-fn extract_variable_name_from_declaration(declaration: &str) -> Option<(&str, usize)> {
-    let lhs = declaration.split('=').next().unwrap_or(declaration);
-    let mut candidate: Option<(&str, usize)> = None;
-    for (identifier, start, _end) in iterate_identifiers(lhs) {
-        if is_c_keyword(identifier) {
-            continue;
-        }
-        candidate = Some((identifier, start));
-    }
-    candidate
-}
-
-fn has_static_storage(declaration: &str, symbol_start: usize) -> bool {
-    let prefix = &declaration[..symbol_start];
-    iterate_identifiers(prefix).any(|(identifier, _, _)| identifier == "static")
-}
-
-fn starts_with_keyword(text: &str, keyword: &str) -> bool {
-    let trimmed = text.trim_start();
-    trimmed.starts_with(keyword)
-        && trimmed
-            .chars()
-            .nth(keyword.len())
-            .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_')
-}
-
-fn is_c_keyword(identifier: &str) -> bool {
-    matches!(
-        identifier,
-        "auto"
-            | "break"
-            | "case"
-            | "char"
-            | "const"
-            | "continue"
-            | "default"
-            | "do"
-            | "double"
-            | "else"
-            | "enum"
-            | "extern"
-            | "float"
-            | "for"
-            | "goto"
-            | "if"
-            | "inline"
-            | "int"
-            | "long"
-            | "register"
-            | "restrict"
-            | "return"
-            | "short"
-            | "signed"
-            | "sizeof"
-            | "static"
-            | "struct"
-            | "switch"
-            | "typedef"
-            | "union"
-            | "unsigned"
-            | "void"
-            | "volatile"
-            | "while"
-            | "_Alignas"
-            | "_Alignof"
-            | "_Atomic"
-            | "_Bool"
-            | "_Complex"
-            | "_Generic"
-            | "_Imaginary"
-            | "_Noreturn"
-            | "_Static_assert"
-            | "_Thread_local"
-    )
-}
-
-fn is_excluded_symbol(symbol: &str) -> bool {
-    EXCLUDED_SYMBOLS.contains(&symbol)
-}
-
-fn iterate_identifiers(text: &str) -> impl Iterator<Item = (&str, usize, usize)> {
-    let mut identifiers = Vec::new();
-    let mut start: Option<usize> = None;
-    for (index, ch) in text.char_indices() {
-        let is_ident = ch.is_ascii_alphanumeric() || ch == '_';
-        match (start, is_ident) {
-            (None, true) => {
-                if ch.is_ascii_alphabetic() || ch == '_' {
-                    start = Some(index);
-                }
-            }
-            (Some(s), false) => {
-                identifiers.push((&text[s..index], s, index));
-                start = None;
-            }
-            _ => {}
-        }
-    }
-    if let Some(s) = start {
-        identifiers.push((&text[s..], s, text.len()));
-    }
-    identifiers.into_iter()
-}
-
-// C ソースからコメント・文字列・プリプロセッサ行を除去する
-//
-// 識別子抽出時のノイズを減らすことが目的
-fn normalize_c_source(source_text: &str) -> String {
-    let mut output = String::new();
-    let mut chars = source_text.chars().peekable();
-    let mut in_line_comment = false;
-    let mut in_block_comment = false;
-    let mut in_string = false;
-    let mut in_char = false;
-    let mut escape = false;
-    let mut line_start = true;
-    let mut in_preprocessor = false;
-    let mut preprocessor_continues = false;
-
-    while let Some(ch) = chars.next() {
-        if in_line_comment {
-            if ch == '\n' {
-                in_line_comment = false;
-                line_start = true;
-                output.push('\n');
-            } else {
-                output.push(' ');
-            }
-            continue;
-        }
-        if in_block_comment {
-            if ch == '*' && chars.peek().is_some_and(|next| *next == '/') {
-                let _ = chars.next();
-                output.push(' ');
-                output.push(' ');
-                in_block_comment = false;
-            } else if ch == '\n' {
-                line_start = true;
-                output.push('\n');
-            } else {
-                output.push(' ');
-            }
-            continue;
-        }
-        if in_preprocessor {
-            if ch == '\n' {
-                in_preprocessor = preprocessor_continues;
-                preprocessor_continues = false;
-                line_start = true;
-                output.push('\n');
-            } else {
-                preprocessor_continues = ch == '\\';
-                output.push(' ');
-            }
-            continue;
-        }
-        if in_string {
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            output.push(' ');
-            continue;
-        }
-        if in_char {
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == '\'' {
-                in_char = false;
-            }
-            output.push(' ');
-            continue;
-        }
-
-        if line_start {
-            if ch.is_whitespace() {
-                output.push(ch);
-                line_start = ch == '\n';
-                continue;
-            }
-            if ch == '#' {
-                in_preprocessor = true;
-                preprocessor_continues = false;
-                output.push(' ');
-                line_start = false;
-                continue;
-            }
-            line_start = false;
-        }
-
-        if ch == '/' && chars.peek().is_some_and(|next| *next == '/') {
-            let _ = chars.next();
-            in_line_comment = true;
-            output.push(' ');
-            output.push(' ');
-            continue;
-        }
-        if ch == '/' && chars.peek().is_some_and(|next| *next == '*') {
-            let _ = chars.next();
-            in_block_comment = true;
-            output.push(' ');
-            output.push(' ');
-            continue;
-        }
-        if ch == '"' {
-            in_string = true;
-            output.push(' ');
-            continue;
-        }
-        if ch == '\'' {
-            in_char = true;
-            output.push(' ');
-            continue;
-        }
-        if ch == '\n' {
-            line_start = true;
-        }
-        output.push(ch);
-    }
-
-    output
-}
-
-// 対象プレフィックスを持つ C 識別子かどうかを判定する
-fn is_prefixed_target_symbol(symbol: &str) -> bool {
+// C 識別子かどうかを判定する
+fn is_c_identifier(symbol: &str) -> bool {
     if symbol.is_empty() {
         return false;
     }
@@ -583,39 +246,47 @@ fn is_prefixed_target_symbol(symbol: &str) -> bool {
     if !(first.is_ascii_alphabetic() || first == '_') {
         return false;
     }
-    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return false;
-    }
-    RENAME_TARGET_PREFIXES
-        .iter()
-        .any(|prefix| symbol.starts_with(prefix))
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-// シンボルリネーム用ヘッダを生成する
-//
-// 生成内容:
-// - include guard
-// - すべての対象シンボルを `shiguredo_opus_<original_symbol>` に変換
-fn write_symbol_rename_header(path: &Path, symbols: &BTreeSet<String>) {
-    let mut header = String::new();
-    header.push_str("#ifndef SHIGUREDO_OPUS_SYMBOL_RENAMES_H\n");
-    header.push_str("#define SHIGUREDO_OPUS_SYMBOL_RENAMES_H\n\n");
-    for symbol in symbols {
-        let renamed_symbol = format!("{SHIGUREDO_OPUS_SYMBOL_PREFIX}{symbol}");
-        header.push_str(&format!("#define {symbol} {renamed_symbol}\n"));
+// configure / make / make install を行う
+fn build_and_install(src_dir: &Path, cppflags: &str) {
+    let mut configure = Command::new("./configure");
+    configure
+        .arg("--disable-shared")
+        .arg("--prefix")
+        .arg(src_dir.display().to_string())
+        .current_dir(src_dir)
+        .env("CPPFLAGS", cppflags);
+    let success = configure.status().is_ok_and(|status| status.success());
+    if !success {
+        panic!("[configure] failed to build {LIB_NAME}");
     }
-    header.push_str("\n#endif\n");
-    std::fs::write(path, header).expect("failed to write symbol rename header");
+
+    let mut make = Command::new("make");
+    make.current_dir(src_dir).env("CPPFLAGS", cppflags);
+    let success = make.status().is_ok_and(|status| status.success());
+    if !success {
+        panic!("[make] failed to build {LIB_NAME}");
+    }
+
+    let mut make_install = Command::new("make");
+    make_install
+        .arg("install")
+        .current_dir(src_dir)
+        .env("CPPFLAGS", cppflags);
+    let success = make_install.status().is_ok_and(|status| status.success());
+    if !success {
+        panic!("[make] failed to build {LIB_NAME}");
+    }
 }
 
-// 既存の `CPPFLAGS` を保持しつつ、生成ヘッダの強制インクルード指定を追加する
-//
-// autotools では `-include` のようなプリプロセッサ関連のフラグは
-// `CPPFLAGS` で渡すのが正しい
-fn compose_cppflags(include_header: &Path) -> String {
-    let include_header = format!("-include {}", include_header.display());
-    match std::env::var("CPPFLAGS") {
-        Ok(existing) if !existing.trim().is_empty() => format!("{existing} {include_header}"),
-        _ => include_header,
-    }
+// `CPPFLAGS` 環境変数をそのまま取得する
+fn read_cppflags() -> String {
+    std::env::var("CPPFLAGS").unwrap_or_default()
+}
+
+// 既存の `CPPFLAGS` に生成ヘッダの強制インクルード指定を追加する
+fn compose_cppflags(cppflags: String, include_header: &Path) -> String {
+    format!("{} -include {}", cppflags, include_header.display())
 }
