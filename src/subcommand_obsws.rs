@@ -705,15 +705,11 @@ fn build_get_canvas_list_response(request_id: &str) -> String {
                     nojson::object(|f| {
                         f.member(
                             "canvases",
-                            nojson::json(|f| {
-                                f.array(|f| {
-                                    f.element(nojson::object(|f| {
-                                        f.member("canvasName", "hisui-main")?;
-                                        f.member("canvasWidth", 0)?;
-                                        f.member("canvasHeight", 0)
-                                    }))
-                                })
-                            }),
+                            [nojson::object(|f| {
+                                f.member("canvasName", "hisui-main")?;
+                                f.member("canvasWidth", 0)?;
+                                f.member("canvasHeight", 0)
+                            })],
                         )
                     }),
                 )
