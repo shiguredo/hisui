@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use shiguredo_websocket::CloseCode;
+use tokio::sync::RwLock;
 
 use crate::obsws_auth::ObswsAuthentication;
+use crate::obsws_input_registry::ObswsInputRegistry;
 use crate::obsws_message_handler::{
     ClientMessage, ObswsSessionStats, build_hello_message, build_identified_message,
     handle_request_message, is_supported_rpc_version, parse_client_message,
@@ -32,14 +36,19 @@ enum ObswsSessionState {
 pub(crate) struct ObswsSession {
     state: ObswsSessionState,
     auth: Option<ObswsAuthentication>,
+    input_registry: Arc<RwLock<ObswsInputRegistry>>,
     stats: ObswsSessionStats,
 }
 
 impl ObswsSession {
-    pub(crate) fn new(auth: Option<ObswsAuthentication>) -> Self {
+    pub(crate) fn new(
+        auth: Option<ObswsAuthentication>,
+        input_registry: Arc<RwLock<ObswsInputRegistry>>,
+    ) -> Self {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
             auth,
+            input_registry,
             stats: ObswsSessionStats::default(),
         }
     }
@@ -55,13 +64,13 @@ impl ObswsSession {
         }
     }
 
-    pub(crate) fn on_text_message(&mut self, text: &str) -> crate::Result<SessionAction> {
+    pub(crate) async fn on_text_message(&mut self, text: &str) -> crate::Result<SessionAction> {
         self.stats.incoming_messages = self.stats.incoming_messages.saturating_add(1);
 
         let message = parse_client_message(text)?;
         let action = match message {
             ClientMessage::Identify(identify) => self.handle_identify(identify),
-            ClientMessage::Request(request) => self.handle_request(request),
+            ClientMessage::Request(request) => self.handle_request(request).await,
         };
         Ok(action)
     }
@@ -111,7 +120,7 @@ impl ObswsSession {
         }
     }
 
-    fn handle_request(
+    async fn handle_request(
         &mut self,
         request: crate::obsws_message_handler::RequestMessage,
     ) -> SessionAction {
@@ -123,7 +132,8 @@ impl ObswsSession {
             };
         }
 
-        let response = handle_request_message(request, &self.stats);
+        let input_registry = self.input_registry.read().await;
+        let response = handle_request_message(request, &self.stats, &input_registry);
         SessionAction::SendText {
             text: response.message,
             message_name: "request response message",
@@ -140,10 +150,16 @@ mod tests {
         OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED,
         OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
     };
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    fn input_registry() -> Arc<RwLock<ObswsInputRegistry>> {
+        Arc::new(RwLock::new(ObswsInputRegistry::new()))
+    }
 
     #[test]
     fn on_connected_returns_hello_message_action() {
-        let session = ObswsSession::new(None);
+        let session = ObswsSession::new(None, input_registry());
         let action = session.on_connected();
         let SessionAction::SendText { text, message_name } = action else {
             panic!("must be SendText");
@@ -154,11 +170,15 @@ mod tests {
 
     #[test]
     fn on_request_before_identify_returns_close_action() {
-        let mut session = ObswsSession::new(None);
+        let mut session = ObswsSession::new(None, input_registry());
         let action = session.handle_request(RequestMessage {
             request_id: Some("req-1".to_owned()),
             request_type: Some("GetVersion".to_owned()),
+            request_data: None,
         });
+        let action = tokio::runtime::Runtime::new()
+            .expect("runtime init must succeed")
+            .block_on(action);
         let SessionAction::Close { code, reason, .. } = action else {
             panic!("must be Close");
         };
@@ -166,13 +186,17 @@ mod tests {
         assert_eq!(reason, "identify is required");
     }
 
-    #[test]
-    fn duplicate_identify_returns_already_identified_close() {
-        let mut session = ObswsSession::new(None);
-        let first = session.on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#);
+    #[tokio::test]
+    async fn duplicate_identify_returns_already_identified_close() {
+        let mut session = ObswsSession::new(None, input_registry());
+        let first = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await;
         assert!(first.is_ok());
 
-        let second = session.on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#);
+        let second = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await;
         let action = second.expect("second identify must return action");
         let SessionAction::Close { code, reason, .. } = action else {
             panic!("must be Close");
@@ -181,11 +205,12 @@ mod tests {
         assert_eq!(reason, "already identified");
     }
 
-    #[test]
-    fn unsupported_rpc_version_returns_close_action() {
-        let mut session = ObswsSession::new(None);
+    #[tokio::test]
+    async fn unsupported_rpc_version_returns_close_action() {
+        let mut session = ObswsSession::new(None, input_registry());
         let action = session
             .on_text_message(r#"{"op":1,"d":{"rpcVersion":2}}"#)
+            .await
             .expect("identify must be parsed");
         let SessionAction::Close { code, reason, .. } = action else {
             panic!("must be Close");
@@ -194,8 +219,8 @@ mod tests {
         assert_eq!(reason, "unsupported rpc version");
     }
 
-    #[test]
-    fn invalid_authentication_returns_close_action() {
+    #[tokio::test]
+    async fn invalid_authentication_returns_close_action() {
         let auth = ObswsAuthentication {
             salt: "test-salt".to_owned(),
             challenge: "test-challenge".to_owned(),
@@ -205,9 +230,10 @@ mod tests {
                 "test-challenge",
             ),
         };
-        let mut session = ObswsSession::new(Some(auth));
+        let mut session = ObswsSession::new(Some(auth), input_registry());
         let action = session
             .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"invalid"}}"#)
+            .await
             .expect("identify must be parsed");
         let SessionAction::Close { code, reason, .. } = action else {
             panic!("must be Close");

@@ -111,14 +111,14 @@
 
 ### Inputs
 
-- [ ] `GetInputList`: 入力一覧を取得する
-- [ ] `GetInputKindList`: 入力種別一覧を取得する
+- [x] `GetInputList`: 入力一覧を取得する
+- [x] `GetInputKindList`: 入力種別一覧を取得する
 - [ ] `GetSpecialInputs`: 特殊入力設定を取得する
 - [ ] `CreateInput`: 入力を作成する
 - [ ] `RemoveInput`: 入力を削除する
 - [ ] `SetInputName`: 入力名を変更する
 - [ ] `GetInputDefaultSettings`: 入力の既定設定を取得する
-- [ ] `GetInputSettings`: 入力設定を取得する
+- [x] `GetInputSettings`: 入力設定を取得する
 - [ ] `SetInputSettings`: 入力設定を更新する
 - [ ] `GetInputMute`: ミュート状態を取得する
 - [ ] `SetInputMute`: ミュート状態を設定する

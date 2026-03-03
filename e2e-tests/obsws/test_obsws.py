@@ -268,6 +268,7 @@ async def _connect_identify_and_request(
     request_type: str,
     request_id: str,
     *,
+    request_data: dict[str, object] | None = None,
     password: str | None = None,
 ):
     timeout = aiohttp.ClientTimeout(total=10.0)
@@ -278,6 +279,7 @@ async def _connect_identify_and_request(
             ws,
             request_type=request_type,
             request_id=request_id,
+            request_data=request_data,
         )
         await ws.close()
         return response
@@ -538,6 +540,9 @@ def test_obsws_get_version_request(binary_path: Path):
         response_data = response["d"]["responseData"]
         assert response_data["rpcVersion"] == 1
         assert "GetVersion" in response_data["availableRequests"]
+        assert "GetInputList" in response_data["availableRequests"]
+        assert "GetInputKindList" in response_data["availableRequests"]
+        assert "GetInputSettings" in response_data["availableRequests"]
         supported_image_formats = response_data["supportedImageFormats"]
         assert isinstance(supported_image_formats, list)
         assert "png" in supported_image_formats
@@ -594,6 +599,84 @@ def test_obsws_get_canvas_list_request(binary_path: Path):
         assert status["code"] == 100
         response_data = response["d"]["responseData"]
         assert isinstance(response_data["canvases"], list)
+
+
+def test_obsws_get_input_list_request(binary_path: Path):
+    """obsws が GetInputList request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputList",
+                request_id="req-get-input-list",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert isinstance(response_data["inputs"], list)
+
+
+def test_obsws_get_input_kind_list_request(binary_path: Path):
+    """obsws が GetInputKindList request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputKindList",
+                request_id="req-get-input-kind-list",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert isinstance(response_data["inputKinds"], list)
+        assert "ffmpeg_source" in response_data["inputKinds"]
+
+
+def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
+    """obsws が GetInputSettings で識別子欠落をエラー応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings",
+                request_data={},
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 300
 
 
 def test_obsws_unknown_request_type_returns_error(binary_path: Path):

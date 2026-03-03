@@ -48,6 +48,7 @@ mod media_pipeline_rpc;
 pub mod mixer_realtime_audio;
 pub mod mixer_realtime_video;
 mod obsws_auth;
+mod obsws_input_registry;
 mod obsws_message_handler;
 mod obsws_protocol;
 mod obsws_server;

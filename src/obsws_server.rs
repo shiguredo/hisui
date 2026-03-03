@@ -1,5 +1,6 @@
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
 use shiguredo_http11::{RequestDecoder, Response};
 use shiguredo_websocket::{
@@ -8,8 +9,10 @@ use shiguredo_websocket::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 
 use crate::obsws_auth::ObswsAuthentication;
+use crate::obsws_input_registry::ObswsInputRegistry;
 use crate::obsws_message_handler::ObswsSessionStats;
 use crate::obsws_protocol::OBSWS_SUBPROTOCOL;
 use crate::obsws_session::{ObswsSession, SessionAction};
@@ -62,6 +65,7 @@ async fn run_server(
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws http listener: {e}")))?;
     tracing::info!("obsws http server listening on http://{http_listen_addr}");
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new()));
 
     // 将来の obsws processor 連携のため、現時点で MediaPipeline を初期化して起動する
     let pipeline = crate::MediaPipeline::new()?;
@@ -75,7 +79,7 @@ async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
-    let ws_task = tokio::spawn(run_ws_accept_loop(ws_listener, password));
+    let ws_task = tokio::spawn(run_ws_accept_loop(ws_listener, password, input_registry));
     let http_task = tokio::spawn(run_http_accept_loop(http_listener, pipeline_handle));
 
     tokio::select! {
@@ -90,15 +94,21 @@ async fn run_server(
     }
 }
 
-async fn run_ws_accept_loop(listener: TcpListener, password: Option<String>) -> crate::Result<()> {
+async fn run_ws_accept_loop(
+    listener: TcpListener,
+    password: Option<String>,
+    input_registry: Arc<RwLock<ObswsInputRegistry>>,
+) -> crate::Result<()> {
     loop {
         let (stream, peer_addr) = listener
             .accept()
             .await
             .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
         let password = password.clone();
+        let input_registry = input_registry.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_ws_connection(stream, peer_addr, password).await {
+            if let Err(e) = handle_ws_connection(stream, peer_addr, password, input_registry).await
+            {
                 tracing::warn!("obsws connection handler failed: {}", e.display());
             }
         });
@@ -126,6 +136,7 @@ async fn handle_ws_connection(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     password: Option<String>,
+    input_registry: Arc<RwLock<ObswsInputRegistry>>,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
@@ -138,7 +149,7 @@ async fn handle_ws_connection(
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
-    let mut session = ObswsSession::new(auth);
+    let mut session = ObswsSession::new(auth, input_registry);
 
     loop {
         let n = stream
@@ -186,7 +197,7 @@ async fn handle_ws_connection(
                     should_terminate = apply_session_action(&mut ws, action, session.stats_mut())?;
                 }
                 ConnectionEvent::TextMessage(text) => {
-                    let action = match session.on_text_message(&text) {
+                    let action = match session.on_text_message(&text).await {
                         Ok(action) => action,
                         Err(e) => {
                             tracing::warn!("obsws invalid client message: {}", e.display());
