@@ -48,13 +48,12 @@
   - [ ] `availableDiskSpace`: 空きディスク容量を返す（ 現状は `0.0` 固定 ）
   - [ ] `activeFps`: 現在の FPS を返す（ 現状は `0.0` 固定 ）
   - [ ] `averageFrameRenderTime`: 平均レンダー時間を返す（ 現状は `0.0` 固定 ）
-  - [x] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す
-  - [x] `renderTotalFrames`: レンダー総フレーム数を返す
-  - [x] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す
-  - [x] `outputTotalFrames`: 出力総フレーム数を返す
+  - [ ] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す（ 現状は `0` 固定 ）
+  - [ ] `renderTotalFrames`: レンダー総フレーム数を返す（ 現状は `0` 固定 ）
+  - [ ] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す（ 現状は `0` 固定 ）
+  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
-  - NOTE: OBS 互換の統計項目のうち一部は現状固定値を返している
 - [ ] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [ ] `CallVendorRequest`: ベンダー拡張リクエストを実行する
 - [ ] `GetHotkeyList`: ホットキー一覧を取得する
@@ -90,8 +89,7 @@
 
 ### Canvases
 
-- [x] `GetCanvasList`: 利用可能なキャンバス一覧を返す
-  - NOTE: 現状は単一キャンバス（ `hisui-main` ）を返す
+- [ ] `GetCanvasList`: 利用可能なキャンバス一覧を返す
 
 ### Scenes
 
