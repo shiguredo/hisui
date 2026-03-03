@@ -1,6 +1,7 @@
 """obsws サブコマンドの e2e テスト"""
 
 import asyncio
+import json
 import os
 import signal
 import socket
@@ -9,8 +10,11 @@ import time
 from pathlib import Path
 
 import aiohttp
+import pytest
 
 from hisui_server import reserve_ephemeral_port
+
+OBSWS_SUBPROTOCOL = "obswebsocket.json"
 
 
 class ObswsServer:
@@ -92,12 +96,33 @@ class ObswsServer:
 async def _connect_websocket(url: str):
     timeout = aiohttp.ClientTimeout(total=10.0)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        ws = await session.ws_connect(url)
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
         await ws.close()
 
 
-def test_obsws_accepts_websocket_connection(binary_path: Path):
-    """obsws が websocket 接続を受け付けることを確認する"""
+async def _connect_and_exchange_identify(url: str):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+
+        hello_msg = await ws.receive(timeout=5.0)
+        assert hello_msg.type == aiohttp.WSMsgType.TEXT
+        hello = json.loads(hello_msg.data)
+        assert hello["op"] == 0
+        assert hello["d"]["rpcVersion"] == 1
+
+        await ws.send_str(json.dumps({"op": 1, "d": {"rpcVersion": 1}}))
+        identified_msg = await ws.receive(timeout=5.0)
+        assert identified_msg.type == aiohttp.WSMsgType.TEXT
+        identified = json.loads(identified_msg.data)
+        assert identified["op"] == 2
+        assert identified["d"]["negotiatedRpcVersion"] == 1
+
+        await ws.close()
+
+
+def test_obsws_hello_and_identify_flow(binary_path: Path):
+    """obsws が Hello / Identify / Identified を処理できることを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
@@ -106,10 +131,9 @@ def test_obsws_accepts_websocket_connection(binary_path: Path):
         binary_path,
         host=host,
         port=port,
-        password="test-password",
         use_env=False,
     ):
-        asyncio.run(_connect_websocket(f"ws://{host}:{port}/"))
+        asyncio.run(_connect_and_exchange_identify(f"ws://{host}:{port}/"))
 
 
 def test_obsws_accepts_websocket_connection_with_env_vars(binary_path: Path):
@@ -122,7 +146,55 @@ def test_obsws_accepts_websocket_connection_with_env_vars(binary_path: Path):
         binary_path,
         host=host,
         port=port,
-        password="test-password",
         use_env=True,
     ):
         asyncio.run(_connect_websocket(f"ws://{host}:{port}/"))
+
+
+def test_obsws_rejects_connection_without_subprotocol(binary_path: Path):
+    """obsws が必須 subprotocol なしの接続を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _connect_without_subprotocol(url: str):
+        timeout = aiohttp.ClientTimeout(total=10.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            with pytest.raises(aiohttp.WSServerHandshakeError):
+                await session.ws_connect(url)
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        asyncio.run(_connect_without_subprotocol(f"ws://{host}:{port}/"))
+
+
+def test_obsws_rejects_authenticated_connection(binary_path: Path):
+    """obsws が password 指定時の接続を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _connect_with_password(url: str):
+        timeout = aiohttp.ClientTimeout(total=10.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+            first_msg = await ws.receive(timeout=5.0)
+            assert first_msg.type in {
+                aiohttp.WSMsgType.CLOSE,
+                aiohttp.WSMsgType.CLOSING,
+                aiohttp.WSMsgType.CLOSED,
+            }
+            await ws.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        password="test-password",
+        use_env=False,
+    ):
+        asyncio.run(_connect_with_password(f"ws://{host}:{port}/"))
