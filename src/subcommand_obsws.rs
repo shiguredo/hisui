@@ -16,6 +16,7 @@ const OBSWS_OP_IDENTIFY: i64 = 1;
 const OBSWS_OP_IDENTIFIED: i64 = 2;
 const OBSWS_OP_REQUEST: i64 = 6;
 const OBSWS_OP_REQUEST_RESPONSE: i64 = 7;
+const OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION: CloseCode = CloseCode(4006);
 const OBSWS_CLOSE_NOT_IDENTIFIED: CloseCode = CloseCode(4007);
 const OBSWS_CLOSE_ALREADY_IDENTIFIED: CloseCode = CloseCode(4008);
 const OBSWS_CLOSE_AUTHENTICATION_FAILED: CloseCode = CloseCode(4009);
@@ -169,6 +170,19 @@ async fn handle_connection(
                                 should_close = true;
                                 continue;
                             }
+                            if !is_supported_rpc_version(identify.rpc_version) {
+                                ws.close(
+                                    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
+                                    "unsupported rpc version",
+                                )
+                                .map_err(|e| {
+                                    crate::Error::new(format!(
+                                        "failed to close websocket for unsupported rpc version: {e}"
+                                    ))
+                                })?;
+                                should_close = true;
+                                continue;
+                            }
                             if let Some(auth) = auth.as_ref()
                                 && !auth.is_valid_response(identify.authentication.as_deref())
                             {
@@ -186,7 +200,7 @@ async fn handle_connection(
                             }
                             send_ws_text(
                                 &mut ws,
-                                &build_identified_message(),
+                                &build_identified_message(identify.rpc_version),
                                 &mut session_stats,
                                 "identified message",
                             )?;
@@ -297,6 +311,7 @@ enum ClientMessage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IdentifyMessage {
+    rpc_version: u32,
     authentication: Option<String>,
 }
 
@@ -357,6 +372,10 @@ impl ObswsAuthentication {
     }
 }
 
+fn is_supported_rpc_version(rpc_version: u32) -> bool {
+    rpc_version >= 1 && rpc_version <= OBSWS_RPC_VERSION
+}
+
 fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
     let json = nojson::RawJson::parse(text)?;
     let value = json.value();
@@ -377,8 +396,12 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
         }
         OBSWS_OP_IDENTIFY => {
             let d_value = value.to_member("d")?.required()?;
+            let rpc_version: u32 = d_value.to_member("rpcVersion")?.required()?.try_into()?;
             let authentication: Option<String> = d_value.to_member("authentication")?.try_into()?;
-            Ok(ClientMessage::Identify(IdentifyMessage { authentication }))
+            Ok(ClientMessage::Identify(IdentifyMessage {
+                rpc_version,
+                authentication,
+            }))
         }
         _ => Err(crate::Error::new(format!(
             "unsupported message opcode: {op}"
@@ -472,12 +495,12 @@ fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
     .to_string()
 }
 
-fn build_identified_message() -> String {
+fn build_identified_message(negotiated_rpc_version: u32) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_IDENTIFIED)?;
         f.member(
             "d",
-            nojson::object(|f| f.member("negotiatedRpcVersion", OBSWS_RPC_VERSION)),
+            nojson::object(|f| f.member("negotiatedRpcVersion", negotiated_rpc_version)),
         )
     })
     .to_string()
@@ -649,6 +672,7 @@ mod tests {
         assert_eq!(
             parsed,
             ClientMessage::Identify(IdentifyMessage {
+                rpc_version: 1,
                 authentication: None,
             })
         );
@@ -661,9 +685,26 @@ mod tests {
         assert_eq!(
             parsed,
             ClientMessage::Identify(IdentifyMessage {
+                rpc_version: 1,
                 authentication: Some("test-auth".to_owned()),
             })
         );
+    }
+
+    #[test]
+    fn parse_client_message_rejects_identify_without_rpc_version() {
+        let message = r#"{"op":1,"d":{}}"#;
+        let error = parse_client_message(message).expect_err("identify without rpcVersion");
+        assert!(error.display().contains("rpcVersion"));
+    }
+
+    #[test]
+    fn is_supported_rpc_version_accepts_only_range_one_to_server_version() {
+        assert!(!is_supported_rpc_version(0));
+        assert!(is_supported_rpc_version(1));
+        assert!(!is_supported_rpc_version(
+            OBSWS_RPC_VERSION.saturating_add(1)
+        ));
     }
 
     #[test]
