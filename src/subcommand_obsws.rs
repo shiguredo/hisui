@@ -363,29 +363,27 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
     let op_value = value.to_member("op")?.required()?;
     let op: i64 = op_value.try_into()?;
 
-    if op != OBSWS_OP_IDENTIFY {
-        if op == OBSWS_OP_REQUEST {
+    match op {
+        OBSWS_OP_REQUEST => {
             let d_value = value.to_member("d")?.required()?;
 
             let request_id: Option<String> = d_value.to_member("requestId")?.try_into()?;
             let request_type: Option<String> = d_value.to_member("requestType")?.try_into()?;
 
-            return Ok(ClientMessage::Request(RequestMessage {
+            Ok(ClientMessage::Request(RequestMessage {
                 request_id,
                 request_type,
-            }));
+            }))
         }
-
-        return Err(crate::Error::new(format!(
+        OBSWS_OP_IDENTIFY => {
+            let d_value = value.to_member("d")?.required()?;
+            let authentication: Option<String> = d_value.to_member("authentication")?.try_into()?;
+            Ok(ClientMessage::Identify(IdentifyMessage { authentication }))
+        }
+        _ => Err(crate::Error::new(format!(
             "unsupported message opcode: {op}"
-        )));
+        ))),
     }
-
-    let d_value = value.to_member("d")?.required()?;
-
-    let authentication: Option<String> = d_value.to_member("authentication")?.try_into()?;
-
-    Ok(ClientMessage::Identify(IdentifyMessage { authentication }))
 }
 
 fn handle_request_message(
