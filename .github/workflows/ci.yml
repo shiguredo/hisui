@@ -26,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -119,6 +120,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
       - name: Update PATH
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - run: rustup component add llvm-tools
       - run: cargo check --no-default-features --features nvcodec -p hisui
       - run: cargo clippy --no-default-features --features nvcodec -p hisui -- --deny warnings
       - run: cargo test --no-default-features --features nvcodec -p hisui -- --test-threads=1
@@ -137,6 +139,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
       - name: Update PATH
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           brew update
@@ -151,6 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -184,6 +188,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -214,6 +219,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
@@ -269,6 +275,7 @@ jobs:
           cuda_version: ${{ env.CUDA_VERSION }}
           platform: ${{ matrix.platform.runs-on }}
       - run: rustup update stable
+      - run: rustup component add llvm-tools
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
           os: ${{ matrix.platform.runs-on }}
@@ -326,6 +333,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - run: rustup update stable
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           brew update
