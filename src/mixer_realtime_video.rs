@@ -393,8 +393,6 @@ impl VideoRealtimeMixerRunner {
         &mut self,
         request: VideoRealtimeMixerUpdateConfigRequest,
     ) -> crate::Result<VideoRealtimeMixerUpdateConfigResult> {
-        validate_unique_input_tracks(&request.input_tracks)?;
-
         let previous_canvas_width = self.canvas_width;
         let previous_canvas_height = self.canvas_height;
         let previous_frame_rate = self.frame_rate;
@@ -924,19 +922,6 @@ fn build_draw_order(input_tracks: &[InputTrack]) -> Vec<DrawOrder> {
         .collect::<Vec<_>>();
     draw_order.sort_by_key(|entry| (entry.z, entry.index));
     draw_order
-}
-
-fn validate_unique_input_tracks(input_tracks: &[InputTrack]) -> crate::Result<()> {
-    let mut seen_track_ids = HashSet::new();
-    for input_track in input_tracks {
-        if !seen_track_ids.insert(input_track.track_id.clone()) {
-            return Err(Error::new(format!(
-                "duplicate input track ID: {}",
-                input_track.track_id
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn validate_unique_input_tracks_for_json(
@@ -1563,31 +1548,6 @@ mod tests {
         assert!(state.current_frame.is_some());
         assert_eq!(state.pending_frames.len(), 1);
         Ok(())
-    }
-
-    #[test]
-    fn validate_unique_input_tracks_rejects_duplicate_track_id() {
-        let input_tracks = vec![
-            InputTrack {
-                track_id: TrackId::new("duplicated-track"),
-                x: 0,
-                y: 0,
-                z: 0,
-                width: None,
-                height: None,
-            },
-            InputTrack {
-                track_id: TrackId::new("duplicated-track"),
-                x: 10,
-                y: 20,
-                z: 1,
-                width: None,
-                height: None,
-            },
-        ];
-
-        let error = validate_unique_input_tracks(&input_tracks).expect_err("must reject duplicate");
-        assert!(error.display().contains("duplicate input track ID"));
     }
 
     #[test]
