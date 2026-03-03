@@ -59,6 +59,7 @@ shiguredo_nvcodec = { version = "=2026.1.0-canary.1", optional = true }
 shiguredo_openh264 = { version = "=2026.1.0-canary.0" }
 shiguredo_opus = { version = "=2025.1.0", path = "crates/shiguredo_opus/" }
 shiguredo_svt_av1 = { version = "=2025.1.0", path = "crates/shiguredo_svt_av1/" }
+shiguredo_websocket = "=2026.1.0-canary.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = { version = "=2025.1.0", path = "crates/shiguredo_audio_toolbox/" }
