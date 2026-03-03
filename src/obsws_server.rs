@@ -8,14 +8,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::obsws_auth::ObswsAuthentication;
-use crate::obsws_message_handler::{
-    ClientMessage, ObswsSessionStats, build_hello_message, build_identified_message,
-    handle_request_message, is_supported_rpc_version, parse_client_message,
-};
-use crate::obsws_protocol::{
-    OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
-    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_SUBPROTOCOL,
-};
+use crate::obsws_message_handler::ObswsSessionStats;
+use crate::obsws_protocol::OBSWS_SUBPROTOCOL;
+use crate::obsws_session::{ObswsSession, SessionAction};
 
 pub(crate) fn run_internal(host: IpAddr, port: u16, password: Option<String>) -> crate::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -59,12 +54,11 @@ async fn handle_connection(
             .ping_interval(0),
     );
     let mut buf = [0_u8; 8192];
-    let mut identified = false;
     let auth = password
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
-    let mut session_stats = ObswsSessionStats::default();
+    let mut session = ObswsSession::new(auth);
 
     loop {
         let n = stream
@@ -98,7 +92,7 @@ async fn handle_connection(
             }
         }
 
-        let mut should_close = false;
+        let mut should_terminate = false;
         while let Some(event) = ws.poll_event() {
             match event {
                 ConnectionEvent::Connected {
@@ -108,121 +102,60 @@ async fn handle_connection(
                     tracing::info!(
                         "obsws websocket connected: peer={peer_addr}, protocol={protocol:?}, extensions={extensions:?}"
                     );
-                    send_ws_text(
-                        &mut ws,
-                        &build_hello_message(auth.as_ref()),
-                        &mut session_stats,
-                        "hello message",
-                    )?;
+                    let action = session.on_connected();
+                    should_terminate = apply_session_action(&mut ws, action, session.stats_mut())?;
                 }
                 ConnectionEvent::TextMessage(text) => {
-                    session_stats.incoming_messages =
-                        session_stats.incoming_messages.saturating_add(1);
-                    // ws.close() は即時切断ではなく close frame を送るための要求なので、
-                    // ここで break せず should_close を立てて continue し、
-                    // このループ内の残イベント処理と外側での flush を行ってから抜ける。
-
-                    match parse_client_message(&text) {
-                        Ok(ClientMessage::Identify(identify)) => {
-                            if identified {
-                                ws.close(OBSWS_CLOSE_ALREADY_IDENTIFIED, "already identified")
-                                    .map_err(|e| {
-                                        crate::Error::new(format!(
-                                            "failed to close websocket for duplicated identify: {e}"
-                                        ))
-                                    })?;
-                                should_close = true;
-                                continue;
-                            }
-                            if !is_supported_rpc_version(identify.rpc_version) {
-                                ws.close(
-                                    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
-                                    "unsupported rpc version",
-                                )
-                                .map_err(|e| {
-                                    crate::Error::new(format!(
-                                        "failed to close websocket for unsupported rpc version: {e}"
-                                    ))
-                                })?;
-                                should_close = true;
-                                continue;
-                            }
-                            if let Some(auth) = auth.as_ref()
-                                && !auth.is_valid_response(identify.authentication.as_deref())
-                            {
-                                ws.close(
-                                    OBSWS_CLOSE_AUTHENTICATION_FAILED,
-                                    "authentication failed",
-                                )
-                                .map_err(|e| {
-                                    crate::Error::new(format!(
-                                        "failed to close websocket for authentication failure: {e}"
-                                    ))
-                                })?;
-                                should_close = true;
-                                continue;
-                            }
-                            send_ws_text(
-                                &mut ws,
-                                &build_identified_message(identify.rpc_version),
-                                &mut session_stats,
-                                "identified message",
-                            )?;
-                            identified = true;
-                        }
-                        Ok(ClientMessage::Request(request)) => {
-                            if !identified {
-                                ws.close(OBSWS_CLOSE_NOT_IDENTIFIED, "identify is required")
-                                    .map_err(|e| {
-                                        crate::Error::new(format!(
-                                            "failed to close websocket for unidentified request: {e}"
-                                        ))
-                                    })?;
-                                should_close = true;
-                                continue;
-                            }
-
-                            let response = handle_request_message(request, &session_stats);
-                            send_ws_text(
-                                &mut ws,
-                                &response.message,
-                                &mut session_stats,
-                                "request response message",
-                            )?;
-                        }
+                    let action = match session.on_text_message(&text) {
+                        Ok(action) => action,
                         Err(e) => {
                             tracing::warn!("obsws invalid client message: {}", e.display());
-                            ws.close(CloseCode::INVALID_PAYLOAD, "invalid message")
-                                .map_err(|close_err| {
-                                    crate::Error::new(format!(
-                                        "failed to close websocket for invalid message: {close_err}"
-                                    ))
-                                })?;
-                            should_close = true;
+                            SessionAction::Close {
+                                code: CloseCode::INVALID_PAYLOAD,
+                                reason: "invalid message",
+                                close_error_context: "failed to close websocket for invalid message",
+                            }
                         }
-                    }
+                    };
+                    should_terminate = apply_session_action(&mut ws, action, session.stats_mut())?;
                 }
                 ConnectionEvent::Close { code, reason } => {
                     tracing::debug!(
                         "obsws close received: peer={peer_addr}, code={code:?}, reason={reason}"
                     );
-                    should_close = true;
+                    should_terminate = apply_session_action(
+                        &mut ws,
+                        session.on_close_event(),
+                        session.stats_mut(),
+                    )?;
                 }
                 ConnectionEvent::Error(reason) => {
                     tracing::warn!("obsws event error from {peer_addr}: {reason}");
-                    should_close = true;
+                    should_terminate = apply_session_action(
+                        &mut ws,
+                        session.on_error_event(),
+                        session.stats_mut(),
+                    )?;
                 }
                 ConnectionEvent::StateChanged(ConnectionState::Closed) => {
-                    should_close = true;
+                    should_terminate = apply_session_action(
+                        &mut ws,
+                        session.on_close_event(),
+                        session.stats_mut(),
+                    )?;
                 }
                 _ => {}
+            }
+
+            if should_terminate {
+                break;
             }
         }
 
         if !flush_connection_output(&mut ws, &mut stream).await? {
             break;
         }
-        if should_close {
+        if should_terminate {
             break;
         }
     }
@@ -230,6 +163,29 @@ async fn handle_connection(
     let _ = stream.shutdown().await;
     tracing::debug!("obsws peer disconnected: {peer_addr}");
     Ok(())
+}
+
+fn apply_session_action(
+    ws: &mut WebSocketServerConnection,
+    action: SessionAction,
+    session_stats: &mut ObswsSessionStats,
+) -> crate::Result<bool> {
+    match action {
+        SessionAction::SendText { text, message_name } => {
+            send_ws_text(ws, &text, session_stats, message_name)?;
+            Ok(false)
+        }
+        SessionAction::Close {
+            code,
+            reason,
+            close_error_context,
+        } => {
+            ws.close(code, reason)
+                .map_err(|e| crate::Error::new(format!("{close_error_context}: {e}")))?;
+            Ok(true)
+        }
+        SessionAction::Terminate => Ok(true),
+    }
 }
 
 fn send_ws_text(

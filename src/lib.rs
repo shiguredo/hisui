@@ -51,6 +51,7 @@ mod obsws_auth;
 mod obsws_message_handler;
 mod obsws_protocol;
 mod obsws_server;
+mod obsws_session;
 pub mod optuna;
 pub mod outbound_endpoint_rtmp;
 pub mod progress;
