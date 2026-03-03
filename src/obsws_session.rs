@@ -23,8 +23,14 @@ pub(crate) enum SessionAction {
     Terminate,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObswsSessionState {
+    AwaitingIdentify,
+    Identified,
+}
+
 pub(crate) struct ObswsSession {
-    identified: bool,
+    state: ObswsSessionState,
     auth: Option<ObswsAuthentication>,
     stats: ObswsSessionStats,
 }
@@ -32,7 +38,7 @@ pub(crate) struct ObswsSession {
 impl ObswsSession {
     pub(crate) fn new(auth: Option<ObswsAuthentication>) -> Self {
         Self {
-            identified: false,
+            state: ObswsSessionState::AwaitingIdentify,
             auth,
             stats: ObswsSessionStats::default(),
         }
@@ -60,11 +66,11 @@ impl ObswsSession {
         Ok(action)
     }
 
-    pub(crate) fn on_close_event(&mut self) -> SessionAction {
+    pub(crate) fn on_close_event(&self) -> SessionAction {
         SessionAction::Terminate
     }
 
-    pub(crate) fn on_error_event(&mut self) -> SessionAction {
+    pub(crate) fn on_error_event(&self) -> SessionAction {
         SessionAction::Terminate
     }
 
@@ -72,7 +78,7 @@ impl ObswsSession {
         &mut self,
         identify: crate::obsws_message_handler::IdentifyMessage,
     ) -> SessionAction {
-        if self.identified {
+        if self.state == ObswsSessionState::Identified {
             return SessionAction::Close {
                 code: OBSWS_CLOSE_ALREADY_IDENTIFIED,
                 reason: "already identified",
@@ -98,7 +104,7 @@ impl ObswsSession {
             };
         }
 
-        self.identified = true;
+        self.state = ObswsSessionState::Identified;
         SessionAction::SendText {
             text: build_identified_message(identify.rpc_version),
             message_name: "identified message",
@@ -109,7 +115,7 @@ impl ObswsSession {
         &mut self,
         request: crate::obsws_message_handler::RequestMessage,
     ) -> SessionAction {
-        if !self.identified {
+        if self.state != ObswsSessionState::Identified {
             return SessionAction::Close {
                 code: OBSWS_CLOSE_NOT_IDENTIFIED,
                 reason: "identify is required",
@@ -128,8 +134,12 @@ impl ObswsSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::obsws_auth::build_authentication_response;
     use crate::obsws_message_handler::RequestMessage;
-    use crate::obsws_protocol::{OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_NOT_IDENTIFIED};
+    use crate::obsws_protocol::{
+        OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED,
+        OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
+    };
 
     #[test]
     fn on_connected_returns_hello_message_action() {
@@ -169,5 +179,40 @@ mod tests {
         };
         assert_eq!(code, OBSWS_CLOSE_ALREADY_IDENTIFIED);
         assert_eq!(reason, "already identified");
+    }
+
+    #[test]
+    fn unsupported_rpc_version_returns_close_action() {
+        let mut session = ObswsSession::new(None);
+        let action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":2}}"#)
+            .expect("identify must be parsed");
+        let SessionAction::Close { code, reason, .. } = action else {
+            panic!("must be Close");
+        };
+        assert_eq!(code, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION);
+        assert_eq!(reason, "unsupported rpc version");
+    }
+
+    #[test]
+    fn invalid_authentication_returns_close_action() {
+        let auth = ObswsAuthentication {
+            salt: "test-salt".to_owned(),
+            challenge: "test-challenge".to_owned(),
+            expected_response: build_authentication_response(
+                "test-password",
+                "test-salt",
+                "test-challenge",
+            ),
+        };
+        let mut session = ObswsSession::new(Some(auth));
+        let action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"invalid"}}"#)
+            .expect("identify must be parsed");
+        let SessionAction::Close { code, reason, .. } = action else {
+            panic!("must be Close");
+        };
+        assert_eq!(code, OBSWS_CLOSE_AUTHENTICATION_FAILED);
+        assert_eq!(reason, "authentication failed");
     }
 }

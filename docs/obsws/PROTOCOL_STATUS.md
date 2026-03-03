@@ -33,6 +33,8 @@
   - NOTE: 認証失敗時は `4009` を返す
 - [x] `Request / RequestResponse (op=6/7)` 基盤: Request を受けて同期応答を返す
   - NOTE: `Identify` 後のみ `Request` を受け付ける
+- [x] `Identify` 検証: `rpcVersion` の必須チェックと対応範囲チェックを行う
+- [x] メッセージ検証エラーの切断: 不正 payload や未対応 opcode は close する
 - [ ] `Reidentify (op=3)`: 既存セッションの再設定を受け付ける
 - [ ] Event 配信（ `op=5` ）: サーバーイベントを push 配信する
 - [ ] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
@@ -91,7 +93,7 @@
 
 ### Canvases
 
-- [ ] `GetCanvasList`: 利用可能なキャンバス一覧を返す
+- [x] `GetCanvasList`: 利用可能なキャンバス一覧を返す
 
 ### Scenes
 

@@ -266,6 +266,43 @@ async def _connect_and_send_missing_password_auth(url: str):
         await ws.close()
 
 
+async def _connect_and_expect_close_code(
+    url: str,
+    message: dict[str, object],
+    expected_close_code: int,
+):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+        hello_msg = await ws.receive(timeout=5.0)
+        assert hello_msg.type == aiohttp.WSMsgType.TEXT
+        await ws.send_str(json.dumps(message))
+        close_msg = await ws.receive(timeout=5.0)
+        assert close_msg.type in {
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.CLOSED,
+        }
+        assert ws.close_code == expected_close_code
+        await ws.close()
+
+
+async def _connect_and_send_duplicate_identify(url: str):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+        await _identify_with_optional_password(ws, None)
+        await ws.send_str(json.dumps({"op": 1, "d": {"rpcVersion": 1}}))
+        close_msg = await ws.receive(timeout=5.0)
+        assert close_msg.type in {
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.CLOSED,
+        }
+        assert ws.close_code == 4008
+        await ws.close()
+
+
 def test_obsws_hello_and_identify_flow(binary_path: Path):
     """obsws が Hello / Identify / Identified を処理できることを確認する"""
     host = "127.0.0.1"
@@ -475,3 +512,64 @@ def test_obsws_unknown_request_type_returns_error(binary_path: Path):
         status = response["d"]["requestStatus"]
         assert status["result"] is False
         assert status["code"] == 204
+
+
+def test_obsws_rejects_request_before_identify(binary_path: Path):
+    """obsws が Identify 前 Request を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(
+            _connect_and_expect_close_code(
+                f"ws://{host}:{port}/",
+                {
+                    "op": 6,
+                    "d": {"requestType": "GetVersion", "requestId": "req-before-identify"},
+                },
+                4007,
+            )
+        )
+
+
+def test_obsws_rejects_duplicate_identify(binary_path: Path):
+    """obsws が重複 Identify を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_connect_and_send_duplicate_identify(f"ws://{host}:{port}/"))
+
+
+def test_obsws_rejects_unsupported_rpc_version(binary_path: Path):
+    """obsws が非対応 rpcVersion を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(
+            _connect_and_expect_close_code(
+                f"ws://{host}:{port}/",
+                {"op": 1, "d": {"rpcVersion": 2}},
+                4006,
+            )
+        )
+
+
+def test_obsws_rejects_invalid_payload_message(binary_path: Path):
+    """obsws が不正メッセージを invalid payload として拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(
+            _connect_and_expect_close_code(
+                f"ws://{host}:{port}/",
+                {"op": 999, "d": {}},
+                1007,
+            )
+        )
