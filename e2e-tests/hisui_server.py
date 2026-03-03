@@ -219,6 +219,51 @@ class HisuiServer:
             f"processor metric did not reach expected value: processor_id={processor_id}, processor_type={processor_type}, metric_name={metric_name}, expected_value={expected_value}"
         )
 
+    def wait_processor_metric_int_stable(
+        self,
+        *,
+        processor_id: str,
+        processor_type: str,
+        metric_name: str,
+        expected_value: int,
+        stable_duration: float = 1.0,
+        timeout: float = 10.0,
+        interval: float = 0.1,
+    ) -> None:
+        deadline = time.time() + timeout
+        stable_since: float | None = None
+        last_value: int | None = None
+
+        while time.time() < deadline:
+            try:
+                last_value = int(
+                    ProcessorMetrics(
+                        self.metrics_json(),
+                        processor_id=processor_id,
+                        processor_type=processor_type,
+                    ).value(metric_name)
+                )
+                if last_value == expected_value:
+                    if stable_since is None:
+                        stable_since = time.time()
+                    if time.time() - stable_since >= stable_duration:
+                        return
+                else:
+                    stable_since = None
+            except (AssertionError, ValueError):
+                stable_since = None
+            time.sleep(interval)
+
+        raise AssertionError(
+            "processor metric did not stay at expected value long enough: "
+            f"processor_id={processor_id}, "
+            f"processor_type={processor_type}, "
+            f"metric_name={metric_name}, "
+            f"expected_value={expected_value}, "
+            f"stable_duration={stable_duration}, "
+            f"last_value={last_value}"
+        )
+
     def _terminate_process(self) -> None:
         process = self._process
         if process is None:
