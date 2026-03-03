@@ -106,7 +106,7 @@ async fn handle_connection(
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
-    let mut session_stats = ObswsSessionStats::new();
+    let mut session_stats = ObswsSessionStats::default();
 
     loop {
         let n = stream
@@ -327,19 +327,10 @@ struct RequestMessage {
     request_type: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct ObswsSessionStats {
     incoming_messages: u64,
     outgoing_messages: u64,
-}
-
-impl ObswsSessionStats {
-    fn new() -> Self {
-        Self {
-            incoming_messages: 0,
-            outgoing_messages: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -786,7 +777,7 @@ mod tests {
             request_id: Some("req-1".to_owned()),
             request_type: Some("GetVersion".to_owned()),
         };
-        let session_stats = ObswsSessionStats::new();
+        let session_stats = ObswsSessionStats::default();
         let response = handle_request_message(request, &session_stats);
 
         let json = nojson::RawJson::parse(&response.message)?;
@@ -813,7 +804,7 @@ mod tests {
             request_id: Some("req-1".to_owned()),
             request_type: Some("UnknownRequest".to_owned()),
         };
-        let session_stats = ObswsSessionStats::new();
+        let session_stats = ObswsSessionStats::default();
         let response = handle_request_message(request, &session_stats);
 
         let json = nojson::RawJson::parse(&response.message)?;
