@@ -160,6 +160,9 @@ async fn handle_connection(
                 ConnectionEvent::TextMessage(text) => {
                     session_stats.incoming_messages =
                         session_stats.incoming_messages.saturating_add(1);
+                    // ws.close() は即時切断ではなく close frame を送るための要求なので、
+                    // ここで break せず should_close を立てて continue し、
+                    // このループ内の残イベント処理と外側での flush を行ってから抜ける。
 
                     match parse_client_message(&text) {
                         Ok(ClientMessage::Identify(identify)) => {
