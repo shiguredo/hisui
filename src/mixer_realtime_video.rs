@@ -44,12 +44,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
         let frame_rate: Option<FrameRate> = value.to_member("frameRate")?.try_into()?;
         let input_tracks: Vec<InputTrack> =
             value.to_member("inputTracks")?.required()?.try_into()?;
-        let mut seen_track_ids = HashSet::new();
-        for track in &input_tracks {
-            if !seen_track_ids.insert(track.track_id.clone()) {
-                return Err(value.invalid(format!("duplicate input track ID: {}", track.track_id)));
-            }
-        }
+        validate_unique_input_tracks_for_json(&input_tracks, value)?;
         let output_track_id = value.to_member("outputTrackId")?.required()?.try_into()?;
         Ok(Self {
             canvas_width,
@@ -71,51 +66,63 @@ impl VideoRealtimeMixer {
             output_track_id,
         } = self;
 
+        let mut stats = handle.stats();
+        let stats = VideoRealtimeMixerStats::new(&mut stats);
         let output_tx = handle.publish_track(output_track_id).await?;
-
-        let mut draw_order = Vec::with_capacity(input_tracks.len());
+        let draw_order = build_draw_order(&input_tracks);
         let mut states = HashMap::with_capacity(input_tracks.len());
-        for (index, input_track) in input_tracks.iter().enumerate() {
+        for input_track in &input_tracks {
             let state = InputTrackState::new(input_track.clone())?;
-            draw_order.push(DrawOrder {
-                track_id: input_track.track_id.clone(),
-                z: input_track.z,
-                index,
-            });
             states.insert(input_track.track_id.clone(), state);
         }
 
-        draw_order.sort_by_key(|x| (x.z, x.index));
-
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (rpc_tx, rpc_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle
+            .register_rpc_sender(rpc_tx)
+            .await
+            .map_err(|e| Error::new(format!("failed to register video mixer RPC sender: {}", e)))?;
         let mixer_start = tokio::time::Instant::now();
+        let mut input_receivers = HashMap::with_capacity(input_tracks.len());
         for track in &draw_order {
             let input_rx = handle.subscribe_track(track.track_id.clone());
-            spawn_input_receiver(
+            let receiver = spawn_input_receiver(
                 track.track_id.clone(),
                 input_rx,
                 event_tx.clone(),
                 mixer_start,
             );
+            input_receivers.insert(receiver.track_id.clone(), receiver);
         }
-        drop(event_tx);
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
+        stats.set_runtime_config(
+            canvas_width.get(),
+            canvas_height.get(),
+            frame_rate,
+            input_tracks.len(),
+        );
 
         let mut output_tx = output_tx;
         let ack = Some(output_tx.send_syn());
         VideoRealtimeMixerRunner {
+            processor_handle: handle,
             canvas_width: canvas_width.get(),
             canvas_height: canvas_height.get(),
             frame_rate,
             output_tx,
+            input_tracks,
             draw_order,
             states,
+            input_receivers,
+            track_event_tx: event_tx,
             event_rx: Some(event_rx),
+            rpc_rx: Some(rpc_rx),
             mixer_start,
             output_frame_index: 0,
             noacked_sent: 0,
             ack,
+            stats,
         }
         .run()
         .await
@@ -175,6 +182,53 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
 }
 
 #[derive(Debug)]
+pub enum VideoRealtimeMixerRpcMessage {
+    UpdateConfig {
+        request: VideoRealtimeMixerUpdateConfigRequest,
+        reply_tx: tokio::sync::oneshot::Sender<crate::Result<VideoRealtimeMixerUpdateConfigResult>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct VideoRealtimeMixerUpdateConfigRequest {
+    pub canvas_width: EvenUsize,
+    pub canvas_height: EvenUsize,
+    pub frame_rate: FrameRate,
+    pub input_tracks: Vec<InputTrack>,
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>>
+    for VideoRealtimeMixerUpdateConfigRequest
+{
+    type Error = nojson::JsonParseError;
+
+    fn try_from(
+        value: nojson::RawJsonValue<'text, 'raw>,
+    ) -> std::result::Result<Self, Self::Error> {
+        let canvas_width = value.to_member("canvasWidth")?.required()?.try_into()?;
+        let canvas_height = value.to_member("canvasHeight")?.required()?.try_into()?;
+        let frame_rate = value.to_member("frameRate")?.required()?.try_into()?;
+        let input_tracks: Vec<InputTrack> =
+            value.to_member("inputTracks")?.required()?.try_into()?;
+        validate_unique_input_tracks_for_json(&input_tracks, value)?;
+        Ok(Self {
+            canvas_width,
+            canvas_height,
+            frame_rate,
+            input_tracks,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VideoRealtimeMixerUpdateConfigResult {
+    pub previous_canvas_width: usize,
+    pub previous_canvas_height: usize,
+    pub previous_frame_rate: FrameRate,
+    pub previous_input_tracks: Vec<InputTrack>,
+}
+
+#[derive(Debug)]
 struct DrawOrder {
     track_id: TrackId,
     z: isize,
@@ -183,22 +237,66 @@ struct DrawOrder {
 
 #[derive(Debug)]
 struct VideoRealtimeMixerRunner {
+    processor_handle: ProcessorHandle,
     canvas_width: usize,
     canvas_height: usize,
     frame_rate: FrameRate,
     output_tx: crate::MessageSender,
+    input_tracks: Vec<InputTrack>,
     draw_order: Vec<DrawOrder>,
     states: HashMap<TrackId, InputTrackState>,
+    input_receivers: HashMap<TrackId, InputReceiverHandle>,
+    track_event_tx: tokio::sync::mpsc::UnboundedSender<TrackEvent>,
     event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
+    rpc_rx: Option<tokio::sync::mpsc::UnboundedReceiver<VideoRealtimeMixerRpcMessage>>,
     mixer_start: tokio::time::Instant,
     output_frame_index: u64,
     noacked_sent: u64,
     ack: Option<crate::Ack>,
+    stats: VideoRealtimeMixerStats,
+}
+
+#[derive(Debug)]
+struct VideoRealtimeMixerStats {
+    current_input_track_count: crate::stats::StatsGauge,
+    current_canvas_width: crate::stats::StatsGauge,
+    current_canvas_height: crate::stats::StatsGauge,
+    current_frame_rate_numerator: crate::stats::StatsGauge,
+    current_frame_rate_denumerator: crate::stats::StatsGauge,
+}
+
+impl VideoRealtimeMixerStats {
+    fn new(stats: &mut crate::stats::Stats) -> Self {
+        Self {
+            current_input_track_count: stats.gauge("current_input_track_count"),
+            current_canvas_width: stats.gauge("current_canvas_width"),
+            current_canvas_height: stats.gauge("current_canvas_height"),
+            current_frame_rate_numerator: stats.gauge("current_frame_rate_numerator"),
+            current_frame_rate_denumerator: stats.gauge("current_frame_rate_denumerator"),
+        }
+    }
+
+    fn set_runtime_config(
+        &self,
+        canvas_width: usize,
+        canvas_height: usize,
+        frame_rate: FrameRate,
+        input_track_count: usize,
+    ) {
+        self.current_canvas_width.set(canvas_width as i64);
+        self.current_canvas_height.set(canvas_height as i64);
+        self.current_frame_rate_numerator
+            .set(frame_rate.numerator.get() as i64);
+        self.current_frame_rate_denumerator
+            .set(frame_rate.denumerator.get() as i64);
+        self.current_input_track_count.set(input_track_count as i64);
+    }
 }
 
 impl VideoRealtimeMixerRunner {
     async fn run(mut self) -> crate::Result<()> {
         let mut event_rx = self.event_rx.take();
+        let mut rpc_rx = self.rpc_rx.take();
         loop {
             let next_instant = self.next_output_instant();
             tokio::select! {
@@ -209,6 +307,9 @@ impl VideoRealtimeMixerRunner {
                 }
                 event = recv_track_event_or_pending(&mut event_rx) => {
                     self.handle_event(event, &mut event_rx)?;
+                }
+                rpc_message = recv_rpc_message_or_pending(&mut rpc_rx) => {
+                    self.handle_rpc_message(rpc_message, &mut rpc_rx)?;
                 }
             }
         }
@@ -266,6 +367,96 @@ impl VideoRealtimeMixerRunner {
             return Ok(());
         };
         handle_track_event(event, &mut self.states)
+    }
+
+    fn handle_rpc_message(
+        &mut self,
+        rpc_message: Option<VideoRealtimeMixerRpcMessage>,
+        rpc_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<VideoRealtimeMixerRpcMessage>>,
+    ) -> crate::Result<()> {
+        let Some(rpc_message) = rpc_message else {
+            *rpc_rx = None;
+            return Ok(());
+        };
+
+        match rpc_message {
+            VideoRealtimeMixerRpcMessage::UpdateConfig { request, reply_tx } => {
+                let result = self.update_config(request);
+                let _ = reply_tx.send(result);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn update_config(
+        &mut self,
+        request: VideoRealtimeMixerUpdateConfigRequest,
+    ) -> crate::Result<VideoRealtimeMixerUpdateConfigResult> {
+        let previous_canvas_width = self.canvas_width;
+        let previous_canvas_height = self.canvas_height;
+        let previous_frame_rate = self.frame_rate;
+        let previous_input_tracks = self.input_tracks.clone();
+        let requested_track_ids: HashSet<TrackId> = request
+            .input_tracks
+            .iter()
+            .map(|input_track| input_track.track_id.clone())
+            .collect();
+        let removed_track_ids = self
+            .input_tracks
+            .iter()
+            .map(|input_track| input_track.track_id.clone())
+            .filter(|track_id| !requested_track_ids.contains(track_id))
+            .collect::<Vec<_>>();
+
+        for track_id in removed_track_ids {
+            self.states.remove(&track_id);
+            if let Some(receiver) = self.input_receivers.remove(&track_id) {
+                receiver.shutdown();
+            }
+        }
+
+        for input_track in &request.input_tracks {
+            if let Some(state) = self.states.get_mut(&input_track.track_id) {
+                state.update_input_track(input_track.clone());
+                continue;
+            }
+
+            self.states.insert(
+                input_track.track_id.clone(),
+                InputTrackState::new(input_track.clone())?,
+            );
+            let input_rx = self
+                .processor_handle
+                .subscribe_track(input_track.track_id.clone());
+            let receiver = spawn_input_receiver(
+                input_track.track_id.clone(),
+                input_rx,
+                self.track_event_tx.clone(),
+                self.mixer_start,
+            );
+            self.input_receivers
+                .insert(receiver.track_id.clone(), receiver);
+        }
+
+        self.draw_order = build_draw_order(&request.input_tracks);
+        self.input_tracks = request.input_tracks;
+        self.canvas_width = request.canvas_width.get();
+        self.canvas_height = request.canvas_height.get();
+        self.frame_rate = request.frame_rate;
+        self.stats.set_runtime_config(
+            self.canvas_width,
+            self.canvas_height,
+            self.frame_rate,
+            self.input_tracks.len(),
+        );
+
+        Ok(VideoRealtimeMixerUpdateConfigResult {
+            previous_canvas_width,
+            previous_canvas_height,
+            previous_frame_rate,
+            previous_input_tracks,
+        })
     }
 }
 
@@ -337,6 +528,12 @@ impl InputTrackState {
         self.current_frame = None;
     }
 
+    fn update_input_track(&mut self, input_track: InputTrack) {
+        self.target_width = input_track.width;
+        self.target_height = input_track.height;
+        self.input_track = input_track;
+    }
+
     fn advance(&mut self, now: Duration) {
         while let Some(next) = self.pending_frames.front() {
             if next.timestamp <= now {
@@ -365,15 +562,40 @@ enum TrackEvent {
     },
 }
 
+#[derive(Debug)]
+struct InputReceiverHandle {
+    track_id: TrackId,
+    // 明示的な Drop 実装は持たない
+    // shutdown_tx を drop しても受信側は完了として解除され、spawn タスクは終了する
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl InputReceiverHandle {
+    fn shutdown(mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+    }
+}
+
 fn spawn_input_receiver(
     track_id: TrackId,
     mut input_rx: crate::MessageReceiver,
     event_tx: tokio::sync::mpsc::UnboundedSender<TrackEvent>,
     mixer_start: tokio::time::Instant,
-) {
+) -> InputReceiverHandle {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let task_track_id = track_id.clone();
     tokio::spawn(async move {
         loop {
-            match input_rx.recv().await {
+            let message = tokio::select! {
+                _ = &mut shutdown_rx => {
+                    break;
+                }
+                message = input_rx.recv() => message,
+            };
+
+            match message {
                 Message::Media(sample) => match sample {
                     MediaFrame::Video(frame) => {
                         let _ = event_tx.send(TrackEvent::Video {
@@ -402,6 +624,11 @@ fn spawn_input_receiver(
             }
         }
     });
+
+    InputReceiverHandle {
+        track_id: task_track_id,
+        shutdown_tx: Some(shutdown_tx),
+    }
 }
 
 async fn recv_track_event_or_pending(
@@ -409,6 +636,16 @@ async fn recv_track_event_or_pending(
 ) -> Option<TrackEvent> {
     if let Some(event_rx) = event_rx {
         event_rx.recv().await
+    } else {
+        std::future::pending().await
+    }
+}
+
+async fn recv_rpc_message_or_pending(
+    rpc_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<VideoRealtimeMixerRpcMessage>>,
+) -> Option<VideoRealtimeMixerRpcMessage> {
+    if let Some(rpc_rx) = rpc_rx {
+        rpc_rx.recv().await
     } else {
         std::future::pending().await
     }
@@ -425,7 +662,7 @@ fn handle_track_event(
             received_at,
         } => {
             let Some(state) = states.get_mut(&track_id) else {
-                return Err(Error::new(format!("unknown input track ID: {}", track_id)));
+                return Ok(());
             };
             state.handle_video(frame, received_at)?;
         }
@@ -436,6 +673,9 @@ fn handle_track_event(
         }
         TrackEvent::Syn(_syn) => {}
         TrackEvent::Error { track_id, reason } => {
+            if !states.contains_key(&track_id) {
+                return Ok(());
+            }
             return Err(Error::new(format!("input track {}: {}", track_id, reason)));
         }
     }
@@ -670,6 +910,36 @@ fn catch_up_output_frame_index(frame_rate: FrameRate, mut frame_index: u64, now:
         }
         frame_index = next;
     }
+}
+
+fn build_draw_order(input_tracks: &[InputTrack]) -> Vec<DrawOrder> {
+    let mut draw_order = input_tracks
+        .iter()
+        .enumerate()
+        .map(|(index, input_track)| DrawOrder {
+            track_id: input_track.track_id.clone(),
+            z: input_track.z,
+            index,
+        })
+        .collect::<Vec<_>>();
+    draw_order.sort_by_key(|entry| (entry.z, entry.index));
+    draw_order
+}
+
+fn validate_unique_input_tracks_for_json(
+    input_tracks: &[InputTrack],
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<(), nojson::JsonParseError> {
+    let mut seen_track_ids = HashSet::new();
+    for input_track in input_tracks {
+        if !seen_track_ids.insert(input_track.track_id.clone()) {
+            return Err(value.invalid(format!(
+                "duplicate input track ID: {}",
+                input_track.track_id
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1125,7 +1395,8 @@ mod tests {
 
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let mixer_start = tokio::time::Instant::now();
-        spawn_input_receiver(track_id.clone(), input_rx, event_tx, mixer_start);
+        let receiver_handle =
+            spawn_input_receiver(track_id.clone(), input_rx, event_tx, mixer_start);
 
         let mut first_event = None;
         for _ in 0..40 {
@@ -1168,6 +1439,7 @@ mod tests {
             .map_err(|e| Error::new(e.to_string()))?;
 
         tx.send_eos();
+        drop(receiver_handle);
 
         drop(receiver_processor);
         drop(sender_processor);
@@ -1232,6 +1504,51 @@ mod tests {
         state.advance(Duration::from_millis(1));
 
         assert!(state.current_frame.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn input_track_state_update_input_track_keeps_buffered_frames() -> crate::Result<()> {
+        let input_track = InputTrack {
+            track_id: TrackId::new("input-update"),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: Some(EvenUsize::new(160).expect("infallible")),
+            height: Some(EvenUsize::new(120).expect("infallible")),
+        };
+        let mut state = InputTrackState::new(input_track)?;
+        state.current_frame = Some(PendingVideoFrame {
+            timestamp: Duration::from_millis(10),
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_frame(Duration::from_millis(
+                10,
+            ))))
+            .expect("infallible"),
+        });
+        state.pending_frames.push_back(PendingVideoFrame {
+            timestamp: Duration::from_millis(20),
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_frame(Duration::from_millis(
+                20,
+            ))))
+            .expect("infallible"),
+        });
+
+        state.update_input_track(InputTrack {
+            track_id: TrackId::new("input-update"),
+            x: 100,
+            y: 50,
+            z: 3,
+            width: Some(EvenUsize::new(320).expect("infallible")),
+            height: Some(EvenUsize::new(180).expect("infallible")),
+        });
+
+        assert_eq!(state.input_track.x, 100);
+        assert_eq!(state.input_track.y, 50);
+        assert_eq!(state.input_track.z, 3);
+        assert_eq!(state.target_width.map(EvenUsize::get), Some(320));
+        assert_eq!(state.target_height.map(EvenUsize::get), Some(180));
+        assert!(state.current_frame.is_some());
+        assert_eq!(state.pending_frames.len(), 1);
         Ok(())
     }
 

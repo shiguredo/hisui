@@ -871,6 +871,161 @@ def test_update_audio_mixer_inputs_updates_current_input_track_count_metric(
         )
 
 
+def test_update_video_mixer_updates_runtime_metrics(
+    binary_path: Path,
+):
+    """updateVideoMixer で実行中メトリクスが更新されることを確認する"""
+    mixer_processor_id = "e2e-video-mixer-update-config"
+    input_track_id_a = "e2e-video-mixer-input-a"
+    input_track_id_b = "e2e-video-mixer-input-b"
+    output_track_id = "e2e-video-mixer-update-config-output"
+
+    with HisuiServer(binary_path, manual_start_trigger=True) as server:
+        create_mixer_response = server.rpc_call(
+            "createVideoMixer",
+            {
+                "canvasWidth": 640,
+                "canvasHeight": 360,
+                "inputTracks": [{"trackId": input_track_id_a}],
+                "outputTrackId": output_track_id,
+                "processorId": mixer_processor_id,
+            },
+        )
+        assert create_mixer_response["result"]["processorId"] == mixer_processor_id
+
+        start_response = server.trigger_start()
+        assert start_response["result"]["started"] is True
+
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=1,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_canvas_width",
+            expected_value=640,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_canvas_height",
+            expected_value=360,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_frame_rate_numerator",
+            expected_value=30,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_frame_rate_denumerator",
+            expected_value=1,
+        )
+
+        update_response = server.rpc_call(
+            "updateVideoMixer",
+            {
+                "processorId": mixer_processor_id,
+                "canvasWidth": 1280,
+                "canvasHeight": 720,
+                "frameRate": "30000/1001",
+                "inputTracks": [
+                    {"trackId": input_track_id_a},
+                    {"trackId": input_track_id_b},
+                ],
+            },
+        )
+        assert update_response["result"]["previousCanvasWidth"] == 640
+        assert update_response["result"]["previousCanvasHeight"] == 360
+        assert update_response["result"]["previousFrameRate"] == 30
+        assert update_response["result"]["previousInputTracks"] == [
+            {"trackId": input_track_id_a, "x": 0, "y": 0, "z": 0}
+        ]
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=2,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_canvas_width",
+            expected_value=1280,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_canvas_height",
+            expected_value=720,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_frame_rate_numerator",
+            expected_value=30000,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_frame_rate_denumerator",
+            expected_value=1001,
+        )
+
+        empty_update_response = server.rpc_call(
+            "updateVideoMixer",
+            {
+                "processorId": mixer_processor_id,
+                "canvasWidth": 1920,
+                "canvasHeight": 1080,
+                "frameRate": 25,
+                "inputTracks": [],
+            },
+        )
+        assert empty_update_response["result"]["previousCanvasWidth"] == 1280
+        assert empty_update_response["result"]["previousCanvasHeight"] == 720
+        assert empty_update_response["result"]["previousFrameRate"] == "30000/1001"
+        assert empty_update_response["result"]["previousInputTracks"] == [
+            {"trackId": input_track_id_a, "x": 0, "y": 0, "z": 0},
+            {"trackId": input_track_id_b, "x": 0, "y": 0, "z": 0},
+        ]
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_input_track_count",
+            expected_value=0,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_canvas_width",
+            expected_value=1920,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_canvas_height",
+            expected_value=1080,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_frame_rate_numerator",
+            expected_value=25,
+        )
+        server.wait_processor_metric_int(
+            processor_id=mixer_processor_id,
+            processor_type="video_mixer",
+            metric_name="hisui_current_frame_rate_denumerator",
+            expected_value=1,
+        )
+
+
 def test_create_rtmp_inbound_endpoint_and_compare_stats(binary_path: Path):
     """createRtmpInboundEndpoint で受信した映像の統計値を確認する"""
     input_path = (
@@ -1226,12 +1381,13 @@ def test_create_srt_inbound_endpoint_reconnect_keeps_live_timestamp_progress(
             processor_type="srt_inbound_endpoint",
         )
 
-        server.wait_processor_metric_int(
+        server.wait_processor_metric_int_stable(
             processor_id=processor_id,
             processor_type="srt_inbound_endpoint",
             metric_name="hisui_is_connected",
             expected_value=0,
-            timeout=10.0,
+            stable_duration=1.0,
+            timeout=20.0,
         )
         _run_ffmpeg_srt_publish(
             input_path,
