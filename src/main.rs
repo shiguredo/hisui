@@ -19,6 +19,8 @@ const TUNE_COMMAND: noargs::CmdSpec =
     noargs::cmd("tune").doc("Optuna を用いた映像エンコードパラメーターの調整を行います");
 
 const SERVER_COMMAND: noargs::CmdSpec = noargs::cmd("server").doc("HTTP サーバーを起動します");
+const OBSWS_COMMAND: noargs::CmdSpec =
+    noargs::cmd("obsws").doc("OBS WebSocket 互換コマンド（実験的）");
 
 // 以降は実験的なサブコマンドの定義
 
@@ -61,6 +63,8 @@ fn main() -> noargs::Result<()> {
         hisui::sora_recording_subcommand_tune::run(args)?;
     } else if experimental && SERVER_COMMAND.take(&mut args).is_present() {
         hisui::subcommand_server::run(args)?;
+    } else if experimental && OBSWS_COMMAND.take(&mut args).is_present() {
+        hisui::subcommand_obsws::run(args)?;
     } else if let Some(help) = args.finish()? {
         print!("{help}");
     }
