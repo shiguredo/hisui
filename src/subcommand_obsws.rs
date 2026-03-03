@@ -357,47 +357,18 @@ impl ObswsAuthentication {
     }
 }
 
-trait ObswsParseResultExt<T> {
-    fn with_context(self, context: &str) -> crate::Result<T>;
-}
-
-impl<T, E> ObswsParseResultExt<T> for Result<T, E>
-where
-    E: std::fmt::Display,
-{
-    fn with_context(self, context: &str) -> crate::Result<T> {
-        self.map_err(|e| crate::Error::new(format!("{context}: {e}")))
-    }
-}
-
 fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
-    let json = nojson::RawJson::parse(text).with_context("invalid JSON")?;
+    let json = nojson::RawJson::parse(text)?;
     let value = json.value();
-    let op_value = value
-        .to_member("op")
-        .with_context("invalid message")?
-        .required()
-        .with_context("invalid message")?;
-    let op: i64 = op_value.try_into().with_context("invalid message")?;
+    let op_value = value.to_member("op")?.required()?;
+    let op: i64 = op_value.try_into()?;
 
     if op != OBSWS_OP_IDENTIFY {
         if op == OBSWS_OP_REQUEST {
-            let d_value = value
-                .to_member("d")
-                .with_context("invalid request payload")?
-                .required()
-                .with_context("invalid request payload")?;
+            let d_value = value.to_member("d")?.required()?;
 
-            let request_id: Option<String> = d_value
-                .to_member("requestId")
-                .with_context("invalid request payload")?
-                .try_into()
-                .with_context("invalid request payload")?;
-            let request_type: Option<String> = d_value
-                .to_member("requestType")
-                .with_context("invalid request payload")?
-                .try_into()
-                .with_context("invalid request payload")?;
+            let request_id: Option<String> = d_value.to_member("requestId")?.try_into()?;
+            let request_type: Option<String> = d_value.to_member("requestType")?.try_into()?;
 
             return Ok(ClientMessage::Request(RequestMessage {
                 request_id,
@@ -410,17 +381,9 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
         )));
     }
 
-    let d_value = value
-        .to_member("d")
-        .with_context("invalid identify payload")?
-        .required()
-        .with_context("invalid identify payload")?;
+    let d_value = value.to_member("d")?.required()?;
 
-    let authentication: Option<String> = d_value
-        .to_member("authentication")
-        .with_context("invalid identify payload")?
-        .try_into()
-        .with_context("invalid identify payload")?;
+    let authentication: Option<String> = d_value.to_member("authentication")?.try_into()?;
 
     Ok(ClientMessage::Identify(IdentifyMessage { authentication }))
 }
