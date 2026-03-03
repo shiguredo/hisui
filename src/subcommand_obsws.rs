@@ -1,4 +1,7 @@
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use base64::Engine as _;
 use shiguredo_websocket::{
@@ -14,8 +17,16 @@ const OBSWS_RPC_VERSION: u32 = 1;
 const OBSWS_OP_HELLO: i64 = 0;
 const OBSWS_OP_IDENTIFY: i64 = 1;
 const OBSWS_OP_IDENTIFIED: i64 = 2;
+const OBSWS_OP_REQUEST: i64 = 6;
+const OBSWS_OP_REQUEST_RESPONSE: i64 = 7;
+const OBSWS_CLOSE_NOT_IDENTIFIED: CloseCode = CloseCode(4007);
+const OBSWS_CLOSE_ALREADY_IDENTIFIED: CloseCode = CloseCode(4008);
 const OBSWS_CLOSE_AUTHENTICATION_FAILED: CloseCode = CloseCode(4009);
 const AUTH_RANDOM_BYTE_LEN: usize = 32;
+const REQUEST_STATUS_SUCCESS: i64 = 100;
+const REQUEST_STATUS_MISSING_REQUEST_TYPE: i64 = 203;
+const REQUEST_STATUS_UNKNOWN_REQUEST_TYPE: i64 = 204;
+const REQUEST_STATUS_MISSING_REQUEST_FIELD: i64 = 300;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let host: IpAddr = noargs::opt("host")
@@ -57,6 +68,7 @@ fn run_internal(host: IpAddr, port: u16, password: Option<String>) -> crate::Res
 }
 
 async fn run_server(host: IpAddr, port: u16, password: Option<String>) -> crate::Result<()> {
+    let server_state = Arc::new(ObswsServerState::new());
     let listen_addr = SocketAddr::new(host, port);
     let listener = TcpListener::bind(listen_addr)
         .await
@@ -69,8 +81,9 @@ async fn run_server(host: IpAddr, port: u16, password: Option<String>) -> crate:
             .await
             .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
         let password = password.clone();
+        let server_state = Arc::clone(&server_state);
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, peer_addr, password).await {
+            if let Err(e) = handle_connection(stream, peer_addr, password, server_state).await {
                 tracing::warn!("obsws connection handler failed: {}", e.display());
             }
         });
@@ -81,6 +94,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     password: Option<String>,
+    server_state: Arc<ObswsServerState>,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
@@ -94,6 +108,8 @@ async fn handle_connection(
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
+    let mut session_stats = ObswsSessionStats::new();
+    let mut counted_connection = false;
 
     loop {
         let n = stream
@@ -134,29 +150,41 @@ async fn handle_connection(
                     protocol,
                     extensions,
                 } => {
+                    if !counted_connection {
+                        counted_connection = true;
+                        server_state
+                            .current_connections
+                            .fetch_add(1, Ordering::Relaxed);
+                        server_state
+                            .total_connections
+                            .fetch_add(1, Ordering::Relaxed);
+                    }
                     tracing::info!(
                         "obsws websocket connected: peer={peer_addr}, protocol={protocol:?}, extensions={extensions:?}"
                     );
-                    ws.send_text(&build_hello_message(auth.as_ref()))
-                        .map_err(|e| {
-                            crate::Error::new(format!("failed to send hello message: {e}"))
-                        })?;
+                    send_ws_text(
+                        &mut ws,
+                        &build_hello_message(auth.as_ref()),
+                        &mut session_stats,
+                        "hello message",
+                    )?;
                 }
                 ConnectionEvent::TextMessage(text) => {
-                    if identified {
-                        tracing::warn!("obsws received unsupported message after identify");
-                        ws.close(CloseCode::UNSUPPORTED_DATA, "unsupported message")
-                            .map_err(|e| {
-                                crate::Error::new(format!(
-                                    "failed to close websocket for unsupported message: {e}"
-                                ))
-                            })?;
-                        should_close = true;
-                        continue;
-                    }
+                    session_stats.incoming_messages =
+                        session_stats.incoming_messages.saturating_add(1);
 
                     match parse_client_message(&text) {
                         Ok(ClientMessage::Identify(identify)) => {
+                            if identified {
+                                ws.close(OBSWS_CLOSE_ALREADY_IDENTIFIED, "already identified")
+                                    .map_err(|e| {
+                                        crate::Error::new(format!(
+                                            "failed to close websocket for duplicated identify: {e}"
+                                        ))
+                                    })?;
+                                should_close = true;
+                                continue;
+                            }
                             if let Some(auth) = auth.as_ref()
                                 && !auth.is_valid_response(identify.authentication.as_deref())
                             {
@@ -172,10 +200,38 @@ async fn handle_connection(
                                 should_close = true;
                                 continue;
                             }
-                            ws.send_text(&build_identified_message()).map_err(|e| {
-                                crate::Error::new(format!("failed to send identified message: {e}"))
-                            })?;
+                            send_ws_text(
+                                &mut ws,
+                                &build_identified_message(),
+                                &mut session_stats,
+                                "identified message",
+                            )?;
                             identified = true;
+                        }
+                        Ok(ClientMessage::Request(request)) => {
+                            if !identified {
+                                ws.close(OBSWS_CLOSE_NOT_IDENTIFIED, "identify is required")
+                                    .map_err(|e| {
+                                        crate::Error::new(format!(
+                                            "failed to close websocket for unidentified request: {e}"
+                                        ))
+                                    })?;
+                                should_close = true;
+                                continue;
+                            }
+
+                            server_state.total_requests.fetch_add(1, Ordering::Relaxed);
+                            let response =
+                                handle_request_message(request, &session_stats, &server_state);
+                            if !response.is_success {
+                                server_state.failed_requests.fetch_add(1, Ordering::Relaxed);
+                            }
+                            send_ws_text(
+                                &mut ws,
+                                &response.message,
+                                &mut session_stats,
+                                "request response message",
+                            )?;
                         }
                         Err(e) => {
                             tracing::warn!("obsws invalid client message: {}", e.display());
@@ -215,7 +271,27 @@ async fn handle_connection(
     }
 
     let _ = stream.shutdown().await;
+    if counted_connection {
+        server_state
+            .current_connections
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                Some(value.saturating_sub(1))
+            })
+            .ok();
+    }
     tracing::debug!("obsws peer disconnected: {peer_addr}");
+    Ok(())
+}
+
+fn send_ws_text(
+    ws: &mut WebSocketServerConnection,
+    text: &str,
+    session_stats: &mut ObswsSessionStats,
+    message_name: &str,
+) -> crate::Result<()> {
+    ws.send_text(text)
+        .map_err(|e| crate::Error::new(format!("failed to send {message_name}: {e}")))?;
+    session_stats.outgoing_messages = session_stats.outgoing_messages.saturating_add(1);
     Ok(())
 }
 
@@ -245,11 +321,62 @@ async fn flush_connection_output(
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ClientMessage {
     Identify(IdentifyMessage),
+    Request(RequestMessage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IdentifyMessage {
     authentication: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RequestMessage {
+    request_id: Option<String>,
+    request_type: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ObswsSessionStats {
+    connected_at: Instant,
+    incoming_messages: u64,
+    outgoing_messages: u64,
+}
+
+impl ObswsSessionStats {
+    fn new() -> Self {
+        Self {
+            connected_at: Instant::now(),
+            incoming_messages: 0,
+            outgoing_messages: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ObswsServerState {
+    started_at: Instant,
+    current_connections: AtomicU64,
+    total_connections: AtomicU64,
+    total_requests: AtomicU64,
+    failed_requests: AtomicU64,
+}
+
+impl ObswsServerState {
+    fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+            current_connections: AtomicU64::new(0),
+            total_connections: AtomicU64::new(0),
+            total_requests: AtomicU64::new(0),
+            failed_requests: AtomicU64::new(0),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RequestResponsePayload {
+    message: String,
+    is_success: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -297,6 +424,35 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
         .map_err(|e| crate::Error::new(format!("invalid message: {e}")))?;
 
     if op != OBSWS_OP_IDENTIFY {
+        if op == OBSWS_OP_REQUEST {
+            let d_value = value
+                .to_member("d")
+                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?
+                .required()
+                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?;
+            if d_value.kind() != nojson::JsonValueKind::Object {
+                return Err(crate::Error::new(
+                    "invalid request payload: d must be an object",
+                ));
+            }
+
+            let request_id: Option<String> = d_value
+                .to_member("requestId")
+                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?
+                .try_into()
+                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?;
+            let request_type: Option<String> = d_value
+                .to_member("requestType")
+                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?
+                .try_into()
+                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?;
+
+            return Ok(ClientMessage::Request(RequestMessage {
+                request_id,
+                request_type,
+            }));
+        }
+
         return Err(crate::Error::new(format!(
             "unsupported message opcode: {op}"
         )));
@@ -322,6 +478,56 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
     Ok(ClientMessage::Identify(IdentifyMessage { authentication }))
 }
 
+fn handle_request_message(
+    request: RequestMessage,
+    session_stats: &ObswsSessionStats,
+    server_state: &ObswsServerState,
+) -> RequestResponsePayload {
+    let request_id = request.request_id.unwrap_or_default();
+    let request_type = request.request_type.unwrap_or_default();
+    if request_id.is_empty() {
+        return RequestResponsePayload {
+            message: build_request_response_error(
+                &request_type,
+                &request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required requestId field",
+            ),
+            is_success: false,
+        };
+    }
+
+    if request_type.is_empty() {
+        return RequestResponsePayload {
+            message: build_request_response_error(
+                &request_type,
+                &request_id,
+                REQUEST_STATUS_MISSING_REQUEST_TYPE,
+                "Missing required requestType field",
+            ),
+            is_success: false,
+        };
+    }
+
+    let message = match request_type.as_str() {
+        "GetVersion" => build_get_version_response(&request_id),
+        "GetStats" => build_get_stats_response(&request_id, session_stats, server_state),
+        "GetCanvasList" => build_get_canvas_list_response(&request_id),
+        _ => build_request_response_error(
+            &request_type,
+            &request_id,
+            REQUEST_STATUS_UNKNOWN_REQUEST_TYPE,
+            "Unknown request type",
+        ),
+    };
+    RequestResponsePayload {
+        is_success: request_type == "GetVersion"
+            || request_type == "GetStats"
+            || request_type == "GetCanvasList",
+        message,
+    }
+}
+
 fn generate_random_base64(len: usize) -> crate::Result<String> {
     let mut bytes = vec![0_u8; len];
     aws_lc_rs::rand::fill(&mut bytes)
@@ -343,44 +549,203 @@ fn build_authentication_response(password: &str, salt: &str, challenge: &str) ->
 }
 
 fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
-    nojson::json(|f| {
-        f.object(|f| {
-            f.member("op", OBSWS_OP_HELLO)?;
-            f.member(
-                "d",
-                nojson::json(|f| {
-                    f.object(|f| {
-                        f.member("obsWebSocketVersion", OBSWS_VERSION)?;
-                        f.member("rpcVersion", OBSWS_RPC_VERSION)?;
-                        if let Some(authentication) = authentication {
-                            f.member(
-                                "authentication",
-                                nojson::json(|f| {
-                                    f.object(|f| {
-                                        f.member("challenge", &authentication.challenge)?;
-                                        f.member("salt", &authentication.salt)
-                                    })
-                                }),
-                            )?;
-                        }
-                        Ok(())
-                    })
-                }),
-            )
-        })
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_HELLO)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("obsWebSocketVersion", OBSWS_VERSION)?;
+                f.member("rpcVersion", OBSWS_RPC_VERSION)?;
+                if let Some(authentication) = authentication {
+                    f.member(
+                        "authentication",
+                        nojson::object(|f| {
+                            f.member("challenge", &authentication.challenge)?;
+                            f.member("salt", &authentication.salt)
+                        }),
+                    )?;
+                }
+                Ok(())
+            }),
+        )
     })
     .to_string()
 }
 
 fn build_identified_message() -> String {
-    nojson::json(|f| {
-        f.object(|f| {
-            f.member("op", OBSWS_OP_IDENTIFIED)?;
-            f.member(
-                "d",
-                nojson::json(|f| f.object(|f| f.member("negotiatedRpcVersion", OBSWS_RPC_VERSION))),
-            )
-        })
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_IDENTIFIED)?;
+        f.member(
+            "d",
+            nojson::object(|f| f.member("negotiatedRpcVersion", OBSWS_RPC_VERSION)),
+        )
+    })
+    .to_string()
+}
+
+fn build_get_version_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetVersion")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("obsVersion", env!("CARGO_PKG_VERSION"))?;
+                        f.member("obsWebSocketVersion", OBSWS_VERSION)?;
+                        f.member("rpcVersion", OBSWS_RPC_VERSION)?;
+                        f.member(
+                            "availableRequests",
+                            nojson::json(|f| {
+                                f.array(|f| {
+                                    f.element("GetVersion")?;
+                                    f.element("GetStats")?;
+                                    f.element("GetCanvasList")
+                                })
+                            }),
+                        )?;
+                        f.member("platform", std::env::consts::OS)?;
+                        f.member(
+                            "platformDescription",
+                            format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+                        )
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_get_stats_response(
+    request_id: &str,
+    session_stats: &ObswsSessionStats,
+    server_state: &ObswsServerState,
+) -> String {
+    let session_uptime_sec = session_stats.connected_at.elapsed().as_secs_f64();
+    let server_uptime_sec = server_state.started_at.elapsed().as_secs_f64();
+    let current_connections = server_state.current_connections.load(Ordering::Relaxed);
+    let total_connections = server_state.total_connections.load(Ordering::Relaxed);
+    let total_requests = server_state.total_requests.load(Ordering::Relaxed);
+    let failed_requests = server_state.failed_requests.load(Ordering::Relaxed);
+    let outgoing_messages = session_stats.outgoing_messages.saturating_add(1);
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetStats")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("cpuUsage", 0.0)?;
+                        f.member("memoryUsage", 0.0)?;
+                        f.member("availableDiskSpace", 0.0)?;
+                        f.member("activeFps", 0.0)?;
+                        f.member("averageFrameRenderTime", 0.0)?;
+                        f.member("renderSkippedFrames", 0)?;
+                        f.member("renderTotalFrames", 0)?;
+                        f.member("outputSkippedFrames", 0)?;
+                        f.member("outputTotalFrames", 0)?;
+                        f.member(
+                            "webSocketSessionIncomingMessages",
+                            session_stats.incoming_messages,
+                        )?;
+                        f.member("webSocketSessionOutgoingMessages", outgoing_messages)?;
+                        f.member("hisuiSessionUptimeSec", session_uptime_sec)?;
+                        f.member("hisuiServerUptimeSec", server_uptime_sec)?;
+                        f.member("hisuiCurrentConnections", current_connections)?;
+                        f.member("hisuiTotalConnections", total_connections)?;
+                        f.member("hisuiTotalRequests", total_requests)?;
+                        f.member("hisuiFailedRequests", failed_requests)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_get_canvas_list_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetCanvasList")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member(
+                            "canvases",
+                            nojson::json(|f| {
+                                f.array(|f| {
+                                    f.element(nojson::object(|f| {
+                                        f.member("canvasName", "hisui-main")?;
+                                        f.member("canvasWidth", 0)?;
+                                        f.member("canvasHeight", 0)
+                                    }))
+                                })
+                            }),
+                        )
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_request_response_error(
+    request_type: &str,
+    request_id: &str,
+    code: i64,
+    comment: &str,
+) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", request_type)?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", false)?;
+                        f.member("code", code)?;
+                        f.member("comment", comment)
+                    }),
+                )
+            }),
+        )
     })
     .to_string()
 }
@@ -423,6 +788,20 @@ mod tests {
             parsed,
             ClientMessage::Identify(IdentifyMessage {
                 authentication: Some("test-auth".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_client_message_accepts_request() {
+        let message =
+            r#"{"op":6,"d":{"requestType":"GetVersion","requestId":"req-1","requestData":{}}}"#;
+        let parsed = parse_client_message(message).expect("request message must be accepted");
+        assert_eq!(
+            parsed,
+            ClientMessage::Request(RequestMessage {
+                request_id: Some("req-1".to_owned()),
+                request_type: Some("GetVersion".to_owned()),
             })
         );
     }
@@ -476,5 +855,49 @@ mod tests {
             .expect("salt must be string");
         assert_eq!(challenge, "test-challenge");
         assert_eq!(salt, "test-salt");
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_version_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-1".to_owned()),
+            request_type: Some("GetVersion".to_owned()),
+        };
+        let session_stats = ObswsSessionStats::new();
+        let server_state = ObswsServerState::new();
+        let response = handle_request_message(request, &session_stats, &server_state);
+        assert!(response.is_success);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let op: i64 = json.value().to_member("op")?.required()?.try_into()?;
+        assert_eq!(op, OBSWS_OP_REQUEST_RESPONSE);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_unknown_request_type_error()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-1".to_owned()),
+            request_type: Some("UnknownRequest".to_owned()),
+        };
+        let session_stats = ObswsSessionStats::new();
+        let server_state = ObswsServerState::new();
+        let response = handle_request_message(request, &session_stats, &server_state);
+        assert!(!response.is_success);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_UNKNOWN_REQUEST_TYPE);
+        Ok(())
     }
 }

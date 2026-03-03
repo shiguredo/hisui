@@ -124,6 +124,57 @@ async def _connect_and_exchange_identify(url: str):
         await ws.close()
 
 
+async def _identify_with_optional_password(
+    ws: aiohttp.ClientWebSocketResponse,
+    password: str | None,
+):
+    hello_msg = await ws.receive(timeout=5.0)
+    assert hello_msg.type == aiohttp.WSMsgType.TEXT
+    hello = json.loads(hello_msg.data)
+    assert hello["op"] == 0
+    hello_data = hello["d"]
+    assert hello_data["rpcVersion"] == 1
+
+    identify_data: dict[str, object] = {"rpcVersion": 1}
+    if password is not None:
+        authentication = hello_data["authentication"]
+        identify_data["authentication"] = _build_obsws_authentication(
+            password=password,
+            salt=authentication["salt"],
+            challenge=authentication["challenge"],
+        )
+
+    await ws.send_str(json.dumps({"op": 1, "d": identify_data}))
+    identified_msg = await ws.receive(timeout=5.0)
+    assert identified_msg.type == aiohttp.WSMsgType.TEXT
+    identified = json.loads(identified_msg.data)
+    assert identified["op"] == 2
+    assert identified["d"]["negotiatedRpcVersion"] == 1
+
+
+async def _send_obsws_request(
+    ws: aiohttp.ClientWebSocketResponse,
+    request_type: str,
+    request_id: str,
+    request_data: dict[str, object] | None = None,
+):
+    data: dict[str, object] = {
+        "requestType": request_type,
+        "requestId": request_id,
+    }
+    if request_data is not None:
+        data["requestData"] = request_data
+
+    await ws.send_str(json.dumps({"op": 6, "d": data}))
+    response_msg = await ws.receive(timeout=5.0)
+    assert response_msg.type == aiohttp.WSMsgType.TEXT
+    response = json.loads(response_msg.data)
+    assert response["op"] == 7
+    assert response["d"]["requestType"] == request_type
+    assert response["d"]["requestId"] == request_id
+    return response
+
+
 def _build_obsws_authentication(password: str, salt: str, challenge: str) -> str:
     secret = base64.b64encode(
         hashlib.sha256(f"{password}{salt}".encode("utf-8")).digest()
@@ -137,37 +188,7 @@ async def _connect_and_exchange_identify_with_password(url: str, password: str):
     timeout = aiohttp.ClientTimeout(total=10.0)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
-
-        hello_msg = await ws.receive(timeout=5.0)
-        assert hello_msg.type == aiohttp.WSMsgType.TEXT
-        hello = json.loads(hello_msg.data)
-        assert hello["op"] == 0
-        hello_data = hello["d"]
-        assert hello_data["rpcVersion"] == 1
-        authentication = hello_data["authentication"]
-        challenge = authentication["challenge"]
-        salt = authentication["salt"]
-
-        await ws.send_str(
-            json.dumps(
-                {
-                    "op": 1,
-                    "d": {
-                        "rpcVersion": 1,
-                        "authentication": _build_obsws_authentication(
-                            password=password,
-                            salt=salt,
-                            challenge=challenge,
-                        ),
-                    },
-                }
-            )
-        )
-        identified_msg = await ws.receive(timeout=5.0)
-        assert identified_msg.type == aiohttp.WSMsgType.TEXT
-        identified = json.loads(identified_msg.data)
-        assert identified["op"] == 2
-        assert identified["d"]["negotiatedRpcVersion"] == 1
+        await _identify_with_optional_password(ws, password)
         await ws.close()
 
 
@@ -201,6 +222,26 @@ async def _connect_and_send_invalid_password_auth(url: str):
         }
         assert ws.close_code == 4009
         await ws.close()
+
+
+async def _connect_identify_and_request(
+    url: str,
+    request_type: str,
+    request_id: str,
+    *,
+    password: str | None = None,
+):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+        await _identify_with_optional_password(ws, password)
+        response = await _send_obsws_request(
+            ws,
+            request_type=request_type,
+            request_id=request_id,
+        )
+        await ws.close()
+        return response
 
 
 async def _connect_and_send_missing_password_auth(url: str):
@@ -327,3 +368,107 @@ def test_obsws_rejects_authenticated_connection_without_auth(binary_path: Path):
         use_env=False,
     ):
         asyncio.run(_connect_and_send_missing_password_auth(f"ws://{host}:{port}/"))
+
+
+def test_obsws_get_version_request(binary_path: Path):
+    """obsws が GetVersion request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetVersion",
+                request_id="req-get-version",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert response_data["rpcVersion"] == 1
+        assert "GetVersion" in response_data["availableRequests"]
+
+
+def test_obsws_get_stats_request(binary_path: Path):
+    """obsws が GetStats request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetStats",
+                request_id="req-get-stats",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert response_data["webSocketSessionIncomingMessages"] >= 2
+        assert response_data["webSocketSessionOutgoingMessages"] >= 2
+
+
+def test_obsws_get_canvas_list_request(binary_path: Path):
+    """obsws が GetCanvasList request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetCanvasList",
+                request_id="req-get-canvas-list",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert isinstance(response_data["canvases"], list)
+
+
+def test_obsws_unknown_request_type_returns_error(binary_path: Path):
+    """obsws が未知 requestType をエラー応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="UnknownRequestType",
+                request_id="req-unknown",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 204
