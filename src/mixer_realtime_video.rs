@@ -565,6 +565,8 @@ enum TrackEvent {
 #[derive(Debug)]
 struct InputReceiverHandle {
     track_id: TrackId,
+    // 明示的な Drop 実装は持たない
+    // shutdown_tx を drop しても受信側は完了として解除され、spawn タスクは終了する
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
