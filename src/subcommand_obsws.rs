@@ -1,5 +1,4 @@
 use std::net::{IpAddr, SocketAddr};
-use std::time::Instant;
 
 use base64::Engine as _;
 use shiguredo_websocket::{
@@ -358,42 +357,47 @@ impl ObswsAuthentication {
     }
 }
 
+trait ObswsParseResultExt<T> {
+    fn with_context(self, context: &str) -> crate::Result<T>;
+}
+
+impl<T, E> ObswsParseResultExt<T> for Result<T, E>
+where
+    E: std::fmt::Display,
+{
+    fn with_context(self, context: &str) -> crate::Result<T> {
+        self.map_err(|e| crate::Error::new(format!("{context}: {e}")))
+    }
+}
+
 fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
-    let json = nojson::RawJson::parse(text)
-        .map_err(|e| crate::Error::new(format!("invalid JSON: {e}")))?;
+    let json = nojson::RawJson::parse(text).with_context("invalid JSON")?;
     let value = json.value();
     let op_value = value
         .to_member("op")
-        .map_err(|e| crate::Error::new(format!("invalid message: {e}")))?
+        .with_context("invalid message")?
         .required()
-        .map_err(|e| crate::Error::new(format!("invalid message: {e}")))?;
-    let op: i64 = op_value
-        .try_into()
-        .map_err(|e| crate::Error::new(format!("invalid message: {e}")))?;
+        .with_context("invalid message")?;
+    let op: i64 = op_value.try_into().with_context("invalid message")?;
 
     if op != OBSWS_OP_IDENTIFY {
         if op == OBSWS_OP_REQUEST {
             let d_value = value
                 .to_member("d")
-                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?
+                .with_context("invalid request payload")?
                 .required()
-                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?;
-            if d_value.kind() != nojson::JsonValueKind::Object {
-                return Err(crate::Error::new(
-                    "invalid request payload: d must be an object",
-                ));
-            }
+                .with_context("invalid request payload")?;
 
             let request_id: Option<String> = d_value
                 .to_member("requestId")
-                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?
+                .with_context("invalid request payload")?
                 .try_into()
-                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?;
+                .with_context("invalid request payload")?;
             let request_type: Option<String> = d_value
                 .to_member("requestType")
-                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?
+                .with_context("invalid request payload")?
                 .try_into()
-                .map_err(|e| crate::Error::new(format!("invalid request payload: {e}")))?;
+                .with_context("invalid request payload")?;
 
             return Ok(ClientMessage::Request(RequestMessage {
                 request_id,
@@ -408,20 +412,15 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
 
     let d_value = value
         .to_member("d")
-        .map_err(|e| crate::Error::new(format!("invalid identify payload: {e}")))?
+        .with_context("invalid identify payload")?
         .required()
-        .map_err(|e| crate::Error::new(format!("invalid identify payload: {e}")))?;
-    if d_value.kind() != nojson::JsonValueKind::Object {
-        return Err(crate::Error::new(
-            "invalid identify payload: d must be an object",
-        ));
-    }
+        .with_context("invalid identify payload")?;
 
     let authentication: Option<String> = d_value
         .to_member("authentication")
-        .map_err(|e| crate::Error::new(format!("invalid identify payload: {e}")))?
+        .with_context("invalid identify payload")?
         .try_into()
-        .map_err(|e| crate::Error::new(format!("invalid identify payload: {e}")))?;
+        .with_context("invalid identify payload")?;
 
     Ok(ClientMessage::Identify(IdentifyMessage { authentication }))
 }
@@ -546,13 +545,7 @@ fn build_get_version_response(request_id: &str) -> String {
                         f.member("rpcVersion", OBSWS_RPC_VERSION)?;
                         f.member(
                             "availableRequests",
-                            nojson::json(|f| {
-                                f.array(|f| {
-                                    f.element("GetVersion")?;
-                                    f.element("GetStats")?;
-                                    f.element("GetCanvasList")
-                                })
-                            }),
+                            ["GetVersion", "GetStats", "GetCanvasList"],
                         )?;
                         f.member("platform", std::env::consts::OS)?;
                         f.member(
