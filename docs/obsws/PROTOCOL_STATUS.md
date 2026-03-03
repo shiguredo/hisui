@@ -114,8 +114,14 @@
 - [x] `GetInputList`: 入力一覧を取得する
 - [x] `GetInputKindList`: 入力種別一覧を取得する
 - [ ] `GetSpecialInputs`: 特殊入力設定を取得する
-- [ ] `CreateInput`: 入力を作成する
-- [ ] `RemoveInput`: 入力を削除する
+- [x] `CreateInput`: 入力を作成する
+  - NOTE: `sceneName` は現時点で `"Scene"` のみ対応する
+  - NOTE: `inputKind` は `GetInputKindList` で返す値のみ受理する
+  - NOTE: `sceneItemEnabled` は受理するが現状は動作に反映しない
+  - NOTE: 成功時は `responseData.inputUuid` を返し、`GetInputSettings` で参照できる
+- [x] `RemoveInput`: 入力を削除する
+  - NOTE: `inputName` または `inputUuid` のいずれか指定で削除する
+  - NOTE: 対象が存在しない場合は not found エラーを返す
 - [ ] `SetInputName`: 入力名を変更する
 - [ ] `GetInputDefaultSettings`: 入力の既定設定を取得する
 - [x] `GetInputSettings`: 入力設定を取得する

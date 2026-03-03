@@ -131,7 +131,7 @@
   - `Hello (op=0)` / `Identify (op=1)` / `Identified (op=2)` を処理できる
   - challenge / salt ベースの password 認証に対応する
   - `Request (op=6)` / `RequestResponse (op=7)` を処理できる
-  - `GetVersion` / `GetStats` / `GetCanvasList` / `GetInputList` / `GetInputKindList` / `GetInputSettings` の RequestType に対応する
+  - `GetVersion` / `GetStats` / `GetCanvasList` / `GetInputList` / `GetInputKindList` / `GetInputSettings` / `CreateInput` / `RemoveInput` の RequestType に対応する
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
   - @sile

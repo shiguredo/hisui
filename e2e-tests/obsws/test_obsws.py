@@ -543,6 +543,8 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetInputList" in response_data["availableRequests"]
         assert "GetInputKindList" in response_data["availableRequests"]
         assert "GetInputSettings" in response_data["availableRequests"]
+        assert "CreateInput" in response_data["availableRequests"]
+        assert "RemoveInput" in response_data["availableRequests"]
         supported_image_formats = response_data["supportedImageFormats"]
         assert isinstance(supported_image_formats, list)
         assert "png" in supported_image_formats
@@ -677,6 +679,248 @@ def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
         status = response["d"]["requestStatus"]
         assert status["result"] is False
         assert status["code"] == 300
+
+
+def test_obsws_create_input_request(binary_path: Path):
+    """obsws が CreateInput request に応答して入力を追加できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-test-input",
+                    "inputKind": "ffmpeg_source",
+                    "inputSettings": {"input": "sample.mp4"},
+                    "sceneItemEnabled": True,
+                },
+            )
+        )
+        create_status = create_response["d"]["requestStatus"]
+        assert create_status["result"] is True
+        assert create_status["code"] == 100
+        input_uuid = create_response["d"]["responseData"]["inputUuid"]
+        assert isinstance(input_uuid, str)
+        assert input_uuid != ""
+
+        list_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputList",
+                request_id="req-get-input-list-after-create",
+            )
+        )
+        list_status = list_response["d"]["requestStatus"]
+        assert list_status["result"] is True
+        names = [v["inputName"] for v in list_response["d"]["responseData"]["inputs"]]
+        assert "obsws-test-input" in names
+
+        settings_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-after-create",
+                request_data={"inputUuid": input_uuid},
+            )
+        )
+        settings_status = settings_response["d"]["requestStatus"]
+        assert settings_status["result"] is True
+        assert (
+            settings_response["d"]["responseData"]["inputName"] == "obsws-test-input"
+        )
+
+
+def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
+    """obsws が CreateInput で inputName 重複を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        first_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-first",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "duplicate-input",
+                    "inputKind": "ffmpeg_source",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert first_response["d"]["requestStatus"]["result"] is True
+
+        second_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-second",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "duplicate-input",
+                    "inputKind": "ffmpeg_source",
+                    "inputSettings": {},
+                },
+            )
+        )
+        second_status = second_response["d"]["requestStatus"]
+        assert second_status["result"] is False
+        assert second_status["code"] == 602
+
+
+def test_obsws_create_input_rejects_unsupported_scene_name(binary_path: Path):
+    """obsws が CreateInput で未対応 sceneName を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-unsupported-scene",
+                request_data={
+                    "sceneName": "custom-scene",
+                    "inputName": "scene-rejected",
+                    "inputKind": "ffmpeg_source",
+                    "inputSettings": {},
+                },
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 300
+
+
+def test_obsws_create_input_rejects_unsupported_input_kind(binary_path: Path):
+    """obsws が CreateInput で未対応 inputKind を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-unsupported-kind",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "kind-rejected",
+                    "inputKind": "unsupported_kind",
+                    "inputSettings": {},
+                },
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 300
+
+
+def test_obsws_remove_input_request(binary_path: Path):
+    """obsws が RemoveInput request に応答して入力を削除できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-for-remove",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "to-be-removed",
+                    "inputKind": "ffmpeg_source",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        remove_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="RemoveInput",
+                request_id="req-remove-input",
+                request_data={"inputName": "to-be-removed"},
+            )
+        )
+        remove_status = remove_response["d"]["requestStatus"]
+        assert remove_status["result"] is True
+        assert remove_status["code"] == 100
+
+        list_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputList",
+                request_id="req-get-input-list-after-remove",
+            )
+        )
+        list_status = list_response["d"]["requestStatus"]
+        assert list_status["result"] is True
+        names = [v["inputName"] for v in list_response["d"]["responseData"]["inputs"]]
+        assert "to-be-removed" not in names
+
+
+def test_obsws_remove_input_rejects_unknown_input(binary_path: Path):
+    """obsws が RemoveInput で存在しない入力を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="RemoveInput",
+                request_id="req-remove-input-not-found",
+                request_data={"inputName": "not-found"},
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 601
 
 
 def test_obsws_unknown_request_type_returns_error(binary_path: Path):

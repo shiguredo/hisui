@@ -1,10 +1,11 @@
 use crate::obsws_auth::ObswsAuthentication;
-use crate::obsws_input_registry::ObswsInputRegistry;
+use crate::obsws_input_registry::{CreateInputError, ObswsInputRegistry};
 use crate::obsws_protocol::{
-    OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_IDENTIFY, OBSWS_OP_REQUEST,
-    OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS, REQUEST_STATUS_UNKNOWN_REQUEST_TYPE,
+    OBSWS_DEFAULT_SCENE_NAME, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_IDENTIFY,
+    OBSWS_OP_REQUEST, OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS,
+    OBSWS_VERSION, REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
+    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_SUCCESS, REQUEST_STATUS_UNKNOWN_REQUEST_TYPE,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,7 +81,7 @@ pub(crate) fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
 pub(crate) fn handle_request_message(
     request: RequestMessage,
     session_stats: &ObswsSessionStats,
-    input_registry: &ObswsInputRegistry,
+    input_registry: &mut ObswsInputRegistry,
 ) -> RequestResponsePayload {
     let request_id = request.request_id.unwrap_or_default();
     let request_type = request.request_type.unwrap_or_default();
@@ -117,6 +118,12 @@ pub(crate) fn handle_request_message(
             request.request_data.as_ref(),
             input_registry,
         ),
+        "CreateInput" => {
+            build_create_input_response(&request_id, request.request_data.as_ref(), input_registry)
+        }
+        "RemoveInput" => {
+            build_remove_input_response(&request_id, request.request_data.as_ref(), input_registry)
+        }
         _ => build_request_response_error(
             &request_type,
             &request_id,
@@ -161,6 +168,69 @@ fn parse_input_lookup_fields(
     }
 
     Ok((input_uuid, input_name))
+}
+
+struct CreateInputFields<'a> {
+    scene_name: &'a str,
+    input_name: &'a str,
+    input_kind: &'a str,
+    input_settings: crate::json::JsonValue,
+}
+
+fn parse_create_input_fields(
+    request_data: Option<&crate::json::JsonValue>,
+) -> Result<CreateInputFields<'_>, &'static str> {
+    let Some(request_data) = request_data else {
+        return Err("Missing required requestData field");
+    };
+    let crate::json::JsonValue::Object(request_data) = request_data else {
+        return Err("Invalid requestData field");
+    };
+
+    let scene_name = request_data
+        .get("sceneName")
+        .and_then(|v| {
+            let crate::json::JsonValue::String(v) = v else {
+                return None;
+            };
+            Some(v.as_str())
+        })
+        .filter(|v| !v.is_empty())
+        .ok_or("Missing required sceneName field")?;
+    let input_name = request_data
+        .get("inputName")
+        .and_then(|v| {
+            let crate::json::JsonValue::String(v) = v else {
+                return None;
+            };
+            Some(v.as_str())
+        })
+        .filter(|v| !v.is_empty())
+        .ok_or("Missing required inputName field")?;
+    let input_kind = request_data
+        .get("inputKind")
+        .and_then(|v| {
+            let crate::json::JsonValue::String(v) = v else {
+                return None;
+            };
+            Some(v.as_str())
+        })
+        .filter(|v| !v.is_empty())
+        .ok_or("Missing required inputKind field")?;
+    let input_settings = request_data
+        .get("inputSettings")
+        .ok_or("Missing required inputSettings field")?
+        .clone();
+    if !matches!(input_settings, crate::json::JsonValue::Object(_)) {
+        return Err("Invalid inputSettings field: object is required");
+    }
+
+    Ok(CreateInputFields {
+        scene_name,
+        input_name,
+        input_kind,
+        input_settings,
+    })
 }
 
 pub(crate) fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
@@ -228,6 +298,8 @@ fn build_get_version_response(request_id: &str) -> String {
                                 "GetInputList",
                                 "GetInputKindList",
                                 "GetInputSettings",
+                                "CreateInput",
+                                "RemoveInput",
                             ],
                         )?;
                         f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
@@ -430,6 +502,129 @@ fn build_get_input_settings_response(
     .to_string()
 }
 
+fn build_create_input_response(
+    request_id: &str,
+    request_data: Option<&crate::json::JsonValue>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_create_input_fields(request_data) {
+        Ok(fields) => fields,
+        Err(message) => {
+            return build_request_response_error(
+                "CreateInput",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                message,
+            );
+        }
+    };
+
+    let created = match input_registry.create_input(
+        fields.scene_name,
+        fields.input_name,
+        fields.input_kind,
+        fields.input_settings,
+    ) {
+        Ok(created) => created,
+        Err(CreateInputError::UnsupportedSceneName) => {
+            return build_request_response_error(
+                "CreateInput",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                &format!(
+                    "Unsupported sceneName field: only '{OBSWS_DEFAULT_SCENE_NAME}' is supported"
+                ),
+            );
+        }
+        Err(CreateInputError::UnsupportedInputKind) => {
+            return build_request_response_error(
+                "CreateInput",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Unsupported inputKind field",
+            );
+        }
+        Err(CreateInputError::InputNameAlreadyExists) => {
+            return build_request_response_error(
+                "CreateInput",
+                request_id,
+                REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+                "Input already exists",
+            );
+        }
+    };
+    let input_uuid = created.input_uuid;
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "CreateInput")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("inputUuid", &input_uuid)),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_remove_input_response(
+    request_id: &str,
+    request_data: Option<&crate::json::JsonValue>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let (input_uuid, input_name) = match parse_input_lookup_fields(request_data) {
+        Ok(v) => v,
+        Err(message) => {
+            return build_request_response_error(
+                "RemoveInput",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                message,
+            );
+        }
+    };
+    let Some(_removed) = input_registry.remove_input(input_uuid, input_name) else {
+        return build_request_response_error(
+            "RemoveInput",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Input not found",
+        );
+    };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "RemoveInput")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
 fn build_request_response_error(
     request_type: &str,
     request_id: &str,
@@ -612,7 +807,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let response = handle_request_message(request, &session_stats, &input_registry());
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let op: i64 = json.value().to_member("op")?.required()?.try_into()?;
@@ -626,8 +822,14 @@ mod tests {
             .to_member("supportedImageFormats")?
             .required()?
             .try_into()?;
+        let available_requests: Vec<String> = response_data
+            .to_member("availableRequests")?
+            .required()?
+            .try_into()?;
         assert_eq!(op, OBSWS_OP_REQUEST_RESPONSE);
         assert!(supported_image_formats.iter().any(|f| f == "png"));
+        assert!(available_requests.iter().any(|r| r == "CreateInput"));
+        assert!(available_requests.iter().any(|r| r == "RemoveInput"));
         Ok(())
     }
 
@@ -640,7 +842,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let response = handle_request_message(request, &session_stats, &input_registry());
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
@@ -665,7 +868,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let response = handle_request_message(request, &session_stats, &input_registry());
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
@@ -695,7 +899,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let response = handle_request_message(request, &session_stats, &input_registry());
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
@@ -728,7 +933,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let response = handle_request_message(request, &session_stats, &input_registry());
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
@@ -754,7 +960,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let response = handle_request_message(request, &session_stats, &input_registry());
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
@@ -767,6 +974,182 @@ mod tests {
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_create_input_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-1".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(crate::json::JsonValue::Object(
+                [
+                    (
+                        "sceneName".to_owned(),
+                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
+                    ),
+                    (
+                        "inputName".to_owned(),
+                        crate::json::JsonValue::String("camera-2".to_owned()),
+                    ),
+                    (
+                        "inputKind".to_owned(),
+                        crate::json::JsonValue::String("video_capture_device".to_owned()),
+                    ),
+                    (
+                        "inputSettings".to_owned(),
+                        crate::json::JsonValue::Object(Default::default()),
+                    ),
+                    (
+                        "sceneItemEnabled".to_owned(),
+                        crate::json::JsonValue::Boolean(true),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        let input_uuid: String = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("responseData")?
+            .required()?
+            .to_member("inputUuid")?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        assert_eq!(code, REQUEST_STATUS_SUCCESS);
+        assert!(!input_uuid.is_empty());
+        assert!(input_registry.find_input(Some(&input_uuid), None).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_duplicate_error_for_create_input()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-dup".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(crate::json::JsonValue::Object(
+                [
+                    (
+                        "sceneName".to_owned(),
+                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
+                    ),
+                    (
+                        "inputName".to_owned(),
+                        crate::json::JsonValue::String("input-name-1".to_owned()),
+                    ),
+                    (
+                        "inputKind".to_owned(),
+                        crate::json::JsonValue::String("ffmpeg_source".to_owned()),
+                    ),
+                    (
+                        "inputSettings".to_owned(),
+                        crate::json::JsonValue::Object(Default::default()),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_remove_input_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-remove-1".to_owned()),
+            request_type: Some("RemoveInput".to_owned()),
+            request_data: Some(crate::json::JsonValue::Object(
+                [(
+                    "inputName".to_owned(),
+                    crate::json::JsonValue::String("input-name-1".to_owned()),
+                )]
+                .into_iter()
+                .collect(),
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(result);
+        assert_eq!(code, REQUEST_STATUS_SUCCESS);
+        assert!(
+            input_registry
+                .find_input(None, Some("input-name-1"))
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_not_found_error_for_remove_input()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-remove-2".to_owned()),
+            request_type: Some("RemoveInput".to_owned()),
+            request_data: Some(crate::json::JsonValue::Object(
+                [(
+                    "inputName".to_owned(),
+                    crate::json::JsonValue::String("not-found".to_owned()),
+                )]
+                .into_iter()
+                .collect(),
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
         Ok(())
     }
 }

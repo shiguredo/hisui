@@ -132,8 +132,8 @@ impl ObswsSession {
             };
         }
 
-        let input_registry = self.input_registry.read().await;
-        let response = handle_request_message(request, &self.stats, &input_registry);
+        let mut input_registry = self.input_registry.write().await;
+        let response = handle_request_message(request, &self.stats, &mut input_registry);
         SessionAction::SendText {
             text: response.message,
             message_name: "request response message",
