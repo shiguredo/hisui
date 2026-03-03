@@ -1,6 +1,8 @@
 """obsws サブコマンドの e2e テスト"""
 
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import signal
@@ -109,7 +111,8 @@ async def _connect_and_exchange_identify(url: str):
         assert hello_msg.type == aiohttp.WSMsgType.TEXT
         hello = json.loads(hello_msg.data)
         assert hello["op"] == 0
-        assert hello["d"]["rpcVersion"] == 1
+        hello_data = hello["d"]
+        assert hello_data["rpcVersion"] == 1
 
         await ws.send_str(json.dumps({"op": 1, "d": {"rpcVersion": 1}}))
         identified_msg = await ws.receive(timeout=5.0)
@@ -118,6 +121,107 @@ async def _connect_and_exchange_identify(url: str):
         assert identified["op"] == 2
         assert identified["d"]["negotiatedRpcVersion"] == 1
 
+        await ws.close()
+
+
+def _build_obsws_authentication(password: str, salt: str, challenge: str) -> str:
+    secret = base64.b64encode(
+        hashlib.sha256(f"{password}{salt}".encode("utf-8")).digest()
+    ).decode("utf-8")
+    return base64.b64encode(
+        hashlib.sha256(f"{secret}{challenge}".encode("utf-8")).digest()
+    ).decode("utf-8")
+
+
+async def _connect_and_exchange_identify_with_password(url: str, password: str):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+
+        hello_msg = await ws.receive(timeout=5.0)
+        assert hello_msg.type == aiohttp.WSMsgType.TEXT
+        hello = json.loads(hello_msg.data)
+        assert hello["op"] == 0
+        hello_data = hello["d"]
+        assert hello_data["rpcVersion"] == 1
+        authentication = hello_data["authentication"]
+        challenge = authentication["challenge"]
+        salt = authentication["salt"]
+
+        await ws.send_str(
+            json.dumps(
+                {
+                    "op": 1,
+                    "d": {
+                        "rpcVersion": 1,
+                        "authentication": _build_obsws_authentication(
+                            password=password,
+                            salt=salt,
+                            challenge=challenge,
+                        ),
+                    },
+                }
+            )
+        )
+        identified_msg = await ws.receive(timeout=5.0)
+        assert identified_msg.type == aiohttp.WSMsgType.TEXT
+        identified = json.loads(identified_msg.data)
+        assert identified["op"] == 2
+        assert identified["d"]["negotiatedRpcVersion"] == 1
+        await ws.close()
+
+
+async def _connect_and_send_invalid_password_auth(url: str):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+
+        hello_msg = await ws.receive(timeout=5.0)
+        assert hello_msg.type == aiohttp.WSMsgType.TEXT
+        hello = json.loads(hello_msg.data)
+        assert hello["op"] == 0
+        assert "authentication" in hello["d"]
+
+        await ws.send_str(
+            json.dumps(
+                {
+                    "op": 1,
+                    "d": {
+                        "rpcVersion": 1,
+                        "authentication": "invalid-authentication",
+                    },
+                }
+            )
+        )
+        close_msg = await ws.receive(timeout=5.0)
+        assert close_msg.type in {
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.CLOSED,
+        }
+        assert ws.close_code == 4009
+        await ws.close()
+
+
+async def _connect_and_send_missing_password_auth(url: str):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+
+        hello_msg = await ws.receive(timeout=5.0)
+        assert hello_msg.type == aiohttp.WSMsgType.TEXT
+        hello = json.loads(hello_msg.data)
+        assert hello["op"] == 0
+        assert "authentication" in hello["d"]
+
+        await ws.send_str(json.dumps({"op": 1, "d": {"rpcVersion": 1}}))
+        close_msg = await ws.receive(timeout=5.0)
+        assert close_msg.type in {
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.CLOSED,
+        }
+        assert ws.close_code == 4009
         await ws.close()
 
 
@@ -172,23 +276,11 @@ def test_obsws_rejects_connection_without_subprotocol(binary_path: Path):
         asyncio.run(_connect_without_subprotocol(f"ws://{host}:{port}/"))
 
 
-def test_obsws_rejects_authenticated_connection(binary_path: Path):
-    """obsws が password 指定時の接続を拒否することを確認する"""
+def test_obsws_accepts_authenticated_connection(binary_path: Path):
+    """obsws が password 指定時に認証成功で接続継続することを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
-
-    async def _connect_with_password(url: str):
-        timeout = aiohttp.ClientTimeout(total=10.0)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
-            first_msg = await ws.receive(timeout=5.0)
-            assert first_msg.type in {
-                aiohttp.WSMsgType.CLOSE,
-                aiohttp.WSMsgType.CLOSING,
-                aiohttp.WSMsgType.CLOSED,
-            }
-            await ws.close()
 
     with ObswsServer(
         binary_path,
@@ -197,4 +289,41 @@ def test_obsws_rejects_authenticated_connection(binary_path: Path):
         password="test-password",
         use_env=False,
     ):
-        asyncio.run(_connect_with_password(f"ws://{host}:{port}/"))
+        asyncio.run(
+            _connect_and_exchange_identify_with_password(
+                f"ws://{host}:{port}/",
+                "test-password",
+            )
+        )
+
+
+def test_obsws_rejects_authenticated_connection_with_invalid_auth(binary_path: Path):
+    """obsws が password 指定時に認証失敗を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        password="test-password",
+        use_env=False,
+    ):
+        asyncio.run(_connect_and_send_invalid_password_auth(f"ws://{host}:{port}/"))
+
+
+def test_obsws_rejects_authenticated_connection_without_auth(binary_path: Path):
+    """obsws が password 指定時に authentication 欠落を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        password="test-password",
+        use_env=False,
+    ):
+        asyncio.run(_connect_and_send_missing_password_auth(f"ws://{host}:{port}/"))

@@ -1,5 +1,6 @@
 use std::net::{IpAddr, SocketAddr};
 
+use base64::Engine as _;
 use shiguredo_websocket::{
     CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ServerConnectionOptions,
     WebSocketServerConnection,
@@ -13,6 +14,8 @@ const OBSWS_RPC_VERSION: u32 = 1;
 const OBSWS_OP_HELLO: i64 = 0;
 const OBSWS_OP_IDENTIFY: i64 = 1;
 const OBSWS_OP_IDENTIFIED: i64 = 2;
+const OBSWS_CLOSE_AUTHENTICATION_FAILED: CloseCode = CloseCode(4009);
+const AUTH_RANDOM_BYTE_LEN: usize = 32;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let host: IpAddr = noargs::opt("host")
@@ -41,23 +44,19 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    run_internal(host, port, password.is_some()).map_err(noargs::Error::from)
+    run_internal(host, port, password).map_err(noargs::Error::from)
 }
 
-fn run_internal(host: IpAddr, port: u16, has_password: bool) -> crate::Result<()> {
+fn run_internal(host: IpAddr, port: u16, password: Option<String>) -> crate::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(crate::Error::from)?;
 
-    runtime.block_on(async move { run_server(host, port, has_password).await })
+    runtime.block_on(async move { run_server(host, port, password).await })
 }
 
-async fn run_server(host: IpAddr, port: u16, has_password: bool) -> crate::Result<()> {
-    if has_password {
-        tracing::warn!("obsws password is set but authentication is not implemented yet");
-    }
-
+async fn run_server(host: IpAddr, port: u16, password: Option<String>) -> crate::Result<()> {
     let listen_addr = SocketAddr::new(host, port);
     let listener = TcpListener::bind(listen_addr)
         .await
@@ -69,8 +68,9 @@ async fn run_server(host: IpAddr, port: u16, has_password: bool) -> crate::Resul
             .accept()
             .await
             .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
+        let password = password.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, peer_addr, has_password).await {
+            if let Err(e) = handle_connection(stream, peer_addr, password).await {
                 tracing::warn!("obsws connection handler failed: {}", e.display());
             }
         });
@@ -80,7 +80,7 @@ async fn run_server(host: IpAddr, port: u16, has_password: bool) -> crate::Resul
 async fn handle_connection(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
-    has_password: bool,
+    password: Option<String>,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
@@ -90,6 +90,10 @@ async fn handle_connection(
     );
     let mut buf = [0_u8; 8192];
     let mut identified = false;
+    let auth = password
+        .as_deref()
+        .map(ObswsAuthentication::new)
+        .transpose()?;
 
     loop {
         let n = stream
@@ -133,25 +137,10 @@ async fn handle_connection(
                     tracing::info!(
                         "obsws websocket connected: peer={peer_addr}, protocol={protocol:?}, extensions={extensions:?}"
                     );
-                    if has_password {
-                        tracing::warn!(
-                            "obsws authentication is not implemented, closing authenticated connection"
-                        );
-                        ws.close(
-                            CloseCode::POLICY_VIOLATION,
-                            "authentication is not implemented",
-                        )
+                    ws.send_text(&build_hello_message(auth.as_ref()))
                         .map_err(|e| {
-                            crate::Error::new(format!(
-                                "failed to close websocket for unimplemented auth: {e}"
-                            ))
-                        })?;
-                        should_close = true;
-                    } else {
-                        ws.send_text(&build_hello_message()).map_err(|e| {
                             crate::Error::new(format!("failed to send hello message: {e}"))
                         })?;
-                    }
                 }
                 ConnectionEvent::TextMessage(text) => {
                     if identified {
@@ -167,7 +156,22 @@ async fn handle_connection(
                     }
 
                     match parse_client_message(&text) {
-                        Ok(ClientMessage::Identify) => {
+                        Ok(ClientMessage::Identify(identify)) => {
+                            if let Some(auth) = auth.as_ref()
+                                && !auth.is_valid_response(identify.authentication.as_deref())
+                            {
+                                ws.close(
+                                    OBSWS_CLOSE_AUTHENTICATION_FAILED,
+                                    "authentication failed",
+                                )
+                                .map_err(|e| {
+                                    crate::Error::new(format!(
+                                        "failed to close websocket for authentication failure: {e}"
+                                    ))
+                                })?;
+                                should_close = true;
+                                continue;
+                            }
                             ws.send_text(&build_identified_message()).map_err(|e| {
                                 crate::Error::new(format!("failed to send identified message: {e}"))
                             })?;
@@ -238,9 +242,45 @@ async fn flush_connection_output(
     Ok(true)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ClientMessage {
-    Identify,
+    Identify(IdentifyMessage),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IdentifyMessage {
+    authentication: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ObswsAuthentication {
+    salt: String,
+    challenge: String,
+    expected_response: String,
+}
+
+impl ObswsAuthentication {
+    fn new(password: &str) -> crate::Result<Self> {
+        let salt = generate_random_base64(AUTH_RANDOM_BYTE_LEN)?;
+        let challenge = generate_random_base64(AUTH_RANDOM_BYTE_LEN)?;
+        let expected_response = build_authentication_response(password, &salt, &challenge);
+        Ok(Self {
+            salt,
+            challenge,
+            expected_response,
+        })
+    }
+
+    fn is_valid_response(&self, response: Option<&str>) -> bool {
+        let Some(response) = response else {
+            return false;
+        };
+        aws_lc_rs::constant_time::verify_slices_are_equal(
+            response.as_bytes(),
+            self.expected_response.as_bytes(),
+        )
+        .is_ok()
+    }
 }
 
 fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
@@ -273,10 +313,36 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
         ));
     }
 
-    Ok(ClientMessage::Identify)
+    let authentication: Option<String> = d_value
+        .to_member("authentication")
+        .map_err(|e| crate::Error::new(format!("invalid identify payload: {e}")))?
+        .try_into()
+        .map_err(|e| crate::Error::new(format!("invalid identify payload: {e}")))?;
+
+    Ok(ClientMessage::Identify(IdentifyMessage { authentication }))
 }
 
-fn build_hello_message() -> String {
+fn generate_random_base64(len: usize) -> crate::Result<String> {
+    let mut bytes = vec![0_u8; len];
+    aws_lc_rs::rand::fill(&mut bytes)
+        .map_err(|_| crate::Error::new("failed to generate random bytes"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+fn build_authentication_response(password: &str, salt: &str, challenge: &str) -> String {
+    let secret_hash = aws_lc_rs::digest::digest(
+        &aws_lc_rs::digest::SHA256,
+        format!("{password}{salt}").as_bytes(),
+    );
+    let secret = base64::engine::general_purpose::STANDARD.encode(secret_hash.as_ref());
+    let response_hash = aws_lc_rs::digest::digest(
+        &aws_lc_rs::digest::SHA256,
+        format!("{secret}{challenge}").as_bytes(),
+    );
+    base64::engine::general_purpose::STANDARD.encode(response_hash.as_ref())
+}
+
+fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
     nojson::json(|f| {
         f.object(|f| {
             f.member("op", OBSWS_OP_HELLO)?;
@@ -285,7 +351,19 @@ fn build_hello_message() -> String {
                 nojson::json(|f| {
                     f.object(|f| {
                         f.member("obsWebSocketVersion", OBSWS_VERSION)?;
-                        f.member("rpcVersion", OBSWS_RPC_VERSION)
+                        f.member("rpcVersion", OBSWS_RPC_VERSION)?;
+                        if let Some(authentication) = authentication {
+                            f.member(
+                                "authentication",
+                                nojson::json(|f| {
+                                    f.object(|f| {
+                                        f.member("challenge", &authentication.challenge)?;
+                                        f.member("salt", &authentication.salt)
+                                    })
+                                }),
+                            )?;
+                        }
+                        Ok(())
                     })
                 }),
             )
@@ -313,7 +391,7 @@ mod tests {
 
     #[test]
     fn build_hello_message_contains_expected_fields() {
-        let message = build_hello_message();
+        let message = build_hello_message(None);
         let json = nojson::RawJson::parse(&message).expect("hello message must be valid JSON");
         let op_value = json
             .value()
@@ -329,7 +407,24 @@ mod tests {
     fn parse_client_message_accepts_identify() {
         let message = r#"{"op":1,"d":{"rpcVersion":1}}"#;
         let parsed = parse_client_message(message).expect("identify message must be accepted");
-        assert_eq!(parsed, ClientMessage::Identify);
+        assert_eq!(
+            parsed,
+            ClientMessage::Identify(IdentifyMessage {
+                authentication: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_client_message_accepts_identify_with_authentication() {
+        let message = r#"{"op":1,"d":{"rpcVersion":1,"authentication":"test-auth"}}"#;
+        let parsed = parse_client_message(message).expect("identify message must be accepted");
+        assert_eq!(
+            parsed,
+            ClientMessage::Identify(IdentifyMessage {
+                authentication: Some("test-auth".to_owned()),
+            })
+        );
     }
 
     #[test]
@@ -337,5 +432,49 @@ mod tests {
         let message = r#"{"op":9,"d":{}}"#;
         let error = parse_client_message(message).expect_err("non identify must be rejected");
         assert!(error.display().contains("unsupported message opcode"));
+    }
+
+    #[test]
+    fn build_authentication_response_matches_expected_value() {
+        let response = build_authentication_response("test-password", "c2FsdA==", "Y2hhbGxlbmdl");
+        assert_eq!(response, "692yhXm+ZMl25QzSnVANJIg265Xtpfqja0A08Opeiv8=");
+    }
+
+    #[test]
+    fn build_hello_message_contains_authentication() {
+        let auth = ObswsAuthentication {
+            salt: "test-salt".to_owned(),
+            challenge: "test-challenge".to_owned(),
+            expected_response: "unused".to_owned(),
+        };
+        let message = build_hello_message(Some(&auth));
+        let json = nojson::RawJson::parse(&message).expect("hello message must be valid JSON");
+        let d_value = json
+            .value()
+            .to_member("d")
+            .expect("d member access must succeed")
+            .required()
+            .expect("d must exist");
+        let authentication = d_value
+            .to_member("authentication")
+            .expect("authentication member access must succeed")
+            .required()
+            .expect("authentication must exist");
+        let challenge: String = authentication
+            .to_member("challenge")
+            .expect("challenge member access must succeed")
+            .required()
+            .expect("challenge must exist")
+            .try_into()
+            .expect("challenge must be string");
+        let salt: String = authentication
+            .to_member("salt")
+            .expect("salt member access must succeed")
+            .required()
+            .expect("salt must exist")
+            .try_into()
+            .expect("salt must be string");
+        assert_eq!(challenge, "test-challenge");
+        assert_eq!(salt, "test-salt");
     }
 }

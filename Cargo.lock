@@ -445,6 +445,7 @@ name = "hisui"
 version = "2026.1.0-canary.1"
 dependencies = [
  "aws-lc-rs",
+ "base64",
  "mpeg2ts",
  "noargs",
  "nojson",
