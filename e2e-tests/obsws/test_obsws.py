@@ -28,12 +28,21 @@ class ObswsServer:
         *,
         host: str,
         port: int,
+        http_host: str | None = None,
+        http_port: int | None = None,
         password: str | None = None,
         use_env: bool = False,
     ):
         self.binary_path = binary_path
         self.host = host
         self.port = port
+        self.http_host = http_host or host
+        if http_port is None:
+            reserved_http_port, reserved_http_sock = reserve_ephemeral_port()
+            reserved_http_sock.close()
+            self.http_port = reserved_http_port
+        else:
+            self.http_port = http_port
         self.password = password
         self.use_env = use_env
         self._process: subprocess.Popen[None] | None = None
@@ -53,10 +62,23 @@ class ObswsServer:
         if self.use_env:
             env["HISUI_OBSWS_HOST"] = self.host
             env["HISUI_OBSWS_PORT"] = str(self.port)
+            env["HISUI_OBSWS_HTTP_LISTEN_ADDRESS"] = self.http_host
+            env["HISUI_OBSWS_HTTP_PORT"] = str(self.http_port)
             if self.password is not None:
                 env["HISUI_OBSWS_PASSWORD"] = self.password
         else:
-            cmd.extend(["--host", self.host, "--port", str(self.port)])
+            cmd.extend(
+                [
+                    "--host",
+                    self.host,
+                    "--port",
+                    str(self.port),
+                    "--http-listen-address",
+                    self.http_host,
+                    "--http-port",
+                    str(self.http_port),
+                ]
+            )
             if self.password is not None:
                 cmd.extend(["--password", self.password])
 
@@ -85,14 +107,24 @@ class ObswsServer:
                 raise AssertionError(
                     f"obsws process exited before listening: returncode={process.returncode}"
                 )
-            try:
-                with socket.create_connection((self.host, self.port), timeout=0.5):
-                    return
-            except OSError:
+            ws_ready = _is_port_open(self.host, self.port)
+            http_ready = _is_port_open(self.http_host, self.http_port)
+            if ws_ready and http_ready:
+                return
+            if not ws_ready or not http_ready:
                 time.sleep(0.1)
         raise AssertionError(
-            f"obsws server did not start listening in time: host={self.host}, port={self.port}"
+            "obsws server did not start listening in time: "
+            f"ws={self.host}:{self.port}, http={self.http_host}:{self.http_port}"
         )
+
+
+def _is_port_open(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
 
 
 async def _connect_websocket(url: str):
@@ -100,6 +132,13 @@ async def _connect_websocket(url: str):
     async with aiohttp.ClientSession(timeout=timeout) as session:
         ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
         await ws.close()
+
+
+async def _http_get(url: str):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as response:
+            return response.status, await response.text(), response.headers
 
 
 async def _connect_and_exchange_identify(url: str):
@@ -331,6 +370,73 @@ def test_obsws_accepts_websocket_connection_with_env_vars(binary_path: Path):
         use_env=True,
     ):
         asyncio.run(_connect_websocket(f"ws://{host}:{port}/"))
+
+
+def test_obsws_http_ok_endpoint(binary_path: Path):
+    """obsws が HTTP /.ok エンドポイントを公開することを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    http_port, http_sock = reserve_ephemeral_port()
+    http_sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=ws_port,
+        http_port=http_port,
+        use_env=False,
+    ) as server:
+        status, _, _ = asyncio.run(
+            _http_get(f"http://{server.http_host}:{server.http_port}/.ok")
+        )
+        assert status == 204
+
+
+def test_obsws_http_metrics_endpoint(binary_path: Path):
+    """obsws が HTTP /metrics エンドポイントを公開することを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    http_port, http_sock = reserve_ephemeral_port()
+    http_sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=ws_port,
+        http_port=http_port,
+        use_env=False,
+    ) as server:
+        status, body, headers = asyncio.run(
+            _http_get(f"http://{server.http_host}:{server.http_port}/metrics")
+        )
+        assert status == 200
+        assert headers.get("Content-Type") == "text/plain; version=0.0.4; charset=utf-8"
+        assert "# TYPE hisui_tokio_num_workers gauge" in body
+
+
+def test_obsws_http_metrics_json_endpoint(binary_path: Path):
+    """obsws が HTTP /metrics?format=json を返すことを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    http_port, http_sock = reserve_ephemeral_port()
+    http_sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=ws_port,
+        http_port=http_port,
+        use_env=False,
+    ) as server:
+        status, body, headers = asyncio.run(
+            _http_get(f"http://{server.http_host}:{server.http_port}/metrics?format=json")
+        )
+        assert status == 200
+        assert headers.get("Content-Type") == "application/json; charset=utf-8"
+        assert "\"name\":\"hisui_tokio_num_workers\"" in body
 
 
 def test_obsws_rejects_connection_without_subprotocol(binary_path: Path):

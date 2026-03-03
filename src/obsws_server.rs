@@ -1,10 +1,12 @@
+use std::io;
 use std::net::{IpAddr, SocketAddr};
 
+use shiguredo_http11::{RequestDecoder, Response};
 use shiguredo_websocket::{
     CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ServerConnectionOptions,
     WebSocketServerConnection,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::obsws_auth::ObswsAuthentication;
@@ -12,22 +14,83 @@ use crate::obsws_message_handler::ObswsSessionStats;
 use crate::obsws_protocol::OBSWS_SUBPROTOCOL;
 use crate::obsws_session::{ObswsSession, SessionAction};
 
-pub(crate) fn run_internal(host: IpAddr, port: u16, password: Option<String>) -> crate::Result<()> {
+/// クライアント切断かどうかを判定する
+fn is_client_disconnect(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+    )
+}
+
+fn request_path(uri: &str) -> &str {
+    uri.split_once('?').map_or(uri, |(path, _)| path)
+}
+
+pub(crate) fn run_internal(
+    ws_host: IpAddr,
+    ws_port: u16,
+    http_host: IpAddr,
+    http_port: u16,
+    password: Option<String>,
+) -> crate::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(crate::Error::from)?;
 
-    runtime.block_on(async move { run_server(host, port, password).await })
+    runtime
+        .block_on(async move { run_server(ws_host, ws_port, http_host, http_port, password).await })
 }
 
-async fn run_server(host: IpAddr, port: u16, password: Option<String>) -> crate::Result<()> {
-    let listen_addr = SocketAddr::new(host, port);
-    let listener = TcpListener::bind(listen_addr)
+async fn run_server(
+    ws_host: IpAddr,
+    ws_port: u16,
+    http_host: IpAddr,
+    http_port: u16,
+    password: Option<String>,
+) -> crate::Result<()> {
+    let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
+    let ws_listener = TcpListener::bind(ws_listen_addr)
         .await
-        .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
-    tracing::info!("obsws server listening on ws://{listen_addr}");
+        .map_err(|e| crate::Error::new(format!("failed to bind obsws websocket listener: {e}")))?;
+    tracing::info!("obsws server listening on ws://{ws_listen_addr}");
 
+    let http_listen_addr = SocketAddr::new(http_host, http_port);
+    let http_listener = TcpListener::bind(http_listen_addr)
+        .await
+        .map_err(|e| crate::Error::new(format!("failed to bind obsws http listener: {e}")))?;
+    tracing::info!("obsws http server listening on http://{http_listen_addr}");
+
+    // 将来の obsws processor 連携のため、現時点で MediaPipeline を初期化して起動する
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    tokio::spawn(pipeline.run());
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    if !started {
+        tracing::debug!("obsws initial start trigger was already completed");
+    }
+
+    let ws_task = tokio::spawn(run_ws_accept_loop(ws_listener, password));
+    let http_task = tokio::spawn(run_http_accept_loop(http_listener, pipeline_handle));
+
+    tokio::select! {
+        ws_result = ws_task => {
+            ws_result
+                .map_err(|e| crate::Error::new(format!("obsws websocket accept loop task failed: {e}")))?
+        }
+        http_result = http_task => {
+            http_result
+                .map_err(|e| crate::Error::new(format!("obsws http accept loop task failed: {e}")))?
+        }
+    }
+}
+
+async fn run_ws_accept_loop(listener: TcpListener, password: Option<String>) -> crate::Result<()> {
     loop {
         let (stream, peer_addr) = listener
             .accept()
@@ -35,14 +98,31 @@ async fn run_server(host: IpAddr, port: u16, password: Option<String>) -> crate:
             .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
         let password = password.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, peer_addr, password).await {
+            if let Err(e) = handle_ws_connection(stream, peer_addr, password).await {
                 tracing::warn!("obsws connection handler failed: {}", e.display());
             }
         });
     }
 }
 
-async fn handle_connection(
+async fn run_http_accept_loop(
+    listener: TcpListener,
+    pipeline_handle: crate::MediaPipelineHandle,
+) -> crate::Result<()> {
+    loop {
+        let (stream, peer_addr) = listener.accept().await.map_err(|e| {
+            crate::Error::new(format!("failed to accept obsws http connection: {e}"))
+        })?;
+        let pipeline_handle = pipeline_handle.clone();
+        tokio::spawn(async move {
+            if let Err(e) = handle_http_connection(stream, peer_addr, pipeline_handle).await {
+                tracing::warn!("obsws http connection handler failed from {peer_addr}: {e}");
+            }
+        });
+    }
+}
+
+async fn handle_ws_connection(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     password: Option<String>,
@@ -165,6 +245,51 @@ async fn handle_connection(
     Ok(())
 }
 
+async fn handle_http_connection(
+    stream: TcpStream,
+    peer_addr: SocketAddr,
+    pipeline_handle: crate::MediaPipelineHandle,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (reader, writer) = tokio::io::split(stream);
+    let mut reader = tokio::io::BufReader::with_capacity(8192, reader);
+    let mut writer = BufWriter::with_capacity(65536, writer);
+    let mut decoder = RequestDecoder::new();
+    let mut buf = [0_u8; 8192];
+
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        decoder.feed(&buf[..n])?;
+
+        while let Some(request) = decoder.decode()? {
+            let keep_alive = request.is_keep_alive();
+            let response = match request_path(request.uri.as_str()) {
+                "/.ok" => Response::new(204, "No Content"),
+                "/metrics" => {
+                    crate::endpoint_http_metrics::handle_request(&request, &pipeline_handle).await
+                }
+                _ => Response::new(404, "Not Found"),
+            };
+
+            if let Err(e) = write_response(&mut writer, &response).await {
+                if is_client_disconnect(&e) {
+                    tracing::warn!("obsws http 499 Client Closed Request from {peer_addr}");
+                    return Ok(());
+                }
+                return Err(e.into());
+            }
+
+            if !keep_alive {
+                return Ok(());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn apply_session_action(
     ws: &mut WebSocketServerConnection,
     action: SessionAction,
@@ -221,4 +346,14 @@ async fn flush_connection_output(
     }
 
     Ok(true)
+}
+
+/// レスポンスを downstream に書き込む
+async fn write_response(
+    writer: &mut BufWriter<impl tokio::io::AsyncWrite + Unpin>,
+    response: &Response,
+) -> io::Result<()> {
+    writer.write_all(&response.encode()).await?;
+    writer.flush().await?;
+    Ok(())
 }
