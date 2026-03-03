@@ -39,6 +39,73 @@ jobs:
       - run: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox -- --deny warnings
       - run: cargo test --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_audio_toolbox
 
+  shiguredo-opus-symbol-rewrite:
+    name: "shiguredo_opus Symbol Rewrite"
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+          - os: macos-14
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable
+      - run: rustup component add llvm-tools
+      - name: Install packages to build external dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+      - name: Install packages to build external dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew update
+          brew install cmake ninja
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.os }}
+          toolchain: stable
+      - run: cargo check -p shiguredo_opus
+      - run: cargo test -p shiguredo_opus
+      - name: Verify rewritten symbols
+        shell: bash
+        run: |
+          latest_output=$(ls -1t target/debug/build/shiguredo_opus-*/output | head -n 1)
+          link_search=$(grep '^cargo::rustc-link-search' "$latest_output" | tail -n 1 | sed 's/^cargo::rustc-link-search=//; s/^native=//')
+          if [ -f "$link_search/libopus.a" ]; then
+            lib_path="$link_search/libopus.a"
+          elif [ -f "$link_search/opus.lib" ]; then
+            lib_path="$link_search/opus.lib"
+          else
+            echo "failed to find static opus library under $link_search"
+            exit 1
+          fi
+
+          host_triple=$(rustc -vV | awk '/^host:/{print $2}')
+          sysroot=$(rustc --print sysroot)
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            llvm_nm="$sysroot/lib/rustlib/$host_triple/bin/llvm-nm.exe"
+          else
+            llvm_nm="$sysroot/lib/rustlib/$host_triple/bin/llvm-nm"
+          fi
+
+          "$llvm_nm" --defined-only --extern-only --format=just-symbols "$lib_path" > symbols.txt
+          cat symbols.txt
+
+          grep -Eq '^(_)?shiguredo_opus_encode_pulses$' symbols.txt
+          grep -Eq '^(_)?shiguredo_opus_PITCH_XCORR_IMPL$' symbols.txt
+
+          if grep -Eq '^(_)?encode_pulses$' symbols.txt; then
+            echo "original symbol encode_pulses is still present"
+            exit 1
+          fi
+          if grep -Eq '^(_)?PITCH_XCORR_IMPL$' symbols.txt; then
+            echo "original symbol PITCH_XCORR_IMPL is still present"
+            exit 1
+          fi
+
   test-nvidia-video-codec:
     runs-on:
       group: Self
@@ -292,6 +359,7 @@ jobs:
   slack_notify:
     needs:
       - ci
+      - shiguredo-opus-symbol-rewrite
       - test-nvidia-video-codec
       - test-apple-toolbox
       - test-fdk-aac
