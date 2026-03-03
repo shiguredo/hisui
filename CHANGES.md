@@ -123,6 +123,20 @@
   - @sile
 - [ADD] 依存ライブラリに shiguredo_webrtc 0.145.2 を追加する
   - @sile
+- [ADD] 実験的な `obsws` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
+  - `hisui obsws` で WebSocket サーバーを起動できる
+  - `obswebsocket.json` サブプロトコルでの接続を受け付ける
+  - `Hello (op=0)` / `Identify (op=1)` / `Identified (op=2)` を処理できる
+  - challenge / salt ベースの password 認証に対応する
+  - `Request (op=6)` / `RequestResponse (op=7)` を処理できる
+  - `GetVersion` / `GetStats` / `GetCanvasList` の RequestType に対応する
+  - 未対応 RequestType は `Unknown request type` のエラーで応答する
+  - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
+  - @sile
+- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0-canary.4 を追加する
+  - @sile
+- [ADD] 依存ライブラリに base64 0.22.1 を追加する
+  - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
   - @sile
 - [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
