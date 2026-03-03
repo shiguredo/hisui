@@ -1,6 +1,4 @@
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use base64::Engine as _;
@@ -68,7 +66,6 @@ fn run_internal(host: IpAddr, port: u16, password: Option<String>) -> crate::Res
 }
 
 async fn run_server(host: IpAddr, port: u16, password: Option<String>) -> crate::Result<()> {
-    let server_state = Arc::new(ObswsServerState::new());
     let listen_addr = SocketAddr::new(host, port);
     let listener = TcpListener::bind(listen_addr)
         .await
@@ -81,9 +78,8 @@ async fn run_server(host: IpAddr, port: u16, password: Option<String>) -> crate:
             .await
             .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
         let password = password.clone();
-        let server_state = Arc::clone(&server_state);
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, peer_addr, password, server_state).await {
+            if let Err(e) = handle_connection(stream, peer_addr, password).await {
                 tracing::warn!("obsws connection handler failed: {}", e.display());
             }
         });
@@ -94,7 +90,6 @@ async fn handle_connection(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     password: Option<String>,
-    server_state: Arc<ObswsServerState>,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
@@ -109,7 +104,6 @@ async fn handle_connection(
         .map(ObswsAuthentication::new)
         .transpose()?;
     let mut session_stats = ObswsSessionStats::new();
-    let mut counted_connection = false;
 
     loop {
         let n = stream
@@ -150,15 +144,6 @@ async fn handle_connection(
                     protocol,
                     extensions,
                 } => {
-                    if !counted_connection {
-                        counted_connection = true;
-                        server_state
-                            .current_connections
-                            .fetch_add(1, Ordering::Relaxed);
-                        server_state
-                            .total_connections
-                            .fetch_add(1, Ordering::Relaxed);
-                    }
                     tracing::info!(
                         "obsws websocket connected: peer={peer_addr}, protocol={protocol:?}, extensions={extensions:?}"
                     );
@@ -220,12 +205,7 @@ async fn handle_connection(
                                 continue;
                             }
 
-                            server_state.total_requests.fetch_add(1, Ordering::Relaxed);
-                            let response =
-                                handle_request_message(request, &session_stats, &server_state);
-                            if !response.is_success {
-                                server_state.failed_requests.fetch_add(1, Ordering::Relaxed);
-                            }
+                            let response = handle_request_message(request, &session_stats);
                             send_ws_text(
                                 &mut ws,
                                 &response.message,
@@ -271,14 +251,6 @@ async fn handle_connection(
     }
 
     let _ = stream.shutdown().await;
-    if counted_connection {
-        server_state
-            .current_connections
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                Some(value.saturating_sub(1))
-            })
-            .ok();
-    }
     tracing::debug!("obsws peer disconnected: {peer_addr}");
     Ok(())
 }
@@ -337,7 +309,6 @@ struct RequestMessage {
 
 #[derive(Debug, Clone)]
 struct ObswsSessionStats {
-    connected_at: Instant,
     incoming_messages: u64,
     outgoing_messages: u64,
 }
@@ -345,30 +316,8 @@ struct ObswsSessionStats {
 impl ObswsSessionStats {
     fn new() -> Self {
         Self {
-            connected_at: Instant::now(),
             incoming_messages: 0,
             outgoing_messages: 0,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct ObswsServerState {
-    started_at: Instant,
-    current_connections: AtomicU64,
-    total_connections: AtomicU64,
-    total_requests: AtomicU64,
-    failed_requests: AtomicU64,
-}
-
-impl ObswsServerState {
-    fn new() -> Self {
-        Self {
-            started_at: Instant::now(),
-            current_connections: AtomicU64::new(0),
-            total_connections: AtomicU64::new(0),
-            total_requests: AtomicU64::new(0),
-            failed_requests: AtomicU64::new(0),
         }
     }
 }
@@ -376,7 +325,6 @@ impl ObswsServerState {
 #[derive(Debug, Clone)]
 struct RequestResponsePayload {
     message: String,
-    is_success: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -481,7 +429,6 @@ fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
 fn handle_request_message(
     request: RequestMessage,
     session_stats: &ObswsSessionStats,
-    server_state: &ObswsServerState,
 ) -> RequestResponsePayload {
     let request_id = request.request_id.unwrap_or_default();
     let request_type = request.request_type.unwrap_or_default();
@@ -493,7 +440,6 @@ fn handle_request_message(
                 REQUEST_STATUS_MISSING_REQUEST_FIELD,
                 "Missing required requestId field",
             ),
-            is_success: false,
         };
     }
 
@@ -505,13 +451,12 @@ fn handle_request_message(
                 REQUEST_STATUS_MISSING_REQUEST_TYPE,
                 "Missing required requestType field",
             ),
-            is_success: false,
         };
     }
 
     let message = match request_type.as_str() {
         "GetVersion" => build_get_version_response(&request_id),
-        "GetStats" => build_get_stats_response(&request_id, session_stats, server_state),
+        "GetStats" => build_get_stats_response(&request_id, session_stats),
         "GetCanvasList" => build_get_canvas_list_response(&request_id),
         _ => build_request_response_error(
             &request_type,
@@ -520,12 +465,7 @@ fn handle_request_message(
             "Unknown request type",
         ),
     };
-    RequestResponsePayload {
-        is_success: request_type == "GetVersion"
-            || request_type == "GetStats"
-            || request_type == "GetCanvasList",
-        message,
-    }
+    RequestResponsePayload { message }
 }
 
 fn generate_random_base64(len: usize) -> crate::Result<String> {
@@ -627,17 +567,7 @@ fn build_get_version_response(request_id: &str) -> String {
     .to_string()
 }
 
-fn build_get_stats_response(
-    request_id: &str,
-    session_stats: &ObswsSessionStats,
-    server_state: &ObswsServerState,
-) -> String {
-    let session_uptime_sec = session_stats.connected_at.elapsed().as_secs_f64();
-    let server_uptime_sec = server_state.started_at.elapsed().as_secs_f64();
-    let current_connections = server_state.current_connections.load(Ordering::Relaxed);
-    let total_connections = server_state.total_connections.load(Ordering::Relaxed);
-    let total_requests = server_state.total_requests.load(Ordering::Relaxed);
-    let failed_requests = server_state.failed_requests.load(Ordering::Relaxed);
+fn build_get_stats_response(request_id: &str, session_stats: &ObswsSessionStats) -> String {
     let outgoing_messages = session_stats.outgoing_messages.saturating_add(1);
 
     nojson::object(|f| {
@@ -670,13 +600,7 @@ fn build_get_stats_response(
                             "webSocketSessionIncomingMessages",
                             session_stats.incoming_messages,
                         )?;
-                        f.member("webSocketSessionOutgoingMessages", outgoing_messages)?;
-                        f.member("hisuiSessionUptimeSec", session_uptime_sec)?;
-                        f.member("hisuiServerUptimeSec", server_uptime_sec)?;
-                        f.member("hisuiCurrentConnections", current_connections)?;
-                        f.member("hisuiTotalConnections", total_connections)?;
-                        f.member("hisuiTotalRequests", total_requests)?;
-                        f.member("hisuiFailedRequests", failed_requests)
+                        f.member("webSocketSessionOutgoingMessages", outgoing_messages)
                     }),
                 )
             }),
@@ -861,9 +785,7 @@ mod tests {
             request_type: Some("GetVersion".to_owned()),
         };
         let session_stats = ObswsSessionStats::new();
-        let server_state = ObswsServerState::new();
-        let response = handle_request_message(request, &session_stats, &server_state);
-        assert!(response.is_success);
+        let response = handle_request_message(request, &session_stats);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let op: i64 = json.value().to_member("op")?.required()?.try_into()?;
@@ -879,9 +801,7 @@ mod tests {
             request_type: Some("UnknownRequest".to_owned()),
         };
         let session_stats = ObswsSessionStats::new();
-        let server_state = ObswsServerState::new();
-        let response = handle_request_message(request, &session_stats, &server_state);
-        assert!(!response.is_success);
+        let response = handle_request_message(request, &session_stats);
 
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
