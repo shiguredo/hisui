@@ -96,15 +96,15 @@ jobs:
           "$llvm_nm" --defined-only --extern-only --format=just-symbols "$lib_path" > symbols.txt
           cat symbols.txt
 
-          grep -Eq '^(_)?shiguredo_opus_encode_pulses$' symbols.txt
-          grep -Eq '^(_)?shiguredo_opus_PITCH_XCORR_IMPL$' symbols.txt
+          grep -Eq '^(_)?shiguredo_opus_opus_encode$' symbols.txt
+          grep -Eq '^(_)?shiguredo_opus_clt_compute_allocation$' symbols.txt
 
-          if grep -Eq '^(_)?encode_pulses$' symbols.txt; then
-            echo "original symbol encode_pulses is still present"
+          if grep -Eq '^(_)?opus_encode$' symbols.txt; then
+            echo "original symbol opus_encode is still present"
             exit 1
           fi
-          if grep -Eq '^(_)?PITCH_XCORR_IMPL$' symbols.txt; then
-            echo "original symbol PITCH_XCORR_IMPL is still present"
+          if grep -Eq '^(_)?clt_compute_allocation$' symbols.txt; then
+            echo "original symbol clt_compute_allocation is still present"
             exit 1
           fi
 

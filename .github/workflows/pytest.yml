@@ -48,6 +48,7 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
+          rustup component add llvm-tools
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7

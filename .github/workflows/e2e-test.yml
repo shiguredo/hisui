@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update

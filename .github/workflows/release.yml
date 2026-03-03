@@ -76,6 +76,7 @@ jobs:
 
       - run: rustup update stable
       - run: rustup default stable
+      - run: rustup component add llvm-tools
 
       # x86_64 では nvcodec feature を有効化
       - name: Build with NVCODEC (x86_64)
@@ -124,6 +125,7 @@ jobs:
 
       - run: rustup update stable
       - run: rustup default stable
+      - run: rustup component add llvm-tools
       - name: Install packages to build external dependencies
         run: |
           brew update
