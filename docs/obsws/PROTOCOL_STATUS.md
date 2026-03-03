@@ -8,7 +8,7 @@
 ## 目的
 
 - `obs-websocket` 互換機能の実装状況を 1 つのファイルで管理する
-- PoC 段階でも、対応済み / 未対応 / 対象外を明確にする
+- 対応済み / 未対応 / 対象外を明確にする
 - 次に実装する機能の優先順位を明確にする
 
 ## ステータス定義
@@ -37,7 +37,7 @@
 - [ ] Event 配信（ `op=5` ）: サーバーイベントを push 配信する
 - [ ] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
 
-## RequestType 実装状況（ protocol.md 網羅 ）
+## RequestType 実装状況
 
 ### General
 
@@ -54,7 +54,7 @@
   - [x] `outputTotalFrames`: 出力総フレーム数を返す
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
-  - NOTE: OBS 互換の統計項目のうち一部は PoC として固定値を返している
+  - NOTE: OBS 互換の統計項目のうち一部は現状固定値を返している
 - [ ] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [ ] `CallVendorRequest`: ベンダー拡張リクエストを実行する
 - [ ] `GetHotkeyList`: ホットキー一覧を取得する
@@ -91,7 +91,7 @@
 ### Canvases
 
 - [x] `GetCanvasList`: 利用可能なキャンバス一覧を返す
-  - NOTE: PoC として単一キャンバス（ `hisui-main` ）を返す
+  - NOTE: 現状は単一キャンバス（ `hisui-main` ）を返す
 
 ### Scenes
 
@@ -243,7 +243,7 @@
 
 ## 実装対象外
 
-- [ ] MessagePack: WebSocket の MessagePack サブプロトコル対応
+- MessagePack: WebSocket の MessagePack サブプロトコル対応
   - NOTE: 現状は `obswebsocket.json` のみを対象とする
 
 ## 未対応 Request の扱い
