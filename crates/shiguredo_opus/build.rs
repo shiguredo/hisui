@@ -98,7 +98,7 @@ fn main() {
 
     // バインディングを生成する
     let callbacks = SymbolLinkNameCallbacks {
-        canonical_rename_map: symbol_maps.canonical_to_canonical_renamed,
+        canonical_link_name_map: symbol_maps.canonical_to_link_name,
     };
     bindgen::Builder::default()
         .header(input_header_path.to_str().expect("invalid header path"))
@@ -117,14 +117,14 @@ fn main() {
 
 #[derive(Debug)]
 struct SymbolLinkNameCallbacks {
-    canonical_rename_map: BTreeMap<String, String>,
+    canonical_link_name_map: BTreeMap<String, String>,
 }
 
 impl ParseCallbacks for SymbolLinkNameCallbacks {
     fn generated_link_name_override(&self, item_info: ItemInfo<'_>) -> Option<String> {
         match item_info.kind {
             ItemKind::Function | ItemKind::Var => {
-                self.canonical_rename_map.get(item_info.name).cloned()
+                self.canonical_link_name_map.get(item_info.name).cloned()
             }
             _ => None,
         }
@@ -140,7 +140,7 @@ struct LlvmTools {
 #[derive(Debug)]
 struct SymbolRenameMaps {
     raw_to_raw_renamed: BTreeMap<String, String>,
-    canonical_to_canonical_renamed: BTreeMap<String, String>,
+    canonical_to_link_name: BTreeMap<String, String>,
 }
 
 // 外部ライブラリのリポジトリを git clone する
@@ -286,7 +286,7 @@ fn collect_defined_external_symbols(nm_path: &Path, archive_path: &Path) -> BTre
 // raw シンボル名（objcopy 用）と canonical シンボル名（bindgen 用）のリネームマップを生成する
 fn build_symbol_rename_maps(raw_symbols: BTreeSet<String>, is_macos: bool) -> SymbolRenameMaps {
     let mut raw_to_raw_renamed = BTreeMap::new();
-    let mut canonical_to_canonical_renamed = BTreeMap::new();
+    let mut canonical_to_link_name = BTreeMap::new();
 
     for raw_symbol in raw_symbols {
         let canonical_symbol = canonical_symbol_name(&raw_symbol, is_macos);
@@ -305,11 +305,11 @@ fn build_symbol_rename_maps(raw_symbols: BTreeSet<String>, is_macos: bool) -> Sy
             canonical_renamed_symbol.clone()
         };
 
-        raw_to_raw_renamed.insert(raw_symbol, raw_renamed_symbol);
+        raw_to_raw_renamed.insert(raw_symbol, raw_renamed_symbol.clone());
 
-        if let Some(previous) = canonical_to_canonical_renamed
-            .insert(canonical_symbol.clone(), canonical_renamed_symbol.clone())
-            && previous != canonical_renamed_symbol
+        if let Some(previous) =
+            canonical_to_link_name.insert(canonical_symbol.clone(), raw_renamed_symbol.clone())
+            && previous != raw_renamed_symbol
         {
             panic!("duplicate canonical symbol mapping detected for {canonical_symbol}");
         }
@@ -317,7 +317,7 @@ fn build_symbol_rename_maps(raw_symbols: BTreeSet<String>, is_macos: bool) -> Sy
 
     SymbolRenameMaps {
         raw_to_raw_renamed,
-        canonical_to_canonical_renamed,
+        canonical_to_link_name,
     }
 }
 
