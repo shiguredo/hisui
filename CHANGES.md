@@ -40,7 +40,6 @@
   - JSON-RPC に `updateVideoMixer` メソッドを追加する
   - `processorId` / `canvasWidth` / `canvasHeight` / `frameRate` / `inputTracks` を指定して設定を全置換できる
   - レスポンスで `previousCanvasWidth` / `previousCanvasHeight` / `previousFrameRate` / `previousInputTracks` を取得できる
-  - `updateVideoMixerInputs` は後方互換のため継続サポートする
   - @sile
 - [ADD] server サブコマンドの JSON-RPC で Audio encoder を作成できるようにする
   - JSON-RPC に `createAudioEncoder` メソッドを追加する

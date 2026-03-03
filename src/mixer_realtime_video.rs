@@ -187,10 +187,6 @@ pub enum VideoRealtimeMixerRpcMessage {
         request: VideoRealtimeMixerUpdateConfigRequest,
         reply_tx: tokio::sync::oneshot::Sender<crate::Result<VideoRealtimeMixerUpdateConfigResult>>,
     },
-    UpdateInputs {
-        input_tracks: Vec<InputTrack>,
-        reply_tx: tokio::sync::oneshot::Sender<crate::Result<VideoRealtimeMixerUpdateInputsResult>>,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -229,11 +225,6 @@ pub struct VideoRealtimeMixerUpdateConfigResult {
     pub previous_canvas_width: usize,
     pub previous_canvas_height: usize,
     pub previous_frame_rate: FrameRate,
-    pub previous_input_tracks: Vec<InputTrack>,
-}
-
-#[derive(Debug, Clone)]
-pub struct VideoRealtimeMixerUpdateInputsResult {
     pub previous_input_tracks: Vec<InputTrack>,
 }
 
@@ -393,33 +384,9 @@ impl VideoRealtimeMixerRunner {
                 let result = self.update_config(request);
                 let _ = reply_tx.send(result);
             }
-            VideoRealtimeMixerRpcMessage::UpdateInputs {
-                input_tracks,
-                reply_tx,
-            } => {
-                let result = self.update_inputs(input_tracks);
-                let _ = reply_tx.send(result);
-            }
         }
 
         Ok(())
-    }
-
-    fn update_inputs(
-        &mut self,
-        input_tracks: Vec<InputTrack>,
-    ) -> crate::Result<VideoRealtimeMixerUpdateInputsResult> {
-        let result = self.update_config(VideoRealtimeMixerUpdateConfigRequest {
-            canvas_width: EvenUsize::new(self.canvas_width)
-                .expect("BUG: current canvas width must remain even"),
-            canvas_height: EvenUsize::new(self.canvas_height)
-                .expect("BUG: current canvas height must remain even"),
-            frame_rate: self.frame_rate,
-            input_tracks,
-        })?;
-        Ok(VideoRealtimeMixerUpdateInputsResult {
-            previous_input_tracks: result.previous_input_tracks,
-        })
     }
 
     fn update_config(

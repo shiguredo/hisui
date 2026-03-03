@@ -103,10 +103,6 @@ impl MediaPipelineHandle {
             }
             "createVideoMixer" => self.handle_create_video_mixer_rpc(maybe_params).await,
             "updateVideoMixer" => self.handle_update_video_mixer_rpc(maybe_params).await,
-            "updateVideoMixerInputs" => {
-                self.handle_update_video_mixer_inputs_rpc(maybe_params)
-                    .await
-            }
             "createRtmpPublisher" => self.handle_create_rtmp_publisher_rpc(maybe_params).await,
             "createRtmpInboundEndpoint" => {
                 self.handle_create_rtmp_inbound_endpoint_rpc(maybe_params)
@@ -679,71 +675,6 @@ impl MediaPipelineHandle {
         Ok(RpcSuccessResult::CreateVideoMixer { processor_id })
     }
 
-    async fn handle_update_video_mixer_inputs_rpc(
-        &self,
-        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
-    ) -> Result<RpcSuccessResult, RpcError> {
-        let (processor_id, input_tracks): (
-            ProcessorId,
-            Vec<crate::mixer_realtime_video::InputTrack>,
-        ) = parse_params(maybe_params, |params| {
-            let processor_id = params.to_member("processorId")?.required()?.try_into()?;
-            let input_tracks = params.to_member("inputTracks")?.required()?.try_into()?;
-            Ok((processor_id, input_tracks))
-        })?;
-
-        let sender = self
-            .get_rpc_sender::<
-                tokio::sync::mpsc::UnboundedSender<
-                    crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage,
-                >,
-            >(&processor_id)
-            .await
-            .map_err(|e| match e {
-                crate::media_pipeline::GetProcessorRpcSenderError::PipelineTerminated => {
-                    internal_error("Internal error: pipeline has terminated".to_owned())
-                }
-                crate::media_pipeline::GetProcessorRpcSenderError::ProcessorNotFound => {
-                    invalid_params(format!(
-                        "Invalid params: processorId not found: {processor_id}"
-                    ))
-                }
-                crate::media_pipeline::GetProcessorRpcSenderError::SenderNotRegistered => {
-                    invalid_params(format!(
-                        "Invalid params: processor does not support video mixer input updates: {processor_id}"
-                    ))
-                }
-                crate::media_pipeline::GetProcessorRpcSenderError::TypeMismatch => invalid_params(
-                    format!(
-                        "Invalid params: processor does not support video mixer input updates: {processor_id}"
-                    ),
-                ),
-            })?;
-
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        sender
-            .send(
-                crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage::UpdateInputs {
-                    input_tracks,
-                    reply_tx,
-                },
-            )
-            .map_err(|_| {
-                internal_error(
-                    "Internal error: video mixer RPC sender channel is closed".to_owned(),
-                )
-            })?;
-        let result = reply_rx.await.map_err(|_| {
-            internal_error("Internal error: video mixer RPC response channel is closed".to_owned())
-        })?;
-        let result =
-            result.map_err(|e| invalid_params(format!("Invalid params: {}", e.display())))?;
-
-        Ok(RpcSuccessResult::UpdateVideoMixerInputs {
-            previous_input_tracks: result.previous_input_tracks,
-        })
-    }
-
     async fn handle_update_video_mixer_rpc(
         &self,
         maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
@@ -1138,9 +1069,6 @@ enum RpcSuccessResult {
         previous_frame_rate: crate::video::FrameRate,
         previous_input_tracks: Vec<crate::mixer_realtime_video::InputTrack>,
     },
-    UpdateVideoMixerInputs {
-        previous_input_tracks: Vec<crate::mixer_realtime_video::InputTrack>,
-    },
     CreateRtmpPublisher {
         processor_id: ProcessorId,
     },
@@ -1226,9 +1154,6 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.member("previousFrameRate", *previous_frame_rate)?;
                 f.member("previousInputTracks", previous_input_tracks)
             }),
-            Self::UpdateVideoMixerInputs {
-                previous_input_tracks,
-            } => f.object(|f| f.member("previousInputTracks", previous_input_tracks)),
             Self::CreateRtmpPublisher { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
@@ -2840,6 +2765,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removed_update_video_mixer_inputs_returns_method_not_found() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"updateVideoMixerInputs","params":{"processorId":"video-mixer","inputTracks":[]}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::METHOD_NOT_FOUND
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
     async fn update_video_mixer_returns_previous_config() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let processor_id = "updatable-video-mixer-config";
@@ -2881,91 +2828,6 @@ mod tests {
             result_previous_frame_rate(&update_response).expect("parse previousFrameRate"),
             "30"
         );
-        assert_eq!(
-            result_previous_input_track_ids(&update_response).expect("parse previousInputTracks"),
-            vec!["video-input-track".to_owned()]
-        );
-
-        drop(handle);
-        pipeline_task.abort();
-        let _ = pipeline_task.await;
-    }
-
-    #[tokio::test]
-    async fn update_video_mixer_inputs_requires_params() {
-        let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"updateVideoMixerInputs"}"#;
-
-        let response = handle
-            .rpc(request.as_bytes())
-            .await
-            .expect("response must exist");
-
-        assert_eq!(
-            error_code(&response).expect("parse error.code"),
-            crate::jsonrpc::INVALID_PARAMS
-        );
-
-        drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
-    }
-
-    #[tokio::test]
-    async fn update_video_mixer_inputs_rejects_unknown_processor_id() {
-        let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let request = update_video_mixer_inputs_request(
-            "unknown-video-mixer",
-            &[("video-a", 0, 0, 0, None, None)],
-        );
-
-        let response = handle
-            .rpc(request.as_bytes())
-            .await
-            .expect("response must exist");
-
-        assert_eq!(
-            error_code(&response).expect("parse error.code"),
-            crate::jsonrpc::INVALID_PARAMS
-        );
-
-        drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
-    }
-
-    #[tokio::test]
-    async fn update_video_mixer_inputs_returns_previous_input_tracks() {
-        // spawn_test_pipeline() は内部で trigger_start() を実行済み。
-        let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let processor_id = "updatable-video-mixer";
-        let create_request =
-            create_video_mixer_request("video-mixer-update-output", Some(processor_id));
-        let create_response = handle
-            .rpc(create_request.as_bytes())
-            .await
-            .expect("response must exist");
-        assert_eq!(
-            result_processor_id(&create_response).expect("parse result.processorId"),
-            processor_id
-        );
-
-        let update_request = update_video_mixer_inputs_request(
-            processor_id,
-            &[
-                ("video-input-a", 0, 0, 0, None, None),
-                ("video-input-b", 100, 50, 1, Some(320), Some(180)),
-            ],
-        );
-        let update_response = handle
-            .rpc(update_request.as_bytes())
-            .await
-            .expect("response must exist");
-
         assert_eq!(
             result_previous_input_track_ids(&update_response).expect("parse previousInputTracks"),
             vec!["video-input-track".to_owned()]
@@ -4664,30 +4526,6 @@ mod tests {
             .join(",");
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"updateAudioMixerInputs","params":{{"processorId":"{processor_id}","inputTracks":[{input_tracks_json}]}}}}"#
-        )
-    }
-
-    fn update_video_mixer_inputs_request(
-        processor_id: &str,
-        input_tracks: &[VideoMixerInputTrackSpec<'_>],
-    ) -> String {
-        let input_tracks_json = input_tracks
-            .iter()
-            .map(|(track_id, x, y, z, width, height)| {
-                let width_part = width
-                    .map(|value| format!(r#","width":{value}"#))
-                    .unwrap_or_default();
-                let height_part = height
-                    .map(|value| format!(r#","height":{value}"#))
-                    .unwrap_or_default();
-                format!(
-                    r#"{{"trackId":"{track_id}","x":{x},"y":{y},"z":{z}{width_part}{height_part}}}"#
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"updateVideoMixerInputs","params":{{"processorId":"{processor_id}","inputTracks":[{input_tracks_json}]}}}}"#
         )
     }
 
