@@ -42,6 +42,8 @@
 ### General
 
 - [x] `GetVersion`: サーバーのバージョン情報と対応 Request 一覧を返す
+  - [x] `availableRequests`: 対応 RequestType 一覧を返す
+  - [x] `supportedImageFormats`: 対応画像フォーマット一覧を返す
 - [x] `GetStats`: 実行統計情報を返す
   - [ ] `cpuUsage`: CPU 使用率を返す（ 現状は `0.0` 固定 ）
   - [ ] `memoryUsage`: メモリ使用量を返す（ 現状は `0.0` 固定 ）

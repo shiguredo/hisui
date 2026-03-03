@@ -20,6 +20,9 @@ const OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION: CloseCode = CloseCode(4006);
 const OBSWS_CLOSE_NOT_IDENTIFIED: CloseCode = CloseCode(4007);
 const OBSWS_CLOSE_ALREADY_IDENTIFIED: CloseCode = CloseCode(4008);
 const OBSWS_CLOSE_AUTHENTICATION_FAILED: CloseCode = CloseCode(4009);
+const OBSWS_SUPPORTED_IMAGE_FORMATS: [&str; 9] = [
+    "bmp", "cur", "heic", "jpeg", "jpg", "jxl", "png", "tga", "webp",
+];
 const AUTH_RANDOM_BYTE_LEN: usize = 32;
 const REQUEST_STATUS_SUCCESS: i64 = 100;
 const REQUEST_STATUS_MISSING_REQUEST_TYPE: i64 = 203;
@@ -531,6 +534,7 @@ fn build_get_version_response(request_id: &str) -> String {
                             "availableRequests",
                             ["GetVersion", "GetStats", "GetCanvasList"],
                         )?;
+                        f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
                         f.member("platform", std::env::consts::OS)?;
                         f.member(
                             "platformDescription",
@@ -784,7 +788,18 @@ mod tests {
 
         let json = nojson::RawJson::parse(&response.message)?;
         let op: i64 = json.value().to_member("op")?.required()?.try_into()?;
+        let response_data = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("responseData")?
+            .required()?;
+        let supported_image_formats: Vec<String> = response_data
+            .to_member("supportedImageFormats")?
+            .required()?
+            .try_into()?;
         assert_eq!(op, OBSWS_OP_REQUEST_RESPONSE);
+        assert!(supported_image_formats.iter().any(|f| f == "png"));
         Ok(())
     }
 

@@ -395,6 +395,9 @@ def test_obsws_get_version_request(binary_path: Path):
         response_data = response["d"]["responseData"]
         assert response_data["rpcVersion"] == 1
         assert "GetVersion" in response_data["availableRequests"]
+        supported_image_formats = response_data["supportedImageFormats"]
+        assert isinstance(supported_image_formats, list)
+        assert "png" in supported_image_formats
 
 
 def test_obsws_get_stats_request(binary_path: Path):
