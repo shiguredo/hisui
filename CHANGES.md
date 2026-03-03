@@ -133,6 +133,10 @@
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
   - @sile
+- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0-canary.4 を追加する
+  - @sile
+- [ADD] 依存ライブラリに base64 0.22.1 を追加する
+  - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
   - @sile
 - [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
