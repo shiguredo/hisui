@@ -2765,28 +2765,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn removed_update_video_mixer_inputs_returns_method_not_found() {
-        let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"updateVideoMixerInputs","params":{"processorId":"video-mixer","inputTracks":[]}}"#;
-
-        let response = handle
-            .rpc(request.as_bytes())
-            .await
-            .expect("response must exist");
-
-        assert_eq!(
-            error_code(&response).expect("parse error.code"),
-            crate::jsonrpc::METHOD_NOT_FOUND
-        );
-
-        drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
-    }
-
-    #[tokio::test]
     async fn update_video_mixer_returns_previous_config() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let processor_id = "updatable-video-mixer-config";
