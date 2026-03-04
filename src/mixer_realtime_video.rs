@@ -835,9 +835,11 @@ impl RealtimeI420Canvas {
 
         for row in 0..copy_uv_height {
             for col in 0..copy_uv_width {
-                let src_index = (src_uv_y0 + row) * src_uv_width + (src_uv_x0 + col);
+                let src_uv_x = src_uv_x0 + col;
+                let src_uv_y = src_uv_y0 + row;
+                let src_index = src_uv_y * src_uv_width + src_uv_x;
                 let dst_index = (dst_uv_y0 + row) * dst_uv_width + (dst_uv_x0 + col);
-                let alpha = src_a.map(|a| a[src_index]).unwrap_or(u8::MAX);
+                let alpha = alpha_for_chroma(src_a, size.width, src_uv_x, src_uv_y);
 
                 self.u_plane[dst_index] =
                     blend_component(src_u[src_index], self.u_plane[dst_index], alpha);
@@ -863,9 +865,22 @@ fn alpha_for_luma(src_a: Option<&[u8]>, src_width: usize, src_x: usize, src_y: u
     let Some(src_a) = src_a else {
         return u8::MAX;
     };
-    let src_uv_width = src_width.div_ceil(2);
-    let index = (src_y / 2) * src_uv_width + (src_x / 2);
+    let index = src_y * src_width + src_x;
     src_a[index]
+}
+
+fn alpha_for_chroma(
+    src_a: Option<&[u8]>,
+    src_width: usize,
+    src_uv_x: usize,
+    src_uv_y: usize,
+) -> u8 {
+    let Some(src_a) = src_a else {
+        return u8::MAX;
+    };
+    let src_x = src_uv_x * 2;
+    let src_y = src_uv_y * 2;
+    src_a[src_y * src_width + src_x]
 }
 
 fn blend_component(src: u8, dst: u8, alpha: u8) -> u8 {
@@ -1611,7 +1626,7 @@ mod tests {
                 height: 2,
             }),
             timestamp,
-            data: vec![y, y, y, y, 200, 200, alpha],
+            data: vec![y, y, y, y, 200, 200, alpha, alpha, alpha, alpha],
         }
     }
 

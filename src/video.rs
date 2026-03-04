@@ -87,15 +87,31 @@ impl RawVideoFrame {
 
     pub fn as_i420_planes(&self) -> crate::Result<I420Planes<'_>> {
         let frame = self.as_video_frame();
-        if frame.format != VideoFormat::I420 {
-            return Err(crate::Error::new(format!(
-                "expected I420 format, got {:?}",
+        match frame.format {
+            VideoFormat::I420 => frame
+                .as_yuv_planes()
+                .ok_or_else(|| crate::Error::new("invalid I420 frame data")),
+            VideoFormat::I420A => {
+                let size = frame
+                    .size()
+                    .ok_or_else(|| crate::Error::new("video frame size is required"))?;
+                let width = size.width;
+                let height = size.height;
+                let (y_size, uv_size, _) = VideoFrame::i420_plane_sizes(width, height);
+                if frame.data.len() < VideoFrame::i420a_total_size(width, height) {
+                    return Err(crate::Error::new("invalid I420A frame data"));
+                }
+
+                let y_plane = &frame.data[..y_size];
+                let u_plane = &frame.data[y_size..][..uv_size];
+                let v_plane = &frame.data[y_size + uv_size..][..uv_size];
+                Ok((y_plane, u_plane, v_plane))
+            }
+            _ => Err(crate::Error::new(format!(
+                "expected I420 or I420A format, got {:?}",
                 frame.format
-            )));
+            ))),
         }
-        frame
-            .as_yuv_planes()
-            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))
     }
 }
 
@@ -140,8 +156,8 @@ impl VideoFrame {
 
     /// I420A 形式の総データサイズを計算
     fn i420a_total_size(width: usize, height: usize) -> usize {
-        let (_, u_size, _) = Self::i420_plane_sizes(width, height);
-        Self::i420_total_size(width, height) + u_size
+        let (y_size, _, _) = Self::i420_plane_sizes(width, height);
+        Self::i420_total_size(width, height) + y_size
     }
 
     /// UV プレーンの幅・高さを計算
@@ -523,7 +539,7 @@ impl VideoFrame {
         let y_plane = &self.data[..y_size];
         let u_plane = &self.data[y_size..][..uv_size];
         let v_plane = &self.data[y_size + uv_size..][..uv_size];
-        let a_plane = &self.data[y_size + uv_size * 2..][..uv_size];
+        let a_plane = &self.data[y_size + uv_size * 2..][..y_size];
 
         Some((y_plane, u_plane, v_plane, a_plane))
     }
@@ -612,17 +628,18 @@ impl VideoFrame {
         )?;
 
         let data = if let Some(src_a) = src_a {
-            let (src_uv_width, src_uv_height) = Self::i420_uv_dimensions(width, height);
-            let (dst_uv_width, dst_uv_height) =
-                Self::i420_uv_dimensions(new_width.get(), new_height.get());
-            let mut dst_a = vec![0; dst_uv_width * dst_uv_height];
+            let src_a_width = width;
+            let src_a_height = height;
+            let dst_a_width = new_width.get();
+            let dst_a_height = new_height.get();
+            let mut dst_a = vec![0; dst_a_width * dst_a_height];
             Self::resize_plane_nearest(
                 src_a,
-                src_uv_width,
-                src_uv_height,
+                src_a_width,
+                src_a_height,
                 &mut dst_a,
-                dst_uv_width,
-                dst_uv_height,
+                dst_a_width,
+                dst_a_height,
             )?;
 
             let mut data = Vec::with_capacity(resized_yuv.len() + dst_a.len());
@@ -909,6 +926,7 @@ pub fn sample_entry_visual_fields(width: usize, height: usize) -> VisualSampleEn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn frame_rate_from_str_rejects_too_high_value() {
@@ -968,8 +986,8 @@ mod tests {
                 16, 16, 16, 16, 32, 32, 32, 32, 64, 64, 64, 64, 128, 128, 128, 128,
                 // U (2x2)
                 80, 80, 80, 80, // V (2x2)
-                160, 160, 160, 160, // A (2x2)
-                0, 64, 128, 255,
+                160, 160, 160, 160, // A (4x4)
+                0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240,
             ],
         };
 
@@ -985,7 +1003,38 @@ mod tests {
         let size = resized.size().expect("infallible");
         assert_eq!(size.width, 2);
         assert_eq!(size.height, 2);
-        assert_eq!(resized.data.len(), 7);
+        assert_eq!(resized.data.len(), 10);
+        Ok(())
+    }
+
+    #[test]
+    fn raw_video_frame_as_i420_planes_accepts_i420a() -> crate::Result<()> {
+        let frame = Arc::new(VideoFrame {
+            sample_entry: None,
+            keyframe: true,
+            format: VideoFormat::I420A,
+            size: Some(VideoFrameSize {
+                width: 4,
+                height: 4,
+            }),
+            timestamp: Duration::ZERO,
+            data: vec![
+                // Y (4x4)
+                1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, // U (2x2)
+                5, 5, 5, 5, // V (2x2)
+                6, 6, 6, 6, // A (4x4)
+                7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+            ],
+        });
+        let raw = RawVideoFrame::from_video_frame(frame)?;
+        let (y, u, v) = raw.as_i420_planes()?;
+
+        assert_eq!(y.len(), 16);
+        assert_eq!(u.len(), 4);
+        assert_eq!(v.len(), 4);
+        assert_eq!(y[0], 1);
+        assert_eq!(u[0], 5);
+        assert_eq!(v[0], 6);
         Ok(())
     }
 }

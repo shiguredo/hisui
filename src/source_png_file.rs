@@ -222,13 +222,12 @@ fn rgba_like_to_i420a(
     let mut y_plane = vec![0u8; y_size];
     let mut u_plane = vec![0u8; uv_size];
     let mut v_plane = vec![0u8; uv_size];
-    let mut a_plane = vec![0u8; uv_size];
+    let mut a_plane = vec![0u8; y_size];
 
     for block_y in (0..height).step_by(2) {
         for block_x in (0..width).step_by(2) {
             let mut u_sum = 0u32;
             let mut v_sum = 0u32;
-            let mut a_sum = 0u32;
 
             for dy in 0..2 {
                 for dx in 0..2 {
@@ -246,20 +245,19 @@ fn rgba_like_to_i420a(
 
                     let (y_val, u_val, v_val) = rgb_to_yuv_bt601_int(r, g, b);
                     y_plane[y * width + x] = y_val;
+                    a_plane[y * width + x] = a;
                     u_sum += u32::from(u_val);
                     v_sum += u32::from(v_val);
-                    a_sum += u32::from(a);
                 }
             }
 
             let uv_index = (block_y / 2) * uv_width + (block_x / 2);
             u_plane[uv_index] = (u_sum / 4) as u8;
             v_plane[uv_index] = (v_sum / 4) as u8;
-            a_plane[uv_index] = (a_sum / 4) as u8;
         }
     }
 
-    let mut data = Vec::with_capacity(y_size + uv_size * 3);
+    let mut data = Vec::with_capacity(y_size * 2 + uv_size * 2);
     data.extend_from_slice(&y_plane);
     data.extend_from_slice(&u_plane);
     data.extend_from_slice(&v_plane);
@@ -293,12 +291,10 @@ fn grayscale_like_to_i420a(
     let mut y_plane = vec![0u8; y_size];
     let u_plane = vec![128u8; uv_size];
     let v_plane = vec![128u8; uv_size];
-    let mut a_plane = vec![0u8; uv_size];
+    let mut a_plane = vec![0u8; y_size];
 
     for block_y in (0..height).step_by(2) {
         for block_x in (0..width).step_by(2) {
-            let mut a_sum = 0u32;
-
             for dy in 0..2 {
                 for dx in 0..2 {
                     let x = block_x + dx;
@@ -310,16 +306,13 @@ fn grayscale_like_to_i420a(
                     } else {
                         u8::MAX
                     };
-                    a_sum += u32::from(alpha);
+                    a_plane[y * width + x] = alpha;
                 }
             }
-
-            let uv_index = (block_y / 2) * uv_width + (block_x / 2);
-            a_plane[uv_index] = (a_sum / 4) as u8;
         }
     }
 
-    let mut data = Vec::with_capacity(y_size + uv_size * 3);
+    let mut data = Vec::with_capacity(y_size * 2 + uv_size * 2);
     data.extend_from_slice(&y_plane);
     data.extend_from_slice(&u_plane);
     data.extend_from_slice(&v_plane);
@@ -379,7 +372,7 @@ mod tests {
 
         assert_eq!(decoded.width, 2);
         assert_eq!(decoded.height, 2);
-        assert_eq!(decoded.data.len(), 7);
+        assert_eq!(decoded.data.len(), 10);
         Ok(())
     }
 

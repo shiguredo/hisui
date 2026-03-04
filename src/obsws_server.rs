@@ -37,6 +37,7 @@ pub async fn run_server(
     http_host: IpAddr,
     http_port: u16,
     password: Option<String>,
+    pipeline_config: crate::MediaPipelineConfig,
 ) -> crate::Result<()> {
     let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
     let ws_listener = TcpListener::bind(ws_listen_addr)
@@ -51,7 +52,7 @@ pub async fn run_server(
     tracing::info!("obsws http server listening on http://{http_listen_addr}");
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new()));
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -62,7 +63,12 @@ pub async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
-    let ws_task = tokio::spawn(run_ws_accept_loop(ws_listener, password, input_registry));
+    let ws_task = tokio::spawn(run_ws_accept_loop(
+        ws_listener,
+        password,
+        input_registry,
+        pipeline_handle.clone(),
+    ));
     let http_task = tokio::spawn(run_http_accept_loop(http_listener, pipeline_handle));
 
     tokio::select! {
@@ -81,6 +87,7 @@ async fn run_ws_accept_loop(
     listener: TcpListener,
     password: Option<String>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
+    pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::Result<()> {
     loop {
         let (stream, peer_addr) = listener
@@ -89,8 +96,11 @@ async fn run_ws_accept_loop(
             .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
         let password = password.clone();
         let input_registry = input_registry.clone();
+        let pipeline_handle = pipeline_handle.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_ws_connection(stream, peer_addr, password, input_registry).await
+            if let Err(e) =
+                handle_ws_connection(stream, peer_addr, password, input_registry, pipeline_handle)
+                    .await
             {
                 tracing::warn!("obsws connection handler failed: {}", e.display());
             }
@@ -120,6 +130,7 @@ async fn handle_ws_connection(
     peer_addr: SocketAddr,
     password: Option<String>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
+    pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
@@ -134,7 +145,7 @@ async fn handle_ws_connection(
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
-    let mut session = ObswsSession::new(auth, input_registry);
+    let mut session = ObswsSession::new(auth, input_registry, Some(pipeline_handle));
 
     loop {
         let n = stream

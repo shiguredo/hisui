@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
 
 const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 2] = ["image_source", "video_capture_device"];
 const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
+const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
+const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -110,6 +113,90 @@ impl nojson::DisplayJson for ObswsInputSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsSceneEntry {
+    pub scene_index: usize,
+    pub scene_name: String,
+    pub scene_uuid: String,
+}
+
+impl nojson::DisplayJson for ObswsSceneEntry {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("sceneIndex", self.scene_index)?;
+            f.member("sceneName", &self.scene_name)?;
+            f.member("sceneUuid", &self.scene_uuid)
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsStreamServiceSettings {
+    pub stream_service_type: String,
+    pub server: Option<String>,
+    pub key: Option<String>,
+}
+
+impl Default for ObswsStreamServiceSettings {
+    fn default() -> Self {
+        Self {
+            stream_service_type: OBSWS_DEFAULT_STREAM_SERVICE_TYPE.to_owned(),
+            server: None,
+            key: None,
+        }
+    }
+}
+
+impl nojson::DisplayJson for ObswsStreamServiceSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("streamServiceType", &self.stream_service_type)?;
+            f.member(
+                "streamServiceSettings",
+                nojson::object(|f| {
+                    if let Some(server) = &self.server {
+                        f.member("server", server)?;
+                    }
+                    if let Some(key) = &self.key {
+                        f.member("key", key)?;
+                    }
+                    Ok(())
+                }),
+            )
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsStreamRun {
+    pub source_processor_id: String,
+    pub encoder_processor_id: String,
+    pub endpoint_processor_id: String,
+    pub source_track_id: String,
+    pub encoded_track_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct ObswsSceneItemState {
+    input_uuid: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ObswsSceneState {
+    scene_uuid: String,
+    items: Vec<ObswsSceneItemState>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ObswsStreamRuntimeState {
+    active: bool,
+    started_at: Option<Instant>,
+    run: Option<ObswsStreamRun>,
+}
+
 fn parse_optional_string_setting(
     settings: nojson::RawJsonValue<'_, '_>,
     key: &str,
@@ -187,11 +274,33 @@ pub enum CreateInputError {
     InputNameAlreadyExists,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateSceneError {
+    SceneNameAlreadyExists,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetCurrentProgramSceneError {
+    SceneNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateStreamError {
+    AlreadyActive,
+}
+
+#[derive(Debug, Clone)]
 pub struct ObswsInputRegistry {
     inputs_by_uuid: BTreeMap<String, ObswsInputEntry>,
     uuids_by_name: BTreeMap<String, String>,
+    scenes_by_name: BTreeMap<String, ObswsSceneState>,
+    scene_order: Vec<String>,
+    current_program_scene_name: String,
     next_input_id: u64,
+    next_scene_id: u64,
+    next_stream_run_id: u64,
+    stream_service_settings: ObswsStreamServiceSettings,
+    stream_runtime: ObswsStreamRuntimeState,
 }
 
 impl ObswsInputRegistry {
@@ -212,8 +321,9 @@ impl ObswsInputRegistry {
         scene_name: &str,
         input_name: &str,
         input: ObswsInput,
+        scene_item_enabled: bool,
     ) -> Result<ObswsInputEntry, CreateInputError> {
-        if scene_name != OBSWS_DEFAULT_SCENE_NAME {
+        if !self.scenes_by_name.contains_key(scene_name) {
             return Err(CreateInputError::UnsupportedSceneName);
         }
         if self.uuids_by_name.contains_key(input_name) {
@@ -230,8 +340,141 @@ impl ObswsInputRegistry {
             .insert(entry.input_name.clone(), input_uuid);
         self.inputs_by_uuid
             .insert(entry.input_uuid.clone(), entry.clone());
+        if scene_item_enabled && let Some(scene) = self.scenes_by_name.get_mut(scene_name) {
+            scene.items.push(ObswsSceneItemState {
+                input_uuid: entry.input_uuid.clone(),
+                enabled: true,
+            });
+        }
 
         Ok(entry)
+    }
+
+    pub fn create_scene(&mut self, scene_name: &str) -> Result<ObswsSceneEntry, CreateSceneError> {
+        if self.scenes_by_name.contains_key(scene_name) {
+            return Err(CreateSceneError::SceneNameAlreadyExists);
+        }
+        let scene_id = self.next_scene_id;
+        if scene_id > OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX {
+            panic!("BUG: obsws scene id exceeds 48-bit UUID suffix range");
+        }
+        self.next_scene_id = self
+            .next_scene_id
+            .checked_add(1)
+            .expect("BUG: obsws scene id overflow");
+        let scene_uuid = format!("10000000-0000-0000-0000-{scene_id:012x}");
+
+        self.scenes_by_name.insert(
+            scene_name.to_owned(),
+            ObswsSceneState {
+                scene_uuid: scene_uuid.clone(),
+                items: Vec::new(),
+            },
+        );
+        self.scene_order.push(scene_name.to_owned());
+        Ok(ObswsSceneEntry {
+            scene_index: self.scene_order.len().saturating_sub(1),
+            scene_name: scene_name.to_owned(),
+            scene_uuid,
+        })
+    }
+
+    pub fn list_scenes(&self) -> Vec<ObswsSceneEntry> {
+        self.scene_order
+            .iter()
+            .enumerate()
+            .filter_map(|(index, scene_name)| {
+                self.scenes_by_name
+                    .get(scene_name)
+                    .map(|scene| ObswsSceneEntry {
+                        scene_index: index,
+                        scene_name: scene_name.clone(),
+                        scene_uuid: scene.scene_uuid.clone(),
+                    })
+            })
+            .collect()
+    }
+
+    pub fn current_program_scene(&self) -> Option<ObswsSceneEntry> {
+        let scene_name = &self.current_program_scene_name;
+        let scene = self.scenes_by_name.get(scene_name)?;
+        let scene_index = self
+            .scene_order
+            .iter()
+            .position(|name| name == scene_name)?;
+        Some(ObswsSceneEntry {
+            scene_index,
+            scene_name: scene_name.clone(),
+            scene_uuid: scene.scene_uuid.clone(),
+        })
+    }
+
+    pub fn set_current_program_scene(
+        &mut self,
+        scene_name: &str,
+    ) -> Result<(), SetCurrentProgramSceneError> {
+        if !self.scenes_by_name.contains_key(scene_name) {
+            return Err(SetCurrentProgramSceneError::SceneNotFound);
+        }
+        self.current_program_scene_name = scene_name.to_owned();
+        Ok(())
+    }
+
+    pub fn list_current_program_scene_inputs(&self) -> Vec<ObswsInputEntry> {
+        let Some(scene) = self.scenes_by_name.get(&self.current_program_scene_name) else {
+            return Vec::new();
+        };
+        scene
+            .items
+            .iter()
+            .filter(|item| item.enabled)
+            .filter_map(|item| self.inputs_by_uuid.get(&item.input_uuid).cloned())
+            .collect()
+    }
+
+    pub fn stream_service_settings(&self) -> &ObswsStreamServiceSettings {
+        &self.stream_service_settings
+    }
+
+    pub fn next_stream_run_id(&mut self) -> u64 {
+        let run_id = self.next_stream_run_id;
+        self.next_stream_run_id = self
+            .next_stream_run_id
+            .checked_add(1)
+            .expect("BUG: obsws stream run id overflow");
+        run_id
+    }
+
+    pub fn set_stream_service_settings(&mut self, settings: ObswsStreamServiceSettings) {
+        self.stream_service_settings = settings;
+    }
+
+    pub fn activate_stream(&mut self, run: ObswsStreamRun) -> Result<(), ActivateStreamError> {
+        if self.stream_runtime.active {
+            return Err(ActivateStreamError::AlreadyActive);
+        }
+        self.stream_runtime.active = true;
+        self.stream_runtime.started_at = Some(Instant::now());
+        self.stream_runtime.run = Some(run);
+        Ok(())
+    }
+
+    pub fn deactivate_stream(&mut self) -> Option<ObswsStreamRun> {
+        let run = self.stream_runtime.run.take();
+        self.stream_runtime.active = false;
+        self.stream_runtime.started_at = None;
+        run
+    }
+
+    pub fn is_stream_active(&self) -> bool {
+        self.stream_runtime.active
+    }
+
+    pub fn stream_uptime(&self) -> Duration {
+        self.stream_runtime
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or(Duration::ZERO)
     }
 
     pub fn remove_input(
@@ -242,12 +485,23 @@ impl ObswsInputRegistry {
         if let Some(input_uuid) = input_uuid {
             let removed = self.inputs_by_uuid.remove(input_uuid)?;
             self.uuids_by_name.remove(&removed.input_name);
+            for scene in self.scenes_by_name.values_mut() {
+                scene
+                    .items
+                    .retain(|item| item.input_uuid != removed.input_uuid);
+            }
             return Some(removed);
         }
 
         let input_name = input_name?;
         let input_uuid = self.uuids_by_name.remove(input_name)?;
-        self.inputs_by_uuid.remove(&input_uuid)
+        let removed = self.inputs_by_uuid.remove(&input_uuid)?;
+        for scene in self.scenes_by_name.values_mut() {
+            scene
+                .items
+                .retain(|item| item.input_uuid != removed.input_uuid);
+        }
+        Some(removed)
     }
 
     pub fn find_input(
@@ -280,6 +534,31 @@ impl ObswsInputRegistry {
             .checked_add(1)
             .expect("BUG: obsws input id overflow");
         format!("00000000-0000-0000-0000-{input_id:012x}")
+    }
+}
+
+impl Default for ObswsInputRegistry {
+    fn default() -> Self {
+        let mut scenes_by_name = BTreeMap::new();
+        scenes_by_name.insert(
+            OBSWS_DEFAULT_SCENE_NAME.to_owned(),
+            ObswsSceneState {
+                scene_uuid: "10000000-0000-0000-0000-000000000000".to_owned(),
+                items: Vec::new(),
+            },
+        );
+        Self {
+            inputs_by_uuid: BTreeMap::new(),
+            uuids_by_name: BTreeMap::new(),
+            scenes_by_name,
+            scene_order: vec![OBSWS_DEFAULT_SCENE_NAME.to_owned()],
+            current_program_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
+            next_input_id: 0,
+            next_scene_id: 1,
+            next_stream_run_id: 0,
+            stream_service_settings: ObswsStreamServiceSettings::default(),
+            stream_runtime: ObswsStreamRuntimeState::default(),
+        }
     }
 }
 
@@ -420,7 +699,7 @@ mod tests {
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
         let entry = registry
-            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input)
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
             .expect("input creation must succeed");
 
         assert_eq!(entry.input_name, "camera-1");
@@ -436,7 +715,7 @@ mod tests {
             ObswsInput::from_kind_and_settings("video_capture_device", first_settings.value())
                 .expect("input settings must be valid");
         registry
-            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", first_input)
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", first_input, true)
             .expect("first input creation must succeed");
 
         let second_settings = parse_owned_json("{}");
@@ -444,7 +723,7 @@ mod tests {
             ObswsInput::from_kind_and_settings("video_capture_device", second_settings.value())
                 .expect("input settings must be valid");
         let error = registry
-            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", second_input)
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", second_input, true)
             .expect_err("duplicate input name must be rejected");
         assert_eq!(error, CreateInputError::InputNameAlreadyExists);
     }
@@ -456,7 +735,7 @@ mod tests {
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
         let error = registry
-            .create_input("not-scene", "camera-1", input)
+            .create_input("not-scene", "camera-1", input, true)
             .expect_err("unsupported scene name must be rejected");
         assert_eq!(error, CreateInputError::UnsupportedSceneName);
     }
@@ -468,7 +747,7 @@ mod tests {
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
         let created = registry
-            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input)
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
             .expect("input creation must succeed");
 
         let removed = registry.remove_input(None, Some("camera-1"));
@@ -487,7 +766,7 @@ mod tests {
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
         let created = registry
-            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input)
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
             .expect("input creation must succeed");
 
         let removed = registry.remove_input(Some(&created.input_uuid), None);
@@ -507,6 +786,61 @@ mod tests {
     }
 
     #[test]
+    fn scene_list_contains_default_scene() {
+        let registry = ObswsInputRegistry::new();
+        let scenes = registry.list_scenes();
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].scene_name, OBSWS_DEFAULT_SCENE_NAME);
+        assert_eq!(
+            registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some(OBSWS_DEFAULT_SCENE_NAME.to_owned())
+        );
+    }
+
+    #[test]
+    fn create_scene_and_set_current_program_scene_succeeds() {
+        let mut registry = ObswsInputRegistry::new();
+        let created = registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        assert_eq!(created.scene_name, "Scene B");
+
+        registry
+            .set_current_program_scene("Scene B")
+            .expect("setting current scene must succeed");
+        assert_eq!(
+            registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some("Scene B".to_owned())
+        );
+    }
+
+    #[test]
+    fn stream_runtime_state_changes_on_activate_and_deactivate() {
+        let mut registry = ObswsInputRegistry::new();
+        assert!(!registry.is_stream_active());
+        assert_eq!(registry.stream_uptime(), Duration::ZERO);
+
+        registry
+            .activate_stream(ObswsStreamRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                endpoint_processor_id: "endpoint".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            })
+            .expect("stream activation must succeed");
+        assert!(registry.is_stream_active());
+
+        registry.deactivate_stream();
+        assert!(!registry.is_stream_active());
+        assert_eq!(registry.stream_uptime(), Duration::ZERO);
+    }
+
+    #[test]
     #[should_panic(expected = "BUG: obsws input id exceeds 48-bit UUID suffix range")]
     fn create_input_panics_when_uuid_suffix_range_is_exhausted() {
         let mut registry = ObswsInputRegistry::new();
@@ -514,6 +848,6 @@ mod tests {
         let settings = parse_owned_json("{}");
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
-        let _ = registry.create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input);
+        let _ = registry.create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true);
     }
 }
