@@ -30,9 +30,12 @@ jobs:
           toolchain: stable
       - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
         run: |
-          curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
-          bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
-          mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
+          OPENH264_ARCHIVE="libopenh264-${OPENH264_VERSION}-linux64.8.so.bz2"
+          OPENH264_URL="https://ciscobinary.openh264.org/${OPENH264_ARCHIVE}"
+          echo "Downloading ${OPENH264_URL}"
+          curl -fL -o "${OPENH264_ARCHIVE}" "${OPENH264_URL}"
+          bzip2 -d "${OPENH264_ARCHIVE}"
+          mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
       - run: cargo build
       - uses: astral-sh/setup-uv@v7
       - name: Run e2e tests
