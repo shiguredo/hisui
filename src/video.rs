@@ -156,8 +156,8 @@ impl VideoFrame {
 
     /// I420A 形式の総データサイズを計算
     fn i420a_total_size(width: usize, height: usize) -> usize {
-        let (_, u_size, _) = Self::i420_plane_sizes(width, height);
-        Self::i420_total_size(width, height) + u_size
+        let (y_size, _, _) = Self::i420_plane_sizes(width, height);
+        Self::i420_total_size(width, height) + y_size
     }
 
     /// UV プレーンの幅・高さを計算
@@ -539,7 +539,7 @@ impl VideoFrame {
         let y_plane = &self.data[..y_size];
         let u_plane = &self.data[y_size..][..uv_size];
         let v_plane = &self.data[y_size + uv_size..][..uv_size];
-        let a_plane = &self.data[y_size + uv_size * 2..][..uv_size];
+        let a_plane = &self.data[y_size + uv_size * 2..][..y_size];
 
         Some((y_plane, u_plane, v_plane, a_plane))
     }
@@ -628,17 +628,18 @@ impl VideoFrame {
         )?;
 
         let data = if let Some(src_a) = src_a {
-            let (src_uv_width, src_uv_height) = Self::i420_uv_dimensions(width, height);
-            let (dst_uv_width, dst_uv_height) =
-                Self::i420_uv_dimensions(new_width.get(), new_height.get());
-            let mut dst_a = vec![0; dst_uv_width * dst_uv_height];
+            let src_a_width = width;
+            let src_a_height = height;
+            let dst_a_width = new_width.get();
+            let dst_a_height = new_height.get();
+            let mut dst_a = vec![0; dst_a_width * dst_a_height];
             Self::resize_plane_nearest(
                 src_a,
-                src_uv_width,
-                src_uv_height,
+                src_a_width,
+                src_a_height,
                 &mut dst_a,
-                dst_uv_width,
-                dst_uv_height,
+                dst_a_width,
+                dst_a_height,
             )?;
 
             let mut data = Vec::with_capacity(resized_yuv.len() + dst_a.len());
@@ -985,8 +986,8 @@ mod tests {
                 16, 16, 16, 16, 32, 32, 32, 32, 64, 64, 64, 64, 128, 128, 128, 128,
                 // U (2x2)
                 80, 80, 80, 80, // V (2x2)
-                160, 160, 160, 160, // A (2x2)
-                0, 64, 128, 255,
+                160, 160, 160, 160, // A (4x4)
+                0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240,
             ],
         };
 
@@ -1002,7 +1003,7 @@ mod tests {
         let size = resized.size().expect("infallible");
         assert_eq!(size.width, 2);
         assert_eq!(size.height, 2);
-        assert_eq!(resized.data.len(), 7);
+        assert_eq!(resized.data.len(), 10);
         Ok(())
     }
 
@@ -1021,8 +1022,8 @@ mod tests {
                 // Y (4x4)
                 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, // U (2x2)
                 5, 5, 5, 5, // V (2x2)
-                6, 6, 6, 6, // A (2x2)
-                7, 7, 7, 7,
+                6, 6, 6, 6, // A (4x4)
+                7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
             ],
         });
         let raw = RawVideoFrame::from_video_frame(frame)?;
