@@ -127,27 +127,12 @@ def _is_port_open(host: str, port: int) -> bool:
         return False
 
 
-def _wait_for_tcp_listen(port: int, timeout: float = 10.0) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        # 接続プローブは listen モードの ffmpeg に副作用を与えるため、
-        # bind 可否で待受開始（ ポート占有 ）を確認する
-        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError:
-            probe.close()
-            return
-        probe.close()
-        time.sleep(0.05)
-    raise AssertionError(f"RTMP listener did not start within timeout: port={port}")
-
-
 def _start_ffmpeg_rtmp_receive(
     receive_url: str,
     output_path: Path,
     *,
     max_video_frames: int | None,
+    startup_timeout: float = 10.0,
 ) -> subprocess.Popen[str]:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
@@ -160,8 +145,6 @@ def _start_ffmpeg_rtmp_receive(
         "error",
         "-nostdin",
         "-y",
-        "-listen",
-        "1",
         "-i",
         receive_url,
     ]
@@ -175,11 +158,25 @@ def _start_ffmpeg_rtmp_receive(
         "mp4",
         str(output_path),
     ])
-    return subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+
+    deadline = time.time() + startup_timeout
+    last_stderr = ""
+    while time.time() < deadline:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(0.2)
+        if process.poll() is None:
+            return process
+        stdout, stderr = process.communicate(timeout=5)
+        last_stderr = f"stdout={stdout}, stderr={stderr}"
+        time.sleep(0.1)
+
+    raise AssertionError(
+        f"failed to start ffmpeg receiver within timeout: url={receive_url}, details={last_stderr}"
     )
 
 
@@ -215,10 +212,10 @@ def _inspect_mp4(binary_path: Path, path: Path) -> dict[str, object]:
 
 
 def _write_test_png(path: Path) -> None:
-    # 1x1 PNG（ 赤 ）の固定データ
+    # 2x2 PNG（ 赤 ）の固定データ
     path.write_bytes(
         base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR42mP4z8AARAwQCgAf7gP9Y167WwAAAABJRU5ErkJggg=="
         )
     )
 
@@ -1042,80 +1039,72 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
     stream_key = "obsws-stream"
     receive_url = f"{output_url}/{stream_key}"
 
+    async def _run_start_stream_flow():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-image-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-image-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            create_input_status = create_input_response["d"]["requestStatus"]
+            assert create_input_status["result"] is True
+
+            set_stream_service_response = await _send_obsws_request(
+                ws,
+                request_type="SetStreamServiceSettings",
+                request_id="req-set-stream-service",
+                request_data={
+                    "streamServiceType": "rtmp_custom",
+                    "streamServiceSettings": {
+                        "server": output_url,
+                        "key": stream_key,
+                    },
+                },
+            )
+            set_stream_service_status = set_stream_service_response["d"]["requestStatus"]
+            assert set_stream_service_status["result"] is True
+
+            start_stream_response = await _send_obsws_request(
+                ws,
+                request_type="StartStream",
+                request_id="req-start-stream",
+            )
+            start_stream_status = start_stream_response["d"]["requestStatus"]
+            assert start_stream_status["result"] is True
+
+            for _ in range(20):
+                stream_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetStreamStatus",
+                    request_id="req-get-stream-status",
+                )
+                if stream_status_response["d"]["responseData"]["outputActive"] is True:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("stream did not become active in time")
+
+            await ws.close()
+
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
-        ffmpeg_process = _start_ffmpeg_rtmp_receive(
-            receive_url,
-            output_path,
-            max_video_frames=30,
-        )
+        asyncio.run(_run_start_stream_flow())
+
+        ffmpeg_process = _start_ffmpeg_rtmp_receive(receive_url, output_path, max_video_frames=30)
         try:
-            _wait_for_tcp_listen(rtmp_port)
-
-            async def _run_start_stream_flow():
-                timeout = aiohttp.ClientTimeout(total=20.0)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    ws = await session.ws_connect(
-                        f"ws://{host}:{ws_port}/",
-                        protocols=[OBSWS_SUBPROTOCOL],
-                    )
-                    await _identify_with_optional_password(ws, None)
-
-                    create_input_response = await _send_obsws_request(
-                        ws,
-                        request_type="CreateInput",
-                        request_id="req-create-image-input",
-                        request_data={
-                            "sceneName": "Scene",
-                            "inputName": "obsws-image-input",
-                            "inputKind": "image_source",
-                            "inputSettings": {"file": str(image_path)},
-                            "sceneItemEnabled": True,
-                        },
-                    )
-                    create_input_status = create_input_response["d"]["requestStatus"]
-                    assert create_input_status["result"] is True
-
-                    set_stream_service_response = await _send_obsws_request(
-                        ws,
-                        request_type="SetStreamServiceSettings",
-                        request_id="req-set-stream-service",
-                        request_data={
-                            "streamServiceType": "rtmp_custom",
-                            "streamServiceSettings": {
-                                "server": output_url,
-                                "key": stream_key,
-                            },
-                        },
-                    )
-                    set_stream_service_status = set_stream_service_response["d"][
-                        "requestStatus"
-                    ]
-                    assert set_stream_service_status["result"] is True
-
-                    start_stream_response = await _send_obsws_request(
-                        ws,
-                        request_type="StartStream",
-                        request_id="req-start-stream",
-                    )
-                    start_stream_status = start_stream_response["d"]["requestStatus"]
-                    assert start_stream_status["result"] is True
-
-                    for _ in range(20):
-                        stream_status_response = await _send_obsws_request(
-                            ws,
-                            request_type="GetStreamStatus",
-                            request_id="req-get-stream-status",
-                        )
-                        if stream_status_response["d"]["responseData"]["outputActive"] is True:
-                            break
-                        await asyncio.sleep(0.1)
-                    else:
-                        raise AssertionError("stream did not become active in time")
-
-                    await ws.close()
-
-            asyncio.run(_run_start_stream_flow())
-
             _wait_process_exit(ffmpeg_process, timeout=20.0)
         finally:
             if ffmpeg_process.poll() is None:
