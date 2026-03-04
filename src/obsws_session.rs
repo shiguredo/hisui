@@ -13,6 +13,7 @@ use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
+    REQUEST_STATUS_STREAM_NOT_RUNNING, REQUEST_STATUS_STREAM_RUNNING,
 };
 
 pub enum SessionAction {
@@ -250,7 +251,7 @@ impl ObswsSession {
                 return crate::obsws_response_builder::build_request_response_error(
                     "StartStream",
                     request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    REQUEST_STATUS_STREAM_RUNNING,
                     "Stream is already active",
                 );
             }
@@ -282,7 +283,7 @@ impl ObswsSession {
                 return crate::obsws_response_builder::build_request_response_error(
                     "StopStream",
                     request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    REQUEST_STATUS_STREAM_NOT_RUNNING,
                     "Stream is not active",
                 );
             }
