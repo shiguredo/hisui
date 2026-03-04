@@ -31,23 +31,7 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
-pub fn run_internal(
-    ws_host: IpAddr,
-    ws_port: u16,
-    http_host: IpAddr,
-    http_port: u16,
-    password: Option<String>,
-) -> crate::Result<()> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(crate::Error::from)?;
-
-    runtime
-        .block_on(async move { run_server(ws_host, ws_port, http_host, http_port, password).await })
-}
-
-async fn run_server(
+pub async fn run_server(
     ws_host: IpAddr,
     ws_port: u16,
     http_host: IpAddr,

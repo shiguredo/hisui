@@ -41,6 +41,23 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    crate::obsws_server::run_internal(ws_host, ws_port, http_listen_address, http_port, password)
+    run_internal(ws_host, ws_port, http_listen_address, http_port, password)
         .map_err(noargs::Error::from)
+}
+
+fn run_internal(
+    ws_host: IpAddr,
+    ws_port: u16,
+    http_host: IpAddr,
+    http_port: u16,
+    password: Option<String>,
+) -> crate::Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(crate::Error::from)?;
+
+    runtime.block_on(async move {
+        crate::obsws_server::run_server(ws_host, ws_port, http_host, http_port, password).await
+    })
 }
