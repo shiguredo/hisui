@@ -159,4 +159,3 @@ fn find_static_library_path(dst: &Path) -> PathBuf {
 fn target_is_macos() -> bool {
     std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "macos")
 }
-
