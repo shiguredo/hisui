@@ -177,7 +177,7 @@ where
         } else {
             &platform_symbol
         };
-        if !is_c_identifier(&symbol_name) {
+        if !is_c_identifier(symbol_name) {
             continue;
         }
 
