@@ -61,6 +61,11 @@ fn parse_required_mp4_path(
     Ok(path)
 }
 
+fn default_video_encode_config_for_rpc() -> crate::encoder::EncodeConfig {
+    // server RPC の既定 encode params は、compose 既定値と同じ値を利用する。
+    crate::sora_recording_layout_encode_params::LayoutEncodeParams::default().config
+}
+
 impl MediaPipelineHandle {
     // JSON-RPC リクエストを処理する
     //
@@ -91,6 +96,7 @@ impl MediaPipelineHandle {
             "createVideoDecoder" => self.handle_create_video_decoder_rpc(maybe_params).await,
             "createAudioDecoder" => self.handle_create_audio_decoder_rpc(maybe_params).await,
             "createAudioEncoder" => self.handle_create_audio_encoder_rpc(maybe_params).await,
+            "createVideoEncoder" => self.handle_create_video_encoder_rpc(maybe_params).await,
             "createPngFileSource" => self.handle_create_png_file_source_rpc(maybe_params).await,
             "createVideoDeviceSource" => {
                 self.handle_create_video_device_source_rpc(maybe_params)
@@ -433,6 +439,79 @@ impl MediaPipelineHandle {
         })?;
 
         Ok(RpcSuccessResult::CreateAudioEncoder { processor_id })
+    }
+
+    async fn handle_create_video_encoder_rpc(
+        &self,
+        maybe_params: Option<nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<RpcSuccessResult, RpcError> {
+        let (input_track_id, output_track_id, codec_name, bitrate_bps, frame_rate, processor_id): (
+            TrackId,
+            TrackId,
+            String,
+            usize,
+            crate::video::FrameRate,
+            Option<ProcessorId>,
+        ) = parse_params(maybe_params, |params| {
+            let input_track_id = params.to_member("inputTrackId")?.required()?.try_into()?;
+            let output_track_id = params.to_member("outputTrackId")?.required()?.try_into()?;
+            let codec_name = params.to_member("codec")?.required()?.try_into()?;
+            let bitrate_bps = params.to_member("bitrateBps")?.required()?.try_into()?;
+            let frame_rate = params.to_member("frameRate")?.required()?.try_into()?;
+            let processor_id = params.to_member("processorId")?.try_into()?;
+            Ok((
+                input_track_id,
+                output_track_id,
+                codec_name,
+                bitrate_bps,
+                frame_rate,
+                processor_id,
+            ))
+        })?;
+
+        let codec = crate::types::CodecName::parse_video(&codec_name).map_err(|e| {
+            invalid_params(format!(
+                "Invalid params: codec must be a video codec: {codec_name} ({e})"
+            ))
+        })?;
+
+        if bitrate_bps == 0 {
+            return Err(invalid_params(
+                "Invalid params: bitrateBps must be greater than 0",
+            ));
+        }
+
+        let processor_id = processor_id
+            .unwrap_or_else(|| ProcessorId::new(format!("videoEncoder:{input_track_id}")));
+        let options = crate::encoder::VideoEncoderOptions {
+            codec,
+            engines: None,
+            bitrate: bitrate_bps,
+            width: crate::types::EvenUsize::ZERO,
+            height: crate::types::EvenUsize::ZERO,
+            frame_rate,
+            encode_params: default_video_encode_config_for_rpc(),
+        };
+
+        self.spawn_processor(
+            processor_id.clone(),
+            ProcessorMetadata::new("video_encoder"),
+            move |handle| async move {
+                let encoder = crate::encoder::VideoEncoder::new(&options, None, handle.stats())?;
+                encoder.run(handle, input_track_id, output_track_id).await
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            RegisterProcessorError::DuplicateProcessorId => invalid_params(format!(
+                "Invalid params: processorId already exists: {processor_id}"
+            )),
+            RegisterProcessorError::PipelineTerminated => {
+                internal_error("Internal error: pipeline has terminated".to_owned())
+            }
+        })?;
+
+        Ok(RpcSuccessResult::CreateVideoEncoder { processor_id })
     }
 
     async fn handle_create_video_decoder_rpc(
@@ -1048,6 +1127,9 @@ enum RpcSuccessResult {
     CreateAudioEncoder {
         processor_id: ProcessorId,
     },
+    CreateVideoEncoder {
+        processor_id: ProcessorId,
+    },
     CreatePngFileSource {
         processor_id: ProcessorId,
     },
@@ -1126,6 +1208,9 @@ impl nojson::DisplayJson for RpcSuccessResult {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreateAudioEncoder { processor_id } => {
+                f.object(|f| f.member("processorId", processor_id))
+            }
+            Self::CreateVideoEncoder { processor_id } => {
                 f.object(|f| f.member("processorId", processor_id))
             }
             Self::CreatePngFileSource { processor_id } => {
@@ -1943,6 +2028,184 @@ mod tests {
         assert_eq!(
             result_processor_id(&first_response).expect("parse result.processorId"),
             "duplicate-audio-encoder"
+        );
+
+        let second_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            error_code(&second_response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_requires_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoEncoder"}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_validates_params() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoEncoder","params":{"inputTrackId":"video-input"}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_rejects_invalid_codec() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoEncoder","params":{"inputTrackId":"video-input","outputTrackId":"video-output","codec":"OPUS","bitrateBps":2000000,"frameRate":30}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_rejects_zero_bitrate() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoEncoder","params":{"inputTrackId":"video-input","outputTrackId":"video-output","codec":"H264","bitrateBps":0,"frameRate":30}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_rejects_invalid_frame_rate() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"createVideoEncoder","params":{"inputTrackId":"video-input","outputTrackId":"video-output","codec":"H264","bitrateBps":2000000,"frameRate":0}}"#;
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            error_code(&response).expect("parse error.code"),
+            crate::jsonrpc::INVALID_PARAMS
+        );
+
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_uses_default_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_video_encoder_request(None);
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "videoEncoder:video-input"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_uses_explicit_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_video_encoder_request(Some("custom-video-encoder"));
+
+        let response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+
+        assert_eq!(
+            result_processor_id(&response).expect("parse result.processorId"),
+            "custom-video-encoder"
+        );
+
+        drop(handle);
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
+    }
+
+    #[tokio::test]
+    async fn create_video_encoder_rejects_duplicate_processor_id() {
+        let (handle, pipeline_task) = spawn_test_pipeline().await;
+        let request = create_video_encoder_request(Some("duplicate-video-encoder"));
+
+        let first_response = handle
+            .rpc(request.as_bytes())
+            .await
+            .expect("response must exist");
+        assert_eq!(
+            result_processor_id(&first_response).expect("parse result.processorId"),
+            "duplicate-video-encoder"
         );
 
         let second_response = handle
@@ -4463,6 +4726,16 @@ mod tests {
 
         format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"createAudioEncoder","params":{{"inputTrackId":"audio-input","outputTrackId":"audio-output","codec":"OPUS","bitrateBps":64000{processor_id_part}}}}}"#
+        )
+    }
+
+    fn create_video_encoder_request(processor_id: Option<&str>) -> String {
+        let processor_id_part = processor_id
+            .map(|id| format!(r#","processorId":"{id}""#))
+            .unwrap_or_default();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"createVideoEncoder","params":{{"inputTrackId":"video-input","outputTrackId":"video-output","codec":"H264","bitrateBps":2000000,"frameRate":30{processor_id_part}}}}}"#
         )
     }
 

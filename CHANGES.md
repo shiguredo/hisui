@@ -47,6 +47,11 @@
   - `codec` / `bitrateBps` を指定できる（既定値は `OPUS` / `65536`）
   - `processorId` 未指定時は `audioEncoder:<inputTrackId>` を既定値として利用する
   - @sile
+- [ADD] server サブコマンドの JSON-RPC で Video encoder を作成できるようにする
+  - JSON-RPC に `createVideoEncoder` メソッドを追加する
+  - `inputTrackId` / `outputTrackId` / `codec` / `bitrateBps` / `frameRate` を指定して映像トラックをエンコードできる
+  - `processorId` 未指定時は `videoEncoder:<inputTrackId>` を既定値として利用する
+  - @sile
 - [ADD] server サブコマンドの JSON-RPC で MP4 writer を作成できるようにする
   - JSON-RPC に `createMp4Writer` メソッドを追加する
   - `outputPath` と `inputAudioTrackId` / `inputVideoTrackId` を指定して MP4 ファイルへ書き出しできる
