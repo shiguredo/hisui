@@ -319,24 +319,6 @@ impl ObswsSession {
         // ここで送る内部 JSON-RPC は常に 1 件ずつ送信して即時 await しているため、
         // 相関に id は使っておらず固定値を意図的に使用している。
         // 将来並列送信へ拡張する場合は id をユニーク化すること。
-        let png_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createPngFileSource")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("path", image_path)?;
-                    f.member("frameRate", 30)?;
-                    f.member("outputVideoTrackId", &run.source_track_id)?;
-                    f.member("processorId", &run.source_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createPngFileSource", &png_request)
-            .await?;
-
         let video_encoder_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
             f.member("id", 1)?;
@@ -375,6 +357,24 @@ impl ObswsSession {
         })
         .to_string();
         self.send_pipeline_rpc_request("createRtmpOutboundEndpoint", &rtmp_request)
+            .await?;
+
+        let png_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createPngFileSource")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("path", image_path)?;
+                    f.member("frameRate", 30)?;
+                    f.member("outputVideoTrackId", &run.source_track_id)?;
+                    f.member("processorId", &run.source_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createPngFileSource", &png_request)
             .await
     }
 

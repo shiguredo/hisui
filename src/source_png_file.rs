@@ -72,7 +72,6 @@ impl PngFileSource {
             .await?;
         outer_processor.notify_ready();
         outer_processor.wait_subscribers_ready().await?;
-        drop(outer_processor);
 
         let mut frame_index = 0u64;
         let mut noacked_sent = 0u64;
