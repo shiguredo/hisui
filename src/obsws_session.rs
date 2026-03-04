@@ -183,16 +183,7 @@ impl ObswsSession {
     }
 
     async fn handle_start_stream(&self, request_id: &str) -> String {
-        let (
-            output_url,
-            stream_name,
-            image_path,
-            source_processor_id,
-            encoder_processor_id,
-            endpoint_processor_id,
-            source_track_id,
-            encoded_track_id,
-        ) = {
+        let (output_url, stream_name, image_path, run) = {
             let mut input_registry = self.input_registry.write().await;
             if input_registry.is_stream_active() {
                 return crate::obsws_response_builder::build_request_response_error(
@@ -261,7 +252,9 @@ impl ObswsSession {
                 source_track_id: source_track_id.clone(),
                 encoded_track_id: encoded_track_id.clone(),
             };
-            if let Err(ActivateStreamError::AlreadyActive) = input_registry.activate_stream(run) {
+            if let Err(ActivateStreamError::AlreadyActive) =
+                input_registry.activate_stream(run.clone())
+            {
                 return crate::obsws_response_builder::build_request_response_error(
                     "StartStream",
                     request_id,
@@ -270,29 +263,11 @@ impl ObswsSession {
                 );
             }
 
-            (
-                output_url,
-                stream_service_settings.key,
-                image_path,
-                source_processor_id,
-                encoder_processor_id,
-                endpoint_processor_id,
-                source_track_id,
-                encoded_track_id,
-            )
+            (output_url, stream_service_settings.key, image_path, run)
         };
 
         let start_result = self
-            .start_stream_processors(
-                &image_path,
-                &output_url,
-                stream_name.as_deref(),
-                &source_processor_id,
-                &source_track_id,
-                &encoder_processor_id,
-                &encoded_track_id,
-                &endpoint_processor_id,
-            )
+            .start_stream_processors(&image_path, &output_url, stream_name.as_deref(), &run)
             .await;
 
         if let Err(e) = start_result {
@@ -329,11 +304,7 @@ impl ObswsSession {
         image_path: &str,
         output_url: &str,
         stream_name: Option<&str>,
-        source_processor_id: &str,
-        source_track_id: &str,
-        encoder_processor_id: &str,
-        encoded_track_id: &str,
-        endpoint_processor_id: &str,
+        run: &ObswsStreamRun,
     ) -> crate::Result<()> {
         let png_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
@@ -344,8 +315,8 @@ impl ObswsSession {
                 nojson::object(|f| {
                     f.member("path", image_path)?;
                     f.member("frameRate", 30)?;
-                    f.member("outputVideoTrackId", source_track_id)?;
-                    f.member("processorId", source_processor_id)
+                    f.member("outputVideoTrackId", &run.source_track_id)?;
+                    f.member("processorId", &run.source_processor_id)
                 }),
             )
         })
@@ -360,12 +331,12 @@ impl ObswsSession {
             f.member(
                 "params",
                 nojson::object(|f| {
-                    f.member("inputTrackId", source_track_id)?;
-                    f.member("outputTrackId", encoded_track_id)?;
+                    f.member("inputTrackId", &run.source_track_id)?;
+                    f.member("outputTrackId", &run.encoded_track_id)?;
                     f.member("codec", "H264")?;
                     f.member("bitrateBps", 2_000_000)?;
                     f.member("frameRate", 30)?;
-                    f.member("processorId", encoder_processor_id)
+                    f.member("processorId", &run.encoder_processor_id)
                 }),
             )
         })
@@ -384,8 +355,8 @@ impl ObswsSession {
                     if let Some(stream_name) = stream_name {
                         f.member("streamName", stream_name)?;
                     }
-                    f.member("inputVideoTrackId", encoded_track_id)?;
-                    f.member("processorId", endpoint_processor_id)
+                    f.member("inputVideoTrackId", &run.encoded_track_id)?;
+                    f.member("processorId", &run.endpoint_processor_id)
                 }),
             )
         })
