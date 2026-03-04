@@ -24,7 +24,7 @@ fn parse_input_lookup_fields(
     let input_uuid = optional_non_empty_string_member(request_data, "inputUuid")?;
 
     if input_name.is_none() && input_uuid.is_none() {
-        return Err(request_data.invalid("Missing required inputName or inputUuid field"));
+        return Err(request_data.invalid("required member 'inputName or inputUuid' is missing"));
     }
 
     Ok((input_uuid, input_name))
@@ -107,13 +107,19 @@ where
     };
 
     parser(request_data.value()).map_err(|e| {
-        build_request_response_error(
-            request_type,
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
-            &e.to_string(),
-        )
+        let code = request_status_code_for_parse_error(&e);
+        build_request_response_error(request_type, request_id, code, &e.to_string())
     })
+}
+
+fn request_status_code_for_parse_error(error: &nojson::JsonParseError) -> i64 {
+    if let nojson::JsonParseError::InvalidValue { error, .. } = error {
+        let reason = error.to_string();
+        if reason.contains("required member") && reason.contains("is missing") {
+            return REQUEST_STATUS_MISSING_REQUEST_FIELD;
+        }
+    }
+    REQUEST_STATUS_INVALID_REQUEST_FIELD
 }
 
 pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {

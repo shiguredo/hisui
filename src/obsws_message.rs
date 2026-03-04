@@ -588,7 +588,7 @@ mod tests {
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         let comment: String = status.to_member("comment")?.required()?.try_into()?;
         assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
         assert!(comment.contains("Invalid inputSettings field"));
         Ok(())
     }
@@ -617,7 +617,7 @@ mod tests {
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         let comment: String = status.to_member("comment")?.required()?.try_into()?;
         assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
         assert!(comment.contains("inputSettings.device_id"));
         Ok(())
     }

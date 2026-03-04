@@ -843,7 +843,7 @@ def test_obsws_create_input_rejects_unsupported_input_kind(binary_path: Path):
         )
         status = response["d"]["requestStatus"]
         assert status["result"] is False
-        assert status["code"] == 300
+        assert status["code"] == 400
 
 
 def test_obsws_remove_input_request(binary_path: Path):
