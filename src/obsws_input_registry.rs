@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
 
-const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
-    ["ffmpeg_source", "image_source", "video_capture_device"];
+const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 2] = ["image_source", "video_capture_device"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -183,7 +182,6 @@ mod tests {
     #[test]
     fn supported_input_kinds_contains_expected_values() {
         let registry = ObswsInputRegistry::new();
-        assert!(registry.supported_input_kinds().contains(&"ffmpeg_source"));
         assert!(registry.supported_input_kinds().contains(&"image_source"));
         assert!(
             registry

@@ -653,7 +653,7 @@ def test_obsws_get_input_kind_list_request(binary_path: Path):
         assert status["code"] == 100
         response_data = response["d"]["responseData"]
         assert isinstance(response_data["inputKinds"], list)
-        assert "ffmpeg_source" in response_data["inputKinds"]
+        assert "video_capture_device" in response_data["inputKinds"]
 
 
 def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
@@ -701,7 +701,7 @@ def test_obsws_create_input_request(binary_path: Path):
                 request_data={
                     "sceneName": "Scene",
                     "inputName": "obsws-test-input",
-                    "inputKind": "ffmpeg_source",
+                    "inputKind": "video_capture_device",
                     "inputSettings": {"input": "sample.mp4"},
                     "sceneItemEnabled": True,
                 },
@@ -761,7 +761,7 @@ def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
                 request_data={
                     "sceneName": "Scene",
                     "inputName": "duplicate-input",
-                    "inputKind": "ffmpeg_source",
+                    "inputKind": "video_capture_device",
                     "inputSettings": {},
                 },
             )
@@ -776,7 +776,7 @@ def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
                 request_data={
                     "sceneName": "Scene",
                     "inputName": "duplicate-input",
-                    "inputKind": "ffmpeg_source",
+                    "inputKind": "video_capture_device",
                     "inputSettings": {},
                 },
             )
@@ -806,7 +806,7 @@ def test_obsws_create_input_rejects_unsupported_scene_name(binary_path: Path):
                 request_data={
                     "sceneName": "custom-scene",
                     "inputName": "scene-rejected",
-                    "inputKind": "ffmpeg_source",
+                    "inputKind": "video_capture_device",
                     "inputSettings": {},
                 },
             )
@@ -866,7 +866,7 @@ def test_obsws_remove_input_request(binary_path: Path):
                 request_data={
                     "sceneName": "Scene",
                     "inputName": "to-be-removed",
-                    "inputKind": "ffmpeg_source",
+                    "inputKind": "video_capture_device",
                     "inputSettings": {},
                 },
             )

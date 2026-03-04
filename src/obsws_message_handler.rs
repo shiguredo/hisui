@@ -663,7 +663,7 @@ mod tests {
         registry.insert_for_test(ObswsInputEntry::new_for_test(
             "input-uuid-1",
             "input-name-1",
-            "ffmpeg_source",
+            "video_capture_device",
             crate::json::JsonValue::Object(
                 [(
                     "input".to_owned(),
@@ -913,7 +913,11 @@ mod tests {
             .to_member("inputKinds")?
             .required()?
             .try_into()?;
-        assert!(input_kinds.iter().any(|kind| kind == "ffmpeg_source"));
+        assert!(
+            input_kinds
+                .iter()
+                .any(|kind| kind == "video_capture_device")
+        );
         Ok(())
     }
 
@@ -947,7 +951,7 @@ mod tests {
             .to_member("inputKind")?
             .required()?
             .try_into()?;
-        assert_eq!(input_kind, "ffmpeg_source");
+        assert_eq!(input_kind, "video_capture_device");
         Ok(())
     }
 
@@ -1056,7 +1060,7 @@ mod tests {
                     ),
                     (
                         "inputKind".to_owned(),
-                        crate::json::JsonValue::String("ffmpeg_source".to_owned()),
+                        crate::json::JsonValue::String("video_capture_device".to_owned()),
                     ),
                     (
                         "inputSettings".to_owned(),
