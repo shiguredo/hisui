@@ -179,6 +179,22 @@ mod tests {
         nojson::RawJsonOwned::parse(json).expect("requestData must be valid json")
     }
 
+    fn parse_request_status(
+        response_message: &str,
+    ) -> Result<(bool, i64, String), Box<dyn std::error::Error>> {
+        let json = nojson::RawJson::parse(response_message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        let comment: String = status.to_member("comment")?.required()?.try_into()?;
+        Ok((result, code, comment))
+    }
+
     #[test]
     fn build_hello_message_contains_expected_fields() {
         let message = build_hello_message(None);
@@ -533,6 +549,72 @@ mod tests {
         assert_eq!(code, REQUEST_STATUS_SUCCESS);
         assert!(!input_uuid.is_empty());
         assert!(input_registry.find_input(Some(&input_uuid), None).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_when_create_input_is_missing_scene_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-missing-scene-name".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"camera-2","inputKind":"video_capture_device","inputSettings":{}}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let (result, code, comment) = parse_request_status(&response.message)?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert!(comment.contains("required member"));
+        assert!(comment.contains("is missing"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_when_create_input_is_missing_input_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-missing-input-name".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","inputKind":"video_capture_device","inputSettings":{}}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let (result, code, comment) = parse_request_status(&response.message)?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert!(comment.contains("required member"));
+        assert!(comment.contains("is missing"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_when_create_input_is_missing_input_kind()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-missing-input-kind".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","inputName":"camera-2","inputSettings":{}}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let (result, code, comment) = parse_request_status(&response.message)?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert!(comment.contains("required member"));
+        assert!(comment.contains("is missing"));
         Ok(())
     }
 
