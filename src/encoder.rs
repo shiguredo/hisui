@@ -639,6 +639,10 @@ impl VideoEncoder {
     }
 
     fn apply_pending_keyframe_request(&mut self) -> Result<()> {
+        debug_assert!(
+            self.inner.is_some(),
+            "apply_pending_keyframe_request must be called after initialize_inner"
+        );
         let request_supported = match self.inner.as_mut() {
             Some(inner) => inner.request_keyframe(),
             None => false,
