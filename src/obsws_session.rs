@@ -309,6 +309,10 @@ impl ObswsSession {
         stream_name: Option<&str>,
         run: &ObswsStreamRun,
     ) -> crate::Result<()> {
+        // [NOTE]
+        // ここで送る内部 JSON-RPC は常に 1 件ずつ送信して即時 await しているため、
+        // 相関に id は使っておらず固定値を意図的に使用している。
+        // 将来並列送信へ拡張する場合は id をユニーク化すること。
         let png_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
             f.member("id", 1)?;
