@@ -280,7 +280,10 @@ impl ObswsSession {
             );
         }
 
-        self.request_stream_keyframe_after_start(&run).await;
+        tokio::spawn(Self::request_stream_keyframe_after_start(
+            self.pipeline_handle.clone(),
+            run.clone(),
+        ));
         crate::obsws_response_builder::build_start_stream_response(request_id)
     }
 
@@ -483,28 +486,29 @@ impl ObswsSession {
         }
     }
 
-    async fn request_stream_keyframe_after_start(&self, run: &ObswsStreamRun) {
-        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+    async fn request_stream_keyframe_after_start(
+        pipeline_handle: Option<crate::MediaPipelineHandle>,
+        run: ObswsStreamRun,
+    ) {
+        let Some(pipeline_handle) = pipeline_handle else {
             tracing::warn!("failed to request keyframe: pipeline handle is not initialized");
             return;
         };
 
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
-            match self
-                .find_stream_video_encoder(pipeline_handle, run)
+            match Self::find_stream_video_encoder(&pipeline_handle, &run)
                 .await
                 .and_then(|maybe_encoder_processor_id| {
                     maybe_encoder_processor_id
                         .ok_or_else(|| crate::Error::new("upstream video encoder is not found yet"))
                 }) {
                 Ok(encoder_processor_id) => {
-                    if let Err(e) = self
-                        .send_keyframe_request_to_video_encoder(
-                            pipeline_handle,
-                            &encoder_processor_id,
-                        )
-                        .await
+                    if let Err(e) = Self::send_keyframe_request_to_video_encoder(
+                        &pipeline_handle,
+                        &encoder_processor_id,
+                    )
+                    .await
                     {
                         tracing::warn!(
                             "failed to request keyframe for stream start: {}",
@@ -528,7 +532,6 @@ impl ObswsSession {
     }
 
     async fn find_stream_video_encoder(
-        &self,
         pipeline_handle: &crate::MediaPipelineHandle,
         run: &ObswsStreamRun,
     ) -> crate::Result<Option<crate::ProcessorId>> {
@@ -540,7 +543,6 @@ impl ObswsSession {
     }
 
     async fn send_keyframe_request_to_video_encoder(
-        &self,
         pipeline_handle: &crate::MediaPipelineHandle,
         encoder_processor_id: &crate::ProcessorId,
     ) -> crate::Result<()> {

@@ -634,35 +634,17 @@ impl VideoEncoder {
             }
         }
 
-        // エンコード済みフレームを取得
-        if let Some(inner) = &mut self.inner {
-            while let Some(mut encoded) = inner.next_encoded_frame() {
-                self.total_output_video_frame_count_metric.inc();
-                if let Some(sample_entry) = encoded.sample_entry.clone() {
-                    self.last_video_sample_entry = Some(sample_entry);
-                }
-                if encoded.keyframe {
-                    self.total_output_video_keyframe_count_metric.inc();
-                    if self.requested_keyframes_inflight > 0 {
-                        self.requested_keyframes_inflight -= 1;
-                        if encoded.sample_entry.is_none()
-                            && let Some(sample_entry) = self.last_video_sample_entry.clone()
-                        {
-                            encoded.sample_entry = Some(sample_entry);
-                        }
-                    }
-                }
-                self.encoded.push_back(encoded);
-            }
-        }
+        self.drain_encoded_frames();
         Ok(())
     }
 
     fn apply_pending_keyframe_request(&mut self) -> Result<()> {
-        let Some(inner) = self.inner.as_mut() else {
-            return Ok(());
+        let request_supported = match self.inner.as_mut() {
+            Some(inner) => inner.request_keyframe(),
+            None => false,
         };
-        if !inner.request_keyframe() {
+        if !request_supported {
+            self.drain_encoded_frames();
             let recreated = self.create_inner()?;
             self.engine_metric.set(recreated.name().as_str());
             self.codec_metric.set(recreated.codec().as_str());
@@ -671,6 +653,35 @@ impl VideoEncoder {
         self.keyframe_request_pending = false;
         self.requested_keyframes_inflight = self.requested_keyframes_inflight.saturating_add(1);
         Ok(())
+    }
+
+    fn drain_encoded_frames(&mut self) {
+        let Some(mut inner) = self.inner.take() else {
+            return;
+        };
+        while let Some(encoded) = inner.next_encoded_frame() {
+            self.push_encoded_frame_with_metrics(encoded);
+        }
+        self.inner = Some(inner);
+    }
+
+    fn push_encoded_frame_with_metrics(&mut self, mut encoded: VideoFrame) {
+        self.total_output_video_frame_count_metric.inc();
+        if let Some(sample_entry) = encoded.sample_entry.clone() {
+            self.last_video_sample_entry = Some(sample_entry);
+        }
+        if encoded.keyframe {
+            self.total_output_video_keyframe_count_metric.inc();
+            if self.requested_keyframes_inflight > 0 {
+                self.requested_keyframes_inflight -= 1;
+                if encoded.sample_entry.is_none()
+                    && let Some(sample_entry) = self.last_video_sample_entry.clone()
+                {
+                    encoded.sample_entry = Some(sample_entry);
+                }
+            }
+        }
+        self.encoded.push_back(encoded);
     }
 
     fn poll_output(&mut self) -> Result<EncoderRunOutput> {
