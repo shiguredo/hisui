@@ -155,8 +155,9 @@ mod tests {
         ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws_protocol::{
-        OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-        REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+        OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+        REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+        REQUEST_STATUS_SUCCESS,
     };
 
     fn input_registry() -> ObswsInputRegistry {
@@ -532,6 +533,33 @@ mod tests {
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_invalid_field_error_for_unsupported_scene_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-invalid-scene".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(request_data(
+                r#"{"sceneName":"custom-scene","inputName":"input-name-2","inputKind":"video_capture_device","inputSettings":{}}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
         Ok(())
     }
 

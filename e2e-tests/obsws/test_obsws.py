@@ -678,7 +678,7 @@ def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
         )
         status = response["d"]["requestStatus"]
         assert status["result"] is False
-        assert status["code"] == 300
+        assert status["code"] == 400
 
 
 def test_obsws_create_input_request(binary_path: Path):

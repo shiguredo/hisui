@@ -6,8 +6,9 @@ use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
     OBSWS_DEFAULT_SCENE_NAME, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_RESPONSE,
     OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
+    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_SUCCESS,
 };
 
 struct CreateInputFields {
@@ -411,7 +412,7 @@ pub fn build_create_input_response(
             return build_request_response_error(
                 "CreateInput",
                 request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
                 &format!(
                     "Unsupported sceneName field: only '{OBSWS_DEFAULT_SCENE_NAME}' is supported"
                 ),
