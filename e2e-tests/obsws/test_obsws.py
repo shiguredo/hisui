@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -1101,15 +1102,27 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
-        asyncio.run(_run_start_stream_flow())
+        def _run_start_stream_flow_sync() -> None:
+            asyncio.run(_run_start_stream_flow())
 
-        ffmpeg_process = _start_ffmpeg_rtmp_receive(receive_url, output_path, max_video_frames=30)
-        try:
-            _wait_process_exit(ffmpeg_process, timeout=20.0)
-        finally:
-            if ffmpeg_process.poll() is None:
-                ffmpeg_process.kill()
-                ffmpeg_process.communicate(timeout=5)
+        # 受信側が先に接続待機へ入れるよう、StartStream フローは別スレッドで並行実行する
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            start_stream_future = executor.submit(_run_start_stream_flow_sync)
+
+            ffmpeg_process = _start_ffmpeg_rtmp_receive(
+                receive_url,
+                output_path,
+                max_video_frames=30,
+                startup_timeout=20.0,
+            )
+            try:
+                _wait_process_exit(ffmpeg_process, timeout=20.0)
+            finally:
+                if ffmpeg_process.poll() is None:
+                    ffmpeg_process.kill()
+                    ffmpeg_process.communicate(timeout=5)
+
+            start_stream_future.result(timeout=20.0)
 
     assert output_path.exists(), "RTMP received output file must exist"
     assert output_path.stat().st_size > 0, "RTMP received output file must not be empty"

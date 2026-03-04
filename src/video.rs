@@ -87,15 +87,31 @@ impl RawVideoFrame {
 
     pub fn as_i420_planes(&self) -> crate::Result<I420Planes<'_>> {
         let frame = self.as_video_frame();
-        if frame.format != VideoFormat::I420 {
-            return Err(crate::Error::new(format!(
-                "expected I420 format, got {:?}",
+        match frame.format {
+            VideoFormat::I420 => frame
+                .as_yuv_planes()
+                .ok_or_else(|| crate::Error::new("invalid I420 frame data")),
+            VideoFormat::I420A => {
+                let size = frame
+                    .size()
+                    .ok_or_else(|| crate::Error::new("video frame size is required"))?;
+                let width = size.width;
+                let height = size.height;
+                let (y_size, uv_size, _) = VideoFrame::i420_plane_sizes(width, height);
+                if frame.data.len() < VideoFrame::i420a_total_size(width, height) {
+                    return Err(crate::Error::new("invalid I420A frame data"));
+                }
+
+                let y_plane = &frame.data[..y_size];
+                let u_plane = &frame.data[y_size..][..uv_size];
+                let v_plane = &frame.data[y_size + uv_size..][..uv_size];
+                Ok((y_plane, u_plane, v_plane))
+            }
+            _ => Err(crate::Error::new(format!(
+                "expected I420 or I420A format, got {:?}",
                 frame.format
-            )));
+            ))),
         }
-        frame
-            .as_yuv_planes()
-            .ok_or_else(|| crate::Error::new("invalid I420 frame data"))
     }
 }
 
@@ -909,6 +925,7 @@ pub fn sample_entry_visual_fields(width: usize, height: usize) -> VisualSampleEn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn frame_rate_from_str_rejects_too_high_value() {
@@ -986,6 +1003,37 @@ mod tests {
         assert_eq!(size.width, 2);
         assert_eq!(size.height, 2);
         assert_eq!(resized.data.len(), 7);
+        Ok(())
+    }
+
+    #[test]
+    fn raw_video_frame_as_i420_planes_accepts_i420a() -> crate::Result<()> {
+        let frame = Arc::new(VideoFrame {
+            sample_entry: None,
+            keyframe: true,
+            format: VideoFormat::I420A,
+            size: Some(VideoFrameSize {
+                width: 4,
+                height: 4,
+            }),
+            timestamp: Duration::ZERO,
+            data: vec![
+                // Y (4x4)
+                1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, // U (2x2)
+                5, 5, 5, 5, // V (2x2)
+                6, 6, 6, 6, // A (2x2)
+                7, 7, 7, 7,
+            ],
+        });
+        let raw = RawVideoFrame::from_video_frame(frame)?;
+        let (y, u, v) = raw.as_i420_planes()?;
+
+        assert_eq!(y.len(), 16);
+        assert_eq!(u.len(), 4);
+        assert_eq!(v.len(), 4);
+        assert_eq!(y[0], 1);
+        assert_eq!(u[0], 5);
+        assert_eq!(v[0], 6);
         Ok(())
     }
 }
