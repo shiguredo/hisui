@@ -1,5 +1,7 @@
 use crate::obsws_auth::ObswsAuthentication;
-use crate::obsws_input_registry::{CreateInputError, ObswsInputRegistry};
+use crate::obsws_input_registry::{
+    CreateInputError, ObswsInput, ObswsInputRegistry, ParseInputSettingsError,
+};
 use crate::obsws_protocol::{
     OBSWS_DEFAULT_SCENE_NAME, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_IDENTIFY,
     OBSWS_OP_REQUEST, OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS,
@@ -173,18 +175,17 @@ fn parse_input_lookup_fields(
 struct CreateInputFields<'a> {
     scene_name: &'a str,
     input_name: &'a str,
-    input_kind: &'a str,
-    input_settings: crate::json::JsonValue,
+    input: ObswsInput,
 }
 
 fn parse_create_input_fields(
     request_data: Option<&crate::json::JsonValue>,
-) -> Result<CreateInputFields<'_>, &'static str> {
+) -> Result<CreateInputFields<'_>, String> {
     let Some(request_data) = request_data else {
-        return Err("Missing required requestData field");
+        return Err("Missing required requestData field".to_owned());
     };
     let crate::json::JsonValue::Object(request_data) = request_data else {
-        return Err("Invalid requestData field");
+        return Err("Invalid requestData field".to_owned());
     };
 
     let scene_name = request_data
@@ -196,7 +197,7 @@ fn parse_create_input_fields(
             Some(v.as_str())
         })
         .filter(|v| !v.is_empty())
-        .ok_or("Missing required sceneName field")?;
+        .ok_or("Missing required sceneName field".to_owned())?;
     let input_name = request_data
         .get("inputName")
         .and_then(|v| {
@@ -206,7 +207,7 @@ fn parse_create_input_fields(
             Some(v.as_str())
         })
         .filter(|v| !v.is_empty())
-        .ok_or("Missing required inputName field")?;
+        .ok_or("Missing required inputName field".to_owned())?;
     let input_kind = request_data
         .get("inputKind")
         .and_then(|v| {
@@ -216,20 +217,23 @@ fn parse_create_input_fields(
             Some(v.as_str())
         })
         .filter(|v| !v.is_empty())
-        .ok_or("Missing required inputKind field")?;
+        .ok_or("Missing required inputKind field".to_owned())?;
     let input_settings = request_data
         .get("inputSettings")
-        .ok_or("Missing required inputSettings field")?
+        .ok_or("Missing required inputSettings field".to_owned())?
         .clone();
-    if !matches!(input_settings, crate::json::JsonValue::Object(_)) {
-        return Err("Invalid inputSettings field: object is required");
-    }
+    let input =
+        ObswsInput::from_kind_and_settings(input_kind, input_settings).map_err(|e| match e {
+            ParseInputSettingsError::UnsupportedInputKind => {
+                "Unsupported inputKind field".to_owned()
+            }
+            ParseInputSettingsError::InvalidInputSettings(message) => message,
+        })?;
 
     Ok(CreateInputFields {
         scene_name,
         input_name,
-        input_kind,
-        input_settings,
+        input,
     })
 }
 
@@ -491,9 +495,10 @@ fn build_get_input_settings_response(
                 f.member(
                     "responseData",
                     nojson::object(|f| {
+                        let input_settings = input.input.settings_as_json();
                         f.member("inputName", &input.input_name)?;
-                        f.member("inputKind", &input.input_kind)?;
-                        f.member("inputSettings", &input.settings)
+                        f.member("inputKind", input.input.kind_name())?;
+                        f.member("inputSettings", &input_settings)
                     }),
                 )
             }),
@@ -514,7 +519,7 @@ fn build_create_input_response(
                 "CreateInput",
                 request_id,
                 REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                message,
+                &message,
             );
         }
     };
@@ -522,8 +527,7 @@ fn build_create_input_response(
     let created = match input_registry.create_input(
         fields.scene_name,
         fields.input_name,
-        fields.input_kind,
-        fields.input_settings,
+        fields.input,
     ) {
         Ok(created) => created,
         Err(CreateInputError::UnsupportedSceneName) => {
@@ -534,14 +538,6 @@ fn build_create_input_response(
                 &format!(
                     "Unsupported sceneName field: only '{OBSWS_DEFAULT_SCENE_NAME}' is supported"
                 ),
-            );
-        }
-        Err(CreateInputError::UnsupportedInputKind) => {
-            return build_request_response_error(
-                "CreateInput",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Unsupported inputKind field",
             );
         }
         Err(CreateInputError::InputNameAlreadyExists) => {
@@ -656,22 +652,21 @@ fn build_request_response_error(
 mod tests {
     use super::*;
     use crate::obsws_auth::build_authentication_response;
-    use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputRegistry};
+    use crate::obsws_input_registry::{
+        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings,
+        ObswsVideoCaptureDeviceSettings,
+    };
 
     fn input_registry() -> ObswsInputRegistry {
         let mut registry = ObswsInputRegistry::new();
         registry.insert_for_test(ObswsInputEntry::new_for_test(
             "input-uuid-1",
             "input-name-1",
-            "video_capture_device",
-            crate::json::JsonValue::Object(
-                [(
-                    "input".to_owned(),
-                    crate::json::JsonValue::String("sample.mp4".to_owned()),
-                )]
-                .into_iter()
-                .collect(),
-            ),
+            ObswsInput {
+                settings: ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
+                    device_id: Some("camera-1".to_owned()),
+                }),
+            },
         ));
         registry
     }
@@ -1085,6 +1080,103 @@ mod tests {
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_rejects_non_object_input_settings_for_create_input()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-invalid-settings-1".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(crate::json::JsonValue::Object(
+                [
+                    (
+                        "sceneName".to_owned(),
+                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
+                    ),
+                    (
+                        "inputName".to_owned(),
+                        crate::json::JsonValue::String("camera-invalid".to_owned()),
+                    ),
+                    (
+                        "inputKind".to_owned(),
+                        crate::json::JsonValue::String("video_capture_device".to_owned()),
+                    ),
+                    ("inputSettings".to_owned(), crate::json::JsonValue::Null),
+                ]
+                .into_iter()
+                .collect(),
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        let comment: String = status.to_member("comment")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert!(comment.contains("Invalid inputSettings field"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_rejects_invalid_known_input_settings_field_type()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-invalid-settings-2".to_owned()),
+            request_type: Some("CreateInput".to_owned()),
+            request_data: Some(crate::json::JsonValue::Object(
+                [
+                    (
+                        "sceneName".to_owned(),
+                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
+                    ),
+                    (
+                        "inputName".to_owned(),
+                        crate::json::JsonValue::String("camera-invalid-2".to_owned()),
+                    ),
+                    (
+                        "inputKind".to_owned(),
+                        crate::json::JsonValue::String("video_capture_device".to_owned()),
+                    ),
+                    (
+                        "inputSettings".to_owned(),
+                        crate::json::JsonValue::Object(
+                            [("device_id".to_owned(), crate::json::JsonValue::Integer(1))]
+                                .into_iter()
+                                .collect(),
+                        ),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        let comment: String = status.to_member("comment")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert!(comment.contains("inputSettings.device_id"));
         Ok(())
     }
 
