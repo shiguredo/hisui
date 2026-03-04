@@ -166,17 +166,16 @@ mod tests {
         assert!(text.contains("\"op\":0"));
     }
 
-    #[test]
-    fn on_request_before_identify_returns_close_action() {
+    #[tokio::test]
+    async fn on_request_before_identify_returns_close_action() {
         let mut session = ObswsSession::new(None, input_registry());
-        let action = session.handle_request(RequestMessage {
-            request_id: Some("req-1".to_owned()),
-            request_type: Some("GetVersion".to_owned()),
-            request_data: None,
-        });
-        let action = tokio::runtime::Runtime::new()
-            .expect("runtime init must succeed")
-            .block_on(action);
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-1".to_owned()),
+                request_type: Some("GetVersion".to_owned()),
+                request_data: None,
+            })
+            .await;
         let SessionAction::Close { code, reason, .. } = action else {
             panic!("must be Close");
         };
