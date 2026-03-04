@@ -616,38 +616,35 @@ async fn request_video_keyframe_for_rtmp_play_start(
     pipeline_handle: &crate::MediaPipelineHandle,
     endpoint_processor_id: &crate::ProcessorId,
 ) -> crate::Result<()> {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        let maybe_encoder_processor_id = pipeline_handle
-            .find_upstream_video_encoder(endpoint_processor_id)
-            .await
-            .map_err(|_| crate::Error::new("failed to find upstream video encoder"))?;
-        let Some(encoder_processor_id) = maybe_encoder_processor_id else {
-            if tokio::time::Instant::now() >= deadline {
-                return Err(crate::Error::new("upstream video encoder is not found yet"));
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            continue;
-        };
-
-        let rpc_sender = pipeline_handle
-            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoEncoderRpcMessage>>(
-                &encoder_processor_id,
-            )
-            .await
-            .map_err(|e| {
-                crate::Error::new(format!(
-                    "failed to get video encoder RPC sender ({encoder_processor_id}): {e}"
-                ))
-            })?;
-
-        rpc_sender
-            .send(VideoEncoderRpcMessage::RequestKeyframe)
-            .map_err(|_| {
-                crate::Error::new(format!(
-                    "failed to send keyframe request to video encoder: {encoder_processor_id}"
-                ))
-            })?;
+    // [NOTE]
+    // ここは best effort で、経路上に video encoder がない構成（既エンコード入力など）は
+    // 正常系としてキーフレーム要求をスキップする。
+    let maybe_encoder_processor_id = pipeline_handle
+        .find_upstream_video_encoder(endpoint_processor_id)
+        .await
+        .map_err(|_| crate::Error::new("failed to find upstream video encoder"))?;
+    let Some(encoder_processor_id) = maybe_encoder_processor_id else {
         return Ok(());
-    }
+    };
+
+    // get_rpc_sender() は sender 登録待ちができるため、ここで追加ポーリングは不要。
+    let rpc_sender = pipeline_handle
+        .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoEncoderRpcMessage>>(
+            &encoder_processor_id,
+        )
+        .await
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "failed to get video encoder RPC sender ({encoder_processor_id}): {e}"
+            ))
+        })?;
+
+    rpc_sender
+        .send(VideoEncoderRpcMessage::RequestKeyframe)
+        .map_err(|_| {
+            crate::Error::new(format!(
+                "failed to send keyframe request to video encoder: {encoder_processor_id}"
+            ))
+        })?;
+    Ok(())
 }
