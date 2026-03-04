@@ -38,9 +38,6 @@ fn optional_non_empty_string_member(
     let Some(value) = value else {
         return Ok(None);
     };
-    if value.kind() != nojson::JsonValueKind::String {
-        return Ok(None);
-    }
     let value: String = value.try_into()?;
     if value.is_empty() {
         return Ok(None);

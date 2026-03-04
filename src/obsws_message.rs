@@ -473,6 +473,32 @@ mod tests {
     }
 
     #[test]
+    fn handle_request_message_returns_invalid_field_error_for_get_input_settings_lookup_type_mismatch()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-1-invalid-type".to_owned()),
+            request_type: Some("GetInputSettings".to_owned()),
+            request_data: Some(request_data(r#"{"inputName":1}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+        Ok(())
+    }
+
+    #[test]
     fn handle_request_message_returns_create_input_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = RequestMessage {
