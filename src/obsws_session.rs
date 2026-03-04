@@ -14,7 +14,7 @@ use crate::obsws_protocol::{
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
 };
 
-pub(crate) enum SessionAction {
+pub enum SessionAction {
     SendText {
         text: String,
         message_name: &'static str,
@@ -33,7 +33,7 @@ enum ObswsSessionState {
     Identified,
 }
 
-pub(crate) struct ObswsSession {
+pub struct ObswsSession {
     state: ObswsSessionState,
     auth: Option<ObswsAuthentication>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
@@ -41,7 +41,7 @@ pub(crate) struct ObswsSession {
 }
 
 impl ObswsSession {
-    pub(crate) fn new(
+    pub fn new(
         auth: Option<ObswsAuthentication>,
         input_registry: Arc<RwLock<ObswsInputRegistry>>,
     ) -> Self {
@@ -53,18 +53,18 @@ impl ObswsSession {
         }
     }
 
-    pub(crate) fn stats_mut(&mut self) -> &mut ObswsSessionStats {
+    pub fn stats_mut(&mut self) -> &mut ObswsSessionStats {
         &mut self.stats
     }
 
-    pub(crate) fn on_connected(&self) -> SessionAction {
+    pub fn on_connected(&self) -> SessionAction {
         SessionAction::SendText {
             text: build_hello_message(self.auth.as_ref()),
             message_name: "hello message",
         }
     }
 
-    pub(crate) async fn on_text_message(&mut self, text: &str) -> crate::Result<SessionAction> {
+    pub async fn on_text_message(&mut self, text: &str) -> crate::Result<SessionAction> {
         self.stats.incoming_messages = self.stats.incoming_messages.saturating_add(1);
 
         let message = parse_client_message(text)?;
@@ -75,11 +75,11 @@ impl ObswsSession {
         Ok(action)
     }
 
-    pub(crate) fn on_close_event(&self) -> SessionAction {
+    pub fn on_close_event(&self) -> SessionAction {
         SessionAction::Terminate
     }
 
-    pub(crate) fn on_error_event(&self) -> SessionAction {
+    pub fn on_error_event(&self) -> SessionAction {
         SessionAction::Terminate
     }
 

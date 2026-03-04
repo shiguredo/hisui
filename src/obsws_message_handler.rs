@@ -9,40 +9,40 @@ use crate::obsws_protocol::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ClientMessage {
+pub enum ClientMessage {
     Identify(IdentifyMessage),
     Request(RequestMessage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IdentifyMessage {
-    pub(crate) rpc_version: u32,
-    pub(crate) authentication: Option<String>,
+pub struct IdentifyMessage {
+    pub rpc_version: u32,
+    pub authentication: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct RequestMessage {
-    pub(crate) request_id: Option<String>,
-    pub(crate) request_type: Option<String>,
-    pub(crate) request_data: Option<crate::json::JsonValue>,
+pub struct RequestMessage {
+    pub request_id: Option<String>,
+    pub request_type: Option<String>,
+    pub request_data: Option<crate::json::JsonValue>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ObswsSessionStats {
-    pub(crate) incoming_messages: u64,
-    pub(crate) outgoing_messages: u64,
+pub struct ObswsSessionStats {
+    pub incoming_messages: u64,
+    pub outgoing_messages: u64,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RequestResponsePayload {
-    pub(crate) message: String,
+pub struct RequestResponsePayload {
+    pub message: String,
 }
 
-pub(crate) fn is_supported_rpc_version(rpc_version: u32) -> bool {
+pub fn is_supported_rpc_version(rpc_version: u32) -> bool {
     rpc_version >= 1 && rpc_version <= OBSWS_RPC_VERSION
 }
 
-pub(crate) fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
+pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
     let json = nojson::RawJson::parse(text)?;
     let value = json.value();
     let op_value = value.to_member("op")?.required()?;
@@ -78,7 +78,7 @@ pub(crate) fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
     }
 }
 
-pub(crate) fn handle_request_message(
+pub fn handle_request_message(
     request: RequestMessage,
     session_stats: &ObswsSessionStats,
     input_registry: &mut ObswsInputRegistry,
@@ -233,7 +233,7 @@ fn parse_create_input_fields(
     })
 }
 
-pub(crate) fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
+pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_HELLO)?;
         f.member(
@@ -257,7 +257,7 @@ pub(crate) fn build_hello_message(authentication: Option<&ObswsAuthentication>) 
     .to_string()
 }
 
-pub(crate) fn build_identified_message(negotiated_rpc_version: u32) -> String {
+pub fn build_identified_message(negotiated_rpc_version: u32) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_IDENTIFIED)?;
         f.member(

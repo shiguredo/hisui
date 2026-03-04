@@ -31,7 +31,7 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
-pub(crate) fn run_internal(
+pub fn run_internal(
     ws_host: IpAddr,
     ws_port: u16,
     http_host: IpAddr,

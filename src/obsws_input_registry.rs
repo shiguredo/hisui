@@ -6,16 +6,16 @@ const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
     ["ffmpeg_source", "image_source", "video_capture_device"];
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ObswsInputEntry {
-    pub(crate) input_uuid: String,
-    pub(crate) input_name: String,
-    pub(crate) input_kind: String,
-    pub(crate) settings: crate::json::JsonValue,
+pub struct ObswsInputEntry {
+    pub input_uuid: String,
+    pub input_name: String,
+    pub input_kind: String,
+    pub settings: crate::json::JsonValue,
 }
 
 impl ObswsInputEntry {
     #[cfg(test)]
-    pub(crate) fn new_for_test(
+    pub fn new_for_test(
         input_uuid: impl Into<String>,
         input_name: impl Into<String>,
         input_kind: impl Into<String>,
@@ -43,33 +43,33 @@ impl nojson::DisplayJson for ObswsInputEntry {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ObswsInputRegistry {
+pub struct ObswsInputRegistry {
     inputs_by_uuid: BTreeMap<String, ObswsInputEntry>,
     uuids_by_name: BTreeMap<String, String>,
     next_input_id: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CreateInputError {
+pub enum CreateInputError {
     UnsupportedSceneName,
     UnsupportedInputKind,
     InputNameAlreadyExists,
 }
 
 impl ObswsInputRegistry {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
-    pub(crate) fn list_inputs(&self) -> Vec<ObswsInputEntry> {
+    pub fn list_inputs(&self) -> Vec<ObswsInputEntry> {
         self.inputs_by_uuid.values().cloned().collect()
     }
 
-    pub(crate) fn supported_input_kinds(&self) -> &'static [&'static str] {
+    pub fn supported_input_kinds(&self) -> &'static [&'static str] {
         &OBSWS_SUPPORTED_INPUT_KINDS
     }
 
-    pub(crate) fn create_input(
+    pub fn create_input(
         &mut self,
         scene_name: &str,
         input_name: &str,
@@ -101,7 +101,7 @@ impl ObswsInputRegistry {
         Ok(entry)
     }
 
-    pub(crate) fn remove_input(
+    pub fn remove_input(
         &mut self,
         input_uuid: Option<&str>,
         input_name: Option<&str>,
@@ -117,7 +117,7 @@ impl ObswsInputRegistry {
         self.inputs_by_uuid.remove(&input_uuid)
     }
 
-    pub(crate) fn find_input(
+    pub fn find_input(
         &self,
         input_uuid: Option<&str>,
         input_name: Option<&str>,
@@ -131,7 +131,7 @@ impl ObswsInputRegistry {
     }
 
     #[cfg(test)]
-    pub(crate) fn insert_for_test(&mut self, entry: ObswsInputEntry) {
+    pub fn insert_for_test(&mut self, entry: ObswsInputEntry) {
         self.uuids_by_name
             .insert(entry.input_name.clone(), entry.input_uuid.clone());
         self.inputs_by_uuid.insert(entry.input_uuid.clone(), entry);

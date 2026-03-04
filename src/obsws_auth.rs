@@ -3,14 +3,14 @@ use base64::Engine as _;
 use crate::obsws_protocol::AUTH_RANDOM_BYTE_LEN;
 
 #[derive(Debug, Clone)]
-pub(crate) struct ObswsAuthentication {
-    pub(crate) salt: String,
-    pub(crate) challenge: String,
-    pub(crate) expected_response: String,
+pub struct ObswsAuthentication {
+    pub salt: String,
+    pub challenge: String,
+    pub expected_response: String,
 }
 
 impl ObswsAuthentication {
-    pub(crate) fn new(password: &str) -> crate::Result<Self> {
+    pub fn new(password: &str) -> crate::Result<Self> {
         let salt = generate_random_base64(AUTH_RANDOM_BYTE_LEN)?;
         let challenge = generate_random_base64(AUTH_RANDOM_BYTE_LEN)?;
         let expected_response = build_authentication_response(password, &salt, &challenge);
@@ -21,7 +21,7 @@ impl ObswsAuthentication {
         })
     }
 
-    pub(crate) fn is_valid_response(&self, response: Option<&str>) -> bool {
+    pub fn is_valid_response(&self, response: Option<&str>) -> bool {
         let Some(response) = response else {
             return false;
         };
@@ -40,7 +40,7 @@ fn generate_random_base64(len: usize) -> crate::Result<String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-pub(crate) fn build_authentication_response(password: &str, salt: &str, challenge: &str) -> String {
+pub fn build_authentication_response(password: &str, salt: &str, challenge: &str) -> String {
     let secret_hash = aws_lc_rs::digest::digest(
         &aws_lc_rs::digest::SHA256,
         format!("{password}{salt}").as_bytes(),
