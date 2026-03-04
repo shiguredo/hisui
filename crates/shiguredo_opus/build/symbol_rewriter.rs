@@ -187,21 +187,21 @@ where
             continue;
         };
 
-        let renamed_symbol = if is_underscore_prefixed {
+        let renamed_symbol_name = if is_underscore_prefixed {
             format!("_{renamed_symbol_name}")
         } else {
             renamed_symbol_name.clone()
         };
 
-        if !renamed_symbols.insert(renamed_symbol.clone()) {
+        if !renamed_symbols.insert(renamed_symbol_name.clone()) {
             panic!(
                 "symbol rename collision detected: {} is renamed to {} which is already used by another symbol",
-                symbol_name, renamed_symbol
+                symbol_name, renamed_symbol_name
             );
         }
 
-        objcopy_rename_map.insert(platform_symbol.clone(), renamed_symbol.clone());
-        link_name_map.insert(symbol_name.to_string(), renamed_symbol.clone());
+        objcopy_rename_map.insert(platform_symbol.clone(), renamed_symbol_name.clone());
+        link_name_map.insert(symbol_name.to_string(), renamed_symbol_name.clone());
     }
 
     SymbolRenameMaps {
