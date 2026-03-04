@@ -111,8 +111,7 @@ class ObswsServer:
             http_ready = _is_port_open(self.http_host, self.http_port)
             if ws_ready and http_ready:
                 return
-            if not ws_ready or not http_ready:
-                time.sleep(0.1)
+            time.sleep(0.1)
         raise AssertionError(
             "obsws server did not start listening in time: "
             f"ws={self.host}:{self.port}, http={self.http_host}:{self.http_port}"
@@ -702,7 +701,7 @@ def test_obsws_create_input_request(binary_path: Path):
                     "sceneName": "Scene",
                     "inputName": "obsws-test-input",
                     "inputKind": "video_capture_device",
-                    "inputSettings": {"input": "sample.mp4"},
+                    "inputSettings": {"device_id": "sample-device"},
                     "sceneItemEnabled": True,
                 },
             )
@@ -738,6 +737,10 @@ def test_obsws_create_input_request(binary_path: Path):
         assert settings_status["result"] is True
         assert (
             settings_response["d"]["responseData"]["inputName"] == "obsws-test-input"
+        )
+        assert (
+            settings_response["d"]["responseData"]["inputSettings"]["device_id"]
+            == "sample-device"
         )
 
 
