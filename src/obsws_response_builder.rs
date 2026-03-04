@@ -17,21 +17,13 @@ struct CreateInputFields {
 }
 
 fn parse_input_lookup_fields(
-    request_data: Option<&nojson::RawJsonOwned>,
-) -> Result<(Option<String>, Option<String>), &'static str> {
-    let Some(request_data) = request_data else {
-        return Err("Missing required requestData field");
-    };
-    let request_data = request_data.value();
-    if request_data.kind() != nojson::JsonValueKind::Object {
-        return Err("Invalid requestData field");
-    }
-
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
     let input_name = optional_non_empty_string_member(request_data, "inputName")?;
     let input_uuid = optional_non_empty_string_member(request_data, "inputUuid")?;
 
     if input_name.is_none() && input_uuid.is_none() {
-        return Err("Missing required inputName or inputUuid field");
+        return Err(request_data.invalid("Missing required inputName or inputUuid field"));
     }
 
     Ok((input_uuid, input_name))
@@ -40,18 +32,15 @@ fn parse_input_lookup_fields(
 fn optional_non_empty_string_member(
     object: nojson::RawJsonValue<'_, '_>,
     member_name: &str,
-) -> Result<Option<String>, &'static str> {
-    let value = object
-        .to_member(member_name)
-        .map_err(|_| "Invalid requestData field")?
-        .get();
+) -> Result<Option<String>, nojson::JsonParseError> {
+    let value = object.to_member(member_name)?.get();
     let Some(value) = value else {
         return Ok(None);
     };
     if value.kind() != nojson::JsonValueKind::String {
         return Ok(None);
     }
-    let value: String = value.try_into().map_err(|_| "Invalid requestData field")?;
+    let value: String = value.try_into()?;
     if value.is_empty() {
         return Ok(None);
     }
@@ -59,31 +48,25 @@ fn optional_non_empty_string_member(
 }
 
 fn parse_create_input_fields(
-    request_data: Option<&nojson::RawJsonOwned>,
-) -> Result<CreateInputFields, String> {
-    let Some(request_data) = request_data else {
-        return Err("Missing required requestData field".to_owned());
-    };
-    let request_data = request_data.value();
-    if request_data.kind() != nojson::JsonValueKind::Object {
-        return Err("Invalid requestData field".to_owned());
-    }
-
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<CreateInputFields, nojson::JsonParseError> {
     let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
     let input_name = required_non_empty_string_member(request_data, "inputName")?;
     let input_kind = required_non_empty_string_member(request_data, "inputKind")?;
-    let input_settings = request_data
-        .to_member("inputSettings")
-        .map_err(|_| "Invalid requestData field".to_owned())?
-        .required()
-        .map_err(|_| "Missing required inputSettings field".to_owned())?;
-    let input =
-        ObswsInput::from_kind_and_settings(&input_kind, input_settings).map_err(|e| match e {
-            ParseInputSettingsError::UnsupportedInputKind => {
-                "Unsupported inputKind field".to_owned()
-            }
-            ParseInputSettingsError::InvalidInputSettings(message) => message,
-        })?;
+    let input_settings = request_data.to_member("inputSettings")?.required()?;
+
+    let input = match ObswsInput::from_kind_and_settings(&input_kind, input_settings) {
+        Ok(input) => input,
+        Err(ParseInputSettingsError::UnsupportedInputKind) => {
+            return Err(request_data
+                .to_member("inputKind")?
+                .required()?
+                .invalid("Unsupported inputKind field"));
+        }
+        Err(ParseInputSettingsError::InvalidInputSettings(message)) => {
+            return Err(input_settings.invalid(message));
+        }
+    };
 
     Ok(CreateInputFields {
         scene_name,
@@ -95,22 +78,41 @@ fn parse_create_input_fields(
 fn required_non_empty_string_member(
     object: nojson::RawJsonValue<'_, '_>,
     member_name: &str,
-) -> Result<String, String> {
-    let value = object
-        .to_member(member_name)
-        .map_err(|_| "Invalid requestData field".to_owned())?
-        .required()
-        .map_err(|_| format!("Missing required {member_name} field"))?;
-    if value.kind() != nojson::JsonValueKind::String {
-        return Err(format!("Invalid {member_name} field: string is required"));
-    }
-    let value: String = value
-        .try_into()
-        .map_err(|_| format!("Invalid {member_name} field"))?;
+) -> Result<String, nojson::JsonParseError> {
+    let raw_value = object.to_member(member_name)?.required()?;
+    let value: String = raw_value.try_into()?;
     if value.is_empty() {
-        return Err(format!("Missing required {member_name} field"));
+        return Err(raw_value.invalid("string must not be empty"));
     }
     Ok(value)
+}
+
+fn parse_request_data_or_error_response<T, F>(
+    request_type: &str,
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    parser: F,
+) -> Result<T, String>
+where
+    F: FnOnce(nojson::RawJsonValue<'_, '_>) -> Result<T, nojson::JsonParseError>,
+{
+    let Some(request_data) = request_data else {
+        return Err(build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "Missing required requestData field",
+        ));
+    };
+
+    parser(request_data.value()).map_err(|e| {
+        build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            &e.to_string(),
+        )
+    })
 }
 
 pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
@@ -336,16 +338,14 @@ pub fn build_get_input_settings_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
 ) -> String {
-    let (input_uuid, input_name) = match parse_input_lookup_fields(request_data) {
+    let (input_uuid, input_name) = match parse_request_data_or_error_response(
+        "GetInputSettings",
+        request_id,
+        request_data,
+        parse_input_lookup_fields,
+    ) {
         Ok(v) => v,
-        Err(message) => {
-            return build_request_response_error(
-                "GetInputSettings",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                message,
-            );
-        }
+        Err(response) => return response,
     };
 
     let Some(input) = input_registry.find_input(input_uuid.as_deref(), input_name.as_deref())
@@ -391,16 +391,14 @@ pub fn build_create_input_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
 ) -> String {
-    let fields = match parse_create_input_fields(request_data) {
+    let fields = match parse_request_data_or_error_response(
+        "CreateInput",
+        request_id,
+        request_data,
+        parse_create_input_fields,
+    ) {
         Ok(fields) => fields,
-        Err(message) => {
-            return build_request_response_error(
-                "CreateInput",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                &message,
-            );
-        }
+        Err(response) => return response,
     };
 
     let created = match input_registry.create_input(
@@ -459,16 +457,14 @@ pub fn build_remove_input_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
 ) -> String {
-    let (input_uuid, input_name) = match parse_input_lookup_fields(request_data) {
+    let (input_uuid, input_name) = match parse_request_data_or_error_response(
+        "RemoveInput",
+        request_id,
+        request_data,
+        parse_input_lookup_fields,
+    ) {
         Ok(v) => v,
-        Err(message) => {
-            return build_request_response_error(
-                "RemoveInput",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                message,
-            );
-        }
+        Err(response) => return response,
     };
     let Some(_removed) = input_registry.remove_input(input_uuid.as_deref(), input_name.as_deref())
     else {
