@@ -55,16 +55,6 @@ jobs:
       - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup component add llvm-tools
-      - name: Install packages to build external dependencies (Ubuntu)
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
-      - name: Install packages to build external dependencies (macOS)
-        if: startsWith(matrix.os, 'macos')
-        run: |
-          brew update
-          brew install cmake ninja
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
           os: ${{ matrix.os }}

@@ -15,7 +15,7 @@ build = "build.rs"
 
 [build-dependencies]
 bindgen = "0.72.0"
-cmake = "0.1"
+shiguredo_cmake = "4.2.3"
 toml = "0.9.0"
 
 # 以降は外部ライブラリビルド用のメタデータ

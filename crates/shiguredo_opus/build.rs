@@ -3,7 +3,6 @@ use std::{
     process::Command,
 };
 
-use cmake::Config;
 use symbol_rewriter::rewrite_symbols;
 
 #[path = "build/symbol_rewriter.rs"]
@@ -61,7 +60,8 @@ fn main() {
     git_clone_external_lib(&out_source_dir);
 
     // 依存ライブラリを CMake でビルドする
-    let dst = Config::new(&src_dir)
+    shiguredo_cmake::set_cmake_env();
+    let dst = shiguredo_cmake::Config::new(&src_dir)
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("OPUS_BUILD_SHARED_LIBRARY", "OFF")
         .define("OPUS_BUILD_TESTING", "OFF")
