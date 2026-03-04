@@ -51,7 +51,6 @@ pub async fn run_server(
     tracing::info!("obsws http server listening on http://{http_listen_addr}");
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new()));
 
-    // 将来の obsws processor 連携のため、現時点で MediaPipeline を初期化して起動する
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
