@@ -186,15 +186,6 @@ impl ObswsSession {
     async fn handle_start_stream(&self, request_id: &str) -> String {
         let (output_url, stream_name, image_path, run) = {
             let mut input_registry = self.input_registry.write().await;
-            if input_registry.is_stream_active() {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartStream",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Stream is already active",
-                );
-            }
-
             let stream_service_settings = input_registry.stream_service_settings().clone();
             if stream_service_settings.stream_service_type != "rtmp_custom" {
                 return crate::obsws_response_builder::build_request_response_error(
