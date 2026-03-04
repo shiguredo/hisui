@@ -933,6 +933,10 @@ impl ProcessorHandle {
         self.pipeline_handle.config()
     }
 
+    pub fn pipeline_handle(&self) -> MediaPipelineHandle {
+        self.pipeline_handle.clone()
+    }
+
     pub async fn publish_track(
         &self,
         track_id: TrackId,
