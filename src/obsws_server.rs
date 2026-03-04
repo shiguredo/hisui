@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::ObswsInputRegistry;
-use crate::obsws_message_handler::ObswsSessionStats;
+use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::OBSWS_SUBPROTOCOL;
 use crate::obsws_session::{ObswsSession, SessionAction};
 
