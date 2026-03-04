@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::path::PathBuf;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let ws_host: IpAddr = noargs::opt("host")
@@ -35,14 +36,27 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OBS WebSocket の接続パスワード")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
+    let openh264: Option<PathBuf> = noargs::opt("openh264")
+        .ty("PATH")
+        .env("HISUI_OPENH264_PATH")
+        .doc("OpenH264 の共有ライブラリのパス")
+        .take(&mut args)
+        .present_and_then(|o| o.value().parse())?;
 
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
     }
 
-    run_internal(ws_host, ws_port, http_listen_address, http_port, password)
-        .map_err(noargs::Error::from)
+    run_internal(
+        ws_host,
+        ws_port,
+        http_listen_address,
+        http_port,
+        password,
+        openh264,
+    )
+    .map_err(noargs::Error::from)
 }
 
 fn run_internal(
@@ -51,13 +65,27 @@ fn run_internal(
     http_host: IpAddr,
     http_port: u16,
     password: Option<String>,
+    openh264: Option<PathBuf>,
 ) -> crate::Result<()> {
+    let openh264_lib = openh264
+        .as_ref()
+        .map(shiguredo_openh264::Openh264Library::load)
+        .transpose()?;
+    let pipeline_config = crate::MediaPipelineConfig { openh264_lib };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(crate::Error::from)?;
 
     runtime.block_on(async move {
-        crate::obsws_server::run_server(ws_host, ws_port, http_host, http_port, password).await
+        crate::obsws_server::run_server(
+            ws_host,
+            ws_port,
+            http_host,
+            http_port,
+            password,
+            pipeline_config,
+        )
+        .await
     })
 }

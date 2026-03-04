@@ -14,6 +14,9 @@ jobs:
   e2e-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      OPENH264_VERSION: "2.6.0"
+      OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
@@ -25,9 +28,16 @@ jobs:
         with:
           os: ubuntu-24.04
           toolchain: stable
+      - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
+        run: |
+          curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
+          bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
+          mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
       - run: cargo build
       - uses: astral-sh/setup-uv@v7
       - name: Run e2e tests
+        env:
+          HISUI_OPENH264_PATH: ${{ env.OPENH264_PATH }}
         run: |
           uv sync
           uv run pytest -v

@@ -2,6 +2,19 @@ type LocalProcessorTask = Box<dyn FnOnce() + Send + 'static>;
 type PendingRpcSenderWaiter =
     tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>;
 
+#[derive(Clone, Default)]
+pub struct MediaPipelineConfig {
+    pub openh264_lib: Option<shiguredo_openh264::Openh264Library>,
+}
+
+impl std::fmt::Debug for MediaPipelineConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaPipelineConfig")
+            .field("openh264_lib", &self.openh264_lib.is_some())
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>>,
@@ -15,10 +28,15 @@ pub struct MediaPipeline {
     initial_ready_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     tracks: std::collections::HashMap<TrackId, TrackState>,
     stats: crate::stats::Stats,
+    config: std::sync::Arc<MediaPipelineConfig>,
 }
 
 impl MediaPipeline {
     pub fn new() -> crate::Result<Self> {
+        Self::new_with_config(MediaPipelineConfig::default())
+    }
+
+    pub fn new_with_config(config: MediaPipelineConfig) -> crate::Result<Self> {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (local_processor_task_tx, local_processor_task_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -42,6 +60,7 @@ impl MediaPipeline {
             initial_ready_waiters: Vec::new(),
             tracks: std::collections::HashMap::new(),
             stats: crate::stats::Stats::new(),
+            config: std::sync::Arc::new(config),
         })
     }
 
@@ -53,6 +72,7 @@ impl MediaPipeline {
             command_tx: self.command_tx.clone().expect("infallible"),
             local_processor_task_tx: self.local_processor_task_tx.clone().expect("infallible"),
             stats: self.stats.clone(),
+            config: self.config.clone(),
         }
     }
 
@@ -414,6 +434,7 @@ pub struct MediaPipelineHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>,
     local_processor_task_tx: tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>,
     stats: crate::stats::Stats,
+    config: std::sync::Arc<MediaPipelineConfig>,
 }
 
 impl MediaPipelineHandle {
@@ -546,6 +567,10 @@ impl MediaPipelineHandle {
 
     pub fn stats(&self) -> crate::stats::Stats {
         self.stats.clone()
+    }
+
+    pub fn config(&self) -> std::sync::Arc<MediaPipelineConfig> {
+        self.config.clone()
     }
 
     pub async fn list_processors(&self) -> Result<Vec<ProcessorId>, PipelineTerminated> {
@@ -798,6 +823,10 @@ impl ProcessorHandle {
 
     pub fn stats(&self) -> crate::stats::Stats {
         self.stats.clone()
+    }
+
+    pub fn config(&self) -> std::sync::Arc<MediaPipelineConfig> {
+        self.pipeline_handle.config()
     }
 
     pub async fn publish_track(

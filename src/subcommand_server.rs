@@ -50,6 +50,17 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
 
 type TlsAcceptor = Arc<tokio_rustls::TlsAcceptor>;
 
+struct RunOptions {
+    http_listen_address: IpAddr,
+    http_port: u16,
+    https_cert_path: Option<PathBuf>,
+    https_key_path: Option<PathBuf>,
+    ui_remote_url: Option<String>,
+    startup_rpc_file: Option<PathBuf>,
+    manual_start_trigger: bool,
+    openh264: Option<PathBuf>,
+}
+
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     let http_listen_address: IpAddr = noargs::opt("http-listen-address")
         .ty("ADDRESS")
@@ -89,6 +100,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("起動時に実行する RPC 通知配列 JSON ファイル")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
+    let openh264: Option<PathBuf> = noargs::opt("openh264")
+        .ty("PATH")
+        .env("HISUI_OPENH264_PATH")
+        .doc("OpenH264 の共有ライブラリのパス")
+        .take(&mut args)
+        .present_and_then(|o| o.value().parse())?;
 
     let manual_start_trigger = noargs::flag("manual-start-trigger")
         .doc("初期 processor 登録完了の自動トリガーを無効化する")
@@ -117,7 +134,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    run_internal(
+    run_internal(RunOptions {
         http_listen_address,
         http_port,
         https_cert_path,
@@ -125,19 +142,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         ui_remote_url,
         startup_rpc_file,
         manual_start_trigger,
-    )
+        openh264,
+    })
     .map_err(noargs::Error::from)
 }
 
-fn run_internal(
-    http_listen_address: IpAddr,
-    http_port: u16,
-    https_cert_path: Option<PathBuf>,
-    https_key_path: Option<PathBuf>,
-    ui_remote_url: Option<String>,
-    startup_rpc_file: Option<PathBuf>,
-    manual_start_trigger: bool,
-) -> crate::Result<()> {
+fn run_internal(options: RunOptions) -> crate::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -147,29 +157,22 @@ fn run_internal(
         // webrtc_p2p_session が spawn_local() で !Send タスクを起動するため、
         // /bootstrap を扱う server 実行コンテキストは LocalSet 上で動かす必要がある。
         let local = tokio::task::LocalSet::new();
-        local
-            .run_until(run_server(
-                http_listen_address,
-                http_port,
-                https_cert_path,
-                https_key_path,
-                ui_remote_url,
-                startup_rpc_file,
-                manual_start_trigger,
-            ))
-            .await
+        local.run_until(run_server(options)).await
     })
 }
 
-async fn run_server(
-    http_listen_address: IpAddr,
-    http_port: u16,
-    https_cert_path: Option<PathBuf>,
-    https_key_path: Option<PathBuf>,
-    ui_remote_url: Option<String>,
-    startup_rpc_file: Option<PathBuf>,
-    manual_start_trigger: bool,
-) -> crate::Result<()> {
+async fn run_server(options: RunOptions) -> crate::Result<()> {
+    let RunOptions {
+        http_listen_address,
+        http_port,
+        https_cert_path,
+        https_key_path,
+        ui_remote_url,
+        startup_rpc_file,
+        manual_start_trigger,
+        openh264,
+    } = options;
+
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
     // TLS が指定されている場合は TlsAcceptor を作成する
@@ -186,7 +189,12 @@ async fn run_server(
         "http"
     };
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let openh264_lib = openh264
+        .as_ref()
+        .map(shiguredo_openh264::Openh264Library::load)
+        .transpose()?;
+    let pipeline =
+        crate::MediaPipeline::new_with_config(crate::MediaPipelineConfig { openh264_lib })?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
 

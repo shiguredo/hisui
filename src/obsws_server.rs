@@ -37,6 +37,7 @@ pub async fn run_server(
     http_host: IpAddr,
     http_port: u16,
     password: Option<String>,
+    pipeline_config: crate::MediaPipelineConfig,
 ) -> crate::Result<()> {
     let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
     let ws_listener = TcpListener::bind(ws_listen_addr)
@@ -51,7 +52,7 @@ pub async fn run_server(
     tracing::info!("obsws http server listening on http://{http_listen_addr}");
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new()));
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
     let started = pipeline_handle
