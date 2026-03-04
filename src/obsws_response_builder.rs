@@ -828,8 +828,8 @@ pub fn build_create_input_response(
             return build_request_response_error(
                 "CreateInput",
                 request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Unsupported sceneName field",
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene not found",
             );
         }
         Err(CreateInputError::InputNameAlreadyExists) => {

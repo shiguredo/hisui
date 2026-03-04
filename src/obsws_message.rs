@@ -692,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_request_message_returns_invalid_field_error_for_unsupported_scene_name()
+    fn handle_request_message_returns_not_found_error_for_unsupported_scene_name()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = RequestMessage {
             request_id: Some("req-create-invalid-scene".to_owned()),
@@ -714,7 +714,7 @@ mod tests {
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+        assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
         Ok(())
     }
 

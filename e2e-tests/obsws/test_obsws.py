@@ -914,7 +914,7 @@ def test_obsws_create_input_rejects_unsupported_scene_name(binary_path: Path):
         )
         status = response["d"]["requestStatus"]
         assert status["result"] is False
-        assert status["code"] == 400
+        assert status["code"] == 601
 
 
 def test_obsws_create_input_rejects_unsupported_input_kind(binary_path: Path):
