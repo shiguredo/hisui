@@ -26,7 +26,7 @@ pub struct IdentifyMessage {
 pub struct RequestMessage {
     pub request_id: Option<String>,
     pub request_type: Option<String>,
-    pub request_data: Option<crate::json::JsonValue>,
+    pub request_data: Option<nojson::RawJsonOwned>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -56,8 +56,9 @@ pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
 
             let request_id: Option<String> = d_value.to_member("requestId")?.try_into()?;
             let request_type: Option<String> = d_value.to_member("requestType")?.try_into()?;
-            let request_data: Option<crate::json::JsonValue> =
-                d_value.to_member("requestData")?.try_into()?;
+            let request_data: Option<nojson::RawJsonOwned> = d_value
+                .to_member("requestData")?
+                .map(nojson::RawJsonOwned::try_from)?;
 
             Ok(ClientMessage::Request(RequestMessage {
                 request_id,
@@ -137,33 +138,18 @@ pub fn handle_request_message(
 }
 
 fn parse_input_lookup_fields(
-    request_data: Option<&crate::json::JsonValue>,
-) -> Result<(Option<&str>, Option<&str>), &'static str> {
+    request_data: Option<&nojson::RawJsonOwned>,
+) -> Result<(Option<String>, Option<String>), &'static str> {
     let Some(request_data) = request_data else {
         return Err("Missing required requestData field");
     };
-    let crate::json::JsonValue::Object(request_data) = request_data else {
+    let request_data = request_data.value();
+    if request_data.kind() != nojson::JsonValueKind::Object {
         return Err("Invalid requestData field");
-    };
+    }
 
-    let input_name = request_data
-        .get("inputName")
-        .and_then(|v| {
-            let crate::json::JsonValue::String(v) = v else {
-                return None;
-            };
-            Some(v.as_str())
-        })
-        .filter(|v| !v.is_empty());
-    let input_uuid = request_data
-        .get("inputUuid")
-        .and_then(|v| {
-            let crate::json::JsonValue::String(v) = v else {
-                return None;
-            };
-            Some(v.as_str())
-        })
-        .filter(|v| !v.is_empty());
+    let input_name = optional_non_empty_string_member(request_data, "inputName")?;
+    let input_uuid = optional_non_empty_string_member(request_data, "inputUuid")?;
 
     if input_name.is_none() && input_uuid.is_none() {
         return Err("Missing required inputName or inputUuid field");
@@ -172,58 +158,54 @@ fn parse_input_lookup_fields(
     Ok((input_uuid, input_name))
 }
 
-struct CreateInputFields<'a> {
-    scene_name: &'a str,
-    input_name: &'a str,
+fn optional_non_empty_string_member(
+    object: nojson::RawJsonValue<'_, '_>,
+    member_name: &str,
+) -> Result<Option<String>, &'static str> {
+    let value = object
+        .to_member(member_name)
+        .map_err(|_| "Invalid requestData field")?
+        .get();
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.kind() != nojson::JsonValueKind::String {
+        return Ok(None);
+    }
+    let value: String = value.try_into().map_err(|_| "Invalid requestData field")?;
+    if value.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(value))
+}
+
+struct CreateInputFields {
+    scene_name: String,
+    input_name: String,
     input: ObswsInput,
 }
 
 fn parse_create_input_fields(
-    request_data: Option<&crate::json::JsonValue>,
-) -> Result<CreateInputFields<'_>, String> {
+    request_data: Option<&nojson::RawJsonOwned>,
+) -> Result<CreateInputFields, String> {
     let Some(request_data) = request_data else {
         return Err("Missing required requestData field".to_owned());
     };
-    let crate::json::JsonValue::Object(request_data) = request_data else {
+    let request_data = request_data.value();
+    if request_data.kind() != nojson::JsonValueKind::Object {
         return Err("Invalid requestData field".to_owned());
-    };
+    }
 
-    let scene_name = request_data
-        .get("sceneName")
-        .and_then(|v| {
-            let crate::json::JsonValue::String(v) = v else {
-                return None;
-            };
-            Some(v.as_str())
-        })
-        .filter(|v| !v.is_empty())
-        .ok_or("Missing required sceneName field".to_owned())?;
-    let input_name = request_data
-        .get("inputName")
-        .and_then(|v| {
-            let crate::json::JsonValue::String(v) = v else {
-                return None;
-            };
-            Some(v.as_str())
-        })
-        .filter(|v| !v.is_empty())
-        .ok_or("Missing required inputName field".to_owned())?;
-    let input_kind = request_data
-        .get("inputKind")
-        .and_then(|v| {
-            let crate::json::JsonValue::String(v) = v else {
-                return None;
-            };
-            Some(v.as_str())
-        })
-        .filter(|v| !v.is_empty())
-        .ok_or("Missing required inputKind field".to_owned())?;
+    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    let input_name = required_non_empty_string_member(request_data, "inputName")?;
+    let input_kind = required_non_empty_string_member(request_data, "inputKind")?;
     let input_settings = request_data
-        .get("inputSettings")
-        .ok_or("Missing required inputSettings field".to_owned())?
-        .clone();
+        .to_member("inputSettings")
+        .map_err(|_| "Invalid requestData field".to_owned())?
+        .required()
+        .map_err(|_| "Missing required inputSettings field".to_owned())?;
     let input =
-        ObswsInput::from_kind_and_settings(input_kind, input_settings).map_err(|e| match e {
+        ObswsInput::from_kind_and_settings(&input_kind, input_settings).map_err(|e| match e {
             ParseInputSettingsError::UnsupportedInputKind => {
                 "Unsupported inputKind field".to_owned()
             }
@@ -235,6 +217,27 @@ fn parse_create_input_fields(
         input_name,
         input,
     })
+}
+
+fn required_non_empty_string_member(
+    object: nojson::RawJsonValue<'_, '_>,
+    member_name: &str,
+) -> Result<String, String> {
+    let value = object
+        .to_member(member_name)
+        .map_err(|_| "Invalid requestData field".to_owned())?
+        .required()
+        .map_err(|_| format!("Missing required {member_name} field"))?;
+    if value.kind() != nojson::JsonValueKind::String {
+        return Err(format!("Missing required {member_name} field"));
+    }
+    let value: String = value
+        .try_into()
+        .map_err(|_| format!("Missing required {member_name} field"))?;
+    if value.is_empty() {
+        return Err(format!("Missing required {member_name} field"));
+    }
+    Ok(value)
 }
 
 pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
@@ -454,7 +457,7 @@ fn build_get_input_kind_list_response(
 
 fn build_get_input_settings_response(
     request_id: &str,
-    request_data: Option<&crate::json::JsonValue>,
+    request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let (input_uuid, input_name) = match parse_input_lookup_fields(request_data) {
@@ -469,7 +472,8 @@ fn build_get_input_settings_response(
         }
     };
 
-    let Some(input) = input_registry.find_input(input_uuid, input_name) else {
+    let Some(input) = input_registry.find_input(input_uuid.as_deref(), input_name.as_deref())
+    else {
         return build_request_response_error(
             "GetInputSettings",
             request_id,
@@ -495,10 +499,9 @@ fn build_get_input_settings_response(
                 f.member(
                     "responseData",
                     nojson::object(|f| {
-                        let input_settings = input.input.settings_as_json();
                         f.member("inputName", &input.input_name)?;
                         f.member("inputKind", input.input.kind_name())?;
-                        f.member("inputSettings", &input_settings)
+                        f.member("inputSettings", &input.input.settings)
                     }),
                 )
             }),
@@ -509,7 +512,7 @@ fn build_get_input_settings_response(
 
 fn build_create_input_response(
     request_id: &str,
-    request_data: Option<&crate::json::JsonValue>,
+    request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
 ) -> String {
     let fields = match parse_create_input_fields(request_data) {
@@ -525,8 +528,8 @@ fn build_create_input_response(
     };
 
     let created = match input_registry.create_input(
-        fields.scene_name,
-        fields.input_name,
+        &fields.scene_name,
+        &fields.input_name,
         fields.input,
     ) {
         Ok(created) => created,
@@ -577,7 +580,7 @@ fn build_create_input_response(
 
 fn build_remove_input_response(
     request_id: &str,
-    request_data: Option<&crate::json::JsonValue>,
+    request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
 ) -> String {
     let (input_uuid, input_name) = match parse_input_lookup_fields(request_data) {
@@ -591,7 +594,8 @@ fn build_remove_input_response(
             );
         }
     };
-    let Some(_removed) = input_registry.remove_input(input_uuid, input_name) else {
+    let Some(_removed) = input_registry.remove_input(input_uuid.as_deref(), input_name.as_deref())
+    else {
         return build_request_response_error(
             "RemoveInput",
             request_id,
@@ -671,6 +675,10 @@ mod tests {
         registry
     }
 
+    fn request_data(json: &str) -> nojson::RawJsonOwned {
+        nojson::RawJsonOwned::parse(json).expect("requestData must be valid json")
+    }
+
     #[test]
     fn build_hello_message_contains_expected_fields() {
         let message = build_hello_message(None);
@@ -737,7 +745,7 @@ mod tests {
             ClientMessage::Request(RequestMessage {
                 request_id: Some("req-1".to_owned()),
                 request_type: Some("GetVersion".to_owned()),
-                request_data: Some(crate::json::JsonValue::Object(Default::default())),
+                request_data: Some(request_data("{}")),
             })
         );
     }
@@ -873,14 +881,9 @@ mod tests {
             .required()?
             .to_member("responseData")?
             .required()?;
-        let inputs: Vec<crate::json::JsonValue> =
-            response_data.to_member("inputs")?.required()?.try_into()?;
-        let Some(crate::json::JsonValue::Object(first_input)) = inputs.first() else {
-            panic!("first input must be object");
-        };
-        let Some(crate::json::JsonValue::String(input_name)) = first_input.get("inputName") else {
-            panic!("inputName must exist");
-        };
+        let mut inputs = response_data.to_member("inputs")?.required()?.to_array()?;
+        let first_input = inputs.next().expect("first input must exist");
+        let input_name: String = first_input.to_member("inputName")?.required()?.try_into()?;
         assert_eq!(input_name, "input-name-1");
         Ok(())
     }
@@ -922,14 +925,7 @@ mod tests {
         let request = RequestMessage {
             request_id: Some("req-1".to_owned()),
             request_type: Some("GetInputSettings".to_owned()),
-            request_data: Some(crate::json::JsonValue::Object(
-                [(
-                    "inputName".to_owned(),
-                    crate::json::JsonValue::String("input-name-1".to_owned()),
-                )]
-                .into_iter()
-                .collect(),
-            )),
+            request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
         let mut input_registry = input_registry();
@@ -982,31 +978,8 @@ mod tests {
         let request = RequestMessage {
             request_id: Some("req-create-1".to_owned()),
             request_type: Some("CreateInput".to_owned()),
-            request_data: Some(crate::json::JsonValue::Object(
-                [
-                    (
-                        "sceneName".to_owned(),
-                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
-                    ),
-                    (
-                        "inputName".to_owned(),
-                        crate::json::JsonValue::String("camera-2".to_owned()),
-                    ),
-                    (
-                        "inputKind".to_owned(),
-                        crate::json::JsonValue::String("video_capture_device".to_owned()),
-                    ),
-                    (
-                        "inputSettings".to_owned(),
-                        crate::json::JsonValue::Object(Default::default()),
-                    ),
-                    (
-                        "sceneItemEnabled".to_owned(),
-                        crate::json::JsonValue::Boolean(true),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
             )),
         };
         let session_stats = ObswsSessionStats::default();
@@ -1043,27 +1016,8 @@ mod tests {
         let request = RequestMessage {
             request_id: Some("req-create-dup".to_owned()),
             request_type: Some("CreateInput".to_owned()),
-            request_data: Some(crate::json::JsonValue::Object(
-                [
-                    (
-                        "sceneName".to_owned(),
-                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
-                    ),
-                    (
-                        "inputName".to_owned(),
-                        crate::json::JsonValue::String("input-name-1".to_owned()),
-                    ),
-                    (
-                        "inputKind".to_owned(),
-                        crate::json::JsonValue::String("video_capture_device".to_owned()),
-                    ),
-                    (
-                        "inputSettings".to_owned(),
-                        crate::json::JsonValue::Object(Default::default()),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","inputName":"input-name-1","inputKind":"video_capture_device","inputSettings":{}}"#,
             )),
         };
         let session_stats = ObswsSessionStats::default();
@@ -1089,24 +1043,8 @@ mod tests {
         let request = RequestMessage {
             request_id: Some("req-create-invalid-settings-1".to_owned()),
             request_type: Some("CreateInput".to_owned()),
-            request_data: Some(crate::json::JsonValue::Object(
-                [
-                    (
-                        "sceneName".to_owned(),
-                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
-                    ),
-                    (
-                        "inputName".to_owned(),
-                        crate::json::JsonValue::String("camera-invalid".to_owned()),
-                    ),
-                    (
-                        "inputKind".to_owned(),
-                        crate::json::JsonValue::String("video_capture_device".to_owned()),
-                    ),
-                    ("inputSettings".to_owned(), crate::json::JsonValue::Null),
-                ]
-                .into_iter()
-                .collect(),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","inputName":"camera-invalid","inputKind":"video_capture_device","inputSettings":null}"#,
             )),
         };
         let session_stats = ObswsSessionStats::default();
@@ -1134,31 +1072,8 @@ mod tests {
         let request = RequestMessage {
             request_id: Some("req-create-invalid-settings-2".to_owned()),
             request_type: Some("CreateInput".to_owned()),
-            request_data: Some(crate::json::JsonValue::Object(
-                [
-                    (
-                        "sceneName".to_owned(),
-                        crate::json::JsonValue::String(OBSWS_DEFAULT_SCENE_NAME.to_owned()),
-                    ),
-                    (
-                        "inputName".to_owned(),
-                        crate::json::JsonValue::String("camera-invalid-2".to_owned()),
-                    ),
-                    (
-                        "inputKind".to_owned(),
-                        crate::json::JsonValue::String("video_capture_device".to_owned()),
-                    ),
-                    (
-                        "inputSettings".to_owned(),
-                        crate::json::JsonValue::Object(
-                            [("device_id".to_owned(), crate::json::JsonValue::Integer(1))]
-                                .into_iter()
-                                .collect(),
-                        ),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","inputName":"camera-invalid-2","inputKind":"video_capture_device","inputSettings":{"device_id":1}}"#,
             )),
         };
         let session_stats = ObswsSessionStats::default();
@@ -1186,14 +1101,7 @@ mod tests {
         let request = RequestMessage {
             request_id: Some("req-remove-1".to_owned()),
             request_type: Some("RemoveInput".to_owned()),
-            request_data: Some(crate::json::JsonValue::Object(
-                [(
-                    "inputName".to_owned(),
-                    crate::json::JsonValue::String("input-name-1".to_owned()),
-                )]
-                .into_iter()
-                .collect(),
-            )),
+            request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
         let mut input_registry = input_registry();
@@ -1223,14 +1131,7 @@ mod tests {
         let request = RequestMessage {
             request_id: Some("req-remove-2".to_owned()),
             request_type: Some("RemoveInput".to_owned()),
-            request_data: Some(crate::json::JsonValue::Object(
-                [(
-                    "inputName".to_owned(),
-                    crate::json::JsonValue::String("not-found".to_owned()),
-                )]
-                .into_iter()
-                .collect(),
-            )),
+            request_data: Some(request_data(r#"{"inputName":"not-found"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
         let mut input_registry = input_registry();

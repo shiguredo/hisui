@@ -46,7 +46,7 @@ pub struct ObswsInput {
 impl ObswsInput {
     pub fn from_kind_and_settings(
         input_kind: &str,
-        input_settings: crate::json::JsonValue,
+        input_settings: nojson::RawJsonValue<'_, '_>,
     ) -> Result<Self, ParseInputSettingsError> {
         Ok(Self {
             settings: ObswsInputSettings::from_kind_and_settings(input_kind, input_settings)?,
@@ -55,10 +55,6 @@ impl ObswsInput {
 
     pub fn kind_name(&self) -> &'static str {
         self.settings.kind_name()
-    }
-
-    pub fn settings_as_json(&self) -> crate::json::JsonValue {
-        self.settings.to_json_value()
     }
 }
 
@@ -71,21 +67,21 @@ pub enum ObswsInputSettings {
 impl ObswsInputSettings {
     pub fn from_kind_and_settings(
         input_kind: &str,
-        input_settings: crate::json::JsonValue,
+        input_settings: nojson::RawJsonValue<'_, '_>,
     ) -> Result<Self, ParseInputSettingsError> {
-        let crate::json::JsonValue::Object(settings_object) = input_settings else {
+        if input_settings.kind() != nojson::JsonValueKind::Object {
             return Err(ParseInputSettingsError::InvalidInputSettings(
                 "Invalid inputSettings field: object is required".to_owned(),
             ));
-        };
+        }
 
         match input_kind {
             "image_source" => {
-                let file = parse_optional_string_setting(&settings_object, "file")?;
+                let file = parse_optional_string_setting(input_settings, "file")?;
                 Ok(Self::ImageSource(ObswsImageSourceSettings { file }))
             }
             "video_capture_device" => {
-                let device_id = parse_optional_string_setting(&settings_object, "device_id")?;
+                let device_id = parse_optional_string_setting(input_settings, "device_id")?;
                 Ok(Self::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id,
                 }))
@@ -100,42 +96,44 @@ impl ObswsInputSettings {
             Self::VideoCaptureDevice(_) => "video_capture_device",
         }
     }
+}
 
-    pub fn to_json_value(&self) -> crate::json::JsonValue {
-        let mut settings = BTreeMap::new();
+impl nojson::DisplayJson for ObswsInputSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
-            Self::ImageSource(image_source) => {
-                if let Some(file) = &image_source.file {
-                    settings.insert(
-                        "file".to_owned(),
-                        crate::json::JsonValue::String(file.clone()),
-                    );
-                }
-            }
-            Self::VideoCaptureDevice(video_capture_device) => {
-                if let Some(device_id) = &video_capture_device.device_id {
-                    settings.insert(
-                        "device_id".to_owned(),
-                        crate::json::JsonValue::String(device_id.clone()),
-                    );
-                }
-            }
+            Self::ImageSource(settings) => settings.fmt(f),
+            Self::VideoCaptureDevice(settings) => settings.fmt(f),
         }
-        crate::json::JsonValue::Object(settings)
     }
 }
 
 fn parse_optional_string_setting(
-    settings: &BTreeMap<String, crate::json::JsonValue>,
+    settings: nojson::RawJsonValue<'_, '_>,
     key: &str,
 ) -> Result<Option<String>, ParseInputSettingsError> {
-    match settings.get(key) {
-        None => Ok(None),
-        Some(crate::json::JsonValue::String(value)) => Ok(Some(value.clone())),
-        Some(_) => Err(ParseInputSettingsError::InvalidInputSettings(format!(
+    let Some(value) = settings
+        .to_member(key)
+        .map_err(|e| {
+            ParseInputSettingsError::InvalidInputSettings(format!(
+                "Invalid inputSettings field: {e}"
+            ))
+        })?
+        .get()
+    else {
+        return Ok(None);
+    };
+
+    if value.kind() != nojson::JsonValueKind::String {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
             "Invalid inputSettings.{key} field: string is required"
-        ))),
+        )));
     }
+    let value: String = value.try_into().map_err(|e| {
+        ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: {e}"
+        ))
+    })?;
+    Ok(Some(value))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -144,10 +142,34 @@ pub struct ObswsImageSourceSettings {
     pub file: Option<String>,
 }
 
+impl nojson::DisplayJson for ObswsImageSourceSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(file) = &self.file {
+                f.member("file", file)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsVideoCaptureDeviceSettings {
     // OBS 互換のため、video_capture_device は device_id 未指定の状態も有効として扱う
     pub device_id: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(device_id) = &self.device_id {
+                f.member("device_id", device_id)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,8 +281,8 @@ impl ObswsInputRegistry {
 mod tests {
     use super::*;
 
-    fn empty_settings_object() -> crate::json::JsonValue {
-        crate::json::JsonValue::Object(BTreeMap::new())
+    fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
+        nojson::RawJsonOwned::parse(text).expect("test json must be valid")
     }
 
     fn empty_video_capture_device_input() -> ObswsInput {
@@ -308,18 +330,17 @@ mod tests {
 
     #[test]
     fn parse_input_settings_rejects_unsupported_kind() {
-        let error = ObswsInput::from_kind_and_settings("unsupported_kind", empty_settings_object())
+        let settings = parse_owned_json("{}");
+        let error = ObswsInput::from_kind_and_settings("unsupported_kind", settings.value())
             .expect_err("unsupported input kind must be rejected");
         assert_eq!(error, ParseInputSettingsError::UnsupportedInputKind);
     }
 
     #[test]
     fn parse_input_settings_rejects_non_object() {
-        let error = ObswsInput::from_kind_and_settings(
-            "video_capture_device",
-            crate::json::JsonValue::Null,
-        )
-        .expect_err("non object settings must be rejected");
+        let settings = parse_owned_json("null");
+        let error = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect_err("non object settings must be rejected");
         assert_eq!(
             error,
             ParseInputSettingsError::InvalidInputSettings(
@@ -330,18 +351,9 @@ mod tests {
 
     #[test]
     fn parse_image_source_settings_reads_file() {
-        let input = ObswsInput::from_kind_and_settings(
-            "image_source",
-            crate::json::JsonValue::Object(
-                [(
-                    "file".to_owned(),
-                    crate::json::JsonValue::String("/tmp/image.png".to_owned()),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-        )
-        .expect("image_source settings must be accepted");
+        let settings = parse_owned_json(r#"{"file":"/tmp/image.png"}"#);
+        let input = ObswsInput::from_kind_and_settings("image_source", settings.value())
+            .expect("image_source settings must be accepted");
         assert_eq!(input.kind_name(), "image_source");
         assert_eq!(
             input.settings,
@@ -353,18 +365,9 @@ mod tests {
 
     #[test]
     fn parse_video_capture_device_settings_reads_device_id() {
-        let input = ObswsInput::from_kind_and_settings(
-            "video_capture_device",
-            crate::json::JsonValue::Object(
-                [(
-                    "device_id".to_owned(),
-                    crate::json::JsonValue::String("camera-1".to_owned()),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-        )
-        .expect("video_capture_device settings must be accepted");
+        let settings = parse_owned_json(r#"{"device_id":"camera-1"}"#);
+        let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect("video_capture_device settings must be accepted");
         assert_eq!(input.kind_name(), "video_capture_device");
         assert_eq!(
             input.settings,
@@ -376,15 +379,9 @@ mod tests {
 
     #[test]
     fn parse_input_settings_rejects_invalid_known_field_type() {
-        let error = ObswsInput::from_kind_and_settings(
-            "video_capture_device",
-            crate::json::JsonValue::Object(
-                [("device_id".to_owned(), crate::json::JsonValue::Integer(1))]
-                    .into_iter()
-                    .collect(),
-            ),
-        )
-        .expect_err("invalid known field type must be rejected");
+        let settings = parse_owned_json(r#"{"device_id":1}"#);
+        let error = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect_err("invalid known field type must be rejected");
         assert_eq!(
             error,
             ParseInputSettingsError::InvalidInputSettings(
@@ -395,30 +392,27 @@ mod tests {
 
     #[test]
     fn parse_input_settings_ignores_unknown_fields() {
-        let input = ObswsInput::from_kind_and_settings(
-            "video_capture_device",
-            crate::json::JsonValue::Object(
-                [(
-                    "unknown_key".to_owned(),
-                    crate::json::JsonValue::String("value".to_owned()),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-        )
-        .expect("unknown fields should be ignored");
-        assert_eq!(
-            input.settings_as_json(),
-            crate::json::JsonValue::Object(BTreeMap::new())
+        let settings = parse_owned_json(r#"{"unknown_key":"value"}"#);
+        let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect("unknown fields should be ignored");
+        let output_json_text = nojson::json(|f| f.value(&input.settings)).to_string();
+        let output_json = parse_owned_json(&output_json_text);
+        assert!(
+            output_json
+                .value()
+                .to_member("unknown_key")
+                .expect("member access must succeed")
+                .get()
+                .is_none()
         );
     }
 
     #[test]
     fn create_input_succeeds_with_supported_values() {
         let mut registry = ObswsInputRegistry::new();
-        let input =
-            ObswsInput::from_kind_and_settings("video_capture_device", empty_settings_object())
-                .expect("input settings must be valid");
+        let settings = parse_owned_json("{}");
+        let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect("input settings must be valid");
         let entry = registry
             .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input)
             .expect("input creation must succeed");
@@ -431,15 +425,17 @@ mod tests {
     #[test]
     fn create_input_rejects_duplicate_name() {
         let mut registry = ObswsInputRegistry::new();
+        let first_settings = parse_owned_json("{}");
         let first_input =
-            ObswsInput::from_kind_and_settings("video_capture_device", empty_settings_object())
+            ObswsInput::from_kind_and_settings("video_capture_device", first_settings.value())
                 .expect("input settings must be valid");
         registry
             .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", first_input)
             .expect("first input creation must succeed");
 
+        let second_settings = parse_owned_json("{}");
         let second_input =
-            ObswsInput::from_kind_and_settings("video_capture_device", empty_settings_object())
+            ObswsInput::from_kind_and_settings("video_capture_device", second_settings.value())
                 .expect("input settings must be valid");
         let error = registry
             .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", second_input)
@@ -450,9 +446,9 @@ mod tests {
     #[test]
     fn create_input_rejects_unsupported_scene_name() {
         let mut registry = ObswsInputRegistry::new();
-        let input =
-            ObswsInput::from_kind_and_settings("video_capture_device", empty_settings_object())
-                .expect("input settings must be valid");
+        let settings = parse_owned_json("{}");
+        let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect("input settings must be valid");
         let error = registry
             .create_input("not-scene", "camera-1", input)
             .expect_err("unsupported scene name must be rejected");
@@ -462,9 +458,9 @@ mod tests {
     #[test]
     fn remove_input_by_name_succeeds() {
         let mut registry = ObswsInputRegistry::new();
-        let input =
-            ObswsInput::from_kind_and_settings("video_capture_device", empty_settings_object())
-                .expect("input settings must be valid");
+        let settings = parse_owned_json("{}");
+        let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect("input settings must be valid");
         let created = registry
             .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input)
             .expect("input creation must succeed");
@@ -481,9 +477,9 @@ mod tests {
     #[test]
     fn remove_input_by_uuid_succeeds() {
         let mut registry = ObswsInputRegistry::new();
-        let input =
-            ObswsInput::from_kind_and_settings("video_capture_device", empty_settings_object())
-                .expect("input settings must be valid");
+        let settings = parse_owned_json("{}");
+        let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect("input settings must be valid");
         let created = registry
             .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input)
             .expect("input creation must succeed");
