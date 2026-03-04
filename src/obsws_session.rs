@@ -421,16 +421,32 @@ impl ObswsSession {
             crate::ProcessorId::new(run.source_processor_id.clone()),
         ];
 
+        let mut terminate_error = None;
         for processor_id in &processor_ids {
-            let _ = pipeline_handle
+            if pipeline_handle
                 .terminate_processor(processor_id.clone())
                 .await
-                .map_err(|_| {
-                    crate::Error::new("failed to terminate processor: pipeline has terminated")
-                })?;
+                .is_err()
+                && terminate_error.is_none()
+            {
+                terminate_error = Some(crate::Error::new(
+                    "failed to terminate processor: pipeline has terminated",
+                ));
+            }
         }
-        self.wait_stream_processors_stopped(pipeline_handle, &processor_ids, Duration::from_secs(2))
-            .await
+
+        self.wait_stream_processors_stopped(
+            pipeline_handle,
+            &processor_ids,
+            Duration::from_secs(2),
+        )
+        .await?;
+
+        if let Some(e) = terminate_error {
+            return Err(e);
+        }
+
+        Ok(())
     }
 
     async fn wait_stream_processors_stopped(
