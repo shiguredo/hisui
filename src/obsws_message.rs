@@ -146,6 +146,7 @@ pub fn handle_request_message(
     };
     RequestResponsePayload { message }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
