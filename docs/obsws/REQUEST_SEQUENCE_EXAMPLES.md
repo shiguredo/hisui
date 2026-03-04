@@ -37,7 +37,7 @@
   - 多くの運用では実質 1 つを使うが、仕様上は `GetCanvasList` で複数要素を返せる
 - `Output`
   - 実際の出力処理の実体
-  - 主な種類: `Stream` / `Record`
+  - この文書で扱う種類: `Stream` / `Record`
 - `Stream`
   - ネットワーク配信出力
   - `StartStream` / `StopStream` で制御
@@ -169,7 +169,7 @@ NOTE: この図は概念上の依存関係を示す。実際の最小 API フロ
 
 ## 例 3: Canvas を確認して配信前提を検証する
 
-目的: 利用可能な Canvas と Program Scene を事前確認する
+目的: 利用可能な Canvas 一覧を事前確認する（ Program Scene は別軸で確認する ）
 
 1. `C -> S` GetCanvasList
 
@@ -217,7 +217,7 @@ NOTE: この図は概念上の依存関係を示す。実際の最小 API フロ
 }
 ```
 
-NOTE: `Canvas` は確認系 API が中心で、配信開始そのものは `StartStream` で制御する
+NOTE: `Canvas` は確認系 API が中心で、配信開始そのものは `StartStream` で制御する。`GetCurrentProgramScene` は `Canvas` 非対応の request であり、Canvas ごとの Program Scene を返す API ではない
 
 ---
 
