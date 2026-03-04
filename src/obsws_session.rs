@@ -265,6 +265,12 @@ impl ObswsSession {
 
         if let Err(e) = start_result {
             let _ = self.input_registry.write().await.deactivate_stream();
+            if let Err(cleanup_error) = self.stop_stream_processors(&run).await {
+                tracing::warn!(
+                    "failed to cleanup stream processors after start failure: {}",
+                    cleanup_error.display()
+                );
+            }
             return crate::obsws_response_builder::build_request_response_error(
                 "StartStream",
                 request_id,
