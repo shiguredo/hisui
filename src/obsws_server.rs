@@ -150,20 +150,20 @@ async fn handle_ws_connection(
             break;
         }
 
-        if ws.state() == ConnectionState::Connecting {
-            if let Some(request) = ws.handshake_request() {
-                if !request.protocols.iter().any(|p| p == OBSWS_SUBPROTOCOL) {
-                    tracing::warn!(
-                        "obsws handshake rejected: missing required subprotocol: {OBSWS_SUBPROTOCOL}"
-                    );
-                    ws.reject_handshake(400, "Bad Request").map_err(|e| {
-                        crate::Error::new(format!("failed to reject websocket handshake: {e}"))
-                    })?;
-                } else {
-                    ws.accept_handshake_auto().map_err(|e| {
-                        crate::Error::new(format!("failed to accept websocket handshake: {e}"))
-                    })?;
-                }
+        if ws.state() == ConnectionState::Connecting
+            && let Some(request) = ws.handshake_request()
+        {
+            if !request.protocols.iter().any(|p| p == OBSWS_SUBPROTOCOL) {
+                tracing::warn!(
+                    "obsws handshake rejected: missing required subprotocol: {OBSWS_SUBPROTOCOL}"
+                );
+                ws.reject_handshake(400, "Bad Request").map_err(|e| {
+                    crate::Error::new(format!("failed to reject websocket handshake: {e}"))
+                })?;
+            } else {
+                ws.accept_handshake_auto().map_err(|e| {
+                    crate::Error::new(format!("failed to accept websocket handshake: {e}"))
+                })?;
             }
         }
 
