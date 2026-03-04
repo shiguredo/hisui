@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
 
 const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 2] = ["image_source", "video_capture_device"];
+const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -271,6 +272,9 @@ impl ObswsInputRegistry {
 
     fn next_input_uuid(&mut self) -> String {
         let input_id = self.next_input_id;
+        if input_id > OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX {
+            panic!("BUG: obsws input id exceeds 48-bit UUID suffix range");
+        }
         self.next_input_id = self
             .next_input_id
             .checked_add(1)
@@ -500,5 +504,16 @@ mod tests {
         let mut registry = ObswsInputRegistry::new();
         let removed = registry.remove_input(None, Some("not-found"));
         assert!(removed.is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: obsws input id exceeds 48-bit UUID suffix range")]
+    fn create_input_panics_when_uuid_suffix_range_is_exhausted() {
+        let mut registry = ObswsInputRegistry::new();
+        registry.next_input_id = OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX + 1;
+        let settings = parse_owned_json("{}");
+        let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+            .expect("input settings must be valid");
+        let _ = registry.create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input);
     }
 }
