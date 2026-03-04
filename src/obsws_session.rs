@@ -5,10 +5,7 @@ use tokio::sync::RwLock;
 
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::ObswsInputRegistry;
-use crate::obsws_message_handler::{
-    ClientMessage, ObswsSessionStats, build_hello_message, build_identified_message,
-    handle_request_message, is_supported_rpc_version, parse_client_message,
-};
+use crate::obsws_message_handler::{ClientMessage, ObswsSessionStats};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
@@ -59,7 +56,7 @@ impl ObswsSession {
 
     pub fn on_connected(&self) -> SessionAction {
         SessionAction::SendText {
-            text: build_hello_message(self.auth.as_ref()),
+            text: crate::obsws_message_handler::build_hello_message(self.auth.as_ref()),
             message_name: "hello message",
         }
     }
@@ -67,7 +64,7 @@ impl ObswsSession {
     pub async fn on_text_message(&mut self, text: &str) -> crate::Result<SessionAction> {
         self.stats.incoming_messages = self.stats.incoming_messages.saturating_add(1);
 
-        let message = parse_client_message(text)?;
+        let message = crate::obsws_message_handler::parse_client_message(text)?;
         let action = match message {
             ClientMessage::Identify(identify) => self.handle_identify(identify),
             ClientMessage::Request(request) => self.handle_request(request).await,
@@ -95,7 +92,7 @@ impl ObswsSession {
             };
         }
 
-        if !is_supported_rpc_version(identify.rpc_version) {
+        if !crate::obsws_message_handler::is_supported_rpc_version(identify.rpc_version) {
             return SessionAction::Close {
                 code: OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
                 reason: "unsupported rpc version",
@@ -115,7 +112,7 @@ impl ObswsSession {
 
         self.state = ObswsSessionState::Identified;
         SessionAction::SendText {
-            text: build_identified_message(identify.rpc_version),
+            text: crate::obsws_message_handler::build_identified_message(identify.rpc_version),
             message_name: "identified message",
         }
     }
@@ -133,7 +130,11 @@ impl ObswsSession {
         }
 
         let mut input_registry = self.input_registry.write().await;
-        let response = handle_request_message(request, &self.stats, &mut input_registry);
+        let response = crate::obsws_message_handler::handle_request_message(
+            request,
+            &self.stats,
+            &mut input_registry,
+        );
         SessionAction::SendText {
             text: response.message,
             message_name: "request response message",
