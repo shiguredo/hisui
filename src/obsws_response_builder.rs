@@ -113,6 +113,9 @@ where
 }
 
 fn request_status_code_for_parse_error(error: &nojson::JsonParseError) -> i64 {
+    // OBS WebSocket の 300 / 400 の厳密分類は nojson のエラー種別だけでは判別しづらいため、
+    // 現状は required member 欠落パターンのみ 300 として扱い、それ以外は 400 とする
+    // 将来的に厳密化する場合は、パーサー側で欠落と型不一致を明示的に分離する
     if let nojson::JsonParseError::InvalidValue { error, .. } = error {
         let reason = error.to_string();
         if reason.contains("required member") && reason.contains("is missing") {
