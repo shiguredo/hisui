@@ -671,8 +671,8 @@ impl VideoEncoder {
 
     fn push_encoded_frame_with_metrics(&mut self, mut encoded: VideoFrame) {
         self.total_output_video_frame_count_metric.inc();
-        if let Some(sample_entry) = encoded.sample_entry.clone() {
-            self.last_video_sample_entry = Some(sample_entry);
+        if let Some(sample_entry) = encoded.sample_entry.as_ref() {
+            self.last_video_sample_entry = Some(sample_entry.clone());
         }
         if encoded.keyframe {
             self.total_output_video_keyframe_count_metric.inc();
