@@ -80,8 +80,9 @@
 - [ ] `SetProfileParameter`: プロファイルパラメータを設定する
 - [ ] `GetVideoSettings`: 映像設定を取得する
 - [ ] `SetVideoSettings`: 映像設定を更新する
-- [ ] `GetStreamServiceSettings`: 配信サービス設定を取得する
-- [ ] `SetStreamServiceSettings`: 配信サービス設定を更新する
+- [x] `GetStreamServiceSettings`: 配信サービス設定を取得する
+- [x] `SetStreamServiceSettings`: 配信サービス設定を更新する
+  - NOTE: 現時点は `streamServiceType = "rtmp_custom"` 前提で `server` / `key` を保持する
 - [ ] `GetRecordDirectory`: 録画ディレクトリを取得する
 - [ ] `SetRecordDirectory`: 録画ディレクトリを設定する
 
@@ -97,13 +98,13 @@
 
 ### Scenes
 
-- [ ] `GetSceneList`: シーン一覧を取得する
+- [x] `GetSceneList`: シーン一覧を取得する
 - [ ] `GetGroupList`: グループ一覧を取得する
-- [ ] `GetCurrentProgramScene`: 現在の Program Scene を取得する
-- [ ] `SetCurrentProgramScene`: Program Scene を切り替える
+- [x] `GetCurrentProgramScene`: 現在の Program Scene を取得する
+- [x] `SetCurrentProgramScene`: Program Scene を切り替える
 - [ ] `GetCurrentPreviewScene`: 現在の Preview Scene を取得する
 - [ ] `SetCurrentPreviewScene`: Preview Scene を切り替える
-- [ ] `CreateScene`: シーンを作成する
+- [x] `CreateScene`: シーンを作成する
 - [ ] `RemoveScene`: シーンを削除する
 - [ ] `SetSceneName`: シーン名を変更する
 - [ ] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
@@ -115,9 +116,9 @@
 - [x] `GetInputKindList`: 入力種別一覧を取得する
 - [ ] `GetSpecialInputs`: 特殊入力設定を取得する
 - [x] `CreateInput`: 入力を作成する
-  - NOTE: `sceneName` は現時点で `"Scene"` のみ対応する
+  - NOTE: `sceneName` は既存 Scene のみ受理する（ `CreateScene` で追加可能 ）
   - NOTE: `inputKind` は `GetInputKindList` で返す値のみ受理する
-  - NOTE: `sceneItemEnabled` は受理するが現状は動作に反映しない
+  - NOTE: `sceneItemEnabled = false` の入力は Scene へ追加されない
   - NOTE: 成功時は `responseData.inputUuid` を返し、`GetInputSettings` で参照できる
 - [x] `RemoveInput`: 入力を削除する
   - NOTE: `inputName` または `inputUuid` のいずれか指定で削除する
@@ -213,10 +214,14 @@
 
 ### Stream
 
-- [ ] `GetStreamStatus`: 配信状態を取得する
+- [x] `GetStreamStatus`: 配信状態を取得する
 - [ ] `ToggleStream`: 配信をトグルする
-- [ ] `StartStream`: 配信を開始する
-- [ ] `StopStream`: 配信を停止する
+- [x] `StartStream`: 配信を開始する
+  - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
+  - NOTE: 現時点の入力対応は `image_source` のみ
+  - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を起動する
+- [x] `StopStream`: 配信を停止する
+  - NOTE: 現時点は OBS 側の配信状態のみ停止し、内部 processor の停止は未対応
 - [ ] `SendStreamCaption`: 配信キャプションを送信する
 
 ### Record

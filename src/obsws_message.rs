@@ -114,6 +114,28 @@ pub fn handle_request_message(
         "GetCanvasList" => {
             crate::obsws_response_builder::build_get_canvas_list_response(&request_id)
         }
+        "GetSceneList" => crate::obsws_response_builder::build_get_scene_list_response(
+            &request_id,
+            input_registry,
+        ),
+        "GetCurrentProgramScene" => {
+            crate::obsws_response_builder::build_get_current_program_scene_response(
+                &request_id,
+                input_registry,
+            )
+        }
+        "SetCurrentProgramScene" => {
+            crate::obsws_response_builder::build_set_current_program_scene_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "CreateScene" => crate::obsws_response_builder::build_create_scene_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
             input_registry,
@@ -135,6 +157,23 @@ pub fn handle_request_message(
         "RemoveInput" => crate::obsws_response_builder::build_remove_input_response(
             &request_id,
             request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetStreamServiceSettings" => {
+            crate::obsws_response_builder::build_get_stream_service_settings_response(
+                &request_id,
+                input_registry,
+            )
+        }
+        "SetStreamServiceSettings" => {
+            crate::obsws_response_builder::build_set_stream_service_settings_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetStreamStatus" => crate::obsws_response_builder::build_get_stream_status_response(
+            &request_id,
             input_registry,
         ),
         _ => crate::obsws_response_builder::build_request_response_error(
@@ -349,6 +388,13 @@ mod tests {
         assert!(supported_image_formats.iter().any(|f| f == "png"));
         assert!(available_requests.iter().any(|r| r == "CreateInput"));
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
+        assert!(available_requests.iter().any(|r| r == "GetSceneList"));
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetStreamServiceSettings")
+        );
+        assert!(available_requests.iter().any(|r| r == "StartStream"));
         Ok(())
     }
 
@@ -782,6 +828,92 @@ mod tests {
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_create_scene_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-create-scene-1".to_owned()),
+            request_type: Some("CreateScene".to_owned()),
+            request_data: Some(request_data(r#"{"sceneName":"Scene B"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(result);
+        assert_eq!(code, REQUEST_STATUS_SUCCESS);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_current_program_scene_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let create_scene_request = RequestMessage {
+            request_id: Some("req-create-scene-2".to_owned()),
+            request_type: Some("CreateScene".to_owned()),
+            request_data: Some(request_data(r#"{"sceneName":"Scene B"}"#)),
+        };
+        let _ = handle_request_message(create_scene_request, &session_stats, &mut input_registry);
+
+        let set_scene_request = RequestMessage {
+            request_id: Some("req-set-scene-1".to_owned()),
+            request_type: Some("SetCurrentProgramScene".to_owned()),
+            request_data: Some(request_data(r#"{"sceneName":"Scene B"}"#)),
+        };
+        let response =
+            handle_request_message(set_scene_request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(result);
+        assert_eq!(code, REQUEST_STATUS_SUCCESS);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_stream_service_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let request = RequestMessage {
+            request_id: Some("req-set-stream-service".to_owned()),
+            request_type: Some("SetStreamServiceSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"streamServiceType":"rtmp_custom","streamServiceSettings":{"server":"rtmp://127.0.0.1:1935/live","key":"stream-main"}}"#,
+            )),
+        };
+
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(result);
+        assert_eq!(code, REQUEST_STATUS_SUCCESS);
         Ok(())
     }
 }

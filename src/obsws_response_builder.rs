@@ -1,20 +1,35 @@
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
-    CreateInputError, ObswsInput, ObswsInputRegistry, ParseInputSettingsError,
+    CreateInputError, CreateSceneError, ObswsInput, ObswsInputRegistry, ObswsStreamServiceSettings,
+    ParseInputSettingsError, SetCurrentProgramSceneError,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
-    OBSWS_DEFAULT_SCENE_NAME, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_RESPONSE,
-    OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
-    REQUEST_STATUS_SUCCESS,
+    OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION,
+    OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
 };
 
 struct CreateInputFields {
     scene_name: String,
     input_name: String,
     input: ObswsInput,
+    scene_item_enabled: bool,
+}
+
+struct CreateSceneFields {
+    scene_name: String,
+}
+
+struct SetCurrentProgramSceneFields {
+    scene_name: String,
+}
+
+struct SetStreamServiceSettingsFields {
+    stream_service_type: String,
+    server: String,
+    key: Option<String>,
 }
 
 fn parse_input_lookup_fields(
@@ -65,11 +80,45 @@ fn parse_create_input_fields(
             return Err(input_settings.invalid(message));
         }
     };
+    let scene_item_enabled: Option<bool> =
+        request_data.to_member("sceneItemEnabled")?.try_into()?;
 
     Ok(CreateInputFields {
         scene_name,
         input_name,
         input,
+        scene_item_enabled: scene_item_enabled.unwrap_or(true),
+    })
+}
+
+fn parse_create_scene_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<CreateSceneFields, nojson::JsonParseError> {
+    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    Ok(CreateSceneFields { scene_name })
+}
+
+fn parse_set_current_program_scene_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetCurrentProgramSceneFields, nojson::JsonParseError> {
+    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    Ok(SetCurrentProgramSceneFields { scene_name })
+}
+
+fn parse_set_stream_service_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetStreamServiceSettingsFields, nojson::JsonParseError> {
+    let stream_service_type = required_non_empty_string_member(request_data, "streamServiceType")?;
+    let stream_service_settings = request_data
+        .to_member("streamServiceSettings")?
+        .required()?;
+    let server = required_non_empty_string_member(stream_service_settings, "server")?;
+    let key = optional_non_empty_string_member(stream_service_settings, "key")?;
+
+    Ok(SetStreamServiceSettingsFields {
+        stream_service_type,
+        server,
+        key,
     })
 }
 
@@ -184,11 +233,20 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetVersion",
                                 "GetStats",
                                 "GetCanvasList",
+                                "GetSceneList",
+                                "CreateScene",
+                                "GetCurrentProgramScene",
+                                "SetCurrentProgramScene",
                                 "GetInputList",
                                 "GetInputKindList",
                                 "GetInputSettings",
                                 "CreateInput",
                                 "RemoveInput",
+                                "GetStreamServiceSettings",
+                                "SetStreamServiceSettings",
+                                "GetStreamStatus",
+                                "StartStream",
+                                "StopStream",
                             ],
                         )?;
                         f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
@@ -279,6 +337,335 @@ pub fn build_get_canvas_list_response(request_id: &str) -> String {
         )
     })
     .to_string()
+}
+
+pub fn build_get_scene_list_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let scenes = input_registry.list_scenes();
+    let current_program_scene_name = input_registry.current_program_scene_name();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetSceneList")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("currentProgramSceneName", current_program_scene_name)?;
+                        f.member("scenes", &scenes)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_current_program_scene_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetCurrentProgramScene")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member(
+                            "currentProgramSceneName",
+                            input_registry.current_program_scene_name(),
+                        )
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_current_program_scene_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetCurrentProgramScene",
+        request_id,
+        request_data,
+        parse_set_current_program_scene_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    if let Err(SetCurrentProgramSceneError::SceneNotFound) =
+        input_registry.set_current_program_scene(&fields.scene_name)
+    {
+        return build_request_response_error(
+            "SetCurrentProgramScene",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Scene not found",
+        );
+    }
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetCurrentProgramScene")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_create_scene_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "CreateScene",
+        request_id,
+        request_data,
+        parse_create_scene_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    let created = match input_registry.create_scene(&fields.scene_name) {
+        Ok(created) => created,
+        Err(CreateSceneError::SceneNameAlreadyExists) => {
+            return build_request_response_error(
+                "CreateScene",
+                request_id,
+                REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+                "Scene already exists",
+            );
+        }
+    };
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "CreateScene")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("sceneName", &created.scene_name)?;
+                        f.member("sceneUuid", &created.scene_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_stream_service_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let settings = input_registry.stream_service_settings();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetStreamServiceSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", settings)
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_stream_service_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetStreamServiceSettings",
+        request_id,
+        request_data,
+        parse_set_stream_service_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    input_registry.set_stream_service_settings(ObswsStreamServiceSettings {
+        stream_service_type: fields.stream_service_type,
+        server: Some(fields.server),
+        key: fields.key,
+    });
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetStreamServiceSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_stream_status_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let active = input_registry.is_stream_active();
+    let duration = if active {
+        input_registry.stream_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetStreamStatus")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputActive", active)?;
+                        f.member("outputReconnecting", false)?;
+                        f.member("outputTimecode", &output_timecode)?;
+                        f.member("outputDuration", output_duration)?;
+                        f.member("outputCongestion", 0.0)?;
+                        f.member("outputBytes", 0)?;
+                        f.member("outputSkippedFrames", 0)?;
+                        f.member("outputTotalFrames", 0)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_start_stream_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StartStream")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_stop_stream_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StopStream")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn format_timecode(duration: std::time::Duration) -> String {
+    let total_millis = duration.as_millis();
+    let millis = total_millis % 1_000;
+    let total_secs = total_millis / 1_000;
+    let secs = total_secs % 60;
+    let total_minutes = total_secs / 60;
+    let minutes = total_minutes % 60;
+    let hours = total_minutes / 60;
+    format!("{hours:02}:{minutes:02}:{secs:02}.{millis:03}")
 }
 
 pub fn build_get_input_list_response(
@@ -412,6 +799,7 @@ pub fn build_create_input_response(
         &fields.scene_name,
         &fields.input_name,
         fields.input,
+        fields.scene_item_enabled,
     ) {
         Ok(created) => created,
         Err(CreateInputError::UnsupportedSceneName) => {
@@ -419,9 +807,7 @@ pub fn build_create_input_response(
                 "CreateInput",
                 request_id,
                 REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                &format!(
-                    "Unsupported sceneName field: only '{OBSWS_DEFAULT_SCENE_NAME}' is supported"
-                ),
+                "Unsupported sceneName field",
             );
         }
         Err(CreateInputError::InputNameAlreadyExists) => {
