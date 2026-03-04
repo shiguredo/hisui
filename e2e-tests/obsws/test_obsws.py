@@ -213,7 +213,7 @@ def _inspect_mp4(binary_path: Path, path: Path) -> dict[str, object]:
 
 
 def _write_test_png(path: Path) -> None:
-    # 2x2 PNG（ 赤 ）の固定データ
+    # 2x2 PNG（赤）の固定データ
     path.write_bytes(
         base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR42mP4z8AARAwQCgAf7gP9Y167WwAAAABJRU5ErkJggg=="
