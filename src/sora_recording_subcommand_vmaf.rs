@@ -447,8 +447,11 @@ async fn setup_vmaf_pipeline(
 
     let encoder_output_track_id = next_track_id(&mut next_track_number, "encoder_output");
     let encoder_options = layout.video_encoder_options();
-    let encoder_processor_id = next_processor_id(&mut next_processor_number, "video_encoder");
-    let encoder_processor_type = "video_encoder";
+    let encoder_processor_id = next_processor_id(
+        &mut next_processor_number,
+        crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER,
+    );
+    let encoder_processor_type = crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER;
     let openh264_lib_for_encoder = openh264_lib;
     let limiter_output_track_id_for_encoder = limiter_output_track_id.clone();
     let encoder_output_track_id_for_encoder = encoder_output_track_id.clone();

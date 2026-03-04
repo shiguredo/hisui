@@ -492,7 +492,8 @@ async fn setup_pipeline(
     )
     .await?;
 
-    let (video_encoder_processor_id, video_encoder_metadata) = next_processor("video_encoder");
+    let (video_encoder_processor_id, video_encoder_metadata) =
+        next_processor(crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER);
     let video_encoder_output_track_id = TrackId::new(video_encoder_processor_id.get());
     let video_encoder_options = layout.video_encoder_options();
     let openh264_lib_for_encoder = openh264_lib;
@@ -779,7 +780,11 @@ fn print_output_stats_summary(
     }
     if let Some(codec) = find_string_metric_by_processor(entries, &writer_id, "video_codec") {
         f.member("output_video_codec", codec)?;
-        if let Some(engine) = find_first_string_metric_by_type(entries, "video_encoder", "engine") {
+        if let Some(engine) = find_first_string_metric_by_type(
+            entries,
+            crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER,
+            "engine",
+        ) {
             f.member("output_video_encode_engine", engine)?;
         }
         if let Some(duration_seconds) =

@@ -2,6 +2,8 @@ type LocalProcessorTask = Box<dyn FnOnce() + Send + 'static>;
 type PendingRpcSenderWaiter =
     tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>;
 
+pub const PROCESSOR_TYPE_VIDEO_ENCODER: &str = "video_encoder";
+
 #[derive(Clone, Default)]
 pub struct MediaPipelineConfig {
     pub openh264_lib: Option<shiguredo_openh264::Openh264Library>,
@@ -413,7 +415,7 @@ impl MediaPipeline {
                 let Some(publisher_state) = self.processors.get(publisher_processor_id) else {
                     continue;
                 };
-                if publisher_state.processor_type == "video_encoder" {
+                if publisher_state.processor_type == PROCESSOR_TYPE_VIDEO_ENCODER {
                     return Some(publisher_processor_id.clone());
                 }
                 queue.push_back(publisher_processor_id.clone());
@@ -1819,7 +1821,10 @@ mod tests {
             .await
             .expect("failed to register source");
         let encoder = handle
-            .register_processor(ProcessorId::new("encoder"), metadata("video_encoder"))
+            .register_processor(
+                ProcessorId::new("encoder"),
+                metadata(PROCESSOR_TYPE_VIDEO_ENCODER),
+            )
             .await
             .expect("failed to register encoder");
         let endpoint = handle

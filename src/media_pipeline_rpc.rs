@@ -1,8 +1,8 @@
 // NOTE: 長いので MediaPipelineHandle の RPC 関連の処理はこっちで実装している
 
 use crate::media_pipeline::{
-    MediaPipelineCommand, MediaPipelineHandle, ProcessorId, ProcessorMetadata,
-    RegisterProcessorError, TrackId,
+    MediaPipelineCommand, MediaPipelineHandle, PROCESSOR_TYPE_VIDEO_ENCODER, ProcessorId,
+    ProcessorMetadata, RegisterProcessorError, TrackId,
 };
 
 type RpcError = (i32, String);
@@ -495,7 +495,7 @@ impl MediaPipelineHandle {
 
         self.spawn_processor(
             processor_id.clone(),
-            ProcessorMetadata::new("video_encoder"),
+            ProcessorMetadata::new(PROCESSOR_TYPE_VIDEO_ENCODER),
             move |handle| async move {
                 let encoder = crate::encoder::VideoEncoder::new(
                     &options,
