@@ -34,6 +34,7 @@
   - `SetCurrentProgramScene` で切り替える
 - `Canvas`
   - 合成時の基準座標系と出力サイズ
+  - 多くの運用では実質 1 つを使うが、仕様上は `GetCanvasList` で複数要素を返せる
 - `Output`
   - 実際の出力処理の実体
   - 主な種類: `Stream` / `Record`
@@ -48,9 +49,22 @@
 
 - `Input` は `Scene` に `Scene Item` として追加される
 - `Program Scene` が現在の出力元として選ばれる
-- 選ばれた `Program Scene` が `Canvas` 上で合成される
+- 概念モデル上は、選ばれた `Program Scene` が `Canvas` の座標系で合成される
 - 合成結果が `Output` として `Stream` / `Record` に流れる
 - `Stream` と `Record` は独立して開始 / 停止できる
+
+### Canvas がリストで返る理由
+
+- 仕様の拡張性を保つため、`Canvas` は単数ではなくリストとして扱える形で定義されている
+- 実装差分や将来機能を吸収しやすくするため、クライアントには複数要素の可能性を残している
+- そのためクライアント実装は「`Canvas` は必ず 1 個」という前提を置かない方が安全
+- 一方で、単純な配信用途では 1 個の `Canvas` だけで十分なケースが多い
+
+### Canvas 操作の必須性について
+
+- 配信の最小フローは `StartStream` / `StopStream` を中心に成立し、`Canvas` の明示操作が毎回必要なわけではない
+- `Canvas` は内部の合成モデルを理解するための概念として重要だが、API 呼び出しとしては参照 (`GetCanvasList`) が中心になる
+- 複数 `Canvas` を返す実装に備えるため、必要時のみ `GetCanvasList` を参照して判断する運用が現実的
 
 ### 構造イメージ
 
@@ -58,8 +72,11 @@
 Input -> Scene (Scene Item) -> Program Scene -> Canvas -> Output (Stream / Record)
 ```
 
+NOTE: この図は概念上の依存関係を示す。実際の最小 API フローでは `Canvas` を直接操作しない場合がある
+
 ### この後の例との対応
 
+- `例 2`: `Canvas` を直接操作しない最小配信フロー
 - `例 3`: `Canvas` の確認 (`GetCanvasList`)
 - `例 5` / `例 6`: `Record` と `Stream` の制御
 - `例 7` / `例 8`: `Scene` と `Input` の構築
