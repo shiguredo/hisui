@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use shiguredo_websocket::CloseCode;
 use tokio::sync::RwLock;
@@ -271,7 +272,7 @@ impl ObswsSession {
             .await;
 
         if let Err(e) = start_result {
-            self.input_registry.write().await.deactivate_stream();
+            let _ = self.input_registry.write().await.deactivate_stream();
             return crate::obsws_response_builder::build_request_response_error(
                 "StartStream",
                 request_id,
@@ -284,18 +285,28 @@ impl ObswsSession {
     }
 
     async fn handle_stop_stream(&self, request_id: &str) -> String {
-        let mut input_registry = self.input_registry.write().await;
-        if !input_registry.is_stream_active() {
+        let run = {
+            let mut input_registry = self.input_registry.write().await;
+            if !input_registry.is_stream_active() {
+                return crate::obsws_response_builder::build_request_response_error(
+                    "StopStream",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Stream is not active",
+                );
+            }
+            input_registry
+                .deactivate_stream()
+                .expect("infallible: active stream must have run state")
+        };
+        if let Err(e) = self.stop_stream_processors(&run).await {
             return crate::obsws_response_builder::build_request_response_error(
                 "StopStream",
                 request_id,
                 REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Stream is not active",
+                &format!("Failed to stop stream: {}", e.display()),
             );
         }
-
-        // MediaPipeline 側に processor 停止 API がないため、現時点では OBS 状態のみ停止扱いにする
-        input_registry.deactivate_stream();
         crate::obsws_response_builder::build_stop_stream_response(request_id)
     }
 
@@ -394,6 +405,62 @@ impl ObswsSession {
         }
 
         Ok(())
+    }
+
+    async fn stop_stream_processors(&self, run: &ObswsStreamRun) -> crate::Result<()> {
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return Err(crate::Error::new(
+                "BUG: obsws pipeline handle is not initialized",
+            ));
+        };
+        let processor_ids = [
+            crate::ProcessorId::new(run.endpoint_processor_id.clone()),
+            crate::ProcessorId::new(run.encoder_processor_id.clone()),
+            crate::ProcessorId::new(run.source_processor_id.clone()),
+        ];
+
+        for processor_id in &processor_ids {
+            let _ = pipeline_handle
+                .terminate_processor(processor_id.clone())
+                .await
+                .map_err(|_| {
+                    crate::Error::new("failed to terminate processor: pipeline has terminated")
+                })?;
+        }
+        self.wait_stream_processors_stopped(pipeline_handle, &processor_ids, Duration::from_secs(2))
+            .await
+    }
+
+    async fn wait_stream_processors_stopped(
+        &self,
+        pipeline_handle: &crate::MediaPipelineHandle,
+        processor_ids: &[crate::ProcessorId],
+        timeout: Duration,
+    ) -> crate::Result<()> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let live_processors = pipeline_handle.list_processors().await.map_err(|_| {
+                crate::Error::new("failed to list processors: pipeline has terminated")
+            })?;
+            if processor_ids
+                .iter()
+                .all(|processor_id| !live_processors.iter().any(|id| id == processor_id))
+            {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                let pending = processor_ids
+                    .iter()
+                    .filter(|processor_id| live_processors.iter().any(|id| id == *processor_id))
+                    .map(|processor_id| processor_id.get().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(crate::Error::new(format!(
+                    "stream processors did not terminate in time: {pending}"
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 }
 

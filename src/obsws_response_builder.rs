@@ -344,7 +344,15 @@ pub fn build_get_scene_list_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let scenes = input_registry.list_scenes();
-    let current_program_scene_name = input_registry.current_program_scene_name();
+    let current_program_scene = input_registry.current_program_scene();
+    let current_program_scene_name = current_program_scene
+        .as_ref()
+        .map(|scene| scene.scene_name.as_str())
+        .unwrap_or_default();
+    let current_program_scene_uuid = current_program_scene
+        .as_ref()
+        .map(|scene| scene.scene_uuid.as_str())
+        .unwrap_or_default();
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -363,6 +371,10 @@ pub fn build_get_scene_list_response(
                     "responseData",
                     nojson::object(|f| {
                         f.member("currentProgramSceneName", current_program_scene_name)?;
+                        f.member("currentProgramSceneUuid", current_program_scene_uuid)?;
+                        // 現時点は preview scene を独立管理していないため、program scene と同じ値を返す。
+                        f.member("currentPreviewSceneName", current_program_scene_name)?;
+                        f.member("currentPreviewSceneUuid", current_program_scene_uuid)?;
                         f.member("scenes", &scenes)
                     }),
                 )
@@ -376,6 +388,15 @@ pub fn build_get_current_program_scene_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
 ) -> String {
+    let current_program_scene = input_registry.current_program_scene();
+    let scene_name = current_program_scene
+        .as_ref()
+        .map(|scene| scene.scene_name.as_str())
+        .unwrap_or_default();
+    let scene_uuid = current_program_scene
+        .as_ref()
+        .map(|scene| scene.scene_uuid.as_str())
+        .unwrap_or_default();
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -393,10 +414,11 @@ pub fn build_get_current_program_scene_response(
                 f.member(
                     "responseData",
                     nojson::object(|f| {
-                        f.member(
-                            "currentProgramSceneName",
-                            input_registry.current_program_scene_name(),
-                        )
+                        f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)?;
+                        // 互換目的で currentProgramSceneName/currentProgramSceneUuid も返す。
+                        f.member("currentProgramSceneName", scene_name)?;
+                        f.member("currentProgramSceneUuid", scene_uuid)
                     }),
                 )
             }),

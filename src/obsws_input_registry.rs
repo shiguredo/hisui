@@ -395,8 +395,18 @@ impl ObswsInputRegistry {
             .collect()
     }
 
-    pub fn current_program_scene_name(&self) -> &str {
-        &self.current_program_scene_name
+    pub fn current_program_scene(&self) -> Option<ObswsSceneEntry> {
+        let scene_name = &self.current_program_scene_name;
+        let scene = self.scenes_by_name.get(scene_name)?;
+        let scene_index = self
+            .scene_order
+            .iter()
+            .position(|name| name == scene_name)?;
+        Some(ObswsSceneEntry {
+            scene_index,
+            scene_name: scene_name.clone(),
+            scene_uuid: scene.scene_uuid.clone(),
+        })
     }
 
     pub fn set_current_program_scene(
@@ -449,10 +459,11 @@ impl ObswsInputRegistry {
         Ok(())
     }
 
-    pub fn deactivate_stream(&mut self) {
+    pub fn deactivate_stream(&mut self) -> Option<ObswsStreamRun> {
+        let run = self.stream_runtime.run.take();
         self.stream_runtime.active = false;
         self.stream_runtime.started_at = None;
-        self.stream_runtime.run = None;
+        run
     }
 
     pub fn is_stream_active(&self) -> bool {
@@ -781,8 +792,10 @@ mod tests {
         assert_eq!(scenes.len(), 1);
         assert_eq!(scenes[0].scene_name, OBSWS_DEFAULT_SCENE_NAME);
         assert_eq!(
-            registry.current_program_scene_name(),
-            OBSWS_DEFAULT_SCENE_NAME
+            registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some(OBSWS_DEFAULT_SCENE_NAME.to_owned())
         );
     }
 
@@ -797,7 +810,12 @@ mod tests {
         registry
             .set_current_program_scene("Scene B")
             .expect("setting current scene must succeed");
-        assert_eq!(registry.current_program_scene_name(), "Scene B");
+        assert_eq!(
+            registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some("Scene B".to_owned())
+        );
     }
 
     #[test]

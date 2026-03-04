@@ -135,7 +135,7 @@ hisui 対応状況: 対応済み
 ## 例 2: 既存設定で配信開始 / 停止
 
 目的: 既存の Scene / Service 設定を使って配信を開始し、停止する
-hisui 対応状況: 部分対応（ `StartStream` は `image_source` 1 件 + `rtmp_custom` 前提。`StopStream` は内部 processor 停止が未対応 ）
+hisui 対応状況: 部分対応（ `StartStream` は `image_source` 1 件 + `rtmp_custom` 前提 ）
 
 1. `C -> S` GetStreamStatus
 

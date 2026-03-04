@@ -215,13 +215,22 @@
 ### Stream
 
 - [x] `GetStreamStatus`: 配信状態を取得する
+  - [x] `outputActive`: 出力のアクティブ状態を返す
+  - [x] `outputReconnecting`: 再接続状態を返す
+  - [x] `outputTimecode`: 出力タイムコードを返す
+  - [x] `outputDuration`: 出力継続時間を返す
+  - [ ] `outputCongestion`: 出力混雑度を返す（ 現状は `0.0` 固定 ）
+  - [ ] `outputBytes`: 出力バイト数を返す（ 現状は `0` 固定 ）
+  - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
+  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
+  - NOTE: 固定値項目は 実測値連携を TODO として追跡する
 - [ ] `ToggleStream`: 配信をトグルする
 - [x] `StartStream`: 配信を開始する
   - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
   - NOTE: 現時点の入力対応は `image_source` のみ
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を起動する
 - [x] `StopStream`: 配信を停止する
-  - NOTE: 現時点は OBS 側の配信状態のみ停止し、内部 processor の停止は未対応
+  - NOTE: 内部で起動した stream 用 processor を停止する
 - [ ] `SendStreamCaption`: 配信キャプションを送信する
 
 ### Record

@@ -135,6 +135,18 @@ impl MediaPipeline {
             } => {
                 self.handle_get_processor_rpc_sender(processor_id, reply_tx);
             }
+            MediaPipelineCommand::SetProcessorAbortHandle {
+                processor_id,
+                abort_handle,
+            } => {
+                self.handle_set_processor_abort_handle(processor_id, abort_handle);
+            }
+            MediaPipelineCommand::TerminateProcessor {
+                processor_id,
+                reply_tx,
+            } => {
+                let _ = reply_tx.send(self.handle_terminate_processor(processor_id));
+            }
         }
     }
 
@@ -372,6 +384,29 @@ impl MediaPipeline {
 
         state.pending_rpc_sender_waiters.push(reply_tx);
     }
+
+    fn handle_set_processor_abort_handle(
+        &mut self,
+        processor_id: ProcessorId,
+        abort_handle: tokio::task::AbortHandle,
+    ) {
+        let Some(state) = self.processors.get_mut(&processor_id) else {
+            abort_handle.abort();
+            return;
+        };
+        state.abort_handle = Some(abort_handle);
+    }
+
+    fn handle_terminate_processor(&mut self, processor_id: ProcessorId) -> bool {
+        let Some(state) = self.processors.get_mut(&processor_id) else {
+            return false;
+        };
+        let Some(abort_handle) = state.abort_handle.take() else {
+            return false;
+        };
+        abort_handle.abort();
+        true
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -396,11 +431,19 @@ impl MediaPipelineHandle {
             .register_processor(processor_id.clone(), metadata)
             .await?;
         let error_flag = handle.error_flag.clone();
-        tokio::spawn(async move {
+        let spawned_processor_id = processor_id.clone();
+        let join_handle = tokio::spawn(async move {
             if let Err(e) = f(handle).await {
                 error_flag.set(true);
-                tracing::error!("failed to run processor {processor_id}: {}", e.display());
+                tracing::error!(
+                    "failed to run processor {spawned_processor_id}: {}",
+                    e.display()
+                );
             }
+        });
+        self.send(MediaPipelineCommand::SetProcessorAbortHandle {
+            processor_id,
+            abort_handle: join_handle.abort_handle(),
         });
         Ok(())
     }
@@ -505,6 +548,24 @@ impl MediaPipelineHandle {
         self.stats.clone()
     }
 
+    pub async fn list_processors(&self) -> Result<Vec<ProcessorId>, PipelineTerminated> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(MediaPipelineCommand::ListProcessors { reply_tx });
+        reply_rx.await.map_err(|_| PipelineTerminated)
+    }
+
+    pub async fn terminate_processor(
+        &self,
+        processor_id: ProcessorId,
+    ) -> Result<bool, PipelineTerminated> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(MediaPipelineCommand::TerminateProcessor {
+            processor_id,
+            reply_tx,
+        });
+        reply_rx.await.map_err(|_| PipelineTerminated)
+    }
+
     // すでに MediaPipeline が終了している場合には false が返される。
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
@@ -578,6 +639,14 @@ pub(crate) enum MediaPipelineCommand {
     GetProcessorRpcSender {
         processor_id: ProcessorId,
         reply_tx: tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>,
+    },
+    SetProcessorAbortHandle {
+        processor_id: ProcessorId,
+        abort_handle: tokio::task::AbortHandle,
+    },
+    TerminateProcessor {
+        processor_id: ProcessorId,
+        reply_tx: tokio::sync::oneshot::Sender<bool>,
     },
 }
 
@@ -710,6 +779,7 @@ struct ProcessorState {
     notified_ready: bool,
     is_initial_member: bool,
     rpc_sender: Option<ErasedRpcSender>,
+    abort_handle: Option<tokio::task::AbortHandle>,
     pending_rpc_sender_waiters: Vec<PendingRpcSenderWaiter>,
 }
 
