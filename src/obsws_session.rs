@@ -4,6 +4,7 @@ use std::time::Duration;
 use shiguredo_websocket::CloseCode;
 use tokio::sync::RwLock;
 
+use crate::encoder::VideoEncoderRpcMessage;
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     ActivateStreamError, ObswsInputRegistry, ObswsInputSettings, ObswsStreamRun,
@@ -279,6 +280,7 @@ impl ObswsSession {
             );
         }
 
+        self.request_stream_keyframe_after_start(&run).await;
         crate::obsws_response_builder::build_start_stream_response(request_id)
     }
 
@@ -479,6 +481,87 @@ impl ObswsSession {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+    }
+
+    async fn request_stream_keyframe_after_start(&self, run: &ObswsStreamRun) {
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            tracing::warn!("failed to request keyframe: pipeline handle is not initialized");
+            return;
+        };
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match self
+                .find_stream_video_encoder(pipeline_handle, run)
+                .await
+                .and_then(|maybe_encoder_processor_id| {
+                    maybe_encoder_processor_id
+                        .ok_or_else(|| crate::Error::new("upstream video encoder is not found yet"))
+                }) {
+                Ok(encoder_processor_id) => {
+                    if let Err(e) = self
+                        .send_keyframe_request_to_video_encoder(
+                            pipeline_handle,
+                            &encoder_processor_id,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            "failed to request keyframe for stream start: {}",
+                            e.display()
+                        );
+                    }
+                    return;
+                }
+                Err(e) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        tracing::warn!(
+                            "failed to request keyframe for stream start: {}",
+                            e.display()
+                        );
+                        return;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn find_stream_video_encoder(
+        &self,
+        pipeline_handle: &crate::MediaPipelineHandle,
+        run: &ObswsStreamRun,
+    ) -> crate::Result<Option<crate::ProcessorId>> {
+        let endpoint_processor_id = crate::ProcessorId::new(run.endpoint_processor_id.clone());
+        pipeline_handle
+            .find_upstream_video_encoder(&endpoint_processor_id)
+            .await
+            .map_err(|_| crate::Error::new("failed to find upstream video encoder"))
+    }
+
+    async fn send_keyframe_request_to_video_encoder(
+        &self,
+        pipeline_handle: &crate::MediaPipelineHandle,
+        encoder_processor_id: &crate::ProcessorId,
+    ) -> crate::Result<()> {
+        let rpc_sender = pipeline_handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoEncoderRpcMessage>>(
+                encoder_processor_id,
+            )
+            .await
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to get video encoder RPC sender ({encoder_processor_id}): {e}"
+                ))
+            })?;
+
+        rpc_sender
+            .send(VideoEncoderRpcMessage::RequestKeyframe)
+            .map_err(|_| {
+                crate::Error::new(format!(
+                    "failed to send keyframe request to video encoder: {encoder_processor_id}"
+                ))
+            })
     }
 }
 
