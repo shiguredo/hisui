@@ -140,11 +140,13 @@ fn parse_optional_string_setting(
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsImageSourceSettings {
+    // OBS 互換のため、image_source は file 未指定の状態も有効として扱う
     pub file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsVideoCaptureDeviceSettings {
+    // OBS 互換のため、video_capture_device は device_id 未指定の状態も有効として扱う
     pub device_id: Option<String>,
 }
 
