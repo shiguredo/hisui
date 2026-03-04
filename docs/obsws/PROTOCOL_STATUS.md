@@ -118,7 +118,8 @@
 - [x] `CreateInput`: 入力を作成する
   - NOTE: `sceneName` は既存 Scene のみ受理する（ `CreateScene` で追加可能 ）
   - NOTE: `inputKind` は `GetInputKindList` で返す値のみ受理する
-  - NOTE: `sceneItemEnabled = false` の入力は Scene へ追加されない
+  - NOTE: `sceneItemEnabled = false` で作成した入力は Scene へ追加されない
+  - NOTE: 上記入力は Scene Item を持たず、現状（ `SetSceneItemEnabled` など Scene Item 操作 API 未実装 ）では実質的に利用できない
   - NOTE: 成功時は `responseData.inputUuid` を返し、`GetInputSettings` で参照できる
 - [x] `RemoveInput`: 入力を削除する
   - NOTE: `inputName` または `inputUuid` のいずれか指定で削除する
