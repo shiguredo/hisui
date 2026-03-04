@@ -127,6 +127,8 @@ async fn handle_ws_connection(
             .protocol(OBSWS_SUBPROTOCOL)
             .ping_interval(0),
     );
+    // 受信チャンクサイズのみを規定する固定バッファ。
+    // メッセージ境界の再構成は shiguredo_websocket 側の内部バッファで処理される。
     let mut buf = [0_u8; 8192];
     let auth = password
         .as_deref()
