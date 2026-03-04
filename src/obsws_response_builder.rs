@@ -102,11 +102,11 @@ fn required_non_empty_string_member(
         .required()
         .map_err(|_| format!("Missing required {member_name} field"))?;
     if value.kind() != nojson::JsonValueKind::String {
-        return Err(format!("Missing required {member_name} field"));
+        return Err(format!("Invalid {member_name} field: string is required"));
     }
     let value: String = value
         .try_into()
-        .map_err(|_| format!("Missing required {member_name} field"))?;
+        .map_err(|_| format!("Invalid {member_name} field"))?;
     if value.is_empty() {
         return Err(format!("Missing required {member_name} field"));
     }
