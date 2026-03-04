@@ -679,9 +679,9 @@ impl VideoEncoder {
             if self.requested_keyframes_inflight > 0 {
                 self.requested_keyframes_inflight -= 1;
                 if encoded.sample_entry.is_none()
-                    && let Some(sample_entry) = self.last_video_sample_entry.clone()
+                    && let Some(sample_entry) = self.last_video_sample_entry.as_ref()
                 {
-                    encoded.sample_entry = Some(sample_entry);
+                    encoded.sample_entry = Some(sample_entry.clone());
                 }
             }
         }
