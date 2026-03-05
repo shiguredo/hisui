@@ -1005,13 +1005,17 @@ pub fn build_get_record_status_response(
     .to_string()
 }
 
-pub fn build_start_stream_response(request_id: &str, output_active: bool) -> String {
+fn build_output_active_response(
+    request_type: &str,
+    request_id: &str,
+    output_active: bool,
+) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
             "d",
             nojson::object(|f| {
-                f.member("requestType", "StartStream")?;
+                f.member("requestType", request_type)?;
                 f.member("requestId", request_id)?;
                 f.member(
                     "requestStatus",
@@ -1030,29 +1034,12 @@ pub fn build_start_stream_response(request_id: &str, output_active: bool) -> Str
     .to_string()
 }
 
+pub fn build_start_stream_response(request_id: &str, output_active: bool) -> String {
+    build_output_active_response("StartStream", request_id, output_active)
+}
+
 pub fn build_toggle_stream_response(request_id: &str, output_active: bool) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "ToggleStream")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("outputActive", output_active)),
-                )
-            }),
-        )
-    })
-    .to_string()
+    build_output_active_response("ToggleStream", request_id, output_active)
 }
 
 pub fn build_stop_stream_response(request_id: &str) -> String {
@@ -1078,53 +1065,11 @@ pub fn build_stop_stream_response(request_id: &str) -> String {
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "ToggleRecord")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("outputActive", output_active)),
-                )
-            }),
-        )
-    })
-    .to_string()
+    build_output_active_response("ToggleRecord", request_id, output_active)
 }
 
 pub fn build_start_record_response(request_id: &str, output_active: bool) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "StartRecord")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("outputActive", output_active)),
-                )
-            }),
-        )
-    })
-    .to_string()
+    build_output_active_response("StartRecord", request_id, output_active)
 }
 
 pub fn build_stop_record_response(request_id: &str, output_path: &str) -> String {
