@@ -508,10 +508,12 @@ mod tests {
                 .any(|r| r == "SetStreamServiceSettings")
         );
         assert!(available_requests.iter().any(|r| r == "StartStream"));
+        assert!(available_requests.iter().any(|r| r == "ToggleStream"));
         assert!(available_requests.iter().any(|r| r == "GetRecordDirectory"));
         assert!(available_requests.iter().any(|r| r == "SetRecordDirectory"));
         assert!(available_requests.iter().any(|r| r == "GetRecordStatus"));
         assert!(available_requests.iter().any(|r| r == "StartRecord"));
+        assert!(available_requests.iter().any(|r| r == "ToggleRecord"));
         assert!(available_requests.iter().any(|r| r == "StopRecord"));
         Ok(())
     }
