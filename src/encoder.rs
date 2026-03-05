@@ -360,7 +360,6 @@ pub struct VideoEncoder {
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     keyframe_request_pending: bool,
-    keyframe_request_inflight: bool,
     last_video_sample_entry: Option<SampleEntry>,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
     inner: Option<VideoEncoderInner>,
@@ -397,7 +396,6 @@ impl VideoEncoder {
             encoded: VecDeque::new(),
             eos: false,
             keyframe_request_pending: false,
-            keyframe_request_inflight: false,
             last_video_sample_entry: None,
             inner: None,
             options: options.clone(),
@@ -659,7 +657,6 @@ impl VideoEncoder {
             self.inner = Some(recreated);
         }
         self.keyframe_request_pending = false;
-        self.keyframe_request_inflight = true;
         Ok(())
     }
 
@@ -685,9 +682,6 @@ impl VideoEncoder {
                 && let Some(sample_entry) = self.last_video_sample_entry.as_ref()
             {
                 encoded.sample_entry = Some(sample_entry.clone());
-            }
-            if self.keyframe_request_inflight {
-                self.keyframe_request_inflight = false;
             }
         }
         self.encoded.push_back(encoded);
