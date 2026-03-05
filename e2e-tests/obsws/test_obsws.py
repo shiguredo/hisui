@@ -90,12 +90,7 @@ class ObswsServer:
             if self.default_record_dir is not None:
                 cmd.extend(["--default-record-dir", str(self.default_record_dir)])
 
-        self._process = subprocess.Popen(
-            cmd,
-            env=env,
-            stdout=None,
-            stderr=None,
-        )
+        self._process = subprocess.Popen(cmd, env=env)
         self._wait_until_listening()
         return self
 
@@ -246,17 +241,13 @@ async def _http_get(url: str):
 
 
 def _collect_obsws_metrics_snapshot(http_host: str, http_port: int) -> str:
-    lines: list[str] = []
-    endpoints = ["/metrics"]
-    for endpoint in endpoints:
-        url = f"http://{http_host}:{http_port}{endpoint}"
-        try:
-            status, body, _ = asyncio.run(_http_get(url))
-            lines.append(f"[{endpoint}] status={status}")
-            lines.append(body)
-        except Exception as e:
-            lines.append(f"[{endpoint}] failed to fetch metrics: {e}")
-    return "\n".join(lines)
+    endpoint = "/metrics"
+    url = f"http://{http_host}:{http_port}{endpoint}"
+    try:
+        status, body, _ = asyncio.run(_http_get(url))
+        return f"[{endpoint}] status={status}\n{body}"
+    except Exception as e:
+        return f"[{endpoint}] failed to fetch metrics: {e}"
 
 
 async def _connect_and_exchange_identify(url: str):
