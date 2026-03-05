@@ -159,14 +159,16 @@ def _start_ffmpeg_rtmp_receive(
     cmd.extend(["-i", receive_url])
     if max_video_frames is not None:
         cmd.extend(["-frames:v", str(max_video_frames)])
-    cmd.extend([
-        "-an",
-        "-c",
-        "copy",
-        "-f",
-        "mp4",
-        str(output_path),
-    ])
+    cmd.extend(
+        [
+            "-an",
+            "-c",
+            "copy",
+            "-f",
+            "mp4",
+            str(output_path),
+        ]
+    )
 
     deadline = time.time() + startup_timeout
     last_stderr = ""
@@ -189,7 +191,9 @@ def _start_ffmpeg_rtmp_receive(
     )
 
 
-def _wait_process_exit(process: subprocess.Popen[str], timeout: float) -> tuple[str, str]:
+def _wait_process_exit(
+    process: subprocess.Popen[str], timeout: float
+) -> tuple[str, str]:
     try:
         return_code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as e:
@@ -363,6 +367,20 @@ async def _expect_stream_state_changed_event(
         event_intent=OBSWS_EVENT_SUB_OUTPUTS,
     )
     assert event["d"]["eventData"]["outputActive"] is output_active
+
+
+async def _expect_record_state_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    output_active: bool,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="RecordStateChanged",
+        event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+    )
+    assert event["d"]["eventData"]["outputActive"] is output_active
+    return event
 
 
 async def _expect_obsws_event(
@@ -689,11 +707,13 @@ def test_obsws_http_metrics_json_endpoint(binary_path: Path):
         use_env=False,
     ) as server:
         status, body, headers = asyncio.run(
-            _http_get(f"http://{server.http_host}:{server.http_port}/metrics?format=json")
+            _http_get(
+                f"http://{server.http_host}:{server.http_port}/metrics?format=json"
+            )
         )
         assert status == 200
         assert headers.get("Content-Type") == "application/json; charset=utf-8"
-        assert "\"name\":\"hisui_tokio_num_workers\"" in body
+        assert '"name":"hisui_tokio_num_workers"' in body
 
 
 def test_obsws_rejects_connection_without_subprotocol(binary_path: Path):
@@ -867,7 +887,9 @@ def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path:
         )
         get_status = get_response["d"]["requestStatus"]
         assert get_status["result"] is True
-        assert get_response["d"]["responseData"]["recordDirectory"] == str(default_record_dir)
+        assert get_response["d"]["responseData"]["recordDirectory"] == str(
+            default_record_dir
+        )
 
         set_response = asyncio.run(
             _connect_identify_and_request(
@@ -889,9 +911,8 @@ def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path:
         )
         get_status_after_update = get_response_after_update["d"]["requestStatus"]
         assert get_status_after_update["result"] is True
-        assert (
-            get_response_after_update["d"]["responseData"]["recordDirectory"]
-            == str(updated_record_dir)
+        assert get_response_after_update["d"]["responseData"]["recordDirectory"] == str(
+            updated_record_dir
         )
 
 
@@ -1081,9 +1102,7 @@ def test_obsws_create_input_request(binary_path: Path):
         )
         settings_status = settings_response["d"]["requestStatus"]
         assert settings_status["result"] is True
-        assert (
-            settings_response["d"]["responseData"]["inputName"] == "obsws-test-input"
-        )
+        assert settings_response["d"]["responseData"]["inputName"] == "obsws-test-input"
         assert (
             settings_response["d"]["responseData"]["inputSettings"]["device_id"]
             == "sample-device"
@@ -1394,7 +1413,9 @@ def test_obsws_request_batch_rejects_unsupported_execution_type(binary_path: Pat
         asyncio.run(_run_invalid_batch_flow())
 
 
-def test_obsws_request_batch_halt_on_failure_stops_subsequent_requests(binary_path: Path):
+def test_obsws_request_batch_halt_on_failure_stops_subsequent_requests(
+    binary_path: Path,
+):
     """obsws が RequestBatch の haltOnFailure で後続 request を停止することを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
@@ -1554,7 +1575,9 @@ def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
                     break
                 await asyncio.sleep(0.1)
             else:
-                raise AssertionError("stream did not become inactive after ToggleStream")
+                raise AssertionError(
+                    "stream did not become inactive after ToggleStream"
+                )
 
             await ws.close()
 
@@ -1636,7 +1659,9 @@ def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
                     break
                 await asyncio.sleep(0.1)
             else:
-                raise AssertionError("record did not become inactive after ToggleRecord")
+                raise AssertionError(
+                    "record did not become inactive after ToggleRecord"
+                )
 
             await ws.close()
 
@@ -1696,7 +1721,9 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
                     },
                 },
             )
-            set_stream_service_status = set_stream_service_response["d"]["requestStatus"]
+            set_stream_service_status = set_stream_service_response["d"][
+                "requestStatus"
+            ]
             assert set_stream_service_status["result"] is True
 
             start_stream_response = await _send_obsws_request(
@@ -1736,6 +1763,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
+
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
 
@@ -1810,7 +1838,10 @@ def test_obsws_rejects_request_before_identify(binary_path: Path):
                 f"ws://{host}:{port}/",
                 {
                     "op": 6,
-                    "d": {"requestType": "GetVersion", "requestId": "req-before-identify"},
+                    "d": {
+                        "requestType": "GetVersion",
+                        "requestId": "req-before-identify",
+                    },
                 },
                 4007,
             )
@@ -1911,7 +1942,9 @@ def test_obsws_stream_events_are_sent_when_outputs_subscription_enabled(
         asyncio.run(_run())
 
 
-def test_obsws_stream_events_follow_reidentify_updates(binary_path: Path, tmp_path: Path):
+def test_obsws_stream_events_follow_reidentify_updates(
+    binary_path: Path, tmp_path: Path
+):
     """obsws が Reidentify 後に更新した Outputs 購読設定でイベントを送ることを確認する"""
     host = "127.0.0.1"
     ws_port, ws_sock = reserve_ephemeral_port()
@@ -2120,12 +2153,10 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
             assert start_record_response["d"]["responseData"]["outputActive"] is True
-            start_event = await _expect_obsws_event(
+            await _expect_record_state_changed_event(
                 ws,
-                event_type="RecordStateChanged",
-                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+                output_active=True,
             )
-            assert start_event["d"]["eventData"]["outputActive"] is True
 
             stop_record_response = await _send_obsws_request(
                 ws,
@@ -2133,12 +2164,10 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
                 request_id="req-stop-record-event-enabled",
             )
             assert stop_record_response["d"]["requestStatus"]["result"] is True
-            stop_event = await _expect_obsws_event(
+            stop_event = await _expect_record_state_changed_event(
                 ws,
-                event_type="RecordStateChanged",
-                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+                output_active=False,
             )
-            assert stop_event["d"]["eventData"]["outputActive"] is False
             assert stop_event["d"]["eventData"]["outputPath"]
             await ws.close()
 
@@ -2189,12 +2218,10 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
                 request_id="req-toggle-record-event-enabled-on",
             )
             assert start_response["d"]["requestStatus"]["result"] is True
-            start_event = await _expect_obsws_event(
+            await _expect_record_state_changed_event(
                 ws,
-                event_type="RecordStateChanged",
-                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+                output_active=True,
             )
-            assert start_event["d"]["eventData"]["outputActive"] is True
 
             stop_response = await _send_obsws_request(
                 ws,
@@ -2202,12 +2229,10 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
                 request_id="req-toggle-record-event-enabled-off",
             )
             assert stop_response["d"]["requestStatus"]["result"] is True
-            stop_event = await _expect_obsws_event(
+            stop_event = await _expect_record_state_changed_event(
                 ws,
-                event_type="RecordStateChanged",
-                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+                output_active=False,
             )
-            assert stop_event["d"]["eventData"]["outputActive"] is False
             assert stop_event["d"]["eventData"]["outputPath"]
             await ws.close()
 
@@ -2215,7 +2240,9 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
         asyncio.run(_run())
 
 
-def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(binary_path: Path):
+def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(
+    binary_path: Path,
+):
     """obsws が Scenes 購読時に Scene 関連イベントを送ることを確認する"""
     host = "127.0.0.1"
     ws_port, ws_sock = reserve_ephemeral_port()
