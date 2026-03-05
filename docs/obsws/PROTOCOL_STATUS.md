@@ -83,8 +83,8 @@
 - [x] `GetStreamServiceSettings`: 配信サービス設定を取得する
 - [x] `SetStreamServiceSettings`: 配信サービス設定を更新する
   - NOTE: 現時点は `streamServiceType = "rtmp_custom"` 前提で `server` / `key` を保持する
-- [ ] `GetRecordDirectory`: 録画ディレクトリを取得する
-- [ ] `SetRecordDirectory`: 録画ディレクトリを設定する
+- [x] `GetRecordDirectory`: 録画ディレクトリを取得する
+- [x] `SetRecordDirectory`: 録画ディレクトリを設定する
 
 ### Sources
 
@@ -236,10 +236,22 @@
 
 ### Record
 
-- [ ] `GetRecordStatus`: 録画状態を取得する
+- [x] `GetRecordStatus`: 録画状態を取得する
+  - [x] `outputActive`: 録画出力のアクティブ状態を返す
+  - [x] `outputPaused`: 録画一時停止状態を返す
+  - [x] `outputTimecode`: 録画タイムコードを返す
+  - [x] `outputDuration`: 録画継続時間を返す
+  - [ ] `outputBytes`: 出力バイト数を返す（ 現状は `0` 固定 ）
+  - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
+  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
+  - [x] `outputPath`: 録画ファイルパスを返す
 - [ ] `ToggleRecord`: 録画をトグルする
-- [ ] `StartRecord`: 録画を開始する
-- [ ] `StopRecord`: 録画を停止する
+- [x] `StartRecord`: 録画を開始する
+  - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
+  - NOTE: 現時点の入力対応は `image_source` のみ
+  - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createMp4Writer` を起動する
+- [x] `StopRecord`: 録画を停止する
+  - NOTE: 内部で起動した record 用 processor を停止する
 - [ ] `ToggleRecordPause`: 録画一時停止をトグルする
 - [ ] `PauseRecord`: 録画を一時停止する
 - [ ] `ResumeRecord`: 録画を再開する

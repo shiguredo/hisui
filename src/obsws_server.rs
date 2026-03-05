@@ -1,5 +1,6 @@
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use shiguredo_http11::{RequestDecoder, Response};
@@ -37,6 +38,7 @@ pub async fn run_server(
     http_host: IpAddr,
     http_port: u16,
     password: Option<String>,
+    default_record_dir: PathBuf,
     pipeline_config: crate::MediaPipelineConfig,
 ) -> crate::Result<()> {
     let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
@@ -50,7 +52,9 @@ pub async fn run_server(
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws http listener: {e}")))?;
     tracing::info!("obsws http server listening on http://{http_listen_addr}");
-    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new()));
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new_with_record_directory(
+        default_record_dir,
+    )));
 
     let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
     let pipeline_handle = pipeline.handle();

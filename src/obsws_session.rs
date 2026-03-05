@@ -1,18 +1,22 @@
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use shiguredo_websocket::CloseCode;
 use tokio::sync::RwLock;
 
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
-    ActivateStreamError, ObswsInputRegistry, ObswsInputSettings, ObswsStreamRun,
+    ActivateRecordError, ActivateStreamError, ObswsInputRegistry, ObswsInputSettings,
+    ObswsRecordRun, ObswsStreamRun,
 };
 use crate::obsws_message::{ClientMessage, ObswsSessionStats};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
+    REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_OUTPUT_RUNNING,
     REQUEST_STATUS_STREAM_NOT_RUNNING, REQUEST_STATUS_STREAM_RUNNING,
 };
 
@@ -174,6 +178,18 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
+        if request_type == "StartRecord" {
+            return SessionAction::SendText {
+                text: self.handle_start_record(&request_id).await,
+                message_name: "request response message",
+            };
+        }
+        if request_type == "StopRecord" {
+            return SessionAction::SendText {
+                text: self.handle_stop_record(&request_id).await,
+                message_name: "request response message",
+            };
+        }
 
         let mut input_registry = self.input_registry.write().await;
         let response =
@@ -308,6 +324,129 @@ impl ObswsSession {
         crate::obsws_response_builder::build_stop_stream_response(request_id)
     }
 
+    async fn handle_start_record(&self, request_id: &str) -> String {
+        let (image_path, output_path, run) = {
+            let mut input_registry = self.input_registry.write().await;
+            let scene_inputs = input_registry.list_current_program_scene_inputs();
+            if scene_inputs.len() != 1 {
+                return crate::obsws_response_builder::build_request_response_error(
+                    "StartRecord",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Exactly one enabled input is required in the current program scene",
+                );
+            }
+            let input = &scene_inputs[0];
+            let ObswsInputSettings::ImageSource(settings) = &input.input.settings else {
+                return crate::obsws_response_builder::build_request_response_error(
+                    "StartRecord",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Only image_source is supported for StartRecord",
+                );
+            };
+            let Some(image_path) = settings.file.clone() else {
+                return crate::obsws_response_builder::build_request_response_error(
+                    "StartRecord",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "inputSettings.file is required for image_source",
+                );
+            };
+            let run_id = input_registry.next_record_run_id();
+            let source_processor_id = format!("obsws:record:{run_id}:png_source");
+            let encoder_processor_id = format!("obsws:record:{run_id}:video_encoder");
+            let writer_processor_id = format!("obsws:record:{run_id}:mp4_writer");
+            let source_track_id = format!("obsws:record:{run_id}:raw_video");
+            let encoded_track_id = format!("obsws:record:{run_id}:encoded_video");
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_millis();
+            let output_path = input_registry
+                .record_directory()
+                .join(format!("obsws-record-{timestamp}.mp4"));
+            let run = ObswsRecordRun {
+                source_processor_id,
+                encoder_processor_id,
+                writer_processor_id,
+                source_track_id,
+                encoded_track_id,
+                output_path: output_path.clone(),
+            };
+            if let Err(ActivateRecordError::AlreadyActive) =
+                input_registry.activate_record(run.clone())
+            {
+                return crate::obsws_response_builder::build_request_response_error(
+                    "StartRecord",
+                    request_id,
+                    REQUEST_STATUS_OUTPUT_RUNNING,
+                    "Record is already active",
+                );
+            }
+            (image_path, output_path, run)
+        };
+
+        if let Some(parent) = output_path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            let _ = self.input_registry.write().await.deactivate_record();
+            return crate::obsws_response_builder::build_request_response_error(
+                "StartRecord",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &format!("Failed to create record directory: {e}"),
+            );
+        }
+
+        let start_result = self
+            .start_record_processors(&image_path, &output_path, &run)
+            .await;
+        if let Err(e) = start_result {
+            let _ = self.input_registry.write().await.deactivate_record();
+            if let Err(cleanup_error) = self.stop_record_processors(&run).await {
+                tracing::warn!(
+                    "failed to cleanup record processors after start failure: {}",
+                    cleanup_error.display()
+                );
+            }
+            return crate::obsws_response_builder::build_request_response_error(
+                "StartRecord",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &format!("Failed to start record: {}", e.display()),
+            );
+        }
+
+        crate::obsws_response_builder::build_start_record_response(request_id)
+    }
+
+    async fn handle_stop_record(&self, request_id: &str) -> String {
+        let run = {
+            let mut input_registry = self.input_registry.write().await;
+            if !input_registry.is_record_active() {
+                return crate::obsws_response_builder::build_request_response_error(
+                    "StopRecord",
+                    request_id,
+                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Record is not active",
+                );
+            }
+            input_registry
+                .deactivate_record()
+                .expect("infallible: active record must have run state")
+        };
+        if let Err(e) = self.stop_record_processors(&run).await {
+            return crate::obsws_response_builder::build_request_response_error(
+                "StopRecord",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &format!("Failed to stop record: {}", e.display()),
+            );
+        }
+        crate::obsws_response_builder::build_stop_record_response(request_id)
+    }
+
     async fn start_stream_processors(
         &self,
         image_path: &str,
@@ -378,6 +517,72 @@ impl ObswsSession {
             .await
     }
 
+    async fn start_record_processors(
+        &self,
+        image_path: &str,
+        output_path: &std::path::Path,
+        run: &ObswsRecordRun,
+    ) -> crate::Result<()> {
+        // [NOTE]
+        // ここで送る内部 JSON-RPC は常に 1 件ずつ送信して即時 await しているため、
+        // 相関に id は使っておらず固定値を意図的に使用している。
+        // 将来並列送信へ拡張する場合は id をユニーク化すること。
+        let video_encoder_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createVideoEncoder")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("inputTrackId", &run.source_track_id)?;
+                    f.member("outputTrackId", &run.encoded_track_id)?;
+                    f.member("codec", "H264")?;
+                    f.member("bitrateBps", 2_000_000)?;
+                    f.member("frameRate", 30)?;
+                    f.member("processorId", &run.encoder_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
+            .await?;
+
+        let writer_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createMp4Writer")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("outputPath", output_path.display().to_string())?;
+                    f.member("inputVideoTrackId", &run.encoded_track_id)?;
+                    f.member("processorId", &run.writer_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createMp4Writer", &writer_request)
+            .await?;
+
+        let png_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createPngFileSource")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("path", image_path)?;
+                    f.member("frameRate", 30)?;
+                    f.member("outputVideoTrackId", &run.source_track_id)?;
+                    f.member("processorId", &run.source_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createPngFileSource", &png_request)
+            .await
+    }
+
     async fn send_pipeline_rpc_request(
         &self,
         method: &str,
@@ -410,19 +615,32 @@ impl ObswsSession {
     }
 
     async fn stop_stream_processors(&self, run: &ObswsStreamRun) -> crate::Result<()> {
+        self.stop_processors(&[
+            crate::ProcessorId::new(run.endpoint_processor_id.clone()),
+            crate::ProcessorId::new(run.encoder_processor_id.clone()),
+            crate::ProcessorId::new(run.source_processor_id.clone()),
+        ])
+        .await
+    }
+
+    async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
+        self.stop_processors(&[
+            crate::ProcessorId::new(run.writer_processor_id.clone()),
+            crate::ProcessorId::new(run.encoder_processor_id.clone()),
+            crate::ProcessorId::new(run.source_processor_id.clone()),
+        ])
+        .await
+    }
+
+    async fn stop_processors(&self, processor_ids: &[crate::ProcessorId]) -> crate::Result<()> {
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             return Err(crate::Error::new(
                 "BUG: obsws pipeline handle is not initialized",
             ));
         };
-        let processor_ids = [
-            crate::ProcessorId::new(run.endpoint_processor_id.clone()),
-            crate::ProcessorId::new(run.encoder_processor_id.clone()),
-            crate::ProcessorId::new(run.source_processor_id.clone()),
-        ];
 
         let mut terminate_error = None;
-        for processor_id in &processor_ids {
+        for processor_id in processor_ids {
             if pipeline_handle
                 .terminate_processor(processor_id.clone())
                 .await
@@ -435,12 +653,8 @@ impl ObswsSession {
             }
         }
 
-        self.wait_stream_processors_stopped(
-            pipeline_handle,
-            &processor_ids,
-            Duration::from_secs(2),
-        )
-        .await?;
+        self.wait_processors_stopped(pipeline_handle, processor_ids, Duration::from_secs(2))
+            .await?;
 
         if let Some(e) = terminate_error {
             return Err(e);
@@ -449,7 +663,7 @@ impl ObswsSession {
         Ok(())
     }
 
-    async fn wait_stream_processors_stopped(
+    async fn wait_processors_stopped(
         &self,
         pipeline_handle: &crate::MediaPipelineHandle,
         processor_ids: &[crate::ProcessorId],
@@ -474,7 +688,7 @@ impl ObswsSession {
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(crate::Error::new(format!(
-                    "stream processors did not terminate in time: {pending}"
+                    "processors did not terminate in time: {pending}"
                 )));
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -490,6 +704,7 @@ mod tests {
     use crate::obsws_protocol::{
         OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED,
         OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
+        REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
     };
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -580,5 +795,101 @@ mod tests {
         };
         assert_eq!(code, OBSWS_CLOSE_AUTHENTICATION_FAILED);
         assert_eq!(reason, "authentication failed");
+    }
+
+    #[tokio::test]
+    async fn stop_record_when_inactive_returns_error_response() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-stop-record".to_owned()),
+                request_type: Some("StopRecord".to_owned()),
+                request_data: None,
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let json = nojson::RawJson::parse(&text).expect("response must be valid json");
+        let status = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("requestStatus")
+            .expect("requestStatus access must succeed")
+            .required()
+            .expect("requestStatus must exist");
+        let result: bool = status
+            .to_member("result")
+            .expect("result access must succeed")
+            .required()
+            .expect("result must exist")
+            .try_into()
+            .expect("result must be bool");
+        let code: i64 = status
+            .to_member("code")
+            .expect("code access must succeed")
+            .required()
+            .expect("code must exist")
+            .try_into()
+            .expect("code must be i64");
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_OUTPUT_NOT_RUNNING);
+    }
+
+    #[tokio::test]
+    async fn start_record_without_image_input_returns_error_response() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-start-record".to_owned()),
+                request_type: Some("StartRecord".to_owned()),
+                request_data: None,
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let json = nojson::RawJson::parse(&text).expect("response must be valid json");
+        let status = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("requestStatus")
+            .expect("requestStatus access must succeed")
+            .required()
+            .expect("requestStatus must exist");
+        let result: bool = status
+            .to_member("result")
+            .expect("result access must succeed")
+            .required()
+            .expect("result must exist")
+            .try_into()
+            .expect("result must be bool");
+        let code: i64 = status
+            .to_member("code")
+            .expect("code access must succeed")
+            .required()
+            .expect("code must exist")
+            .try_into()
+            .expect("code must be i64");
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
     }
 }
