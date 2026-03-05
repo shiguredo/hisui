@@ -619,6 +619,9 @@ async fn request_video_keyframe_for_rtmp_play_start(
     // [NOTE]
     // ここは best effort で、経路上に video encoder がない構成（既エンコード入力など）は
     // 正常系としてキーフレーム要求をスキップする。
+    // また、RTMP サーバー起動直後の接続タイミングでは、上流 encoder の publish_track 完了前に
+    // 到達して None になる可能性がある。この場合も最初の出力フレームは自然にキーフレームとなるため、
+    // リクエストを送れなくても実害はない想定で許容する。
     let maybe_encoder_processor_id = pipeline_handle
         .find_upstream_video_encoder(endpoint_processor_id)
         .await
