@@ -736,6 +736,35 @@ mod tests {
         Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()))
     }
 
+    fn parse_request_status(text: &str) -> (bool, i64) {
+        let json = nojson::RawJson::parse(text).expect("response must be valid json");
+        let status = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("requestStatus")
+            .expect("requestStatus access must succeed")
+            .required()
+            .expect("requestStatus must exist");
+        let result: bool = status
+            .to_member("result")
+            .expect("result access must succeed")
+            .required()
+            .expect("result must exist")
+            .try_into()
+            .expect("result must be bool");
+        let code: i64 = status
+            .to_member("code")
+            .expect("code access must succeed")
+            .required()
+            .expect("code must exist")
+            .try_into()
+            .expect("code must be i64");
+        (result, code)
+    }
+
     #[test]
     fn on_connected_returns_hello_message_action() {
         let session = ObswsSession::new(None, input_registry(), None);
@@ -839,31 +868,7 @@ mod tests {
         let SessionAction::SendText { text, .. } = action else {
             panic!("must be SendText");
         };
-        let json = nojson::RawJson::parse(&text).expect("response must be valid json");
-        let status = json
-            .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("requestStatus")
-            .expect("requestStatus access must succeed")
-            .required()
-            .expect("requestStatus must exist");
-        let result: bool = status
-            .to_member("result")
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
-            .expect("result must be bool");
-        let code: i64 = status
-            .to_member("code")
-            .expect("code access must succeed")
-            .required()
-            .expect("code must exist")
-            .try_into()
-            .expect("code must be i64");
+        let (result, code) = parse_request_status(&text);
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_OUTPUT_NOT_RUNNING);
     }
@@ -887,31 +892,7 @@ mod tests {
         let SessionAction::SendText { text, .. } = action else {
             panic!("must be SendText");
         };
-        let json = nojson::RawJson::parse(&text).expect("response must be valid json");
-        let status = json
-            .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("requestStatus")
-            .expect("requestStatus access must succeed")
-            .required()
-            .expect("requestStatus must exist");
-        let result: bool = status
-            .to_member("result")
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
-            .expect("result must be bool");
-        let code: i64 = status
-            .to_member("code")
-            .expect("code access must succeed")
-            .required()
-            .expect("code must exist")
-            .try_into()
-            .expect("code must be i64");
+        let (result, code) = parse_request_status(&text);
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
     }

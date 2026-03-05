@@ -49,6 +49,8 @@ impl Openh264Encoder {
 
         // OpenH264 は keyframe 要求時などに SPS/PPS が更新され得るため、
         // SPS/PPS を受け取ったフレームでは毎回 sample entry を更新する。
+        // これにより、下流コンポーネントが参照する codec 設定を最新化し、
+        // 古い parameter set 参照によるデコード失敗を避ける。
         let sample_entry = if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let size = frame.size();
             Some(video_h264::h264_sample_entry_from_annexb(
