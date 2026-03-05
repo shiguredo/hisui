@@ -147,6 +147,10 @@ impl RtmpOutgoingFrameHandler {
 
         Ok(Some((seq_frame, frame)))
     }
+
+    pub fn is_waiting_for_keyframe(&self) -> bool {
+        !self.received_keyframe
+    }
 }
 
 impl Default for RtmpOutgoingFrameHandler {
