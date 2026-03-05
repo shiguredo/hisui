@@ -5,10 +5,11 @@ use crate::obsws_input_registry::{
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
-    OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION,
-    OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_OP_EVENT, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED,
+    OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
+    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_SUCCESS,
 };
 use std::path::PathBuf;
 
@@ -213,6 +214,24 @@ pub fn build_identified_message(negotiated_rpc_version: u32) -> String {
         f.member(
             "d",
             nojson::object(|f| f.member("negotiatedRpcVersion", negotiated_rpc_version)),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_stream_state_changed_event(output_active: bool) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "StreamStateChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_OUTPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| f.member("outputActive", output_active)),
+                )
+            }),
         )
     })
     .to_string()
@@ -1136,6 +1155,64 @@ fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_stream_state_changed_event_contains_expected_fields() {
+        let event = build_stream_state_changed_event(true);
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let op: i64 = json
+            .value()
+            .to_member("op")
+            .expect("op access must succeed")
+            .required()
+            .expect("op must exist")
+            .try_into()
+            .expect("op must be i64");
+        let event_type: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventType")
+            .expect("eventType access must succeed")
+            .required()
+            .expect("eventType must exist")
+            .try_into()
+            .expect("eventType must be string");
+        let event_intent: u32 = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventIntent")
+            .expect("eventIntent access must succeed")
+            .required()
+            .expect("eventIntent must exist")
+            .try_into()
+            .expect("eventIntent must be u32");
+        let output_active: bool = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventData")
+            .expect("eventData access must succeed")
+            .required()
+            .expect("eventData must exist")
+            .to_member("outputActive")
+            .expect("outputActive access must succeed")
+            .required()
+            .expect("outputActive must exist")
+            .try_into()
+            .expect("outputActive must be bool");
+        assert_eq!(op, OBSWS_OP_EVENT);
+        assert_eq!(event_type, "StreamStateChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
+        assert!(output_active);
+    }
 
     #[test]
     fn build_stop_record_response_includes_output_path() {

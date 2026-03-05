@@ -18,6 +18,7 @@ pub enum ClientMessage {
 pub struct IdentifyMessage {
     pub rpc_version: u32,
     pub authentication: Option<String>,
+    pub event_subscriptions: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,9 +74,12 @@ pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
             let d_value = value.to_member("d")?.required()?;
             let rpc_version: u32 = d_value.to_member("rpcVersion")?.required()?.try_into()?;
             let authentication: Option<String> = d_value.to_member("authentication")?.try_into()?;
+            let event_subscriptions: Option<u32> =
+                d_value.to_member("eventSubscriptions")?.try_into()?;
             Ok(ClientMessage::Identify(IdentifyMessage {
                 rpc_version,
                 authentication,
+                event_subscriptions,
             }))
         }
         OBSWS_OP_REIDENTIFY => {
@@ -285,6 +289,7 @@ mod tests {
             ClientMessage::Identify(IdentifyMessage {
                 rpc_version: 1,
                 authentication: None,
+                event_subscriptions: None,
             })
         );
     }
@@ -298,6 +303,21 @@ mod tests {
             ClientMessage::Identify(IdentifyMessage {
                 rpc_version: 1,
                 authentication: Some("test-auth".to_owned()),
+                event_subscriptions: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_client_message_accepts_identify_with_event_subscriptions() {
+        let message = r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#;
+        let parsed = parse_client_message(message).expect("identify message must be accepted");
+        assert_eq!(
+            parsed,
+            ClientMessage::Identify(IdentifyMessage {
+                rpc_version: 1,
+                authentication: None,
+                event_subscriptions: Some(64),
             })
         );
     }
@@ -307,6 +327,13 @@ mod tests {
         let message = r#"{"op":1,"d":{}}"#;
         let error = parse_client_message(message).expect_err("identify without rpcVersion");
         assert!(error.display().contains("rpcVersion"));
+    }
+
+    #[test]
+    fn parse_client_message_rejects_identify_with_invalid_event_subscriptions() {
+        let message = r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":"invalid"}}"#;
+        let error = parse_client_message(message).expect_err("identify must reject invalid type");
+        assert!(!error.display().is_empty());
     }
 
     #[test]

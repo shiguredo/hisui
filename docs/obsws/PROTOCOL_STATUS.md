@@ -37,9 +37,20 @@
 - [x] メッセージ検証エラーの切断: 不正 payload や未対応 opcode は close する
 - [x] `Reidentify (op=3)`: 既存セッションの再設定を受け付ける
   - NOTE: 成功時は `Identified (op=2)` を返す
-  - NOTE: `eventSubscriptions` は現時点で構文検証のみ行い、購読状態への反映は未実装
-- [ ] Event 配信（ `op=5` ）: サーバーイベントを push 配信する
+  - NOTE: `eventSubscriptions` は保持し、現在は Outputs ビットを `StreamStateChanged` 配信判定に利用する
+- [x] Event 配信（ `op=5` ）基盤: サーバーイベントを push 配信する
+  - NOTE: 現在は `eventSubscriptions` の Outputs ビット購読時に `StreamStateChanged` を配信する
 - [ ] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
+
+## 対応すべきイベント一覧
+
+- [x] `StreamStateChanged`: 配信出力状態の変化を通知する
+- [ ] `RecordStateChanged`: 録画出力状態の変化を通知する
+- [ ] `CurrentProgramSceneChanged`: 現在 Program Scene の変更を通知する
+- [ ] `SceneCreated`: Scene 作成を通知する
+- [ ] `SceneRemoved`: Scene 削除を通知する
+- [ ] `InputCreated`: Input 作成を通知する
+- [ ] `InputRemoved`: Input 削除を通知する
 
 ## RequestType 実装状況
 

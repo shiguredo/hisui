@@ -509,7 +509,7 @@ hisui 対応状況: 未対応（ `RequestBatch` `op=8/9` は未実装 ）
 ## 例 9: 認証あり接続と Reidentify
 
 目的: 認証付きで接続し、接続中にイベント購読設定を更新する
-hisui 対応状況: 部分対応（ 認証付き `Identify` は対応済み。`Reidentify` は未実装 ）
+hisui 対応状況: 部分対応（ 認証付き `Identify` / `Reidentify` は対応済み。イベント配信は段階対応 ）
 
 1. `S -> C` Hello ( `authentication` あり )
 2. `C -> S` Identify ( `authentication` を含む )
@@ -521,6 +521,17 @@ hisui 対応状況: 部分対応（ 認証付き `Identify` は対応済み。`R
   "op": 3,
   "d": {
     "eventSubscriptions": 1
+  }
+}
+```
+
+5. `S -> C` Identified (`op: 2`)
+
+```json
+{
+  "op": 2,
+  "d": {
+    "negotiatedRpcVersion": 1
   }
 }
 ```

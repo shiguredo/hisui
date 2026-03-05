@@ -14,13 +14,17 @@ use crate::obsws_input_registry::{
 use crate::obsws_message::{ClientMessage, ObswsSessionStats};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
-    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
-    REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_OUTPUT_RUNNING,
-    REQUEST_STATUS_STREAM_NOT_RUNNING, REQUEST_STATUS_STREAM_RUNNING,
+    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_OUTPUTS,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
+    REQUEST_STATUS_MISSING_REQUEST_TYPE, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+    REQUEST_STATUS_OUTPUT_RUNNING, REQUEST_STATUS_STREAM_NOT_RUNNING,
+    REQUEST_STATUS_STREAM_RUNNING,
 };
 
 pub enum SessionAction {
+    SendTexts {
+        messages: Vec<(String, &'static str)>,
+    },
     SendText {
         text: String,
         message_name: &'static str,
@@ -42,6 +46,7 @@ enum ObswsSessionState {
 pub struct ObswsSession {
     state: ObswsSessionState,
     negotiated_rpc_version: Option<u32>,
+    event_subscriptions: u32,
     auth: Option<ObswsAuthentication>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
@@ -57,6 +62,7 @@ impl ObswsSession {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
             negotiated_rpc_version: None,
+            event_subscriptions: 0,
             auth,
             input_registry,
             pipeline_handle,
@@ -144,6 +150,7 @@ impl ObswsSession {
 
         self.state = ObswsSessionState::Identified;
         self.negotiated_rpc_version = Some(identify.rpc_version);
+        self.event_subscriptions = identify.event_subscriptions.unwrap_or(0);
         SessionAction::SendText {
             text: crate::obsws_message::build_identified_message(identify.rpc_version),
             message_name: "identified message",
@@ -152,7 +159,7 @@ impl ObswsSession {
 
     fn handle_reidentify(
         &mut self,
-        _reidentify: crate::obsws_message::ReidentifyMessage,
+        reidentify: crate::obsws_message::ReidentifyMessage,
     ) -> SessionAction {
         if self.state != ObswsSessionState::Identified {
             return SessionAction::Close {
@@ -160,6 +167,9 @@ impl ObswsSession {
                 reason: "identify is required",
                 close_error_context: "failed to close websocket for unidentified reidentify",
             };
+        }
+        if let Some(event_subscriptions) = reidentify.event_subscriptions {
+            self.event_subscriptions = event_subscriptions;
         }
 
         let negotiated_rpc_version = self
@@ -209,16 +219,12 @@ impl ObswsSession {
         }
 
         if request_type == "StartStream" {
-            return SessionAction::SendText {
-                text: self.handle_start_stream(&request_id).await,
-                message_name: "request response message",
-            };
+            let response = self.handle_start_stream(&request_id).await;
+            return self.build_stream_state_changed_action(response, true);
         }
         if request_type == "StopStream" {
-            return SessionAction::SendText {
-                text: self.handle_stop_stream(&request_id).await,
-                message_name: "request response message",
-            };
+            let response = self.handle_stop_stream(&request_id).await;
+            return self.build_stream_state_changed_action(response, false);
         }
         if request_type == "StartRecord" {
             return SessionAction::SendText {
@@ -240,6 +246,57 @@ impl ObswsSession {
             text: response.message,
             message_name: "request response message",
         }
+    }
+
+    fn build_stream_state_changed_action(
+        &self,
+        response_text: String,
+        output_active: bool,
+    ) -> SessionAction {
+        if !Self::is_request_response_success(&response_text)
+            || !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS)
+        {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text =
+            crate::obsws_response_builder::build_stream_state_changed_event(output_active);
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    fn is_event_subscription_enabled(&self, event_flag: u32) -> bool {
+        (self.event_subscriptions & event_flag) != 0
+    }
+
+    fn is_request_response_success(response_text: &str) -> bool {
+        let Ok(json) = nojson::RawJson::parse(response_text) else {
+            return false;
+        };
+        let Ok(status) = json
+            .value()
+            .to_member("d")
+            .and_then(|v| v.required())
+            .and_then(|v| v.to_member("requestStatus"))
+            .and_then(|v| v.required())
+        else {
+            return false;
+        };
+        let Ok(result) = status
+            .to_member("result")
+            .and_then(|v| v.required())
+            .and_then(|v| v.try_into())
+        else {
+            return false;
+        };
+        result
     }
 
     async fn handle_start_stream(&self, request_id: &str) -> String {
@@ -751,7 +808,7 @@ mod tests {
     use crate::obsws_message::RequestMessage;
     use crate::obsws_protocol::{
         OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED,
-        OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
+        OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_OUTPUTS,
         REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
     };
     use std::sync::Arc;
@@ -813,6 +870,59 @@ mod tests {
             .try_into()
             .expect("negotiatedRpcVersion must be u32");
         (op, negotiated_rpc_version)
+    }
+
+    fn parse_stream_state_changed_event(text: &str) -> (i64, String, u32, bool) {
+        let json = nojson::RawJson::parse(text).expect("event must be valid json");
+        let op: i64 = json
+            .value()
+            .to_member("op")
+            .expect("op access must succeed")
+            .required()
+            .expect("op must exist")
+            .try_into()
+            .expect("op must be i64");
+        let event_type: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventType")
+            .expect("eventType access must succeed")
+            .required()
+            .expect("eventType must exist")
+            .try_into()
+            .expect("eventType must be string");
+        let event_intent: u32 = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventIntent")
+            .expect("eventIntent access must succeed")
+            .required()
+            .expect("eventIntent must exist")
+            .try_into()
+            .expect("eventIntent must be u32");
+        let output_active: bool = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventData")
+            .expect("eventData access must succeed")
+            .required()
+            .expect("eventData must exist")
+            .to_member("outputActive")
+            .expect("outputActive access must succeed")
+            .required()
+            .expect("outputActive must exist")
+            .try_into()
+            .expect("outputActive must be bool");
+        (op, event_type, event_intent, output_active)
     }
 
     #[test]
@@ -896,6 +1006,78 @@ mod tests {
         let (op, negotiated_rpc_version) = parse_identified_message(&text);
         assert_eq!(op, 2);
         assert_eq!(negotiated_rpc_version, 1);
+    }
+
+    #[tokio::test]
+    async fn identify_with_event_subscriptions_updates_session_state() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_OUTPUTS);
+    }
+
+    #[tokio::test]
+    async fn reidentify_updates_event_subscriptions_when_specified() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, 1);
+
+        let reidentify_action = session
+            .on_text_message(r#"{"op":3,"d":{"eventSubscriptions":64}}"#)
+            .await
+            .expect("reidentify must succeed");
+        assert!(matches!(reidentify_action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_OUTPUTS);
+    }
+
+    #[tokio::test]
+    async fn reidentify_without_event_subscriptions_keeps_previous_value() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let reidentify_action = session
+            .on_text_message(r#"{"op":3,"d":{}}"#)
+            .await
+            .expect("reidentify must succeed");
+        assert!(matches!(reidentify_action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_OUTPUTS);
+    }
+
+    #[test]
+    fn build_stream_state_changed_action_with_subscription_returns_event_message() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        session.event_subscriptions = OBSWS_EVENT_SUB_OUTPUTS;
+        let response = crate::obsws_response_builder::build_start_stream_response("req-1");
+        let action = session.build_stream_state_changed_action(response, true);
+        let SessionAction::SendTexts { messages } = action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 2);
+        let (op, event_type, event_intent, output_active) =
+            parse_stream_state_changed_event(&messages[1].0);
+        assert_eq!(op, 5);
+        assert_eq!(event_type, "StreamStateChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
+        assert!(output_active);
+    }
+
+    #[test]
+    fn build_stream_state_changed_action_without_subscription_returns_response_only() {
+        let session = ObswsSession::new(None, input_registry(), None);
+        let response = crate::obsws_response_builder::build_start_stream_response("req-1");
+        let action = session.build_stream_state_changed_action(response, true);
+        assert!(matches!(action, SessionAction::SendText { .. }));
     }
 
     #[tokio::test]
