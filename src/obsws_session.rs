@@ -710,7 +710,7 @@ mod tests {
     use tokio::sync::RwLock;
 
     fn input_registry() -> Arc<RwLock<ObswsInputRegistry>> {
-        Arc::new(RwLock::new(ObswsInputRegistry::new()))
+        Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()))
     }
 
     #[test]

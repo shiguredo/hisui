@@ -214,7 +214,7 @@ mod tests {
     };
 
     fn input_registry() -> ObswsInputRegistry {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         registry.insert_for_test(ObswsInputEntry::new_for_test(
             "input-uuid-1",
             "input-name-1",
@@ -939,9 +939,8 @@ mod tests {
     fn handle_request_message_returns_get_record_directory_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_with_record_directory(
-            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
-        );
+        let mut input_registry =
+            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
         let request = RequestMessage {
             request_id: Some("req-get-record-directory".to_owned()),
             request_type: Some("GetRecordDirectory".to_owned()),
@@ -967,9 +966,8 @@ mod tests {
     fn handle_request_message_returns_set_record_directory_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_with_record_directory(
-            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
-        );
+        let mut input_registry =
+            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
         let request = RequestMessage {
             request_id: Some("req-set-record-directory".to_owned()),
             request_type: Some("SetRecordDirectory".to_owned()),
