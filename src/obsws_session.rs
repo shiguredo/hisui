@@ -499,6 +499,11 @@ impl ObswsSession {
             }
             SessionAction::SendTexts { messages } => {
                 let mut iter = messages.into_iter();
+                // [NOTE]
+                // SendTexts は「先頭が request response、2 件目以降が event」という
+                // 形式を前提に組み立てる。これは obsws の各 request ハンドラ
+                // （例: Scene / Input / Output 系）が共通で守る契約とする。
+                // もし順序規約を変更する場合は、この抽出ロジックも同時に更新すること。
                 let Some((response_text, _)) = iter.next() else {
                     return Err(crate::Error::new("response message is missing"));
                 };
