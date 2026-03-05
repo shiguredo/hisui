@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
+use shiguredo_mp4::boxes::SampleEntry;
 use shiguredo_openh264::Openh264Library;
 
 #[cfg(target_os = "macos")]
@@ -342,15 +343,24 @@ impl VideoEncoderOptions {
     pub const DUMMY_HEIGHT: EvenUsize = EvenUsize::ZERO;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoEncoderRpcMessage {
+    RequestKeyframe,
+}
+
 #[derive(Debug)]
 pub struct VideoEncoder {
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_output_video_frame_count_metric: crate::stats::StatsCounter,
+    total_output_video_keyframe_count_metric: crate::stats::StatsCounter,
+    total_video_keyframe_request_count_metric: crate::stats::StatsCounter,
     _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<VideoFrame>,
     eos: bool,
+    keyframe_request_pending: bool,
+    last_video_sample_entry: Option<SampleEntry>,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
     inner: Option<VideoEncoderInner>,
     options: VideoEncoderOptions,
@@ -369,6 +379,10 @@ impl VideoEncoder {
             compose_stats.counter("total_input_video_frame_count");
         let total_output_video_frame_count_metric =
             compose_stats.counter("total_output_video_frame_count");
+        let total_output_video_keyframe_count_metric =
+            compose_stats.counter("total_output_video_keyframe_count");
+        let total_video_keyframe_request_count_metric =
+            compose_stats.counter("total_video_keyframe_request_count");
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         Ok(Self {
@@ -376,9 +390,13 @@ impl VideoEncoder {
             codec_metric,
             total_input_video_frame_count_metric,
             total_output_video_frame_count_metric,
+            total_output_video_keyframe_count_metric,
+            total_video_keyframe_request_count_metric,
             _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
+            keyframe_request_pending: false,
+            last_video_sample_entry: None,
             inner: None,
             options: options.clone(),
             openh264_lib,
@@ -534,27 +552,57 @@ impl VideoEncoder {
     ) -> Result<()> {
         let mut input_rx = handle.subscribe_track(input_track_id);
         let mut output_tx = handle.publish_track(output_track_id).await?;
+        let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle
+            .register_rpc_sender(rpc_tx)
+            .await
+            .map_err(|e| Error::new(format!("failed to register video encoder RPC sender: {e}")))?;
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
+        let mut rpc_rx_enabled = true;
 
         loop {
-            let message = input_rx.recv().await;
-            let is_eos = matches!(message, Message::Eos);
+            tokio::select! {
+                message = input_rx.recv() => {
+                    let is_eos = matches!(message, Message::Eos);
+                    self.handle_input_message(message)?;
 
-            self.handle_input_message(message)?;
+                    let finished = drain_video_encoder_output(&mut self, &mut output_tx)?;
+                    if finished {
+                        output_tx.send_eos();
+                        break;
+                    }
 
-            let finished = drain_video_encoder_output(&mut self, &mut output_tx)?;
-            if finished {
-                output_tx.send_eos();
-                break;
-            }
-
-            if is_eos {
-                return Err(Error::new("video encoder still pending after EOS"));
+                    if is_eos {
+                        return Err(Error::new("video encoder still pending after EOS"));
+                    }
+                }
+                rpc_message = recv_video_encoder_rpc_message_or_pending(
+                    rpc_rx_enabled.then_some(&mut rpc_rx)
+                ) => {
+                    let Some(rpc_message) = rpc_message else {
+                        rpc_rx_enabled = false;
+                        continue;
+                    };
+                    self.handle_rpc_message(rpc_message);
+                }
             }
         }
 
         Ok(())
+    }
+
+    fn handle_rpc_message(&mut self, message: VideoEncoderRpcMessage) {
+        match message {
+            VideoEncoderRpcMessage::RequestKeyframe => {
+                self.total_video_keyframe_request_count_metric.inc();
+                // 複数の keyframe 要求は 1 件に集約して扱う。
+                // RPC 受信時点ではフラグのみ更新し、実際の keyframe 要求適用は
+                // 次の入力フレーム処理時に行う。低フレームレート入力などでは遅延し得るが、
+                // 現状は入力フローと同一タイミングでの適用を意図した設計とする。
+                self.keyframe_request_pending = true;
+            }
+        }
     }
 
     fn handle_input_message(&mut self, message: Message) -> Result<()> {
@@ -575,6 +623,9 @@ impl VideoEncoder {
             if self.inner.is_none() {
                 self.initialize_inner(size.width, size.height)?;
             }
+            if self.keyframe_request_pending {
+                self.apply_pending_keyframe_request()?;
+            }
 
             self.total_input_video_frame_count_metric.inc();
             self.inner.as_mut().expect("infallible").encode(frame)?;
@@ -585,14 +636,55 @@ impl VideoEncoder {
             }
         }
 
-        // エンコード済みフレームを取得
-        if let Some(inner) = &mut self.inner {
-            while let Some(encoded) = inner.next_encoded_frame() {
-                self.total_output_video_frame_count_metric.inc();
-                self.encoded.push_back(encoded);
+        self.drain_encoded_frames();
+        Ok(())
+    }
+
+    fn apply_pending_keyframe_request(&mut self) -> Result<()> {
+        debug_assert!(
+            self.inner.is_some(),
+            "apply_pending_keyframe_request must be called after initialize_inner"
+        );
+        let request_supported = match self.inner.as_mut() {
+            Some(inner) => inner.request_keyframe(),
+            None => false,
+        };
+        if !request_supported {
+            self.drain_encoded_frames();
+            let recreated = self.create_inner()?;
+            self.engine_metric.set(recreated.name().as_str());
+            self.codec_metric.set(recreated.codec().as_str());
+            self.inner = Some(recreated);
+        }
+        self.keyframe_request_pending = false;
+        Ok(())
+    }
+
+    fn drain_encoded_frames(&mut self) {
+        let Some(mut inner) = self.inner.take() else {
+            return;
+        };
+        while let Some(encoded) = inner.next_encoded_frame() {
+            self.push_encoded_frame_with_metrics(encoded);
+        }
+        self.inner = Some(inner);
+    }
+
+    fn push_encoded_frame_with_metrics(&mut self, mut encoded: VideoFrame) {
+        self.total_output_video_frame_count_metric.inc();
+        if let Some(sample_entry) = encoded.sample_entry.as_ref() {
+            self.last_video_sample_entry = Some(sample_entry.clone());
+        }
+        if encoded.keyframe {
+            self.total_output_video_keyframe_count_metric.inc();
+            // keyframe は単体でデコード可能であるべきなので、sample entry を常に補完する。
+            if encoded.sample_entry.is_none()
+                && let Some(sample_entry) = self.last_video_sample_entry.as_ref()
+            {
+                encoded.sample_entry = Some(sample_entry.clone());
             }
         }
-        Ok(())
+        self.encoded.push_back(encoded);
     }
 
     fn poll_output(&mut self) -> Result<EncoderRunOutput> {
@@ -624,6 +716,16 @@ fn drain_video_encoder_output(
                 return Ok(true);
             }
         }
+    }
+}
+
+async fn recv_video_encoder_rpc_message_or_pending(
+    rpc_rx: Option<&mut tokio::sync::mpsc::UnboundedReceiver<VideoEncoderRpcMessage>>,
+) -> Option<VideoEncoderRpcMessage> {
+    if let Some(rpc_rx) = rpc_rx {
+        rpc_rx.recv().await
+    } else {
+        std::future::pending().await
     }
 }
 
@@ -728,6 +830,22 @@ impl VideoEncoderInner {
             Self::VideoToolbox(encoder) => encoder.next_encoded_frame(),
             #[cfg(feature = "nvcodec")]
             Self::Nvcodec(encoder) => encoder.next_encoded_frame(),
+        }
+    }
+
+    fn request_keyframe(&mut self) -> bool {
+        match self {
+            #[cfg(feature = "libvpx")]
+            Self::Libvpx(_) => false,
+            Self::Openh264(_) => false,
+            Self::SvtAv1(_) => false,
+            #[cfg(target_os = "macos")]
+            Self::VideoToolbox(_) => false,
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(encoder) => {
+                encoder.request_keyframe();
+                true
+            }
         }
     }
 

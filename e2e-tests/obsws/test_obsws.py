@@ -59,7 +59,7 @@ class ObswsServer:
         if self._process is not None:
             raise RuntimeError("obsws server is already started")
 
-        cmd = [str(self.binary_path), "--experimental", "obsws"]
+        cmd = [str(self.binary_path), "--verbose", "--experimental", "obsws"]
         env = os.environ.copy()
         if self.use_env:
             env["HISUI_OBSWS_HOST"] = self.host
@@ -146,9 +146,8 @@ def _start_ffmpeg_rtmp_receive(
         "error",
         "-nostdin",
         "-y",
-        "-i",
-        receive_url,
     ]
+    cmd.extend(["-i", receive_url])
     if max_video_frames is not None:
         cmd.extend(["-frames:v", str(max_video_frames)])
     cmd.extend([
@@ -1099,6 +1098,19 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             else:
                 raise AssertionError("stream did not become active in time")
 
+            # 受信側が接続してデータを取り込めるように少し待ってから停止する
+            # 固定待機を意図的に採用する。
+            # 環境差で不安定になった場合は、将来的に GetStreamStatus ポーリングへ置き換える。
+            await asyncio.sleep(5.0)
+
+            stop_stream_response = await _send_obsws_request(
+                ws,
+                request_type="StopStream",
+                request_id="req-stop-stream",
+            )
+            stop_stream_status = stop_stream_response["d"]["requestStatus"]
+            assert stop_stream_status["result"] is True
+
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
@@ -1112,17 +1124,16 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             ffmpeg_process = _start_ffmpeg_rtmp_receive(
                 receive_url,
                 output_path,
-                max_video_frames=30,
+                max_video_frames=None,
                 startup_timeout=20.0,
             )
             try:
+                start_stream_future.result(timeout=30.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
             finally:
                 if ffmpeg_process.poll() is None:
                     ffmpeg_process.kill()
                     ffmpeg_process.communicate(timeout=5)
-
-            start_stream_future.result(timeout=20.0)
 
     assert output_path.exists(), "RTMP received output file must exist"
     assert output_path.stat().st_size > 0, "RTMP received output file must not be empty"

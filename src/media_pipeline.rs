@@ -2,6 +2,8 @@ type LocalProcessorTask = Box<dyn FnOnce() + Send + 'static>;
 type PendingRpcSenderWaiter =
     tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>;
 
+pub const PROCESSOR_TYPE_VIDEO_ENCODER: &str = "video_encoder";
+
 #[derive(Clone, Default)]
 pub struct MediaPipelineConfig {
     pub openh264_lib: Option<shiguredo_openh264::Openh264Library>,
@@ -100,9 +102,10 @@ impl MediaPipeline {
         match command {
             MediaPipelineCommand::RegisterProcessor {
                 processor_id,
+                metadata,
                 reply_tx,
             } => {
-                let result = self.handle_register_processor(processor_id);
+                let result = self.handle_register_processor(processor_id, metadata);
                 let _ = reply_tx.send(result); // 応答では受信側がすでに閉じていても問題ないので、結果の確認は不要（以降も同様）
             }
             MediaPipelineCommand::DeregisterProcessor { processor_id } => {
@@ -166,6 +169,12 @@ impl MediaPipeline {
                 reply_tx,
             } => {
                 let _ = reply_tx.send(self.handle_terminate_processor(processor_id));
+            }
+            MediaPipelineCommand::FindUpstreamVideoEncoder {
+                processor_id,
+                reply_tx,
+            } => {
+                let _ = reply_tx.send(self.handle_find_upstream_video_encoder(processor_id));
             }
         }
     }
@@ -264,6 +273,14 @@ impl MediaPipeline {
             );
             return;
         }
+        // [NOTE]
+        // ここは順序保持を優先して Vec を使う。
+        // track 数は通常少数なので、contains() の線形探索コストは許容する。
+        if let Some(state) = self.processors.get_mut(&processor_id)
+            && !state.subscribed_track_ids.contains(&track_id)
+        {
+            state.subscribed_track_ids.push(track_id.clone());
+        }
 
         // トラックが存在しない場合は新規作成
         let track = self.tracks.entry(track_id.clone()).or_insert_with(|| {
@@ -315,6 +332,14 @@ impl MediaPipeline {
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         track.publisher_command_tx = Some(command_tx.clone());
+        track.publisher_processor_id = Some(processor_id.clone());
+        // [NOTE]
+        // ここも subscribed_track_ids と同様に、順序保持と実装単純性を優先して Vec を使う。
+        if let Some(state) = self.processors.get_mut(&processor_id)
+            && !state.published_track_ids.contains(&track_id)
+        {
+            state.published_track_ids.push(track_id.clone());
+        }
 
         // 初期バリア開放後のみ、待機中の subscriber に通知
         if self.initial_ready_open {
@@ -329,7 +354,11 @@ impl MediaPipeline {
         })
     }
 
-    fn handle_register_processor(&mut self, processor_id: ProcessorId) -> bool {
+    fn handle_register_processor(
+        &mut self,
+        processor_id: ProcessorId,
+        metadata: ProcessorMetadata,
+    ) -> bool {
         tracing::debug!("register processor: {processor_id}");
 
         if self.processors.contains_key(&processor_id) {
@@ -337,8 +366,13 @@ impl MediaPipeline {
             return false;
         }
 
-        self.processors
-            .insert(processor_id.clone(), ProcessorState::default());
+        self.processors.insert(
+            processor_id.clone(),
+            ProcessorState {
+                processor_type: metadata.processor_type().to_owned(),
+                ..ProcessorState::default()
+            },
+        );
         true
     }
 
@@ -346,6 +380,14 @@ impl MediaPipeline {
         // TODO: トラックが残っている間は deregister 扱いにしない
         tracing::debug!("deregister processor: {processor_id}");
         if let Some(mut state) = self.processors.remove(&processor_id) {
+            for published_track_id in state.published_track_ids.drain(..) {
+                if let Some(track) = self.tracks.get_mut(&published_track_id)
+                    && track.publisher_processor_id.as_ref() == Some(&processor_id)
+                {
+                    track.publisher_processor_id = None;
+                    track.publisher_command_tx = None;
+                }
+            }
             for waiter in state.pending_rpc_sender_waiters.drain(..) {
                 let _ = waiter.send(Err(GetProcessorRpcSenderError::ProcessorNotFound));
             }
@@ -354,6 +396,38 @@ impl MediaPipeline {
             }
         }
         self.try_open_initial_ready();
+    }
+
+    fn handle_find_upstream_video_encoder(&self, processor_id: ProcessorId) -> Option<ProcessorId> {
+        let mut queue = std::collections::VecDeque::new();
+        let mut visited = std::collections::HashSet::new();
+        queue.push_back(processor_id);
+
+        while let Some(current) = queue.pop_front() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            let Some(state) = self.processors.get(&current) else {
+                continue;
+            };
+            for subscribed_track_id in &state.subscribed_track_ids {
+                let Some(track) = self.tracks.get(subscribed_track_id) else {
+                    continue;
+                };
+                let Some(publisher_processor_id) = track.publisher_processor_id.as_ref() else {
+                    continue;
+                };
+                let Some(publisher_state) = self.processors.get(publisher_processor_id) else {
+                    continue;
+                };
+                if publisher_state.processor_type == PROCESSOR_TYPE_VIDEO_ENCODER {
+                    return Some(publisher_processor_id.clone());
+                }
+                queue.push_back(publisher_processor_id.clone());
+            }
+        }
+
+        None
     }
 
     fn handle_list_tracks(&self) -> Vec<TrackId> {
@@ -505,6 +579,7 @@ impl MediaPipelineHandle {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = MediaPipelineCommand::RegisterProcessor {
             processor_id: processor_id.clone(),
+            metadata: metadata.clone(),
             reply_tx,
         };
 
@@ -591,6 +666,18 @@ impl MediaPipelineHandle {
         reply_rx.await.map_err(|_| PipelineTerminated)
     }
 
+    pub async fn find_upstream_video_encoder(
+        &self,
+        processor_id: &ProcessorId,
+    ) -> Result<Option<ProcessorId>, PipelineTerminated> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(MediaPipelineCommand::FindUpstreamVideoEncoder {
+            processor_id: processor_id.clone(),
+            reply_tx,
+        });
+        reply_rx.await.map_err(|_| PipelineTerminated)
+    }
+
     // すでに MediaPipeline が終了している場合には false が返される。
     // なお、通常はこの結果をハンドリングする必要はない。
     // （コマンドの応答を受け取る場合は、その受信側で検知できるし、
@@ -625,6 +712,7 @@ fn run_local_processor_runtime_thread(
 pub(crate) enum MediaPipelineCommand {
     RegisterProcessor {
         processor_id: ProcessorId,
+        metadata: ProcessorMetadata,
         reply_tx: tokio::sync::oneshot::Sender<bool>,
     },
     DeregisterProcessor {
@@ -672,6 +760,10 @@ pub(crate) enum MediaPipelineCommand {
     TerminateProcessor {
         processor_id: ProcessorId,
         reply_tx: tokio::sync::oneshot::Sender<bool>,
+    },
+    FindUpstreamVideoEncoder {
+        processor_id: ProcessorId,
+        reply_tx: tokio::sync::oneshot::Sender<Option<ProcessorId>>,
     },
 }
 
@@ -767,6 +859,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for TrackId {
 #[derive(Debug, Default)]
 struct TrackState {
     publisher_command_tx: Option<tokio::sync::mpsc::UnboundedSender<TrackCommand>>,
+    publisher_processor_id: Option<ProcessorId>,
     pending_subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
 }
 
@@ -799,13 +892,31 @@ impl std::fmt::Debug for ErasedRpcSender {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ProcessorState {
+    processor_type: String,
     notified_ready: bool,
     is_initial_member: bool,
+    subscribed_track_ids: Vec<TrackId>,
+    published_track_ids: Vec<TrackId>,
     rpc_sender: Option<ErasedRpcSender>,
     abort_handle: Option<tokio::task::AbortHandle>,
     pending_rpc_sender_waiters: Vec<PendingRpcSenderWaiter>,
+}
+
+impl Default for ProcessorState {
+    fn default() -> Self {
+        Self {
+            processor_type: "unknown".to_owned(),
+            notified_ready: false,
+            is_initial_member: false,
+            subscribed_track_ids: Vec::new(),
+            published_track_ids: Vec::new(),
+            rpc_sender: None,
+            abort_handle: None,
+            pending_rpc_sender_waiters: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -827,6 +938,10 @@ impl ProcessorHandle {
 
     pub fn config(&self) -> std::sync::Arc<MediaPipelineConfig> {
         self.pipeline_handle.config()
+    }
+
+    pub fn pipeline_handle(&self) -> MediaPipelineHandle {
+        self.pipeline_handle.clone()
     }
 
     pub async fn publish_track(
@@ -958,6 +1073,14 @@ impl MessageSender {
 
         self.txs.retain_mut(|tx| tx.send(message.clone()).is_ok());
         true
+    }
+
+    pub fn has_subscribers(&mut self) -> bool {
+        if !self.drain_track_commands() {
+            return false;
+        }
+        self.txs.retain(|tx| !tx.is_closed());
+        !self.txs.is_empty()
     }
 
     pub fn send_media(&mut self, sample: crate::MediaFrame) -> bool {
@@ -1698,6 +1821,102 @@ mod tests {
             get_result,
             Err(GetProcessorRpcSenderError::PipelineTerminated)
         ));
+    }
+
+    #[tokio::test]
+    async fn find_upstream_video_encoder_returns_nearest_encoder() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let source = handle
+            .register_processor(ProcessorId::new("source"), metadata("png_file_source"))
+            .await
+            .expect("failed to register source");
+        let encoder = handle
+            .register_processor(
+                ProcessorId::new("encoder"),
+                metadata(PROCESSOR_TYPE_VIDEO_ENCODER),
+            )
+            .await
+            .expect("failed to register encoder");
+        let endpoint = handle
+            .register_processor(
+                ProcessorId::new("endpoint"),
+                metadata("rtmp_outbound_endpoint"),
+            )
+            .await
+            .expect("failed to register endpoint");
+
+        let source_track = TrackId::new("source_track");
+        let encoded_track = TrackId::new("encoded_track");
+        let _source_tx = source
+            .publish_track(source_track.clone())
+            .await
+            .expect("source publish must succeed");
+        let _encoder_rx = encoder.subscribe_track(source_track);
+        let _encoder_tx = encoder
+            .publish_track(encoded_track.clone())
+            .await
+            .expect("encoder publish must succeed");
+        let _endpoint_rx = endpoint.subscribe_track(encoded_track);
+
+        let found = handle
+            .find_upstream_video_encoder(endpoint.processor_id())
+            .await
+            .expect("find_upstream_video_encoder must succeed");
+        assert_eq!(found, Some(encoder.processor_id().clone()));
+
+        drop(endpoint);
+        drop(encoder);
+        drop(source);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn find_upstream_video_encoder_returns_none_for_best_effort_path() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let source = handle
+            .register_processor(ProcessorId::new("source"), metadata("png_file_source"))
+            .await
+            .expect("failed to register source");
+        let endpoint = handle
+            .register_processor(
+                ProcessorId::new("endpoint"),
+                metadata("rtmp_outbound_endpoint"),
+            )
+            .await
+            .expect("failed to register endpoint");
+
+        let source_track = TrackId::new("source_track");
+        let _source_tx = source
+            .publish_track(source_track.clone())
+            .await
+            .expect("source publish must succeed");
+        let _endpoint_rx = endpoint.subscribe_track(source_track);
+
+        // RTMP 再生開始時のキーフレーム要求は best effort のため、
+        // 上流に video encoder が存在しない構成では None を正常系として扱う。
+        let found = handle
+            .find_upstream_video_encoder(endpoint.processor_id())
+            .await
+            .expect("find_upstream_video_encoder must succeed");
+        assert_eq!(found, None);
+
+        drop(endpoint);
+        drop(source);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
     }
 
     #[tokio::test]

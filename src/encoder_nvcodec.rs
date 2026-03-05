@@ -17,6 +17,7 @@ pub struct NvcodecEncoder {
     sample_entry: Option<SampleEntry>,
     encoded_format: VideoFormat,
     av1_sequence_header: Vec<u8>,
+    force_keyframe_next: bool,
 }
 
 impl NvcodecEncoder {
@@ -53,6 +54,7 @@ impl NvcodecEncoder {
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::H264,
             av1_sequence_header: Vec::new(),
+            force_keyframe_next: false,
         })
     }
 
@@ -94,6 +96,7 @@ impl NvcodecEncoder {
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::H265,
             av1_sequence_header: Vec::new(),
+            force_keyframe_next: false,
         })
     }
 
@@ -147,6 +150,7 @@ impl NvcodecEncoder {
             sample_entry: Some(sample_entry),
             encoded_format: VideoFormat::Av1,
             av1_sequence_header: seq_params,
+            force_keyframe_next: false,
         })
     }
 
@@ -191,14 +195,19 @@ impl NvcodecEncoder {
 
         // エンコード実行
         let encode_options = shiguredo_nvcodec::EncodeOptions {
-            force_intra: false,
-            force_idr: false,
+            force_intra: self.force_keyframe_next,
+            force_idr: self.force_keyframe_next,
             output_spspps: false,
         };
+        self.force_keyframe_next = false;
         self.inner.encode(&nv12_data, &encode_options)?;
         self.input_queue.push_back(video_frame.to_stripped());
         self.handle_encoded_frames()?;
         Ok(())
+    }
+
+    pub fn request_keyframe(&mut self) {
+        self.force_keyframe_next = true;
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {

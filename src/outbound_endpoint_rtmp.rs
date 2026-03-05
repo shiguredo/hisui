@@ -8,6 +8,7 @@ use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 use crate::{
     Error, MediaFrame, Message, ProcessorHandle, TrackId,
     audio::{AudioFormat, AudioFrame},
+    encoder::VideoEncoderRpcMessage,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -126,6 +127,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpOutboundEnd
 
 impl RtmpOutboundEndpoint {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
+        let pipeline_handle = handle.pipeline_handle();
+        let endpoint_processor_id = handle.processor_id().clone();
         let mut audio_rx = self
             .input_audio_track_id
             .clone()
@@ -148,6 +151,8 @@ impl RtmpOutboundEndpoint {
                 rx,
                 clients: Vec::new(),
                 options: server_options,
+                pipeline_handle,
+                endpoint_processor_id,
             };
 
             if let Err(e) = server.run().await {
@@ -287,6 +292,8 @@ struct RtmpPlayServer {
     rx: tokio::sync::mpsc::Receiver<MediaFrame>,
     clients: Vec<tokio::sync::mpsc::Sender<ClientMediaFrame>>,
     options: RtmpOutboundEndpointOptions,
+    pipeline_handle: crate::MediaPipelineHandle,
+    endpoint_processor_id: crate::ProcessorId,
 }
 
 impl RtmpPlayServer {
@@ -355,6 +362,8 @@ impl RtmpPlayServer {
 
         let expected_app = self.url.app.clone();
         let expected_stream_name = self.url.stream_name.clone();
+        let pipeline_handle = self.pipeline_handle.clone();
+        let endpoint_processor_id = self.endpoint_processor_id.clone();
 
         tokio::spawn(async move {
             match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await {
@@ -367,6 +376,8 @@ impl RtmpPlayServer {
                         client_rx,
                         expected_app,
                         expected_stream_name,
+                        pipeline_handle,
+                        endpoint_processor_id,
                     );
 
                     if let Err(e) = handler.run().await {
@@ -405,6 +416,8 @@ struct RtmpClientHandler {
     expected_app: String,
     expected_stream_name: String,
     frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
+    pipeline_handle: crate::MediaPipelineHandle,
+    endpoint_processor_id: crate::ProcessorId,
 }
 
 impl RtmpClientHandler {
@@ -413,6 +426,8 @@ impl RtmpClientHandler {
         rx: tokio::sync::mpsc::Receiver<ClientMediaFrame>,
         expected_app: String,
         expected_stream_name: String,
+        pipeline_handle: crate::MediaPipelineHandle,
+        endpoint_processor_id: crate::ProcessorId,
     ) -> Self {
         Self {
             stream,
@@ -422,6 +437,8 @@ impl RtmpClientHandler {
             expected_app,
             expected_stream_name,
             frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(),
+            pipeline_handle,
+            endpoint_processor_id,
         }
     }
 
@@ -461,6 +478,21 @@ impl RtmpClientHandler {
                         Error::new(format!("failed to accept RTMP play request: {e}"))
                     })?;
                     tracing::debug!("Client started playing stream: {}/{}", app, stream_name);
+                    let pipeline_handle = self.pipeline_handle.clone();
+                    let endpoint_processor_id = self.endpoint_processor_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = request_video_keyframe_for_rtmp_play_start(
+                            &pipeline_handle,
+                            &endpoint_processor_id,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                "failed to request keyframe for RTMP play start: {}",
+                                e.display()
+                            );
+                        }
+                    });
                 } else {
                     self.connection
                         .reject(&format!(
@@ -578,4 +610,44 @@ impl RtmpClientHandler {
         }
         Ok(())
     }
+}
+
+async fn request_video_keyframe_for_rtmp_play_start(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    endpoint_processor_id: &crate::ProcessorId,
+) -> crate::Result<()> {
+    // [NOTE]
+    // ここは best effort で、経路上に video encoder がない構成（既エンコード入力など）は
+    // 正常系としてキーフレーム要求をスキップする。
+    // また、RTMP サーバー起動直後の接続タイミングでは、上流 encoder の publish_track 完了前に
+    // 到達して None になる可能性がある。この場合も最初の出力フレームは自然にキーフレームとなるため、
+    // リクエストを送れなくても実害はない想定で許容する。
+    let maybe_encoder_processor_id = pipeline_handle
+        .find_upstream_video_encoder(endpoint_processor_id)
+        .await
+        .map_err(|_| crate::Error::new("failed to find upstream video encoder"))?;
+    let Some(encoder_processor_id) = maybe_encoder_processor_id else {
+        return Ok(());
+    };
+
+    // get_rpc_sender() は sender 登録待ちができるため、ここで追加ポーリングは不要。
+    let rpc_sender = pipeline_handle
+        .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoEncoderRpcMessage>>(
+            &encoder_processor_id,
+        )
+        .await
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "failed to get video encoder RPC sender ({encoder_processor_id}): {e}"
+            ))
+        })?;
+
+    rpc_sender
+        .send(VideoEncoderRpcMessage::RequestKeyframe)
+        .map_err(|_| {
+            crate::Error::new(format!(
+                "failed to send keyframe request to video encoder: {encoder_processor_id}"
+            ))
+        })?;
+    Ok(())
 }
