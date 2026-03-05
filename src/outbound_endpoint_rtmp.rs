@@ -418,6 +418,7 @@ struct RtmpClientHandler {
     frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
     pipeline_handle: crate::MediaPipelineHandle,
     endpoint_processor_id: crate::ProcessorId,
+    initial_waiting_keyframe_request_sent: bool,
 }
 
 impl RtmpClientHandler {
@@ -439,6 +440,7 @@ impl RtmpClientHandler {
             frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(),
             pipeline_handle,
             endpoint_processor_id,
+            initial_waiting_keyframe_request_sent: false,
         }
     }
 
@@ -478,21 +480,7 @@ impl RtmpClientHandler {
                         Error::new(format!("failed to accept RTMP play request: {e}"))
                     })?;
                     tracing::debug!("Client started playing stream: {}/{}", app, stream_name);
-                    let pipeline_handle = self.pipeline_handle.clone();
-                    let endpoint_processor_id = self.endpoint_processor_id.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = request_video_keyframe_for_rtmp_play_start(
-                            &pipeline_handle,
-                            &endpoint_processor_id,
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                "failed to request keyframe for RTMP play start: {}",
-                                e.display()
-                            );
-                        }
-                    });
+                    self.request_video_keyframe("play_start");
                 } else {
                     self.connection
                         .reject(&format!(
@@ -558,6 +546,13 @@ impl RtmpClientHandler {
                     .map_err(|e| Error::new(format!("failed to send audio frame: {e}")))?;
             }
             ClientMediaFrame::Video(video) => {
+                if self.frame_handler.is_waiting_for_keyframe()
+                    && !video.keyframe
+                    && !self.initial_waiting_keyframe_request_sent
+                {
+                    self.initial_waiting_keyframe_request_sent = true;
+                    self.request_video_keyframe("initial_non_keyframe");
+                }
                 if let Some((seq_frame, video_frame)) = self
                     .frame_handler
                     .prepare_video_frame(video)
@@ -610,6 +605,23 @@ impl RtmpClientHandler {
         }
         Ok(())
     }
+
+    fn request_video_keyframe(&self, trigger: &'static str) {
+        let pipeline_handle = self.pipeline_handle.clone();
+        let endpoint_processor_id = self.endpoint_processor_id.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                request_video_keyframe_for_rtmp_play_start(&pipeline_handle, &endpoint_processor_id)
+                    .await
+            {
+                tracing::warn!(
+                    "failed to request keyframe for RTMP play start: trigger={}, error={}",
+                    trigger,
+                    e.display()
+                );
+            }
+        });
+    }
 }
 
 async fn request_video_keyframe_for_rtmp_play_start(
@@ -619,14 +631,15 @@ async fn request_video_keyframe_for_rtmp_play_start(
     // [NOTE]
     // ここは best effort で、経路上に video encoder がない構成（既エンコード入力など）は
     // 正常系としてキーフレーム要求をスキップする。
-    // また、RTMP サーバー起動直後の接続タイミングでは、上流 encoder の publish_track 完了前に
-    // 到達して None になる可能性がある。この場合も最初の出力フレームは自然にキーフレームとなるため、
-    // リクエストを送れなくても実害はない想定で許容する。
     let maybe_encoder_processor_id = pipeline_handle
         .find_upstream_video_encoder(endpoint_processor_id)
         .await
         .map_err(|_| crate::Error::new("failed to find upstream video encoder"))?;
     let Some(encoder_processor_id) = maybe_encoder_processor_id else {
+        tracing::debug!(
+            "skip keyframe request for RTMP play start: upstream video encoder not found (endpoint={})",
+            endpoint_processor_id,
+        );
         return Ok(());
     };
 
@@ -649,5 +662,10 @@ async fn request_video_keyframe_for_rtmp_play_start(
                 "failed to send keyframe request to video encoder: {encoder_processor_id}"
             ))
         })?;
+    tracing::debug!(
+        "requested keyframe for RTMP play start: endpoint={}, encoder={}",
+        endpoint_processor_id,
+        encoder_processor_id
+    );
     Ok(())
 }
