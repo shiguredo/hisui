@@ -12,6 +12,8 @@ pub const OBSWS_OP_EVENT: i64 = 5;
 pub const OBSWS_OP_REQUEST: i64 = 6;
 pub const OBSWS_OP_REQUEST_RESPONSE: i64 = 7;
 
+pub const OBSWS_EVENT_SUB_SCENES: u32 = 1 << 2;
+pub const OBSWS_EVENT_SUB_INPUTS: u32 = 1 << 3;
 pub const OBSWS_EVENT_SUB_OUTPUTS: u32 = 1 << 6;
 
 pub const OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION: CloseCode = CloseCode(4006);

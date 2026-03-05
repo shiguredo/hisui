@@ -155,6 +155,11 @@ pub fn handle_request_message(
             request.request_data.as_ref(),
             input_registry,
         ),
+        "RemoveScene" => crate::obsws_response_builder::build_remove_scene_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
             input_registry,
@@ -475,6 +480,7 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "CreateInput"));
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
+        assert!(available_requests.iter().any(|r| r == "RemoveScene"));
         assert!(
             available_requests
                 .iter()
