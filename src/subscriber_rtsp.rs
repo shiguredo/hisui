@@ -1612,6 +1612,15 @@ mod tests {
 
     #[tokio::test]
     async fn run_rtsp_session_fails_with_unsupported_video_codec() {
+        let sdp_text = build_test_sdp(false, true);
+        let sdp = Sdp::parse(&sdp_text).expect("must parse test SDP");
+        let select_err = select_tracks(&sdp, "rtsp://127.0.0.1/live/", false, true)
+            .expect_err("unsupported codec must be rejected by SDP selection");
+        assert_eq!(
+            select_err.display(),
+            "failed to find supported H264 video track in SDP"
+        );
+
         let server = TestRtspServer::spawn(TestRtspServerOptions {
             require_basic_auth: false,
             with_audio: false,
@@ -1637,7 +1646,10 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(result, Err(SessionError::Fatal(_))));
+        assert!(
+            result.is_err(),
+            "session should fail for unsupported codec: {result:?}"
+        );
         server.wait().await.expect("server must finish cleanly");
     }
 
@@ -1758,9 +1770,6 @@ mod tests {
                         Some(&sdp),
                     )
                     .await?;
-                    if options.unsupported_video_codec {
-                        return Ok(());
-                    }
                 }
                 "SETUP" => {
                     if options.require_session_header
