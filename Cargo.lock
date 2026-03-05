@@ -1121,10 +1121,12 @@ checksum = "84628cbdeb6a6a46e1134587ecc4ff6a2013837bcc4894d06818dcdc311998ea"
 
 [[package]]
 name = "shiguredo_libvpx"
-version = "2025.1.0"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39863ec527919ca0a88abd8f680aaa59698b0f89549bfc416bba4fb7a4533fe0"
 dependencies = [
  "bindgen",
- "toml",
+ "shiguredo_toml",
 ]
 
 [[package]]

@@ -13,7 +13,9 @@ impl LibvpxDecoder {
     pub fn new_vp8() -> crate::Result<Self> {
         tracing::debug!("create libvpx(VP8) decoder");
         Ok(Self {
-            inner: shiguredo_libvpx::Decoder::new_vp8()?,
+            inner: shiguredo_libvpx::Decoder::new(shiguredo_libvpx::DecoderConfig::new(
+                shiguredo_libvpx::DecoderCodec::Vp8,
+            ))?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
         })
@@ -22,7 +24,9 @@ impl LibvpxDecoder {
     pub fn new_vp9() -> crate::Result<Self> {
         tracing::debug!("create libvpx(VP9) decoder");
         Ok(Self {
-            inner: shiguredo_libvpx::Decoder::new_vp9()?,
+            inner: shiguredo_libvpx::Decoder::new(shiguredo_libvpx::DecoderConfig::new(
+                shiguredo_libvpx::DecoderCodec::Vp9,
+            ))?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
         })

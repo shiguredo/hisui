@@ -27,6 +27,7 @@ pub struct LibvpxEncoder {
     inner: shiguredo_libvpx::Encoder,
     format: VideoFormat,
     sample_entry: Option<SampleEntry>,
+    keyframe_request_pending: bool,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
 }
@@ -44,13 +45,14 @@ impl LibvpxEncoder {
             ..options.encode_params.libvpx_vp8.clone()
         };
         tracing::debug!("libvpx vp8 encoder config: {config:?}");
-        let inner = shiguredo_libvpx::Encoder::new_vp8(&config)?;
+        let inner = shiguredo_libvpx::Encoder::new(config)?;
         let sample_entry = vp8_sample_entry(width, height);
 
         Ok(Self {
             inner,
             format: VideoFormat::Vp8,
             sample_entry: Some(sample_entry),
+            keyframe_request_pending: false,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
         })
@@ -68,13 +70,14 @@ impl LibvpxEncoder {
             ..options.encode_params.libvpx_vp9.clone()
         };
         tracing::debug!("libvpx vp9 encoder config: {config:?}");
-        let inner = shiguredo_libvpx::Encoder::new_vp9(&config)?;
+        let inner = shiguredo_libvpx::Encoder::new(config)?;
         let sample_entry = vp9_sample_entry(width, height);
 
         Ok(Self {
             inner,
             format: VideoFormat::Vp9,
             sample_entry: Some(sample_entry),
+            keyframe_request_pending: false,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
         })
@@ -90,7 +93,18 @@ impl LibvpxEncoder {
 
     pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let (y_plane, u_plane, v_plane) = frame.as_i420_planes()?;
-        self.inner.encode(y_plane, u_plane, v_plane)?;
+        let encode_options = shiguredo_libvpx::EncodeOptions {
+            force_keyframe: self.keyframe_request_pending,
+        };
+        self.inner.encode(
+            &shiguredo_libvpx::ImageData::I420 {
+                y: y_plane,
+                u: u_plane,
+                v: v_plane,
+            },
+            &encode_options,
+        )?;
+        self.keyframe_request_pending = false;
         self.input_queue.push_back(frame);
         self.handle_encoded_frames()?;
 
@@ -127,6 +141,10 @@ impl LibvpxEncoder {
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
+    }
+
+    pub fn request_keyframe(&mut self) {
+        self.keyframe_request_pending = true;
     }
 }
 

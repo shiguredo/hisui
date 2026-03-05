@@ -836,7 +836,10 @@ impl VideoEncoderInner {
     fn request_keyframe(&mut self) -> bool {
         match self {
             #[cfg(feature = "libvpx")]
-            Self::Libvpx(_) => false,
+            Self::Libvpx(encoder) => {
+                encoder.request_keyframe();
+                true
+            }
             Self::Openh264(encoder) => {
                 encoder.request_keyframe();
                 true

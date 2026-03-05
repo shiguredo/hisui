@@ -4,7 +4,12 @@ use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 pub fn parse_vp8_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_libvpx::EncoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_libvpx::EncoderConfig::default();
+    let mut config = shiguredo_libvpx::EncoderConfig::new(
+        2,
+        2,
+        shiguredo_libvpx::ImageFormat::I420,
+        shiguredo_libvpx::CodecConfig::Vp8(shiguredo_libvpx::Vp8Config::default()),
+    );
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -26,7 +31,12 @@ pub fn parse_vp8_encode_params(
 pub fn parse_vp9_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_libvpx::EncoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_libvpx::EncoderConfig::default();
+    let mut config = shiguredo_libvpx::EncoderConfig::new(
+        2,
+        2,
+        shiguredo_libvpx::ImageFormat::I420,
+        shiguredo_libvpx::CodecConfig::Vp9(shiguredo_libvpx::Vp9Config::default()),
+    );
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -113,16 +123,9 @@ fn update_vp8_encode_params(
     }
 
     // 以降はVP8固有の設定
-    let mut vp8_config = config
-        .vp8_config
-        .take()
-        .unwrap_or(shiguredo_libvpx::Vp8Config {
-            noise_sensitivity: None,
-            static_threshold: None,
-            token_partitions: None,
-            max_intra_bitrate_pct: None,
-            arnr_config: None,
-        });
+    let shiguredo_libvpx::CodecConfig::Vp8(vp8_config) = &mut config.codec else {
+        unreachable!();
+    };
 
     if let Some(noise_sensitivity) = params.get("noise_sensitivity")? {
         vp8_config.noise_sensitivity = Some(noise_sensitivity);
@@ -146,7 +149,6 @@ fn update_vp8_encode_params(
         });
     }
 
-    config.vp8_config = Some(vp8_config);
     Ok(())
 }
 
@@ -218,18 +220,9 @@ fn update_vp9_encode_params(
     }
 
     // 以降はVP9固有の設定
-    let mut vp9_config = config
-        .vp9_config
-        .take()
-        .unwrap_or(shiguredo_libvpx::Vp9Config {
-            aq_mode: None,
-            noise_sensitivity: None,
-            tile_columns: None,
-            tile_rows: None,
-            row_mt: false,
-            frame_parallel_decoding: false,
-            tune_content: None,
-        });
+    let shiguredo_libvpx::CodecConfig::Vp9(vp9_config) = &mut config.codec else {
+        unreachable!();
+    };
 
     // VP9固有パラメータの設定
     if let Some(aq_mode) = params.get("aq_mode")? {
@@ -260,6 +253,5 @@ fn update_vp9_encode_params(
         })?
         .or(vp9_config.tune_content);
 
-    config.vp9_config = Some(vp9_config);
     Ok(())
 }
