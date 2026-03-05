@@ -1,7 +1,7 @@
 use crate::obsws_input_registry::ObswsInputRegistry;
 use crate::obsws_protocol::{
-    OBSWS_OP_IDENTIFY, OBSWS_OP_REIDENTIFY, OBSWS_OP_REQUEST, OBSWS_RPC_VERSION,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
+    OBSWS_OP_IDENTIFY, OBSWS_OP_REIDENTIFY, OBSWS_OP_REQUEST, OBSWS_OP_REQUEST_BATCH,
+    OBSWS_RPC_VERSION, REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
     REQUEST_STATUS_UNKNOWN_REQUEST_TYPE,
 };
 
@@ -12,6 +12,7 @@ pub enum ClientMessage {
     Identify(IdentifyMessage),
     Reidentify(ReidentifyMessage),
     Request(RequestMessage),
+    RequestBatch(RequestBatchMessage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,14 @@ pub struct RequestMessage {
     pub request_id: Option<String>,
     pub request_type: Option<String>,
     pub request_data: Option<nojson::RawJsonOwned>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestBatchMessage {
+    pub request_id: Option<String>,
+    pub halt_on_failure: Option<bool>,
+    pub execution_type: Option<i64>,
+    pub requests: Option<Vec<RequestMessage>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,17 +66,27 @@ pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
     match op {
         OBSWS_OP_REQUEST => {
             let d_value = value.to_member("d")?.required()?;
-
+            Ok(ClientMessage::Request(parse_request_message(d_value)?))
+        }
+        OBSWS_OP_REQUEST_BATCH => {
+            let d_value = value.to_member("d")?.required()?;
             let request_id: Option<String> = d_value.to_member("requestId")?.try_into()?;
-            let request_type: Option<String> = d_value.to_member("requestType")?.try_into()?;
-            let request_data: Option<nojson::RawJsonOwned> = d_value
-                .to_member("requestData")?
-                .map(nojson::RawJsonOwned::try_from)?;
-
-            Ok(ClientMessage::Request(RequestMessage {
+            let halt_on_failure: Option<bool> = d_value.to_member("haltOnFailure")?.try_into()?;
+            let execution_type: Option<i64> = d_value.to_member("executionType")?.try_into()?;
+            let requests = if let Some(requests_value) = d_value.to_member("requests")?.optional() {
+                let requests = requests_value
+                    .to_array()?
+                    .map(parse_request_message)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(requests)
+            } else {
+                None
+            };
+            Ok(ClientMessage::RequestBatch(RequestBatchMessage {
                 request_id,
-                request_type,
-                request_data,
+                halt_on_failure,
+                execution_type,
+                requests,
             }))
         }
         OBSWS_OP_IDENTIFY => {
@@ -94,6 +113,21 @@ pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
             "unsupported message opcode: {op}"
         ))),
     }
+}
+
+fn parse_request_message(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<RequestMessage, nojson::JsonParseError> {
+    let request_id: Option<String> = value.to_member("requestId")?.try_into()?;
+    let request_type: Option<String> = value.to_member("requestType")?.try_into()?;
+    let request_data: Option<nojson::RawJsonOwned> = value
+        .to_member("requestData")?
+        .map(nojson::RawJsonOwned::try_from)?;
+    Ok(RequestMessage {
+        request_id,
+        request_type,
+        request_data,
+    })
 }
 
 pub fn handle_request_message(
@@ -350,6 +384,39 @@ mod tests {
                 request_data: Some(request_data("{}")),
             })
         );
+    }
+
+    #[test]
+    fn parse_client_message_accepts_request_batch() {
+        let message = r#"{"op":8,"d":{"requestId":"batch-1","haltOnFailure":true,"executionType":0,"requests":[{"requestType":"GetVersion"},{"requestType":"GetStats","requestData":{}}]}}"#;
+        let parsed = parse_client_message(message).expect("request batch message must be accepted");
+        assert_eq!(
+            parsed,
+            ClientMessage::RequestBatch(RequestBatchMessage {
+                request_id: Some("batch-1".to_owned()),
+                halt_on_failure: Some(true),
+                execution_type: Some(0),
+                requests: Some(vec![
+                    RequestMessage {
+                        request_id: None,
+                        request_type: Some("GetVersion".to_owned()),
+                        request_data: None,
+                    },
+                    RequestMessage {
+                        request_id: None,
+                        request_type: Some("GetStats".to_owned()),
+                        request_data: Some(request_data("{}")),
+                    },
+                ]),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_client_message_rejects_request_batch_with_invalid_requests_type() {
+        let message = r#"{"op":8,"d":{"requestId":"batch-1","requests":"invalid"}}"#;
+        let error = parse_client_message(message).expect_err("request batch must reject invalid");
+        assert!(!error.display().is_empty());
     }
 
     #[test]

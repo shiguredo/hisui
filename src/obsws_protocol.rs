@@ -11,6 +11,8 @@ pub const OBSWS_OP_REIDENTIFY: i64 = 3;
 pub const OBSWS_OP_EVENT: i64 = 5;
 pub const OBSWS_OP_REQUEST: i64 = 6;
 pub const OBSWS_OP_REQUEST_RESPONSE: i64 = 7;
+pub const OBSWS_OP_REQUEST_BATCH: i64 = 8;
+pub const OBSWS_OP_REQUEST_BATCH_RESPONSE: i64 = 9;
 
 pub const OBSWS_EVENT_SUB_SCENES: u32 = 1 << 2;
 pub const OBSWS_EVENT_SUB_INPUTS: u32 = 1 << 3;

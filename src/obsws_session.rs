@@ -11,7 +11,7 @@ use crate::obsws_input_registry::{
     ActivateRecordError, ActivateStreamError, ObswsInputRegistry, ObswsInputSettings,
     ObswsRecordRun, ObswsStreamRun,
 };
-use crate::obsws_message::{ClientMessage, ObswsSessionStats};
+use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
@@ -47,6 +47,31 @@ struct RequestOutcome {
     response_text: String,
     success: bool,
     output_path: Option<String>,
+}
+
+struct RequestExecutionResult {
+    response_text: String,
+    batch_result: crate::obsws_response_builder::RequestBatchResult,
+    events: Vec<String>,
+}
+
+impl RequestExecutionResult {
+    fn into_session_action(self) -> SessionAction {
+        if self.events.is_empty() {
+            return SessionAction::SendText {
+                text: self.response_text,
+                message_name: "request response message",
+            };
+        }
+        let mut messages = Vec::with_capacity(self.events.len() + 1);
+        messages.push((self.response_text, "request response message"));
+        messages.extend(
+            self.events
+                .into_iter()
+                .map(|event| (event, "event message")),
+        );
+        SessionAction::SendTexts { messages }
+    }
 }
 
 pub struct ObswsSession {
@@ -95,6 +120,9 @@ impl ObswsSession {
             ClientMessage::Identify(identify) => self.handle_identify(identify),
             ClientMessage::Reidentify(reidentify) => self.handle_reidentify(reidentify),
             ClientMessage::Request(request) => self.handle_request(request).await,
+            ClientMessage::RequestBatch(request_batch) => {
+                self.handle_request_batch(request_batch).await
+            }
         };
         Ok(action)
     }
@@ -198,13 +226,35 @@ impl ObswsSession {
                 close_error_context: "failed to close websocket for unidentified request",
             };
         }
-
         let request_id = request.request_id.clone().unwrap_or_default();
         let request_type = request.request_type.clone().unwrap_or_default();
+        match self.handle_request_internal(request).await {
+            Ok(execution) => execution.into_session_action(),
+            Err(_) => SessionAction::SendText {
+                text: Self::build_internal_error_response(
+                    &request_type,
+                    &request_id,
+                    "Failed to build internal request response",
+                ),
+                message_name: "request response message",
+            },
+        }
+    }
+
+    async fn handle_request_batch(&mut self, request_batch: RequestBatchMessage) -> SessionAction {
+        if self.state != ObswsSessionState::Identified {
+            return SessionAction::Close {
+                code: OBSWS_CLOSE_NOT_IDENTIFIED,
+                reason: "identify is required",
+                close_error_context: "failed to close websocket for unidentified request batch",
+            };
+        }
+
+        let request_id = request_batch.request_id.unwrap_or_default();
         if request_id.is_empty() {
             return SessionAction::SendText {
                 text: crate::obsws_response_builder::build_request_response_error(
-                    &request_type,
+                    "RequestBatch",
                     &request_id,
                     REQUEST_STATUS_MISSING_REQUEST_FIELD,
                     "Missing required requestId field",
@@ -212,92 +262,262 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        if request_type.is_empty() {
+
+        let execution_type = request_batch.execution_type.unwrap_or(0);
+        if execution_type != 0 {
             return SessionAction::SendText {
                 text: crate::obsws_response_builder::build_request_response_error(
-                    &request_type,
+                    "RequestBatch",
                     &request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_TYPE,
-                    "Missing required requestType field",
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Unsupported executionType field",
                 ),
                 message_name: "request response message",
             };
         }
 
+        let Some(requests) = request_batch.requests else {
+            return SessionAction::SendText {
+                text: crate::obsws_response_builder::build_request_response_error(
+                    "RequestBatch",
+                    &request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing required requests field",
+                ),
+                message_name: "request response message",
+            };
+        };
+
+        let halt_on_failure = request_batch.halt_on_failure.unwrap_or(false);
+        let mut results = Vec::new();
+        let mut events = Vec::new();
+        for (index, request) in requests.into_iter().enumerate() {
+            let sub_request_id = request
+                .request_id
+                .clone()
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| format!("{request_id}:{index}"));
+            let execution = match self
+                .handle_request_internal(crate::obsws_message::RequestMessage {
+                    request_id: Some(sub_request_id),
+                    request_type: request.request_type,
+                    request_data: request.request_data,
+                })
+                .await
+            {
+                Ok(execution) => execution,
+                Err(_) => {
+                    return SessionAction::SendText {
+                        text: Self::build_internal_error_response(
+                            "RequestBatch",
+                            &request_id,
+                            "Failed to build request batch response",
+                        ),
+                        message_name: "request response message",
+                    };
+                }
+            };
+            let request_succeeded = execution.batch_result.request_status_result;
+            results.push(execution.batch_result);
+            events.extend(
+                execution
+                    .events
+                    .into_iter()
+                    .map(|text| (text, "event message")),
+            );
+            if halt_on_failure && !request_succeeded {
+                break;
+            }
+        }
+
+        let response_text =
+            crate::obsws_response_builder::build_request_batch_response(&request_id, &results);
+        if events.is_empty() {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request batch response message",
+            };
+        }
+
+        let mut messages = Vec::with_capacity(events.len() + 1);
+        // [NOTE]
+        // RequestBatch では、client が batch 完了を判定しやすいよう
+        // RequestBatchResponse (op=9) を先に返し、その後に event を送信する。
+        // OBS 実装と厳密に同一順序ではない可能性があるため、
+        // 互換性要件が変わる場合は送信順序を再検討すること。
+        messages.push((response_text, "request batch response message"));
+        messages.extend(events);
+        SessionAction::SendTexts { messages }
+    }
+
+    async fn handle_request_internal(
+        &mut self,
+        request: crate::obsws_message::RequestMessage,
+    ) -> crate::Result<RequestExecutionResult> {
+        let request_id = request.request_id.clone().unwrap_or_default();
+        let request_type = request.request_type.clone().unwrap_or_default();
+        if request_id.is_empty() {
+            return Ok(Self::build_error_execution(
+                &request_type,
+                &request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required requestId field",
+            ));
+        }
+        if request_type.is_empty() {
+            return Ok(Self::build_error_execution(
+                &request_type,
+                &request_id,
+                REQUEST_STATUS_MISSING_REQUEST_TYPE,
+                "Missing required requestType field",
+            ));
+        }
+
         if request_type == "StartStream" {
             let outcome = self.handle_start_stream(&request_id).await;
-            return self.build_stream_state_changed_action(outcome, true);
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(crate::obsws_response_builder::build_stream_state_changed_event(true));
+            }
+            return Self::build_execution_from_outcome("StartStream", outcome, events);
         }
         if request_type == "StopStream" {
             let outcome = self.handle_stop_stream(&request_id).await;
-            return self.build_stream_state_changed_action(outcome, false);
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(crate::obsws_response_builder::build_stream_state_changed_event(false));
+            }
+            return Self::build_execution_from_outcome("StopStream", outcome, events);
         }
         if request_type == "StartRecord" {
             let outcome = self.handle_start_record(&request_id).await;
-            return self.build_record_state_changed_action(outcome, true);
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(true, None),
+                );
+            }
+            return Self::build_execution_from_outcome("StartRecord", outcome, events);
         }
         if request_type == "StopRecord" {
             let outcome = self.handle_stop_record(&request_id).await;
-            return self.build_record_state_changed_action(outcome, false);
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        false,
+                        outcome.output_path.as_deref(),
+                    ),
+                );
+            }
+            return Self::build_execution_from_outcome("StopRecord", outcome, events);
         }
         if request_type == "SetCurrentProgramScene" {
-            return self
+            let action = self
                 .handle_set_current_program_scene_request(
                     &request_id,
                     request.request_data.as_ref(),
                 )
                 .await;
+            return Self::build_execution_from_action(action);
         }
         if request_type == "CreateScene" {
-            return self
+            let action = self
                 .handle_create_scene_request(&request_id, request.request_data.as_ref())
                 .await;
+            return Self::build_execution_from_action(action);
         }
         if request_type == "RemoveScene" {
-            return self
+            let action = self
                 .handle_remove_scene_request(&request_id, request.request_data.as_ref())
                 .await;
+            return Self::build_execution_from_action(action);
         }
         if request_type == "CreateInput" {
-            return self
+            let action = self
                 .handle_create_input_request(&request_id, request.request_data.as_ref())
                 .await;
+            return Self::build_execution_from_action(action);
         }
         if request_type == "RemoveInput" {
-            return self
+            let action = self
                 .handle_remove_input_request(&request_id, request.request_data.as_ref())
                 .await;
+            return Self::build_execution_from_action(action);
         }
 
         let mut input_registry = self.input_registry.write().await;
         let response =
             crate::obsws_message::handle_request_message(request, &self.stats, &mut input_registry);
-        SessionAction::SendText {
-            text: response.message,
-            message_name: "request response message",
+        Self::build_execution_from_response_text(response.message, Vec::new())
+    }
+
+    fn build_execution_from_outcome(
+        _request_type: &str,
+        outcome: RequestOutcome,
+        events: Vec<String>,
+    ) -> crate::Result<RequestExecutionResult> {
+        Self::build_execution_from_response_text(outcome.response_text, events)
+    }
+
+    fn build_error_execution(
+        request_type: &str,
+        request_id: &str,
+        status_code: i64,
+        status_comment: &str,
+    ) -> RequestExecutionResult {
+        RequestExecutionResult {
+            response_text: crate::obsws_response_builder::build_request_response_error(
+                request_type,
+                request_id,
+                status_code,
+                status_comment,
+            ),
+            batch_result: crate::obsws_response_builder::RequestBatchResult {
+                request_type: request_type.to_owned(),
+                request_status_result: false,
+                request_status_code: status_code,
+                request_status_comment: Some(status_comment.to_owned()),
+                response_data: None,
+            },
+            events: Vec::new(),
         }
     }
 
-    fn build_stream_state_changed_action(
-        &self,
-        outcome: RequestOutcome,
-        output_active: bool,
-    ) -> SessionAction {
-        let response_text = outcome.response_text;
-        if !outcome.success || !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
+    fn build_execution_from_response_text(
+        response_text: String,
+        events: Vec<String>,
+    ) -> crate::Result<RequestExecutionResult> {
+        let batch_result =
+            crate::obsws_response_builder::parse_request_response_for_batch_result(&response_text)?;
+        Ok(RequestExecutionResult {
+            response_text,
+            batch_result,
+            events,
+        })
+    }
 
-        let event_text =
-            crate::obsws_response_builder::build_stream_state_changed_event(output_active);
-        SessionAction::SendTexts {
-            messages: vec![
-                (response_text, "request response message"),
-                (event_text, "event message"),
-            ],
+    fn build_execution_from_action(action: SessionAction) -> crate::Result<RequestExecutionResult> {
+        match action {
+            SessionAction::SendText { text, .. } => {
+                Self::build_execution_from_response_text(text, Vec::new())
+            }
+            SessionAction::SendTexts { messages } => {
+                let mut iter = messages.into_iter();
+                // [NOTE]
+                // SendTexts は「先頭が request response、2 件目以降が event」という
+                // 形式を前提に組み立てる。これは obsws の各 request ハンドラ
+                // （例: Scene / Input / Output 系）が共通で守る契約とする。
+                // もし順序規約を変更する場合は、この抽出ロジックも同時に更新すること。
+                let Some((response_text, _)) = iter.next() else {
+                    return Err(crate::Error::new("response message is missing"));
+                };
+                let events = iter.map(|(text, _)| text).collect();
+                Self::build_execution_from_response_text(response_text, events)
+            }
+            SessionAction::Close { .. } | SessionAction::Terminate => {
+                Err(crate::Error::new("request handler returned invalid action"))
+            }
         }
     }
 
@@ -345,31 +565,6 @@ impl ObswsSession {
             return None;
         }
         Some((input_uuid, input_name))
-    }
-
-    fn build_record_state_changed_action(
-        &self,
-        outcome: RequestOutcome,
-        output_active: bool,
-    ) -> SessionAction {
-        let response_text = outcome.response_text;
-        if !outcome.success || !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
-
-        let event_text = crate::obsws_response_builder::build_record_state_changed_event(
-            output_active,
-            outcome.output_path.as_deref(),
-        );
-        SessionAction::SendTexts {
-            messages: vec![
-                (response_text, "request response message"),
-                (event_text, "event message"),
-            ],
-        }
     }
 
     async fn handle_set_current_program_scene_request(
@@ -1306,20 +1501,6 @@ mod tests {
         (op, negotiated_rpc_version)
     }
 
-    fn parse_stream_state_changed_event(text: &str) -> (i64, String, u32, bool) {
-        let (op, event_type, event_intent) = parse_event_type_and_intent(text);
-        let json = nojson::RawJson::parse(text).expect("event must be valid json");
-        let output_active: bool = json
-            .value()
-            .to_path_member(&["d", "eventData", "outputActive"])
-            .expect("outputActive access must succeed")
-            .required()
-            .expect("outputActive must exist")
-            .try_into()
-            .expect("outputActive must be bool");
-        (op, event_type, event_intent, output_active)
-    }
-
     fn parse_event_type_and_intent(text: &str) -> (i64, String, u32) {
         let json = nojson::RawJson::parse(text).expect("event must be valid json");
         let op: i64 = json
@@ -1347,6 +1528,50 @@ mod tests {
             .try_into()
             .expect("eventIntent must be u32");
         (op, event_type, event_intent)
+    }
+
+    fn parse_request_batch_results(text: &str) -> Vec<(String, bool, i64)> {
+        let json = nojson::RawJson::parse(text).expect("response must be valid json");
+        let mut results = json
+            .value()
+            .to_path_member(&["d", "results"])
+            .expect("results access must succeed")
+            .required()
+            .expect("results must exist")
+            .to_array()
+            .expect("results must be array");
+        results
+            .by_ref()
+            .map(|result| {
+                let request_type: String = result
+                    .to_member("requestType")
+                    .expect("requestType access must succeed")
+                    .required()
+                    .expect("requestType must exist")
+                    .try_into()
+                    .expect("requestType must be string");
+                let request_status = result
+                    .to_member("requestStatus")
+                    .expect("requestStatus access must succeed")
+                    .required()
+                    .expect("requestStatus must exist");
+                let success: bool = request_status
+                    .to_member("result")
+                    .expect("result access must succeed")
+                    .required()
+                    .expect("result must exist")
+                    .try_into()
+                    .expect("result must be bool");
+                let code: i64 = request_status
+                    .to_member("code")
+                    .expect("code access must succeed")
+                    .required()
+                    .expect("code must exist")
+                    .try_into()
+                    .expect("code must be i64");
+                (request_type, success, code)
+            })
+            .collect()
     }
 
     #[test]
@@ -1476,63 +1701,6 @@ mod tests {
             .expect("reidentify must succeed");
         assert!(matches!(reidentify_action, SessionAction::SendText { .. }));
         assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_OUTPUTS);
-    }
-
-    #[test]
-    fn build_stream_state_changed_action_with_subscription_returns_event_message() {
-        let mut session = ObswsSession::new(None, input_registry(), None);
-        session.event_subscriptions = OBSWS_EVENT_SUB_OUTPUTS;
-        let outcome = RequestOutcome {
-            response_text: crate::obsws_response_builder::build_start_stream_response("req-1"),
-            success: true,
-            output_path: None,
-        };
-        let action = session.build_stream_state_changed_action(outcome, true);
-        let SessionAction::SendTexts { messages } = action else {
-            panic!("must be SendTexts");
-        };
-        assert_eq!(messages.len(), 2);
-        let (op, event_type, event_intent, output_active) =
-            parse_stream_state_changed_event(&messages[1].0);
-        assert_eq!(op, 5);
-        assert_eq!(event_type, "StreamStateChanged");
-        assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
-        assert!(output_active);
-    }
-
-    #[test]
-    fn build_stream_state_changed_action_without_subscription_returns_response_only() {
-        let session = ObswsSession::new(None, input_registry(), None);
-        let outcome = RequestOutcome {
-            response_text: crate::obsws_response_builder::build_start_stream_response("req-1"),
-            success: true,
-            output_path: None,
-        };
-        let action = session.build_stream_state_changed_action(outcome, true);
-        assert!(matches!(action, SessionAction::SendText { .. }));
-    }
-
-    #[test]
-    fn build_record_state_changed_action_with_subscription_returns_event_message() {
-        let mut session = ObswsSession::new(None, input_registry(), None);
-        session.event_subscriptions = OBSWS_EVENT_SUB_OUTPUTS;
-        let outcome = RequestOutcome {
-            response_text: crate::obsws_response_builder::build_stop_record_response(
-                "req-1",
-                "/tmp/out.mp4",
-            ),
-            success: true,
-            output_path: Some("/tmp/out.mp4".to_owned()),
-        };
-        let action = session.build_record_state_changed_action(outcome, false);
-        let SessionAction::SendTexts { messages } = action else {
-            panic!("must be SendTexts");
-        };
-        assert_eq!(messages.len(), 2);
-        let (op, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
-        assert_eq!(op, 5);
-        assert_eq!(event_type, "RecordStateChanged");
-        assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
     }
 
     #[tokio::test]
@@ -1762,5 +1930,59 @@ mod tests {
         let (result, code) = parse_request_status(&text);
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    }
+
+    #[tokio::test]
+    async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .on_text_message(
+                r#"{"op":8,"d":{"requestId":"batch-1","haltOnFailure":true,"executionType":0,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
+            )
+            .await
+            .expect("request batch must be parsed");
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let results = parse_request_batch_results(&text);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "CreateScene");
+        assert!(results[0].1);
+        assert_eq!(results[1].0, "CreateScene");
+        assert!(!results[1].1);
+    }
+
+    #[tokio::test]
+    async fn request_batch_without_halt_on_failure_continues_after_failure() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .on_text_message(
+                r#"{"op":8,"d":{"requestId":"batch-2","haltOnFailure":false,"executionType":0,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
+            )
+            .await
+            .expect("request batch must be parsed");
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let results = parse_request_batch_results(&text);
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0, "CreateScene");
+        assert!(results[0].1);
+        assert_eq!(results[1].0, "CreateScene");
+        assert!(!results[1].1);
+        assert_eq!(results[2].0, "SetCurrentProgramScene");
+        assert!(results[2].1);
     }
 }

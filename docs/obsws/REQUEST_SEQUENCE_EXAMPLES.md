@@ -278,6 +278,8 @@ hisui 対応状況: 部分対応（ `SetStreamServiceSettings` は現時点で `
 }
 ```
 
+NOTE: hisui の `RequestBatch` は現時点で `executionType = 0` のみを受け付ける。`haltOnFailure` は対応済み
+
 ---
 
 ## 例 5: 録画の開始 / 停止
@@ -426,7 +428,7 @@ NOTE: `inputKind` と `inputSettings` の詳細キーはプラットフォーム
 ## 例 8: RequestBatch で配信準備をまとめる
 
 目的: 複数の準備 Request を 1 回で送る
-hisui 対応状況: 未対応（ `RequestBatch` `op=8/9` は未実装 ）
+hisui 対応状況: 部分対応（ `RequestBatch` `op=8/9` は `executionType = 0` のみ対応 ）
 
 1. `C -> S` RequestBatch (`haltOnFailure = true`)
 

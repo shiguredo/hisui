@@ -40,7 +40,8 @@
   - NOTE: `eventSubscriptions` は保持し、対応済みイベントの配信判定に利用する
 - [x] Event 配信（ `op=5` ）基盤: サーバーイベントを push 配信する
   - NOTE: 現在は `eventSubscriptions` の Outputs / Scenes / Inputs ビット購読時に対応イベントを配信する
-- [ ] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
+- [x] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
+  - NOTE: 現時点で `executionType = 0` のみ対応し、`haltOnFailure` を反映する
 
 ## 対応すべきイベント一覧
 
