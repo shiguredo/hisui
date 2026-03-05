@@ -7,6 +7,7 @@ pub const OBSWS_DEFAULT_SCENE_NAME: &str = "Scene";
 pub const OBSWS_OP_HELLO: i64 = 0;
 pub const OBSWS_OP_IDENTIFY: i64 = 1;
 pub const OBSWS_OP_IDENTIFIED: i64 = 2;
+pub const OBSWS_OP_REIDENTIFY: i64 = 3;
 pub const OBSWS_OP_REQUEST: i64 = 6;
 pub const OBSWS_OP_REQUEST_RESPONSE: i64 = 7;
 

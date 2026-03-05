@@ -453,6 +453,47 @@ async def _connect_and_send_duplicate_identify(url: str):
         await ws.close()
 
 
+async def _connect_identify_and_expect_close_code(
+    url: str,
+    message: dict[str, object],
+    expected_close_code: int,
+):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+        await _identify_with_optional_password(ws, None)
+        await ws.send_str(json.dumps(message))
+        close_msg = await ws.receive(timeout=5.0)
+        assert close_msg.type in {
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.CLOSED,
+        }
+        assert ws.close_code == expected_close_code
+        await ws.close()
+
+
+async def _connect_identify_and_send_reidentify_then_request(url: str):
+    timeout = aiohttp.ClientTimeout(total=10.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
+        await _identify_with_optional_password(ws, None)
+        await ws.send_str(json.dumps({"op": 3, "d": {"eventSubscriptions": 1023}}))
+        reidentified_msg = await ws.receive(timeout=5.0)
+        assert reidentified_msg.type == aiohttp.WSMsgType.TEXT
+        reidentified = json.loads(reidentified_msg.data)
+        assert reidentified["op"] == 2
+        assert reidentified["d"]["negotiatedRpcVersion"] == 1
+        response = await _send_obsws_request(
+            ws,
+            request_type="GetVersion",
+            request_id="req-after-reidentify",
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        await ws.close()
+
+
 def test_obsws_hello_and_identify_flow(binary_path: Path):
     """obsws が Hello / Identify / Identified を処理できることを確認する"""
     host = "127.0.0.1"
@@ -1303,6 +1344,34 @@ def test_obsws_rejects_duplicate_identify(binary_path: Path):
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
         asyncio.run(_connect_and_send_duplicate_identify(f"ws://{host}:{port}/"))
+
+
+def test_obsws_accepts_reidentify_after_identify(binary_path: Path):
+    """obsws が Identify 後の Reidentify を受け付けて接続を継続することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(
+            _connect_identify_and_send_reidentify_then_request(f"ws://{host}:{port}/")
+        )
+
+
+def test_obsws_rejects_reidentify_with_invalid_event_subscriptions(binary_path: Path):
+    """obsws が Identify 後の不正な Reidentify payload を invalid payload として拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(
+            _connect_identify_and_expect_close_code(
+                f"ws://{host}:{port}/",
+                {"op": 3, "d": {"eventSubscriptions": "invalid"}},
+                1007,
+            )
+        )
 
 
 def test_obsws_rejects_unsupported_rpc_version(binary_path: Path):
