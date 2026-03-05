@@ -245,6 +245,23 @@ async def _http_get(url: str):
             return response.status, await response.text(), response.headers
 
 
+def _collect_obsws_metrics_snapshot(http_host: str, http_port: int) -> str:
+    lines: list[str] = []
+    endpoints = [
+        "/metrics",
+        "/metrics?format=json",
+    ]
+    for endpoint in endpoints:
+        url = f"http://{http_host}:{http_port}{endpoint}"
+        try:
+            status, body, _ = asyncio.run(_http_get(url))
+            lines.append(f"[{endpoint}] status={status}")
+            lines.append(body)
+        except Exception as e:
+            lines.append(f"[{endpoint}] failed to fetch metrics: {e}")
+    return "\n".join(lines)
+
+
 async def _connect_and_exchange_identify(url: str):
     timeout = aiohttp.ClientTimeout(total=10.0)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -1208,7 +1225,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
 
@@ -1225,6 +1242,15 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             try:
                 start_stream_future.result(timeout=30.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
+            except Exception as e:
+                # 失敗時の原因切り分け用にメトリクスを添付する。
+                metrics_snapshot = _collect_obsws_metrics_snapshot(
+                    server.http_host,
+                    server.http_port,
+                )
+                raise AssertionError(
+                    f"obsws rtmp stream test failed: {e}\nmetrics_snapshot:\n{metrics_snapshot}"
+                ) from e
             finally:
                 if ffmpeg_process.poll() is None:
                     ffmpeg_process.kill()
