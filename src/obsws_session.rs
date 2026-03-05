@@ -340,6 +340,11 @@ impl ObswsSession {
         }
 
         let mut messages = Vec::with_capacity(events.len() + 1);
+        // [NOTE]
+        // RequestBatch では、client が batch 完了を判定しやすいよう
+        // RequestBatchResponse (op=9) を先に返し、その後に event を送信する。
+        // OBS 実装と厳密に同一順序ではない可能性があるため、
+        // 互換性要件が変わる場合は送信順序を再検討すること。
         messages.push((response_text, "request batch response message"));
         messages.extend(events);
         SessionAction::SendTexts { messages }
