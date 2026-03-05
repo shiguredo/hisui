@@ -247,10 +247,7 @@ async def _http_get(url: str):
 
 def _collect_obsws_metrics_snapshot(http_host: str, http_port: int) -> str:
     lines: list[str] = []
-    endpoints = [
-        "/metrics",
-        "/metrics?format=json",
-    ]
+    endpoints = ["/metrics"]
     for endpoint in endpoints:
         url = f"http://{http_host}:{http_port}{endpoint}"
         try:
