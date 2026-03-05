@@ -101,10 +101,6 @@ fn run_internal(
 
 fn resolve_default_record_dir(configured: Option<PathBuf>) -> crate::Result<PathBuf> {
     let record_dir = configured.unwrap_or_else(|| PathBuf::from("recordings"));
-    if record_dir.is_absolute() {
-        return Ok(record_dir);
-    }
-    let current_dir = std::env::current_dir()
-        .map_err(|e| crate::Error::new(format!("failed to resolve current directory: {e}")))?;
-    Ok(current_dir.join(record_dir))
+    std::path::absolute(record_dir)
+        .map_err(|e| crate::Error::new(format!("failed to resolve absolute path: {e}")))
 }

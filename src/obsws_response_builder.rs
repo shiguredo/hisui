@@ -1129,13 +1129,8 @@ pub fn build_request_response_error(
 }
 
 fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(record_directory);
-    if path.is_absolute() {
-        return Ok(path);
-    }
-    let current_dir =
-        std::env::current_dir().map_err(|e| format!("Failed to resolve current directory: {e}"))?;
-    Ok(current_dir.join(path))
+    std::path::absolute(record_directory)
+        .map_err(|e| format!("Failed to resolve absolute record directory path: {e}"))
 }
 
 #[cfg(test)]
