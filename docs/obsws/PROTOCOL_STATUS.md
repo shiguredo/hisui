@@ -35,7 +35,8 @@
   - NOTE: `Identify` 後のみ `Request` を受け付ける
 - [x] `Identify` 検証: `rpcVersion` の必須チェックと対応範囲チェックを行う
 - [x] メッセージ検証エラーの切断: 不正 payload や未対応 opcode は close する
-- [ ] `Reidentify (op=3)`: 既存セッションの再設定を受け付ける
+- [x] `Reidentify (op=3)`: 既存セッションの再設定を受け付ける
+  - NOTE: `eventSubscriptions` は現時点で構文検証のみ行い、購読状態への反映は未実装
 - [ ] Event 配信（ `op=5` ）: サーバーイベントを push 配信する
 - [ ] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
 

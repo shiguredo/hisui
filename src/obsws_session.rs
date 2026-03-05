@@ -21,6 +21,7 @@ use crate::obsws_protocol::{
 };
 
 pub enum SessionAction {
+    Noop,
     SendText {
         text: String,
         message_name: &'static str,
@@ -79,6 +80,7 @@ impl ObswsSession {
         let message = crate::obsws_message::parse_client_message(text)?;
         let action = match message {
             ClientMessage::Identify(identify) => self.handle_identify(identify),
+            ClientMessage::Reidentify(reidentify) => self.handle_reidentify(reidentify),
             ClientMessage::Request(request) => self.handle_request(request).await,
         };
         Ok(action)
@@ -144,6 +146,21 @@ impl ObswsSession {
             text: crate::obsws_message::build_identified_message(identify.rpc_version),
             message_name: "identified message",
         }
+    }
+
+    fn handle_reidentify(
+        &mut self,
+        _reidentify: crate::obsws_message::ReidentifyMessage,
+    ) -> SessionAction {
+        if self.state != ObswsSessionState::Identified {
+            return SessionAction::Close {
+                code: OBSWS_CLOSE_NOT_IDENTIFIED,
+                reason: "identify is required",
+                close_error_context: "failed to close websocket for unidentified reidentify",
+            };
+        }
+
+        SessionAction::Noop
     }
 
     async fn handle_request(
@@ -810,6 +827,36 @@ mod tests {
         };
         assert_eq!(code, OBSWS_CLOSE_ALREADY_IDENTIFIED);
         assert_eq!(reason, "already identified");
+    }
+
+    #[tokio::test]
+    async fn reidentify_before_identify_returns_not_identified_close() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let action = session
+            .on_text_message(r#"{"op":3,"d":{}}"#)
+            .await
+            .expect("reidentify must be parsed");
+        let SessionAction::Close { code, reason, .. } = action else {
+            panic!("must be Close");
+        };
+        assert_eq!(code, OBSWS_CLOSE_NOT_IDENTIFIED);
+        assert_eq!(reason, "identify is required");
+    }
+
+    #[tokio::test]
+    async fn reidentify_after_identify_returns_noop() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .on_text_message(r#"{"op":3,"d":{"eventSubscriptions":1023}}"#)
+            .await
+            .expect("reidentify must be parsed");
+        assert!(matches!(action, SessionAction::Noop));
     }
 
     #[tokio::test]

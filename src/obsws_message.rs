@@ -1,7 +1,8 @@
 use crate::obsws_input_registry::ObswsInputRegistry;
 use crate::obsws_protocol::{
-    OBSWS_OP_IDENTIFY, OBSWS_OP_REQUEST, OBSWS_RPC_VERSION, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_TYPE, REQUEST_STATUS_UNKNOWN_REQUEST_TYPE,
+    OBSWS_OP_IDENTIFY, OBSWS_OP_REIDENTIFY, OBSWS_OP_REQUEST, OBSWS_RPC_VERSION,
+    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
+    REQUEST_STATUS_UNKNOWN_REQUEST_TYPE,
 };
 
 pub use crate::obsws_response_builder::{build_hello_message, build_identified_message};
@@ -9,6 +10,7 @@ pub use crate::obsws_response_builder::{build_hello_message, build_identified_me
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientMessage {
     Identify(IdentifyMessage),
+    Reidentify(ReidentifyMessage),
     Request(RequestMessage),
 }
 
@@ -16,6 +18,11 @@ pub enum ClientMessage {
 pub struct IdentifyMessage {
     pub rpc_version: u32,
     pub authentication: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReidentifyMessage {
+    pub event_subscriptions: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +76,14 @@ pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
             Ok(ClientMessage::Identify(IdentifyMessage {
                 rpc_version,
                 authentication,
+            }))
+        }
+        OBSWS_OP_REIDENTIFY => {
+            let d_value = value.to_member("d")?.required()?;
+            let event_subscriptions: Option<u32> =
+                d_value.to_member("eventSubscriptions")?.try_into()?;
+            Ok(ClientMessage::Reidentify(ReidentifyMessage {
+                event_subscriptions,
             }))
         }
         _ => Err(crate::Error::new(format!(
@@ -208,9 +223,9 @@ mod tests {
         ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws_protocol::{
-        OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-        REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
-        REQUEST_STATUS_SUCCESS,
+        OBSWS_OP_HELLO, OBSWS_OP_REIDENTIFY, OBSWS_OP_REQUEST_RESPONSE,
+        REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+        REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
     };
 
     fn input_registry() -> ObswsInputRegistry {
@@ -295,6 +310,37 @@ mod tests {
     }
 
     #[test]
+    fn parse_client_message_accepts_reidentify_without_event_subscriptions() {
+        let message = r#"{"op":3,"d":{}}"#;
+        let parsed = parse_client_message(message).expect("reidentify message must be accepted");
+        assert_eq!(
+            parsed,
+            ClientMessage::Reidentify(ReidentifyMessage {
+                event_subscriptions: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_client_message_accepts_reidentify_with_event_subscriptions() {
+        let message = r#"{"op":3,"d":{"eventSubscriptions":1023}}"#;
+        let parsed = parse_client_message(message).expect("reidentify message must be accepted");
+        assert_eq!(
+            parsed,
+            ClientMessage::Reidentify(ReidentifyMessage {
+                event_subscriptions: Some(1023),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_client_message_rejects_reidentify_with_invalid_event_subscriptions() {
+        let message = r#"{"op":3,"d":{"eventSubscriptions":"invalid"}}"#;
+        let error = parse_client_message(message).expect_err("reidentify must reject invalid type");
+        assert!(!error.display().is_empty());
+    }
+
+    #[test]
     fn is_supported_rpc_version_accepts_only_range_one_to_server_version() {
         assert!(!is_supported_rpc_version(0));
         assert!(is_supported_rpc_version(1));
@@ -323,6 +369,11 @@ mod tests {
         let message = r#"{"op":9,"d":{}}"#;
         let error = parse_client_message(message).expect_err("non identify must be rejected");
         assert!(error.display().contains("unsupported message opcode"));
+    }
+
+    #[test]
+    fn reidentify_opcode_constant_is_expected_value() {
+        assert_eq!(OBSWS_OP_REIDENTIFY, 3);
     }
 
     #[test]
