@@ -36,9 +36,9 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.16.0"
+version = "1.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9a7b350e3bb1767102698302bc37256cbd48422809984b98d292c40e2579aa9"
+checksum = "94bffc006df10ac2a68c83692d734a465f8ee6c5b384d8545a636f81d858f4bf"
 dependencies = [
  "aws-lc-sys",
  "untrusted 0.7.1",
@@ -47,9 +47,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.37.1"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b092fe214090261288111db7a2b2c2118e5a7f30dc2569f1732c4069a6840549"
+checksum = "4321e568ed89bb5a7d291a7f37997c2c0df89809d7b6d12062c81ddb54aa782e"
 dependencies = [
  "cc",
  "cmake",
@@ -1154,13 +1154,13 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_openh264"
-version = "2026.1.0-canary.0"
+version = "2026.1.0-canary.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28bc4a82473b9dab292eea7f4726422f5153c5cf40960bc989b76a43ddacf3a2"
+checksum = "a46b2a491de13894477dfef71cd7100d6545561f13d47ba0d70577074621f8d1"
 dependencies = [
  "bindgen",
  "log",
- "toml",
+ "shiguredo_toml",
 ]
 
 [[package]]
@@ -1254,9 +1254,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_websocket"
-version = "2026.1.0-canary.4"
+version = "2026.1.0-canary.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4020d438666f7f836170f060ea937ed5b94d5cbfd71353ca2fd2901526d7c39d"
+checksum = "88e6984c7419572d5ed99a96b9ec846f7423330d2ba5e8ad0edc9c0dba8c0d54"
 dependencies = [
  "base64",
  "flate2",
@@ -1383,9 +1383,9 @@ checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
 
 [[package]]
 name = "tokio"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
+checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
 dependencies = [
  "bytes",
  "libc",

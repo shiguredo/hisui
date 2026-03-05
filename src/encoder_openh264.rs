@@ -26,7 +26,7 @@ impl Openh264Encoder {
             target_bitrate: options.bitrate,
             ..options.encode_params.openh264.clone()
         };
-        let inner = shiguredo_openh264::Encoder::new(lib, &config)?;
+        let inner = shiguredo_openh264::Encoder::new(lib, config)?;
         Ok(Self {
             inner,
             encoded: None,
@@ -37,18 +37,26 @@ impl Openh264Encoder {
     pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let video_frame = frame.as_video_frame();
         let (y_plane, u_plane, v_plane) = frame.as_i420_planes()?;
-        let encoded = self.inner.encode(y_plane, u_plane, v_plane)?;
+        let encoded = self.inner.encode(
+            y_plane,
+            u_plane,
+            v_plane,
+            &shiguredo_openh264::EncodeOptions::default(),
+        )?;
         let Some(encoded) = encoded else {
             return Ok(());
         };
 
-        let sample_entry = if self.is_first {
-            self.is_first = false;
+        let sample_entry = if self.is_first
+            && !encoded.sps_list.is_empty()
+            && !encoded.pps_list.is_empty()
+        {
             let size = frame.size();
+            self.is_first = false;
             Some(video_h264::h264_sample_entry_from_annexb(
                 size.width,
                 size.height,
-                &encoded.data,
+                &video_h264::create_sequence_header_annexb(&encoded.sps_list, &encoded.pps_list),
             )?)
         } else {
             None
@@ -70,7 +78,10 @@ impl Openh264Encoder {
         self.encoded = Some(VideoFrame {
             data,
             format: VideoFormat::H264,
-            keyframe: encoded.keyframe,
+            keyframe: matches!(
+                encoded.frame_type,
+                shiguredo_openh264::FrameType::Idr | shiguredo_openh264::FrameType::I
+            ),
             size: Some(frame.size()),
             timestamp: video_frame.timestamp,
             sample_entry,

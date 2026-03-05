@@ -4,7 +4,8 @@ use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 pub fn parse_encode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_openh264::EncoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_openh264::EncoderConfig::default();
+    // width / height / target_bitrate / fps は後で実値に上書きするため、ここではダミー値を使う。
+    let mut config = shiguredo_openh264::EncoderConfig::new(1, 1, 1, 1, 1);
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
@@ -35,8 +36,8 @@ fn update_encode_params(
     // - target_bitrate
 
     // 基本的なエンコーダーパラメーター
-    config.max_qp = params.get("max_qp")?.unwrap_or(config.max_qp);
-    config.min_qp = params.get("min_qp")?.unwrap_or(config.min_qp);
+    config.max_qp = params.get("max_qp")?.or(config.max_qp);
+    config.min_qp = params.get("min_qp")?.or(config.min_qp);
 
     // 複雑度モード
     config.complexity_mode = params
@@ -48,33 +49,47 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'complexity_mode' value")),
             }
         })?
-        .unwrap_or(config.complexity_mode);
+        .or(config.complexity_mode);
 
     // エントロピー符号化モード
-    config.entropy_coding = params
-        .get("entropy_coding")?
-        .unwrap_or(config.entropy_coding);
+    config.entropy_coding_mode = params
+        .get_with("entropy_coding_mode", |v| {
+            match v.to_unquoted_string_str()?.as_ref() {
+                "cavlc" => Ok(shiguredo_openh264::EntropyCodingMode::Cavlc),
+                "cabac" => Ok(shiguredo_openh264::EntropyCodingMode::Cabac),
+                _ => Err(v.invalid("unknown 'entropy_coding_mode' value")),
+            }
+        })?
+        .or(config.entropy_coding_mode);
+
+    // 互換のため、旧キー `entropy_coding` (bool) も受け付ける。
+    if config.entropy_coding_mode.is_none() {
+        config.entropy_coding_mode = params
+            .get_with("entropy_coding", |v| {
+                let enabled: bool = v.try_into()?;
+                Ok(if enabled {
+                    shiguredo_openh264::EntropyCodingMode::Cabac
+                } else {
+                    shiguredo_openh264::EntropyCodingMode::Cavlc
+                })
+            })?
+            .or(config.entropy_coding_mode);
+    }
 
     // 参照フレーム数
-    config.ref_frame_count = params
-        .get("ref_frame_count")?
-        .unwrap_or(config.ref_frame_count);
+    config.ref_frame_count = params.get("ref_frame_count")?.or(config.ref_frame_count);
 
     // スレッド数
-    config.thread_count = params.get("thread_count")?;
+    config.thread_count = params.get("thread_count")?.or(config.thread_count);
 
     // 空間レイヤー数
-    config.spatial_layers = params
-        .get("spatial_layers")?
-        .unwrap_or(config.spatial_layers);
+    config.spatial_layers = params.get("spatial_layers")?.or(config.spatial_layers);
 
     // 時間レイヤー数
-    config.temporal_layers = params
-        .get("temporal_layers")?
-        .unwrap_or(config.temporal_layers);
+    config.temporal_layers = params.get("temporal_layers")?.or(config.temporal_layers);
 
     // Intra フレーム間隔
-    config.intra_period = params.get("intra_period")?;
+    config.intra_period = params.get("intra_period")?.or(config.intra_period);
 
     // レート制御モード
     config.rate_control_mode = params
@@ -87,25 +102,25 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'rate_control_mode' value")),
             }
         })?
-        .unwrap_or(config.rate_control_mode);
+        .or(config.rate_control_mode);
 
     // 前処理機能設定
-    config.denoise = params.get("denoise")?.unwrap_or(config.denoise);
+    config.denoise = params.get("denoise")?.or(config.denoise);
     config.background_detection = params
         .get("background_detection")?
-        .unwrap_or(config.background_detection);
+        .or(config.background_detection);
     config.adaptive_quantization = params
         .get("adaptive_quantization")?
-        .unwrap_or(config.adaptive_quantization);
+        .or(config.adaptive_quantization);
     config.scene_change_detection = params
         .get("scene_change_detection")?
-        .unwrap_or(config.scene_change_detection);
+        .or(config.scene_change_detection);
     config.deblocking_filter = params
         .get("deblocking_filter")?
-        .unwrap_or(config.deblocking_filter);
+        .or(config.deblocking_filter);
     config.long_term_reference = params
         .get("long_term_reference")?
-        .unwrap_or(config.long_term_reference);
+        .or(config.long_term_reference);
 
     // スライスモード
     config.slice_mode = params
@@ -125,7 +140,7 @@ fn update_encode_params(
                 _ => Err(v.invalid("unknown 'slice_mode.type' value")),
             }
         })?
-        .unwrap_or(config.slice_mode);
+        .or(config.slice_mode);
 
     Ok(())
 }

@@ -141,7 +141,7 @@
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0-canary.4 を追加する
+- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0-canary.5 を追加する
   - @sile
 - [ADD] 依存ライブラリに base64 0.22.1 を追加する
   - @sile
@@ -158,7 +158,7 @@
   - @sile
 - [UPDATE] png crate のバージョンを 0.18.1 に上げる
   - @sile
-- [UPDATE] aws-lc-rs crate のバージョンを 1.16.0 に上げる
+- [UPDATE] aws-lc-rs crate のバージョンを 1.16.1 に上げる
   - @sile
 - [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
@@ -166,8 +166,8 @@
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
-- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.0 にあげる
-  - このバージョンから shiguredo_openh264 crate のリポジトリが https://github.com/shiguredo/openh264-rs に独立したので、hisui のワークスペースからは削除されている
+- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.1 にあげる
+  - shiguredo_openh264 crate のリポジトリは 2026.1.0-canary.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.1 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが https://github.com/shiguredo/nvcodec-rs に独立したので、hisui のワークスペースからは削除されている

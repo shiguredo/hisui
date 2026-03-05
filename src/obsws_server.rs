@@ -168,7 +168,7 @@ async fn handle_ws_connection(
                 tracing::warn!(
                     "obsws handshake rejected: missing required subprotocol: {OBSWS_SUBPROTOCOL}"
                 );
-                ws.reject_handshake(400, "Bad Request").map_err(|e| {
+                ws.reject_handshake(400, "Bad Request", &[]).map_err(|e| {
                     crate::Error::new(format!("failed to reject websocket handshake: {e}"))
                 })?;
             } else {

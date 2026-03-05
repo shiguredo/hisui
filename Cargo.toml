@@ -31,7 +31,7 @@ rustls = { version = "=0.23.37", default-features = false, features = [
     "aws-lc-rs",
 ] }
 rustls-platform-verifier = "=0.6.2"
-tokio = { version = "=1.49.0", features = [
+tokio = { version = "=1.50.0", features = [
     "rt",
     "rt-multi-thread",
     "net",
@@ -50,17 +50,17 @@ shiguredo_webrtc = "=0.145.2"
 shiguredo_video_device = "=2026.1.0-canary.0"
 mpeg2ts = "=0.6.0"
 png = "=0.18.1"
-aws-lc-rs = "=1.16.0"
+aws-lc-rs = "=1.16.1"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }
 shiguredo_libvpx = { version = "=2025.1.0", path = "crates/shiguredo_libvpx/", optional = true }
 shiguredo_libyuv = { version = "=2025.2.0", path = "crates/shiguredo_libyuv/" }
 shiguredo_nvcodec = { version = "=2026.1.0-canary.1", optional = true }
-shiguredo_openh264 = { version = "=2026.1.0-canary.0" }
+shiguredo_openh264 = { version = "=2026.1.0-canary.1" }
 shiguredo_opus = { version = "=2025.1.0", path = "crates/shiguredo_opus/" }
 shiguredo_svt_av1 = { version = "=2025.1.0", path = "crates/shiguredo_svt_av1/" }
-shiguredo_websocket = "=2026.1.0-canary.4"
+shiguredo_websocket = "=2026.1.0-canary.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = { version = "=2025.1.0", path = "crates/shiguredo_audio_toolbox/" }
