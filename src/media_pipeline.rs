@@ -273,6 +273,9 @@ impl MediaPipeline {
             );
             return;
         }
+        // [NOTE]
+        // ここは順序保持を優先して Vec を使う。
+        // track 数は通常少数なので、contains() の線形探索コストは許容する。
         if let Some(state) = self.processors.get_mut(&processor_id)
             && !state.subscribed_track_ids.contains(&track_id)
         {
@@ -330,6 +333,8 @@ impl MediaPipeline {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         track.publisher_command_tx = Some(command_tx.clone());
         track.publisher_processor_id = Some(processor_id.clone());
+        // [NOTE]
+        // ここも subscribed_track_ids と同様に、順序保持と実装単純性を優先して Vec を使う。
         if let Some(state) = self.processors.get_mut(&processor_id)
             && !state.published_track_ids.contains(&track_id)
         {
