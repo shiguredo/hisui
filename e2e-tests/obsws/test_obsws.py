@@ -329,6 +329,29 @@ async def _send_obsws_request(
     return response
 
 
+async def _send_obsws_request_batch(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    request_id: str,
+    requests: list[dict[str, object]],
+    halt_on_failure: bool = False,
+    execution_type: int = 0,
+):
+    data: dict[str, object] = {
+        "requestId": request_id,
+        "haltOnFailure": halt_on_failure,
+        "executionType": execution_type,
+        "requests": requests,
+    }
+    await ws.send_str(json.dumps({"op": 8, "d": data}))
+    response_msg = await ws.receive(timeout=5.0)
+    assert response_msg.type == aiohttp.WSMsgType.TEXT
+    response = json.loads(response_msg.data)
+    assert response["op"] == 9
+    assert response["d"]["requestId"] == request_id
+    return response
+
+
 async def _expect_stream_state_changed_event(
     ws: aiohttp.ClientWebSocketResponse,
     *,
@@ -1245,6 +1268,86 @@ def test_obsws_remove_input_rejects_unknown_input(binary_path: Path):
         status = response["d"]["requestStatus"]
         assert status["result"] is False
         assert status["code"] == 601
+
+
+def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: Path):
+    """obsws が RequestBatch で配信準備 request を順次実行できることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    rtmp_port, rtmp_sock = reserve_ephemeral_port()
+    rtmp_sock.close()
+
+    image_path = tmp_path / "batch-input.png"
+    _write_test_png(image_path)
+
+    async def _run_batch_flow():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            batch_response = await _send_obsws_request_batch(
+                ws,
+                request_id="batch-prepare-stream",
+                halt_on_failure=True,
+                execution_type=0,
+                requests=[
+                    {
+                        "requestType": "CreateScene",
+                        "requestData": {"sceneName": "BatchScene"},
+                    },
+                    {
+                        "requestType": "CreateInput",
+                        "requestData": {
+                            "sceneName": "BatchScene",
+                            "inputName": "batch-image-input",
+                            "inputKind": "image_source",
+                            "inputSettings": {"file": str(image_path)},
+                            "sceneItemEnabled": True,
+                        },
+                    },
+                    {
+                        "requestType": "SetCurrentProgramScene",
+                        "requestData": {"sceneName": "BatchScene"},
+                    },
+                    {
+                        "requestType": "SetStreamServiceSettings",
+                        "requestData": {
+                            "streamServiceType": "rtmp_custom",
+                            "streamServiceSettings": {
+                                "server": f"rtmp://127.0.0.1:{rtmp_port}/live",
+                                "key": "batch-stream-key",
+                            },
+                        },
+                    },
+                ],
+            )
+            results = batch_response["d"]["results"]
+            assert len(results) == 4
+            for result in results:
+                assert result["requestStatus"]["result"] is True
+
+            start_stream_response = await _send_obsws_request(
+                ws,
+                request_type="StartStream",
+                request_id="req-start-stream-after-batch",
+            )
+            assert start_stream_response["d"]["requestStatus"]["result"] is True
+
+            stop_stream_response = await _send_obsws_request(
+                ws,
+                request_type="StopStream",
+                request_id="req-stop-stream-after-batch",
+            )
+            assert stop_stream_response["d"]["requestStatus"]["result"] is True
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run_batch_flow())
 
 
 def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Path):

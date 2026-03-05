@@ -6,10 +6,11 @@ use crate::obsws_input_registry::{
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
     OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
-    OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION,
-    OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+    OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
+    OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
+    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_SUCCESS,
 };
 use std::path::PathBuf;
 
@@ -40,6 +41,15 @@ struct SetStreamServiceSettingsFields {
 
 struct SetRecordDirectoryFields {
     record_directory: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestBatchResult {
+    pub request_type: String,
+    pub request_status_result: bool,
+    pub request_status_code: i64,
+    pub request_status_comment: Option<String>,
+    pub response_data: Option<nojson::RawJsonOwned>,
 }
 
 fn parse_input_lookup_fields(
@@ -1317,6 +1327,70 @@ pub fn build_remove_input_response(
     .to_string()
 }
 
+pub fn build_request_batch_response(request_id: &str, results: &[RequestBatchResult]) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_BATCH_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestId", request_id)?;
+                f.member(
+                    "results",
+                    nojson::array(|f| {
+                        for result in results {
+                            f.element(nojson::object(|f| {
+                                f.member("requestType", &result.request_type)?;
+                                f.member(
+                                    "requestStatus",
+                                    nojson::object(|f| {
+                                        f.member("result", result.request_status_result)?;
+                                        f.member("code", result.request_status_code)?;
+                                        if let Some(comment) =
+                                            result.request_status_comment.as_deref()
+                                        {
+                                            f.member("comment", comment)?;
+                                        }
+                                        Ok(())
+                                    }),
+                                )?;
+                                if let Some(response_data) = result.response_data.as_ref() {
+                                    f.member("responseData", response_data)?;
+                                }
+                                Ok(())
+                            }))?;
+                        }
+                        Ok(())
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn parse_request_response_for_batch_result(
+    response_text: &str,
+) -> crate::Result<RequestBatchResult> {
+    let json = nojson::RawJson::parse(response_text)?;
+    let d = json.value().to_member("d")?.required()?;
+    let request_type: String = d.to_member("requestType")?.required()?.try_into()?;
+    let request_status = d.to_member("requestStatus")?.required()?;
+    let request_status_result: bool = request_status.to_member("result")?.required()?.try_into()?;
+    let request_status_code: i64 = request_status.to_member("code")?.required()?.try_into()?;
+    let request_status_comment: Option<String> = request_status.to_member("comment")?.try_into()?;
+    let response_data: Option<nojson::RawJsonOwned> = d
+        .to_member("responseData")?
+        .map(nojson::RawJsonOwned::try_from)?;
+
+    Ok(RequestBatchResult {
+        request_type,
+        request_status_result,
+        request_status_code,
+        request_status_comment,
+        response_data,
+    })
+}
+
 pub fn build_request_response_error(
     request_type: &str,
     request_id: &str,
@@ -1531,5 +1605,66 @@ mod tests {
             .try_into()
             .expect("result must be bool");
         assert!(result);
+    }
+
+    #[test]
+    fn build_and_parse_request_batch_response_preserves_fields() {
+        let response = build_request_batch_response(
+            "batch-1",
+            &[
+                RequestBatchResult {
+                    request_type: "GetVersion".to_owned(),
+                    request_status_result: true,
+                    request_status_code: REQUEST_STATUS_SUCCESS,
+                    request_status_comment: None,
+                    response_data: Some(
+                        nojson::RawJsonOwned::parse(r#"{"rpcVersion":1}"#)
+                            .expect("responseData must be valid json"),
+                    ),
+                },
+                RequestBatchResult {
+                    request_type: "CreateScene".to_owned(),
+                    request_status_result: false,
+                    request_status_code: REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+                    request_status_comment: Some("Scene already exists".to_owned()),
+                    response_data: None,
+                },
+            ],
+        );
+        let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+        let op: i64 = json
+            .value()
+            .to_member("op")
+            .expect("op access must succeed")
+            .required()
+            .expect("op must exist")
+            .try_into()
+            .expect("op must be i64");
+        assert_eq!(op, OBSWS_OP_REQUEST_BATCH_RESPONSE);
+
+        let results = json
+            .value()
+            .to_path_member(&["d", "results"])
+            .expect("results access must succeed")
+            .required()
+            .expect("results must exist");
+        let mut results = results.to_array().expect("results must be array");
+        let first = results.next().expect("first result must exist");
+        let first_request_type: String = first
+            .to_member("requestType")
+            .expect("requestType access must succeed")
+            .required()
+            .expect("requestType must exist")
+            .try_into()
+            .expect("requestType must be string");
+        assert_eq!(first_request_type, "GetVersion");
+
+        let source_response = build_get_version_response("req-1");
+        let parsed = parse_request_response_for_batch_result(&source_response)
+            .expect("request response must be parsed");
+        assert_eq!(parsed.request_type, "GetVersion");
+        assert!(parsed.request_status_result);
+        assert_eq!(parsed.request_status_code, REQUEST_STATUS_SUCCESS);
+        assert!(parsed.response_data.is_some());
     }
 }

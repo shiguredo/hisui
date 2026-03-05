@@ -11,7 +11,7 @@ use crate::obsws_input_registry::{
     ActivateRecordError, ActivateStreamError, ObswsInputRegistry, ObswsInputSettings,
     ObswsRecordRun, ObswsStreamRun,
 };
-use crate::obsws_message::{ClientMessage, ObswsSessionStats};
+use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
@@ -95,6 +95,9 @@ impl ObswsSession {
             ClientMessage::Identify(identify) => self.handle_identify(identify),
             ClientMessage::Reidentify(reidentify) => self.handle_reidentify(reidentify),
             ClientMessage::Request(request) => self.handle_request(request).await,
+            ClientMessage::RequestBatch(request_batch) => {
+                self.handle_request_batch(request_batch).await
+            }
         };
         Ok(action)
     }
@@ -198,7 +201,121 @@ impl ObswsSession {
                 close_error_context: "failed to close websocket for unidentified request",
             };
         }
+        self.handle_request_internal(request).await
+    }
 
+    async fn handle_request_batch(&mut self, request_batch: RequestBatchMessage) -> SessionAction {
+        if self.state != ObswsSessionState::Identified {
+            return SessionAction::Close {
+                code: OBSWS_CLOSE_NOT_IDENTIFIED,
+                reason: "identify is required",
+                close_error_context: "failed to close websocket for unidentified request batch",
+            };
+        }
+
+        let request_id = request_batch.request_id.unwrap_or_default();
+        if request_id.is_empty() {
+            return SessionAction::SendText {
+                text: crate::obsws_response_builder::build_request_response_error(
+                    "RequestBatch",
+                    &request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing required requestId field",
+                ),
+                message_name: "request response message",
+            };
+        }
+
+        let execution_type = request_batch.execution_type.unwrap_or(0);
+        if execution_type != 0 {
+            return SessionAction::SendText {
+                text: crate::obsws_response_builder::build_request_response_error(
+                    "RequestBatch",
+                    &request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Unsupported executionType field",
+                ),
+                message_name: "request response message",
+            };
+        }
+
+        let Some(requests) = request_batch.requests else {
+            return SessionAction::SendText {
+                text: crate::obsws_response_builder::build_request_response_error(
+                    "RequestBatch",
+                    &request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing required requests field",
+                ),
+                message_name: "request response message",
+            };
+        };
+
+        let halt_on_failure = request_batch.halt_on_failure.unwrap_or(false);
+        let mut results = Vec::new();
+        let mut events = Vec::new();
+        for (index, request) in requests.into_iter().enumerate() {
+            let sub_request_id = request
+                .request_id
+                .clone()
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| format!("{request_id}:{index}"));
+            let action = self
+                .handle_request_internal(crate::obsws_message::RequestMessage {
+                    request_id: Some(sub_request_id),
+                    request_type: request.request_type,
+                    request_data: request.request_data,
+                })
+                .await;
+            let Ok((response_text, sub_events)) = Self::split_batch_request_action(action) else {
+                return SessionAction::SendText {
+                    text: Self::build_internal_error_response(
+                        "RequestBatch",
+                        &request_id,
+                        "Failed to build request batch response",
+                    ),
+                    message_name: "request response message",
+                };
+            };
+            let Ok(result) = crate::obsws_response_builder::parse_request_response_for_batch_result(
+                &response_text,
+            ) else {
+                return SessionAction::SendText {
+                    text: Self::build_internal_error_response(
+                        "RequestBatch",
+                        &request_id,
+                        "Failed to parse internal request response for request batch",
+                    ),
+                    message_name: "request response message",
+                };
+            };
+            let request_succeeded = result.request_status_result;
+            results.push(result);
+            events.extend(sub_events.into_iter().map(|text| (text, "event message")));
+            if halt_on_failure && !request_succeeded {
+                break;
+            }
+        }
+
+        let response_text =
+            crate::obsws_response_builder::build_request_batch_response(&request_id, &results);
+        if events.is_empty() {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request batch response message",
+            };
+        }
+
+        let mut messages = Vec::with_capacity(events.len() + 1);
+        messages.push((response_text, "request batch response message"));
+        messages.extend(events);
+        SessionAction::SendTexts { messages }
+    }
+
+    async fn handle_request_internal(
+        &mut self,
+        request: crate::obsws_message::RequestMessage,
+    ) -> SessionAction {
         let request_id = request.request_id.clone().unwrap_or_default();
         let request_type = request.request_type.clone().unwrap_or_default();
         if request_id.is_empty() {
@@ -275,6 +392,21 @@ impl ObswsSession {
         SessionAction::SendText {
             text: response.message,
             message_name: "request response message",
+        }
+    }
+
+    fn split_batch_request_action(action: SessionAction) -> Result<(String, Vec<String>), ()> {
+        match action {
+            SessionAction::SendText { text, .. } => Ok((text, Vec::new())),
+            SessionAction::SendTexts { messages } => {
+                let mut iter = messages.into_iter();
+                let Some((response_text, _)) = iter.next() else {
+                    return Err(());
+                };
+                let events = iter.map(|(text, _)| text).collect();
+                Ok((response_text, events))
+            }
+            SessionAction::Close { .. } | SessionAction::Terminate => Err(()),
         }
     }
 
@@ -1349,6 +1481,50 @@ mod tests {
         (op, event_type, event_intent)
     }
 
+    fn parse_request_batch_results(text: &str) -> Vec<(String, bool, i64)> {
+        let json = nojson::RawJson::parse(text).expect("response must be valid json");
+        let mut results = json
+            .value()
+            .to_path_member(&["d", "results"])
+            .expect("results access must succeed")
+            .required()
+            .expect("results must exist")
+            .to_array()
+            .expect("results must be array");
+        results
+            .by_ref()
+            .map(|result| {
+                let request_type: String = result
+                    .to_member("requestType")
+                    .expect("requestType access must succeed")
+                    .required()
+                    .expect("requestType must exist")
+                    .try_into()
+                    .expect("requestType must be string");
+                let request_status = result
+                    .to_member("requestStatus")
+                    .expect("requestStatus access must succeed")
+                    .required()
+                    .expect("requestStatus must exist");
+                let success: bool = request_status
+                    .to_member("result")
+                    .expect("result access must succeed")
+                    .required()
+                    .expect("result must exist")
+                    .try_into()
+                    .expect("result must be bool");
+                let code: i64 = request_status
+                    .to_member("code")
+                    .expect("code access must succeed")
+                    .required()
+                    .expect("code must exist")
+                    .try_into()
+                    .expect("code must be i64");
+                (request_type, success, code)
+            })
+            .collect()
+    }
+
     #[test]
     fn on_connected_returns_hello_message_action() {
         let session = ObswsSession::new(None, input_registry(), None);
@@ -1762,5 +1938,59 @@ mod tests {
         let (result, code) = parse_request_status(&text);
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    }
+
+    #[tokio::test]
+    async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .on_text_message(
+                r#"{"op":8,"d":{"requestId":"batch-1","haltOnFailure":true,"executionType":0,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
+            )
+            .await
+            .expect("request batch must be parsed");
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let results = parse_request_batch_results(&text);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "CreateScene");
+        assert!(results[0].1);
+        assert_eq!(results[1].0, "CreateScene");
+        assert!(!results[1].1);
+    }
+
+    #[tokio::test]
+    async fn request_batch_without_halt_on_failure_continues_after_failure() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .on_text_message(
+                r#"{"op":8,"d":{"requestId":"batch-2","haltOnFailure":false,"executionType":0,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
+            )
+            .await
+            .expect("request batch must be parsed");
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let results = parse_request_batch_results(&text);
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0, "CreateScene");
+        assert!(results[0].1);
+        assert_eq!(results[1].0, "CreateScene");
+        assert!(!results[1].1);
+        assert_eq!(results[2].0, "SetCurrentProgramScene");
+        assert!(results[2].1);
     }
 }
