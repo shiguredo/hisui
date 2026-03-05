@@ -394,7 +394,7 @@ async fn handle_rpc_message(sess: &mut Session, data: &[u8], is_binary: bool) {
             return;
         }
     };
-    let request_id = request.to_member("id").ok().and_then(|v| v.get());
+    let request_id = request.to_member("id").ok().and_then(|v| v.optional());
 
     if method != "subscribe" {
         if let Some(response) = sess.handle.rpc(data).await {

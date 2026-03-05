@@ -48,7 +48,7 @@ fn inspect_mp4_without_decode() -> noargs::Result<()> {
     let mut has_decoded_data_size = false;
     for sample in root.to_member("video_samples")?.required()?.to_array()? {
         video_sample_count += 1;
-        if sample.to_member("decoded_data_size")?.get().is_some() {
+        if sample.to_member("decoded_data_size")?.optional().is_some() {
             has_decoded_data_size = true;
         }
     }
@@ -86,11 +86,11 @@ fn inspect_mp4_with_decode() -> noargs::Result<()> {
     let mut has_resolution = false;
     for sample in root.to_member("video_samples")?.required()?.to_array()? {
         video_sample_count += 1;
-        if sample.to_member("decoded_data_size")?.get().is_some() {
+        if sample.to_member("decoded_data_size")?.optional().is_some() {
             has_decoded_data_size = true;
         }
-        let has_width = sample.to_member("width")?.get().is_some();
-        let has_height = sample.to_member("height")?.get().is_some();
+        let has_width = sample.to_member("width")?.optional().is_some();
+        let has_height = sample.to_member("height")?.optional().is_some();
         if has_width && has_height {
             has_resolution = true;
         }
@@ -124,7 +124,7 @@ fn inspect_webm_without_decode() -> noargs::Result<()> {
     let mut has_decoded_data_size = false;
     for sample in root.to_member("video_samples")?.required()?.to_array()? {
         video_sample_count += 1;
-        if sample.to_member("decoded_data_size")?.get().is_some() {
+        if sample.to_member("decoded_data_size")?.optional().is_some() {
             has_decoded_data_size = true;
         }
     }
@@ -158,11 +158,11 @@ fn inspect_webm_with_decode() -> noargs::Result<()> {
     let mut has_resolution = false;
     for sample in root.to_member("video_samples")?.required()?.to_array()? {
         video_sample_count += 1;
-        if sample.to_member("decoded_data_size")?.get().is_some() {
+        if sample.to_member("decoded_data_size")?.optional().is_some() {
             has_decoded_data_size = true;
         }
-        let has_width = sample.to_member("width")?.get().is_some();
-        let has_height = sample.to_member("height")?.get().is_some();
+        let has_width = sample.to_member("width")?.optional().is_some();
+        let has_height = sample.to_member("height")?.optional().is_some();
         if has_width && has_height {
             has_resolution = true;
         }
@@ -510,7 +510,7 @@ fn check_engine_in_stats(
 
         match processor_type.as_ref() {
             "video_decoder" => {
-                if let Some(engine_value) = processor.to_member("engine")?.get()
+                if let Some(engine_value) = processor.to_member("engine")?.optional()
                     && let Ok(engine_str) = engine_value.to_unquoted_string_str()
                 {
                     assert_eq!(
@@ -522,7 +522,7 @@ fn check_engine_in_stats(
                 }
             }
             "video_encoder" => {
-                if let Some(engine_value) = processor.to_member("engine")?.get() {
+                if let Some(engine_value) = processor.to_member("engine")?.optional() {
                     let engine_str = engine_value
                         .to_unquoted_string_str()
                         .map_err(|e| format!("engine is not a string: {e}"))?;
@@ -750,22 +750,22 @@ fn compose_empty_source_summary_omits_media_specific_fields() -> noargs::Result<
     assert!(elapsed >= 0.0, "elapsed_seconds must be non-negative");
 
     assert!(
-        root.to_member("output_audio_codec")?.get().is_none(),
+        root.to_member("output_audio_codec")?.optional().is_none(),
         "output_audio_codec must not exist for empty source",
     );
     assert!(
-        root.to_member("output_video_codec")?.get().is_none(),
+        root.to_member("output_video_codec")?.optional().is_none(),
         "output_video_codec must not exist for empty source",
     );
     assert!(
         root.to_member("output_audio_duration_seconds")?
-            .get()
+            .optional()
             .is_none(),
         "output_audio_duration_seconds must not exist for empty source",
     );
     assert!(
         root.to_member("output_video_duration_seconds")?
-            .get()
+            .optional()
             .is_none(),
         "output_video_duration_seconds must not exist for empty source",
     );

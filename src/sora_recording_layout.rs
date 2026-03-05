@@ -252,7 +252,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let object = JsonObject::new(value)?;
 
-        if let Some(video_layout) = value.to_member("video_layout")?.get() {
+        if let Some(video_layout) = value.to_member("video_layout")?.optional() {
             // 事前にリージョン名の重複をチェックする
             let mut region_names = BTreeSet::new();
             for (name, _) in video_layout.to_object()? {

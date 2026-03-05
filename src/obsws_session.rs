@@ -1145,11 +1145,11 @@ impl ObswsSession {
             )));
         };
 
-        if let Some(error_value) = response_json.value().to_member("error")?.get() {
+        if let Some(error_value) = response_json.value().to_member("error")?.optional() {
             let message = error_value
                 .to_member("message")
                 .ok()
-                .and_then(|v| v.get())
+                .and_then(|v| v.optional())
                 .and_then(|v| v.try_into().ok())
                 .unwrap_or_else(|| "unknown rpc error".to_owned());
             return Err(crate::Error::new(format!(
@@ -1264,11 +1264,7 @@ mod tests {
         let json = nojson::RawJson::parse(text).expect("response must be valid json");
         let status = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("requestStatus")
+            .to_path_member(&["d", "requestStatus"])
             .expect("requestStatus access must succeed")
             .required()
             .expect("requestStatus must exist");
@@ -1301,11 +1297,7 @@ mod tests {
             .expect("op must be i64");
         let negotiated_rpc_version: u32 = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("negotiatedRpcVersion")
+            .to_path_member(&["d", "negotiatedRpcVersion"])
             .expect("negotiatedRpcVersion access must succeed")
             .required()
             .expect("negotiatedRpcVersion must exist")
@@ -1319,15 +1311,7 @@ mod tests {
         let json = nojson::RawJson::parse(text).expect("event must be valid json");
         let output_active: bool = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventData")
-            .expect("eventData access must succeed")
-            .required()
-            .expect("eventData must exist")
-            .to_member("outputActive")
+            .to_path_member(&["d", "eventData", "outputActive"])
             .expect("outputActive access must succeed")
             .required()
             .expect("outputActive must exist")
@@ -1348,11 +1332,7 @@ mod tests {
             .expect("op must be i64");
         let event_type: String = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventType")
+            .to_path_member(&["d", "eventType"])
             .expect("eventType access must succeed")
             .required()
             .expect("eventType must exist")
@@ -1360,11 +1340,7 @@ mod tests {
             .expect("eventType must be string");
         let event_intent: u32 = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventIntent")
+            .to_path_member(&["d", "eventIntent"])
             .expect("eventIntent access must succeed")
             .required()
             .expect("eventIntent must exist")

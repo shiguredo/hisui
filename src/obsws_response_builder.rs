@@ -59,7 +59,7 @@ fn optional_non_empty_string_member(
     object: nojson::RawJsonValue<'_, '_>,
     member_name: &str,
 ) -> Result<Option<String>, nojson::JsonParseError> {
-    let value = object.to_member(member_name)?.get();
+    let value = object.to_member(member_name)?.optional();
     let Some(value) = value else {
         return Ok(None);
     };
@@ -1368,11 +1368,7 @@ mod tests {
             .expect("op must be i64");
         let event_type: String = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventType")
+            .to_path_member(&["d", "eventType"])
             .expect("eventType access must succeed")
             .required()
             .expect("eventType must exist")
@@ -1380,11 +1376,7 @@ mod tests {
             .expect("eventType must be string");
         let event_intent: u32 = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventIntent")
+            .to_path_member(&["d", "eventIntent"])
             .expect("eventIntent access must succeed")
             .required()
             .expect("eventIntent must exist")
@@ -1392,15 +1384,7 @@ mod tests {
             .expect("eventIntent must be u32");
         let output_active: bool = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventData")
-            .expect("eventData access must succeed")
-            .required()
-            .expect("eventData must exist")
-            .to_member("outputActive")
+            .to_path_member(&["d", "eventData", "outputActive"])
             .expect("outputActive access must succeed")
             .required()
             .expect("outputActive must exist")
@@ -1418,15 +1402,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response).expect("response must be valid json");
         let output_path: String = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("responseData")
-            .expect("responseData access must succeed")
-            .required()
-            .expect("responseData must exist")
-            .to_member("outputPath")
+            .to_path_member(&["d", "responseData", "outputPath"])
             .expect("outputPath access must succeed")
             .required()
             .expect("outputPath must exist")
@@ -1441,11 +1417,7 @@ mod tests {
         let json = nojson::RawJson::parse(&event).expect("event must be valid json");
         let event_type: String = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventType")
+            .to_path_member(&["d", "eventType"])
             .expect("eventType access must succeed")
             .required()
             .expect("eventType must exist")
@@ -1453,15 +1425,7 @@ mod tests {
             .expect("eventType must be string");
         let output_path: String = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventData")
-            .expect("eventData access must succeed")
-            .required()
-            .expect("eventData must exist")
-            .to_member("outputPath")
+            .to_path_member(&["d", "eventData", "outputPath"])
             .expect("outputPath access must succeed")
             .required()
             .expect("outputPath must exist")
@@ -1483,11 +1447,7 @@ mod tests {
             let json = nojson::RawJson::parse(&event).expect("event must be valid json");
             let event_type: String = json
                 .value()
-                .to_member("d")
-                .expect("d access must succeed")
-                .required()
-                .expect("d must exist")
-                .to_member("eventType")
+                .to_path_member(&["d", "eventType"])
                 .expect("eventType access must succeed")
                 .required()
                 .expect("eventType must exist")
@@ -1495,15 +1455,7 @@ mod tests {
                 .expect("eventType must be string");
             let scene_name: String = json
                 .value()
-                .to_member("d")
-                .expect("d access must succeed")
-                .required()
-                .expect("d must exist")
-                .to_member("eventData")
-                .expect("eventData access must succeed")
-                .required()
-                .expect("eventData must exist")
-                .to_member("sceneName")
+                .to_path_member(&["d", "eventData", "sceneName"])
                 .expect("sceneName access must succeed")
                 .required()
                 .expect("sceneName must exist")
@@ -1526,11 +1478,7 @@ mod tests {
             let json = nojson::RawJson::parse(&event).expect("event must be valid json");
             let event_type: String = json
                 .value()
-                .to_member("d")
-                .expect("d access must succeed")
-                .required()
-                .expect("d must exist")
-                .to_member("eventType")
+                .to_path_member(&["d", "eventType"])
                 .expect("eventType access must succeed")
                 .required()
                 .expect("eventType must exist")
@@ -1538,11 +1486,7 @@ mod tests {
                 .expect("eventType must be string");
             let event_data = json
                 .value()
-                .to_member("d")
-                .expect("d access must succeed")
-                .required()
-                .expect("d must exist")
-                .to_member("eventData")
+                .to_path_member(&["d", "eventData"])
                 .expect("eventData access must succeed")
                 .required()
                 .expect("eventData must exist");
@@ -1580,15 +1524,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response).expect("response must be valid json");
         let result: bool = json
             .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("requestStatus")
-            .expect("requestStatus access must succeed")
-            .required()
-            .expect("requestStatus must exist")
-            .to_member("result")
+            .to_path_member(&["d", "requestStatus", "result"])
             .expect("result access must succeed")
             .required()
             .expect("result must exist")

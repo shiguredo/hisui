@@ -419,9 +419,7 @@ mod tests {
         let op: i64 = json.value().to_member("op")?.required()?.try_into()?;
         let response_data = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("responseData")?
+            .to_path_member(&["d", "responseData"])?
             .required()?;
         let supported_image_formats: Vec<String> = response_data
             .to_member("supportedImageFormats")?
@@ -466,9 +464,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
+            .to_path_member(&["d", "requestStatus"])?
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
@@ -492,9 +488,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("responseData")?
+            .to_path_member(&["d", "responseData"])?
             .required()?;
         let mut inputs = response_data.to_member("inputs")?.required()?.to_array()?;
         let first_input = inputs.next().expect("first input must exist");
@@ -518,9 +512,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("responseData")?
+            .to_path_member(&["d", "responseData"])?
             .required()?;
         let input_kinds: Vec<String> = response_data
             .to_member("inputKinds")?
@@ -549,9 +541,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("responseData")?
+            .to_path_member(&["d", "responseData"])?
             .required()?;
         let input_kind: String = response_data
             .to_member("inputKind")?
@@ -576,9 +566,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
+            .to_path_member(&["d", "requestStatus"])?
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
@@ -602,9 +590,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
+            .to_path_member(&["d", "requestStatus"])?
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
@@ -636,9 +622,7 @@ mod tests {
             let json = nojson::RawJson::parse(&response.message)?;
             let status = json
                 .value()
-                .to_member("d")?
-                .required()?
-                .to_member("requestStatus")?
+                .to_path_member(&["d", "requestStatus"])?
                 .required()?;
             let result: bool = status.to_member("result")?.required()?.try_into()?;
             let code: i64 = status.to_member("code")?.required()?.try_into()?;
@@ -665,9 +649,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
+            .to_path_member(&["d", "requestStatus"])?
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
@@ -691,9 +673,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("responseData")?
+            .to_path_member(&["d", "responseData"])?
             .required()?;
         let record_directory: String = response_data
             .to_member("recordDirectory")?
@@ -718,9 +698,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let status = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
+            .to_path_member(&["d", "requestStatus"])?
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
@@ -748,9 +726,7 @@ mod tests {
         let json = nojson::RawJson::parse(&response.message)?;
         let response_data = json
             .value()
-            .to_member("d")?
-            .required()?
-            .to_member("responseData")?
+            .to_path_member(&["d", "responseData"])?
             .required()?;
         let output_active: bool = response_data
             .to_member("outputActive")?

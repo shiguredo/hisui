@@ -85,8 +85,8 @@ impl MediaPipelineHandle {
             .expect("bug")
             .as_string_str()
             .expect("bug");
-        let maybe_id = request.to_member("id").ok().and_then(|v| v.get());
-        let maybe_params = request.to_member("params").ok().and_then(|v| v.get());
+        let maybe_id = request.to_member("id").ok().and_then(|v| v.optional());
+        let maybe_params = request.to_member("params").ok().and_then(|v| v.optional());
 
         let result = match method {
             "createMp4FileSource" => self.handle_create_mp4_file_source_rpc(maybe_params).await,
@@ -4592,9 +4592,7 @@ mod tests {
     fn error_code(response: &nojson::RawJsonOwned) -> Result<i32, nojson::JsonParseError> {
         response
             .value()
-            .to_member("error")?
-            .required()?
-            .to_member("code")?
+            .to_path_member(&["error", "code"])?
             .required()?
             .try_into()
     }
@@ -4604,9 +4602,7 @@ mod tests {
     ) -> Result<String, nojson::JsonParseError> {
         response
             .value()
-            .to_member("result")?
-            .required()?
-            .to_member("processorId")?
+            .to_path_member(&["result", "processorId"])?
             .required()?
             .try_into()
     }
@@ -4654,9 +4650,7 @@ mod tests {
     ) -> Result<Vec<String>, nojson::JsonParseError> {
         response
             .value()
-            .to_member("result")?
-            .required()?
-            .to_member("previousInputTracks")?
+            .to_path_member(&["result", "previousInputTracks"])?
             .required()?
             .to_array()?
             .map(|v| v.to_member("trackId")?.required()?.try_into())
@@ -4668,9 +4662,7 @@ mod tests {
     ) -> Result<usize, nojson::JsonParseError> {
         response
             .value()
-            .to_member("result")?
-            .required()?
-            .to_member("previousCanvasWidth")?
+            .to_path_member(&["result", "previousCanvasWidth"])?
             .required()?
             .try_into()
     }
@@ -4680,9 +4672,7 @@ mod tests {
     ) -> Result<usize, nojson::JsonParseError> {
         response
             .value()
-            .to_member("result")?
-            .required()?
-            .to_member("previousCanvasHeight")?
+            .to_path_member(&["result", "previousCanvasHeight"])?
             .required()?
             .try_into()
     }
@@ -4692,9 +4682,7 @@ mod tests {
     ) -> Result<String, nojson::JsonParseError> {
         let value = response
             .value()
-            .to_member("result")?
-            .required()?
-            .to_member("previousFrameRate")?
+            .to_path_member(&["result", "previousFrameRate"])?
             .required()?;
         match value.kind() {
             nojson::JsonValueKind::Integer => {

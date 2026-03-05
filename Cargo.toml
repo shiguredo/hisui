@@ -23,7 +23,7 @@ libvpx = ["shiguredo_libvpx"]
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.22", features = ["fmt", "std"] }
 noargs = "=0.4.2"
-nojson = "=0.3.8"
+nojson = "=0.3.9"
 base64 = "=0.22.1"
 rustls = { version = "=0.23.37", default-features = false, features = [
     "std",

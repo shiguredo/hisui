@@ -226,7 +226,7 @@ fn parse_optional_string_setting(
                 "Invalid inputSettings field: {e}"
             ))
         })?
-        .get()
+        .optional()
     else {
         return Ok(None);
     };
@@ -815,7 +815,7 @@ mod tests {
                 .value()
                 .to_member("unknown_key")
                 .expect("member access must succeed")
-                .get()
+                .optional()
                 .is_none()
         );
     }
