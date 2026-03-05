@@ -804,10 +804,12 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetSceneList" in response_data["availableRequests"]
         assert "SetStreamServiceSettings" in response_data["availableRequests"]
         assert "StartStream" in response_data["availableRequests"]
+        assert "ToggleStream" in response_data["availableRequests"]
         assert "GetRecordDirectory" in response_data["availableRequests"]
         assert "SetRecordDirectory" in response_data["availableRequests"]
         assert "GetRecordStatus" in response_data["availableRequests"]
         assert "StartRecord" in response_data["availableRequests"]
+        assert "ToggleRecord" in response_data["availableRequests"]
         assert "StopRecord" in response_data["availableRequests"]
         supported_image_formats = response_data["supportedImageFormats"]
         assert isinstance(supported_image_formats, list)
@@ -1460,6 +1462,182 @@ def test_obsws_request_batch_halt_on_failure_stops_subsequent_requests(binary_pa
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
         asyncio.run(_run_halt_on_failure_flow())
+
+
+def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
+    """obsws が ToggleStream で配信状態を切り替えられることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    rtmp_port, rtmp_sock = reserve_ephemeral_port()
+    rtmp_sock.close()
+
+    image_path = tmp_path / "toggle-stream-input.png"
+    _write_test_png(image_path)
+
+    async def _run_toggle_stream_flow():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-toggle-stream-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "toggle-stream-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            set_stream_service_response = await _send_obsws_request(
+                ws,
+                request_type="SetStreamServiceSettings",
+                request_id="req-set-toggle-stream-service",
+                request_data={
+                    "streamServiceType": "rtmp_custom",
+                    "streamServiceSettings": {
+                        "server": f"rtmp://127.0.0.1:{rtmp_port}/live",
+                        "key": "toggle-stream-key",
+                    },
+                },
+            )
+            assert set_stream_service_response["d"]["requestStatus"]["result"] is True
+
+            toggle_start_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleStream",
+                request_id="req-toggle-stream-start",
+            )
+            toggle_start_status = toggle_start_response["d"]["requestStatus"]
+            assert toggle_start_status["result"] is True
+            assert toggle_start_status["code"] == 100
+
+            for _ in range(20):
+                stream_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetStreamStatus",
+                    request_id="req-get-toggle-stream-status-on",
+                )
+                if stream_status_response["d"]["responseData"]["outputActive"] is True:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("stream did not become active after ToggleStream")
+
+            toggle_stop_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleStream",
+                request_id="req-toggle-stream-stop",
+            )
+            toggle_stop_status = toggle_stop_response["d"]["requestStatus"]
+            assert toggle_stop_status["result"] is True
+            assert toggle_stop_status["code"] == 100
+
+            for _ in range(20):
+                stream_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetStreamStatus",
+                    request_id="req-get-toggle-stream-status-off",
+                )
+                if stream_status_response["d"]["responseData"]["outputActive"] is False:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("stream did not become inactive after ToggleStream")
+
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run_toggle_stream_flow())
+
+
+def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
+    """obsws が ToggleRecord で録画状態を切り替えられることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    image_path = tmp_path / "toggle-record-input.png"
+    _write_test_png(image_path)
+
+    async def _run_toggle_record_flow():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-toggle-record-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "toggle-record-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            toggle_start_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecord",
+                request_id="req-toggle-record-start",
+            )
+            toggle_start_status = toggle_start_response["d"]["requestStatus"]
+            assert toggle_start_status["result"] is True
+            assert toggle_start_status["code"] == 100
+
+            for _ in range(20):
+                record_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetRecordStatus",
+                    request_id="req-get-toggle-record-status-on",
+                )
+                if record_status_response["d"]["responseData"]["outputActive"] is True:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("record did not become active after ToggleRecord")
+
+            toggle_stop_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecord",
+                request_id="req-toggle-record-stop",
+            )
+            toggle_stop_status = toggle_stop_response["d"]["requestStatus"]
+            assert toggle_stop_status["result"] is True
+            assert toggle_stop_status["code"] == 100
+
+            for _ in range(20):
+                record_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetRecordStatus",
+                    request_id="req-get-toggle-record-status-off",
+                )
+                if record_status_response["d"]["responseData"]["outputActive"] is False:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("record did not become inactive after ToggleRecord")
+
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run_toggle_record_flow())
 
 
 def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Path):

@@ -381,6 +381,23 @@ impl ObswsSession {
             }
             return Self::build_execution_from_outcome("StartStream", outcome, events);
         }
+        if request_type == "ToggleStream" {
+            let was_active = self.input_registry.read().await.is_stream_active();
+            let outcome = if was_active {
+                self.handle_stop_stream(&request_id).await
+            } else {
+                self.handle_start_stream(&request_id).await
+            };
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(
+                    crate::obsws_response_builder::build_stream_state_changed_event(!was_active),
+                );
+            }
+            let response_text =
+                Self::build_toggle_response_from_outcome("ToggleStream", &request_id, &outcome)?;
+            return Self::build_execution_from_response_text(response_text, events);
+        }
         if request_type == "StopStream" {
             let outcome = self.handle_stop_stream(&request_id).await;
             let mut events = Vec::new();
@@ -398,6 +415,31 @@ impl ObswsSession {
                 );
             }
             return Self::build_execution_from_outcome("StartRecord", outcome, events);
+        }
+        if request_type == "ToggleRecord" {
+            let was_active = self.input_registry.read().await.is_record_active();
+            let outcome = if was_active {
+                self.handle_stop_record(&request_id).await
+            } else {
+                self.handle_start_record(&request_id).await
+            };
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                let output_path = if was_active {
+                    outcome.output_path.as_deref()
+                } else {
+                    None
+                };
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        !was_active,
+                        output_path,
+                    ),
+                );
+            }
+            let response_text =
+                Self::build_toggle_response_from_outcome("ToggleRecord", &request_id, &outcome)?;
+            return Self::build_execution_from_response_text(response_text, events);
         }
         if request_type == "StopRecord" {
             let outcome = self.handle_stop_record(&request_id).await;
@@ -519,6 +561,46 @@ impl ObswsSession {
                 Err(crate::Error::new("request handler returned invalid action"))
             }
         }
+    }
+
+    fn build_toggle_response_from_outcome(
+        toggle_request_type: &str,
+        request_id: &str,
+        outcome: &RequestOutcome,
+    ) -> crate::Result<String> {
+        if outcome.success {
+            return match toggle_request_type {
+                "ToggleStream" => Ok(crate::obsws_response_builder::build_toggle_stream_response(
+                    request_id,
+                )),
+                "ToggleRecord" => Ok(crate::obsws_response_builder::build_toggle_record_response(
+                    request_id,
+                )),
+                _ => Err(crate::Error::new("unknown toggle request type")),
+            };
+        }
+
+        let (_result, code, comment) = Self::parse_request_status_fields(&outcome.response_text)?;
+        Ok(crate::obsws_response_builder::build_request_response_error(
+            toggle_request_type,
+            request_id,
+            code,
+            comment.as_deref().unwrap_or("Unknown request error"),
+        ))
+    }
+
+    fn parse_request_status_fields(
+        response_text: &str,
+    ) -> crate::Result<(bool, i64, Option<String>)> {
+        let json = nojson::RawJson::parse(response_text)?;
+        let request_status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = request_status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = request_status.to_member("code")?.required()?.try_into()?;
+        let comment: Option<String> = request_status.to_member("comment")?.try_into()?;
+        Ok((result, code, comment))
     }
 
     fn is_event_subscription_enabled(&self, event_flag: u32) -> bool {
@@ -1480,6 +1562,17 @@ mod tests {
         (result, code)
     }
 
+    fn parse_request_type(text: &str) -> String {
+        let json = nojson::RawJson::parse(text).expect("response must be valid json");
+        json.value()
+            .to_path_member(&["d", "requestType"])
+            .expect("requestType access must succeed")
+            .required()
+            .expect("requestType must exist")
+            .try_into()
+            .expect("requestType must be string")
+    }
+
     fn parse_identified_message(text: &str) -> (i64, u32) {
         let json = nojson::RawJson::parse(text).expect("response must be valid json");
         let op: i64 = json
@@ -1930,6 +2023,56 @@ mod tests {
         let (result, code) = parse_request_status(&text);
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    }
+
+    #[tokio::test]
+    async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-toggle-stream".to_owned()),
+                request_type: Some("ToggleStream".to_owned()),
+                request_data: None,
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let (result, code) = parse_request_status(&text);
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+        assert_eq!(parse_request_type(&text), "ToggleStream");
+    }
+
+    #[tokio::test]
+    async fn toggle_record_without_image_input_returns_toggle_request_type_error() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-toggle-record".to_owned()),
+                request_type: Some("ToggleRecord".to_owned()),
+                request_data: None,
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let (result, code) = parse_request_status(&text);
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+        assert_eq!(parse_request_type(&text), "ToggleRecord");
     }
 
     #[tokio::test]

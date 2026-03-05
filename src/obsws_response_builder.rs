@@ -431,11 +431,13 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetStreamServiceSettings",
                                 "SetStreamServiceSettings",
                                 "GetStreamStatus",
+                                "ToggleStream",
                                 "StartStream",
                                 "StopStream",
                                 "GetRecordDirectory",
                                 "SetRecordDirectory",
                                 "GetRecordStatus",
+                                "ToggleRecord",
                                 "StartRecord",
                                 "StopRecord",
                             ],
@@ -1025,6 +1027,28 @@ pub fn build_start_stream_response(request_id: &str) -> String {
     .to_string()
 }
 
+pub fn build_toggle_stream_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "ToggleStream")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_stop_stream_response(request_id: &str) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
@@ -1032,6 +1056,28 @@ pub fn build_stop_stream_response(request_id: &str) -> String {
             "d",
             nojson::object(|f| {
                 f.member("requestType", "StopStream")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_toggle_record_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "ToggleRecord")?;
                 f.member("requestId", request_id)?;
                 f.member(
                     "requestStatus",

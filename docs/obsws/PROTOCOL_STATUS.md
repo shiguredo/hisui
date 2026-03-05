@@ -241,7 +241,8 @@
   - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
   - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
   - NOTE: 固定値項目は 実測値連携を TODO として追跡する
-- [ ] `ToggleStream`: 配信をトグルする
+- [x] `ToggleStream`: 配信をトグルする
+  - NOTE: 現在状態に応じて `StartStream` または `StopStream` 相当の処理を内部で実行する
 - [x] `StartStream`: 配信を開始する
   - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
   - NOTE: 現時点の入力対応は `image_source` のみ
@@ -261,7 +262,8 @@
   - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
   - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
   - [x] `outputPath`: 録画ファイルパスを返す
-- [ ] `ToggleRecord`: 録画をトグルする
+- [x] `ToggleRecord`: 録画をトグルする
+  - NOTE: 現在状態に応じて `StartRecord` または `StopRecord` 相当の処理を内部で実行する
 - [x] `StartRecord`: 録画を開始する
   - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
   - NOTE: 現時点の入力対応は `image_source` のみ
