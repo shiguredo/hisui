@@ -599,6 +599,9 @@ impl VideoEncoder {
             VideoEncoderRpcMessage::RequestKeyframe => {
                 self.total_video_keyframe_request_count_metric.inc();
                 // 複数の keyframe 要求は 1 件に集約して扱う。
+                // RPC 受信時点ではフラグのみ更新し、実際の keyframe 要求適用は
+                // 次の入力フレーム処理時に行う。低フレームレート入力などでは遅延し得るが、
+                // 現状は入力フローと同一タイミングでの適用を意図した設計とする。
                 self.keyframe_request_pending = true;
             }
         }
