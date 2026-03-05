@@ -223,9 +223,9 @@ mod tests {
         ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws_protocol::{
-        OBSWS_OP_HELLO, OBSWS_OP_REIDENTIFY, OBSWS_OP_REQUEST_RESPONSE,
-        REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-        REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+        OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+        REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+        REQUEST_STATUS_SUCCESS,
     };
 
     fn input_registry() -> ObswsInputRegistry {
@@ -369,11 +369,6 @@ mod tests {
         let message = r#"{"op":9,"d":{}}"#;
         let error = parse_client_message(message).expect_err("non identify must be rejected");
         assert!(error.display().contains("unsupported message opcode"));
-    }
-
-    #[test]
-    fn reidentify_opcode_constant_is_expected_value() {
-        assert_eq!(OBSWS_OP_REIDENTIFY, 3);
     }
 
     #[test]
