@@ -78,10 +78,6 @@ impl PngFileSource {
         let start = tokio::time::Instant::now();
         let mut ack = tx.send_syn();
         loop {
-            if !tx.has_subscribers() {
-                break;
-            }
-
             let timestamp = frames_to_timestamp(self.frame_rate, frame_index);
             tokio::time::sleep_until(start + timestamp).await;
 
@@ -407,9 +403,10 @@ mod tests {
             frame_rate: FrameRate::FPS_30,
             output_video_track_id: output_track_id,
         };
+        let source_processor_id = ProcessorId::new("png_source");
         pipeline_handle
             .spawn_processor(
-                ProcessorId::new("png_source"),
+                source_processor_id.clone(),
                 ProcessorMetadata::new("png_file_source"),
                 |handle| source.run(handle),
             )
@@ -433,6 +430,11 @@ mod tests {
 
         drop(rx);
         drop(subscriber);
+        let terminated = pipeline_handle
+            .terminate_processor(source_processor_id)
+            .await
+            .map_err(|e| Error::new(e.to_string()))?;
+        assert!(terminated, "png source processor must be terminated");
         drop(pipeline_handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
             .await
