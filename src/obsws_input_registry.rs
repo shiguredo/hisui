@@ -532,6 +532,10 @@ impl ObswsInputRegistry {
         self.stream_runtime.active
     }
 
+    pub fn stream_run(&self) -> Option<ObswsStreamRun> {
+        self.stream_runtime.run.clone()
+    }
+
     pub fn stream_uptime(&self) -> Duration {
         self.stream_runtime
             .started_at
@@ -566,6 +570,10 @@ impl ObswsInputRegistry {
 
     pub fn is_record_active(&self) -> bool {
         self.record_runtime.active
+    }
+
+    pub fn record_run(&self) -> Option<ObswsRecordRun> {
+        self.record_runtime.run.clone()
     }
 
     pub fn record_uptime(&self) -> Duration {

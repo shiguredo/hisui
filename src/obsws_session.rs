@@ -316,7 +316,7 @@ impl ObswsSession {
 
     async fn handle_stop_stream(&self, request_id: &str) -> String {
         let run = {
-            let mut input_registry = self.input_registry.write().await;
+            let input_registry = self.input_registry.read().await;
             if !input_registry.is_stream_active() {
                 return crate::obsws_response_builder::build_request_response_error(
                     "StopStream",
@@ -326,7 +326,7 @@ impl ObswsSession {
                 );
             }
             input_registry
-                .deactivate_stream()
+                .stream_run()
                 .expect("infallible: active stream must have run state")
         };
         if let Err(e) = self.stop_stream_processors(&run).await {
@@ -335,6 +335,10 @@ impl ObswsSession {
                 request_id,
                 &format!("Failed to stop stream: {}", e.display()),
             );
+        }
+        let mut input_registry = self.input_registry.write().await;
+        if input_registry.deactivate_stream().is_none() {
+            tracing::warn!("stream runtime was already deactivated while stopping stream");
         }
         crate::obsws_response_builder::build_stop_stream_response(request_id)
     }
@@ -436,7 +440,7 @@ impl ObswsSession {
 
     async fn handle_stop_record(&self, request_id: &str) -> String {
         let run = {
-            let mut input_registry = self.input_registry.write().await;
+            let input_registry = self.input_registry.read().await;
             if !input_registry.is_record_active() {
                 return crate::obsws_response_builder::build_request_response_error(
                     "StopRecord",
@@ -446,7 +450,7 @@ impl ObswsSession {
                 );
             }
             input_registry
-                .deactivate_record()
+                .record_run()
                 .expect("infallible: active record must have run state")
         };
         if let Err(e) = self.stop_record_processors(&run).await {
@@ -455,6 +459,10 @@ impl ObswsSession {
                 request_id,
                 &format!("Failed to stop record: {}", e.display()),
             );
+        }
+        let mut input_registry = self.input_registry.write().await;
+        if input_registry.deactivate_record().is_none() {
+            tracing::warn!("record runtime was already deactivated while stopping record");
         }
         crate::obsws_response_builder::build_stop_record_response(
             request_id,
