@@ -243,10 +243,12 @@
   - NOTE: 固定値項目は 実測値連携を TODO として追跡する
 - [x] `ToggleStream`: 配信をトグルする
   - NOTE: 現在状態に応じて `StartStream` または `StopStream` 相当の処理を内部で実行する
+  - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartStream`: 配信を開始する
   - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
   - NOTE: 現時点の入力対応は `image_source` のみ
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を起動する
+  - NOTE: 成功時の `responseData` には `outputActive = true` を返す
 - [x] `StopStream`: 配信を停止する
   - NOTE: 内部で起動した stream 用 processor を停止する
 - [ ] `SendStreamCaption`: 配信キャプションを送信する
@@ -264,10 +266,12 @@
   - [x] `outputPath`: 録画ファイルパスを返す
 - [x] `ToggleRecord`: 録画をトグルする
   - NOTE: 現在状態に応じて `StartRecord` または `StopRecord` 相当の処理を内部で実行する
+  - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartRecord`: 録画を開始する
   - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
   - NOTE: 現時点の入力対応は `image_source` のみ
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createMp4Writer` を起動する
+  - NOTE: 成功時の `responseData` には `outputActive = true` を返す
 - [x] `StopRecord`: 録画を停止する
   - NOTE: 内部で起動した record 用 processor を停止する
 - [ ] `ToggleRecordPause`: 録画一時停止をトグルする

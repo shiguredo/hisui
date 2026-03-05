@@ -47,6 +47,30 @@ struct RequestOutcome {
     response_text: String,
     success: bool,
     output_path: Option<String>,
+    error_code: Option<i64>,
+    error_comment: Option<String>,
+}
+
+impl RequestOutcome {
+    fn success(response_text: String, output_path: Option<String>) -> Self {
+        Self {
+            response_text,
+            success: true,
+            output_path,
+            error_code: None,
+            error_comment: None,
+        }
+    }
+
+    fn failure(response_text: String, error_code: i64, error_comment: impl Into<String>) -> Self {
+        Self {
+            response_text,
+            success: false,
+            output_path: None,
+            error_code: Some(error_code),
+            error_comment: Some(error_comment.into()),
+        }
+    }
 }
 
 struct RequestExecutionResult {
@@ -591,27 +615,19 @@ impl ObswsSession {
             };
         }
 
-        let (_result, code, comment) = Self::parse_request_status_fields(&outcome.response_text)?;
+        let code = outcome
+            .error_code
+            .unwrap_or(REQUEST_STATUS_INVALID_REQUEST_FIELD);
+        let comment = outcome
+            .error_comment
+            .as_deref()
+            .unwrap_or("Unknown request error");
         Ok(crate::obsws_response_builder::build_request_response_error(
             toggle_request_type,
             request_id,
             code,
-            comment.as_deref().unwrap_or("Unknown request error"),
+            comment,
         ))
-    }
-
-    fn parse_request_status_fields(
-        response_text: &str,
-    ) -> crate::Result<(bool, i64, Option<String>)> {
-        let json = nojson::RawJson::parse(response_text)?;
-        let request_status = json
-            .value()
-            .to_path_member(&["d", "requestStatus"])?
-            .required()?;
-        let result: bool = request_status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = request_status.to_member("code")?.required()?.try_into()?;
-        let comment: Option<String> = request_status.to_member("comment")?.try_into()?;
-        Ok((result, code, comment))
     }
 
     fn is_event_subscription_enabled(&self, event_flag: u32) -> bool {
@@ -948,67 +964,67 @@ impl ObswsSession {
             let mut input_registry = self.input_registry.write().await;
             let stream_service_settings = input_registry.stream_service_settings().clone();
             if stream_service_settings.stream_service_type != "rtmp_custom" {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartStream",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Unsupported streamServiceType field",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Unsupported streamServiceType field",
+                );
             }
             let Some(output_url) = stream_service_settings.server else {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartStream",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Missing streamServiceSettings.server field",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Missing streamServiceSettings.server field",
+                );
             };
 
             let scene_inputs = input_registry.list_current_program_scene_inputs();
             if scene_inputs.len() != 1 {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartStream",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Exactly one enabled input is required in the current program scene",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Exactly one enabled input is required in the current program scene",
+                );
             }
             let input = &scene_inputs[0];
             let ObswsInputSettings::ImageSource(settings) = &input.input.settings else {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartStream",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Only image_source is supported for StartStream",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Only image_source is supported for StartStream",
+                );
             };
             let Some(image_path) = settings.file.clone() else {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartStream",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "inputSettings.file is required for image_source",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "inputSettings.file is required for image_source",
+                );
             };
 
             let run_id = input_registry.next_stream_run_id();
@@ -1027,16 +1043,16 @@ impl ObswsSession {
             if let Err(ActivateStreamError::AlreadyActive) =
                 input_registry.activate_stream(run.clone())
             {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartStream",
                         request_id,
                         REQUEST_STATUS_STREAM_RUNNING,
                         "Stream is already active",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_STREAM_RUNNING,
+                    "Stream is already active",
+                );
             }
 
             (output_url, stream_service_settings.key, image_path, run)
@@ -1054,65 +1070,55 @@ impl ObswsSession {
                     cleanup_error.display()
                 );
             }
-            return RequestOutcome {
-                response_text: Self::build_internal_error_response(
-                    "StartStream",
-                    request_id,
-                    &format!("Failed to start stream: {}", e.display()),
-                ),
-                success: false,
-                output_path: None,
-            };
+            let error_comment = format!("Failed to start stream: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("StartStream", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
         }
 
-        RequestOutcome {
-            response_text: crate::obsws_response_builder::build_start_stream_response(
-                request_id, true,
-            ),
-            success: true,
-            output_path: None,
-        }
+        RequestOutcome::success(
+            crate::obsws_response_builder::build_start_stream_response(request_id, true),
+            None,
+        )
     }
 
     async fn handle_stop_stream(&self, request_id: &str) -> RequestOutcome {
         let run = {
             let input_registry = self.input_registry.read().await;
             if !input_registry.is_stream_active() {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StopStream",
                         request_id,
                         REQUEST_STATUS_STREAM_NOT_RUNNING,
                         "Stream is not active",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_STREAM_NOT_RUNNING,
+                    "Stream is not active",
+                );
             }
             input_registry
                 .stream_run()
                 .expect("infallible: active stream must have run state")
         };
         if let Err(e) = self.stop_stream_processors(&run).await {
-            return RequestOutcome {
-                response_text: Self::build_internal_error_response(
-                    "StopStream",
-                    request_id,
-                    &format!("Failed to stop stream: {}", e.display()),
-                ),
-                success: false,
-                output_path: None,
-            };
+            let error_comment = format!("Failed to stop stream: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("StopStream", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
         }
         let mut input_registry = self.input_registry.write().await;
         if input_registry.deactivate_stream().is_none() {
             tracing::warn!("stream runtime was already deactivated while stopping stream");
         }
-        RequestOutcome {
-            response_text: crate::obsws_response_builder::build_stop_stream_response(request_id),
-            success: true,
-            output_path: None,
-        }
+        RequestOutcome::success(
+            crate::obsws_response_builder::build_stop_stream_response(request_id),
+            None,
+        )
     }
 
     async fn handle_start_record(&self, request_id: &str) -> RequestOutcome {
@@ -1120,41 +1126,41 @@ impl ObswsSession {
             let mut input_registry = self.input_registry.write().await;
             let scene_inputs = input_registry.list_current_program_scene_inputs();
             if scene_inputs.len() != 1 {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartRecord",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Exactly one enabled input is required in the current program scene",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Exactly one enabled input is required in the current program scene",
+                );
             }
             let input = &scene_inputs[0];
             let ObswsInputSettings::ImageSource(settings) = &input.input.settings else {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartRecord",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Only image_source is supported for StartRecord",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Only image_source is supported for StartRecord",
+                );
             };
             let Some(image_path) = settings.file.clone() else {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartRecord",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "inputSettings.file is required for image_source",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "inputSettings.file is required for image_source",
+                );
             };
             let run_id = input_registry.next_record_run_id();
             let source_processor_id = format!("obsws:record:{run_id}:png_source");
@@ -1180,16 +1186,16 @@ impl ObswsSession {
             if let Err(ActivateRecordError::AlreadyActive) =
                 input_registry.activate_record(run.clone())
             {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StartRecord",
                         request_id,
                         REQUEST_STATUS_OUTPUT_RUNNING,
                         "Record is already active",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_OUTPUT_RUNNING,
+                    "Record is already active",
+                );
             }
             (image_path, output_path, run)
         };
@@ -1198,15 +1204,12 @@ impl ObswsSession {
             && let Err(e) = std::fs::create_dir_all(parent)
         {
             let _ = self.input_registry.write().await.deactivate_record();
-            return RequestOutcome {
-                response_text: Self::build_internal_error_response(
-                    "StartRecord",
-                    request_id,
-                    &format!("Failed to create record directory: {e}"),
-                ),
-                success: false,
-                output_path: None,
-            };
+            let error_comment = format!("Failed to create record directory: {e}");
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("StartRecord", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
         }
 
         let start_result = self
@@ -1220,69 +1223,56 @@ impl ObswsSession {
                     cleanup_error.display()
                 );
             }
-            return RequestOutcome {
-                response_text: Self::build_internal_error_response(
-                    "StartRecord",
-                    request_id,
-                    &format!("Failed to start record: {}", e.display()),
-                ),
-                success: false,
-                output_path: None,
-            };
+            let error_comment = format!("Failed to start record: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("StartRecord", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
         }
 
-        RequestOutcome {
-            response_text: crate::obsws_response_builder::build_start_record_response(
-                request_id, true,
-            ),
-            success: true,
-            output_path: None,
-        }
+        RequestOutcome::success(
+            crate::obsws_response_builder::build_start_record_response(request_id, true),
+            None,
+        )
     }
 
     async fn handle_stop_record(&self, request_id: &str) -> RequestOutcome {
         let run = {
             let input_registry = self.input_registry.read().await;
             if !input_registry.is_record_active() {
-                return RequestOutcome {
-                    response_text: crate::obsws_response_builder::build_request_response_error(
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
                         "StopRecord",
                         request_id,
                         REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                         "Record is not active",
                     ),
-                    success: false,
-                    output_path: None,
-                };
+                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Record is not active",
+                );
             }
             input_registry
                 .record_run()
                 .expect("infallible: active record must have run state")
         };
         if let Err(e) = self.stop_record_processors(&run).await {
-            return RequestOutcome {
-                response_text: Self::build_internal_error_response(
-                    "StopRecord",
-                    request_id,
-                    &format!("Failed to stop record: {}", e.display()),
-                ),
-                success: false,
-                output_path: None,
-            };
+            let error_comment = format!("Failed to stop record: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("StopRecord", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
         }
         let mut input_registry = self.input_registry.write().await;
         if input_registry.deactivate_record().is_none() {
             tracing::warn!("record runtime was already deactivated while stopping record");
         }
         let output_path = run.output_path.display().to_string();
-        RequestOutcome {
-            response_text: crate::obsws_response_builder::build_stop_record_response(
-                request_id,
-                &output_path,
-            ),
-            success: true,
-            output_path: Some(output_path),
-        }
+        RequestOutcome::success(
+            crate::obsws_response_builder::build_stop_record_response(request_id, &output_path),
+            Some(output_path),
+        )
     }
 
     async fn start_stream_processors(
