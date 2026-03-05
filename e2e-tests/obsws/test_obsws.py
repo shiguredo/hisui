@@ -1099,6 +1099,8 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
                 raise AssertionError("stream did not become active in time")
 
             # 受信側が接続してデータを取り込めるように少し待ってから停止する
+            # 固定待機を意図的に採用する。
+            # 環境差で不安定になった場合は、将来的に GetStreamStatus ポーリングへ置き換える。
             await asyncio.sleep(5.0)
 
             stop_stream_response = await _send_obsws_request(
