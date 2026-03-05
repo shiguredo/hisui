@@ -66,7 +66,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     .map_err(noargs::Error::from)
 }
 
-pub fn run_internal(
+fn run_internal(
     ws_host: IpAddr,
     ws_port: u16,
     http_host: IpAddr,
