@@ -176,6 +176,19 @@ pub fn handle_request_message(
             &request_id,
             input_registry,
         ),
+        "GetRecordDirectory" => crate::obsws_response_builder::build_get_record_directory_response(
+            &request_id,
+            input_registry,
+        ),
+        "SetRecordDirectory" => crate::obsws_response_builder::build_set_record_directory_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetRecordStatus" => crate::obsws_response_builder::build_get_record_status_response(
+            &request_id,
+            input_registry,
+        ),
         _ => crate::obsws_response_builder::build_request_response_error(
             &request_type,
             &request_id,
@@ -201,7 +214,7 @@ mod tests {
     };
 
     fn input_registry() -> ObswsInputRegistry {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         registry.insert_for_test(ObswsInputEntry::new_for_test(
             "input-uuid-1",
             "input-name-1",
@@ -395,6 +408,11 @@ mod tests {
                 .any(|r| r == "SetStreamServiceSettings")
         );
         assert!(available_requests.iter().any(|r| r == "StartStream"));
+        assert!(available_requests.iter().any(|r| r == "GetRecordDirectory"));
+        assert!(available_requests.iter().any(|r| r == "SetRecordDirectory"));
+        assert!(available_requests.iter().any(|r| r == "GetRecordStatus"));
+        assert!(available_requests.iter().any(|r| r == "StartRecord"));
+        assert!(available_requests.iter().any(|r| r == "StopRecord"));
         Ok(())
     }
 
@@ -914,6 +932,95 @@ mod tests {
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         assert!(result);
         assert_eq!(code, REQUEST_STATUS_SUCCESS);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_record_directory_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry =
+            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let request = RequestMessage {
+            request_id: Some("req-get-record-directory".to_owned()),
+            request_type: Some("GetRecordDirectory".to_owned()),
+            request_data: None,
+        };
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let response_data = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("responseData")?
+            .required()?;
+        let record_directory: String = response_data
+            .to_member("recordDirectory")?
+            .required()?
+            .try_into()?;
+        assert_eq!(record_directory, "/tmp/hisui-obsws-recordings");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_record_directory_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry =
+            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let request = RequestMessage {
+            request_id: Some("req-set-record-directory".to_owned()),
+            request_type: Some("SetRecordDirectory".to_owned()),
+            request_data: Some(request_data(r#"{"recordDirectory":"recordings-updated"}"#)),
+        };
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("requestStatus")?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(result);
+        assert_eq!(code, REQUEST_STATUS_SUCCESS);
+        assert!(
+            input_registry
+                .record_directory()
+                .ends_with("recordings-updated")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_record_status_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let request = RequestMessage {
+            request_id: Some("req-get-record-status".to_owned()),
+            request_type: Some("GetRecordStatus".to_owned()),
+            request_data: None,
+        };
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let response_data = json
+            .value()
+            .to_member("d")?
+            .required()?
+            .to_member("responseData")?
+            .required()?;
+        let output_active: bool = response_data
+            .to_member("outputActive")?
+            .required()?
+            .try_into()?;
+        let output_paused: bool = response_data
+            .to_member("outputPaused")?
+            .required()?
+            .try_into()?;
+        assert!(!output_active);
+        assert!(!output_paused);
         Ok(())
     }
 }

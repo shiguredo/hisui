@@ -130,13 +130,14 @@
   - @sile
 - [ADD] 実験的な `obsws` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui obsws` で WebSocket サーバーを起動できる
+  - `hisui obsws --default-record-dir <PATH>` と `HISUI_DEFAULT_RECORD_DIR` で録画先ディレクトリの初期値を設定できる
   - `obswebsocket.json` サブプロトコルでの接続を受け付ける
   - Hisui 固有の HTTP endpoint として `/.ok` と `/metrics` を公開する
     - `GET /metrics?format=json` で JSON 形式のメトリクス取得もできる
   - `Hello (op=0)` / `Identify (op=1)` / `Identified (op=2)` を処理できる
   - challenge / salt ベースの password 認証に対応する
   - `Request (op=6)` / `RequestResponse (op=7)` を処理できる
-  - `GetVersion` / `GetStats` / `GetCanvasList` / `GetSceneList` / `CreateScene` / `GetCurrentProgramScene` / `SetCurrentProgramScene` / `GetInputList` / `GetInputKindList` / `GetInputSettings` / `CreateInput` / `RemoveInput` / `GetStreamServiceSettings` / `SetStreamServiceSettings` / `GetStreamStatus` / `StartStream` / `StopStream` の RequestType に対応する
+  - `GetVersion` / `GetStats` / `GetCanvasList` / `GetSceneList` / `CreateScene` / `GetCurrentProgramScene` / `SetCurrentProgramScene` / `GetInputList` / `GetInputKindList` / `GetInputSettings` / `CreateInput` / `RemoveInput` / `GetStreamServiceSettings` / `SetStreamServiceSettings` / `GetStreamStatus` / `StartStream` / `StopStream` / `GetRecordDirectory` / `SetRecordDirectory` / `GetRecordStatus` / `StartRecord` / `StopRecord` の RequestType に対応する
   - `StartStream` は `image_source` を入力として `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を内部で起動し、RTMP 配信を開始できる
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する

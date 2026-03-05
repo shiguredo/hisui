@@ -8,7 +8,6 @@ use crate::{
 pub struct Openh264Encoder {
     inner: shiguredo_openh264::Encoder,
     encoded: Option<VideoFrame>,
-    is_first: bool,
     force_idr_pending: bool,
 }
 
@@ -31,7 +30,6 @@ impl Openh264Encoder {
         Ok(Self {
             inner,
             encoded: None,
-            is_first: true,
             force_idr_pending: false,
         })
     }
@@ -49,12 +47,12 @@ impl Openh264Encoder {
             return Ok(());
         };
 
-        let sample_entry = if self.is_first
-            && !encoded.sps_list.is_empty()
-            && !encoded.pps_list.is_empty()
-        {
+        // OpenH264 は keyframe 要求時などに SPS/PPS が更新され得るため、
+        // SPS/PPS を受け取ったフレームでは毎回 sample entry を更新する。
+        // これにより、下流コンポーネントが参照する codec 設定を最新化し、
+        // 古い parameter set 参照によるデコード失敗を避ける。
+        let sample_entry = if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let size = frame.size();
-            self.is_first = false;
             Some(video_h264::h264_sample_entry_from_annexb(
                 size.width,
                 size.height,

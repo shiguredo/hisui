@@ -10,6 +10,7 @@ use crate::obsws_protocol::{
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
     REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
 };
+use std::path::PathBuf;
 
 struct CreateInputFields {
     scene_name: String,
@@ -30,6 +31,10 @@ struct SetStreamServiceSettingsFields {
     stream_service_type: String,
     server: String,
     key: Option<String>,
+}
+
+struct SetRecordDirectoryFields {
+    record_directory: String,
 }
 
 fn parse_input_lookup_fields(
@@ -120,6 +125,13 @@ fn parse_set_stream_service_settings_fields(
         server,
         key,
     })
+}
+
+fn parse_set_record_directory_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetRecordDirectoryFields, nojson::JsonParseError> {
+    let record_directory = required_non_empty_string_member(request_data, "recordDirectory")?;
+    Ok(SetRecordDirectoryFields { record_directory })
 }
 
 fn required_non_empty_string_member(
@@ -247,6 +259,11 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetStreamStatus",
                                 "StartStream",
                                 "StopStream",
+                                "GetRecordDirectory",
+                                "SetRecordDirectory",
+                                "GetRecordStatus",
+                                "StartRecord",
+                                "StopRecord",
                             ],
                         )?;
                         f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
@@ -635,6 +652,131 @@ pub fn build_get_stream_status_response(
     .to_string()
 }
 
+pub fn build_get_record_directory_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let record_directory = input_registry.record_directory().display().to_string();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetRecordDirectory")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("recordDirectory", &record_directory)),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_record_directory_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetRecordDirectory",
+        request_id,
+        request_data,
+        parse_set_record_directory_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    let record_directory = match resolve_record_directory_path(&fields.record_directory) {
+        Ok(path) => path,
+        Err(e) => {
+            return build_request_response_error(
+                "SetRecordDirectory",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &e,
+            );
+        }
+    };
+    input_registry.set_record_directory(record_directory);
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetRecordDirectory")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_record_status_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let active = input_registry.is_record_active();
+    let duration = if active {
+        input_registry.record_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    let output_path = input_registry
+        .record_output_path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetRecordStatus")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputActive", active)?;
+                        f.member("outputPaused", false)?;
+                        f.member("outputTimecode", &output_timecode)?;
+                        f.member("outputDuration", output_duration)?;
+                        f.member("outputBytes", 0)?;
+                        f.member("outputSkippedFrames", 0)?;
+                        f.member("outputTotalFrames", 0)?;
+                        f.member("outputPath", &output_path)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_start_stream_response(request_id: &str) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
@@ -673,6 +815,53 @@ pub fn build_stop_stream_response(request_id: &str) -> String {
                     }),
                 )?;
                 f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_start_record_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StartRecord")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_stop_record_response(request_id: &str, output_path: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StopRecord")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("outputPath", output_path)),
+                )
             }),
         )
     })
@@ -937,4 +1126,37 @@ pub fn build_request_response_error(
         )
     })
     .to_string()
+}
+
+fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {
+    std::path::absolute(record_directory)
+        .map_err(|e| format!("Failed to resolve absolute record directory path: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_stop_record_response_includes_output_path() {
+        let response = build_stop_record_response("req-stop-record", "/tmp/output.mp4");
+        let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+        let output_path: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("responseData")
+            .expect("responseData access must succeed")
+            .required()
+            .expect("responseData must exist")
+            .to_member("outputPath")
+            .expect("outputPath access must succeed")
+            .required()
+            .expect("outputPath must exist")
+            .try_into()
+            .expect("outputPath must be string");
+        assert_eq!(output_path, "/tmp/output.mp4");
+    }
 }

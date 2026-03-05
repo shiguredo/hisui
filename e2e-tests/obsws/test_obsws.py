@@ -33,6 +33,7 @@ class ObswsServer:
         http_host: str | None = None,
         http_port: int | None = None,
         password: str | None = None,
+        default_record_dir: Path | None = None,
         use_env: bool = False,
     ):
         self.binary_path = binary_path
@@ -46,6 +47,7 @@ class ObswsServer:
         else:
             self.http_port = http_port
         self.password = password
+        self.default_record_dir = default_record_dir
         self.use_env = use_env
         self._process: subprocess.Popen[None] | None = None
 
@@ -68,6 +70,8 @@ class ObswsServer:
             env["HISUI_OBSWS_HTTP_PORT"] = str(self.http_port)
             if self.password is not None:
                 env["HISUI_OBSWS_PASSWORD"] = self.password
+            if self.default_record_dir is not None:
+                env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
         else:
             cmd.extend(
                 [
@@ -83,6 +87,8 @@ class ObswsServer:
             )
             if self.password is not None:
                 cmd.extend(["--password", self.password])
+            if self.default_record_dir is not None:
+                cmd.extend(["--default-record-dir", str(self.default_record_dir)])
 
         self._process = subprocess.Popen(cmd, env=env)
         self._wait_until_listening()
@@ -232,6 +238,16 @@ async def _http_get(url: str):
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url) as response:
             return response.status, await response.text(), response.headers
+
+
+def _collect_obsws_metrics_snapshot(http_host: str, http_port: int) -> str:
+    endpoint = "/metrics"
+    url = f"http://{http_host}:{http_port}{endpoint}"
+    try:
+        status, body, _ = asyncio.run(_http_get(url))
+        return f"[{endpoint}] status={status}\n{body}"
+    except Exception as e:
+        return f"[{endpoint}] failed to fetch metrics: {e}"
 
 
 async def _connect_and_exchange_identify(url: str):
@@ -641,6 +657,11 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetSceneList" in response_data["availableRequests"]
         assert "SetStreamServiceSettings" in response_data["availableRequests"]
         assert "StartStream" in response_data["availableRequests"]
+        assert "GetRecordDirectory" in response_data["availableRequests"]
+        assert "SetRecordDirectory" in response_data["availableRequests"]
+        assert "GetRecordStatus" in response_data["availableRequests"]
+        assert "StartRecord" in response_data["availableRequests"]
+        assert "StopRecord" in response_data["availableRequests"]
         supported_image_formats = response_data["supportedImageFormats"]
         assert isinstance(supported_image_formats, list)
         assert "png" in supported_image_formats
@@ -671,6 +692,85 @@ def test_obsws_get_stats_request(binary_path: Path):
         response_data = response["d"]["responseData"]
         assert response_data["webSocketSessionIncomingMessages"] >= 2
         assert response_data["webSocketSessionOutgoingMessages"] >= 2
+
+
+def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path: Path):
+    """obsws が GetRecordDirectory / SetRecordDirectory request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    default_record_dir = tmp_path / "default-records"
+    updated_record_dir = tmp_path / "updated-records"
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        default_record_dir=default_record_dir,
+        use_env=False,
+    ):
+        get_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetRecordDirectory",
+                request_id="req-get-record-dir-1",
+            )
+        )
+        get_status = get_response["d"]["requestStatus"]
+        assert get_status["result"] is True
+        assert get_response["d"]["responseData"]["recordDirectory"] == str(default_record_dir)
+
+        set_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetRecordDirectory",
+                request_id="req-set-record-dir-1",
+                request_data={"recordDirectory": str(updated_record_dir)},
+            )
+        )
+        set_status = set_response["d"]["requestStatus"]
+        assert set_status["result"] is True
+
+        get_response_after_update = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetRecordDirectory",
+                request_id="req-get-record-dir-2",
+            )
+        )
+        get_status_after_update = get_response_after_update["d"]["requestStatus"]
+        assert get_status_after_update["result"] is True
+        assert (
+            get_response_after_update["d"]["responseData"]["recordDirectory"]
+            == str(updated_record_dir)
+        )
+
+
+def test_obsws_get_record_status_request(binary_path: Path):
+    """obsws が GetRecordStatus request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetRecordStatus",
+                request_id="req-get-record-status",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert response_data["outputActive"] is False
+        assert response_data["outputPaused"] is False
 
 
 def test_obsws_get_canvas_list_request(binary_path: Path):
@@ -1113,7 +1213,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
 
@@ -1130,6 +1230,15 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             try:
                 start_stream_future.result(timeout=30.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
+            except Exception as e:
+                # 失敗時の原因切り分け用にメトリクスを添付する。
+                metrics_snapshot = _collect_obsws_metrics_snapshot(
+                    server.http_host,
+                    server.http_port,
+                )
+                raise AssertionError(
+                    f"obsws rtmp stream test failed: {e}\nmetrics_snapshot:\n{metrics_snapshot}"
+                ) from e
             finally:
                 if ffmpeg_process.poll() is None:
                     ffmpeg_process.kill()

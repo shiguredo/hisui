@@ -283,7 +283,7 @@ hisui 対応状況: 部分対応（ `SetStreamServiceSettings` は現時点で `
 ## 例 5: 録画の開始 / 停止
 
 目的: 録画の基本制御を行う
-hisui 対応状況: 未対応（ `Record` 系 request は未実装 ）
+hisui 対応状況: 部分対応（ `GetRecordStatus` / `StartRecord` / `StopRecord` は対応済み。入力種別と構成に制約あり ）
 
 1. `C -> S` GetRecordStatus
 
@@ -338,7 +338,7 @@ hisui 対応状況: 未対応（ `Record` 系 request は未実装 ）
 ## 例 6: 配信と録画を同時運用する
 
 目的: 配信と録画を独立に開始 / 停止する
-hisui 対応状況: 未対応（ `Record` 系 request 未実装のため、この例全体は現時点で成立しない ）
+hisui 対応状況: 部分対応（ `StartStream` / `StopStream` / `StartRecord` / `StopRecord` は対応済み。入力種別と構成に制約あり ）
 
 1. `C -> S` StartStream
 2. `C -> S` StartRecord

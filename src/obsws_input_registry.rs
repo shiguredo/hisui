@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
@@ -178,6 +179,16 @@ pub struct ObswsStreamRun {
     pub encoded_track_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsRecordRun {
+    pub source_processor_id: String,
+    pub encoder_processor_id: String,
+    pub writer_processor_id: String,
+    pub source_track_id: String,
+    pub encoded_track_id: String,
+    pub output_path: PathBuf,
+}
+
 #[derive(Debug, Clone)]
 struct ObswsSceneItemState {
     input_uuid: String,
@@ -195,6 +206,13 @@ struct ObswsStreamRuntimeState {
     active: bool,
     started_at: Option<Instant>,
     run: Option<ObswsStreamRun>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ObswsRecordRuntimeState {
+    active: bool,
+    started_at: Option<Instant>,
+    run: Option<ObswsRecordRun>,
 }
 
 fn parse_optional_string_setting(
@@ -289,6 +307,11 @@ pub enum ActivateStreamError {
     AlreadyActive,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateRecordError {
+    AlreadyActive,
+}
+
 #[derive(Debug, Clone)]
 pub struct ObswsInputRegistry {
     inputs_by_uuid: BTreeMap<String, ObswsInputEntry>,
@@ -299,13 +322,43 @@ pub struct ObswsInputRegistry {
     next_input_id: u64,
     next_scene_id: u64,
     next_stream_run_id: u64,
+    next_record_run_id: u64,
     stream_service_settings: ObswsStreamServiceSettings,
     stream_runtime: ObswsStreamRuntimeState,
+    record_directory: PathBuf,
+    record_runtime: ObswsRecordRuntimeState,
 }
 
 impl ObswsInputRegistry {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(record_directory: PathBuf) -> Self {
+        let mut scenes_by_name = BTreeMap::new();
+        scenes_by_name.insert(
+            OBSWS_DEFAULT_SCENE_NAME.to_owned(),
+            ObswsSceneState {
+                scene_uuid: "10000000-0000-0000-0000-000000000000".to_owned(),
+                items: Vec::new(),
+            },
+        );
+        Self {
+            inputs_by_uuid: BTreeMap::new(),
+            uuids_by_name: BTreeMap::new(),
+            scenes_by_name,
+            scene_order: vec![OBSWS_DEFAULT_SCENE_NAME.to_owned()],
+            current_program_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
+            next_input_id: 0,
+            next_scene_id: 1,
+            next_stream_run_id: 0,
+            next_record_run_id: 0,
+            stream_service_settings: ObswsStreamServiceSettings::default(),
+            stream_runtime: ObswsStreamRuntimeState::default(),
+            record_directory,
+            record_runtime: ObswsRecordRuntimeState::default(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test() -> Self {
+        Self::new(PathBuf::from("recordings-for-test"))
     }
 
     pub fn list_inputs(&self) -> Vec<ObswsInputEntry> {
@@ -445,6 +498,15 @@ impl ObswsInputRegistry {
         run_id
     }
 
+    pub fn next_record_run_id(&mut self) -> u64 {
+        let run_id = self.next_record_run_id;
+        self.next_record_run_id = self
+            .next_record_run_id
+            .checked_add(1)
+            .expect("BUG: obsws record run id overflow");
+        run_id
+    }
+
     pub fn set_stream_service_settings(&mut self, settings: ObswsStreamServiceSettings) {
         self.stream_service_settings = settings;
     }
@@ -470,11 +532,62 @@ impl ObswsInputRegistry {
         self.stream_runtime.active
     }
 
+    pub fn stream_run(&self) -> Option<ObswsStreamRun> {
+        self.stream_runtime.run.clone()
+    }
+
     pub fn stream_uptime(&self) -> Duration {
         self.stream_runtime
             .started_at
             .map(|started_at| started_at.elapsed())
             .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn record_directory(&self) -> &Path {
+        &self.record_directory
+    }
+
+    pub fn set_record_directory(&mut self, record_directory: PathBuf) {
+        self.record_directory = record_directory;
+    }
+
+    pub fn activate_record(&mut self, run: ObswsRecordRun) -> Result<(), ActivateRecordError> {
+        if self.record_runtime.active {
+            return Err(ActivateRecordError::AlreadyActive);
+        }
+        self.record_runtime.active = true;
+        self.record_runtime.started_at = Some(Instant::now());
+        self.record_runtime.run = Some(run);
+        Ok(())
+    }
+
+    pub fn deactivate_record(&mut self) -> Option<ObswsRecordRun> {
+        let run = self.record_runtime.run.take();
+        self.record_runtime.active = false;
+        self.record_runtime.started_at = None;
+        run
+    }
+
+    pub fn is_record_active(&self) -> bool {
+        self.record_runtime.active
+    }
+
+    pub fn record_run(&self) -> Option<ObswsRecordRun> {
+        self.record_runtime.run.clone()
+    }
+
+    pub fn record_uptime(&self) -> Duration {
+        self.record_runtime
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn record_output_path(&self) -> Option<&Path> {
+        self.record_runtime
+            .run
+            .as_ref()
+            .map(|run| run.output_path.as_path())
     }
 
     pub fn remove_input(
@@ -537,31 +650,6 @@ impl ObswsInputRegistry {
     }
 }
 
-impl Default for ObswsInputRegistry {
-    fn default() -> Self {
-        let mut scenes_by_name = BTreeMap::new();
-        scenes_by_name.insert(
-            OBSWS_DEFAULT_SCENE_NAME.to_owned(),
-            ObswsSceneState {
-                scene_uuid: "10000000-0000-0000-0000-000000000000".to_owned(),
-                items: Vec::new(),
-            },
-        );
-        Self {
-            inputs_by_uuid: BTreeMap::new(),
-            uuids_by_name: BTreeMap::new(),
-            scenes_by_name,
-            scene_order: vec![OBSWS_DEFAULT_SCENE_NAME.to_owned()],
-            current_program_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
-            next_input_id: 0,
-            next_scene_id: 1,
-            next_stream_run_id: 0,
-            stream_service_settings: ObswsStreamServiceSettings::default(),
-            stream_runtime: ObswsStreamRuntimeState::default(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,7 +668,7 @@ mod tests {
 
     #[test]
     fn find_input_by_uuid_and_name() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         registry.insert_for_test(ObswsInputEntry::new_for_test(
             "input-uuid-1",
             "camera-1",
@@ -604,7 +692,7 @@ mod tests {
 
     #[test]
     fn supported_input_kinds_contains_expected_values() {
-        let registry = ObswsInputRegistry::new();
+        let registry = ObswsInputRegistry::new_for_test();
         assert!(registry.supported_input_kinds().contains(&"image_source"));
         assert!(
             registry
@@ -694,7 +782,7 @@ mod tests {
 
     #[test]
     fn create_input_succeeds_with_supported_values() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         let settings = parse_owned_json("{}");
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
@@ -709,7 +797,7 @@ mod tests {
 
     #[test]
     fn create_input_rejects_duplicate_name() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         let first_settings = parse_owned_json("{}");
         let first_input =
             ObswsInput::from_kind_and_settings("video_capture_device", first_settings.value())
@@ -730,7 +818,7 @@ mod tests {
 
     #[test]
     fn create_input_rejects_unsupported_scene_name() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         let settings = parse_owned_json("{}");
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
@@ -742,7 +830,7 @@ mod tests {
 
     #[test]
     fn remove_input_by_name_succeeds() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         let settings = parse_owned_json("{}");
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
@@ -761,7 +849,7 @@ mod tests {
 
     #[test]
     fn remove_input_by_uuid_succeeds() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         let settings = parse_owned_json("{}");
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
             .expect("input settings must be valid");
@@ -780,14 +868,14 @@ mod tests {
 
     #[test]
     fn remove_input_returns_none_when_not_found() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         let removed = registry.remove_input(None, Some("not-found"));
         assert!(removed.is_none());
     }
 
     #[test]
     fn scene_list_contains_default_scene() {
-        let registry = ObswsInputRegistry::new();
+        let registry = ObswsInputRegistry::new_for_test();
         let scenes = registry.list_scenes();
         assert_eq!(scenes.len(), 1);
         assert_eq!(scenes[0].scene_name, OBSWS_DEFAULT_SCENE_NAME);
@@ -801,7 +889,7 @@ mod tests {
 
     #[test]
     fn create_scene_and_set_current_program_scene_succeeds() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         let created = registry
             .create_scene("Scene B")
             .expect("scene creation must succeed");
@@ -820,7 +908,7 @@ mod tests {
 
     #[test]
     fn stream_runtime_state_changes_on_activate_and_deactivate() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         assert!(!registry.is_stream_active());
         assert_eq!(registry.stream_uptime(), Duration::ZERO);
 
@@ -843,7 +931,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "BUG: obsws input id exceeds 48-bit UUID suffix range")]
     fn create_input_panics_when_uuid_suffix_range_is_exhausted() {
-        let mut registry = ObswsInputRegistry::new();
+        let mut registry = ObswsInputRegistry::new_for_test();
         registry.next_input_id = OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX + 1;
         let settings = parse_owned_json("{}");
         let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
