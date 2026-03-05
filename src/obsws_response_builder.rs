@@ -1,10 +1,11 @@
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     CreateInputError, CreateSceneError, ObswsInput, ObswsInputRegistry, ObswsStreamServiceSettings,
-    ParseInputSettingsError, SetCurrentProgramSceneError,
+    ParseInputSettingsError, RemoveSceneError, SetCurrentProgramSceneError,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
+    OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
     OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION,
     OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
@@ -24,6 +25,10 @@ struct CreateSceneFields {
 }
 
 struct SetCurrentProgramSceneFields {
+    scene_name: String,
+}
+
+struct RemoveSceneFields {
     scene_name: String,
 }
 
@@ -108,6 +113,13 @@ fn parse_set_current_program_scene_fields(
 ) -> Result<SetCurrentProgramSceneFields, nojson::JsonParseError> {
     let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
     Ok(SetCurrentProgramSceneFields { scene_name })
+}
+
+fn parse_remove_scene_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<RemoveSceneFields, nojson::JsonParseError> {
+    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    Ok(RemoveSceneFields { scene_name })
 }
 
 fn parse_set_stream_service_settings_fields(
@@ -218,6 +230,157 @@ pub fn build_identified_message(negotiated_rpc_version: u32) -> String {
     .to_string()
 }
 
+pub fn build_stream_state_changed_event(output_active: bool) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "StreamStateChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_OUTPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| f.member("outputActive", output_active)),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_record_state_changed_event(output_active: bool, output_path: Option<&str>) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "RecordStateChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_OUTPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("outputActive", output_active)?;
+                        if let Some(output_path) = output_path {
+                            f.member("outputPath", output_path)?;
+                        }
+                        Ok(())
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_current_program_scene_changed_event(scene_name: &str, scene_uuid: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "CurrentProgramSceneChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SCENES)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_scene_created_event(scene_name: &str, scene_uuid: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "SceneCreated")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SCENES)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)?;
+                        f.member("isGroup", false)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_scene_removed_event(scene_name: &str, scene_uuid: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "SceneRemoved")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SCENES)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)?;
+                        f.member("isGroup", false)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_input_created_event(input_name: &str, input_uuid: &str, input_kind: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputCreated")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)?;
+                        f.member("inputKind", input_kind)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_input_removed_event(input_name: &str, input_uuid: &str, input_kind: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputRemoved")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)?;
+                        f.member("inputKind", input_kind)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_get_version_response(request_id: &str) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
@@ -247,6 +410,7 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetCanvasList",
                                 "GetSceneList",
                                 "CreateScene",
+                                "RemoveScene",
                                 "GetCurrentProgramScene",
                                 "SetCurrentProgramScene",
                                 "GetInputList",
@@ -535,6 +699,58 @@ pub fn build_create_scene_response(
                         f.member("sceneUuid", &created.scene_uuid)
                     }),
                 )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_remove_scene_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "RemoveScene",
+        request_id,
+        request_data,
+        parse_remove_scene_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    if let Err(error) = input_registry.remove_scene(&fields.scene_name) {
+        return match error {
+            RemoveSceneError::SceneNotFound => build_request_response_error(
+                "RemoveScene",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene not found",
+            ),
+            RemoveSceneError::LastSceneNotRemovable => build_request_response_error(
+                "RemoveScene",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "At least one scene must remain",
+            ),
+        };
+    }
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "RemoveScene")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
             }),
         )
     })
@@ -1136,6 +1352,65 @@ fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::obsws_input_registry::ObswsInputRegistry;
+
+    #[test]
+    fn build_stream_state_changed_event_contains_expected_fields() {
+        let event = build_stream_state_changed_event(true);
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let op: i64 = json
+            .value()
+            .to_member("op")
+            .expect("op access must succeed")
+            .required()
+            .expect("op must exist")
+            .try_into()
+            .expect("op must be i64");
+        let event_type: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventType")
+            .expect("eventType access must succeed")
+            .required()
+            .expect("eventType must exist")
+            .try_into()
+            .expect("eventType must be string");
+        let event_intent: u32 = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventIntent")
+            .expect("eventIntent access must succeed")
+            .required()
+            .expect("eventIntent must exist")
+            .try_into()
+            .expect("eventIntent must be u32");
+        let output_active: bool = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventData")
+            .expect("eventData access must succeed")
+            .required()
+            .expect("eventData must exist")
+            .to_member("outputActive")
+            .expect("outputActive access must succeed")
+            .required()
+            .expect("outputActive must exist")
+            .try_into()
+            .expect("outputActive must be bool");
+        assert_eq!(op, OBSWS_OP_EVENT);
+        assert_eq!(event_type, "StreamStateChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
+        assert!(output_active);
+    }
 
     #[test]
     fn build_stop_record_response_includes_output_path() {
@@ -1158,5 +1433,167 @@ mod tests {
             .try_into()
             .expect("outputPath must be string");
         assert_eq!(output_path, "/tmp/output.mp4");
+    }
+
+    #[test]
+    fn build_record_state_changed_event_includes_output_path_when_present() {
+        let event = build_record_state_changed_event(false, Some("/tmp/record.mp4"));
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let event_type: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventType")
+            .expect("eventType access must succeed")
+            .required()
+            .expect("eventType must exist")
+            .try_into()
+            .expect("eventType must be string");
+        let output_path: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventData")
+            .expect("eventData access must succeed")
+            .required()
+            .expect("eventData must exist")
+            .to_member("outputPath")
+            .expect("outputPath access must succeed")
+            .required()
+            .expect("outputPath must exist")
+            .try_into()
+            .expect("outputPath must be string");
+        assert_eq!(event_type, "RecordStateChanged");
+        assert_eq!(output_path, "/tmp/record.mp4");
+    }
+
+    #[test]
+    fn build_scene_events_contain_expected_fields() {
+        let created_event = build_scene_created_event("Scene A", "scene-uuid-a");
+        let removed_event = build_scene_removed_event("Scene B", "scene-uuid-b");
+
+        for (event, expected_type, expected_name) in [
+            (created_event, "SceneCreated", "Scene A"),
+            (removed_event, "SceneRemoved", "Scene B"),
+        ] {
+            let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+            let event_type: String = json
+                .value()
+                .to_member("d")
+                .expect("d access must succeed")
+                .required()
+                .expect("d must exist")
+                .to_member("eventType")
+                .expect("eventType access must succeed")
+                .required()
+                .expect("eventType must exist")
+                .try_into()
+                .expect("eventType must be string");
+            let scene_name: String = json
+                .value()
+                .to_member("d")
+                .expect("d access must succeed")
+                .required()
+                .expect("d must exist")
+                .to_member("eventData")
+                .expect("eventData access must succeed")
+                .required()
+                .expect("eventData must exist")
+                .to_member("sceneName")
+                .expect("sceneName access must succeed")
+                .required()
+                .expect("sceneName must exist")
+                .try_into()
+                .expect("sceneName must be string");
+            assert_eq!(event_type, expected_type);
+            assert_eq!(scene_name, expected_name);
+        }
+    }
+
+    #[test]
+    fn build_input_events_contain_expected_fields() {
+        let created_event = build_input_created_event("camera-1", "input-uuid-1", "image_source");
+        let removed_event = build_input_removed_event("camera-2", "input-uuid-2", "image_source");
+
+        for (event, expected_type, expected_name, expected_uuid) in [
+            (created_event, "InputCreated", "camera-1", "input-uuid-1"),
+            (removed_event, "InputRemoved", "camera-2", "input-uuid-2"),
+        ] {
+            let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+            let event_type: String = json
+                .value()
+                .to_member("d")
+                .expect("d access must succeed")
+                .required()
+                .expect("d must exist")
+                .to_member("eventType")
+                .expect("eventType access must succeed")
+                .required()
+                .expect("eventType must exist")
+                .try_into()
+                .expect("eventType must be string");
+            let event_data = json
+                .value()
+                .to_member("d")
+                .expect("d access must succeed")
+                .required()
+                .expect("d must exist")
+                .to_member("eventData")
+                .expect("eventData access must succeed")
+                .required()
+                .expect("eventData must exist");
+            let input_name: String = event_data
+                .to_member("inputName")
+                .expect("inputName access must succeed")
+                .required()
+                .expect("inputName must exist")
+                .try_into()
+                .expect("inputName must be string");
+            let input_uuid: String = event_data
+                .to_member("inputUuid")
+                .expect("inputUuid access must succeed")
+                .required()
+                .expect("inputUuid must exist")
+                .try_into()
+                .expect("inputUuid must be string");
+            assert_eq!(event_type, expected_type);
+            assert_eq!(input_name, expected_name);
+            assert_eq!(input_uuid, expected_uuid);
+        }
+    }
+
+    #[test]
+    fn build_remove_scene_response_succeeds_when_scene_exists() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        let request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+            .expect("requestData must be valid json");
+
+        let response =
+            build_remove_scene_response("req-remove-scene", Some(&request_data), &mut registry);
+        let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+        let result: bool = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("requestStatus")
+            .expect("requestStatus access must succeed")
+            .required()
+            .expect("requestStatus must exist")
+            .to_member("result")
+            .expect("result access must succeed")
+            .required()
+            .expect("result must exist")
+            .try_into()
+            .expect("result must be bool");
+        assert!(result);
     }
 }

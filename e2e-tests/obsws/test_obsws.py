@@ -19,6 +19,9 @@ import pytest
 from hisui_server import reserve_ephemeral_port
 
 OBSWS_SUBPROTOCOL = "obswebsocket.json"
+OBSWS_EVENT_SUB_SCENES = 1 << 2
+OBSWS_EVENT_SUB_INPUTS = 1 << 3
+OBSWS_EVENT_SUB_OUTPUTS = 1 << 6
 
 
 class ObswsServer:
@@ -275,6 +278,7 @@ async def _connect_and_exchange_identify(url: str):
 async def _identify_with_optional_password(
     ws: aiohttp.ClientWebSocketResponse,
     password: str | None,
+    event_subscriptions: int | None = None,
 ):
     hello_msg = await ws.receive(timeout=5.0)
     assert hello_msg.type == aiohttp.WSMsgType.TEXT
@@ -284,6 +288,8 @@ async def _identify_with_optional_password(
     assert hello_data["rpcVersion"] == 1
 
     identify_data: dict[str, object] = {"rpcVersion": 1}
+    if event_subscriptions is not None:
+        identify_data["eventSubscriptions"] = event_subscriptions
     if password is not None:
         authentication = hello_data["authentication"]
         identify_data["authentication"] = _build_obsws_authentication(
@@ -321,6 +327,44 @@ async def _send_obsws_request(
     assert response["d"]["requestType"] == request_type
     assert response["d"]["requestId"] == request_id
     return response
+
+
+async def _expect_stream_state_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    output_active: bool,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="StreamStateChanged",
+        event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+    )
+    assert event["d"]["eventData"]["outputActive"] is output_active
+
+
+async def _expect_obsws_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    event_type: str,
+    event_intent: int,
+):
+    event_msg = await ws.receive(timeout=5.0)
+    assert event_msg.type == aiohttp.WSMsgType.TEXT
+    event = json.loads(event_msg.data)
+    assert event["op"] == 5
+    event_data = event["d"]
+    assert event_data["eventType"] == event_type
+    assert event_data["eventIntent"] == event_intent
+    return event
+
+
+async def _assert_no_message_within(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    timeout: float,
+):
+    with pytest.raises(asyncio.TimeoutError):
+        await ws.receive(timeout=timeout)
 
 
 def _build_obsws_authentication(password: str, salt: str, challenge: str) -> str:
@@ -471,6 +515,44 @@ async def _connect_identify_and_expect_close_code(
         }
         assert ws.close_code == expected_close_code
         await ws.close()
+
+
+async def _setup_stream_input_and_service(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    image_path: Path,
+    output_url: str,
+    stream_key: str,
+):
+    create_input_response = await _send_obsws_request(
+        ws,
+        request_type="CreateInput",
+        request_id="req-create-image-input",
+        request_data={
+            "sceneName": "Scene",
+            "inputName": "obsws-image-input",
+            "inputKind": "image_source",
+            "inputSettings": {"file": str(image_path)},
+            "sceneItemEnabled": True,
+        },
+    )
+    create_input_status = create_input_response["d"]["requestStatus"]
+    assert create_input_status["result"] is True
+
+    set_stream_service_response = await _send_obsws_request(
+        ws,
+        request_type="SetStreamServiceSettings",
+        request_id="req-set-stream-service",
+        request_data={
+            "streamServiceType": "rtmp_custom",
+            "streamServiceSettings": {
+                "server": output_url,
+                "key": stream_key,
+            },
+        },
+    )
+    set_stream_service_status = set_stream_service_response["d"]["requestStatus"]
+    assert set_stream_service_status["result"] is True
 
 
 async def _connect_identify_and_send_reidentify_then_request(url: str):
@@ -695,6 +777,7 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetInputSettings" in response_data["availableRequests"]
         assert "CreateInput" in response_data["availableRequests"]
         assert "RemoveInput" in response_data["availableRequests"]
+        assert "RemoveScene" in response_data["availableRequests"]
         assert "GetSceneList" in response_data["availableRequests"]
         assert "SetStreamServiceSettings" in response_data["availableRequests"]
         assert "StartStream" in response_data["availableRequests"]
@@ -1372,6 +1455,425 @@ def test_obsws_rejects_reidentify_with_invalid_event_subscriptions(binary_path: 
                 1007,
             )
         )
+
+
+def test_obsws_stream_events_are_sent_when_outputs_subscription_enabled(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Outputs 購読時に StartStream / StopStream のイベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    rtmp_port, rtmp_sock = reserve_ephemeral_port()
+    rtmp_sock.close()
+
+    image_path = tmp_path / "event-enabled-input.png"
+    _write_test_png(image_path)
+    output_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
+    stream_key = "event-enabled-key"
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            await _setup_stream_input_and_service(
+                ws,
+                image_path=image_path,
+                output_url=output_url,
+                stream_key=stream_key,
+            )
+
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="StartStream",
+                request_id="req-start-stream-event-enabled",
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+            await _expect_stream_state_changed_event(ws, output_active=True)
+
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="StopStream",
+                request_id="req-stop-stream-event-enabled",
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
+            await _expect_stream_state_changed_event(ws, output_active=False)
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_stream_events_follow_reidentify_updates(binary_path: Path, tmp_path: Path):
+    """obsws が Reidentify 後に更新した Outputs 購読設定でイベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    rtmp_port, rtmp_sock = reserve_ephemeral_port()
+    rtmp_sock.close()
+
+    image_path = tmp_path / "event-reidentify-input.png"
+    _write_test_png(image_path)
+    output_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
+    stream_key = "event-reidentify-key"
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+            await _setup_stream_input_and_service(
+                ws,
+                image_path=image_path,
+                output_url=output_url,
+                stream_key=stream_key,
+            )
+
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="StartStream",
+                request_id="req-start-stream-event-reidentify",
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+            await _assert_no_message_within(ws, timeout=0.5)
+
+            await ws.send_str(
+                json.dumps(
+                    {"op": 3, "d": {"eventSubscriptions": OBSWS_EVENT_SUB_OUTPUTS}}
+                )
+            )
+            identified_msg = await ws.receive(timeout=5.0)
+            assert identified_msg.type == aiohttp.WSMsgType.TEXT
+            identified = json.loads(identified_msg.data)
+            assert identified["op"] == 2
+
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="StopStream",
+                request_id="req-stop-stream-event-reidentify",
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
+            await _expect_stream_state_changed_event(ws, output_active=False)
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_stream_events_are_not_sent_without_outputs_subscription(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Outputs 非購読時は StartStream / StopStream のイベントを送らないことを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    rtmp_port, rtmp_sock = reserve_ephemeral_port()
+    rtmp_sock.close()
+
+    image_path = tmp_path / "event-disabled-input.png"
+    _write_test_png(image_path)
+    output_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
+    stream_key = "event-disabled-key"
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+            await _setup_stream_input_and_service(
+                ws,
+                image_path=image_path,
+                output_url=output_url,
+                stream_key=stream_key,
+            )
+
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="StartStream",
+                request_id="req-start-stream-event-disabled",
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+            await _assert_no_message_within(ws, timeout=0.5)
+
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="StopStream",
+                request_id="req-stop-stream-event-disabled",
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
+            await _assert_no_message_within(ws, timeout=0.5)
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Outputs 購読時に StartRecord / StopRecord のイベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    image_path = tmp_path / "record-event-input.png"
+    _write_test_png(image_path)
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-record-event-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "record-event-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            start_record_response = await _send_obsws_request(
+                ws,
+                request_type="StartRecord",
+                request_id="req-start-record-event-enabled",
+            )
+            assert start_record_response["d"]["requestStatus"]["result"] is True
+            start_event = await _expect_obsws_event(
+                ws,
+                event_type="RecordStateChanged",
+                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            assert start_event["d"]["eventData"]["outputActive"] is True
+
+            stop_record_response = await _send_obsws_request(
+                ws,
+                request_type="StopRecord",
+                request_id="req-stop-record-event-enabled",
+            )
+            assert stop_record_response["d"]["requestStatus"]["result"] is True
+            stop_event = await _expect_obsws_event(
+                ws,
+                event_type="RecordStateChanged",
+                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            assert stop_event["d"]["eventData"]["outputActive"] is False
+            assert stop_event["d"]["eventData"]["outputPath"]
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(binary_path: Path):
+    """obsws が Scenes 購読時に Scene 関連イベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENES,
+            )
+            create_scene_response = await _send_obsws_request(
+                ws,
+                request_type="CreateScene",
+                request_id="req-create-scene-events",
+                request_data={"sceneName": "Scene B"},
+            )
+            assert create_scene_response["d"]["requestStatus"]["result"] is True
+            create_event = await _expect_obsws_event(
+                ws,
+                event_type="SceneCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert create_event["d"]["eventData"]["sceneName"] == "Scene B"
+
+            set_scene_response = await _send_obsws_request(
+                ws,
+                request_type="SetCurrentProgramScene",
+                request_id="req-set-current-program-scene-events",
+                request_data={"sceneName": "Scene B"},
+            )
+            assert set_scene_response["d"]["requestStatus"]["result"] is True
+            set_scene_event = await _expect_obsws_event(
+                ws,
+                event_type="CurrentProgramSceneChanged",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert set_scene_event["d"]["eventData"]["sceneName"] == "Scene B"
+
+            remove_scene_response = await _send_obsws_request(
+                ws,
+                request_type="RemoveScene",
+                request_id="req-remove-scene-events",
+                request_data={"sceneName": "Scene B"},
+            )
+            assert remove_scene_response["d"]["requestStatus"]["result"] is True
+            remove_event = await _expect_obsws_event(
+                ws,
+                event_type="SceneRemoved",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert remove_event["d"]["eventData"]["sceneName"] == "Scene B"
+            current_scene_event = await _expect_obsws_event(
+                ws,
+                event_type="CurrentProgramSceneChanged",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert current_scene_event["d"]["eventData"]["sceneName"] == "Scene"
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Inputs 購読時に Input 関連イベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    image_path = tmp_path / "input-event-input.png"
+    _write_test_png(image_path)
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_INPUTS,
+            )
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-events",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "input-event-camera",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+            create_event = await _expect_obsws_event(
+                ws,
+                event_type="InputCreated",
+                event_intent=OBSWS_EVENT_SUB_INPUTS,
+            )
+            assert create_event["d"]["eventData"]["inputName"] == "input-event-camera"
+
+            remove_input_response = await _send_obsws_request(
+                ws,
+                request_type="RemoveInput",
+                request_id="req-remove-input-events",
+                request_data={"inputName": "input-event-camera"},
+            )
+            assert remove_input_response["d"]["requestStatus"]["result"] is True
+            remove_event = await _expect_obsws_event(
+                ws,
+                event_type="InputRemoved",
+                event_intent=OBSWS_EVENT_SUB_INPUTS,
+            )
+            assert remove_event["d"]["eventData"]["inputName"] == "input-event-camera"
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_scene_events_follow_reidentify_updates(binary_path: Path):
+    """obsws が Reidentify 後の Scenes 購読設定変更をイベント送信へ反映することを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+            create_scene_response = await _send_obsws_request(
+                ws,
+                request_type="CreateScene",
+                request_id="req-create-scene-reidentify",
+                request_data={"sceneName": "Scene C"},
+            )
+            assert create_scene_response["d"]["requestStatus"]["result"] is True
+            await _assert_no_message_within(ws, timeout=0.5)
+
+            await ws.send_str(
+                json.dumps(
+                    {"op": 3, "d": {"eventSubscriptions": OBSWS_EVENT_SUB_SCENES}}
+                )
+            )
+            identified_msg = await ws.receive(timeout=5.0)
+            assert identified_msg.type == aiohttp.WSMsgType.TEXT
+            identified = json.loads(identified_msg.data)
+            assert identified["op"] == 2
+
+            set_scene_response = await _send_obsws_request(
+                ws,
+                request_type="SetCurrentProgramScene",
+                request_id="req-set-scene-reidentify",
+                request_data={"sceneName": "Scene C"},
+            )
+            assert set_scene_response["d"]["requestStatus"]["result"] is True
+            set_scene_event = await _expect_obsws_event(
+                ws,
+                event_type="CurrentProgramSceneChanged",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert set_scene_event["d"]["eventData"]["sceneName"] == "Scene C"
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
 
 
 def test_obsws_rejects_unsupported_rpc_version(binary_path: Path):

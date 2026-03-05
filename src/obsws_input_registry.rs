@@ -303,6 +303,12 @@ pub enum SetCurrentProgramSceneError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveSceneError {
+    SceneNotFound,
+    LastSceneNotRemovable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivateStreamError {
     AlreadyActive,
 }
@@ -427,6 +433,40 @@ impl ObswsInputRegistry {
         self.scene_order.push(scene_name.to_owned());
         Ok(ObswsSceneEntry {
             scene_index: self.scene_order.len().saturating_sub(1),
+            scene_name: scene_name.to_owned(),
+            scene_uuid,
+        })
+    }
+
+    pub fn remove_scene(&mut self, scene_name: &str) -> Result<ObswsSceneEntry, RemoveSceneError> {
+        if !self.scenes_by_name.contains_key(scene_name) {
+            return Err(RemoveSceneError::SceneNotFound);
+        }
+        if self.scene_order.len() <= 1 {
+            return Err(RemoveSceneError::LastSceneNotRemovable);
+        }
+
+        let Some(scene_index) = self.scene_order.iter().position(|name| name == scene_name) else {
+            return Err(RemoveSceneError::SceneNotFound);
+        };
+        let scene_uuid = self
+            .scenes_by_name
+            .remove(scene_name)
+            .map(|scene| scene.scene_uuid)
+            .ok_or(RemoveSceneError::SceneNotFound)?;
+        self.scene_order.retain(|name| name != scene_name);
+
+        if self.current_program_scene_name == scene_name {
+            let new_scene_name = self
+                .scene_order
+                .first()
+                .expect("infallible: at least one scene remains after scene deletion")
+                .clone();
+            self.current_program_scene_name = new_scene_name;
+        }
+
+        Ok(ObswsSceneEntry {
+            scene_index,
             scene_name: scene_name.to_owned(),
             scene_uuid,
         })
@@ -904,6 +944,56 @@ mod tests {
                 .map(|scene| scene.scene_name),
             Some("Scene B".to_owned())
         );
+    }
+
+    #[test]
+    fn remove_scene_removes_non_current_scene() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+
+        let removed = registry
+            .remove_scene("Scene B")
+            .expect("scene removal must succeed");
+        assert_eq!(removed.scene_name, "Scene B");
+        assert_eq!(registry.list_scenes().len(), 1);
+        assert_eq!(
+            registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some(OBSWS_DEFAULT_SCENE_NAME.to_owned())
+        );
+    }
+
+    #[test]
+    fn remove_scene_switches_current_program_scene_when_current_is_removed() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        registry
+            .set_current_program_scene("Scene B")
+            .expect("setting current scene must succeed");
+
+        registry
+            .remove_scene("Scene B")
+            .expect("scene removal must succeed");
+        assert_eq!(
+            registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some(OBSWS_DEFAULT_SCENE_NAME.to_owned())
+        );
+    }
+
+    #[test]
+    fn remove_scene_rejects_deleting_last_scene() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let error = registry
+            .remove_scene(OBSWS_DEFAULT_SCENE_NAME)
+            .expect_err("last scene removal must fail");
+        assert_eq!(error, RemoveSceneError::LastSceneNotRemovable);
     }
 
     #[test]

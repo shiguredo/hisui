@@ -37,9 +37,20 @@
 - [x] メッセージ検証エラーの切断: 不正 payload や未対応 opcode は close する
 - [x] `Reidentify (op=3)`: 既存セッションの再設定を受け付ける
   - NOTE: 成功時は `Identified (op=2)` を返す
-  - NOTE: `eventSubscriptions` は現時点で構文検証のみ行い、購読状態への反映は未実装
-- [ ] Event 配信（ `op=5` ）: サーバーイベントを push 配信する
+  - NOTE: `eventSubscriptions` は保持し、対応済みイベントの配信判定に利用する
+- [x] Event 配信（ `op=5` ）基盤: サーバーイベントを push 配信する
+  - NOTE: 現在は `eventSubscriptions` の Outputs / Scenes / Inputs ビット購読時に対応イベントを配信する
 - [ ] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
+
+## 対応すべきイベント一覧
+
+- [x] `StreamStateChanged`: 配信出力状態の変化を通知する
+- [x] `RecordStateChanged`: 録画出力状態の変化を通知する
+- [x] `CurrentProgramSceneChanged`: 現在 Program Scene の変更を通知する
+- [x] `SceneCreated`: Scene 作成を通知する
+- [x] `SceneRemoved`: Scene 削除を通知する
+- [x] `InputCreated`: Input 作成を通知する
+- [x] `InputRemoved`: Input 削除を通知する
 
 ## RequestType 実装状況
 
@@ -107,7 +118,9 @@
 - [ ] `GetCurrentPreviewScene`: 現在の Preview Scene を取得する
 - [ ] `SetCurrentPreviewScene`: Preview Scene を切り替える
 - [x] `CreateScene`: シーンを作成する
-- [ ] `RemoveScene`: シーンを削除する
+- [x] `RemoveScene`: シーンを削除する
+  - NOTE: 最後の 1 Scene は削除不可
+  - NOTE: 現在 Program Scene を削除した場合は残存 Scene へ自動切替する
 - [ ] `SetSceneName`: シーン名を変更する
 - [ ] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
 - [ ] `SetSceneSceneTransitionOverride`: シーン遷移上書き設定を更新する

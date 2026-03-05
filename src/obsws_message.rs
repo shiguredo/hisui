@@ -18,6 +18,7 @@ pub enum ClientMessage {
 pub struct IdentifyMessage {
     pub rpc_version: u32,
     pub authentication: Option<String>,
+    pub event_subscriptions: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,9 +74,12 @@ pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
             let d_value = value.to_member("d")?.required()?;
             let rpc_version: u32 = d_value.to_member("rpcVersion")?.required()?.try_into()?;
             let authentication: Option<String> = d_value.to_member("authentication")?.try_into()?;
+            let event_subscriptions: Option<u32> =
+                d_value.to_member("eventSubscriptions")?.try_into()?;
             Ok(ClientMessage::Identify(IdentifyMessage {
                 rpc_version,
                 authentication,
+                event_subscriptions,
             }))
         }
         OBSWS_OP_REIDENTIFY => {
@@ -139,18 +143,6 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
-        "SetCurrentProgramScene" => {
-            crate::obsws_response_builder::build_set_current_program_scene_response(
-                &request_id,
-                request.request_data.as_ref(),
-                input_registry,
-            )
-        }
-        "CreateScene" => crate::obsws_response_builder::build_create_scene_response(
-            &request_id,
-            request.request_data.as_ref(),
-            input_registry,
-        ),
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
             input_registry,
@@ -160,16 +152,6 @@ pub fn handle_request_message(
             input_registry,
         ),
         "GetInputSettings" => crate::obsws_response_builder::build_get_input_settings_response(
-            &request_id,
-            request.request_data.as_ref(),
-            input_registry,
-        ),
-        "CreateInput" => crate::obsws_response_builder::build_create_input_response(
-            &request_id,
-            request.request_data.as_ref(),
-            input_registry,
-        ),
-        "RemoveInput" => crate::obsws_response_builder::build_remove_input_response(
             &request_id,
             request.request_data.as_ref(),
             input_registry,
@@ -224,7 +206,6 @@ mod tests {
     };
     use crate::obsws_protocol::{
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-        REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
         REQUEST_STATUS_SUCCESS,
     };
 
@@ -244,22 +225,6 @@ mod tests {
 
     fn request_data(json: &str) -> nojson::RawJsonOwned {
         nojson::RawJsonOwned::parse(json).expect("requestData must be valid json")
-    }
-
-    fn parse_request_status(
-        response_message: &str,
-    ) -> Result<(bool, i64, String), Box<dyn std::error::Error>> {
-        let json = nojson::RawJson::parse(response_message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        let comment: String = status.to_member("comment")?.required()?.try_into()?;
-        Ok((result, code, comment))
     }
 
     #[test]
@@ -285,6 +250,7 @@ mod tests {
             ClientMessage::Identify(IdentifyMessage {
                 rpc_version: 1,
                 authentication: None,
+                event_subscriptions: None,
             })
         );
     }
@@ -298,6 +264,21 @@ mod tests {
             ClientMessage::Identify(IdentifyMessage {
                 rpc_version: 1,
                 authentication: Some("test-auth".to_owned()),
+                event_subscriptions: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_client_message_accepts_identify_with_event_subscriptions() {
+        let message = r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#;
+        let parsed = parse_client_message(message).expect("identify message must be accepted");
+        assert_eq!(
+            parsed,
+            ClientMessage::Identify(IdentifyMessage {
+                rpc_version: 1,
+                authentication: None,
+                event_subscriptions: Some(64),
             })
         );
     }
@@ -307,6 +288,13 @@ mod tests {
         let message = r#"{"op":1,"d":{}}"#;
         let error = parse_client_message(message).expect_err("identify without rpcVersion");
         assert!(error.display().contains("rpcVersion"));
+    }
+
+    #[test]
+    fn parse_client_message_rejects_identify_with_invalid_event_subscriptions() {
+        let message = r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":"invalid"}}"#;
+        let error = parse_client_message(message).expect_err("identify must reject invalid type");
+        assert!(!error.display().is_empty());
     }
 
     #[test]
@@ -448,6 +436,7 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "CreateInput"));
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
+        assert!(available_requests.iter().any(|r| r == "RemoveScene"));
         assert!(
             available_requests
                 .iter()
@@ -625,331 +614,37 @@ mod tests {
     }
 
     #[test]
-    fn handle_request_message_returns_create_input_response()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-1".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        let input_uuid: String = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("responseData")?
-            .required()?
-            .to_member("inputUuid")?
-            .required()?
-            .try_into()?;
-        assert!(result);
-        assert_eq!(code, REQUEST_STATUS_SUCCESS);
-        assert!(!input_uuid.is_empty());
-        assert!(input_registry.find_input(Some(&input_uuid), None).is_some());
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_error_when_create_input_is_missing_scene_name()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-missing-scene-name".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"inputName":"camera-2","inputKind":"video_capture_device","inputSettings":{}}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-
-        let (result, code, comment) = parse_request_status(&response.message)?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
-        assert!(comment.contains("required member"));
-        assert!(comment.contains("is missing"));
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_error_when_create_input_is_missing_input_name()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-missing-input-name".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"sceneName":"Scene","inputKind":"video_capture_device","inputSettings":{}}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-
-        let (result, code, comment) = parse_request_status(&response.message)?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
-        assert!(comment.contains("required member"));
-        assert!(comment.contains("is missing"));
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_error_when_create_input_is_missing_input_kind()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-missing-input-kind".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"sceneName":"Scene","inputName":"camera-2","inputSettings":{}}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-
-        let (result, code, comment) = parse_request_status(&response.message)?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
-        assert!(comment.contains("required member"));
-        assert!(comment.contains("is missing"));
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_duplicate_error_for_create_input()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-dup".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"sceneName":"Scene","inputName":"input-name-1","inputKind":"video_capture_device","inputSettings":{}}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS);
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_not_found_error_for_unsupported_scene_name()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-invalid-scene".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"sceneName":"custom-scene","inputName":"input-name-2","inputKind":"video_capture_device","inputSettings":{}}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_rejects_non_object_input_settings_for_create_input()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-invalid-settings-1".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"sceneName":"Scene","inputName":"camera-invalid","inputKind":"video_capture_device","inputSettings":null}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        let comment: String = status.to_member("comment")?.required()?.try_into()?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
-        assert!(comment.contains("Invalid inputSettings field"));
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_rejects_invalid_known_input_settings_field_type()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-invalid-settings-2".to_owned()),
-            request_type: Some("CreateInput".to_owned()),
-            request_data: Some(request_data(
-                r#"{"sceneName":"Scene","inputName":"camera-invalid-2","inputKind":"video_capture_device","inputSettings":{"device_id":1}}"#,
-            )),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        let comment: String = status.to_member("comment")?.required()?.try_into()?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
-        assert!(comment.contains("inputSettings.device_id"));
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_remove_input_response()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-remove-1".to_owned()),
-            request_type: Some("RemoveInput".to_owned()),
-            request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        assert!(result);
-        assert_eq!(code, REQUEST_STATUS_SUCCESS);
-        assert!(
-            input_registry
-                .find_input(None, Some("input-name-1"))
-                .is_none()
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_not_found_error_for_remove_input()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-remove-2".to_owned()),
-            request_type: Some("RemoveInput".to_owned()),
-            request_data: Some(request_data(r#"{"inputName":"not-found"}"#)),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_create_scene_response()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-create-scene-1".to_owned()),
-            request_type: Some("CreateScene".to_owned()),
-            request_data: Some(request_data(r#"{"sceneName":"Scene B"}"#)),
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        assert!(result);
-        assert_eq!(code, REQUEST_STATUS_SUCCESS);
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_set_current_program_scene_response()
+    fn handle_request_message_returns_unknown_request_type_for_session_handled_requests()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let create_scene_request = RequestMessage {
-            request_id: Some("req-create-scene-2".to_owned()),
-            request_type: Some("CreateScene".to_owned()),
-            request_data: Some(request_data(r#"{"sceneName":"Scene B"}"#)),
-        };
-        let _ = handle_request_message(create_scene_request, &session_stats, &mut input_registry);
+        let request_types = [
+            "SetCurrentProgramScene",
+            "CreateScene",
+            "RemoveScene",
+            "CreateInput",
+            "RemoveInput",
+        ];
 
-        let set_scene_request = RequestMessage {
-            request_id: Some("req-set-scene-1".to_owned()),
-            request_type: Some("SetCurrentProgramScene".to_owned()),
-            request_data: Some(request_data(r#"{"sceneName":"Scene B"}"#)),
-        };
-        let response =
-            handle_request_message(set_scene_request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
-        let status = json
-            .value()
-            .to_member("d")?
-            .required()?
-            .to_member("requestStatus")?
-            .required()?;
-        let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let code: i64 = status.to_member("code")?.required()?.try_into()?;
-        assert!(result);
-        assert_eq!(code, REQUEST_STATUS_SUCCESS);
+        for request_type in request_types {
+            let request = RequestMessage {
+                request_id: Some("req-session-handled".to_owned()),
+                request_type: Some(request_type.to_owned()),
+                request_data: Some(request_data(r#"{"dummy":"value"}"#)),
+            };
+            let mut input_registry = input_registry();
+            let response = handle_request_message(request, &session_stats, &mut input_registry);
+            let json = nojson::RawJson::parse(&response.message)?;
+            let status = json
+                .value()
+                .to_member("d")?
+                .required()?
+                .to_member("requestStatus")?
+                .required()?;
+            let result: bool = status.to_member("result")?.required()?.try_into()?;
+            let code: i64 = status.to_member("code")?.required()?.try_into()?;
+            assert!(!result);
+            assert_eq!(code, REQUEST_STATUS_UNKNOWN_REQUEST_TYPE);
+        }
         Ok(())
     }
 

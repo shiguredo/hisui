@@ -14,13 +14,17 @@ use crate::obsws_input_registry::{
 use crate::obsws_message::{ClientMessage, ObswsSessionStats};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
-    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
+    OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
     REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_OUTPUT_RUNNING,
     REQUEST_STATUS_STREAM_NOT_RUNNING, REQUEST_STATUS_STREAM_RUNNING,
 };
 
 pub enum SessionAction {
+    SendTexts {
+        messages: Vec<(String, &'static str)>,
+    },
     SendText {
         text: String,
         message_name: &'static str,
@@ -39,9 +43,16 @@ enum ObswsSessionState {
     Identified,
 }
 
+struct RequestOutcome {
+    response_text: String,
+    success: bool,
+    output_path: Option<String>,
+}
+
 pub struct ObswsSession {
     state: ObswsSessionState,
     negotiated_rpc_version: Option<u32>,
+    event_subscriptions: u32,
     auth: Option<ObswsAuthentication>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
@@ -57,6 +68,7 @@ impl ObswsSession {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
             negotiated_rpc_version: None,
+            event_subscriptions: 0,
             auth,
             input_registry,
             pipeline_handle,
@@ -144,6 +156,7 @@ impl ObswsSession {
 
         self.state = ObswsSessionState::Identified;
         self.negotiated_rpc_version = Some(identify.rpc_version);
+        self.event_subscriptions = identify.event_subscriptions.unwrap_or(0);
         SessionAction::SendText {
             text: crate::obsws_message::build_identified_message(identify.rpc_version),
             message_name: "identified message",
@@ -152,7 +165,7 @@ impl ObswsSession {
 
     fn handle_reidentify(
         &mut self,
-        _reidentify: crate::obsws_message::ReidentifyMessage,
+        reidentify: crate::obsws_message::ReidentifyMessage,
     ) -> SessionAction {
         if self.state != ObswsSessionState::Identified {
             return SessionAction::Close {
@@ -160,6 +173,9 @@ impl ObswsSession {
                 reason: "identify is required",
                 close_error_context: "failed to close websocket for unidentified reidentify",
             };
+        }
+        if let Some(event_subscriptions) = reidentify.event_subscriptions {
+            self.event_subscriptions = event_subscriptions;
         }
 
         let negotiated_rpc_version = self
@@ -209,28 +225,48 @@ impl ObswsSession {
         }
 
         if request_type == "StartStream" {
-            return SessionAction::SendText {
-                text: self.handle_start_stream(&request_id).await,
-                message_name: "request response message",
-            };
+            let outcome = self.handle_start_stream(&request_id).await;
+            return self.build_stream_state_changed_action(outcome, true);
         }
         if request_type == "StopStream" {
-            return SessionAction::SendText {
-                text: self.handle_stop_stream(&request_id).await,
-                message_name: "request response message",
-            };
+            let outcome = self.handle_stop_stream(&request_id).await;
+            return self.build_stream_state_changed_action(outcome, false);
         }
         if request_type == "StartRecord" {
-            return SessionAction::SendText {
-                text: self.handle_start_record(&request_id).await,
-                message_name: "request response message",
-            };
+            let outcome = self.handle_start_record(&request_id).await;
+            return self.build_record_state_changed_action(outcome, true);
         }
         if request_type == "StopRecord" {
-            return SessionAction::SendText {
-                text: self.handle_stop_record(&request_id).await,
-                message_name: "request response message",
-            };
+            let outcome = self.handle_stop_record(&request_id).await;
+            return self.build_record_state_changed_action(outcome, false);
+        }
+        if request_type == "SetCurrentProgramScene" {
+            return self
+                .handle_set_current_program_scene_request(
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await;
+        }
+        if request_type == "CreateScene" {
+            return self
+                .handle_create_scene_request(&request_id, request.request_data.as_ref())
+                .await;
+        }
+        if request_type == "RemoveScene" {
+            return self
+                .handle_remove_scene_request(&request_id, request.request_data.as_ref())
+                .await;
+        }
+        if request_type == "CreateInput" {
+            return self
+                .handle_create_input_request(&request_id, request.request_data.as_ref())
+                .await;
+        }
+        if request_type == "RemoveInput" {
+            return self
+                .handle_remove_input_request(&request_id, request.request_data.as_ref())
+                .await;
         }
 
         let mut input_registry = self.input_registry.write().await;
@@ -242,52 +278,449 @@ impl ObswsSession {
         }
     }
 
-    async fn handle_start_stream(&self, request_id: &str) -> String {
+    fn build_stream_state_changed_action(
+        &self,
+        outcome: RequestOutcome,
+        output_active: bool,
+    ) -> SessionAction {
+        let response_text = outcome.response_text;
+        if !outcome.success || !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text =
+            crate::obsws_response_builder::build_stream_state_changed_event(output_active);
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    fn is_event_subscription_enabled(&self, event_flag: u32) -> bool {
+        (self.event_subscriptions & event_flag) != 0
+    }
+
+    fn parse_required_non_empty_string_request_field(
+        request_data: Option<&nojson::RawJsonOwned>,
+        field_name: &str,
+    ) -> Option<String> {
+        let request_data = request_data?;
+        let value: Option<String> = request_data
+            .value()
+            .to_member(field_name)
+            .ok()?
+            .try_into()
+            .ok()?;
+        let value = value?;
+        if value.is_empty() {
+            return None;
+        }
+        Some(value)
+    }
+
+    fn parse_input_lookup_fields(
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> Option<(Option<String>, Option<String>)> {
+        let request_data = request_data?;
+        let input_uuid: Option<String> = request_data
+            .value()
+            .to_member("inputUuid")
+            .ok()?
+            .try_into()
+            .ok()?;
+        let input_name: Option<String> = request_data
+            .value()
+            .to_member("inputName")
+            .ok()?
+            .try_into()
+            .ok()?;
+        let input_uuid = input_uuid.filter(|v| !v.is_empty());
+        let input_name = input_name.filter(|v| !v.is_empty());
+        if input_uuid.is_none() && input_name.is_none() {
+            return None;
+        }
+        Some((input_uuid, input_name))
+    }
+
+    fn build_record_state_changed_action(
+        &self,
+        outcome: RequestOutcome,
+        output_active: bool,
+    ) -> SessionAction {
+        let response_text = outcome.response_text;
+        if !outcome.success || !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text = crate::obsws_response_builder::build_record_state_changed_event(
+            output_active,
+            outcome.output_path.as_deref(),
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_set_current_program_scene_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let previous_scene_name = input_registry
+            .current_program_scene()
+            .map(|scene| scene.scene_name);
+        let response_text = crate::obsws_response_builder::build_set_current_program_scene_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some(current_scene) = input_registry.current_program_scene() else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        if previous_scene_name.as_deref() == Some(current_scene.scene_name.as_str()) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text = crate::obsws_response_builder::build_current_program_scene_changed_event(
+            &current_scene.scene_name,
+            &current_scene.scene_uuid,
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_create_scene_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let requested_scene_name =
+            Self::parse_required_non_empty_string_request_field(request_data, "sceneName");
+        let existed_before = requested_scene_name.as_deref().is_some_and(|scene_name| {
+            input_registry
+                .list_scenes()
+                .into_iter()
+                .any(|scene| scene.scene_name == scene_name)
+        });
+        let response_text = crate::obsws_response_builder::build_create_scene_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        if existed_before {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some(requested_scene_name) = requested_scene_name else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let Some(created_scene) = input_registry
+            .list_scenes()
+            .into_iter()
+            .find(|scene| scene.scene_name == requested_scene_name)
+        else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+
+        let event_text = crate::obsws_response_builder::build_scene_created_event(
+            &created_scene.scene_name,
+            &created_scene.scene_uuid,
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_remove_scene_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let target_scene_name =
+            Self::parse_required_non_empty_string_request_field(request_data, "sceneName");
+        let removed_scene = target_scene_name.as_deref().and_then(|scene_name| {
+            input_registry
+                .list_scenes()
+                .into_iter()
+                .find(|scene| scene.scene_name == scene_name)
+        });
+        let previous_current_scene_name = input_registry
+            .current_program_scene()
+            .map(|scene| scene.scene_name);
+        let response_text = crate::obsws_response_builder::build_remove_scene_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some(removed_scene) = removed_scene else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let removed_succeeded = input_registry
+            .list_scenes()
+            .into_iter()
+            .all(|scene| scene.scene_uuid != removed_scene.scene_uuid);
+        if !removed_succeeded {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let mut messages = vec![
+            (response_text, "request response message"),
+            (
+                crate::obsws_response_builder::build_scene_removed_event(
+                    &removed_scene.scene_name,
+                    &removed_scene.scene_uuid,
+                ),
+                "event message",
+            ),
+        ];
+        if previous_current_scene_name.as_deref() == Some(removed_scene.scene_name.as_str())
+            && let Some(current_scene) = input_registry.current_program_scene()
+        {
+            messages.push((
+                crate::obsws_response_builder::build_current_program_scene_changed_event(
+                    &current_scene.scene_name,
+                    &current_scene.scene_uuid,
+                ),
+                "event message",
+            ));
+        }
+
+        SessionAction::SendTexts { messages }
+    }
+
+    async fn handle_create_input_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let requested_input_name =
+            Self::parse_required_non_empty_string_request_field(request_data, "inputName");
+        let existed_before = requested_input_name
+            .as_deref()
+            .is_some_and(|input_name| input_registry.find_input(None, Some(input_name)).is_some());
+        let response_text = crate::obsws_response_builder::build_create_input_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        if existed_before {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some(requested_input_name) = requested_input_name else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let Some(created_input) = input_registry
+            .find_input(None, Some(requested_input_name.as_str()))
+            .cloned()
+        else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let event_text = crate::obsws_response_builder::build_input_created_event(
+            &created_input.input_name,
+            &created_input.input_uuid,
+            created_input.input.kind_name(),
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_remove_input_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let removed_input =
+            Self::parse_input_lookup_fields(request_data).and_then(|(input_uuid, input_name)| {
+                input_registry
+                    .find_input(input_uuid.as_deref(), input_name.as_deref())
+                    .cloned()
+            });
+        let response_text = crate::obsws_response_builder::build_remove_input_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some(removed_input) = removed_input else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let removed_succeeded = input_registry
+            .find_input(Some(&removed_input.input_uuid), None)
+            .is_none();
+        if !removed_succeeded {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text = crate::obsws_response_builder::build_input_removed_event(
+            &removed_input.input_name,
+            &removed_input.input_uuid,
+            removed_input.input.kind_name(),
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_start_stream(&self, request_id: &str) -> RequestOutcome {
         let (output_url, stream_name, image_path, run) = {
             let mut input_registry = self.input_registry.write().await;
             let stream_service_settings = input_registry.stream_service_settings().clone();
             if stream_service_settings.stream_service_type != "rtmp_custom" {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartStream",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Unsupported streamServiceType field",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartStream",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Unsupported streamServiceType field",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             }
             let Some(output_url) = stream_service_settings.server else {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartStream",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing streamServiceSettings.server field",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartStream",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Missing streamServiceSettings.server field",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             };
 
             let scene_inputs = input_registry.list_current_program_scene_inputs();
             if scene_inputs.len() != 1 {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartStream",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Exactly one enabled input is required in the current program scene",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartStream",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Exactly one enabled input is required in the current program scene",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             }
             let input = &scene_inputs[0];
             let ObswsInputSettings::ImageSource(settings) = &input.input.settings else {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartStream",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Only image_source is supported for StartStream",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartStream",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Only image_source is supported for StartStream",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             };
             let Some(image_path) = settings.file.clone() else {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartStream",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "inputSettings.file is required for image_source",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartStream",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "inputSettings.file is required for image_source",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             };
 
             let run_id = input_registry.next_stream_run_id();
@@ -306,12 +739,16 @@ impl ObswsSession {
             if let Err(ActivateStreamError::AlreadyActive) =
                 input_registry.activate_stream(run.clone())
             {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartStream",
-                    request_id,
-                    REQUEST_STATUS_STREAM_RUNNING,
-                    "Stream is already active",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartStream",
+                        request_id,
+                        REQUEST_STATUS_STREAM_RUNNING,
+                        "Stream is already active",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             }
 
             (output_url, stream_service_settings.key, image_path, run)
@@ -329,73 +766,105 @@ impl ObswsSession {
                     cleanup_error.display()
                 );
             }
-            return Self::build_internal_error_response(
-                "StartStream",
-                request_id,
-                &format!("Failed to start stream: {}", e.display()),
-            );
+            return RequestOutcome {
+                response_text: Self::build_internal_error_response(
+                    "StartStream",
+                    request_id,
+                    &format!("Failed to start stream: {}", e.display()),
+                ),
+                success: false,
+                output_path: None,
+            };
         }
 
-        crate::obsws_response_builder::build_start_stream_response(request_id)
+        RequestOutcome {
+            response_text: crate::obsws_response_builder::build_start_stream_response(request_id),
+            success: true,
+            output_path: None,
+        }
     }
 
-    async fn handle_stop_stream(&self, request_id: &str) -> String {
+    async fn handle_stop_stream(&self, request_id: &str) -> RequestOutcome {
         let run = {
             let input_registry = self.input_registry.read().await;
             if !input_registry.is_stream_active() {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StopStream",
-                    request_id,
-                    REQUEST_STATUS_STREAM_NOT_RUNNING,
-                    "Stream is not active",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StopStream",
+                        request_id,
+                        REQUEST_STATUS_STREAM_NOT_RUNNING,
+                        "Stream is not active",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             }
             input_registry
                 .stream_run()
                 .expect("infallible: active stream must have run state")
         };
         if let Err(e) = self.stop_stream_processors(&run).await {
-            return Self::build_internal_error_response(
-                "StopStream",
-                request_id,
-                &format!("Failed to stop stream: {}", e.display()),
-            );
+            return RequestOutcome {
+                response_text: Self::build_internal_error_response(
+                    "StopStream",
+                    request_id,
+                    &format!("Failed to stop stream: {}", e.display()),
+                ),
+                success: false,
+                output_path: None,
+            };
         }
         let mut input_registry = self.input_registry.write().await;
         if input_registry.deactivate_stream().is_none() {
             tracing::warn!("stream runtime was already deactivated while stopping stream");
         }
-        crate::obsws_response_builder::build_stop_stream_response(request_id)
+        RequestOutcome {
+            response_text: crate::obsws_response_builder::build_stop_stream_response(request_id),
+            success: true,
+            output_path: None,
+        }
     }
 
-    async fn handle_start_record(&self, request_id: &str) -> String {
+    async fn handle_start_record(&self, request_id: &str) -> RequestOutcome {
         let (image_path, output_path, run) = {
             let mut input_registry = self.input_registry.write().await;
             let scene_inputs = input_registry.list_current_program_scene_inputs();
             if scene_inputs.len() != 1 {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartRecord",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Exactly one enabled input is required in the current program scene",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartRecord",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Exactly one enabled input is required in the current program scene",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             }
             let input = &scene_inputs[0];
             let ObswsInputSettings::ImageSource(settings) = &input.input.settings else {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartRecord",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Only image_source is supported for StartRecord",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartRecord",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Only image_source is supported for StartRecord",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             };
             let Some(image_path) = settings.file.clone() else {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartRecord",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "inputSettings.file is required for image_source",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartRecord",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "inputSettings.file is required for image_source",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             };
             let run_id = input_registry.next_record_run_id();
             let source_processor_id = format!("obsws:record:{run_id}:png_source");
@@ -421,12 +890,16 @@ impl ObswsSession {
             if let Err(ActivateRecordError::AlreadyActive) =
                 input_registry.activate_record(run.clone())
             {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StartRecord",
-                    request_id,
-                    REQUEST_STATUS_OUTPUT_RUNNING,
-                    "Record is already active",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StartRecord",
+                        request_id,
+                        REQUEST_STATUS_OUTPUT_RUNNING,
+                        "Record is already active",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             }
             (image_path, output_path, run)
         };
@@ -435,11 +908,15 @@ impl ObswsSession {
             && let Err(e) = std::fs::create_dir_all(parent)
         {
             let _ = self.input_registry.write().await.deactivate_record();
-            return Self::build_internal_error_response(
-                "StartRecord",
-                request_id,
-                &format!("Failed to create record directory: {e}"),
-            );
+            return RequestOutcome {
+                response_text: Self::build_internal_error_response(
+                    "StartRecord",
+                    request_id,
+                    &format!("Failed to create record directory: {e}"),
+                ),
+                success: false,
+                output_path: None,
+            };
         }
 
         let start_result = self
@@ -453,46 +930,67 @@ impl ObswsSession {
                     cleanup_error.display()
                 );
             }
-            return Self::build_internal_error_response(
-                "StartRecord",
-                request_id,
-                &format!("Failed to start record: {}", e.display()),
-            );
+            return RequestOutcome {
+                response_text: Self::build_internal_error_response(
+                    "StartRecord",
+                    request_id,
+                    &format!("Failed to start record: {}", e.display()),
+                ),
+                success: false,
+                output_path: None,
+            };
         }
 
-        crate::obsws_response_builder::build_start_record_response(request_id)
+        RequestOutcome {
+            response_text: crate::obsws_response_builder::build_start_record_response(request_id),
+            success: true,
+            output_path: None,
+        }
     }
 
-    async fn handle_stop_record(&self, request_id: &str) -> String {
+    async fn handle_stop_record(&self, request_id: &str) -> RequestOutcome {
         let run = {
             let input_registry = self.input_registry.read().await;
             if !input_registry.is_record_active() {
-                return crate::obsws_response_builder::build_request_response_error(
-                    "StopRecord",
-                    request_id,
-                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                    "Record is not active",
-                );
+                return RequestOutcome {
+                    response_text: crate::obsws_response_builder::build_request_response_error(
+                        "StopRecord",
+                        request_id,
+                        REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        "Record is not active",
+                    ),
+                    success: false,
+                    output_path: None,
+                };
             }
             input_registry
                 .record_run()
                 .expect("infallible: active record must have run state")
         };
         if let Err(e) = self.stop_record_processors(&run).await {
-            return Self::build_internal_error_response(
-                "StopRecord",
-                request_id,
-                &format!("Failed to stop record: {}", e.display()),
-            );
+            return RequestOutcome {
+                response_text: Self::build_internal_error_response(
+                    "StopRecord",
+                    request_id,
+                    &format!("Failed to stop record: {}", e.display()),
+                ),
+                success: false,
+                output_path: None,
+            };
         }
         let mut input_registry = self.input_registry.write().await;
         if input_registry.deactivate_record().is_none() {
             tracing::warn!("record runtime was already deactivated while stopping record");
         }
-        crate::obsws_response_builder::build_stop_record_response(
-            request_id,
-            &run.output_path.display().to_string(),
-        )
+        let output_path = run.output_path.display().to_string();
+        RequestOutcome {
+            response_text: crate::obsws_response_builder::build_stop_record_response(
+                request_id,
+                &output_path,
+            ),
+            success: true,
+            output_path: Some(output_path),
+        }
     }
 
     async fn start_stream_processors(
@@ -751,8 +1249,9 @@ mod tests {
     use crate::obsws_message::RequestMessage;
     use crate::obsws_protocol::{
         OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED,
-        OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
-        REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+        OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS,
+        OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+        REQUEST_STATUS_OUTPUT_NOT_RUNNING,
     };
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -813,6 +1312,65 @@ mod tests {
             .try_into()
             .expect("negotiatedRpcVersion must be u32");
         (op, negotiated_rpc_version)
+    }
+
+    fn parse_stream_state_changed_event(text: &str) -> (i64, String, u32, bool) {
+        let (op, event_type, event_intent) = parse_event_type_and_intent(text);
+        let json = nojson::RawJson::parse(text).expect("event must be valid json");
+        let output_active: bool = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventData")
+            .expect("eventData access must succeed")
+            .required()
+            .expect("eventData must exist")
+            .to_member("outputActive")
+            .expect("outputActive access must succeed")
+            .required()
+            .expect("outputActive must exist")
+            .try_into()
+            .expect("outputActive must be bool");
+        (op, event_type, event_intent, output_active)
+    }
+
+    fn parse_event_type_and_intent(text: &str) -> (i64, String, u32) {
+        let json = nojson::RawJson::parse(text).expect("event must be valid json");
+        let op: i64 = json
+            .value()
+            .to_member("op")
+            .expect("op access must succeed")
+            .required()
+            .expect("op must exist")
+            .try_into()
+            .expect("op must be i64");
+        let event_type: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventType")
+            .expect("eventType access must succeed")
+            .required()
+            .expect("eventType must exist")
+            .try_into()
+            .expect("eventType must be string");
+        let event_intent: u32 = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("eventIntent")
+            .expect("eventIntent access must succeed")
+            .required()
+            .expect("eventIntent must exist")
+            .try_into()
+            .expect("eventIntent must be u32");
+        (op, event_type, event_intent)
     }
 
     #[test]
@@ -896,6 +1454,253 @@ mod tests {
         let (op, negotiated_rpc_version) = parse_identified_message(&text);
         assert_eq!(op, 2);
         assert_eq!(negotiated_rpc_version, 1);
+    }
+
+    #[tokio::test]
+    async fn identify_with_event_subscriptions_updates_session_state() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_OUTPUTS);
+    }
+
+    #[tokio::test]
+    async fn reidentify_updates_event_subscriptions_when_specified() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, 1);
+
+        let reidentify_action = session
+            .on_text_message(r#"{"op":3,"d":{"eventSubscriptions":64}}"#)
+            .await
+            .expect("reidentify must succeed");
+        assert!(matches!(reidentify_action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_OUTPUTS);
+    }
+
+    #[tokio::test]
+    async fn reidentify_without_event_subscriptions_keeps_previous_value() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let reidentify_action = session
+            .on_text_message(r#"{"op":3,"d":{}}"#)
+            .await
+            .expect("reidentify must succeed");
+        assert!(matches!(reidentify_action, SessionAction::SendText { .. }));
+        assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_OUTPUTS);
+    }
+
+    #[test]
+    fn build_stream_state_changed_action_with_subscription_returns_event_message() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        session.event_subscriptions = OBSWS_EVENT_SUB_OUTPUTS;
+        let outcome = RequestOutcome {
+            response_text: crate::obsws_response_builder::build_start_stream_response("req-1"),
+            success: true,
+            output_path: None,
+        };
+        let action = session.build_stream_state_changed_action(outcome, true);
+        let SessionAction::SendTexts { messages } = action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 2);
+        let (op, event_type, event_intent, output_active) =
+            parse_stream_state_changed_event(&messages[1].0);
+        assert_eq!(op, 5);
+        assert_eq!(event_type, "StreamStateChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
+        assert!(output_active);
+    }
+
+    #[test]
+    fn build_stream_state_changed_action_without_subscription_returns_response_only() {
+        let session = ObswsSession::new(None, input_registry(), None);
+        let outcome = RequestOutcome {
+            response_text: crate::obsws_response_builder::build_start_stream_response("req-1"),
+            success: true,
+            output_path: None,
+        };
+        let action = session.build_stream_state_changed_action(outcome, true);
+        assert!(matches!(action, SessionAction::SendText { .. }));
+    }
+
+    #[test]
+    fn build_record_state_changed_action_with_subscription_returns_event_message() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        session.event_subscriptions = OBSWS_EVENT_SUB_OUTPUTS;
+        let outcome = RequestOutcome {
+            response_text: crate::obsws_response_builder::build_stop_record_response(
+                "req-1",
+                "/tmp/out.mp4",
+            ),
+            success: true,
+            output_path: Some("/tmp/out.mp4".to_owned()),
+        };
+        let action = session.build_record_state_changed_action(outcome, false);
+        let SessionAction::SendTexts { messages } = action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 2);
+        let (op, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(op, 5);
+        assert_eq!(event_type, "RecordStateChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
+    }
+
+    #[tokio::test]
+    async fn create_scene_with_scene_subscription_returns_scene_created_event() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+            .expect("requestData must be valid json");
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-scene".to_owned()),
+                request_type: Some("CreateScene".to_owned()),
+                request_data: Some(request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 2);
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "SceneCreated");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    }
+
+    #[tokio::test]
+    async fn set_current_program_scene_to_same_scene_returns_response_only() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene"}"#)
+            .expect("requestData must be valid json");
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-scene-same".to_owned()),
+                request_type: Some("SetCurrentProgramScene".to_owned()),
+                request_data: Some(request_data),
+            })
+            .await;
+        assert!(matches!(action, SessionAction::SendText { .. }));
+    }
+
+    #[tokio::test]
+    async fn remove_current_scene_with_scene_subscription_sends_scene_and_program_events() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+            .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-scene".to_owned()),
+                request_type: Some("CreateScene".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        assert!(matches!(create_action, SessionAction::SendTexts { .. }));
+
+        let set_scene_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+            .expect("requestData must be valid json");
+        let set_scene_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-scene".to_owned()),
+                request_type: Some("SetCurrentProgramScene".to_owned()),
+                request_data: Some(set_scene_request_data),
+            })
+            .await;
+        assert!(matches!(set_scene_action, SessionAction::SendTexts { .. }));
+
+        let remove_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+            .expect("requestData must be valid json");
+        let remove_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-remove-scene".to_owned()),
+                request_type: Some("RemoveScene".to_owned()),
+                request_data: Some(remove_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = remove_action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 3);
+        let (_, event_type_1, event_intent_1) = parse_event_type_and_intent(&messages[1].0);
+        let (_, event_type_2, event_intent_2) = parse_event_type_and_intent(&messages[2].0);
+        assert_eq!(event_type_1, "SceneRemoved");
+        assert_eq!(event_intent_1, OBSWS_EVENT_SUB_SCENES);
+        assert_eq!(event_type_2, "CurrentProgramSceneChanged");
+        assert_eq!(event_intent_2, OBSWS_EVENT_SUB_SCENES);
+    }
+
+    #[tokio::test]
+    async fn create_and_remove_input_with_input_subscription_send_input_events() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = create_action else {
+            panic!("must be SendTexts");
+        };
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "InputCreated");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
+
+        let remove_request_data = nojson::RawJsonOwned::parse(r#"{"inputName":"camera-1"}"#)
+            .expect("requestData must be valid json");
+        let remove_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-remove-input".to_owned()),
+                request_type: Some("RemoveInput".to_owned()),
+                request_data: Some(remove_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = remove_action else {
+            panic!("must be SendTexts");
+        };
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "InputRemoved");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
     }
 
     #[tokio::test]
