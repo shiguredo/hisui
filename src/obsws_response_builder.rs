@@ -843,7 +843,7 @@ pub fn build_start_record_response(request_id: &str) -> String {
     .to_string()
 }
 
-pub fn build_stop_record_response(request_id: &str) -> String {
+pub fn build_stop_record_response(request_id: &str, output_path: &str) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -858,7 +858,10 @@ pub fn build_stop_record_response(request_id: &str) -> String {
                         f.member("code", REQUEST_STATUS_SUCCESS)
                     }),
                 )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("outputPath", output_path)),
+                )
             }),
         )
     })
@@ -1133,4 +1136,32 @@ fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, Stri
     let current_dir =
         std::env::current_dir().map_err(|e| format!("Failed to resolve current directory: {e}"))?;
     Ok(current_dir.join(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_stop_record_response_includes_output_path() {
+        let response = build_stop_record_response("req-stop-record", "/tmp/output.mp4");
+        let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+        let output_path: String = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("responseData")
+            .expect("responseData access must succeed")
+            .required()
+            .expect("responseData must exist")
+            .to_member("outputPath")
+            .expect("outputPath access must succeed")
+            .required()
+            .expect("outputPath must exist")
+            .try_into()
+            .expect("outputPath must be string");
+        assert_eq!(output_path, "/tmp/output.mp4");
+    }
 }

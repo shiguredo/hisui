@@ -456,7 +456,10 @@ impl ObswsSession {
                 &format!("Failed to stop record: {}", e.display()),
             );
         }
-        crate::obsws_response_builder::build_stop_record_response(request_id)
+        crate::obsws_response_builder::build_stop_record_response(
+            request_id,
+            &run.output_path.display().to_string(),
+        )
     }
 
     async fn start_stream_processors(
