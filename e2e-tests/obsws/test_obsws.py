@@ -90,7 +90,12 @@ class ObswsServer:
             if self.default_record_dir is not None:
                 cmd.extend(["--default-record-dir", str(self.default_record_dir)])
 
-        self._process = subprocess.Popen(cmd, env=env)
+        self._process = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=None,
+            stderr=None,
+        )
         self._wait_until_listening()
         return self
 
