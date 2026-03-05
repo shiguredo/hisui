@@ -2015,6 +2015,61 @@ def test_obsws_stream_events_are_not_sent_without_outputs_subscription(
         asyncio.run(_run())
 
 
+def test_obsws_toggle_stream_events_are_sent_when_outputs_subscription_enabled(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Outputs 購読時に ToggleStream のイベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    rtmp_port, rtmp_sock = reserve_ephemeral_port()
+    rtmp_sock.close()
+
+    image_path = tmp_path / "toggle-stream-event-input.png"
+    _write_test_png(image_path)
+    output_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
+    stream_key = "toggle-stream-event-key"
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            await _setup_stream_input_and_service(
+                ws,
+                image_path=image_path,
+                output_url=output_url,
+                stream_key=stream_key,
+            )
+
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleStream",
+                request_id="req-toggle-stream-event-enabled-on",
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+            await _expect_stream_state_changed_event(ws, output_active=True)
+
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleStream",
+                request_id="req-toggle-stream-event-enabled-off",
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
+            await _expect_stream_state_changed_event(ws, output_active=False)
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
 def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
     binary_path: Path, tmp_path: Path
 ):
@@ -2071,6 +2126,75 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
                 request_id="req-stop-record-event-enabled",
             )
             assert stop_record_response["d"]["requestStatus"]["result"] is True
+            stop_event = await _expect_obsws_event(
+                ws,
+                event_type="RecordStateChanged",
+                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            assert stop_event["d"]["eventData"]["outputActive"] is False
+            assert stop_event["d"]["eventData"]["outputPath"]
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Outputs 購読時に ToggleRecord のイベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    image_path = tmp_path / "toggle-record-event-input.png"
+    _write_test_png(image_path)
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-toggle-record-event-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "toggle-record-event-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecord",
+                request_id="req-toggle-record-event-enabled-on",
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+            start_event = await _expect_obsws_event(
+                ws,
+                event_type="RecordStateChanged",
+                event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            assert start_event["d"]["eventData"]["outputActive"] is True
+
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecord",
+                request_id="req-toggle-record-event-enabled-off",
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
             stop_event = await _expect_obsws_event(
                 ws,
                 event_type="RecordStateChanged",
