@@ -1520,6 +1520,7 @@ def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
             toggle_start_status = toggle_start_response["d"]["requestStatus"]
             assert toggle_start_status["result"] is True
             assert toggle_start_status["code"] == 100
+            assert toggle_start_response["d"]["responseData"]["outputActive"] is True
 
             for _ in range(20):
                 stream_status_response = await _send_obsws_request(
@@ -1541,6 +1542,7 @@ def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
             toggle_stop_status = toggle_stop_response["d"]["requestStatus"]
             assert toggle_stop_status["result"] is True
             assert toggle_stop_status["code"] == 100
+            assert toggle_stop_response["d"]["responseData"]["outputActive"] is False
 
             for _ in range(20):
                 stream_status_response = await _send_obsws_request(
@@ -1600,6 +1602,7 @@ def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
             toggle_start_status = toggle_start_response["d"]["requestStatus"]
             assert toggle_start_status["result"] is True
             assert toggle_start_status["code"] == 100
+            assert toggle_start_response["d"]["responseData"]["outputActive"] is True
 
             for _ in range(20):
                 record_status_response = await _send_obsws_request(
@@ -1621,6 +1624,7 @@ def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
             toggle_stop_status = toggle_stop_response["d"]["requestStatus"]
             assert toggle_stop_status["result"] is True
             assert toggle_stop_status["code"] == 100
+            assert toggle_stop_response["d"]["responseData"]["outputActive"] is False
 
             for _ in range(20):
                 record_status_response = await _send_obsws_request(
@@ -1702,6 +1706,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             )
             start_stream_status = start_stream_response["d"]["requestStatus"]
             assert start_stream_status["result"] is True
+            assert start_stream_response["d"]["responseData"]["outputActive"] is True
 
             for _ in range(20):
                 stream_status_response = await _send_obsws_request(
@@ -1890,6 +1895,7 @@ def test_obsws_stream_events_are_sent_when_outputs_subscription_enabled(
                 request_id="req-start-stream-event-enabled",
             )
             assert start_response["d"]["requestStatus"]["result"] is True
+            assert start_response["d"]["responseData"]["outputActive"] is True
             await _expect_stream_state_changed_event(ws, output_active=True)
 
             stop_response = await _send_obsws_request(
@@ -2113,6 +2119,7 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
                 request_id="req-start-record-event-enabled",
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
+            assert start_record_response["d"]["responseData"]["outputActive"] is True
             start_event = await _expect_obsws_event(
                 ws,
                 event_type="RecordStateChanged",

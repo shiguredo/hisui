@@ -394,8 +394,12 @@ impl ObswsSession {
                     crate::obsws_response_builder::build_stream_state_changed_event(!was_active),
                 );
             }
-            let response_text =
-                Self::build_toggle_response_from_outcome("ToggleStream", &request_id, &outcome)?;
+            let response_text = Self::build_toggle_response_from_outcome(
+                "ToggleStream",
+                &request_id,
+                !was_active,
+                &outcome,
+            )?;
             return Self::build_execution_from_response_text(response_text, events);
         }
         if request_type == "StopStream" {
@@ -437,8 +441,12 @@ impl ObswsSession {
                     ),
                 );
             }
-            let response_text =
-                Self::build_toggle_response_from_outcome("ToggleRecord", &request_id, &outcome)?;
+            let response_text = Self::build_toggle_response_from_outcome(
+                "ToggleRecord",
+                &request_id,
+                !was_active,
+                &outcome,
+            )?;
             return Self::build_execution_from_response_text(response_text, events);
         }
         if request_type == "StopRecord" {
@@ -566,15 +574,18 @@ impl ObswsSession {
     fn build_toggle_response_from_outcome(
         toggle_request_type: &str,
         request_id: &str,
+        output_active_on_success: bool,
         outcome: &RequestOutcome,
     ) -> crate::Result<String> {
         if outcome.success {
             return match toggle_request_type {
                 "ToggleStream" => Ok(crate::obsws_response_builder::build_toggle_stream_response(
                     request_id,
+                    output_active_on_success,
                 )),
                 "ToggleRecord" => Ok(crate::obsws_response_builder::build_toggle_record_response(
                     request_id,
+                    output_active_on_success,
                 )),
                 _ => Err(crate::Error::new("unknown toggle request type")),
             };
@@ -1055,7 +1066,9 @@ impl ObswsSession {
         }
 
         RequestOutcome {
-            response_text: crate::obsws_response_builder::build_start_stream_response(request_id),
+            response_text: crate::obsws_response_builder::build_start_stream_response(
+                request_id, true,
+            ),
             success: true,
             output_path: None,
         }
@@ -1219,7 +1232,9 @@ impl ObswsSession {
         }
 
         RequestOutcome {
-            response_text: crate::obsws_response_builder::build_start_record_response(request_id),
+            response_text: crate::obsws_response_builder::build_start_record_response(
+                request_id, true,
+            ),
             success: true,
             output_path: None,
         }
