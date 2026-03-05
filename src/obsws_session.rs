@@ -92,6 +92,23 @@ impl ObswsSession {
         SessionAction::Terminate
     }
 
+    fn build_internal_error_response(
+        request_type: &str,
+        request_id: &str,
+        message: &str,
+    ) -> String {
+        // [NOTE]
+        // 現在 hisui が実装している obsws requestStatus code では、
+        // サーバー内部エラー専用のコードを定義していない。
+        // そのため互換性を保ったまま 400 を内部エラーにも流用している。
+        crate::obsws_response_builder::build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            message,
+        )
+    }
+
     fn handle_identify(
         &mut self,
         identify: crate::obsws_message::IdentifyMessage,
@@ -287,10 +304,9 @@ impl ObswsSession {
                     cleanup_error.display()
                 );
             }
-            return crate::obsws_response_builder::build_request_response_error(
+            return Self::build_internal_error_response(
                 "StartStream",
                 request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
                 &format!("Failed to start stream: {}", e.display()),
             );
         }
@@ -314,10 +330,9 @@ impl ObswsSession {
                 .expect("infallible: active stream must have run state")
         };
         if let Err(e) = self.stop_stream_processors(&run).await {
-            return crate::obsws_response_builder::build_request_response_error(
+            return Self::build_internal_error_response(
                 "StopStream",
                 request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
                 &format!("Failed to stop stream: {}", e.display()),
             );
         }
@@ -391,10 +406,9 @@ impl ObswsSession {
             && let Err(e) = std::fs::create_dir_all(parent)
         {
             let _ = self.input_registry.write().await.deactivate_record();
-            return crate::obsws_response_builder::build_request_response_error(
+            return Self::build_internal_error_response(
                 "StartRecord",
                 request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
                 &format!("Failed to create record directory: {e}"),
             );
         }
@@ -410,10 +424,9 @@ impl ObswsSession {
                     cleanup_error.display()
                 );
             }
-            return crate::obsws_response_builder::build_request_response_error(
+            return Self::build_internal_error_response(
                 "StartRecord",
                 request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
                 &format!("Failed to start record: {}", e.display()),
             );
         }
@@ -437,10 +450,9 @@ impl ObswsSession {
                 .expect("infallible: active record must have run state")
         };
         if let Err(e) = self.stop_record_processors(&run).await {
-            return crate::obsws_response_builder::build_request_response_error(
+            return Self::build_internal_error_response(
                 "StopRecord",
                 request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
                 &format!("Failed to stop record: {}", e.display()),
             );
         }
