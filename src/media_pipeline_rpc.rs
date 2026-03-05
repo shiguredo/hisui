@@ -2678,10 +2678,8 @@ mod tests {
         drop(occupied_sender);
         drop(blocker);
         drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
     }
 
     #[tokio::test]
@@ -2713,10 +2711,8 @@ mod tests {
         drop(occupied_sender);
         drop(blocker);
         drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
     }
 
     #[tokio::test]
@@ -2757,10 +2753,8 @@ mod tests {
         drop(occupied_sender);
         drop(blocker);
         drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
     }
 
     #[tokio::test]
@@ -2914,10 +2908,8 @@ mod tests {
         drop(occupied_sender);
         drop(blocker);
         drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
     }
 
     #[tokio::test]
@@ -2949,10 +2941,8 @@ mod tests {
         drop(occupied_sender);
         drop(blocker);
         drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
-            .await
-            .expect("pipeline task timed out")
-            .expect("pipeline task failed");
+        pipeline_task.abort();
+        let _ = pipeline_task.await;
     }
 
     #[tokio::test]

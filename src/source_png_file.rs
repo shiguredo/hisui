@@ -78,6 +78,10 @@ impl PngFileSource {
         let start = tokio::time::Instant::now();
         let mut ack = tx.send_syn();
         loop {
+            if !tx.has_subscribers() {
+                break;
+            }
+
             let timestamp = frames_to_timestamp(self.frame_rate, frame_index);
             tokio::time::sleep_until(start + timestamp).await;
 

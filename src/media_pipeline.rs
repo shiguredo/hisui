@@ -1070,6 +1070,14 @@ impl MessageSender {
         true
     }
 
+    pub fn has_subscribers(&mut self) -> bool {
+        if !self.drain_track_commands() {
+            return false;
+        }
+        self.txs.retain(|tx| !tx.is_closed());
+        !self.txs.is_empty()
+    }
+
     pub fn send_media(&mut self, sample: crate::MediaFrame) -> bool {
         self.send(Message::Media(sample))
     }
