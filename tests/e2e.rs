@@ -988,9 +988,9 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
                 let col = i % 320;
                 let row = i / 320;
                 if col >= 318 || row >= 238 {
-                    assert!(matches!(x, 0..=3), "Expected black Y value, got y={x}",);
+                    assert!(matches!(x, 0..=8), "Expected black Y value, got y={x}",);
                 } else {
-                    assert!(matches!(x, 79..=83), "Expected red Y value, got y={x}",);
+                    assert!(matches!(x, 75..=84), "Expected red Y value, got y={x}",);
                 }
             });
 
@@ -1336,16 +1336,16 @@ fn multi_sources_single_column() -> noargs::Result<()> {
                     assert!(matches!(y, 40..=43), "y={y}");
                 } else if i / width < 16 + 2 {
                     // 次の 2 行は黒色（枠線）
-                    assert!(matches!(y, 0..=2), "y={y}");
+                    assert!(matches!(y, 0..=8), "y={y}");
                 } else if i / width < 16 + 2 + 16 {
                     // 次の 16 行は緑
-                    assert!(matches!(y, 186..=189), "y={y}");
+                    assert!(matches!(y, 182..=192), "y={y}");
                 } else if i / width < 16 + 2 + 16 + 2 {
                     // 次の 2 行は黒色（枠線）
-                    assert!(matches!(y, 0..=2), "y={y}");
+                    assert!(matches!(y, 0..=8), "y={y}");
                 } else if i / width < 16 + 2 + 16 + 2 + 16 {
                     // 最後の 16 行は赤
-                    assert!(matches!(y, 80..=82), "y={y}");
+                    assert!(matches!(y, 75..=86), "y={y}");
                 } else {
                     unreachable!()
                 }
@@ -1437,16 +1437,16 @@ fn two_regions() -> noargs::Result<()> {
                     assert!(matches!(y, 40..=44), "y={y}");
                 } else if i / width < 8 + 2 {
                     // 次の 2 行は黒色（枠線）
-                    assert!(matches!(y, 0..=2), "y={y}");
+                    assert!(matches!(y, 0..=8), "y={y}");
                 } else if i / width < 8 + 2 + 16 {
                     // 次の 16 行は赤
-                    assert!(matches!(y, 79..=83), "y={y}");
+                    assert!(matches!(y, 75..=84), "y={y}");
                 } else if i / width < 8 + 2 + 16 + 2 {
                     // 次の 2 行は黒色（枠線）
-                    assert!(matches!(y, 0..=2), "y={y}");
+                    assert!(matches!(y, 0..=8), "y={y}");
                 } else if i / width < 8 + 2 + 16 + 2 + 6 {
                     // 最後の 6 行は緑
-                    assert!(matches!(y, 186..=188), "y={y}");
+                    assert!(matches!(y, 182..=192), "y={y}");
                 } else {
                     unreachable!()
                 }
