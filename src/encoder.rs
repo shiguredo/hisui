@@ -837,7 +837,10 @@ impl VideoEncoderInner {
         match self {
             #[cfg(feature = "libvpx")]
             Self::Libvpx(_) => false,
-            Self::Openh264(_) => false,
+            Self::Openh264(encoder) => {
+                encoder.request_keyframe();
+                true
+            }
             Self::SvtAv1(_) => false,
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(_) => false,

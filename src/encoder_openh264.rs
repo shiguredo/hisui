@@ -9,6 +9,7 @@ pub struct Openh264Encoder {
     inner: shiguredo_openh264::Encoder,
     encoded: Option<VideoFrame>,
     is_first: bool,
+    force_idr_pending: bool,
 }
 
 impl Openh264Encoder {
@@ -31,18 +32,19 @@ impl Openh264Encoder {
             inner,
             encoded: None,
             is_first: true,
+            force_idr_pending: false,
         })
     }
 
     pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let video_frame = frame.as_video_frame();
         let (y_plane, u_plane, v_plane) = frame.as_i420_planes()?;
-        let encoded = self.inner.encode(
-            y_plane,
-            u_plane,
-            v_plane,
-            &shiguredo_openh264::EncodeOptions::default(),
-        )?;
+        let encode_options = shiguredo_openh264::EncodeOptions {
+            force_idr: self.force_idr_pending,
+        };
+        let encoded = self
+            .inner
+            .encode(y_plane, u_plane, v_plane, &encode_options)?;
         let Some(encoded) = encoded else {
             return Ok(());
         };
@@ -75,13 +77,18 @@ impl Openh264Encoder {
             data.extend_from_slice(nal.data);
         }
 
+        let is_keyframe = matches!(
+            encoded.frame_type,
+            shiguredo_openh264::FrameType::Idr | shiguredo_openh264::FrameType::I
+        );
+        if self.force_idr_pending && is_keyframe {
+            self.force_idr_pending = false;
+        }
+
         self.encoded = Some(VideoFrame {
             data,
             format: VideoFormat::H264,
-            keyframe: matches!(
-                encoded.frame_type,
-                shiguredo_openh264::FrameType::Idr | shiguredo_openh264::FrameType::I
-            ),
+            keyframe: is_keyframe,
             size: Some(frame.size()),
             timestamp: video_frame.timestamp,
             sample_entry,
@@ -97,5 +104,9 @@ impl Openh264Encoder {
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.encoded.take()
+    }
+
+    pub fn request_keyframe(&mut self) {
+        self.force_idr_pending = true;
     }
 }
