@@ -1315,39 +1315,8 @@ mod tests {
     }
 
     fn parse_stream_state_changed_event(text: &str) -> (i64, String, u32, bool) {
+        let (op, event_type, event_intent) = parse_event_type_and_intent(text);
         let json = nojson::RawJson::parse(text).expect("event must be valid json");
-        let op: i64 = json
-            .value()
-            .to_member("op")
-            .expect("op access must succeed")
-            .required()
-            .expect("op must exist")
-            .try_into()
-            .expect("op must be i64");
-        let event_type: String = json
-            .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventType")
-            .expect("eventType access must succeed")
-            .required()
-            .expect("eventType must exist")
-            .try_into()
-            .expect("eventType must be string");
-        let event_intent: u32 = json
-            .value()
-            .to_member("d")
-            .expect("d access must succeed")
-            .required()
-            .expect("d must exist")
-            .to_member("eventIntent")
-            .expect("eventIntent access must succeed")
-            .required()
-            .expect("eventIntent must exist")
-            .try_into()
-            .expect("eventIntent must be u32");
         let output_active: bool = json
             .value()
             .to_member("d")
