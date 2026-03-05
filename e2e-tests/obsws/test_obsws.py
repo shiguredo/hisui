@@ -459,6 +459,11 @@ async def _connect_identify_and_send_reidentify_then_request(url: str):
         ws = await session.ws_connect(url, protocols=[OBSWS_SUBPROTOCOL])
         await _identify_with_optional_password(ws, None)
         await ws.send_str(json.dumps({"op": 3, "d": {"eventSubscriptions": 1023}}))
+        reidentified_msg = await ws.receive(timeout=5.0)
+        assert reidentified_msg.type == aiohttp.WSMsgType.TEXT
+        reidentified = json.loads(reidentified_msg.data)
+        assert reidentified["op"] == 2
+        assert reidentified["d"]["negotiatedRpcVersion"] == 1
         response = await _send_obsws_request(
             ws,
             request_type="GetVersion",

@@ -21,7 +21,6 @@ use crate::obsws_protocol::{
 };
 
 pub enum SessionAction {
-    Noop,
     SendText {
         text: String,
         message_name: &'static str,
@@ -42,6 +41,7 @@ enum ObswsSessionState {
 
 pub struct ObswsSession {
     state: ObswsSessionState,
+    negotiated_rpc_version: Option<u32>,
     auth: Option<ObswsAuthentication>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
@@ -56,6 +56,7 @@ impl ObswsSession {
     ) -> Self {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
+            negotiated_rpc_version: None,
             auth,
             input_registry,
             pipeline_handle,
@@ -142,6 +143,7 @@ impl ObswsSession {
         }
 
         self.state = ObswsSessionState::Identified;
+        self.negotiated_rpc_version = Some(identify.rpc_version);
         SessionAction::SendText {
             text: crate::obsws_message::build_identified_message(identify.rpc_version),
             message_name: "identified message",
@@ -160,7 +162,13 @@ impl ObswsSession {
             };
         }
 
-        SessionAction::Noop
+        let negotiated_rpc_version = self
+            .negotiated_rpc_version
+            .expect("negotiated rpc version must be set after identify");
+        SessionAction::SendText {
+            text: crate::obsws_message::build_identified_message(negotiated_rpc_version),
+            message_name: "identified message",
+        }
     }
 
     async fn handle_request(
@@ -782,6 +790,31 @@ mod tests {
         (result, code)
     }
 
+    fn parse_identified_message(text: &str) -> (i64, u32) {
+        let json = nojson::RawJson::parse(text).expect("response must be valid json");
+        let op: i64 = json
+            .value()
+            .to_member("op")
+            .expect("op access must succeed")
+            .required()
+            .expect("op must exist")
+            .try_into()
+            .expect("op must be i64");
+        let negotiated_rpc_version: u32 = json
+            .value()
+            .to_member("d")
+            .expect("d access must succeed")
+            .required()
+            .expect("d must exist")
+            .to_member("negotiatedRpcVersion")
+            .expect("negotiatedRpcVersion access must succeed")
+            .required()
+            .expect("negotiatedRpcVersion must exist")
+            .try_into()
+            .expect("negotiatedRpcVersion must be u32");
+        (op, negotiated_rpc_version)
+    }
+
     #[test]
     fn on_connected_returns_hello_message_action() {
         let session = ObswsSession::new(None, input_registry(), None);
@@ -844,7 +877,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reidentify_after_identify_returns_noop() {
+    async fn reidentify_after_identify_returns_identified_message() {
         let mut session = ObswsSession::new(None, input_registry(), None);
         let identify_action = session
             .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
@@ -856,7 +889,13 @@ mod tests {
             .on_text_message(r#"{"op":3,"d":{"eventSubscriptions":1023}}"#)
             .await
             .expect("reidentify must be parsed");
-        assert!(matches!(action, SessionAction::Noop));
+        let SessionAction::SendText { text, message_name } = action else {
+            panic!("must be SendText");
+        };
+        assert_eq!(message_name, "identified message");
+        let (op, negotiated_rpc_version) = parse_identified_message(&text);
+        assert_eq!(op, 2);
+        assert_eq!(negotiated_rpc_version, 1);
     }
 
     #[tokio::test]
