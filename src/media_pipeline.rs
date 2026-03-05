@@ -1873,7 +1873,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn find_upstream_video_encoder_returns_none_when_not_found() {
+    async fn find_upstream_video_encoder_returns_none_for_best_effort_path() {
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
@@ -1897,6 +1897,8 @@ mod tests {
             .expect("source publish must succeed");
         let _endpoint_rx = endpoint.subscribe_track(source_track);
 
+        // RTMP 再生開始時のキーフレーム要求は best effort のため、
+        // 上流に video encoder が存在しない構成では None を正常系として扱う。
         let found = handle
             .find_upstream_video_encoder(endpoint.processor_id())
             .await
