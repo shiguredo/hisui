@@ -360,7 +360,7 @@ pub struct VideoEncoder {
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     keyframe_request_pending: bool,
-    requested_keyframes_inflight: usize,
+    keyframe_request_inflight: bool,
     last_video_sample_entry: Option<SampleEntry>,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
     inner: Option<VideoEncoderInner>,
@@ -397,7 +397,7 @@ impl VideoEncoder {
             encoded: VecDeque::new(),
             eos: false,
             keyframe_request_pending: false,
-            requested_keyframes_inflight: 0,
+            keyframe_request_inflight: false,
             last_video_sample_entry: None,
             inner: None,
             options: options.clone(),
@@ -598,6 +598,7 @@ impl VideoEncoder {
         match message {
             VideoEncoderRpcMessage::RequestKeyframe => {
                 self.total_video_keyframe_request_count_metric.inc();
+                // 複数の keyframe 要求は 1 件に集約して扱う。
                 self.keyframe_request_pending = true;
             }
         }
@@ -655,7 +656,7 @@ impl VideoEncoder {
             self.inner = Some(recreated);
         }
         self.keyframe_request_pending = false;
-        self.requested_keyframes_inflight = self.requested_keyframes_inflight.saturating_add(1);
+        self.keyframe_request_inflight = true;
         Ok(())
     }
 
@@ -676,13 +677,14 @@ impl VideoEncoder {
         }
         if encoded.keyframe {
             self.total_output_video_keyframe_count_metric.inc();
-            if self.requested_keyframes_inflight > 0 {
-                self.requested_keyframes_inflight -= 1;
-                if encoded.sample_entry.is_none()
-                    && let Some(sample_entry) = self.last_video_sample_entry.as_ref()
-                {
-                    encoded.sample_entry = Some(sample_entry.clone());
-                }
+            // keyframe は単体でデコード可能であるべきなので、sample entry を常に補完する。
+            if encoded.sample_entry.is_none()
+                && let Some(sample_entry) = self.last_video_sample_entry.as_ref()
+            {
+                encoded.sample_entry = Some(sample_entry.clone());
+            }
+            if self.keyframe_request_inflight {
+                self.keyframe_request_inflight = false;
             }
         }
         self.encoded.push_back(encoded);
