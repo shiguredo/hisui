@@ -4,8 +4,8 @@ use crate::obsws_input_registry::{
     GetSceneItemEnabledError, GetSceneItemIdError, GetSceneItemIndexError, GetSceneItemListError,
     GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsSceneItemIndexEntry,
     ObswsSceneItemRef, ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError,
-    RemoveSceneItemError, SetCurrentProgramSceneError, SetSceneItemEnabledError,
-    SetSceneItemIndexError, SetSceneItemIndexResult,
+    RemoveSceneItemError, SetCurrentProgramSceneError, SetInputSettingsError,
+    SetSceneItemEnabledError, SetSceneItemIndexError, SetSceneItemIndexResult,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
@@ -23,6 +23,13 @@ struct CreateInputFields {
     input_name: String,
     input: ObswsInput,
     scene_item_enabled: bool,
+}
+
+struct SetInputSettingsFields {
+    input_uuid: Option<String>,
+    input_name: Option<String>,
+    input_settings: nojson::RawJsonOwned,
+    overlay: bool,
 }
 
 struct CreateSceneFields {
@@ -194,6 +201,20 @@ fn parse_create_input_fields(
         input_name,
         input,
         scene_item_enabled: scene_item_enabled.unwrap_or(true),
+    })
+}
+
+fn parse_set_input_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetInputSettingsFields, nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let input_settings = request_data.to_member("inputSettings")?.required()?;
+    let overlay: Option<bool> = request_data.to_member("overlay")?.try_into()?;
+    Ok(SetInputSettingsFields {
+        input_uuid,
+        input_name,
+        input_settings: nojson::RawJsonOwned::try_from(input_settings)?,
+        overlay: overlay.unwrap_or(true),
     })
 }
 
@@ -845,6 +866,7 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetInputList",
                                 "GetInputKindList",
                                 "GetInputSettings",
+                                "SetInputSettings",
                                 "CreateInput",
                                 "RemoveInput",
                                 "GetStreamServiceSettings",
@@ -2354,6 +2376,64 @@ pub fn build_get_input_settings_response(
                         f.member("inputSettings", &input.input.settings)
                     }),
                 )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_input_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetInputSettings",
+        request_id,
+        request_data,
+        parse_set_input_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    if let Err(error) = input_registry.set_input_settings(
+        fields.input_uuid.as_deref(),
+        fields.input_name.as_deref(),
+        fields.input_settings.value(),
+        fields.overlay,
+    ) {
+        return match error {
+            SetInputSettingsError::InputNotFound => build_request_response_error(
+                "SetInputSettings",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            ),
+            SetInputSettingsError::InvalidInputSettings(message) => build_request_response_error(
+                "SetInputSettings",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &message,
+            ),
+        };
+    }
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetInputSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
             }),
         )
     })

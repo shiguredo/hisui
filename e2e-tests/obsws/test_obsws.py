@@ -836,6 +836,7 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetInputList" in response_data["availableRequests"]
         assert "GetInputKindList" in response_data["availableRequests"]
         assert "GetInputSettings" in response_data["availableRequests"]
+        assert "SetInputSettings" in response_data["availableRequests"]
         assert "CreateInput" in response_data["availableRequests"]
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
@@ -1066,6 +1067,153 @@ def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
         status = response["d"]["requestStatus"]
         assert status["result"] is False
         assert status["code"] == 300
+
+
+def test_obsws_set_input_settings_request(binary_path: Path):
+    """obsws が SetInputSettings request に応答して入力設定を更新できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-for-set-settings",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-set-settings-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {"device_id": "before-device"},
+                    "sceneItemEnabled": True,
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+        input_uuid = create_response["d"]["responseData"]["inputUuid"]
+
+        set_overlay_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-overlay",
+                request_data={
+                    "inputUuid": input_uuid,
+                    "inputSettings": {"device_id": "after-device"},
+                },
+            )
+        )
+        set_overlay_status = set_overlay_response["d"]["requestStatus"]
+        assert set_overlay_status["result"] is True
+        assert set_overlay_status["code"] == 100
+
+        get_overlay_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-after-overlay",
+                request_data={"inputUuid": input_uuid},
+            )
+        )
+        assert get_overlay_response["d"]["requestStatus"]["result"] is True
+        assert (
+            get_overlay_response["d"]["responseData"]["inputSettings"]["device_id"]
+            == "after-device"
+        )
+
+        set_replace_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-replace",
+                request_data={
+                    "inputName": "obsws-set-settings-input",
+                    "inputSettings": {},
+                    "overlay": False,
+                },
+            )
+        )
+        set_replace_status = set_replace_response["d"]["requestStatus"]
+        assert set_replace_status["result"] is True
+        assert set_replace_status["code"] == 100
+
+        get_replace_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-after-replace",
+                request_data={"inputName": "obsws-set-settings-input"},
+            )
+        )
+        assert get_replace_response["d"]["requestStatus"]["result"] is True
+        assert (
+            "device_id"
+            not in get_replace_response["d"]["responseData"]["inputSettings"]
+        )
+
+        not_found_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-not-found",
+                request_data={
+                    "inputName": "not-found-input",
+                    "inputSettings": {},
+                },
+            )
+        )
+        not_found_status = not_found_response["d"]["requestStatus"]
+        assert not_found_status["result"] is False
+        assert not_found_status["code"] == 601
+
+
+def test_obsws_set_input_settings_rejects_invalid_input_settings(binary_path: Path):
+    """obsws が SetInputSettings で不正な inputSettings を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-invalid-set-settings",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-invalid-set-settings-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-invalid",
+                request_data={
+                    "inputName": "obsws-invalid-set-settings-input",
+                    "inputSettings": {"device_id": 1},
+                },
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 400
 
 
 def test_obsws_create_input_request(binary_path: Path):

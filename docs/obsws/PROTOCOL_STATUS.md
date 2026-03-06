@@ -138,8 +138,7 @@
 - [x] `CreateInput`: 入力を作成する
   - NOTE: `sceneName` は既存 Scene のみ受理する（ `CreateScene` で追加可能 ）
   - NOTE: `inputKind` は `GetInputKindList` で返す値のみ受理する
-  - NOTE: `sceneItemEnabled = false` で作成した入力は Scene へ追加されない
-  - NOTE: 上記入力は Scene Item を持たないため、`SetSceneItemEnabled` など Scene Item 操作 API の対象外になる
+  - NOTE: `sceneItemEnabled` の値に応じて Scene Item を作成し、`sceneItemEnabled` に反映する
   - NOTE: 成功時は `responseData.inputUuid` を返し、`GetInputSettings` で参照できる
 - [x] `RemoveInput`: 入力を削除する
   - NOTE: `inputName` または `inputUuid` のいずれか指定で削除する
@@ -147,7 +146,8 @@
 - [ ] `SetInputName`: 入力名を変更する
 - [ ] `GetInputDefaultSettings`: 入力の既定設定を取得する
 - [x] `GetInputSettings`: 入力設定を取得する
-- [ ] `SetInputSettings`: 入力設定を更新する
+- [x] `SetInputSettings`: 入力設定を更新する
+  - NOTE: `overlay` 未指定時は `true` として扱う
 - [ ] `GetInputMute`: ミュート状態を取得する
 - [ ] `SetInputMute`: ミュート状態を設定する
 - [ ] `ToggleInputMute`: ミュート状態をトグルする

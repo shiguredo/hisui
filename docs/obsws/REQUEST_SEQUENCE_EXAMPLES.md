@@ -425,6 +425,63 @@ NOTE: `inputKind` と `inputSettings` の詳細キーはプラットフォーム
 
 ---
 
+## 例 7.1: Input 設定を更新する
+
+目的: 既存 Input の `inputSettings` を上書き / 置換する  
+hisui 対応状況: 対応済み（ `SetInputSettings` は `overlay` 指定に対応 ）
+
+1. `C -> S` SetInputSettings（ overlay 更新 ）
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetInputSettings",
+    "requestId": "req-405",
+    "requestData": {
+      "inputName": "Main Camera",
+      "inputSettings": {
+        "device_id": "camera-2"
+      }
+    }
+  }
+}
+```
+
+2. `C -> S` SetInputSettings（ 置換更新 ）
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetInputSettings",
+    "requestId": "req-406",
+    "requestData": {
+      "inputName": "Main Camera",
+      "inputSettings": {},
+      "overlay": false
+    }
+  }
+}
+```
+
+3. `C -> S` GetInputSettings
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "GetInputSettings",
+    "requestId": "req-407",
+    "requestData": {
+      "inputName": "Main Camera"
+    }
+  }
+}
+```
+
+---
+
 ## 例 8: RequestBatch で配信準備をまとめる
 
 目的: 複数の準備 Request を 1 回で送る
