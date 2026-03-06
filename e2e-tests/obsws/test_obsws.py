@@ -1403,6 +1403,7 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
                 request_data={
                     "sceneName": "Scene",
                     "sourceName": "scene-item-enabled-input",
+                    "searchOffset": 0,
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
@@ -1498,6 +1499,7 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
                 request_data={
                     "sceneName": "Scene",
                     "sourceName": "get-scene-item-enabled-input",
+                    "searchOffset": 0,
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
@@ -2725,6 +2727,7 @@ def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabl
                 request_data={
                     "sceneName": "Scene",
                     "sourceName": "scene-item-event-input",
+                    "searchOffset": 0,
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
