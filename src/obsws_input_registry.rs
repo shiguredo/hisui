@@ -196,6 +196,61 @@ struct ObswsSceneItemState {
     enabled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsSceneItemEntry {
+    pub scene_item_id: i64,
+    pub source_name: String,
+    pub source_uuid: String,
+    pub scene_item_enabled: bool,
+    pub scene_item_locked: bool,
+    pub scene_item_index: i64,
+    pub is_group: bool,
+}
+
+impl nojson::DisplayJson for ObswsSceneItemEntry {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("sceneItemId", self.scene_item_id)?;
+            f.member("sourceName", &self.source_name)?;
+            f.member("sourceUuid", &self.source_uuid)?;
+            f.member("sceneItemEnabled", self.scene_item_enabled)?;
+            f.member("sceneItemLocked", self.scene_item_locked)?;
+            f.member("sceneItemIndex", self.scene_item_index)?;
+            f.member("isGroup", self.is_group)
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsSceneItemRef {
+    pub scene_name: String,
+    pub scene_uuid: String,
+    pub scene_item: ObswsSceneItemEntry,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetSceneItemIndexResult {
+    pub changed: bool,
+    pub scene_items: Vec<ObswsSceneItemIndexEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsSceneItemIndexEntry {
+    pub scene_item_id: i64,
+    pub scene_item_index: i64,
+}
+
+impl nojson::DisplayJson for ObswsSceneItemIndexEntry {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("sceneItemId", self.scene_item_id)?;
+            f.member("sceneItemIndex", self.scene_item_index)
+        })
+        .fmt(f)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ObswsSceneState {
     scene_uuid: String,
@@ -330,6 +385,49 @@ pub enum GetSceneItemIdError {
 pub enum GetSceneItemEnabledError {
     SceneNotFound,
     SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemListError {
+    SceneNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateSceneItemError {
+    SceneNotFound,
+    SourceNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveSceneItemError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemSourceError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemIndexError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneItemIndexError {
+    SceneNotFound,
+    SceneItemNotFound,
+    InvalidSceneItemIndex,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuplicateSceneItemError {
+    SourceScene,
+    DestinationScene,
+    SourceSceneItem,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -556,6 +654,25 @@ impl ObswsInputRegistry {
             .collect()
     }
 
+    pub fn resolve_scene_name(
+        &self,
+        scene_name: Option<&str>,
+        scene_uuid: Option<&str>,
+    ) -> Option<String> {
+        if let Some(scene_name) = scene_name {
+            if self.scenes_by_name.contains_key(scene_name) {
+                return Some(scene_name.to_owned());
+            }
+            return None;
+        }
+
+        let scene_uuid = scene_uuid?;
+        self.scenes_by_name
+            .iter()
+            .find(|(_, scene)| scene.scene_uuid == scene_uuid)
+            .map(|(scene_name, _)| scene_name.clone())
+    }
+
     pub fn get_scene_item_id(
         &self,
         scene_name: &str,
@@ -575,6 +692,220 @@ impl ObswsInputRegistry {
             return Err(GetSceneItemIdError::SourceNotFound);
         };
         Ok(scene_item_id)
+    }
+
+    pub fn list_scene_items(
+        &self,
+        scene_name: &str,
+    ) -> Result<Vec<ObswsSceneItemEntry>, GetSceneItemListError> {
+        let Some(scene) = self.scenes_by_name.get(scene_name) else {
+            return Err(GetSceneItemListError::SceneNotFound);
+        };
+        Ok(self.build_scene_item_entries(scene))
+    }
+
+    pub fn create_scene_item(
+        &mut self,
+        scene_name: &str,
+        source_uuid: Option<&str>,
+        source_name: Option<&str>,
+        scene_item_enabled: bool,
+    ) -> Result<ObswsSceneItemRef, CreateSceneItemError> {
+        let input_entry = self
+            .find_input(source_uuid, source_name)
+            .cloned()
+            .ok_or(CreateSceneItemError::SourceNotFound)?;
+        let scene_item_id = self.next_scene_item_id();
+        let scene = self
+            .scenes_by_name
+            .get_mut(scene_name)
+            .ok_or(CreateSceneItemError::SceneNotFound)?;
+        scene.items.push(ObswsSceneItemState {
+            scene_item_id,
+            input_uuid: input_entry.input_uuid.clone(),
+            enabled: scene_item_enabled,
+        });
+        let scene_item_index = scene.items.len().saturating_sub(1) as i64;
+        Ok(ObswsSceneItemRef {
+            scene_name: scene_name.to_owned(),
+            scene_uuid: scene.scene_uuid.clone(),
+            scene_item: ObswsSceneItemEntry {
+                scene_item_id,
+                source_name: input_entry.input_name,
+                source_uuid: input_entry.input_uuid,
+                scene_item_enabled,
+                scene_item_locked: false,
+                scene_item_index,
+                is_group: false,
+            },
+        })
+    }
+
+    pub fn remove_scene_item(
+        &mut self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<ObswsSceneItemRef, RemoveSceneItemError> {
+        let scene = self
+            .scenes_by_name
+            .get_mut(scene_name)
+            .ok_or(RemoveSceneItemError::SceneNotFound)?;
+        let Some(position) = scene
+            .items
+            .iter()
+            .position(|item| item.scene_item_id == scene_item_id)
+        else {
+            return Err(RemoveSceneItemError::SceneItemNotFound);
+        };
+        let removed = scene.items.remove(position);
+        let scene_uuid = scene.scene_uuid.clone();
+        let input_entry = self
+            .inputs_by_uuid
+            .get(&removed.input_uuid)
+            .ok_or(RemoveSceneItemError::SceneItemNotFound)?;
+        Ok(ObswsSceneItemRef {
+            scene_name: scene_name.to_owned(),
+            scene_uuid,
+            scene_item: ObswsSceneItemEntry {
+                scene_item_id: removed.scene_item_id,
+                source_name: input_entry.input_name.clone(),
+                source_uuid: input_entry.input_uuid.clone(),
+                scene_item_enabled: removed.enabled,
+                scene_item_locked: false,
+                scene_item_index: position as i64,
+                is_group: false,
+            },
+        })
+    }
+
+    pub fn duplicate_scene_item(
+        &mut self,
+        from_scene_name: &str,
+        to_scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<ObswsSceneItemRef, DuplicateSceneItemError> {
+        let (input_uuid, enabled) = {
+            let from_scene = self
+                .scenes_by_name
+                .get(from_scene_name)
+                .ok_or(DuplicateSceneItemError::SourceScene)?;
+            let Some(from_item) = from_scene
+                .items
+                .iter()
+                .find(|item| item.scene_item_id == scene_item_id)
+            else {
+                return Err(DuplicateSceneItemError::SourceSceneItem);
+            };
+            (from_item.input_uuid.clone(), from_item.enabled)
+        };
+        let input_entry = self
+            .inputs_by_uuid
+            .get(&input_uuid)
+            .ok_or(DuplicateSceneItemError::SourceSceneItem)?
+            .clone();
+        let new_scene_item_id = self.next_scene_item_id();
+        let to_scene = self
+            .scenes_by_name
+            .get_mut(to_scene_name)
+            .ok_or(DuplicateSceneItemError::DestinationScene)?;
+        to_scene.items.push(ObswsSceneItemState {
+            scene_item_id: new_scene_item_id,
+            input_uuid: input_uuid.clone(),
+            enabled,
+        });
+        let scene_item_index = to_scene.items.len().saturating_sub(1) as i64;
+        Ok(ObswsSceneItemRef {
+            scene_name: to_scene_name.to_owned(),
+            scene_uuid: to_scene.scene_uuid.clone(),
+            scene_item: ObswsSceneItemEntry {
+                scene_item_id: new_scene_item_id,
+                source_name: input_entry.input_name,
+                source_uuid: input_entry.input_uuid,
+                scene_item_enabled: enabled,
+                scene_item_locked: false,
+                scene_item_index,
+                is_group: false,
+            },
+        })
+    }
+
+    pub fn get_scene_item_source(
+        &self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<(String, String), GetSceneItemSourceError> {
+        let scene_item = self
+            .find_scene_item(scene_name, scene_item_id)
+            .map_err(|error| match error {
+                FindSceneItemError::SceneNotFound => GetSceneItemSourceError::SceneNotFound,
+                FindSceneItemError::SceneItemNotFound => GetSceneItemSourceError::SceneItemNotFound,
+            })?;
+        let input_entry = self
+            .inputs_by_uuid
+            .get(&scene_item.input_uuid)
+            .ok_or(GetSceneItemSourceError::SceneItemNotFound)?;
+        Ok((
+            input_entry.input_name.clone(),
+            input_entry.input_uuid.clone(),
+        ))
+    }
+
+    pub fn get_scene_item_index(
+        &self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<i64, GetSceneItemIndexError> {
+        let scene = self
+            .scenes_by_name
+            .get(scene_name)
+            .ok_or(GetSceneItemIndexError::SceneNotFound)?;
+        let Some(index) = scene
+            .items
+            .iter()
+            .position(|item| item.scene_item_id == scene_item_id)
+        else {
+            return Err(GetSceneItemIndexError::SceneItemNotFound);
+        };
+        Ok(index as i64)
+    }
+
+    pub fn set_scene_item_index(
+        &mut self,
+        scene_name: &str,
+        scene_item_id: i64,
+        scene_item_index: i64,
+    ) -> Result<SetSceneItemIndexResult, SetSceneItemIndexError> {
+        let scene = self
+            .scenes_by_name
+            .get_mut(scene_name)
+            .ok_or(SetSceneItemIndexError::SceneNotFound)?;
+        if scene_item_index < 0 || scene_item_index as usize >= scene.items.len() {
+            return Err(SetSceneItemIndexError::InvalidSceneItemIndex);
+        }
+        let Some(current_index) = scene
+            .items
+            .iter()
+            .position(|item| item.scene_item_id == scene_item_id)
+        else {
+            return Err(SetSceneItemIndexError::SceneItemNotFound);
+        };
+        let target_index = scene_item_index as usize;
+        if current_index != target_index {
+            let moved = scene.items.remove(current_index);
+            scene.items.insert(target_index, moved);
+        }
+        Ok(SetSceneItemIndexResult {
+            changed: current_index != target_index,
+            scene_items: scene
+                .items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| ObswsSceneItemIndexEntry {
+                    scene_item_id: item.scene_item_id,
+                    scene_item_index: index as i64,
+                })
+                .collect(),
+        })
     }
 
     pub fn set_scene_item_enabled(
@@ -788,6 +1119,48 @@ impl ObswsInputRegistry {
             .expect("BUG: obsws scene item id overflow");
         scene_item_id
     }
+
+    fn build_scene_item_entries(&self, scene: &ObswsSceneState) -> Vec<ObswsSceneItemEntry> {
+        scene
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let input_entry = self.inputs_by_uuid.get(&item.input_uuid)?;
+                Some(ObswsSceneItemEntry {
+                    scene_item_id: item.scene_item_id,
+                    source_name: input_entry.input_name.clone(),
+                    source_uuid: input_entry.input_uuid.clone(),
+                    scene_item_enabled: item.enabled,
+                    scene_item_locked: false,
+                    scene_item_index: index as i64,
+                    is_group: false,
+                })
+            })
+            .collect()
+    }
+
+    fn find_scene_item(
+        &self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<&ObswsSceneItemState, FindSceneItemError> {
+        let scene = self
+            .scenes_by_name
+            .get(scene_name)
+            .ok_or(FindSceneItemError::SceneNotFound)?;
+        scene
+            .items
+            .iter()
+            .find(|item| item.scene_item_id == scene_item_id)
+            .ok_or(FindSceneItemError::SceneItemNotFound)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FindSceneItemError {
+    SceneNotFound,
+    SceneItemNotFound,
 }
 
 #[cfg(test)]
@@ -1153,6 +1526,130 @@ mod tests {
             scene_item_error,
             GetSceneItemEnabledError::SceneItemNotFound
         );
+    }
+
+    #[test]
+    fn create_scene_item_and_list_scene_items_succeed() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        let created_input = registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, false)
+            .expect("input creation must succeed");
+
+        let created_scene_item = registry
+            .create_scene_item(
+                OBSWS_DEFAULT_SCENE_NAME,
+                Some(&created_input.input_uuid),
+                None,
+                true,
+            )
+            .expect("scene item creation must succeed");
+        assert_eq!(created_scene_item.scene_item.scene_item_id, 1);
+
+        let scene_items = registry
+            .list_scene_items(OBSWS_DEFAULT_SCENE_NAME)
+            .expect("scene items must be listed");
+        assert_eq!(scene_items.len(), 1);
+        assert_eq!(scene_items[0].source_name, "camera-1");
+        assert_eq!(scene_items[0].scene_item_index, 0);
+    }
+
+    #[test]
+    fn remove_scene_item_and_set_scene_item_index_succeed() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input_1 = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        let created_input_1 = registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input_1, false)
+            .expect("input creation must succeed");
+        let input_2 = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        let created_input_2 = registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-2", input_2, false)
+            .expect("input creation must succeed");
+
+        let first_scene_item = registry
+            .create_scene_item(
+                OBSWS_DEFAULT_SCENE_NAME,
+                Some(&created_input_1.input_uuid),
+                None,
+                true,
+            )
+            .expect("scene item creation must succeed");
+        let second_scene_item = registry
+            .create_scene_item(
+                OBSWS_DEFAULT_SCENE_NAME,
+                Some(&created_input_2.input_uuid),
+                None,
+                true,
+            )
+            .expect("scene item creation must succeed");
+
+        let set_index_result = registry
+            .set_scene_item_index(
+                OBSWS_DEFAULT_SCENE_NAME,
+                second_scene_item.scene_item.scene_item_id,
+                0,
+            )
+            .expect("set scene item index must succeed");
+        assert!(set_index_result.changed);
+        assert_eq!(set_index_result.scene_items[0].scene_item_id, 2);
+        assert_eq!(set_index_result.scene_items[1].scene_item_id, 1);
+
+        let removed_scene_item = registry
+            .remove_scene_item(
+                OBSWS_DEFAULT_SCENE_NAME,
+                first_scene_item.scene_item.scene_item_id,
+            )
+            .expect("scene item removal must succeed");
+        assert_eq!(removed_scene_item.scene_item.source_name, "camera-1");
+        let scene_items = registry
+            .list_scene_items(OBSWS_DEFAULT_SCENE_NAME)
+            .expect("scene items must be listed");
+        assert_eq!(scene_items.len(), 1);
+        assert_eq!(scene_items[0].source_name, "camera-2");
+    }
+
+    #[test]
+    fn duplicate_scene_item_to_another_scene_succeeds() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+
+        let duplicated = registry
+            .duplicate_scene_item(OBSWS_DEFAULT_SCENE_NAME, "Scene B", scene_item_id)
+            .expect("scene item duplication must succeed");
+        assert!(duplicated.scene_item.scene_item_id > scene_item_id);
+        assert_eq!(duplicated.scene_name, "Scene B");
+        assert_eq!(duplicated.scene_item.source_name, "camera-1");
+
+        let scene_b_items = registry
+            .list_scene_items("Scene B")
+            .expect("scene items must be listed");
+        assert_eq!(scene_b_items.len(), 1);
+        assert_eq!(scene_b_items[0].source_name, "camera-1");
     }
 
     #[test]

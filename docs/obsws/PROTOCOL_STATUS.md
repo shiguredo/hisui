@@ -53,6 +53,9 @@
 - [x] `InputCreated`: Input 作成を通知する
 - [x] `InputRemoved`: Input 削除を通知する
 - [x] `SceneItemEnableStateChanged`: Scene Item の有効状態変更を通知する
+- [x] `SceneItemCreated`: Scene Item の作成を通知する
+- [x] `SceneItemRemoved`: Scene Item の削除を通知する
+- [x] `SceneItemListReindexed`: Scene Item の並び順変更を通知する
 
 ## RequestType 実装状況
 
@@ -191,22 +194,22 @@
 
 ### Scene Items
 
-- [ ] `GetSceneItemList`: シーン内アイテム一覧を取得する
+- [x] `GetSceneItemList`: シーン内アイテム一覧を取得する
 - [ ] `GetGroupSceneItemList`: グループ内アイテム一覧を取得する
 - [x] `GetSceneItemId`: ソース名からシーンアイテム ID を取得する
   - NOTE: `searchOffset` は `0` のみ対応する
-- [ ] `GetSceneItemSource`: シーンアイテムに紐づくソースを取得する
-- [ ] `CreateSceneItem`: シーンアイテムを作成する
-- [ ] `RemoveSceneItem`: シーンアイテムを削除する
-- [ ] `DuplicateSceneItem`: シーンアイテムを複製する
+- [x] `GetSceneItemSource`: シーンアイテムに紐づくソースを取得する
+- [x] `CreateSceneItem`: シーンアイテムを作成する
+- [x] `RemoveSceneItem`: シーンアイテムを削除する
+- [x] `DuplicateSceneItem`: シーンアイテムを複製する
 - [ ] `GetSceneItemTransform`: シーンアイテム変形情報を取得する
 - [ ] `SetSceneItemTransform`: シーンアイテム変形情報を設定する
 - [x] `GetSceneItemEnabled`: シーンアイテム有効状態を取得する
 - [x] `SetSceneItemEnabled`: シーンアイテム有効状態を設定する
 - [ ] `GetSceneItemLocked`: シーンアイテムロック状態を取得する
 - [ ] `SetSceneItemLocked`: シーンアイテムロック状態を設定する
-- [ ] `GetSceneItemIndex`: シーンアイテム順序を取得する
-- [ ] `SetSceneItemIndex`: シーンアイテム順序を設定する
+- [x] `GetSceneItemIndex`: シーンアイテム順序を取得する
+- [x] `SetSceneItemIndex`: シーンアイテム順序を設定する
 - [ ] `GetSceneItemBlendMode`: シーンアイテム合成モードを取得する
 - [ ] `SetSceneItemBlendMode`: シーンアイテム合成モードを設定する
 

@@ -1546,6 +1546,185 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
         asyncio.run(_run())
 
 
+def test_obsws_scene_item_management_requests(binary_path: Path):
+    """obsws の Scene Item 管理 request 一式が動作することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-management",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-management-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": False,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+            source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
+
+            create_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="CreateSceneItem",
+                request_id="req-create-scene-item-1",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceUuid": source_uuid,
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_scene_item_response["d"]["requestStatus"]["result"] is True
+            first_scene_item_id = create_scene_item_response["d"]["responseData"]["sceneItemId"]
+
+            create_second_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="CreateSceneItem",
+                request_id="req-create-scene-item-2",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceUuid": source_uuid,
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_second_scene_item_response["d"]["requestStatus"]["result"] is True
+            second_scene_item_id = create_second_scene_item_response["d"]["responseData"][
+                "sceneItemId"
+            ]
+
+            get_scene_item_list_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemList",
+                request_id="req-get-scene-item-list",
+                request_data={"sceneName": "Scene"},
+            )
+            assert get_scene_item_list_response["d"]["requestStatus"]["result"] is True
+            scene_items = get_scene_item_list_response["d"]["responseData"]["sceneItems"]
+            scene_item_ids = [item["sceneItemId"] for item in scene_items]
+            assert first_scene_item_id in scene_item_ids
+            assert second_scene_item_id in scene_item_ids
+
+            get_scene_item_source_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemSource",
+                request_id="req-get-scene-item-source",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": first_scene_item_id,
+                },
+            )
+            assert get_scene_item_source_response["d"]["requestStatus"]["result"] is True
+            assert (
+                get_scene_item_source_response["d"]["responseData"]["sourceUuid"]
+                == source_uuid
+            )
+            assert (
+                get_scene_item_source_response["d"]["responseData"]["sourceName"]
+                == "scene-item-management-input"
+            )
+
+            get_second_scene_item_index_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemIndex",
+                request_id="req-get-scene-item-index-before",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                },
+            )
+            assert get_second_scene_item_index_response["d"]["requestStatus"]["result"] is True
+            assert (
+                get_second_scene_item_index_response["d"]["responseData"]["sceneItemIndex"]
+                == 1
+            )
+
+            set_scene_item_index_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemIndex",
+                request_id="req-set-scene-item-index",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                    "sceneItemIndex": 0,
+                },
+            )
+            assert set_scene_item_index_response["d"]["requestStatus"]["result"] is True
+
+            get_second_scene_item_index_after_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemIndex",
+                request_id="req-get-scene-item-index-after",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                },
+            )
+            assert (
+                get_second_scene_item_index_after_response["d"]["responseData"][
+                    "sceneItemIndex"
+                ]
+                == 0
+            )
+
+            remove_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="RemoveSceneItem",
+                request_id="req-remove-scene-item",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": first_scene_item_id,
+                },
+            )
+            assert remove_scene_item_response["d"]["requestStatus"]["result"] is True
+
+            get_scene_item_list_after_remove_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemList",
+                request_id="req-get-scene-item-list-after-remove",
+                request_data={"sceneName": "Scene"},
+            )
+            scene_items_after_remove = get_scene_item_list_after_remove_response["d"][
+                "responseData"
+            ]["sceneItems"]
+            scene_item_ids_after_remove = [
+                item["sceneItemId"] for item in scene_items_after_remove
+            ]
+            assert first_scene_item_id not in scene_item_ids_after_remove
+            assert second_scene_item_id in scene_item_ids_after_remove
+
+            duplicate_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="DuplicateSceneItem",
+                request_id="req-duplicate-scene-item",
+                request_data={
+                    "fromSceneName": "Scene",
+                    "toSceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                },
+            )
+            assert duplicate_scene_item_response["d"]["requestStatus"]["result"] is True
+            duplicated_scene_item_id = duplicate_scene_item_response["d"]["responseData"][
+                "sceneItemId"
+            ]
+            assert duplicated_scene_item_id != second_scene_item_id
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run())
+
+
 def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: Path):
     """obsws が RequestBatch で配信準備 request を順次実行できることを確認する"""
     host = "127.0.0.1"
@@ -2763,6 +2942,157 @@ def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabl
             )
             assert disable_again_response["d"]["requestStatus"]["result"] is True
             await _assert_no_message_within(ws, timeout=0.5)
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
+    binary_path: Path,
+):
+    """obsws が Scenes 購読時に Scene Item 作成・削除・並び替えイベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENES,
+            )
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-events",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-events-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": False,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+            source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
+
+            create_scene_item_first_response = await _send_obsws_request(
+                ws,
+                request_type="CreateSceneItem",
+                request_id="req-create-scene-item-event-1",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceUuid": source_uuid,
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_scene_item_first_response["d"]["requestStatus"]["result"] is True
+            first_scene_item_id = create_scene_item_first_response["d"]["responseData"][
+                "sceneItemId"
+            ]
+            created_event_1 = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert created_event_1["d"]["eventData"]["sceneItemId"] == first_scene_item_id
+
+            create_scene_item_second_response = await _send_obsws_request(
+                ws,
+                request_type="CreateSceneItem",
+                request_id="req-create-scene-item-event-2",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceUuid": source_uuid,
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_scene_item_second_response["d"]["requestStatus"]["result"] is True
+            second_scene_item_id = create_scene_item_second_response["d"]["responseData"][
+                "sceneItemId"
+            ]
+            created_event_2 = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert created_event_2["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+
+            set_scene_item_index_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemIndex",
+                request_id="req-set-scene-item-index-event",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                    "sceneItemIndex": 0,
+                },
+            )
+            assert set_scene_item_index_response["d"]["requestStatus"]["result"] is True
+            reindexed_event_1 = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemListReindexed",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            reindexed_ids_1 = [
+                item["sceneItemId"] for item in reindexed_event_1["d"]["eventData"]["sceneItems"]
+            ]
+            assert reindexed_ids_1[0] == second_scene_item_id
+
+            remove_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="RemoveSceneItem",
+                request_id="req-remove-scene-item-event",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": first_scene_item_id,
+                },
+            )
+            assert remove_scene_item_response["d"]["requestStatus"]["result"] is True
+            removed_event = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemRemoved",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert removed_event["d"]["eventData"]["sceneItemId"] == first_scene_item_id
+            reindexed_event_2 = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemListReindexed",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            reindexed_ids_2 = [
+                item["sceneItemId"] for item in reindexed_event_2["d"]["eventData"]["sceneItems"]
+            ]
+            assert first_scene_item_id not in reindexed_ids_2
+
+            duplicate_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="DuplicateSceneItem",
+                request_id="req-duplicate-scene-item-event",
+                request_data={
+                    "fromSceneName": "Scene",
+                    "toSceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                },
+            )
+            assert duplicate_scene_item_response["d"]["requestStatus"]["result"] is True
+            duplicated_scene_item_id = duplicate_scene_item_response["d"]["responseData"][
+                "sceneItemId"
+            ]
+            created_event_3 = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert created_event_3["d"]["eventData"]["sceneItemId"] == duplicated_scene_item_id
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
