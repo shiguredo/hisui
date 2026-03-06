@@ -5,6 +5,7 @@ use crate::obsws_input_registry::{
     GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsSceneItemIndexEntry,
     ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError, RemoveSceneItemError,
     SetCurrentProgramSceneError, SetSceneItemEnabledError, SetSceneItemIndexError,
+    SetSceneItemIndexResult,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
@@ -116,6 +117,13 @@ pub struct RequestBatchResult {
     pub request_status_code: i64,
     pub request_status_comment: Option<String>,
     pub response_data: Option<nojson::RawJsonOwned>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetSceneItemIndexExecution {
+    pub response_text: String,
+    pub scene_name: Option<String>,
+    pub set_result: Option<SetSceneItemIndexResult>,
 }
 
 fn parse_input_lookup_fields(
@@ -1670,11 +1678,11 @@ pub fn build_get_scene_item_index_response(
     .to_string()
 }
 
-pub fn build_set_scene_item_index_response(
+pub fn execute_set_scene_item_index(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> SetSceneItemIndexExecution {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemIndex",
         request_id,
@@ -1682,7 +1690,13 @@ pub fn build_set_scene_item_index_response(
         parse_set_scene_item_index_fields,
     ) {
         Ok(fields) => fields,
-        Err(response) => return response,
+        Err(response) => {
+            return SetSceneItemIndexExecution {
+                response_text: response,
+                scene_name: None,
+                set_result: None,
+            };
+        }
     };
     let scene_name = match resolve_scene_name_or_error(
         "SetSceneItemIndex",
@@ -1692,36 +1706,50 @@ pub fn build_set_scene_item_index_response(
         fields.scene_uuid.as_deref(),
     ) {
         Ok(scene_name) => scene_name,
-        Err(response) => return response,
+        Err(response) => {
+            return SetSceneItemIndexExecution {
+                response_text: response,
+                scene_name: None,
+                set_result: None,
+            };
+        }
     };
-    if let Err(error) = input_registry.set_scene_item_index(
+    let set_result = match input_registry.set_scene_item_index(
         &scene_name,
         fields.scene_item_id,
         fields.scene_item_index,
     ) {
-        return match error {
-            SetSceneItemIndexError::SceneNotFound => build_request_response_error(
-                "SetSceneItemIndex",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            ),
-            SetSceneItemIndexError::SceneItemNotFound => build_request_response_error(
-                "SetSceneItemIndex",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene item not found",
-            ),
-            SetSceneItemIndexError::InvalidSceneItemIndex => build_request_response_error(
-                "SetSceneItemIndex",
-                request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Invalid sceneItemIndex field",
-            ),
-        };
-    }
+        Ok(set_result) => set_result,
+        Err(error) => {
+            let response_text = match error {
+                SetSceneItemIndexError::SceneNotFound => build_request_response_error(
+                    "SetSceneItemIndex",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Scene not found",
+                ),
+                SetSceneItemIndexError::SceneItemNotFound => build_request_response_error(
+                    "SetSceneItemIndex",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Scene item not found",
+                ),
+                SetSceneItemIndexError::InvalidSceneItemIndex => build_request_response_error(
+                    "SetSceneItemIndex",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Invalid sceneItemIndex field",
+                ),
+            };
+            return SetSceneItemIndexExecution {
+                response_text,
+                scene_name: None,
+                set_result: None,
+            };
+        }
+    };
 
-    nojson::object(|f| {
+    let response_text = nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
             "d",
@@ -1739,7 +1767,12 @@ pub fn build_set_scene_item_index_response(
             }),
         )
     })
-    .to_string()
+    .to_string();
+    SetSceneItemIndexExecution {
+        response_text,
+        scene_name: Some(scene_name),
+        set_result: Some(set_result),
+    }
 }
 
 pub fn build_set_scene_item_enabled_response(
@@ -2904,11 +2937,12 @@ mod tests {
         ))
         .expect("request data must be valid json");
 
-        let response = build_set_scene_item_index_response(
+        let response = execute_set_scene_item_index(
             "req-set-scene-item-index",
             Some(&request_data),
             &mut registry,
-        );
+        )
+        .response_text;
         let json = nojson::RawJson::parse(&response).expect("response must be valid json");
         let result: bool = json
             .value()

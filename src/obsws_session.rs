@@ -1386,81 +1386,54 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let target_scene_name =
-            Self::parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid").and_then(
-                |(scene_name, scene_uuid)| {
-                    input_registry.resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
-                },
-            );
-        let scene_items_before = target_scene_name.as_ref().and_then(|scene_name| {
-            input_registry
-                .list_scene_items(scene_name)
-                .ok()
-                .map(|scene_items| {
-                    scene_items
-                        .iter()
-                        .map(|scene_item| (scene_item.scene_item_id, scene_item.scene_item_index))
-                        .collect::<Vec<_>>()
-                })
-        });
-        let response_text = crate::obsws_response_builder::build_set_scene_item_index_response(
+        let execution = crate::obsws_response_builder::execute_set_scene_item_index(
             request_id,
             request_data,
             &mut input_registry,
         );
+        let response_text = execution.response_text;
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         }
-        let Some(target_scene_name) = target_scene_name else {
+        let Some(target_scene_name) = execution.scene_name else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         };
+        let Some(set_result) = execution.set_result else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        if !set_result.changed {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
         let Some(scene_uuid) = Self::find_scene_uuid(&input_registry, &target_scene_name) else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         };
-        let scene_items_after = input_registry
-            .list_scene_items(&target_scene_name)
-            .unwrap_or_default()
-            .iter()
-            .map(
-                |scene_item| crate::obsws_input_registry::ObswsSceneItemIndexEntry {
-                    scene_item_id: scene_item.scene_item_id,
-                    scene_item_index: scene_item.scene_item_index,
-                },
-            )
-            .collect::<Vec<_>>();
-        let scene_items_after_simple = scene_items_after
-            .iter()
-            .map(|scene_item| (scene_item.scene_item_id, scene_item.scene_item_index))
-            .collect::<Vec<_>>();
-        if let Some(scene_items_before) = scene_items_before
-            && scene_items_before != scene_items_after_simple
-        {
-            return SessionAction::SendTexts {
-                messages: vec![
-                    (response_text, "request response message"),
-                    (
-                        crate::obsws_response_builder::build_scene_item_list_reindexed_event(
-                            &target_scene_name,
-                            &scene_uuid,
-                            &scene_items_after,
-                        ),
-                        "event message",
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (
+                    crate::obsws_response_builder::build_scene_item_list_reindexed_event(
+                        &target_scene_name,
+                        &scene_uuid,
+                        &set_result.scene_items,
                     ),
-                ],
-            };
-        }
-        SessionAction::SendText {
-            text: response_text,
-            message_name: "request response message",
+                    "event message",
+                ),
+            ],
         }
     }
 
