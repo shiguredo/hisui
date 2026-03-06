@@ -750,6 +750,12 @@ impl ObswsInputRegistry {
             .map(|(scene_name, _)| scene_name.clone())
     }
 
+    pub fn get_scene_uuid(&self, scene_name: &str) -> Option<String> {
+        self.scenes_by_name
+            .get(scene_name)
+            .map(|scene| scene.scene_uuid.clone())
+    }
+
     pub fn get_scene_item_id(
         &self,
         scene_name: &str,
@@ -2069,6 +2075,17 @@ mod tests {
                 .map(|scene| scene.scene_name),
             Some(OBSWS_DEFAULT_SCENE_NAME.to_owned())
         );
+    }
+
+    #[test]
+    fn get_scene_uuid_returns_expected_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let created = registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        let scene_uuid = registry.get_scene_uuid("Scene B");
+        assert_eq!(scene_uuid, Some(created.scene_uuid));
+        assert!(registry.get_scene_uuid("not-found").is_none());
     }
 
     #[test]

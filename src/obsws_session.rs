@@ -726,14 +726,6 @@ impl ObswsSession {
         }
     }
 
-    fn find_scene_uuid(input_registry: &ObswsInputRegistry, scene_name: &str) -> Option<String> {
-        input_registry
-            .list_scenes()
-            .into_iter()
-            .find(|scene| scene.scene_name == scene_name)
-            .map(|scene| scene.scene_uuid)
-    }
-
     async fn handle_set_current_program_scene_request(
         &self,
         request_id: &str,
@@ -1277,7 +1269,8 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         };
-        let scene_uuid = Self::find_scene_uuid(&input_registry, &scene_name)
+        let scene_uuid = input_registry
+            .get_scene_uuid(&scene_name)
             .unwrap_or_else(|| unreachable!("resolved scene name must exist in input registry"));
 
         let mut messages = vec![
@@ -1410,7 +1403,8 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let scene_uuid = Self::find_scene_uuid(&input_registry, &target_scene_name)
+        let scene_uuid = input_registry
+            .get_scene_uuid(&target_scene_name)
             .unwrap_or_else(|| unreachable!("resolved scene name must exist in input registry"));
         SessionAction::SendTexts {
             messages: vec![
