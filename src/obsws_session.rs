@@ -1276,12 +1276,8 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let Some(scene_uuid) = Self::find_scene_uuid(&input_registry, &target_scene_name) else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
+        let scene_uuid = Self::find_scene_uuid(&input_registry, &target_scene_name)
+            .unwrap_or_else(|| unreachable!("resolved scene name must exist in input registry"));
         SessionAction::SendTexts {
             messages: vec![
                 (response_text, "request response message"),
