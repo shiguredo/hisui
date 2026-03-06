@@ -383,6 +383,24 @@ async def _expect_record_state_changed_event(
     return event
 
 
+async def _expect_scene_item_enable_state_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    scene_name: str,
+    scene_item_id: int,
+    scene_item_enabled: bool,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="SceneItemEnableStateChanged",
+        event_intent=OBSWS_EVENT_SUB_SCENES,
+    )
+    assert event["d"]["eventData"]["sceneName"] == scene_name
+    assert event["d"]["eventData"]["sceneItemId"] == scene_item_id
+    assert event["d"]["eventData"]["sceneItemEnabled"] is scene_item_enabled
+    return event
+
+
 async def _expect_obsws_event(
     ws: aiohttp.ClientWebSocketResponse,
     *,
@@ -822,6 +840,9 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
         assert "GetSceneList" in response_data["availableRequests"]
+        assert "GetSceneItemId" in response_data["availableRequests"]
+        assert "GetSceneItemEnabled" in response_data["availableRequests"]
+        assert "SetSceneItemEnabled" in response_data["availableRequests"]
         assert "SetStreamServiceSettings" in response_data["availableRequests"]
         assert "StartStream" in response_data["availableRequests"]
         assert "ToggleStream" in response_data["availableRequests"]
@@ -1289,6 +1310,240 @@ def test_obsws_remove_input_rejects_unknown_input(binary_path: Path):
         status = response["d"]["requestStatus"]
         assert status["result"] is False
         assert status["code"] == 601
+
+
+def test_obsws_get_scene_item_id_request(binary_path: Path):
+    """obsws が GetSceneItemId request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-id",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-id-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemId",
+                request_id="req-get-scene-item-id",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceName": "scene-item-id-input",
+                    "searchOffset": 0,
+                },
+            )
+            status = response["d"]["requestStatus"]
+            assert status["result"] is True
+            assert status["code"] == 100
+            scene_item_id = response["d"]["responseData"]["sceneItemId"]
+            assert isinstance(scene_item_id, int)
+            assert scene_item_id > 0
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が SetSceneItemEnabled で StartRecord の前提入力を切り替えられることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    image_path = tmp_path / "set-scene-item-enabled-input.png"
+    _write_test_png(image_path)
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-enabled",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-enabled-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            get_scene_item_id_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemId",
+                request_id="req-get-scene-item-id-for-set",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceName": "scene-item-enabled-input",
+                    "searchOffset": 0,
+                },
+            )
+            assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
+            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+
+            disable_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemEnabled",
+                request_id="req-set-scene-item-disabled",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemEnabled": False,
+                },
+            )
+            assert disable_response["d"]["requestStatus"]["result"] is True
+
+            start_record_error_response = await _send_obsws_request(
+                ws,
+                request_type="StartRecord",
+                request_id="req-start-record-disabled-input",
+            )
+            start_record_error_status = start_record_error_response["d"]["requestStatus"]
+            assert start_record_error_status["result"] is False
+            assert start_record_error_status["code"] == 400
+
+            enable_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemEnabled",
+                request_id="req-set-scene-item-enabled",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert enable_response["d"]["requestStatus"]["result"] is True
+
+            start_record_response = await _send_obsws_request(
+                ws,
+                request_type="StartRecord",
+                request_id="req-start-record-enabled-input",
+            )
+            assert start_record_response["d"]["requestStatus"]["result"] is True
+            assert start_record_response["d"]["responseData"]["outputActive"] is True
+
+            stop_record_response = await _send_obsws_request(
+                ws,
+                request_type="StopRecord",
+                request_id="req-stop-record-enabled-input",
+            )
+            assert stop_record_response["d"]["requestStatus"]["result"] is True
+            assert stop_record_response["d"]["responseData"]["outputPath"]
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_get_scene_item_enabled_request(binary_path: Path):
+    """obsws が GetSceneItemEnabled request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-get-scene-item-enabled",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "get-scene-item-enabled-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            get_scene_item_id_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemId",
+                request_id="req-get-scene-item-id-for-get-enabled",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceName": "get-scene-item-enabled-input",
+                    "searchOffset": 0,
+                },
+            )
+            assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
+            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+
+            get_enabled_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemEnabled",
+                request_id="req-get-scene-item-enabled-true",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_enabled_response["d"]["requestStatus"]["result"] is True
+            assert get_enabled_response["d"]["responseData"]["sceneItemEnabled"] is True
+
+            set_disabled_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemEnabled",
+                request_id="req-set-scene-item-enabled-false-for-get",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemEnabled": False,
+                },
+            )
+            assert set_disabled_response["d"]["requestStatus"]["result"] is True
+
+            get_disabled_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemEnabled",
+                request_id="req-get-scene-item-enabled-false",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_disabled_response["d"]["requestStatus"]["result"] is True
+            assert get_disabled_response["d"]["responseData"]["sceneItemEnabled"] is False
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run())
 
 
 def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: Path):
@@ -2421,6 +2676,93 @@ def test_obsws_scene_events_follow_reidentify_updates(binary_path: Path):
                 event_intent=OBSWS_EVENT_SUB_SCENES,
             )
             assert set_scene_event["d"]["eventData"]["sceneName"] == "Scene C"
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabled(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Scenes 購読時に SetSceneItemEnabled のイベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    image_path = tmp_path / "scene-item-event-input.png"
+    _write_test_png(image_path)
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENES,
+            )
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-event",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-event-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            get_scene_item_id_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemId",
+                request_id="req-get-scene-item-id-event",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceName": "scene-item-event-input",
+                    "searchOffset": 0,
+                },
+            )
+            assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
+            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+
+            disable_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemEnabled",
+                request_id="req-set-scene-item-disabled-event",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemEnabled": False,
+                },
+            )
+            assert disable_response["d"]["requestStatus"]["result"] is True
+            await _expect_scene_item_enable_state_changed_event(
+                ws,
+                scene_name="Scene",
+                scene_item_id=scene_item_id,
+                scene_item_enabled=False,
+            )
+
+            disable_again_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemEnabled",
+                request_id="req-set-scene-item-disabled-event-again",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemEnabled": False,
+                },
+            )
+            assert disable_again_response["d"]["requestStatus"]["result"] is True
+            await _assert_no_message_within(ws, timeout=0.5)
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):

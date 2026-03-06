@@ -177,6 +177,18 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
+        "GetSceneItemId" => crate::obsws_response_builder::build_get_scene_item_id_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetSceneItemEnabled" => {
+            crate::obsws_response_builder::build_get_scene_item_enabled_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
             input_registry,
@@ -502,6 +514,17 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
         assert!(available_requests.iter().any(|r| r == "RemoveScene"));
+        assert!(available_requests.iter().any(|r| r == "GetSceneItemId"));
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetSceneItemEnabled")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetSceneItemEnabled")
+        );
         assert!(
             available_requests
                 .iter()
@@ -621,6 +644,117 @@ mod tests {
     }
 
     #[test]
+    fn handle_request_message_returns_get_scene_item_id_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-scene-item-id".to_owned()),
+            request_type: Some("GetSceneItemId".to_owned()),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","sourceName":"camera-1","searchOffset":0}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            request_data(r#"{}"#).value(),
+        )
+        .expect("input settings must be valid");
+        input_registry
+            .create_input("Scene", "camera-1", input, true)
+            .expect("input creation must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let scene_item_id: i64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneItemId"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        assert_eq!(scene_item_id, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_invalid_field_error_for_get_scene_item_id_search_offset()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-scene-item-id-offset".to_owned()),
+            request_type: Some("GetSceneItemId".to_owned()),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","sourceName":"camera-1","searchOffset":1}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            request_data(r#"{}"#).value(),
+        )
+        .expect("input settings must be valid");
+        input_registry
+            .create_input("Scene", "camera-1", input, true)
+            .expect("input creation must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_scene_item_enabled_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-scene-item-enabled".to_owned()),
+            request_type: Some("GetSceneItemEnabled".to_owned()),
+            request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            request_data(r#"{}"#).value(),
+        )
+        .expect("input settings must be valid");
+        input_registry
+            .create_input("Scene", "camera-1", input, true)
+            .expect("input creation must succeed");
+        input_registry
+            .set_scene_item_enabled("Scene", 1, false)
+            .expect("set scene item enabled must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let scene_item_enabled: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneItemEnabled"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        assert!(!scene_item_enabled);
+        Ok(())
+    }
+
+    #[test]
     fn handle_request_message_returns_error_when_get_input_settings_is_missing_lookup_fields()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = RequestMessage {
@@ -678,6 +812,7 @@ mod tests {
             "RemoveScene",
             "CreateInput",
             "RemoveInput",
+            "SetSceneItemEnabled",
         ];
 
         for request_type in request_types {
