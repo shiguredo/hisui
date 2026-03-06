@@ -1001,11 +1001,12 @@ impl ObswsSession {
         let (scene_name, scene_item_id, scene_item_enabled) = match fields {
             Ok(fields) => fields,
             Err(e) => {
+                let code = crate::obsws_response_builder::request_status_code_for_parse_error(&e);
                 return SessionAction::SendText {
                     text: crate::obsws_response_builder::build_request_response_error(
                         "SetSceneItemEnabled",
                         request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        code,
                         &format!("Invalid requestData field: {e}"),
                     ),
                     message_name: "request response message",
@@ -1641,7 +1642,7 @@ mod tests {
         OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED,
         OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS,
         OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-        REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+        REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
     };
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -2172,6 +2173,33 @@ mod tests {
             })
             .await;
         assert!(matches!(set_action, SessionAction::SendText { .. }));
+    }
+
+    #[tokio::test]
+    async fn set_scene_item_enabled_missing_field_returns_missing_request_field_error() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let request_data =
+            nojson::RawJsonOwned::parse(r#"{"sceneItemId":1,"sceneItemEnabled":true}"#)
+                .expect("requestData must be valid json");
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-scene-item-enabled-missing-scene-name".to_owned()),
+                request_type: Some("SetSceneItemEnabled".to_owned()),
+                request_data: Some(request_data),
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let (result, code) = parse_request_status(&text);
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
     }
 
     #[tokio::test]
