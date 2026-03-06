@@ -2532,34 +2532,22 @@ mod tests {
         let op: i64 = json
             .value()
             .to_member("op")
-            .expect("op access must succeed")
-            .required()
-            .expect("op must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("op must be i64");
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
-            .expect("eventType access must succeed")
-            .required()
-            .expect("eventType must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventType must be string");
         let event_intent: u32 = json
             .value()
             .to_path_member(&["d", "eventIntent"])
-            .expect("eventIntent access must succeed")
-            .required()
-            .expect("eventIntent must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventIntent must be u32");
         let output_active: bool = json
             .value()
             .to_path_member(&["d", "eventData", "outputActive"])
-            .expect("outputActive access must succeed")
-            .required()
-            .expect("outputActive must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("outputActive must be bool");
         assert_eq!(op, OBSWS_OP_EVENT);
         assert_eq!(event_type, "StreamStateChanged");
@@ -2574,10 +2562,7 @@ mod tests {
         let output_path: String = json
             .value()
             .to_path_member(&["d", "responseData", "outputPath"])
-            .expect("outputPath access must succeed")
-            .required()
-            .expect("outputPath must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("outputPath must be string");
         assert_eq!(output_path, "/tmp/output.mp4");
     }
@@ -2589,18 +2574,12 @@ mod tests {
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
-            .expect("eventType access must succeed")
-            .required()
-            .expect("eventType must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventType must be string");
         let output_path: String = json
             .value()
             .to_path_member(&["d", "eventData", "outputPath"])
-            .expect("outputPath access must succeed")
-            .required()
-            .expect("outputPath must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("outputPath must be string");
         assert_eq!(event_type, "RecordStateChanged");
         assert_eq!(output_path, "/tmp/record.mp4");
@@ -2619,18 +2598,12 @@ mod tests {
             let event_type: String = json
                 .value()
                 .to_path_member(&["d", "eventType"])
-                .expect("eventType access must succeed")
-                .required()
-                .expect("eventType must exist")
-                .try_into()
+                .and_then(|v| v.required()?.try_into())
                 .expect("eventType must be string");
             let scene_name: String = json
                 .value()
                 .to_path_member(&["d", "eventData", "sceneName"])
-                .expect("sceneName access must succeed")
-                .required()
-                .expect("sceneName must exist")
-                .try_into()
+                .and_then(|v| v.required()?.try_into())
                 .expect("sceneName must be string");
             assert_eq!(event_type, expected_type);
             assert_eq!(scene_name, expected_name);
@@ -2650,10 +2623,7 @@ mod tests {
             let event_type: String = json
                 .value()
                 .to_path_member(&["d", "eventType"])
-                .expect("eventType access must succeed")
-                .required()
-                .expect("eventType must exist")
-                .try_into()
+                .and_then(|v| v.required()?.try_into())
                 .expect("eventType must be string");
             let event_data = json
                 .value()
@@ -2663,17 +2633,11 @@ mod tests {
                 .expect("eventData must exist");
             let input_name: String = event_data
                 .to_member("inputName")
-                .expect("inputName access must succeed")
-                .required()
-                .expect("inputName must exist")
-                .try_into()
+                .and_then(|v| v.required()?.try_into())
                 .expect("inputName must be string");
             let input_uuid: String = event_data
                 .to_member("inputUuid")
-                .expect("inputUuid access must succeed")
-                .required()
-                .expect("inputUuid must exist")
-                .try_into()
+                .and_then(|v| v.required()?.try_into())
                 .expect("inputUuid must be string");
             assert_eq!(event_type, expected_type);
             assert_eq!(input_name, expected_name);
@@ -2688,18 +2652,12 @@ mod tests {
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
-            .expect("eventType access must succeed")
-            .required()
-            .expect("eventType must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventType must be string");
         let event_intent: u32 = json
             .value()
             .to_path_member(&["d", "eventIntent"])
-            .expect("eventIntent access must succeed")
-            .required()
-            .expect("eventIntent must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventIntent must be u32");
         let event_data = json
             .value()
@@ -2709,24 +2667,15 @@ mod tests {
             .expect("eventData must exist");
         let scene_name: String = event_data
             .to_member("sceneName")
-            .expect("sceneName access must succeed")
-            .required()
-            .expect("sceneName must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneName must be string");
         let scene_item_id: i64 = event_data
             .to_member("sceneItemId")
-            .expect("sceneItemId access must succeed")
-            .required()
-            .expect("sceneItemId must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneItemId must be i64");
         let scene_item_enabled: bool = event_data
             .to_member("sceneItemEnabled")
-            .expect("sceneItemEnabled access must succeed")
-            .required()
-            .expect("sceneItemEnabled must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneItemEnabled must be bool");
         assert_eq!(event_type, "SceneItemEnableStateChanged");
         assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
@@ -2762,18 +2711,12 @@ mod tests {
         let result: bool = json
             .value()
             .to_path_member(&["d", "requestStatus", "result"])
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         let scene_item_id: i64 = json
             .value()
             .to_path_member(&["d", "responseData", "sceneItemId"])
-            .expect("sceneItemId access must succeed")
-            .required()
-            .expect("sceneItemId must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneItemId must be i64");
         assert!(result);
         assert_eq!(scene_item_id, 1);
@@ -2810,10 +2753,7 @@ mod tests {
         let result: bool = json
             .value()
             .to_path_member(&["d", "requestStatus", "result"])
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         assert!(result);
         assert!(registry.list_current_program_scene_inputs().is_empty());
@@ -2853,18 +2793,12 @@ mod tests {
         let result: bool = json
             .value()
             .to_path_member(&["d", "requestStatus", "result"])
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         let scene_item_enabled: bool = json
             .value()
             .to_path_member(&["d", "responseData", "sceneItemEnabled"])
-            .expect("sceneItemEnabled access must succeed")
-            .required()
-            .expect("sceneItemEnabled must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneItemEnabled must be bool");
         assert!(result);
         assert!(!scene_item_enabled);
@@ -2895,10 +2829,7 @@ mod tests {
         let result: bool = json
             .value()
             .to_path_member(&["d", "requestStatus", "result"])
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         let scene_items = json
             .value()
@@ -2940,18 +2871,12 @@ mod tests {
         let result: bool = json
             .value()
             .to_path_member(&["d", "requestStatus", "result"])
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         let scene_item_id: i64 = json
             .value()
             .to_path_member(&["d", "responseData", "sceneItemId"])
-            .expect("sceneItemId access must succeed")
-            .required()
-            .expect("sceneItemId must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneItemId must be i64");
         assert!(result);
         assert!(scene_item_id > 0);
@@ -2988,18 +2913,12 @@ mod tests {
         let result: bool = json
             .value()
             .to_path_member(&["d", "requestStatus", "result"])
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         let code: i64 = json
             .value()
             .to_path_member(&["d", "requestStatus", "code"])
-            .expect("code access must succeed")
-            .required()
-            .expect("code must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("code must be i64");
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -3019,18 +2938,12 @@ mod tests {
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
-            .expect("eventType access must succeed")
-            .required()
-            .expect("eventType must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventType must be string");
         let scene_item_id: i64 = json
             .value()
             .to_path_member(&["d", "eventData", "sceneItemId"])
-            .expect("sceneItemId access must succeed")
-            .required()
-            .expect("sceneItemId must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneItemId must be i64");
         assert_eq!(event_type, "SceneItemCreated");
         assert_eq!(scene_item_id, 10);
@@ -3051,10 +2964,7 @@ mod tests {
         let result: bool = json
             .value()
             .to_path_member(&["d", "requestStatus", "result"])
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         assert!(result);
     }
@@ -3087,10 +2997,7 @@ mod tests {
         let op: i64 = json
             .value()
             .to_member("op")
-            .expect("op access must succeed")
-            .required()
-            .expect("op must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("op must be i64");
         assert_eq!(op, OBSWS_OP_REQUEST_BATCH_RESPONSE);
 
@@ -3104,10 +3011,7 @@ mod tests {
         let first = results.next().expect("first result must exist");
         let first_request_type: String = first
             .to_member("requestType")
-            .expect("requestType access must succeed")
-            .required()
-            .expect("requestType must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("requestType must be string");
         assert_eq!(first_request_type, "GetVersion");
 

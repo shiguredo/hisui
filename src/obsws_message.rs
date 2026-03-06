@@ -483,17 +483,11 @@ mod tests {
             .expect("authentication must exist");
         let challenge: String = authentication
             .to_member("challenge")
-            .expect("challenge member access must succeed")
-            .required()
-            .expect("challenge must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("challenge must be string");
         let salt: String = authentication
             .to_member("salt")
-            .expect("salt member access must succeed")
-            .required()
-            .expect("salt must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("salt must be string");
         assert_eq!(challenge, "test-challenge");
         assert_eq!(salt, "test-salt");

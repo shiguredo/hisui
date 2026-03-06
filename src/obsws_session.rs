@@ -2127,17 +2127,11 @@ mod tests {
             .expect("requestStatus must exist");
         let result: bool = status
             .to_member("result")
-            .expect("result access must succeed")
-            .required()
-            .expect("result must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("result must be bool");
         let code: i64 = status
             .to_member("code")
-            .expect("code access must succeed")
-            .required()
-            .expect("code must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("code must be i64");
         (result, code)
     }
@@ -2146,10 +2140,7 @@ mod tests {
         let json = nojson::RawJson::parse(text).expect("response must be valid json");
         json.value()
             .to_path_member(&["d", "requestType"])
-            .expect("requestType access must succeed")
-            .required()
-            .expect("requestType must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("requestType must be string")
     }
 
@@ -2157,10 +2148,7 @@ mod tests {
         let json = nojson::RawJson::parse(text).expect("response must be valid json");
         json.value()
             .to_path_member(&["d", "responseData", "sceneItemId"])
-            .expect("sceneItemId access must succeed")
-            .required()
-            .expect("sceneItemId must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("sceneItemId must be i64")
     }
 
@@ -2169,18 +2157,12 @@ mod tests {
         let op: i64 = json
             .value()
             .to_member("op")
-            .expect("op access must succeed")
-            .required()
-            .expect("op must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("op must be i64");
         let negotiated_rpc_version: u32 = json
             .value()
             .to_path_member(&["d", "negotiatedRpcVersion"])
-            .expect("negotiatedRpcVersion access must succeed")
-            .required()
-            .expect("negotiatedRpcVersion must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("negotiatedRpcVersion must be u32");
         (op, negotiated_rpc_version)
     }
@@ -2190,26 +2172,17 @@ mod tests {
         let op: i64 = json
             .value()
             .to_member("op")
-            .expect("op access must succeed")
-            .required()
-            .expect("op must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("op must be i64");
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
-            .expect("eventType access must succeed")
-            .required()
-            .expect("eventType must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventType must be string");
         let event_intent: u32 = json
             .value()
             .to_path_member(&["d", "eventIntent"])
-            .expect("eventIntent access must succeed")
-            .required()
-            .expect("eventIntent must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("eventIntent must be u32");
         (op, event_type, event_intent)
     }
@@ -2229,10 +2202,7 @@ mod tests {
             .map(|result| {
                 let request_type: String = result
                     .to_member("requestType")
-                    .expect("requestType access must succeed")
-                    .required()
-                    .expect("requestType must exist")
-                    .try_into()
+                    .and_then(|v| v.required()?.try_into())
                     .expect("requestType must be string");
                 let request_status = result
                     .to_member("requestStatus")
@@ -2241,17 +2211,11 @@ mod tests {
                     .expect("requestStatus must exist");
                 let success: bool = request_status
                     .to_member("result")
-                    .expect("result access must succeed")
-                    .required()
-                    .expect("result must exist")
-                    .try_into()
+                    .and_then(|v| v.required()?.try_into())
                     .expect("result must be bool");
                 let code: i64 = request_status
                     .to_member("code")
-                    .expect("code access must succeed")
-                    .required()
-                    .expect("code must exist")
-                    .try_into()
+                    .and_then(|v| v.required()?.try_into())
                     .expect("code must be i64");
                 (request_type, success, code)
             })
