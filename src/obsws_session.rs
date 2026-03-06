@@ -1072,7 +1072,17 @@ impl ObswsSession {
             request_data,
             &mut input_registry,
         );
+        let request_succeeded =
+            crate::obsws_response_builder::parse_request_response_for_batch_result(&response_text)
+                .map(|result| result.request_status_result)
+                .unwrap_or(false);
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        if !request_succeeded {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -2406,6 +2416,49 @@ mod tests {
         let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
         assert_eq!(event_type, "InputSettingsChanged");
         assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
+    }
+
+    #[tokio::test]
+    async fn set_input_settings_with_input_subscription_does_not_send_event_on_error() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { .. } = create_action else {
+            panic!("must be SendTexts");
+        };
+
+        let set_request_data = nojson::RawJsonOwned::parse(
+            r#"{"inputName":"camera-1","inputSettings":{"device_id":1}}"#,
+        )
+        .expect("requestData must be valid json");
+        let set_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-input-settings".to_owned()),
+                request_type: Some("SetInputSettings".to_owned()),
+                request_data: Some(set_request_data),
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = set_action else {
+            panic!("must be SendText");
+        };
+        let (result, code) = parse_request_status(&text);
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
     }
 
     #[tokio::test]

@@ -3354,6 +3354,22 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 "file": str(updated_image_path)
             }
 
+            invalid_set_input_settings_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-events-invalid",
+                request_data={
+                    "inputName": "input-event-camera",
+                    "inputSettings": {"file": 1},
+                },
+            )
+            invalid_set_input_settings_status = invalid_set_input_settings_response["d"][
+                "requestStatus"
+            ]
+            assert invalid_set_input_settings_status["result"] is False
+            assert invalid_set_input_settings_status["code"] == 400
+            await _assert_no_message_within(ws, timeout=0.5)
+
             remove_input_response = await _send_obsws_request(
                 ws,
                 request_type="RemoveInput",

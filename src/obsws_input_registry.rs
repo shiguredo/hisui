@@ -1222,10 +1222,10 @@ impl ObswsInputRegistry {
             input_uuid.clone()
         };
 
-        if let Some(existing_input_uuid) = self.uuids_by_name.get(new_input_name) {
-            if existing_input_uuid != &target_input_uuid {
-                return Err(SetInputNameError::InputNameAlreadyExists);
-            }
+        if let Some(existing_input_uuid) = self.uuids_by_name.get(new_input_name)
+            && existing_input_uuid != &target_input_uuid
+        {
+            return Err(SetInputNameError::InputNameAlreadyExists);
         }
 
         let Some(input_entry) = self.inputs_by_uuid.get_mut(&target_input_uuid) else {
