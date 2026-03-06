@@ -156,6 +156,12 @@ pub struct DuplicateSceneItemExecution {
     pub duplicated: Option<ObswsSceneItemRef>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SetInputSettingsExecution {
+    pub response_text: String,
+    pub request_succeeded: bool,
+}
+
 fn parse_input_lookup_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
@@ -2505,6 +2511,14 @@ pub fn build_set_input_settings_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
 ) -> String {
+    execute_set_input_settings(request_id, request_data, input_registry).response_text
+}
+
+pub fn execute_set_input_settings(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> SetInputSettingsExecution {
     let fields = match parse_request_data_or_error_response(
         "SetInputSettings",
         request_id,
@@ -2512,7 +2526,12 @@ pub fn build_set_input_settings_response(
         parse_set_input_settings_fields,
     ) {
         Ok(fields) => fields,
-        Err(response) => return response,
+        Err(response_text) => {
+            return SetInputSettingsExecution {
+                response_text,
+                request_succeeded: false,
+            };
+        }
     };
 
     if let Err(error) = input_registry.set_input_settings(
@@ -2521,7 +2540,7 @@ pub fn build_set_input_settings_response(
         fields.input_settings.value(),
         fields.overlay,
     ) {
-        return match error {
+        let response_text = match error {
             SetInputSettingsError::InputNotFound => build_request_response_error(
                 "SetInputSettings",
                 request_id,
@@ -2535,9 +2554,13 @@ pub fn build_set_input_settings_response(
                 &message,
             ),
         };
+        return SetInputSettingsExecution {
+            response_text,
+            request_succeeded: false,
+        };
     }
 
-    nojson::object(|f| {
+    let response_text = nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
             "d",
@@ -2555,7 +2578,11 @@ pub fn build_set_input_settings_response(
             }),
         )
     })
-    .to_string()
+    .to_string();
+    SetInputSettingsExecution {
+        response_text,
+        request_succeeded: true,
+    }
 }
 
 pub fn build_set_input_name_response(

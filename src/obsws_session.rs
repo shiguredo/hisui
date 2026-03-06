@@ -1044,22 +1044,19 @@ impl ObswsSession {
                     return Self::build_parse_error_action("SetInputSettings", request_id, &error);
                 }
             };
-        let response_text = crate::obsws_response_builder::build_set_input_settings_response(
+        let execution = crate::obsws_response_builder::execute_set_input_settings(
             request_id,
             Some(request_data),
             &mut input_registry,
         );
-        let request_succeeded =
-            crate::obsws_response_builder::parse_request_response_for_batch_result(&response_text)
-                .map(|result| result.request_status_result)
-                .unwrap_or(false);
+        let response_text = execution.response_text;
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         }
-        if !request_succeeded {
+        if !execution.request_succeeded {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
