@@ -189,13 +189,6 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
-        "SetSceneItemEnabled" => {
-            crate::obsws_response_builder::build_set_scene_item_enabled_response(
-                &request_id,
-                request.request_data.as_ref(),
-                input_registry,
-            )
-        }
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
             input_registry,
@@ -819,6 +812,7 @@ mod tests {
             "RemoveScene",
             "CreateInput",
             "RemoveInput",
+            "SetSceneItemEnabled",
         ];
 
         for request_type in request_types {

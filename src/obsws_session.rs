@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     ActivateRecordError, ActivateStreamError, ObswsInputRegistry, ObswsInputSettings,
-    ObswsRecordRun, ObswsStreamRun, SetSceneItemEnabledError,
+    ObswsRecordRun, ObswsStreamRun,
 };
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
@@ -682,6 +682,31 @@ impl ObswsSession {
         Some((input_uuid, input_name))
     }
 
+    fn parse_set_scene_item_enabled_fields(
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> Option<(String, i64, bool)> {
+        let request_data = request_data?;
+        let scene_name =
+            Self::parse_required_non_empty_string_request_field(Some(request_data), "sceneName")?;
+        let scene_item_id: i64 = request_data
+            .value()
+            .to_member("sceneItemId")
+            .ok()?
+            .required()
+            .ok()?
+            .try_into()
+            .ok()?;
+        let scene_item_enabled: bool = request_data
+            .value()
+            .to_member("sceneItemEnabled")
+            .ok()?
+            .required()
+            .ok()?
+            .try_into()
+            .ok()?;
+        Some((scene_name, scene_item_id, scene_item_enabled))
+    }
+
     async fn handle_set_current_program_scene_request(
         &self,
         request_id: &str,
@@ -970,85 +995,40 @@ impl ObswsSession {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
-        let Some(request_data) = request_data else {
+        let mut input_registry = self.input_registry.write().await;
+        let requested_fields = Self::parse_set_scene_item_enabled_fields(request_data);
+        let previous_scene_item_enabled =
+            requested_fields
+                .as_ref()
+                .and_then(|(scene_name, scene_item_id, _)| {
+                    input_registry
+                        .get_scene_item_enabled(scene_name, *scene_item_id)
+                        .ok()
+                });
+        let response_text = crate::obsws_response_builder::build_set_scene_item_enabled_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
             return SessionAction::SendText {
-                text: crate::obsws_response_builder::build_request_response_error(
-                    "SetSceneItemEnabled",
-                    request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    "Missing required requestData field",
-                ),
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some((scene_name, scene_item_id, scene_item_enabled)) = requested_fields else {
+            return SessionAction::SendText {
+                text: response_text,
                 message_name: "request response message",
             };
         };
-        let fields = (|| -> Result<(String, i64, bool), nojson::JsonParseError> {
-            let request_data = request_data.value();
-            let scene_name_raw = request_data.to_member("sceneName")?.required()?;
-            let scene_name: String = scene_name_raw.try_into()?;
-            if scene_name.is_empty() {
-                return Err(scene_name_raw.invalid("string must not be empty"));
-            }
-            let scene_item_id: i64 = request_data
-                .to_member("sceneItemId")?
-                .required()?
-                .try_into()?;
-            let scene_item_enabled: bool = request_data
-                .to_member("sceneItemEnabled")?
-                .required()?
-                .try_into()?;
-            Ok((scene_name, scene_item_id, scene_item_enabled))
-        })();
-        let (scene_name, scene_item_id, scene_item_enabled) = match fields {
-            Ok(fields) => fields,
-            Err(e) => {
-                let code = crate::obsws_response_builder::request_status_code_for_parse_error(&e);
-                return SessionAction::SendText {
-                    text: crate::obsws_response_builder::build_request_response_error(
-                        "SetSceneItemEnabled",
-                        request_id,
-                        code,
-                        &format!("Invalid requestData field: {e}"),
-                    ),
-                    message_name: "request response message",
-                };
-            }
+        let Some(previous_scene_item_enabled) = previous_scene_item_enabled else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
         };
-
-        let result = {
-            let mut input_registry = self.input_registry.write().await;
-            input_registry.set_scene_item_enabled(&scene_name, scene_item_id, scene_item_enabled)
-        };
-        let result = match result {
-            Ok(result) => result,
-            Err(SetSceneItemEnabledError::SceneNotFound) => {
-                return SessionAction::SendText {
-                    text: crate::obsws_response_builder::build_request_response_error(
-                        "SetSceneItemEnabled",
-                        request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                        "Scene not found",
-                    ),
-                    message_name: "request response message",
-                };
-            }
-            Err(SetSceneItemEnabledError::SceneItemNotFound) => {
-                return SessionAction::SendText {
-                    text: crate::obsws_response_builder::build_request_response_error(
-                        "SetSceneItemEnabled",
-                        request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                        "Scene item not found",
-                    ),
-                    message_name: "request response message",
-                };
-            }
-        };
-
-        let response_text =
-            crate::obsws_response_builder::build_set_scene_item_enabled_success_response(
-                request_id,
-            );
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) || !result.changed {
+        if previous_scene_item_enabled == scene_item_enabled {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
