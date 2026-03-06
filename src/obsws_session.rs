@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     ActivateRecordError, ActivateStreamError, ObswsInputRegistry, ObswsInputSettings,
-    ObswsRecordRun, ObswsStreamRun,
+    ObswsRecordRun, ObswsStreamRun, PauseRecordError, ResumeRecordError,
 };
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
@@ -439,7 +439,9 @@ impl ObswsSession {
             let mut events = Vec::new();
             if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
                 events.push(
-                    crate::obsws_response_builder::build_record_state_changed_event(true, None),
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        true, false, None,
+                    ),
                 );
             }
             return Self::build_execution_from_outcome("StartRecord", outcome, events);
@@ -461,6 +463,7 @@ impl ObswsSession {
                 events.push(
                     crate::obsws_response_builder::build_record_state_changed_event(
                         !was_active,
+                        false,
                         output_path,
                     ),
                 );
@@ -480,11 +483,61 @@ impl ObswsSession {
                 events.push(
                     crate::obsws_response_builder::build_record_state_changed_event(
                         false,
+                        false,
                         outcome.output_path.as_deref(),
                     ),
                 );
             }
             return Self::build_execution_from_outcome("StopRecord", outcome, events);
+        }
+        if request_type == "PauseRecord" {
+            let outcome = self.handle_pause_record(&request_id).await;
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        true, true, None,
+                    ),
+                );
+            }
+            return Self::build_execution_from_outcome("PauseRecord", outcome, events);
+        }
+        if request_type == "ResumeRecord" {
+            let outcome = self.handle_resume_record(&request_id).await;
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        true, false, None,
+                    ),
+                );
+            }
+            return Self::build_execution_from_outcome("ResumeRecord", outcome, events);
+        }
+        if request_type == "ToggleRecordPause" {
+            let was_paused = self.input_registry.read().await.is_record_paused();
+            let outcome = if was_paused {
+                self.handle_resume_record(&request_id).await
+            } else {
+                self.handle_pause_record(&request_id).await
+            };
+            let mut events = Vec::new();
+            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        true,
+                        !was_paused,
+                        None,
+                    ),
+                );
+            }
+            let response_text = Self::build_toggle_response_from_outcome(
+                "ToggleRecordPause",
+                &request_id,
+                !was_paused,
+                &outcome,
+            )?;
+            return Self::build_execution_from_response_text(response_text, events);
         }
         if request_type == "SetCurrentProgramScene" {
             let action = self
@@ -653,6 +706,12 @@ impl ObswsSession {
                     request_id,
                     output_active_on_success,
                 )),
+                "ToggleRecordPause" => Ok(
+                    crate::obsws_response_builder::build_toggle_record_pause_response(
+                        request_id,
+                        output_active_on_success,
+                    ),
+                ),
                 _ => Err(crate::Error::new("unknown toggle request type")),
             };
         }
@@ -1817,6 +1876,161 @@ impl ObswsSession {
         )
     }
 
+    async fn handle_pause_record(&self, request_id: &str) -> RequestOutcome {
+        let run = {
+            let input_registry = self.input_registry.read().await;
+            if !input_registry.is_record_active() {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        "PauseRecord",
+                        request_id,
+                        REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        "Record is not active",
+                    ),
+                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Record is not active",
+                );
+            }
+            if input_registry.is_record_paused() {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        "PauseRecord",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Record is already paused",
+                    ),
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Record is already paused",
+                );
+            }
+            input_registry
+                .record_run()
+                .expect("infallible: active record must have run state")
+        };
+
+        if let Err(e) = self.pause_record_processors(&run).await {
+            let error_comment = format!("Failed to pause record: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("PauseRecord", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
+        }
+
+        let mut input_registry = self.input_registry.write().await;
+        match input_registry.pause_record() {
+            Ok(()) => RequestOutcome::success(
+                crate::obsws_response_builder::build_pause_record_response(request_id),
+                None,
+            ),
+            Err(PauseRecordError::RecordNotActive) => RequestOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    "PauseRecord",
+                    request_id,
+                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Record is not active",
+                ),
+                REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                "Record is not active",
+            ),
+            Err(PauseRecordError::AlreadyPaused) => RequestOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    "PauseRecord",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Record is already paused",
+                ),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Record is already paused",
+            ),
+        }
+    }
+
+    async fn handle_resume_record(&self, request_id: &str) -> RequestOutcome {
+        let run = {
+            let input_registry = self.input_registry.read().await;
+            if !input_registry.is_record_active() {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        "ResumeRecord",
+                        request_id,
+                        REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        "Record is not active",
+                    ),
+                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Record is not active",
+                );
+            }
+            if !input_registry.is_record_paused() {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        "ResumeRecord",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Record is not paused",
+                    ),
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Record is not paused",
+                );
+            }
+            input_registry
+                .record_run()
+                .expect("infallible: active record must have run state")
+        };
+
+        if let Err(e) = self.resume_record_processors(&run).await {
+            let error_comment = format!("Failed to resume record: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("ResumeRecord", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
+        }
+        if let Err(e) = self.request_record_resume_keyframe(&run).await {
+            if let Err(rollback_error) = self.pause_record_processors(&run).await {
+                tracing::warn!(
+                    "failed to rollback record resume after keyframe request failure: {}",
+                    rollback_error.display()
+                );
+            }
+            let error_comment =
+                format!("Failed to request record resume keyframe: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response("ResumeRecord", request_id, &error_comment),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                error_comment,
+            );
+        }
+
+        let mut input_registry = self.input_registry.write().await;
+        match input_registry.resume_record() {
+            Ok(()) => RequestOutcome::success(
+                crate::obsws_response_builder::build_resume_record_response(request_id),
+                None,
+            ),
+            Err(ResumeRecordError::RecordNotActive) => RequestOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    "ResumeRecord",
+                    request_id,
+                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Record is not active",
+                ),
+                REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                "Record is not active",
+            ),
+            Err(ResumeRecordError::NotPaused) => RequestOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    "ResumeRecord",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Record is not paused",
+                ),
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Record is not paused",
+            ),
+        }
+    }
+
     async fn start_stream_processors(
         &self,
         image_path: &str,
@@ -1951,6 +2165,100 @@ impl ObswsSession {
         .to_string();
         self.send_pipeline_rpc_request("createPngFileSource", &png_request)
             .await
+    }
+
+    async fn pause_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return Err(crate::Error::new(
+                "BUG: obsws pipeline handle is not initialized",
+            ));
+        };
+
+        let writer_processor_id = crate::ProcessorId::new(run.writer_processor_id.clone());
+        let writer_rpc_sender = pipeline_handle
+            .get_rpc_sender::<
+                tokio::sync::mpsc::UnboundedSender<crate::writer_mp4::Mp4WriterRpcMessage>,
+            >(&writer_processor_id)
+            .await
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to get record writer RPC sender ({writer_processor_id}): {e}"
+                ))
+            })?;
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        writer_rpc_sender
+            .send(crate::writer_mp4::Mp4WriterRpcMessage::Pause { reply_tx })
+            .map_err(|_| {
+                crate::Error::new(format!(
+                    "failed to send pause RPC to record writer: {}",
+                    run.writer_processor_id
+                ))
+            })?;
+        reply_rx.await.map_err(|_| {
+            crate::Error::new("failed to receive pause RPC response from record writer")
+        })?
+    }
+
+    async fn resume_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return Err(crate::Error::new(
+                "BUG: obsws pipeline handle is not initialized",
+            ));
+        };
+
+        let writer_processor_id = crate::ProcessorId::new(run.writer_processor_id.clone());
+        let writer_rpc_sender = pipeline_handle
+            .get_rpc_sender::<
+                tokio::sync::mpsc::UnboundedSender<crate::writer_mp4::Mp4WriterRpcMessage>,
+            >(&writer_processor_id)
+            .await
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to get record writer RPC sender ({writer_processor_id}): {e}"
+                ))
+            })?;
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        writer_rpc_sender
+            .send(crate::writer_mp4::Mp4WriterRpcMessage::Resume { reply_tx })
+            .map_err(|_| {
+                crate::Error::new(format!(
+                    "failed to send resume RPC to record writer: {}",
+                    run.writer_processor_id
+                ))
+            })?;
+        reply_rx.await.map_err(|_| {
+            crate::Error::new("failed to receive resume RPC response from record writer")
+        })?
+    }
+
+    async fn request_record_resume_keyframe(&self, run: &ObswsRecordRun) -> crate::Result<()> {
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return Err(crate::Error::new(
+                "BUG: obsws pipeline handle is not initialized",
+            ));
+        };
+
+        let encoder_processor_id = crate::ProcessorId::new(run.encoder_processor_id.clone());
+        let encoder_rpc_sender = pipeline_handle
+            .get_rpc_sender::<
+                tokio::sync::mpsc::UnboundedSender<crate::encoder::VideoEncoderRpcMessage>,
+            >(&encoder_processor_id)
+            .await
+            .map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to get record encoder RPC sender ({encoder_processor_id}): {e}"
+                ))
+            })?;
+        encoder_rpc_sender
+            .send(crate::encoder::VideoEncoderRpcMessage::RequestKeyframe)
+            .map_err(|_| {
+                crate::Error::new(format!(
+                    "failed to send keyframe request to record encoder: {}",
+                    run.encoder_processor_id
+                ))
+            })
     }
 
     async fn send_pipeline_rpc_request(

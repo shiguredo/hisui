@@ -642,7 +642,11 @@ pub fn build_stream_state_changed_event(output_active: bool) -> String {
     .to_string()
 }
 
-pub fn build_record_state_changed_event(output_active: bool, output_path: Option<&str>) -> String {
+pub fn build_record_state_changed_event(
+    output_active: bool,
+    output_paused: bool,
+    output_path: Option<&str>,
+) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
@@ -654,6 +658,7 @@ pub fn build_record_state_changed_event(output_active: bool, output_path: Option
                     "eventData",
                     nojson::object(|f| {
                         f.member("outputActive", output_active)?;
+                        f.member("outputPaused", output_paused)?;
                         if let Some(output_path) = output_path {
                             f.member("outputPath", output_path)?;
                         }
@@ -1007,6 +1012,9 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "ToggleRecord",
                                 "StartRecord",
                                 "StopRecord",
+                                "ToggleRecordPause",
+                                "PauseRecord",
+                                "ResumeRecord",
                             ],
                         )?;
                         f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
@@ -2249,6 +2257,7 @@ pub fn build_get_record_status_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let active = input_registry.is_record_active();
+    let paused = input_registry.is_record_paused();
     let duration = if active {
         input_registry.record_uptime()
     } else {
@@ -2278,7 +2287,7 @@ pub fn build_get_record_status_response(
                     "responseData",
                     nojson::object(|f| {
                         f.member("outputActive", active)?;
-                        f.member("outputPaused", false)?;
+                        f.member("outputPaused", paused)?;
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
                         f.member("outputBytes", 0)?;
@@ -2322,6 +2331,39 @@ fn build_output_active_response(
     .to_string()
 }
 
+fn build_record_output_state_response(
+    request_type: &str,
+    request_id: &str,
+    output_active: bool,
+    output_paused: bool,
+) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", request_type)?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputActive", output_active)?;
+                        f.member("outputPaused", output_paused)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_start_stream_response(request_id: &str, output_active: bool) -> String {
     build_output_active_response("StartStream", request_id, output_active)
 }
@@ -2353,11 +2395,23 @@ pub fn build_stop_stream_response(request_id: &str) -> String {
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> String {
-    build_output_active_response("ToggleRecord", request_id, output_active)
+    build_record_output_state_response("ToggleRecord", request_id, output_active, false)
 }
 
 pub fn build_start_record_response(request_id: &str, output_active: bool) -> String {
-    build_output_active_response("StartRecord", request_id, output_active)
+    build_record_output_state_response("StartRecord", request_id, output_active, false)
+}
+
+pub fn build_toggle_record_pause_response(request_id: &str, output_paused: bool) -> String {
+    build_record_output_state_response("ToggleRecordPause", request_id, true, output_paused)
+}
+
+pub fn build_pause_record_response(request_id: &str) -> String {
+    build_record_output_state_response("PauseRecord", request_id, true, true)
+}
+
+pub fn build_resume_record_response(request_id: &str) -> String {
+    build_record_output_state_response("ResumeRecord", request_id, true, false)
 }
 
 pub fn build_stop_record_response(request_id: &str, output_path: &str) -> String {
@@ -2956,20 +3010,38 @@ mod tests {
 
     #[test]
     fn build_record_state_changed_event_includes_output_path_when_present() {
-        let event = build_record_state_changed_event(false, Some("/tmp/record.mp4"));
+        let event = build_record_state_changed_event(false, false, Some("/tmp/record.mp4"));
         let json = nojson::RawJson::parse(&event).expect("event must be valid json");
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
             .and_then(|v| v.required()?.try_into())
             .expect("eventType must be string");
+        let output_paused: bool = json
+            .value()
+            .to_path_member(&["d", "eventData", "outputPaused"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("outputPaused must be bool");
         let output_path: String = json
             .value()
             .to_path_member(&["d", "eventData", "outputPath"])
             .and_then(|v| v.required()?.try_into())
             .expect("outputPath must be string");
         assert_eq!(event_type, "RecordStateChanged");
+        assert!(!output_paused);
         assert_eq!(output_path, "/tmp/record.mp4");
+    }
+
+    #[test]
+    fn build_pause_record_response_sets_output_paused_true() {
+        let response = build_pause_record_response("req-pause-record");
+        let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+        let output_paused: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputPaused"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("outputPaused must be bool");
+        assert!(output_paused);
     }
 
     #[test]

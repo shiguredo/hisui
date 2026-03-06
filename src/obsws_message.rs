@@ -573,6 +573,9 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "StartRecord"));
         assert!(available_requests.iter().any(|r| r == "ToggleRecord"));
         assert!(available_requests.iter().any(|r| r == "StopRecord"));
+        assert!(available_requests.iter().any(|r| r == "PauseRecord"));
+        assert!(available_requests.iter().any(|r| r == "ResumeRecord"));
+        assert!(available_requests.iter().any(|r| r == "ToggleRecordPause"));
         Ok(())
     }
 
@@ -976,6 +979,15 @@ mod tests {
             "DuplicateSceneItem",
             "SetSceneItemEnabled",
             "SetSceneItemIndex",
+            "StartStream",
+            "ToggleStream",
+            "StopStream",
+            "StartRecord",
+            "ToggleRecord",
+            "StopRecord",
+            "PauseRecord",
+            "ResumeRecord",
+            "ToggleRecordPause",
         ];
 
         for request_type in request_types {
