@@ -1192,15 +1192,6 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         };
-        let removed_succeeded = input_registry
-            .get_scene_item_source(&scene_name, scene_item_id)
-            .is_err();
-        if !removed_succeeded {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
         let Some(scene_uuid) = Self::find_scene_uuid(&input_registry, &scene_name) else {
             return SessionAction::SendText {
                 text: response_text,
