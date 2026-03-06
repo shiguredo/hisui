@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     ActivateRecordError, ActivateStreamError, ObswsInputRegistry, ObswsInputSettings,
-    ObswsRecordRun, ObswsStreamRun,
+    ObswsRecordRun, ObswsStreamRun, SetSceneItemEnabledError,
 };
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
@@ -519,6 +519,12 @@ impl ObswsSession {
                 .await;
             return Self::build_execution_from_action(action);
         }
+        if request_type == "SetSceneItemEnabled" {
+            let action = self
+                .handle_set_scene_item_enabled_request(&request_id, request.request_data.as_ref())
+                .await;
+            return Self::build_execution_from_action(action);
+        }
 
         let mut input_registry = self.input_registry.write().await;
         let response =
@@ -950,6 +956,108 @@ impl ObswsSession {
             &removed_input.input_name,
             &removed_input.input_uuid,
             removed_input.input.kind_name(),
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_set_scene_item_enabled_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let Some(request_data) = request_data else {
+            return SessionAction::SendText {
+                text: crate::obsws_response_builder::build_request_response_error(
+                    "SetSceneItemEnabled",
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing required requestData field",
+                ),
+                message_name: "request response message",
+            };
+        };
+        let fields = (|| -> Result<(String, i64, bool), nojson::JsonParseError> {
+            let request_data = request_data.value();
+            let scene_name_raw = request_data.to_member("sceneName")?.required()?;
+            let scene_name: String = scene_name_raw.try_into()?;
+            if scene_name.is_empty() {
+                return Err(scene_name_raw.invalid("string must not be empty"));
+            }
+            let scene_item_id: i64 = request_data
+                .to_member("sceneItemId")?
+                .required()?
+                .try_into()?;
+            let scene_item_enabled: bool = request_data
+                .to_member("sceneItemEnabled")?
+                .required()?
+                .try_into()?;
+            Ok((scene_name, scene_item_id, scene_item_enabled))
+        })();
+        let (scene_name, scene_item_id, scene_item_enabled) = match fields {
+            Ok(fields) => fields,
+            Err(e) => {
+                return SessionAction::SendText {
+                    text: crate::obsws_response_builder::build_request_response_error(
+                        "SetSceneItemEnabled",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        &format!("Invalid requestData field: {e}"),
+                    ),
+                    message_name: "request response message",
+                };
+            }
+        };
+
+        let result = {
+            let mut input_registry = self.input_registry.write().await;
+            input_registry.set_scene_item_enabled(&scene_name, scene_item_id, scene_item_enabled)
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(SetSceneItemEnabledError::SceneNotFound) => {
+                return SessionAction::SendText {
+                    text: crate::obsws_response_builder::build_request_response_error(
+                        "SetSceneItemEnabled",
+                        request_id,
+                        crate::obsws_protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                        "Scene not found",
+                    ),
+                    message_name: "request response message",
+                };
+            }
+            Err(SetSceneItemEnabledError::SceneItemNotFound) => {
+                return SessionAction::SendText {
+                    text: crate::obsws_response_builder::build_request_response_error(
+                        "SetSceneItemEnabled",
+                        request_id,
+                        crate::obsws_protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                        "Scene item not found",
+                    ),
+                    message_name: "request response message",
+                };
+            }
+        };
+
+        let response_text =
+            crate::obsws_response_builder::build_set_scene_item_enabled_success_response(
+                request_id,
+            );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) || !result.changed {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text = crate::obsws_response_builder::build_scene_item_enable_state_changed_event(
+            &scene_name,
+            scene_item_id,
+            scene_item_enabled,
         );
         SessionAction::SendTexts {
             messages: vec![
@@ -1578,6 +1686,17 @@ mod tests {
             .expect("requestType must be string")
     }
 
+    fn parse_response_scene_item_id(text: &str) -> i64 {
+        let json = nojson::RawJson::parse(text).expect("response must be valid json");
+        json.value()
+            .to_path_member(&["d", "responseData", "sceneItemId"])
+            .expect("sceneItemId access must succeed")
+            .required()
+            .expect("sceneItemId must exist")
+            .try_into()
+            .expect("sceneItemId must be i64")
+    }
+
     fn parse_identified_message(text: &str) -> (i64, u32) {
         let json = nojson::RawJson::parse(text).expect("response must be valid json");
         let op: i64 = json
@@ -1943,6 +2062,116 @@ mod tests {
         let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
         assert_eq!(event_type, "InputRemoved");
         assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
+    }
+
+    #[tokio::test]
+    async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        assert!(matches!(create_action, SessionAction::SendText { .. }));
+
+        let get_scene_item_id_request_data =
+            nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene","sourceName":"camera-1"}"#)
+                .expect("requestData must be valid json");
+        let get_scene_item_id_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-get-scene-item-id".to_owned()),
+                request_type: Some("GetSceneItemId".to_owned()),
+                request_data: Some(get_scene_item_id_request_data),
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
+            panic!("must be SendText");
+        };
+        let scene_item_id = parse_response_scene_item_id(&text);
+
+        let set_request_data = nojson::RawJsonOwned::parse(&format!(
+            r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemEnabled":false}}"#,
+            scene_item_id
+        ))
+        .expect("requestData must be valid json");
+        let set_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-scene-item-enabled".to_owned()),
+                request_type: Some("SetSceneItemEnabled".to_owned()),
+                request_data: Some(set_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = set_action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 2);
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "SceneItemEnableStateChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    }
+
+    #[tokio::test]
+    async fn set_scene_item_enabled_with_same_value_returns_response_only() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        assert!(matches!(create_action, SessionAction::SendText { .. }));
+
+        let get_scene_item_id_request_data =
+            nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene","sourceName":"camera-1"}"#)
+                .expect("requestData must be valid json");
+        let get_scene_item_id_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-get-scene-item-id".to_owned()),
+                request_type: Some("GetSceneItemId".to_owned()),
+                request_data: Some(get_scene_item_id_request_data),
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
+            panic!("must be SendText");
+        };
+        let scene_item_id = parse_response_scene_item_id(&text);
+
+        let set_request_data = nojson::RawJsonOwned::parse(&format!(
+            r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemEnabled":true}}"#,
+            scene_item_id
+        ))
+        .expect("requestData must be valid json");
+        let set_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-scene-item-enabled-same".to_owned()),
+                request_type: Some("SetSceneItemEnabled".to_owned()),
+                request_data: Some(set_request_data),
+            })
+            .await;
+        assert!(matches!(set_action, SessionAction::SendText { .. }));
     }
 
     #[tokio::test]

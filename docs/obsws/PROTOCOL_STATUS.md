@@ -52,6 +52,7 @@
 - [x] `SceneRemoved`: Scene 削除を通知する
 - [x] `InputCreated`: Input 作成を通知する
 - [x] `InputRemoved`: Input 削除を通知する
+- [x] `SceneItemEnableStateChanged`: Scene Item の有効状態変更を通知する
 
 ## RequestType 実装状況
 
@@ -135,7 +136,7 @@
   - NOTE: `sceneName` は既存 Scene のみ受理する（ `CreateScene` で追加可能 ）
   - NOTE: `inputKind` は `GetInputKindList` で返す値のみ受理する
   - NOTE: `sceneItemEnabled = false` で作成した入力は Scene へ追加されない
-  - NOTE: 上記入力は Scene Item を持たず、現状（ `SetSceneItemEnabled` など Scene Item 操作 API 未実装 ）では実質的に利用できない
+  - NOTE: 上記入力は Scene Item を持たないため、`SetSceneItemEnabled` など Scene Item 操作 API の対象外になる
   - NOTE: 成功時は `responseData.inputUuid` を返し、`GetInputSettings` で参照できる
 - [x] `RemoveInput`: 入力を削除する
   - NOTE: `inputName` または `inputUuid` のいずれか指定で削除する
@@ -193,7 +194,8 @@
 
 - [ ] `GetSceneItemList`: シーン内アイテム一覧を取得する
 - [ ] `GetGroupSceneItemList`: グループ内アイテム一覧を取得する
-- [ ] `GetSceneItemId`: ソース名からシーンアイテム ID を取得する
+- [x] `GetSceneItemId`: ソース名からシーンアイテム ID を取得する
+  - NOTE: `searchOffset` は `0` のみ対応する
 - [ ] `GetSceneItemSource`: シーンアイテムに紐づくソースを取得する
 - [ ] `CreateSceneItem`: シーンアイテムを作成する
 - [ ] `RemoveSceneItem`: シーンアイテムを削除する
@@ -201,7 +203,7 @@
 - [ ] `GetSceneItemTransform`: シーンアイテム変形情報を取得する
 - [ ] `SetSceneItemTransform`: シーンアイテム変形情報を設定する
 - [ ] `GetSceneItemEnabled`: シーンアイテム有効状態を取得する
-- [ ] `SetSceneItemEnabled`: シーンアイテム有効状態を設定する
+- [x] `SetSceneItemEnabled`: シーンアイテム有効状態を設定する
 - [ ] `GetSceneItemLocked`: シーンアイテムロック状態を取得する
 - [ ] `SetSceneItemLocked`: シーンアイテムロック状態を設定する
 - [ ] `GetSceneItemIndex`: シーンアイテム順序を取得する

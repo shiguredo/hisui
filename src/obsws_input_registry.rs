@@ -191,6 +191,7 @@ pub struct ObswsRecordRun {
 
 #[derive(Debug, Clone)]
 struct ObswsSceneItemState {
+    scene_item_id: i64,
     input_uuid: String,
     enabled: bool,
 }
@@ -318,6 +319,24 @@ pub enum ActivateRecordError {
     AlreadyActive,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemIdError {
+    SceneNotFound,
+    SourceNotFound,
+    SearchOffsetUnsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneItemEnabledError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetSceneItemEnabledResult {
+    pub changed: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ObswsInputRegistry {
     inputs_by_uuid: BTreeMap<String, ObswsInputEntry>,
@@ -327,6 +346,7 @@ pub struct ObswsInputRegistry {
     current_program_scene_name: String,
     next_input_id: u64,
     next_scene_id: u64,
+    next_scene_item_id: i64,
     next_stream_run_id: u64,
     next_record_run_id: u64,
     stream_service_settings: ObswsStreamServiceSettings,
@@ -353,6 +373,7 @@ impl ObswsInputRegistry {
             current_program_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
             next_input_id: 0,
             next_scene_id: 1,
+            next_scene_item_id: 1,
             next_stream_run_id: 0,
             next_record_run_id: 0,
             stream_service_settings: ObswsStreamServiceSettings::default(),
@@ -399,11 +420,15 @@ impl ObswsInputRegistry {
             .insert(entry.input_name.clone(), input_uuid);
         self.inputs_by_uuid
             .insert(entry.input_uuid.clone(), entry.clone());
-        if scene_item_enabled && let Some(scene) = self.scenes_by_name.get_mut(scene_name) {
-            scene.items.push(ObswsSceneItemState {
-                input_uuid: entry.input_uuid.clone(),
-                enabled: true,
-            });
+        if scene_item_enabled {
+            let scene_item_id = self.next_scene_item_id();
+            if let Some(scene) = self.scenes_by_name.get_mut(scene_name) {
+                scene.items.push(ObswsSceneItemState {
+                    scene_item_id,
+                    input_uuid: entry.input_uuid.clone(),
+                    enabled: true,
+                });
+            }
         }
 
         Ok(entry)
@@ -523,6 +548,48 @@ impl ObswsInputRegistry {
             .filter(|item| item.enabled)
             .filter_map(|item| self.inputs_by_uuid.get(&item.input_uuid).cloned())
             .collect()
+    }
+
+    pub fn get_scene_item_id(
+        &self,
+        scene_name: &str,
+        source_name: &str,
+        search_offset: i64,
+    ) -> Result<i64, GetSceneItemIdError> {
+        if search_offset != 0 {
+            return Err(GetSceneItemIdError::SearchOffsetUnsupported);
+        }
+        let Some(scene) = self.scenes_by_name.get(scene_name) else {
+            return Err(GetSceneItemIdError::SceneNotFound);
+        };
+        let Some(scene_item_id) = scene.items.iter().find_map(|item| {
+            let input = self.inputs_by_uuid.get(&item.input_uuid)?;
+            (input.input_name == source_name).then_some(item.scene_item_id)
+        }) else {
+            return Err(GetSceneItemIdError::SourceNotFound);
+        };
+        Ok(scene_item_id)
+    }
+
+    pub fn set_scene_item_enabled(
+        &mut self,
+        scene_name: &str,
+        scene_item_id: i64,
+        enabled: bool,
+    ) -> Result<SetSceneItemEnabledResult, SetSceneItemEnabledError> {
+        let Some(scene) = self.scenes_by_name.get_mut(scene_name) else {
+            return Err(SetSceneItemEnabledError::SceneNotFound);
+        };
+        let Some(scene_item) = scene
+            .items
+            .iter_mut()
+            .find(|item| item.scene_item_id == scene_item_id)
+        else {
+            return Err(SetSceneItemEnabledError::SceneItemNotFound);
+        };
+        let changed = scene_item.enabled != enabled;
+        scene_item.enabled = enabled;
+        Ok(SetSceneItemEnabledResult { changed })
     }
 
     pub fn stream_service_settings(&self) -> &ObswsStreamServiceSettings {
@@ -687,6 +754,15 @@ impl ObswsInputRegistry {
             .checked_add(1)
             .expect("BUG: obsws input id overflow");
         format!("00000000-0000-0000-0000-{input_id:012x}")
+    }
+
+    fn next_scene_item_id(&mut self) -> i64 {
+        let scene_item_id = self.next_scene_item_id;
+        self.next_scene_item_id = self
+            .next_scene_item_id
+            .checked_add(1)
+            .expect("BUG: obsws scene item id overflow");
+        scene_item_id
     }
 }
 
@@ -866,6 +942,134 @@ mod tests {
             .create_input("not-scene", "camera-1", input, true)
             .expect_err("unsupported scene name must be rejected");
         assert_eq!(error, CreateInputError::UnsupportedSceneName);
+    }
+
+    #[test]
+    fn get_scene_item_id_assigns_global_sequential_ids() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+
+        let input_a = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-a", input_a, true)
+            .expect("input creation must succeed");
+
+        let input_b = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input("Scene B", "camera-b", input_b, true)
+            .expect("input creation must succeed");
+
+        let scene_item_id_a = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-a", 0)
+            .expect("scene item id must exist");
+        let scene_item_id_b = registry
+            .get_scene_item_id("Scene B", "camera-b", 0)
+            .expect("scene item id must exist");
+        assert_eq!(scene_item_id_a, 1);
+        assert_eq!(scene_item_id_b, 2);
+    }
+
+    #[test]
+    fn get_scene_item_id_rejects_non_zero_search_offset() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+
+        let error = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 1)
+            .expect_err("non zero search offset must be rejected");
+        assert_eq!(error, GetSceneItemIdError::SearchOffsetUnsupported);
+    }
+
+    #[test]
+    fn get_scene_item_id_returns_not_found_errors() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+
+        let scene_error = registry
+            .get_scene_item_id("Scene B", "camera-1", 0)
+            .expect_err("unknown scene must be rejected");
+        assert_eq!(scene_error, GetSceneItemIdError::SceneNotFound);
+
+        let source_error = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-unknown", 0)
+            .expect_err("unknown source must be rejected");
+        assert_eq!(source_error, GetSceneItemIdError::SourceNotFound);
+    }
+
+    #[test]
+    fn set_scene_item_enabled_updates_scene_item_state() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+
+        assert_eq!(registry.list_current_program_scene_inputs().len(), 1);
+
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+        let first_result = registry
+            .set_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, scene_item_id, false)
+            .expect("set scene item enabled must succeed");
+        assert!(first_result.changed);
+        assert_eq!(registry.list_current_program_scene_inputs().len(), 0);
+
+        let second_result = registry
+            .set_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, scene_item_id, false)
+            .expect("set scene item enabled must succeed");
+        assert!(!second_result.changed);
+    }
+
+    #[test]
+    fn set_scene_item_enabled_returns_not_found_errors() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+
+        let scene_error = registry
+            .set_scene_item_enabled("Scene B", 1, false)
+            .expect_err("unknown scene must be rejected");
+        assert_eq!(scene_error, SetSceneItemEnabledError::SceneNotFound);
+
+        let item_error = registry
+            .set_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, 999, false)
+            .expect_err("unknown scene item id must be rejected");
+        assert_eq!(item_error, SetSceneItemEnabledError::SceneItemNotFound);
     }
 
     #[test]
