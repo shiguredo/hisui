@@ -1647,7 +1647,7 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
             assert get_second_scene_item_index_response["d"]["requestStatus"]["result"] is True
             assert (
                 get_second_scene_item_index_response["d"]["responseData"]["sceneItemIndex"]
-                == 1
+                == 2
             )
 
             set_scene_item_index_response = await _send_obsws_request(
