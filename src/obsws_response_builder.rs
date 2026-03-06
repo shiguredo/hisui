@@ -1,7 +1,7 @@
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
-    CreateInputError, CreateSceneError, GetSceneItemIdError, ObswsInput, ObswsInputRegistry,
-    ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError,
+    CreateInputError, CreateSceneError, GetSceneItemEnabledError, GetSceneItemIdError, ObswsInput,
+    ObswsInputRegistry, ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError,
     SetCurrentProgramSceneError, SetSceneItemEnabledError,
 };
 use crate::obsws_message::ObswsSessionStats;
@@ -38,6 +38,11 @@ struct GetSceneItemIdFields {
     scene_name: String,
     source_name: String,
     search_offset: i64,
+}
+
+struct GetSceneItemEnabledFields {
+    scene_name: String,
+    scene_item_id: i64,
 }
 
 struct SetSceneItemEnabledFields {
@@ -174,6 +179,20 @@ fn parse_set_scene_item_enabled_fields(
         scene_name,
         scene_item_id,
         scene_item_enabled,
+    })
+}
+
+fn parse_get_scene_item_enabled_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetSceneItemEnabledFields, nojson::JsonParseError> {
+    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    let scene_item_id: i64 = request_data
+        .to_member("sceneItemId")?
+        .required()?
+        .try_into()?;
+    Ok(GetSceneItemEnabledFields {
+        scene_name,
+        scene_item_id,
     })
 }
 
@@ -495,6 +514,7 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetCurrentProgramScene",
                                 "SetCurrentProgramScene",
                                 "GetSceneItemId",
+                                "GetSceneItemEnabled",
                                 "SetSceneItemEnabled",
                                 "GetInputList",
                                 "GetInputKindList",
@@ -950,6 +970,66 @@ pub fn build_set_scene_item_enabled_response(
     }
 
     build_set_scene_item_enabled_success_response(request_id)
+}
+
+pub fn build_get_scene_item_enabled_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "GetSceneItemEnabled",
+        request_id,
+        request_data,
+        parse_get_scene_item_enabled_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    let scene_item_enabled =
+        match input_registry.get_scene_item_enabled(&fields.scene_name, fields.scene_item_id) {
+            Ok(scene_item_enabled) => scene_item_enabled,
+            Err(GetSceneItemEnabledError::SceneNotFound) => {
+                return build_request_response_error(
+                    "GetSceneItemEnabled",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Scene not found",
+                );
+            }
+            Err(GetSceneItemEnabledError::SceneItemNotFound) => {
+                return build_request_response_error(
+                    "GetSceneItemEnabled",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Scene item not found",
+                );
+            }
+        };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetSceneItemEnabled")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("sceneItemEnabled", scene_item_enabled)),
+                )
+            }),
+        )
+    })
+    .to_string()
 }
 
 pub fn build_set_scene_item_enabled_success_response(request_id: &str) -> String {
@@ -1928,6 +2008,57 @@ mod tests {
             .expect("result must be bool");
         assert!(result);
         assert!(registry.list_current_program_scene_inputs().is_empty());
+    }
+
+    #[test]
+    fn build_get_scene_item_enabled_response_succeeds_when_scene_item_exists() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "image_source",
+            nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
+                .expect("settings must be valid json")
+                .value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input("Scene", "input-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id("Scene", "input-1", 0)
+            .expect("scene item id must exist");
+        registry
+            .set_scene_item_enabled("Scene", scene_item_id, false)
+            .expect("set scene item enabled must succeed");
+        let request_data = nojson::RawJsonOwned::parse(&format!(
+            r#"{{"sceneName":"Scene","sceneItemId":{}}}"#,
+            scene_item_id
+        ))
+        .expect("request data must be valid json");
+
+        let response = build_get_scene_item_enabled_response(
+            "req-get-scene-item-enabled",
+            Some(&request_data),
+            &registry,
+        );
+        let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])
+            .expect("result access must succeed")
+            .required()
+            .expect("result must exist")
+            .try_into()
+            .expect("result must be bool");
+        let scene_item_enabled: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneItemEnabled"])
+            .expect("sceneItemEnabled access must succeed")
+            .required()
+            .expect("sceneItemEnabled must exist")
+            .try_into()
+            .expect("sceneItemEnabled must be bool");
+        assert!(result);
+        assert!(!scene_item_enabled);
     }
 
     #[test]

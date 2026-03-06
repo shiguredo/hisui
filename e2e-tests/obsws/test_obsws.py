@@ -841,6 +841,7 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "RemoveScene" in response_data["availableRequests"]
         assert "GetSceneList" in response_data["availableRequests"]
         assert "GetSceneItemId" in response_data["availableRequests"]
+        assert "GetSceneItemEnabled" in response_data["availableRequests"]
         assert "SetSceneItemEnabled" in response_data["availableRequests"]
         assert "SetStreamServiceSettings" in response_data["availableRequests"]
         assert "StartStream" in response_data["availableRequests"]
@@ -1455,6 +1456,88 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
             )
             assert stop_record_response["d"]["requestStatus"]["result"] is True
             assert stop_record_response["d"]["responseData"]["outputPath"]
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_get_scene_item_enabled_request(binary_path: Path):
+    """obsws が GetSceneItemEnabled request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-get-scene-item-enabled",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "get-scene-item-enabled-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            get_scene_item_id_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemId",
+                request_id="req-get-scene-item-id-for-get-enabled",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceName": "get-scene-item-enabled-input",
+                },
+            )
+            assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
+            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+
+            get_enabled_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemEnabled",
+                request_id="req-get-scene-item-enabled-true",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_enabled_response["d"]["requestStatus"]["result"] is True
+            assert get_enabled_response["d"]["responseData"]["sceneItemEnabled"] is True
+
+            set_disabled_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemEnabled",
+                request_id="req-set-scene-item-enabled-false-for-get",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemEnabled": False,
+                },
+            )
+            assert set_disabled_response["d"]["requestStatus"]["result"] is True
+
+            get_disabled_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemEnabled",
+                request_id="req-get-scene-item-enabled-false",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_disabled_response["d"]["requestStatus"]["result"] is True
+            assert get_disabled_response["d"]["responseData"]["sceneItemEnabled"] is False
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):

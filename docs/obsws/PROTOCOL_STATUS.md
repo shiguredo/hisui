@@ -202,7 +202,7 @@
 - [ ] `DuplicateSceneItem`: シーンアイテムを複製する
 - [ ] `GetSceneItemTransform`: シーンアイテム変形情報を取得する
 - [ ] `SetSceneItemTransform`: シーンアイテム変形情報を設定する
-- [ ] `GetSceneItemEnabled`: シーンアイテム有効状態を取得する
+- [x] `GetSceneItemEnabled`: シーンアイテム有効状態を取得する
 - [x] `SetSceneItemEnabled`: シーンアイテム有効状態を設定する
 - [ ] `GetSceneItemLocked`: シーンアイテムロック状態を取得する
 - [ ] `SetSceneItemLocked`: シーンアイテムロック状態を設定する

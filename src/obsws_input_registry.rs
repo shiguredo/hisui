@@ -327,6 +327,12 @@ pub enum GetSceneItemIdError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemEnabledError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetSceneItemEnabledError {
     SceneNotFound,
     SceneItemNotFound,
@@ -590,6 +596,24 @@ impl ObswsInputRegistry {
         let changed = scene_item.enabled != enabled;
         scene_item.enabled = enabled;
         Ok(SetSceneItemEnabledResult { changed })
+    }
+
+    pub fn get_scene_item_enabled(
+        &self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<bool, GetSceneItemEnabledError> {
+        let Some(scene) = self.scenes_by_name.get(scene_name) else {
+            return Err(GetSceneItemEnabledError::SceneNotFound);
+        };
+        let Some(scene_item) = scene
+            .items
+            .iter()
+            .find(|item| item.scene_item_id == scene_item_id)
+        else {
+            return Err(GetSceneItemEnabledError::SceneItemNotFound);
+        };
+        Ok(scene_item.enabled)
     }
 
     pub fn stream_service_settings(&self) -> &ObswsStreamServiceSettings {
@@ -1070,6 +1094,65 @@ mod tests {
             .set_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, 999, false)
             .expect_err("unknown scene item id must be rejected");
         assert_eq!(item_error, SetSceneItemEnabledError::SceneItemNotFound);
+    }
+
+    #[test]
+    fn get_scene_item_enabled_returns_current_state() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+
+        let initial_enabled = registry
+            .get_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item state must be retrievable");
+        assert!(initial_enabled);
+
+        registry
+            .set_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, scene_item_id, false)
+            .expect("set scene item enabled must succeed");
+
+        let updated_enabled = registry
+            .get_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item state must be retrievable");
+        assert!(!updated_enabled);
+    }
+
+    #[test]
+    fn get_scene_item_enabled_returns_not_found_errors() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+
+        let scene_error = registry
+            .get_scene_item_enabled("Scene B", scene_item_id)
+            .expect_err("unknown scene must be rejected");
+        assert_eq!(scene_error, GetSceneItemEnabledError::SceneNotFound);
+
+        let scene_item_error = registry
+            .get_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, 999)
+            .expect_err("unknown scene item id must be rejected");
+        assert_eq!(
+            scene_item_error,
+            GetSceneItemEnabledError::SceneItemNotFound
+        );
     }
 
     #[test]
