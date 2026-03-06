@@ -3,9 +3,9 @@ use crate::obsws_input_registry::{
     CreateInputError, CreateSceneError, CreateSceneItemError, DuplicateSceneItemError,
     GetSceneItemEnabledError, GetSceneItemIdError, GetSceneItemIndexError, GetSceneItemListError,
     GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsSceneItemIndexEntry,
-    ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError, RemoveSceneItemError,
-    SetCurrentProgramSceneError, SetSceneItemEnabledError, SetSceneItemIndexError,
-    SetSceneItemIndexResult,
+    ObswsSceneItemRef, ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError,
+    RemoveSceneItemError, SetCurrentProgramSceneError, SetSceneItemEnabledError,
+    SetSceneItemIndexError, SetSceneItemIndexResult,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
@@ -124,6 +124,18 @@ pub struct SetSceneItemIndexExecution {
     pub response_text: String,
     pub scene_name: Option<String>,
     pub set_result: Option<SetSceneItemIndexResult>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateSceneItemExecution {
+    pub response_text: String,
+    pub created: Option<ObswsSceneItemRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DuplicateSceneItemExecution {
+    pub response_text: String,
+    pub duplicated: Option<ObswsSceneItemRef>,
 }
 
 fn parse_input_lookup_fields(
@@ -1303,11 +1315,11 @@ pub fn build_get_scene_item_list_response(
     .to_string()
 }
 
-pub fn build_create_scene_item_response(
+pub fn execute_create_scene_item(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> CreateSceneItemExecution {
     let fields = match parse_request_data_or_error_response(
         "CreateSceneItem",
         request_id,
@@ -1315,7 +1327,12 @@ pub fn build_create_scene_item_response(
         parse_create_scene_item_fields,
     ) {
         Ok(fields) => fields,
-        Err(response) => return response,
+        Err(response) => {
+            return CreateSceneItemExecution {
+                response_text: response,
+                created: None,
+            };
+        }
     };
     let scene_name = match resolve_scene_name_or_error(
         "CreateSceneItem",
@@ -1325,7 +1342,12 @@ pub fn build_create_scene_item_response(
         fields.scene_uuid.as_deref(),
     ) {
         Ok(scene_name) => scene_name,
-        Err(response) => return response,
+        Err(response) => {
+            return CreateSceneItemExecution {
+                response_text: response,
+                created: None,
+            };
+        }
     };
     let created = match input_registry.create_scene_item(
         &scene_name,
@@ -1335,19 +1357,22 @@ pub fn build_create_scene_item_response(
     ) {
         Ok(created) => created,
         Err(CreateSceneItemError::SourceNotFound) => {
-            return build_request_response_error(
-                "CreateSceneItem",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Source not found",
-            );
+            return CreateSceneItemExecution {
+                response_text: build_request_response_error(
+                    "CreateSceneItem",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Source not found",
+                ),
+                created: None,
+            };
         }
         Err(CreateSceneItemError::SceneNotFound) => {
             unreachable!("resolved scene name must exist in input registry")
         }
     };
 
-    nojson::object(|f| {
+    let response_text = nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
             "d",
@@ -1368,7 +1393,11 @@ pub fn build_create_scene_item_response(
             }),
         )
     })
-    .to_string()
+    .to_string();
+    CreateSceneItemExecution {
+        response_text,
+        created: Some(created),
+    }
 }
 
 pub fn build_remove_scene_item_response(
@@ -1433,11 +1462,11 @@ pub fn build_remove_scene_item_response(
     .to_string()
 }
 
-pub fn build_duplicate_scene_item_response(
+pub fn execute_duplicate_scene_item(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> DuplicateSceneItemExecution {
     let fields = match parse_request_data_or_error_response(
         "DuplicateSceneItem",
         request_id,
@@ -1445,7 +1474,12 @@ pub fn build_duplicate_scene_item_response(
         parse_duplicate_scene_item_fields,
     ) {
         Ok(fields) => fields,
-        Err(response) => return response,
+        Err(response) => {
+            return DuplicateSceneItemExecution {
+                response_text: response,
+                duplicated: None,
+            };
+        }
     };
     let from_scene_name = match resolve_scene_name_or_error(
         "DuplicateSceneItem",
@@ -1455,7 +1489,12 @@ pub fn build_duplicate_scene_item_response(
         fields.from_scene_uuid.as_deref(),
     ) {
         Ok(scene_name) => scene_name,
-        Err(response) => return response,
+        Err(response) => {
+            return DuplicateSceneItemExecution {
+                response_text: response,
+                duplicated: None,
+            };
+        }
     };
     let to_scene_name = match resolve_scene_name_or_error(
         "DuplicateSceneItem",
@@ -1465,7 +1504,12 @@ pub fn build_duplicate_scene_item_response(
         fields.to_scene_uuid.as_deref(),
     ) {
         Ok(scene_name) => scene_name,
-        Err(response) => return response,
+        Err(response) => {
+            return DuplicateSceneItemExecution {
+                response_text: response,
+                duplicated: None,
+            };
+        }
     };
     let duplicated = match input_registry.duplicate_scene_item(
         &from_scene_name,
@@ -1474,32 +1518,41 @@ pub fn build_duplicate_scene_item_response(
     ) {
         Ok(duplicated) => duplicated,
         Err(DuplicateSceneItemError::SourceScene) => {
-            return build_request_response_error(
-                "DuplicateSceneItem",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "From scene not found",
-            );
+            return DuplicateSceneItemExecution {
+                response_text: build_request_response_error(
+                    "DuplicateSceneItem",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "From scene not found",
+                ),
+                duplicated: None,
+            };
         }
         Err(DuplicateSceneItemError::DestinationScene) => {
-            return build_request_response_error(
-                "DuplicateSceneItem",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "To scene not found",
-            );
+            return DuplicateSceneItemExecution {
+                response_text: build_request_response_error(
+                    "DuplicateSceneItem",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "To scene not found",
+                ),
+                duplicated: None,
+            };
         }
         Err(DuplicateSceneItemError::SourceSceneItem) => {
-            return build_request_response_error(
-                "DuplicateSceneItem",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene item not found",
-            );
+            return DuplicateSceneItemExecution {
+                response_text: build_request_response_error(
+                    "DuplicateSceneItem",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Scene item not found",
+                ),
+                duplicated: None,
+            };
         }
     };
 
-    nojson::object(|f| {
+    let response_text = nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
             "d",
@@ -1522,7 +1575,11 @@ pub fn build_duplicate_scene_item_response(
             }),
         )
     })
-    .to_string()
+    .to_string();
+    DuplicateSceneItemExecution {
+        response_text,
+        duplicated: Some(duplicated),
+    }
 }
 
 pub fn build_get_scene_item_source_response(
@@ -2876,11 +2933,9 @@ mod tests {
         ))
         .expect("request data must be valid json");
 
-        let response = build_create_scene_item_response(
-            "req-create-scene-item",
-            Some(&request_data),
-            &mut registry,
-        );
+        let response =
+            execute_create_scene_item("req-create-scene-item", Some(&request_data), &mut registry)
+                .response_text;
         let json = nojson::RawJson::parse(&response).expect("response must be valid json");
         let result: bool = json
             .value()

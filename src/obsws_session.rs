@@ -744,14 +744,6 @@ impl ObswsSession {
             .ok()
     }
 
-    fn parse_response_data_i64_field(text: &str, field_name: &str) -> Option<i64> {
-        let json = nojson::RawJson::parse(text).ok()?;
-        json.value()
-            .to_path_member(&["d", "responseData", field_name])
-            .and_then(|v| v.required()?.try_into())
-            .ok()
-    }
-
     fn find_scene_uuid(input_registry: &ObswsInputRegistry, scene_name: &str) -> Option<String> {
         input_registry
             .list_scenes()
@@ -1068,52 +1060,19 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let target_scene_name =
-            Self::parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid").and_then(
-                |(scene_name, scene_uuid)| {
-                    input_registry.resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
-                },
-            );
-        let response_text = crate::obsws_response_builder::build_create_scene_item_response(
+        let execution = crate::obsws_response_builder::execute_create_scene_item(
             request_id,
             request_data,
             &mut input_registry,
         );
+        let response_text = execution.response_text;
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         }
-        let Some(target_scene_name) = target_scene_name else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(scene_item_id) =
-            Self::parse_response_data_i64_field(&response_text, "sceneItemId")
-        else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(scene_uuid) = Self::find_scene_uuid(&input_registry, &target_scene_name) else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(created_scene_item) = input_registry
-            .list_scene_items(&target_scene_name)
-            .ok()
-            .and_then(|scene_items| {
-                scene_items
-                    .into_iter()
-                    .find(|item| item.scene_item_id == scene_item_id)
-            })
-        else {
+        let Some(created_scene_item) = execution.created else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -1121,12 +1080,12 @@ impl ObswsSession {
         };
 
         let event_text = crate::obsws_response_builder::build_scene_item_created_event(
-            &target_scene_name,
-            &scene_uuid,
-            created_scene_item.scene_item_id,
-            &created_scene_item.source_name,
-            &created_scene_item.source_uuid,
-            created_scene_item.scene_item_index,
+            &created_scene_item.scene_name,
+            &created_scene_item.scene_uuid,
+            created_scene_item.scene_item.scene_item_id,
+            &created_scene_item.scene_item.source_name,
+            &created_scene_item.scene_item.source_uuid,
+            created_scene_item.scene_item.scene_item_index,
         );
         SessionAction::SendTexts {
             messages: vec![
@@ -1250,52 +1209,19 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let target_scene_name =
-            Self::parse_scene_lookup_fields(request_data, "toSceneName", "toSceneUuid").and_then(
-                |(scene_name, scene_uuid)| {
-                    input_registry.resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
-                },
-            );
-        let response_text = crate::obsws_response_builder::build_duplicate_scene_item_response(
+        let execution = crate::obsws_response_builder::execute_duplicate_scene_item(
             request_id,
             request_data,
             &mut input_registry,
         );
+        let response_text = execution.response_text;
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         }
-        let Some(target_scene_name) = target_scene_name else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(scene_item_id) =
-            Self::parse_response_data_i64_field(&response_text, "sceneItemId")
-        else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(scene_uuid) = Self::find_scene_uuid(&input_registry, &target_scene_name) else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(duplicated_scene_item) = input_registry
-            .list_scene_items(&target_scene_name)
-            .ok()
-            .and_then(|scene_items| {
-                scene_items
-                    .into_iter()
-                    .find(|item| item.scene_item_id == scene_item_id)
-            })
-        else {
+        let Some(duplicated_scene_item) = execution.duplicated else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -1303,12 +1229,12 @@ impl ObswsSession {
         };
 
         let event_text = crate::obsws_response_builder::build_scene_item_created_event(
-            &target_scene_name,
-            &scene_uuid,
-            duplicated_scene_item.scene_item_id,
-            &duplicated_scene_item.source_name,
-            &duplicated_scene_item.source_uuid,
-            duplicated_scene_item.scene_item_index,
+            &duplicated_scene_item.scene_name,
+            &duplicated_scene_item.scene_uuid,
+            duplicated_scene_item.scene_item.scene_item_id,
+            &duplicated_scene_item.scene_item.source_name,
+            &duplicated_scene_item.scene_item.source_uuid,
+            duplicated_scene_item.scene_item.scene_item_index,
         );
         SessionAction::SendTexts {
             messages: vec![
