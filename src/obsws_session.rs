@@ -694,66 +694,36 @@ impl ObswsSession {
         Some(value)
     }
 
-    fn parse_input_lookup_fields(
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> Option<(Option<String>, Option<String>)> {
-        let request_data = request_data?;
-        let input_uuid: Option<String> = request_data
-            .value()
-            .to_member("inputUuid")
-            .ok()?
-            .try_into()
-            .ok()?;
-        let input_name: Option<String> = request_data
-            .value()
-            .to_member("inputName")
-            .ok()?
-            .try_into()
-            .ok()?;
-        let input_uuid = input_uuid.filter(|v| !v.is_empty());
-        let input_name = input_name.filter(|v| !v.is_empty());
-        if input_uuid.is_none() && input_name.is_none() {
-            return None;
+    fn build_missing_request_data_error_action(
+        request_type: &str,
+        request_id: &str,
+    ) -> SessionAction {
+        SessionAction::SendText {
+            text: crate::obsws_response_builder::build_request_response_error(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required requestData field",
+            ),
+            message_name: "request response message",
         }
-        Some((input_uuid, input_name))
     }
 
-    fn parse_scene_lookup_fields(
-        request_data: Option<&nojson::RawJsonOwned>,
-        scene_name_field: &str,
-        scene_uuid_field: &str,
-    ) -> Option<(Option<String>, Option<String>)> {
-        let request_data = request_data?;
-        let scene_name: Option<String> = request_data
-            .value()
-            .to_member(scene_name_field)
-            .ok()?
-            .try_into()
-            .ok()?;
-        let scene_uuid: Option<String> = request_data
-            .value()
-            .to_member(scene_uuid_field)
-            .ok()?
-            .try_into()
-            .ok()?;
-        let scene_name = scene_name.filter(|value| !value.is_empty());
-        let scene_uuid = scene_uuid.filter(|value| !value.is_empty());
-        if scene_name.is_none() && scene_uuid.is_none() {
-            return None;
+    fn build_parse_error_action(
+        request_type: &str,
+        request_id: &str,
+        error: &nojson::JsonParseError,
+    ) -> SessionAction {
+        let code = crate::obsws_response_builder::request_status_code_for_parse_error(error);
+        SessionAction::SendText {
+            text: crate::obsws_response_builder::build_request_response_error(
+                request_type,
+                request_id,
+                code,
+                &error.to_string(),
+            ),
+            message_name: "request response message",
         }
-        Some((scene_name, scene_uuid))
-    }
-
-    fn parse_scene_item_id_request_field(
-        request_data: Option<&nojson::RawJsonOwned>,
-        field_name: &str,
-    ) -> Option<i64> {
-        let request_data = request_data?;
-        request_data
-            .value()
-            .to_member(field_name)
-            .and_then(|v| v.required()?.try_into())
-            .ok()
     }
 
     fn find_scene_uuid(input_registry: &ObswsInputRegistry, scene_name: &str) -> Option<String> {
@@ -762,25 +732,6 @@ impl ObswsSession {
             .into_iter()
             .find(|scene| scene.scene_name == scene_name)
             .map(|scene| scene.scene_uuid)
-    }
-
-    fn parse_set_scene_item_enabled_fields(
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> Option<(String, i64, bool)> {
-        let request_data = request_data?;
-        let scene_name =
-            Self::parse_required_non_empty_string_request_field(Some(request_data), "sceneName")?;
-        let scene_item_id: i64 = request_data
-            .value()
-            .to_member("sceneItemId")
-            .and_then(|v| v.required()?.try_into())
-            .ok()?;
-        let scene_item_enabled: bool = request_data
-            .value()
-            .to_member("sceneItemEnabled")
-            .and_then(|v| v.required()?.try_into())
-            .ok()?;
-        Some((scene_name, scene_item_id, scene_item_enabled))
     }
 
     async fn handle_set_current_program_scene_request(
@@ -1020,15 +971,24 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let removed_input =
-            Self::parse_input_lookup_fields(request_data).and_then(|(input_uuid, input_name)| {
-                input_registry
-                    .find_input(input_uuid.as_deref(), input_name.as_deref())
-                    .cloned()
-            });
+        let Some(request_data) = request_data else {
+            return Self::build_missing_request_data_error_action("RemoveInput", request_id);
+        };
+        let (input_uuid, input_name) =
+            match crate::obsws_response_builder::parse_input_lookup_fields_for_session(
+                request_data.value(),
+            ) {
+                Ok(fields) => fields,
+                Err(error) => {
+                    return Self::build_parse_error_action("RemoveInput", request_id, &error);
+                }
+            };
+        let removed_input = input_registry
+            .find_input(input_uuid.as_deref(), input_name.as_deref())
+            .cloned();
         let response_text = crate::obsws_response_builder::build_remove_input_response(
             request_id,
-            request_data,
+            Some(request_data),
             &mut input_registry,
         );
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
@@ -1072,10 +1032,21 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let requested_input_lookup = Self::parse_input_lookup_fields(request_data);
+        let Some(request_data) = request_data else {
+            return Self::build_missing_request_data_error_action("SetInputSettings", request_id);
+        };
+        let requested_input_lookup =
+            match crate::obsws_response_builder::parse_input_lookup_fields_for_session(
+                request_data.value(),
+            ) {
+                Ok(fields) => Some(fields),
+                Err(error) => {
+                    return Self::build_parse_error_action("SetInputSettings", request_id, &error);
+                }
+            };
         let response_text = crate::obsws_response_builder::build_set_input_settings_response(
             request_id,
-            request_data,
+            Some(request_data),
             &mut input_registry,
         );
         let request_succeeded =
@@ -1129,7 +1100,18 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let requested_input_lookup = Self::parse_input_lookup_fields(request_data);
+        let Some(request_data) = request_data else {
+            return Self::build_missing_request_data_error_action("SetInputName", request_id);
+        };
+        let requested_input_lookup =
+            match crate::obsws_response_builder::parse_input_lookup_fields_for_session(
+                request_data.value(),
+            ) {
+                Ok(fields) => Some(fields),
+                Err(error) => {
+                    return Self::build_parse_error_action("SetInputName", request_id, &error);
+                }
+            };
         let old_input = requested_input_lookup
             .as_ref()
             .and_then(|(input_uuid, input_name)| {
@@ -1139,7 +1121,7 @@ impl ObswsSession {
             });
         let response_text = crate::obsws_response_builder::build_set_input_name_response(
             request_id,
-            request_data,
+            Some(request_data),
             &mut input_registry,
         );
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
@@ -1229,14 +1211,33 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let target_fields = Self::parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")
-            .and_then(|(scene_name, scene_uuid)| {
-                let scene_name = input_registry
-                    .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())?;
-                let scene_item_id =
-                    Self::parse_scene_item_id_request_field(request_data, "sceneItemId")?;
-                Some((scene_name, scene_item_id))
-            });
+        let Some(request_data) = request_data else {
+            return Self::build_missing_request_data_error_action("RemoveSceneItem", request_id);
+        };
+        let (scene_name, scene_uuid) =
+            match crate::obsws_response_builder::parse_scene_lookup_fields_for_session(
+                request_data.value(),
+                "sceneName",
+                "sceneUuid",
+            ) {
+                Ok(fields) => fields,
+                Err(error) => {
+                    return Self::build_parse_error_action("RemoveSceneItem", request_id, &error);
+                }
+            };
+        let scene_item_id =
+            match crate::obsws_response_builder::parse_required_i64_field_for_session(
+                request_data.value(),
+                "sceneItemId",
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return Self::build_parse_error_action("RemoveSceneItem", request_id, &error);
+                }
+            };
+        let target_fields = input_registry
+            .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
+            .map(|scene_name| (scene_name, scene_item_id));
         let removed_scene_item = target_fields
             .as_ref()
             .and_then(|(scene_name, scene_item_id)| {
@@ -1258,7 +1259,7 @@ impl ObswsSession {
         });
         let response_text = crate::obsws_response_builder::build_remove_scene_item_response(
             request_id,
-            request_data,
+            Some(request_data),
             &mut input_registry,
         );
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
@@ -1435,7 +1436,25 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let requested_fields = Self::parse_set_scene_item_enabled_fields(request_data);
+        let Some(request_data) = request_data else {
+            return Self::build_missing_request_data_error_action(
+                "SetSceneItemEnabled",
+                request_id,
+            );
+        };
+        let requested_fields =
+            match crate::obsws_response_builder::parse_set_scene_item_enabled_fields_for_session(
+                request_data.value(),
+            ) {
+                Ok(fields) => Some(fields),
+                Err(error) => {
+                    return Self::build_parse_error_action(
+                        "SetSceneItemEnabled",
+                        request_id,
+                        &error,
+                    );
+                }
+            };
         let previous_scene_item_enabled =
             requested_fields
                 .as_ref()
@@ -1446,7 +1465,7 @@ impl ObswsSession {
                 });
         let response_text = crate::obsws_response_builder::build_set_scene_item_enabled_response(
             request_id,
-            request_data,
+            Some(request_data),
             &mut input_registry,
         );
         if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
@@ -2633,6 +2652,33 @@ mod tests {
         let (result, code) = parse_request_status(&text);
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS);
+    }
+
+    #[tokio::test]
+    async fn set_input_name_with_invalid_input_uuid_type_returns_parse_error() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let request_data =
+            nojson::RawJsonOwned::parse(r#"{"inputUuid":1,"newInputName":"camera-renamed"}"#)
+                .expect("requestData must be valid json");
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-input-name-invalid-type".to_owned()),
+                request_type: Some("SetInputName".to_owned()),
+                request_data: Some(request_data),
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = action else {
+            panic!("must be SendText");
+        };
+        let (result, code) = parse_request_status(&text);
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
     }
 
     #[tokio::test]

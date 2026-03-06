@@ -495,6 +495,38 @@ fn required_non_empty_string_member(
     Ok(value)
 }
 
+pub(crate) fn parse_input_lookup_fields_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
+    parse_input_lookup_fields(request_data)
+}
+
+pub(crate) fn parse_scene_lookup_fields_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+    scene_name_field: &str,
+    scene_uuid_field: &str,
+) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
+    parse_scene_lookup_fields(request_data, scene_name_field, scene_uuid_field)
+}
+
+pub(crate) fn parse_required_i64_field_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+    field_name: &str,
+) -> Result<i64, nojson::JsonParseError> {
+    request_data.to_member(field_name)?.required()?.try_into()
+}
+
+pub(crate) fn parse_set_scene_item_enabled_fields_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(String, i64, bool), nojson::JsonParseError> {
+    let fields = parse_set_scene_item_enabled_fields(request_data)?;
+    Ok((
+        fields.scene_name,
+        fields.scene_item_id,
+        fields.scene_item_enabled,
+    ))
+}
+
 fn parse_request_data_or_error_response<T, F>(
     request_type: &str,
     request_id: &str,
