@@ -1426,12 +1426,9 @@ pub fn build_remove_scene_item_response(
     };
     if let Err(error) = input_registry.remove_scene_item(&scene_name, fields.scene_item_id) {
         return match error {
-            RemoveSceneItemError::SceneNotFound => build_request_response_error(
-                "RemoveSceneItem",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            ),
+            RemoveSceneItemError::SceneNotFound => {
+                unreachable!("resolved scene name must exist in input registry")
+            }
             RemoveSceneItemError::SceneItemNotFound => build_request_response_error(
                 "RemoveSceneItem",
                 request_id,
