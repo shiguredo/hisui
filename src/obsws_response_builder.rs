@@ -1986,7 +1986,7 @@ mod tests {
         let scene_item_id = registry
             .get_scene_item_id("Scene", "input-1", 0)
             .expect("scene item id must exist");
-        let request_data = nojson::RawJsonOwned::parse(&format!(
+        let request_data = nojson::RawJsonOwned::parse(format!(
             r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemEnabled":false}}"#,
             scene_item_id
         ))
@@ -2029,7 +2029,7 @@ mod tests {
         registry
             .set_scene_item_enabled("Scene", scene_item_id, false)
             .expect("set scene item enabled must succeed");
-        let request_data = nojson::RawJsonOwned::parse(&format!(
+        let request_data = nojson::RawJsonOwned::parse(format!(
             r#"{{"sceneName":"Scene","sceneItemId":{}}}"#,
             scene_item_id
         ))

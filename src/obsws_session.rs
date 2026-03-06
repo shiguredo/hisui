@@ -2101,7 +2101,7 @@ mod tests {
         };
         let scene_item_id = parse_response_scene_item_id(&text);
 
-        let set_request_data = nojson::RawJsonOwned::parse(&format!(
+        let set_request_data = nojson::RawJsonOwned::parse(format!(
             r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemEnabled":false}}"#,
             scene_item_id
         ))
@@ -2159,7 +2159,7 @@ mod tests {
         };
         let scene_item_id = parse_response_scene_item_id(&text);
 
-        let set_request_data = nojson::RawJsonOwned::parse(&format!(
+        let set_request_data = nojson::RawJsonOwned::parse(format!(
             r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemEnabled":true}}"#,
             scene_item_id
         ))
