@@ -2,10 +2,11 @@ use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     CreateInputError, CreateSceneError, CreateSceneItemError, DuplicateSceneItemError,
     GetSceneItemEnabledError, GetSceneItemIdError, GetSceneItemIndexError, GetSceneItemListError,
-    GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsSceneItemIndexEntry,
-    ObswsSceneItemRef, ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError,
-    RemoveSceneItemError, SetCurrentProgramSceneError, SetInputNameError, SetInputSettingsError,
-    SetSceneItemEnabledError, SetSceneItemIndexError, SetSceneItemIndexResult,
+    GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsInputSettings,
+    ObswsSceneItemIndexEntry, ObswsSceneItemRef, ObswsStreamServiceSettings,
+    ParseInputSettingsError, RemoveSceneError, RemoveSceneItemError, SetCurrentProgramSceneError,
+    SetInputNameError, SetInputSettingsError, SetSceneItemEnabledError, SetSceneItemIndexError,
+    SetSceneItemIndexResult,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
@@ -728,6 +729,34 @@ pub fn build_input_removed_event(input_name: &str, input_uuid: &str, input_kind:
                         f.member("inputName", input_name)?;
                         f.member("inputUuid", input_uuid)?;
                         f.member("inputKind", input_kind)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_input_settings_changed_event(
+    input_name: &str,
+    input_uuid: &str,
+    input_kind: &str,
+    input_settings: &ObswsInputSettings,
+) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputSettingsChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)?;
+                        f.member("inputKind", input_kind)?;
+                        f.member("inputSettings", input_settings)
                     }),
                 )
             }),
@@ -2914,6 +2943,46 @@ mod tests {
             assert_eq!(input_name, expected_name);
             assert_eq!(input_uuid, expected_uuid);
         }
+    }
+
+    #[test]
+    fn build_input_settings_changed_event_contains_expected_fields() {
+        let input_settings = ObswsInputSettings::VideoCaptureDevice(
+            crate::obsws_input_registry::ObswsVideoCaptureDeviceSettings {
+                device_id: Some("camera-1".to_owned()),
+            },
+        );
+        let event = build_input_settings_changed_event(
+            "camera-source",
+            "input-uuid-3",
+            "video_capture_device",
+            &input_settings,
+        );
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let event_type: String = json
+            .value()
+            .to_path_member(&["d", "eventType"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("eventType must be string");
+        let input_name: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputName must be string");
+        let input_kind: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputKind"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputKind must be string");
+        let device_id: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputSettings", "device_id"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("device_id must be string");
+        assert_eq!(event_type, "InputSettingsChanged");
+        assert_eq!(input_name, "camera-source");
+        assert_eq!(input_kind, "video_capture_device");
+        assert_eq!(device_id, "camera-1");
     }
 
     #[test]

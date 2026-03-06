@@ -383,6 +383,20 @@ async def _expect_record_state_changed_event(
     return event
 
 
+async def _expect_input_settings_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    input_name: str,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="InputSettingsChanged",
+        event_intent=OBSWS_EVENT_SUB_INPUTS,
+    )
+    assert event["d"]["eventData"]["inputName"] == input_name
+    return event
+
+
 async def _expect_scene_item_enable_state_changed_event(
     ws: aiohttp.ClientWebSocketResponse,
     *,
@@ -3285,7 +3299,9 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
     ws_sock.close()
 
     image_path = tmp_path / "input-event-input.png"
+    updated_image_path = tmp_path / "input-event-updated-input.png"
     _write_test_png(image_path)
+    _write_test_png(updated_image_path)
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
@@ -3318,6 +3334,25 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 event_intent=OBSWS_EVENT_SUB_INPUTS,
             )
             assert create_event["d"]["eventData"]["inputName"] == "input-event-camera"
+
+            set_input_settings_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-events",
+                request_data={
+                    "inputName": "input-event-camera",
+                    "inputSettings": {"file": str(updated_image_path)},
+                },
+            )
+            assert set_input_settings_response["d"]["requestStatus"]["result"] is True
+            input_settings_changed_event = await _expect_input_settings_changed_event(
+                ws,
+                input_name="input-event-camera",
+            )
+            assert input_settings_changed_event["d"]["eventData"]["inputKind"] == "image_source"
+            assert input_settings_changed_event["d"]["eventData"]["inputSettings"] == {
+                "file": str(updated_image_path)
+            }
 
             remove_input_response = await _send_obsws_request(
                 ws,

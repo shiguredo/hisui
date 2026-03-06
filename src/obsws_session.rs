@@ -519,6 +519,12 @@ impl ObswsSession {
                 .await;
             return Self::build_execution_from_action(action);
         }
+        if request_type == "SetInputSettings" {
+            let action = self
+                .handle_set_input_settings_request(&request_id, request.request_data.as_ref())
+                .await;
+            return Self::build_execution_from_action(action);
+        }
         if request_type == "CreateSceneItem" {
             let action = self
                 .handle_create_scene_item_request(&request_id, request.request_data.as_ref())
@@ -1045,6 +1051,53 @@ impl ObswsSession {
             &removed_input.input_name,
             &removed_input.input_uuid,
             removed_input.input.kind_name(),
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_set_input_settings_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let requested_input_lookup = Self::parse_input_lookup_fields(request_data);
+        let response_text = crate::obsws_response_builder::build_set_input_settings_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some((input_uuid, input_name)) = requested_input_lookup else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let Some(updated_input) = input_registry
+            .find_input(input_uuid.as_deref(), input_name.as_deref())
+            .cloned()
+        else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let event_text = crate::obsws_response_builder::build_input_settings_changed_event(
+            &updated_input.input_name,
+            &updated_input.input_uuid,
+            updated_input.input.kind_name(),
+            &updated_input.input.settings,
         );
         SessionAction::SendTexts {
             messages: vec![
@@ -2309,6 +2362,49 @@ mod tests {
         };
         let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
         assert_eq!(event_type, "InputRemoved");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
+    }
+
+    #[tokio::test]
+    async fn set_input_settings_with_input_subscription_sends_event() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { .. } = create_action else {
+            panic!("must be SendTexts");
+        };
+
+        let set_request_data = nojson::RawJsonOwned::parse(
+            r#"{"inputName":"camera-1","inputSettings":{"device_id":"camera-2"}}"#,
+        )
+        .expect("requestData must be valid json");
+        let set_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-input-settings".to_owned()),
+                request_type: Some("SetInputSettings".to_owned()),
+                request_data: Some(set_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = set_action else {
+            panic!("must be SendTexts");
+        };
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "InputSettingsChanged");
         assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
     }
 

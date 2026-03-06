@@ -52,6 +52,7 @@
 - [x] `SceneRemoved`: Scene 削除を通知する
 - [x] `InputCreated`: Input 作成を通知する
 - [x] `InputRemoved`: Input 削除を通知する
+- [x] `InputSettingsChanged`: Input 設定変更を通知する
 - [x] `SceneItemEnableStateChanged`: Scene Item の有効状態変更を通知する
 - [x] `SceneItemCreated`: Scene Item の作成を通知する
 - [x] `SceneItemRemoved`: Scene Item の削除を通知する
@@ -150,6 +151,7 @@
 - [x] `GetInputSettings`: 入力設定を取得する
 - [x] `SetInputSettings`: 入力設定を更新する
   - NOTE: `overlay` 未指定時は `true` として扱う
+  - NOTE: 成功時は Inputs 購読中セッションへ `InputSettingsChanged` を配信する
 - [ ] `GetInputMute`: ミュート状態を取得する
 - [ ] `SetInputMute`: ミュート状態を設定する
 - [ ] `ToggleInputMute`: ミュート状態をトグルする
