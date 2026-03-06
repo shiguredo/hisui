@@ -1299,10 +1299,7 @@ pub fn build_get_scene_item_list_response(
                 )?;
                 f.member(
                     "responseData",
-                    nojson::object(|f| {
-                        f.member("sceneItems", &scene_items)?;
-                        f.member("sceneName", &scene_name)
-                    }),
+                    nojson::object(|f| f.member("sceneItems", &scene_items)),
                 )
             }),
         )
@@ -2872,8 +2869,14 @@ mod tests {
             .expect("sceneItems must exist")
             .to_array()
             .expect("sceneItems must be array");
+        let scene_name = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneName"])
+            .expect("sceneName access must succeed")
+            .optional();
         assert!(result);
         assert!(scene_items.count() >= 1);
+        assert!(scene_name.is_none());
     }
 
     #[test]
