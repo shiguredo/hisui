@@ -174,7 +174,6 @@
 - [ ] `SetCurrentSceneTransitionDuration`: 遷移時間を設定する
 - [ ] `SetCurrentSceneTransitionSettings`: 遷移設定を更新する
 - [ ] `GetCurrentSceneTransitionCursor`: 遷移カーソル位置を取得する
-- [ ] `TriggerStudioModeTransition`: Studio Mode の遷移を実行する
 - [ ] `SetTBarPosition`: TBar 位置を設定する
 
 ### Filters
@@ -289,21 +288,21 @@
 - [ ] `OffsetMediaInputCursor`: メディア入力カーソル位置を相対移動する
 - [ ] `TriggerMediaInputAction`: メディア入力アクションを実行する
 
-### UI
-
-- [ ] `GetStudioModeEnabled`: Studio Mode の有効状態を取得する
-- [ ] `SetStudioModeEnabled`: Studio Mode の有効状態を設定する
-- [ ] `OpenInputPropertiesDialog`: 入力プロパティダイアログを開く
-- [ ] `OpenInputFiltersDialog`: 入力フィルターダイアログを開く
-- [ ] `OpenInputInteractDialog`: 入力インタラクトダイアログを開く
-- [ ] `GetMonitorList`: モニター一覧を取得する
-- [ ] `OpenVideoMixProjector`: 映像ミックスのプロジェクターを開く
-- [ ] `OpenSourceProjector`: ソースプロジェクターを開く
-
 ## 実装対象外
 
 - MessagePack: WebSocket の MessagePack サブプロトコル対応
   - NOTE: 現状は `obswebsocket.json` のみを対象とする
+- UI / Studio Mode 依存機能
+  - `GetStudioModeEnabled`: Studio Mode の有効状態を取得する
+  - `SetStudioModeEnabled`: Studio Mode の有効状態を設定する
+  - `OpenInputPropertiesDialog`: 入力プロパティダイアログを開く
+  - `OpenInputFiltersDialog`: 入力フィルターダイアログを開く
+  - `OpenInputInteractDialog`: 入力インタラクトダイアログを開く
+  - `GetMonitorList`: モニター一覧を取得する
+  - `OpenVideoMixProjector`: 映像ミックスのプロジェクターを開く
+  - `OpenSourceProjector`: ソースプロジェクターを開く
+  - `TriggerStudioModeTransition`: Studio Mode の遷移を実行する
+  - NOTE: OBS 本体の GUI 状態（ Studio Mode / Dialog / Projector ）および OS のディスプレイ統合に依存するため、hisui の現行アーキテクチャでは対応対象外とする
 
 ## 未対応 Request の扱い
 
