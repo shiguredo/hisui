@@ -426,6 +426,8 @@ async def _expect_scene_item_enable_state_changed_event(
         event_intent=OBSWS_EVENT_SUB_SCENES,
     )
     assert event["d"]["eventData"]["sceneName"] == scene_name
+    assert isinstance(event["d"]["eventData"]["sceneUuid"], str)
+    assert event["d"]["eventData"]["sceneUuid"] != ""
     assert event["d"]["eventData"]["sceneItemId"] == scene_item_id
     assert event["d"]["eventData"]["sceneItemEnabled"] is scene_item_enabled
     return event

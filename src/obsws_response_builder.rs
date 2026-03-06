@@ -831,6 +831,7 @@ pub fn build_input_name_changed_event(
 
 pub fn build_scene_item_enable_state_changed_event(
     scene_name: &str,
+    scene_uuid: &str,
     scene_item_id: i64,
     scene_item_enabled: bool,
 ) -> String {
@@ -845,6 +846,7 @@ pub fn build_scene_item_enable_state_changed_event(
                     "eventData",
                     nojson::object(|f| {
                         f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)?;
                         f.member("sceneItemId", scene_item_id)?;
                         f.member("sceneItemEnabled", scene_item_enabled)
                     }),
@@ -3103,7 +3105,12 @@ mod tests {
 
     #[test]
     fn build_scene_item_enable_state_changed_event_contains_expected_fields() {
-        let event = build_scene_item_enable_state_changed_event("Scene", 10, false);
+        let event = build_scene_item_enable_state_changed_event(
+            "Scene",
+            "10000000-0000-0000-0000-000000000000",
+            10,
+            false,
+        );
         let json = nojson::RawJson::parse(&event).expect("event must be valid json");
         let event_type: String = json
             .value()
@@ -3125,6 +3132,10 @@ mod tests {
             .to_member("sceneName")
             .and_then(|v| v.required()?.try_into())
             .expect("sceneName must be string");
+        let scene_uuid: String = event_data
+            .to_member("sceneUuid")
+            .and_then(|v| v.required()?.try_into())
+            .expect("sceneUuid must be string");
         let scene_item_id: i64 = event_data
             .to_member("sceneItemId")
             .and_then(|v| v.required()?.try_into())
@@ -3136,6 +3147,7 @@ mod tests {
         assert_eq!(event_type, "SceneItemEnableStateChanged");
         assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
         assert_eq!(scene_name, "Scene");
+        assert_eq!(scene_uuid, "10000000-0000-0000-0000-000000000000");
         assert_eq!(scene_item_id, 10);
         assert!(!scene_item_enabled);
     }

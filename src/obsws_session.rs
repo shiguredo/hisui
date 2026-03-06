@@ -1483,9 +1483,13 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
+        let scene_uuid = input_registry
+            .get_scene_uuid(&scene_name)
+            .unwrap_or_else(|| unreachable!("resolved scene name must exist in input registry"));
 
         let event_text = crate::obsws_response_builder::build_scene_item_enable_state_changed_event(
             &scene_name,
+            &scene_uuid,
             scene_item_id,
             scene_item_enabled,
         );
@@ -2726,8 +2730,16 @@ mod tests {
         };
         assert_eq!(messages.len(), 2);
         let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        let event_json =
+            nojson::RawJson::parse(&messages[1].0).expect("event message must be valid json");
+        let scene_uuid: String = event_json
+            .value()
+            .to_path_member(&["d", "eventData", "sceneUuid"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("sceneUuid must be string");
         assert_eq!(event_type, "SceneItemEnableStateChanged");
         assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+        assert_eq!(scene_uuid, "10000000-0000-0000-0000-000000000000");
     }
 
     #[tokio::test]
