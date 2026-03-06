@@ -425,6 +425,122 @@ NOTE: `inputKind` と `inputSettings` の詳細キーはプラットフォーム
 
 ---
 
+## 例 7.1: Input 設定を更新する
+
+目的: 既存 Input の `inputSettings` を上書き / 置換する  
+hisui 対応状況: 対応済み（ `SetInputSettings` は `overlay` 指定に対応 ）
+
+1. `C -> S` SetInputSettings（ overlay 更新 ）
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetInputSettings",
+    "requestId": "req-405",
+    "requestData": {
+      "inputName": "Main Camera",
+      "inputSettings": {
+        "device_id": "camera-2"
+      }
+    }
+  }
+}
+```
+
+2. `C -> S` SetInputSettings（ 置換更新 ）
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetInputSettings",
+    "requestId": "req-406",
+    "requestData": {
+      "inputName": "Main Camera",
+      "inputSettings": {},
+      "overlay": false
+    }
+  }
+}
+```
+
+3. `C -> S` GetInputSettings
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "GetInputSettings",
+    "requestId": "req-407",
+    "requestData": {
+      "inputName": "Main Camera"
+    }
+  }
+}
+```
+
+NOTE: Inputs 購読（ `eventSubscriptions` に `OBSWS_EVENT_SUB_INPUTS` を設定 ）時は、更新成功後に `InputSettingsChanged` が配信される
+
+---
+
+## 例 7.2: Input 名変更と既定設定を取得する
+
+目的: 既存 Input 名を変更し、`inputKind` の既定設定を取得する  
+hisui 対応状況: 対応済み（ `SetInputName` / `GetInputDefaultSettings` に対応 ）
+
+1. `C -> S` SetInputName
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetInputName",
+    "requestId": "req-408",
+    "requestData": {
+      "inputName": "Main Camera",
+      "newInputName": "Main Camera Renamed"
+    }
+  }
+}
+```
+
+NOTE: Inputs 購読（ `eventSubscriptions` に `OBSWS_EVENT_SUB_INPUTS` を設定 ）時は、変更成功後に `InputNameChanged` が配信される
+
+2. `C -> S` GetInputSettings
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "GetInputSettings",
+    "requestId": "req-409",
+    "requestData": {
+      "inputName": "Main Camera Renamed"
+    }
+  }
+}
+```
+
+3. `C -> S` GetInputDefaultSettings
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "GetInputDefaultSettings",
+    "requestId": "req-410",
+    "requestData": {
+      "inputKind": "video_capture_device"
+    }
+  }
+}
+```
+
+NOTE: `GetInputDefaultSettings` は現時点で `image_source` / `video_capture_device` を返す
+
+---
+
 ## 例 8: RequestBatch で配信準備をまとめる
 
 目的: 複数の準備 Request を 1 回で送る

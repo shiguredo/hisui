@@ -2,10 +2,11 @@ use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     CreateInputError, CreateSceneError, CreateSceneItemError, DuplicateSceneItemError,
     GetSceneItemEnabledError, GetSceneItemIdError, GetSceneItemIndexError, GetSceneItemListError,
-    GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsSceneItemIndexEntry,
-    ObswsSceneItemRef, ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError,
-    RemoveSceneItemError, SetCurrentProgramSceneError, SetSceneItemEnabledError,
-    SetSceneItemIndexError, SetSceneItemIndexResult,
+    GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsInputSettings,
+    ObswsSceneItemIndexEntry, ObswsSceneItemRef, ObswsStreamServiceSettings,
+    ParseInputSettingsError, RemoveSceneError, RemoveSceneItemError, SetCurrentProgramSceneError,
+    SetInputNameError, SetInputSettingsError, SetSceneItemEnabledError, SetSceneItemIndexError,
+    SetSceneItemIndexResult,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
@@ -23,6 +24,23 @@ struct CreateInputFields {
     input_name: String,
     input: ObswsInput,
     scene_item_enabled: bool,
+}
+
+struct SetInputSettingsFields {
+    input_uuid: Option<String>,
+    input_name: Option<String>,
+    input_settings: nojson::RawJsonOwned,
+    overlay: bool,
+}
+
+struct SetInputNameFields {
+    input_uuid: Option<String>,
+    input_name: Option<String>,
+    new_input_name: String,
+}
+
+struct GetInputDefaultSettingsFields {
+    input_kind: String,
 }
 
 struct CreateSceneFields {
@@ -138,6 +156,12 @@ pub struct DuplicateSceneItemExecution {
     pub duplicated: Option<ObswsSceneItemRef>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SetInputSettingsExecution {
+    pub response_text: String,
+    pub request_succeeded: bool,
+}
+
 fn parse_input_lookup_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
@@ -195,6 +219,39 @@ fn parse_create_input_fields(
         input,
         scene_item_enabled: scene_item_enabled.unwrap_or(true),
     })
+}
+
+fn parse_set_input_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetInputSettingsFields, nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let input_settings = request_data.to_member("inputSettings")?.required()?;
+    let overlay: Option<bool> = request_data.to_member("overlay")?.try_into()?;
+    Ok(SetInputSettingsFields {
+        input_uuid,
+        input_name,
+        input_settings: nojson::RawJsonOwned::try_from(input_settings)?,
+        overlay: overlay.unwrap_or(true),
+    })
+}
+
+fn parse_set_input_name_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetInputNameFields, nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let new_input_name = required_non_empty_string_member(request_data, "newInputName")?;
+    Ok(SetInputNameFields {
+        input_uuid,
+        input_name,
+        new_input_name,
+    })
+}
+
+fn parse_get_input_default_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetInputDefaultSettingsFields, nojson::JsonParseError> {
+    let input_kind = required_non_empty_string_member(request_data, "inputKind")?;
+    Ok(GetInputDefaultSettingsFields { input_kind })
 }
 
 fn parse_create_scene_fields(
@@ -444,6 +501,38 @@ fn required_non_empty_string_member(
     Ok(value)
 }
 
+pub(crate) fn parse_input_lookup_fields_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
+    parse_input_lookup_fields(request_data)
+}
+
+pub(crate) fn parse_scene_lookup_fields_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+    scene_name_field: &str,
+    scene_uuid_field: &str,
+) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
+    parse_scene_lookup_fields(request_data, scene_name_field, scene_uuid_field)
+}
+
+pub(crate) fn parse_required_i64_field_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+    field_name: &str,
+) -> Result<i64, nojson::JsonParseError> {
+    request_data.to_member(field_name)?.required()?.try_into()
+}
+
+pub(crate) fn parse_set_scene_item_enabled_fields_for_session(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(String, i64, bool), nojson::JsonParseError> {
+    let fields = parse_set_scene_item_enabled_fields(request_data)?;
+    Ok((
+        fields.scene_name,
+        fields.scene_item_id,
+        fields.scene_item_enabled,
+    ))
+}
+
 fn parse_request_data_or_error_response<T, F>(
     request_type: &str,
     request_id: &str,
@@ -686,8 +775,63 @@ pub fn build_input_removed_event(input_name: &str, input_uuid: &str, input_kind:
     .to_string()
 }
 
+pub fn build_input_settings_changed_event(
+    input_name: &str,
+    input_uuid: &str,
+    input_kind: &str,
+    input_settings: &ObswsInputSettings,
+) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputSettingsChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)?;
+                        f.member("inputKind", input_kind)?;
+                        f.member("inputSettings", input_settings)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_input_name_changed_event(
+    input_name: &str,
+    old_input_name: &str,
+    input_uuid: &str,
+) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputNameChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("oldInputName", old_input_name)?;
+                        f.member("inputUuid", input_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_scene_item_enable_state_changed_event(
     scene_name: &str,
+    scene_uuid: &str,
     scene_item_id: i64,
     scene_item_enabled: bool,
 ) -> String {
@@ -702,6 +846,7 @@ pub fn build_scene_item_enable_state_changed_event(
                     "eventData",
                     nojson::object(|f| {
                         f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)?;
                         f.member("sceneItemId", scene_item_id)?;
                         f.member("sceneItemEnabled", scene_item_enabled)
                     }),
@@ -845,6 +990,9 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetInputList",
                                 "GetInputKindList",
                                 "GetInputSettings",
+                                "SetInputSettings",
+                                "SetInputName",
+                                "GetInputDefaultSettings",
                                 "CreateInput",
                                 "RemoveInput",
                                 "GetStreamServiceSettings",
@@ -2360,6 +2508,199 @@ pub fn build_get_input_settings_response(
     .to_string()
 }
 
+pub fn build_set_input_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    execute_set_input_settings(request_id, request_data, input_registry).response_text
+}
+
+pub fn execute_set_input_settings(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> SetInputSettingsExecution {
+    let fields = match parse_request_data_or_error_response(
+        "SetInputSettings",
+        request_id,
+        request_data,
+        parse_set_input_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response_text) => {
+            return SetInputSettingsExecution {
+                response_text,
+                request_succeeded: false,
+            };
+        }
+    };
+
+    if let Err(error) = input_registry.set_input_settings(
+        fields.input_uuid.as_deref(),
+        fields.input_name.as_deref(),
+        fields.input_settings.value(),
+        fields.overlay,
+    ) {
+        let response_text = match error {
+            SetInputSettingsError::InputNotFound => build_request_response_error(
+                "SetInputSettings",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            ),
+            SetInputSettingsError::InvalidInputSettings(message) => build_request_response_error(
+                "SetInputSettings",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &message,
+            ),
+        };
+        return SetInputSettingsExecution {
+            response_text,
+            request_succeeded: false,
+        };
+    }
+
+    let response_text = nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetInputSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string();
+    SetInputSettingsExecution {
+        response_text,
+        request_succeeded: true,
+    }
+}
+
+pub fn build_set_input_name_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetInputName",
+        request_id,
+        request_data,
+        parse_set_input_name_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    if let Err(error) = input_registry.set_input_name(
+        fields.input_uuid.as_deref(),
+        fields.input_name.as_deref(),
+        &fields.new_input_name,
+    ) {
+        return match error {
+            SetInputNameError::InputNotFound => build_request_response_error(
+                "SetInputName",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            ),
+            SetInputNameError::InputNameAlreadyExists => build_request_response_error(
+                "SetInputName",
+                request_id,
+                REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+                "Input name already exists",
+            ),
+        };
+    }
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetInputName")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_input_default_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "GetInputDefaultSettings",
+        request_id,
+        request_data,
+        parse_get_input_default_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    let default_input_settings = match input_registry.get_input_default_settings(&fields.input_kind)
+    {
+        Ok(settings) => settings,
+        Err(ParseInputSettingsError::UnsupportedInputKind) => {
+            return build_request_response_error(
+                "GetInputDefaultSettings",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Unsupported input kind",
+            );
+        }
+        Err(ParseInputSettingsError::InvalidInputSettings(_)) => {
+            unreachable!("BUG: default settings generation must not return invalid settings")
+        }
+    };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetInputDefaultSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("inputKind", &fields.input_kind)?;
+                        f.member("defaultInputSettings", &default_input_settings)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_create_input_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
@@ -2692,8 +3033,84 @@ mod tests {
     }
 
     #[test]
+    fn build_input_settings_changed_event_contains_expected_fields() {
+        let input_settings = ObswsInputSettings::VideoCaptureDevice(
+            crate::obsws_input_registry::ObswsVideoCaptureDeviceSettings {
+                device_id: Some("camera-1".to_owned()),
+            },
+        );
+        let event = build_input_settings_changed_event(
+            "camera-source",
+            "input-uuid-3",
+            "video_capture_device",
+            &input_settings,
+        );
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let event_type: String = json
+            .value()
+            .to_path_member(&["d", "eventType"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("eventType must be string");
+        let input_name: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputName must be string");
+        let input_kind: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputKind"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputKind must be string");
+        let device_id: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputSettings", "device_id"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("device_id must be string");
+        assert_eq!(event_type, "InputSettingsChanged");
+        assert_eq!(input_name, "camera-source");
+        assert_eq!(input_kind, "video_capture_device");
+        assert_eq!(device_id, "camera-1");
+    }
+
+    #[test]
+    fn build_input_name_changed_event_contains_expected_fields() {
+        let event =
+            build_input_name_changed_event("camera-renamed", "camera-before", "input-uuid-4");
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let event_type: String = json
+            .value()
+            .to_path_member(&["d", "eventType"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("eventType must be string");
+        let input_name: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputName must be string");
+        let old_input_name: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "oldInputName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("oldInputName must be string");
+        let input_uuid: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputUuid"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputUuid must be string");
+        assert_eq!(event_type, "InputNameChanged");
+        assert_eq!(input_name, "camera-renamed");
+        assert_eq!(old_input_name, "camera-before");
+        assert_eq!(input_uuid, "input-uuid-4");
+    }
+
+    #[test]
     fn build_scene_item_enable_state_changed_event_contains_expected_fields() {
-        let event = build_scene_item_enable_state_changed_event("Scene", 10, false);
+        let event = build_scene_item_enable_state_changed_event(
+            "Scene",
+            "10000000-0000-0000-0000-000000000000",
+            10,
+            false,
+        );
         let json = nojson::RawJson::parse(&event).expect("event must be valid json");
         let event_type: String = json
             .value()
@@ -2715,6 +3132,10 @@ mod tests {
             .to_member("sceneName")
             .and_then(|v| v.required()?.try_into())
             .expect("sceneName must be string");
+        let scene_uuid: String = event_data
+            .to_member("sceneUuid")
+            .and_then(|v| v.required()?.try_into())
+            .expect("sceneUuid must be string");
         let scene_item_id: i64 = event_data
             .to_member("sceneItemId")
             .and_then(|v| v.required()?.try_into())
@@ -2726,6 +3147,7 @@ mod tests {
         assert_eq!(event_type, "SceneItemEnableStateChanged");
         assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
         assert_eq!(scene_name, "Scene");
+        assert_eq!(scene_uuid, "10000000-0000-0000-0000-000000000000");
         assert_eq!(scene_item_id, 10);
         assert!(!scene_item_enabled);
     }

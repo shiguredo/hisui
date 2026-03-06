@@ -219,6 +219,23 @@ pub fn handle_request_message(
             request.request_data.as_ref(),
             input_registry,
         ),
+        "SetInputSettings" => crate::obsws_response_builder::build_set_input_settings_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "SetInputName" => crate::obsws_response_builder::build_set_input_name_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetInputDefaultSettings" => {
+            crate::obsws_response_builder::build_get_input_default_settings_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetStreamServiceSettings" => {
             crate::obsws_response_builder::build_get_stream_service_settings_response(
                 &request_id,
@@ -658,6 +675,130 @@ mod tests {
             .required()?
             .try_into()?;
         assert_eq!(input_kind, "video_capture_device");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_input_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-set-input-settings".to_owned()),
+            request_type: Some("SetInputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-1","inputSettings":{"device_id":"camera-2"}}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        assert!(result);
+
+        let input = input_registry
+            .find_input(None, Some("input-name-1"))
+            .expect("input must exist");
+        match &input.input.settings {
+            ObswsInputSettings::VideoCaptureDevice(settings) => {
+                assert_eq!(settings.device_id.as_deref(), Some("camera-2"));
+            }
+            _ => panic!("input kind must remain video_capture_device"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_invalid_field_error_for_set_input_settings_with_invalid_settings()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-set-input-settings-invalid".to_owned()),
+            request_type: Some("SetInputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-1","inputSettings":{"device_id":1}}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_input_name_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-set-input-name".to_owned()),
+            request_type: Some("SetInputName".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-1","newInputName":"input-name-1-renamed"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        assert!(result);
+
+        assert!(
+            input_registry
+                .find_input(None, Some("input-name-1"))
+                .is_none()
+        );
+        assert!(
+            input_registry
+                .find_input(None, Some("input-name-1-renamed"))
+                .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_input_default_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-default-input-settings".to_owned()),
+            request_type: Some("GetInputDefaultSettings".to_owned()),
+            request_data: Some(request_data(r#"{"inputKind":"video_capture_device"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let input_kind: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "inputKind"])?
+            .required()?
+            .try_into()?;
+        let default_input_settings = json
+            .value()
+            .to_path_member(&["d", "responseData", "defaultInputSettings"])?
+            .required()?;
+        let device_id: Option<String> =
+            default_input_settings.to_member("device_id")?.try_into()?;
+        assert_eq!(input_kind, "video_capture_device");
+        assert_eq!(device_id, None);
         Ok(())
     }
 

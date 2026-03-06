@@ -383,6 +383,36 @@ async def _expect_record_state_changed_event(
     return event
 
 
+async def _expect_input_settings_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    input_name: str,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="InputSettingsChanged",
+        event_intent=OBSWS_EVENT_SUB_INPUTS,
+    )
+    assert event["d"]["eventData"]["inputName"] == input_name
+    return event
+
+
+async def _expect_input_name_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    input_name: str,
+    old_input_name: str,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="InputNameChanged",
+        event_intent=OBSWS_EVENT_SUB_INPUTS,
+    )
+    assert event["d"]["eventData"]["inputName"] == input_name
+    assert event["d"]["eventData"]["oldInputName"] == old_input_name
+    return event
+
+
 async def _expect_scene_item_enable_state_changed_event(
     ws: aiohttp.ClientWebSocketResponse,
     *,
@@ -396,6 +426,8 @@ async def _expect_scene_item_enable_state_changed_event(
         event_intent=OBSWS_EVENT_SUB_SCENES,
     )
     assert event["d"]["eventData"]["sceneName"] == scene_name
+    assert isinstance(event["d"]["eventData"]["sceneUuid"], str)
+    assert event["d"]["eventData"]["sceneUuid"] != ""
     assert event["d"]["eventData"]["sceneItemId"] == scene_item_id
     assert event["d"]["eventData"]["sceneItemEnabled"] is scene_item_enabled
     return event
@@ -836,6 +868,9 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetInputList" in response_data["availableRequests"]
         assert "GetInputKindList" in response_data["availableRequests"]
         assert "GetInputSettings" in response_data["availableRequests"]
+        assert "SetInputSettings" in response_data["availableRequests"]
+        assert "SetInputName" in response_data["availableRequests"]
+        assert "GetInputDefaultSettings" in response_data["availableRequests"]
         assert "CreateInput" in response_data["availableRequests"]
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
@@ -1043,6 +1078,113 @@ def test_obsws_get_input_kind_list_request(binary_path: Path):
         assert "video_capture_device" in response_data["inputKinds"]
 
 
+def test_obsws_set_input_name_request(binary_path: Path):
+    """obsws が SetInputName request に応答して入力名を変更できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-for-set-name",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-set-name-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        set_name_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputName",
+                request_id="req-set-input-name",
+                request_data={
+                    "inputName": "obsws-set-name-input",
+                    "newInputName": "obsws-set-name-input-renamed",
+                },
+            )
+        )
+        set_name_status = set_name_response["d"]["requestStatus"]
+        assert set_name_status["result"] is True
+        assert set_name_status["code"] == 100
+
+        old_name_get_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-old-name",
+                request_data={"inputName": "obsws-set-name-input"},
+            )
+        )
+        assert old_name_get_response["d"]["requestStatus"]["result"] is False
+        assert old_name_get_response["d"]["requestStatus"]["code"] == 601
+
+        renamed_get_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-renamed",
+                request_data={"inputName": "obsws-set-name-input-renamed"},
+            )
+        )
+        assert renamed_get_response["d"]["requestStatus"]["result"] is True
+        assert renamed_get_response["d"]["responseData"]["inputName"] == (
+            "obsws-set-name-input-renamed"
+        )
+
+
+def test_obsws_get_input_default_settings_request(binary_path: Path):
+    """obsws が GetInputDefaultSettings request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputDefaultSettings",
+                request_id="req-get-input-default-settings",
+                request_data={"inputKind": "video_capture_device"},
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert response_data["inputKind"] == "video_capture_device"
+        assert response_data["defaultInputSettings"] == {}
+
+        unsupported_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputDefaultSettings",
+                request_id="req-get-input-default-settings-unsupported",
+                request_data={"inputKind": "unsupported-kind"},
+            )
+        )
+        unsupported_status = unsupported_response["d"]["requestStatus"]
+        assert unsupported_status["result"] is False
+        assert unsupported_status["code"] == 400
+
+
 def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
     """obsws が GetInputSettings で識別子欠落をエラー応答することを確認する"""
     host = "127.0.0.1"
@@ -1066,6 +1208,286 @@ def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
         status = response["d"]["requestStatus"]
         assert status["result"] is False
         assert status["code"] == 300
+
+
+def test_obsws_set_input_settings_request(binary_path: Path):
+    """obsws が SetInputSettings request に応答して入力設定を更新できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-for-set-settings",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-set-settings-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {"device_id": "before-device"},
+                    "sceneItemEnabled": True,
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+        input_uuid = create_response["d"]["responseData"]["inputUuid"]
+
+        set_overlay_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-overlay",
+                request_data={
+                    "inputUuid": input_uuid,
+                    "inputSettings": {"device_id": "after-device"},
+                },
+            )
+        )
+        set_overlay_status = set_overlay_response["d"]["requestStatus"]
+        assert set_overlay_status["result"] is True
+        assert set_overlay_status["code"] == 100
+
+        get_overlay_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-after-overlay",
+                request_data={"inputUuid": input_uuid},
+            )
+        )
+        assert get_overlay_response["d"]["requestStatus"]["result"] is True
+        assert (
+            get_overlay_response["d"]["responseData"]["inputSettings"]["device_id"]
+            == "after-device"
+        )
+
+        set_replace_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-replace",
+                request_data={
+                    "inputName": "obsws-set-settings-input",
+                    "inputSettings": {},
+                    "overlay": False,
+                },
+            )
+        )
+        set_replace_status = set_replace_response["d"]["requestStatus"]
+        assert set_replace_status["result"] is True
+        assert set_replace_status["code"] == 100
+
+        get_replace_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-after-replace",
+                request_data={"inputName": "obsws-set-settings-input"},
+            )
+        )
+        assert get_replace_response["d"]["requestStatus"]["result"] is True
+        assert (
+            "device_id"
+            not in get_replace_response["d"]["responseData"]["inputSettings"]
+        )
+
+        not_found_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-not-found",
+                request_data={
+                    "inputName": "not-found-input",
+                    "inputSettings": {},
+                },
+            )
+        )
+        not_found_status = not_found_response["d"]["requestStatus"]
+        assert not_found_status["result"] is False
+        assert not_found_status["code"] == 601
+
+
+def test_obsws_set_input_settings_rejects_invalid_input_settings(binary_path: Path):
+    """obsws が SetInputSettings で不正な inputSettings を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-invalid-set-settings",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-invalid-set-settings-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-invalid",
+                request_data={
+                    "inputName": "obsws-invalid-set-settings-input",
+                    "inputSettings": {"device_id": 1},
+                },
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 400
+
+
+def test_obsws_set_input_settings_rejects_missing_request_data(binary_path: Path):
+    """obsws が SetInputSettings で requestData 欠落を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-missing-request-data",
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 300
+
+
+def test_obsws_set_input_settings_rejects_missing_lookup_fields(binary_path: Path):
+    """obsws が SetInputSettings で識別子欠落を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-missing-lookup",
+                request_data={"inputSettings": {}},
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 300
+
+
+def test_obsws_set_input_settings_rejects_missing_input_settings(binary_path: Path):
+    """obsws が SetInputSettings で inputSettings 欠落を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-for-missing-input-settings",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-missing-input-settings-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-missing-input-settings",
+                request_data={"inputName": "obsws-missing-input-settings-input"},
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 300
+
+
+def test_obsws_set_input_settings_rejects_invalid_overlay_type(binary_path: Path):
+    """obsws が SetInputSettings で overlay 型不正を拒否することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-for-invalid-overlay",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-invalid-overlay-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-invalid-overlay",
+                request_data={
+                    "inputName": "obsws-invalid-overlay-input",
+                    "inputSettings": {},
+                    "overlay": "invalid",
+                },
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is False
+        assert status["code"] == 400
 
 
 def test_obsws_create_input_request(binary_path: Path):
@@ -1803,6 +2225,145 @@ def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: P
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
         asyncio.run(_run_batch_flow())
+
+
+def test_obsws_request_batch_applies_set_input_settings(binary_path: Path):
+    """obsws が RequestBatch で SetInputSettings を順次適用できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run_batch_set_input_settings_flow():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            batch_response = await _send_obsws_request_batch(
+                ws,
+                request_id="batch-set-input-settings",
+                halt_on_failure=True,
+                execution_type=0,
+                requests=[
+                    {
+                        "requestType": "CreateInput",
+                        "requestData": {
+                            "sceneName": "Scene",
+                            "inputName": "batch-set-input-settings-input",
+                            "inputKind": "video_capture_device",
+                            "inputSettings": {"device_id": "before-device"},
+                            "sceneItemEnabled": True,
+                        },
+                    },
+                    {
+                        "requestType": "SetInputSettings",
+                        "requestData": {
+                            "inputName": "batch-set-input-settings-input",
+                            "inputSettings": {"device_id": "after-device"},
+                        },
+                    },
+                    {
+                        "requestType": "GetInputSettings",
+                        "requestData": {
+                            "inputName": "batch-set-input-settings-input",
+                        },
+                    },
+                ],
+            )
+            results = batch_response["d"]["results"]
+            assert len(results) == 3
+            assert results[0]["requestType"] == "CreateInput"
+            assert results[0]["requestStatus"]["result"] is True
+            assert results[1]["requestType"] == "SetInputSettings"
+            assert results[1]["requestStatus"]["result"] is True
+            assert results[2]["requestType"] == "GetInputSettings"
+            assert results[2]["requestStatus"]["result"] is True
+            assert (
+                results[2]["responseData"]["inputSettings"]["device_id"] == "after-device"
+            )
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run_batch_set_input_settings_flow())
+
+
+def test_obsws_request_batch_halt_on_failure_stops_after_set_input_settings_error(
+    binary_path: Path,
+):
+    """obsws が RequestBatch の SetInputSettings エラーで後続 request を停止することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run_batch_set_input_settings_halt_flow():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            batch_response = await _send_obsws_request_batch(
+                ws,
+                request_id="batch-set-input-settings-halt",
+                halt_on_failure=True,
+                execution_type=0,
+                requests=[
+                    {
+                        "requestType": "CreateInput",
+                        "requestData": {
+                            "sceneName": "Scene",
+                            "inputName": "batch-set-input-settings-halt-input",
+                            "inputKind": "video_capture_device",
+                            "inputSettings": {"device_id": "before-device"},
+                            "sceneItemEnabled": True,
+                        },
+                    },
+                    {
+                        "requestType": "SetInputSettings",
+                        "requestData": {
+                            "inputName": "batch-set-input-settings-halt-input",
+                            "inputSettings": {},
+                            "overlay": "invalid",
+                        },
+                    },
+                    {
+                        "requestType": "GetInputSettings",
+                        "requestData": {
+                            "inputName": "batch-set-input-settings-halt-input",
+                        },
+                    },
+                ],
+            )
+            results = batch_response["d"]["results"]
+            assert len(results) == 2
+            assert results[0]["requestType"] == "CreateInput"
+            assert results[0]["requestStatus"]["result"] is True
+            assert results[1]["requestType"] == "SetInputSettings"
+            assert results[1]["requestStatus"]["result"] is False
+            assert results[1]["requestStatus"]["code"] == 400
+
+            get_input_settings_response = await _send_obsws_request(
+                ws,
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-after-batch-halt",
+                request_data={"inputName": "batch-set-input-settings-halt-input"},
+            )
+            assert get_input_settings_response["d"]["requestStatus"]["result"] is True
+            assert (
+                get_input_settings_response["d"]["responseData"]["inputSettings"][
+                    "device_id"
+                ]
+                == "before-device"
+            )
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run_batch_set_input_settings_halt_flow())
 
 
 def test_obsws_request_batch_rejects_unsupported_execution_type(binary_path: Path):
@@ -2756,7 +3317,9 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
     ws_sock.close()
 
     image_path = tmp_path / "input-event-input.png"
+    updated_image_path = tmp_path / "input-event-updated-input.png"
     _write_test_png(image_path)
+    _write_test_png(updated_image_path)
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
@@ -2790,11 +3353,99 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
             )
             assert create_event["d"]["eventData"]["inputName"] == "input-event-camera"
 
+            set_input_name_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputName",
+                request_id="req-set-input-name-events",
+                request_data={
+                    "inputName": "input-event-camera",
+                    "newInputName": "input-event-camera-renamed",
+                },
+            )
+            assert set_input_name_response["d"]["requestStatus"]["result"] is True
+            input_name_changed_event = await _expect_input_name_changed_event(
+                ws,
+                input_name="input-event-camera-renamed",
+                old_input_name="input-event-camera",
+            )
+            assert input_name_changed_event["d"]["eventData"]["inputUuid"] == create_event["d"][
+                "eventData"
+            ]["inputUuid"]
+
+            create_input_response_2 = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-events-2",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "input-event-camera-2",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response_2["d"]["requestStatus"]["result"] is True
+            create_event_2 = await _expect_obsws_event(
+                ws,
+                event_type="InputCreated",
+                event_intent=OBSWS_EVENT_SUB_INPUTS,
+            )
+            assert create_event_2["d"]["eventData"]["inputName"] == "input-event-camera-2"
+
+            invalid_set_input_name_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputName",
+                request_id="req-set-input-name-events-invalid",
+                request_data={
+                    "inputName": "input-event-camera-renamed",
+                    "newInputName": "input-event-camera-2",
+                },
+            )
+            invalid_set_input_name_status = invalid_set_input_name_response["d"]["requestStatus"]
+            assert invalid_set_input_name_status["result"] is False
+            assert invalid_set_input_name_status["code"] == 602
+            await _assert_no_message_within(ws, timeout=0.5)
+
+            set_input_settings_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-events",
+                request_data={
+                    "inputName": "input-event-camera-renamed",
+                    "inputSettings": {"file": str(updated_image_path)},
+                },
+            )
+            assert set_input_settings_response["d"]["requestStatus"]["result"] is True
+            input_settings_changed_event = await _expect_input_settings_changed_event(
+                ws,
+                input_name="input-event-camera-renamed",
+            )
+            assert input_settings_changed_event["d"]["eventData"]["inputKind"] == "image_source"
+            assert input_settings_changed_event["d"]["eventData"]["inputSettings"] == {
+                "file": str(updated_image_path)
+            }
+
+            invalid_set_input_settings_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputSettings",
+                request_id="req-set-input-settings-events-invalid",
+                request_data={
+                    "inputName": "input-event-camera-renamed",
+                    "inputSettings": {"file": 1},
+                },
+            )
+            invalid_set_input_settings_status = invalid_set_input_settings_response["d"][
+                "requestStatus"
+            ]
+            assert invalid_set_input_settings_status["result"] is False
+            assert invalid_set_input_settings_status["code"] == 400
+            await _assert_no_message_within(ws, timeout=0.5)
+
             remove_input_response = await _send_obsws_request(
                 ws,
                 request_type="RemoveInput",
                 request_id="req-remove-input-events",
-                request_data={"inputName": "input-event-camera"},
+                request_data={"inputName": "input-event-camera-renamed"},
             )
             assert remove_input_response["d"]["requestStatus"]["result"] is True
             remove_event = await _expect_obsws_event(
@@ -2802,7 +3453,7 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 event_type="InputRemoved",
                 event_intent=OBSWS_EVENT_SUB_INPUTS,
             )
-            assert remove_event["d"]["eventData"]["inputName"] == "input-event-camera"
+            assert remove_event["d"]["eventData"]["inputName"] == "input-event-camera-renamed"
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
@@ -3053,7 +3704,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 request_id="req-remove-scene-item-event",
                 request_data={
                     "sceneName": "Scene",
-                    "sceneItemId": first_scene_item_id,
+                    "sceneItemId": second_scene_item_id,
                 },
             )
             assert remove_scene_item_response["d"]["requestStatus"]["result"] is True
@@ -3062,7 +3713,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_type="SceneItemRemoved",
                 event_intent=OBSWS_EVENT_SUB_SCENES,
             )
-            assert removed_event["d"]["eventData"]["sceneItemId"] == first_scene_item_id
+            assert removed_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
             reindexed_event_2 = await _expect_obsws_event(
                 ws,
                 event_type="SceneItemListReindexed",
@@ -3071,7 +3722,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
             reindexed_ids_2 = [
                 item["sceneItemId"] for item in reindexed_event_2["d"]["eventData"]["sceneItems"]
             ]
-            assert first_scene_item_id not in reindexed_ids_2
+            assert second_scene_item_id not in reindexed_ids_2
 
             duplicate_scene_item_response = await _send_obsws_request(
                 ws,
@@ -3080,7 +3731,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 request_data={
                     "fromSceneName": "Scene",
                     "toSceneName": "Scene",
-                    "sceneItemId": second_scene_item_id,
+                    "sceneItemId": first_scene_item_id,
                 },
             )
             assert duplicate_scene_item_response["d"]["requestStatus"]["result"] is True
@@ -3093,6 +3744,103 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_intent=OBSWS_EVENT_SUB_SCENES,
             )
             assert created_event_3["d"]["eventData"]["sceneItemId"] == duplicated_scene_item_id
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
+    binary_path: Path,
+):
+    """obsws が末尾 Scene Item 削除時に再インデックスイベントを送らないことを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENES,
+            )
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-tail-remove",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-tail-remove-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+            source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
+
+            create_scene_item_second_response = await _send_obsws_request(
+                ws,
+                request_type="CreateSceneItem",
+                request_id="req-create-scene-item-tail-remove-2",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceUuid": source_uuid,
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_scene_item_second_response["d"]["requestStatus"]["result"] is True
+            second_scene_item_id = create_scene_item_second_response["d"]["responseData"][
+                "sceneItemId"
+            ]
+            created_event = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert created_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+
+            remove_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="RemoveSceneItem",
+                request_id="req-remove-scene-item-tail-remove",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                },
+            )
+            assert remove_scene_item_response["d"]["requestStatus"]["result"] is True
+            removed_event = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemRemoved",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert removed_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            try:
+                next_msg = await ws.receive(timeout=0.5)
+            except asyncio.TimeoutError:
+                await ws.close()
+                return
+
+            if next_msg.type == aiohttp.WSMsgType.TEXT:
+                next_payload = json.loads(next_msg.data)
+                is_reindexed_event = (
+                    next_payload.get("op") == 5
+                    and next_payload.get("d", {}).get("eventType")
+                    == "SceneItemListReindexed"
+                )
+                assert not is_reindexed_event, (
+                    "unexpected SceneItemListReindexed after tail remove: "
+                    f"{next_payload}"
+                )
+                raise AssertionError(f"unexpected text message after tail remove: {next_payload}")
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
