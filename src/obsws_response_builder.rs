@@ -4,7 +4,7 @@ use crate::obsws_input_registry::{
     GetSceneItemEnabledError, GetSceneItemIdError, GetSceneItemIndexError, GetSceneItemListError,
     GetSceneItemSourceError, ObswsInput, ObswsInputRegistry, ObswsSceneItemIndexEntry,
     ObswsSceneItemRef, ObswsStreamServiceSettings, ParseInputSettingsError, RemoveSceneError,
-    RemoveSceneItemError, SetCurrentProgramSceneError, SetInputSettingsError,
+    RemoveSceneItemError, SetCurrentProgramSceneError, SetInputNameError, SetInputSettingsError,
     SetSceneItemEnabledError, SetSceneItemIndexError, SetSceneItemIndexResult,
 };
 use crate::obsws_message::ObswsSessionStats;
@@ -30,6 +30,16 @@ struct SetInputSettingsFields {
     input_name: Option<String>,
     input_settings: nojson::RawJsonOwned,
     overlay: bool,
+}
+
+struct SetInputNameFields {
+    input_uuid: Option<String>,
+    input_name: Option<String>,
+    new_input_name: String,
+}
+
+struct GetInputDefaultSettingsFields {
+    input_kind: String,
 }
 
 struct CreateSceneFields {
@@ -216,6 +226,25 @@ fn parse_set_input_settings_fields(
         input_settings: nojson::RawJsonOwned::try_from(input_settings)?,
         overlay: overlay.unwrap_or(true),
     })
+}
+
+fn parse_set_input_name_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetInputNameFields, nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let new_input_name = required_non_empty_string_member(request_data, "newInputName")?;
+    Ok(SetInputNameFields {
+        input_uuid,
+        input_name,
+        new_input_name,
+    })
+}
+
+fn parse_get_input_default_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetInputDefaultSettingsFields, nojson::JsonParseError> {
+    let input_kind = required_non_empty_string_member(request_data, "inputKind")?;
+    Ok(GetInputDefaultSettingsFields { input_kind })
 }
 
 fn parse_create_scene_fields(
@@ -867,6 +896,8 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "GetInputKindList",
                                 "GetInputSettings",
                                 "SetInputSettings",
+                                "SetInputName",
+                                "GetInputDefaultSettings",
                                 "CreateInput",
                                 "RemoveInput",
                                 "GetStreamServiceSettings",
@@ -2434,6 +2465,120 @@ pub fn build_set_input_settings_response(
                     }),
                 )?;
                 f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_input_name_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetInputName",
+        request_id,
+        request_data,
+        parse_set_input_name_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    if let Err(error) = input_registry.set_input_name(
+        fields.input_uuid.as_deref(),
+        fields.input_name.as_deref(),
+        &fields.new_input_name,
+    ) {
+        return match error {
+            SetInputNameError::InputNotFound => build_request_response_error(
+                "SetInputName",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            ),
+            SetInputNameError::InputNameAlreadyExists => build_request_response_error(
+                "SetInputName",
+                request_id,
+                REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+                "Input name already exists",
+            ),
+        };
+    }
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetInputName")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_input_default_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "GetInputDefaultSettings",
+        request_id,
+        request_data,
+        parse_get_input_default_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    let default_input_settings = match input_registry.get_input_default_settings(&fields.input_kind)
+    {
+        Ok(settings) => settings,
+        Err(ParseInputSettingsError::UnsupportedInputKind) => {
+            return build_request_response_error(
+                "GetInputDefaultSettings",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Unsupported input kind",
+            );
+        }
+        Err(ParseInputSettingsError::InvalidInputSettings(_)) => {
+            unreachable!("BUG: default settings generation must not return invalid settings")
+        }
+    };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetInputDefaultSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("inputKind", &fields.input_kind)?;
+                        f.member("defaultInputSettings", &default_input_settings)
+                    }),
+                )
             }),
         )
     })

@@ -837,6 +837,8 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetInputKindList" in response_data["availableRequests"]
         assert "GetInputSettings" in response_data["availableRequests"]
         assert "SetInputSettings" in response_data["availableRequests"]
+        assert "SetInputName" in response_data["availableRequests"]
+        assert "GetInputDefaultSettings" in response_data["availableRequests"]
         assert "CreateInput" in response_data["availableRequests"]
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
@@ -1042,6 +1044,113 @@ def test_obsws_get_input_kind_list_request(binary_path: Path):
         response_data = response["d"]["responseData"]
         assert isinstance(response_data["inputKinds"], list)
         assert "video_capture_device" in response_data["inputKinds"]
+
+
+def test_obsws_set_input_name_request(binary_path: Path):
+    """obsws が SetInputName request に応答して入力名を変更できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-for-set-name",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-set-name-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        set_name_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputName",
+                request_id="req-set-input-name",
+                request_data={
+                    "inputName": "obsws-set-name-input",
+                    "newInputName": "obsws-set-name-input-renamed",
+                },
+            )
+        )
+        set_name_status = set_name_response["d"]["requestStatus"]
+        assert set_name_status["result"] is True
+        assert set_name_status["code"] == 100
+
+        old_name_get_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-old-name",
+                request_data={"inputName": "obsws-set-name-input"},
+            )
+        )
+        assert old_name_get_response["d"]["requestStatus"]["result"] is False
+        assert old_name_get_response["d"]["requestStatus"]["code"] == 601
+
+        renamed_get_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputSettings",
+                request_id="req-get-input-settings-renamed",
+                request_data={"inputName": "obsws-set-name-input-renamed"},
+            )
+        )
+        assert renamed_get_response["d"]["requestStatus"]["result"] is True
+        assert renamed_get_response["d"]["responseData"]["inputName"] == (
+            "obsws-set-name-input-renamed"
+        )
+
+
+def test_obsws_get_input_default_settings_request(binary_path: Path):
+    """obsws が GetInputDefaultSettings request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputDefaultSettings",
+                request_id="req-get-input-default-settings",
+                request_data={"inputKind": "video_capture_device"},
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert response_data["inputKind"] == "video_capture_device"
+        assert response_data["defaultInputSettings"] == {}
+
+        unsupported_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputDefaultSettings",
+                request_id="req-get-input-default-settings-unsupported",
+                request_data={"inputKind": "unsupported-kind"},
+            )
+        )
+        unsupported_status = unsupported_response["d"]["requestStatus"]
+        assert unsupported_status["result"] is False
+        assert unsupported_status["code"] == 400
 
 
 def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):

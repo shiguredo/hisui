@@ -143,8 +143,10 @@
 - [x] `RemoveInput`: 入力を削除する
   - NOTE: `inputName` または `inputUuid` のいずれか指定で削除する
   - NOTE: 対象が存在しない場合は not found エラーを返す
-- [ ] `SetInputName`: 入力名を変更する
-- [ ] `GetInputDefaultSettings`: 入力の既定設定を取得する
+- [x] `SetInputName`: 入力名を変更する
+  - NOTE: `inputName` または `inputUuid` のいずれかで対象 Input を指定する
+- [x] `GetInputDefaultSettings`: 入力の既定設定を取得する
+  - NOTE: 現在は `image_source` / `video_capture_device` の既定設定を返す
 - [x] `GetInputSettings`: 入力設定を取得する
 - [x] `SetInputSettings`: 入力設定を更新する
   - NOTE: `overlay` 未指定時は `true` として扱う

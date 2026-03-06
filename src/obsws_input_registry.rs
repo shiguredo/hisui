@@ -72,6 +72,16 @@ pub enum ObswsInputSettings {
 }
 
 impl ObswsInputSettings {
+    pub fn default_for_kind(input_kind: &str) -> Result<Self, ParseInputSettingsError> {
+        match input_kind {
+            "image_source" => Ok(Self::ImageSource(ObswsImageSourceSettings::default())),
+            "video_capture_device" => Ok(Self::VideoCaptureDevice(
+                ObswsVideoCaptureDeviceSettings::default(),
+            )),
+            _ => Err(ParseInputSettingsError::UnsupportedInputKind),
+        }
+    }
+
     pub fn from_kind_and_settings(
         input_kind: &str,
         input_settings: nojson::RawJsonValue<'_, '_>,
@@ -407,6 +417,12 @@ pub enum CreateInputError {
 pub enum SetInputSettingsError {
     InputNotFound,
     InvalidInputSettings(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetInputNameError {
+    InputNotFound,
+    InputNameAlreadyExists,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1188,6 +1204,52 @@ impl ObswsInputRegistry {
         Ok(())
     }
 
+    pub fn set_input_name(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+        new_input_name: &str,
+    ) -> Result<(), SetInputNameError> {
+        let target_input_uuid = if let Some(input_uuid) = input_uuid {
+            input_uuid.to_owned()
+        } else {
+            let Some(input_name) = input_name else {
+                return Err(SetInputNameError::InputNotFound);
+            };
+            let Some(input_uuid) = self.uuids_by_name.get(input_name) else {
+                return Err(SetInputNameError::InputNotFound);
+            };
+            input_uuid.clone()
+        };
+
+        if let Some(existing_input_uuid) = self.uuids_by_name.get(new_input_name) {
+            if existing_input_uuid != &target_input_uuid {
+                return Err(SetInputNameError::InputNameAlreadyExists);
+            }
+        }
+
+        let Some(input_entry) = self.inputs_by_uuid.get_mut(&target_input_uuid) else {
+            return Err(SetInputNameError::InputNotFound);
+        };
+        if input_entry.input_name == new_input_name {
+            return Ok(());
+        }
+
+        let old_input_name =
+            std::mem::replace(&mut input_entry.input_name, new_input_name.to_owned());
+        self.uuids_by_name.remove(&old_input_name);
+        self.uuids_by_name
+            .insert(new_input_name.to_owned(), target_input_uuid);
+        Ok(())
+    }
+
+    pub fn get_input_default_settings(
+        &self,
+        input_kind: &str,
+    ) -> Result<ObswsInputSettings, ParseInputSettingsError> {
+        ObswsInputSettings::default_for_kind(input_kind)
+    }
+
     pub fn find_input(
         &self,
         input_uuid: Option<&str>,
@@ -1542,6 +1604,90 @@ mod tests {
             )
             .expect_err("unknown input must be rejected");
         assert_eq!(error, SetInputSettingsError::InputNotFound);
+    }
+
+    #[test]
+    fn set_input_name_updates_name_lookup_and_entry() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+
+        registry
+            .set_input_name(None, Some("camera-1"), "camera-renamed")
+            .expect("input rename must succeed");
+
+        assert!(registry.find_input(None, Some("camera-1")).is_none());
+        let renamed = registry
+            .find_input(None, Some("camera-renamed"))
+            .expect("renamed input must exist");
+        assert_eq!(renamed.input_name, "camera-renamed");
+    }
+
+    #[test]
+    fn set_input_name_returns_expected_errors() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input_1 = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input_1, true)
+            .expect("input creation must succeed");
+        let input_2 = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-2", input_2, true)
+            .expect("input creation must succeed");
+
+        let not_found = registry
+            .set_input_name(None, Some("not-found"), "new-name")
+            .expect_err("unknown input must be rejected");
+        assert_eq!(not_found, SetInputNameError::InputNotFound);
+
+        let duplicated = registry
+            .set_input_name(None, Some("camera-1"), "camera-2")
+            .expect_err("duplicated input name must be rejected");
+        assert_eq!(duplicated, SetInputNameError::InputNameAlreadyExists);
+    }
+
+    #[test]
+    fn get_input_default_settings_returns_default_object_per_kind() {
+        let registry = ObswsInputRegistry::new_for_test();
+
+        let image_default = registry
+            .get_input_default_settings("image_source")
+            .expect("image_source defaults must be available");
+        assert_eq!(
+            image_default,
+            ObswsInputSettings::ImageSource(ObswsImageSourceSettings::default())
+        );
+
+        let device_default = registry
+            .get_input_default_settings("video_capture_device")
+            .expect("video_capture_device defaults must be available");
+        assert_eq!(
+            device_default,
+            ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings::default())
+        );
+    }
+
+    #[test]
+    fn get_input_default_settings_rejects_unsupported_kind() {
+        let registry = ObswsInputRegistry::new_for_test();
+        let error = registry
+            .get_input_default_settings("unsupported_kind")
+            .expect_err("unsupported input kind must be rejected");
+        assert_eq!(error, ParseInputSettingsError::UnsupportedInputKind);
     }
 
     #[test]
