@@ -1515,26 +1515,10 @@ pub fn execute_duplicate_scene_item(
     ) {
         Ok(duplicated) => duplicated,
         Err(DuplicateSceneItemError::SourceScene) => {
-            return DuplicateSceneItemExecution {
-                response_text: build_request_response_error(
-                    "DuplicateSceneItem",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "From scene not found",
-                ),
-                duplicated: None,
-            };
+            unreachable!("resolved source scene name must exist in input registry")
         }
         Err(DuplicateSceneItemError::DestinationScene) => {
-            return DuplicateSceneItemExecution {
-                response_text: build_request_response_error(
-                    "DuplicateSceneItem",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "To scene not found",
-                ),
-                duplicated: None,
-            };
+            unreachable!("resolved destination scene name must exist in input registry")
         }
         Err(DuplicateSceneItemError::SourceSceneItem) => {
             return DuplicateSceneItemExecution {
