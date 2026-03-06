@@ -1311,17 +1311,25 @@ impl ObswsSession {
             .iter()
             .map(|scene_item| (scene_item.scene_item_id, scene_item.scene_item_index))
             .collect::<Vec<_>>();
-        if let Some(scene_items_before) = scene_items_before
-            && scene_items_before != scene_items_after_simple
-        {
-            messages.push((
-                crate::obsws_response_builder::build_scene_item_list_reindexed_event(
-                    &scene_name,
-                    &scene_uuid,
-                    &scene_items_after,
-                ),
-                "event message",
-            ));
+        if let Some(scene_items_before) = scene_items_before {
+            let still_present_before = scene_items_before
+                .into_iter()
+                .filter(|(scene_item_id, _)| {
+                    scene_items_after_simple
+                        .iter()
+                        .any(|(after_scene_item_id, _)| after_scene_item_id == scene_item_id)
+                })
+                .collect::<Vec<_>>();
+            if still_present_before != scene_items_after_simple {
+                messages.push((
+                    crate::obsws_response_builder::build_scene_item_list_reindexed_event(
+                        &scene_name,
+                        &scene_uuid,
+                        &scene_items_after,
+                    ),
+                    "event message",
+                ));
+            }
         }
 
         SessionAction::SendTexts { messages }
@@ -2862,6 +2870,84 @@ mod tests {
         assert_eq!(first_event_intent, OBSWS_EVENT_SUB_SCENES);
         assert_eq!(second_event_type, "SceneItemListReindexed");
         assert_eq!(second_event_intent, OBSWS_EVENT_SUB_SCENES);
+    }
+
+    #[tokio::test]
+    async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_event() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_first_input_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_first_input_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input-1".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_first_input_data),
+            })
+            .await;
+        assert!(matches!(
+            create_first_input_action,
+            SessionAction::SendText { .. }
+        ));
+
+        let create_second_input_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_second_input_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input-2".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_second_input_data),
+            })
+            .await;
+        assert!(matches!(
+            create_second_input_action,
+            SessionAction::SendText { .. }
+        ));
+
+        let get_scene_item_id_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","sourceName":"camera-2","searchOffset":0}"#,
+        )
+        .expect("requestData must be valid json");
+        let get_scene_item_id_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-get-scene-item-id".to_owned()),
+                request_type: Some("GetSceneItemId".to_owned()),
+                request_data: Some(get_scene_item_id_data),
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
+            panic!("must be SendText");
+        };
+        let scene_item_id = parse_response_scene_item_id(&text);
+
+        let remove_scene_item_data = nojson::RawJsonOwned::parse(format!(
+            r#"{{"sceneName":"Scene","sceneItemId":{}}}"#,
+            scene_item_id
+        ))
+        .expect("requestData must be valid json");
+        let remove_scene_item_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-remove-scene-item-tail".to_owned()),
+                request_type: Some("RemoveSceneItem".to_owned()),
+                request_data: Some(remove_scene_item_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = remove_scene_item_action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 2);
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "SceneItemRemoved");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
     }
 
     #[tokio::test]

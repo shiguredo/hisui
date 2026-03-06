@@ -3702,7 +3702,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 request_id="req-remove-scene-item-event",
                 request_data={
                     "sceneName": "Scene",
-                    "sceneItemId": first_scene_item_id,
+                    "sceneItemId": second_scene_item_id,
                 },
             )
             assert remove_scene_item_response["d"]["requestStatus"]["result"] is True
@@ -3711,7 +3711,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_type="SceneItemRemoved",
                 event_intent=OBSWS_EVENT_SUB_SCENES,
             )
-            assert removed_event["d"]["eventData"]["sceneItemId"] == first_scene_item_id
+            assert removed_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
             reindexed_event_2 = await _expect_obsws_event(
                 ws,
                 event_type="SceneItemListReindexed",
@@ -3720,7 +3720,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
             reindexed_ids_2 = [
                 item["sceneItemId"] for item in reindexed_event_2["d"]["eventData"]["sceneItems"]
             ]
-            assert first_scene_item_id not in reindexed_ids_2
+            assert second_scene_item_id not in reindexed_ids_2
 
             duplicate_scene_item_response = await _send_obsws_request(
                 ws,
@@ -3729,7 +3729,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 request_data={
                     "fromSceneName": "Scene",
                     "toSceneName": "Scene",
-                    "sceneItemId": second_scene_item_id,
+                    "sceneItemId": first_scene_item_id,
                 },
             )
             assert duplicate_scene_item_response["d"]["requestStatus"]["result"] is True
@@ -3742,6 +3742,103 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_intent=OBSWS_EVENT_SUB_SCENES,
             )
             assert created_event_3["d"]["eventData"]["sceneItemId"] == duplicated_scene_item_id
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
+    binary_path: Path,
+):
+    """obsws が末尾 Scene Item 削除時に再インデックスイベントを送らないことを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENES,
+            )
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-tail-remove",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-tail-remove-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+            source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
+
+            create_scene_item_second_response = await _send_obsws_request(
+                ws,
+                request_type="CreateSceneItem",
+                request_id="req-create-scene-item-tail-remove-2",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceUuid": source_uuid,
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_scene_item_second_response["d"]["requestStatus"]["result"] is True
+            second_scene_item_id = create_scene_item_second_response["d"]["responseData"][
+                "sceneItemId"
+            ]
+            created_event = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert created_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+
+            remove_scene_item_response = await _send_obsws_request(
+                ws,
+                request_type="RemoveSceneItem",
+                request_id="req-remove-scene-item-tail-remove",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": second_scene_item_id,
+                },
+            )
+            assert remove_scene_item_response["d"]["requestStatus"]["result"] is True
+            removed_event = await _expect_obsws_event(
+                ws,
+                event_type="SceneItemRemoved",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert removed_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            try:
+                next_msg = await ws.receive(timeout=0.5)
+            except asyncio.TimeoutError:
+                await ws.close()
+                return
+
+            if next_msg.type == aiohttp.WSMsgType.TEXT:
+                next_payload = json.loads(next_msg.data)
+                is_reindexed_event = (
+                    next_payload.get("op") == 5
+                    and next_payload.get("d", {}).get("eventType")
+                    == "SceneItemListReindexed"
+                )
+                assert not is_reindexed_event, (
+                    "unexpected SceneItemListReindexed after tail remove: "
+                    f"{next_payload}"
+                )
+                raise AssertionError(f"unexpected text message after tail remove: {next_payload}")
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
